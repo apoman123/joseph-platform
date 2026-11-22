@@ -1,0 +1,52 @@
+# Manual (re)deploy or rollback: rolls out any previously published image tag
+# (e.g. sha-<commit> or v1.2.3) to staging or production. Production is
+# gated by the environment's required reviewers.
+name: redeploy
+
+on:
+  workflow_dispatch:
+    inputs:
+      environment:
+        description: Target environment
+        type: choice
+        options: [staging, production]
+        required: true
+      image-tag:
+        description: Image tag to deploy (sha-<full commit sha> or vX.Y.Z)
+        type: string
+        required: true
+
+permissions:
+  contents: read
+  packages: read
+
+jobs:
+  deploy:
+    name: Deploy ${{ inputs.image-tag }} to ${{ inputs.environment }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    environment:
+      name: ${{ inputs.environment }}
+    steps:
+      - uses: actions/checkout@v4
+      - name: Resolve target settings
+        id: target
+        env:
+          ENVIRONMENT: ${{ inputs.environment }}
+          STAGING_HOST: ${{ vars.STAGING_SSH_HOST }}
+          PRODUCTION_HOST: ${{ vars.PRODUCTION_SSH_HOST }}
+        run: |
+          if [ "$ENVIRONMENT" = staging ]; then host="$STAGING_HOST"; else host="$PRODUCTION_HOST"; fi
+          if [ -z "$host" ]; then echo "::error::No SSH host configured for $ENVIRONMENT"; exit 1; fi
+      - uses: ./.github/actions/deploy
+        with:
+          host: ${{ inputs.environment == 'staging' && vars.STAGING_SSH_HOST || vars.PRODUCTION_SSH_HOST }}
+          user: ${{ inputs.environment == 'staging' && vars.STAGING_SSH_USER || vars.PRODUCTION_SSH_USER }}
+          ssh-key: ${{ inputs.environment == 'staging' && secrets.STAGING_SSH_KEY || secrets.PRODUCTION_SSH_KEY }}
+          known-hosts: ${{ inputs.environment == 'staging' && secrets.STAGING_SSH_KNOWN_HOSTS || secrets.PRODUCTION_SSH_KNOWN_HOSTS }}
+          deploy-dir: ${{ inputs.environment == 'staging' && vars.STAGING_DEPLOY_DIR || vars.PRODUCTION_DEPLOY_DIR }}
+          image-tag: ${{ inputs.image-tag }}
+          registry: ghcr.io/${{ github.repository_owner }}
+          registry-user: ${{ github.actor }}
+          registry-token: ${{ secrets.GITHUB_TOKEN }}
+          health-urls: ${{ inputs.environment == 'staging' && vars.STAGING_HEALTH_URLS || vars.PRODUCTION_HEALTH_URLS }}

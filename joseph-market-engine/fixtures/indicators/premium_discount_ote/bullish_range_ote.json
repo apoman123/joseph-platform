@@ -1,0 +1,95 @@
+{
+  "plugin_id": "premium_discount_ote",
+  "timeframe": "5m",
+  "settings": {
+    "swing_length": 2
+  },
+  "description": "Swing low 95 and swing high 105 confirmed; bar 9 closes at 105.8 above the swing high: bullish dealing range [95, 106], EQ 100.5, OTE (62-79% retracement from the high) [97.31, 99.18].",
+  "bars": [
+    [
+      "100",
+      "101",
+      "99.5",
+      "100.5"
+    ],
+    [
+      "100.5",
+      "101.5",
+      "100",
+      "101"
+    ],
+    [
+      "101",
+      "101.2",
+      "95",
+      "95.5"
+    ],
+    [
+      "95.5",
+      "98",
+      "95.5",
+      "97.5"
+    ],
+    [
+      "97.5",
+      "100",
+      "97",
+      "99.5"
+    ],
+    [
+      "99.5",
+      "104",
+      "99",
+      "103.5"
+    ],
+    [
+      "103.5",
+      "105",
+      "103",
+      "104"
+    ],
+    [
+      "104",
+      "104.5",
+      "102",
+      "102.5"
+    ],
+    [
+      "102.7",
+      "103",
+      "102.6",
+      "102.8"
+    ],
+    [
+      "102",
+      "106",
+      "101.8",
+      "105.8"
+    ]
+  ],
+  "expect": {
+    "events": [
+      {
+        "bar": 9,
+        "name": "RANGE_RESET"
+      }
+    ],
+    "final_values": {
+      "direction": "BULLISH",
+      "range_low": "95",
+      "range_high": "106",
+      "eq": "100.5",
+      "ote_lower": "97.31",
+      "ote_upper": "99.18",
+      "in_premium": true
+    },
+    "final_aois": [
+      {
+        "kind": "OTE",
+        "side": "bullish",
+        "lower": "97.31",
+        "upper": "99.18"
+      }
+    ]
+  }
+}

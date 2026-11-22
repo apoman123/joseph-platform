@@ -1,0 +1,378 @@
+{
+  "schema": "strategy.schema.json",
+  "definition": "StrategyDefinition",
+  "valid": [
+    {
+      "schema_version": 2,
+      "strategy_id": "discount-ote-reversal",
+      "name": "Long A: HTF bull + discount OTE + AOI + sweep then seller failure",
+      "direction": "LONG",
+      "signal_timeframe": "5m",
+      "universe": {
+        "qualification": "QUALIFIED_ONLY",
+        "venues": [
+          "binance",
+          "hyperliquid"
+        ]
+      },
+      "when": {
+        "op": "ALL",
+        "id": "root",
+        "children": [
+          {
+            "op": "BIAS",
+            "id": "htf",
+            "timeframes": [
+              "4h"
+            ],
+            "value": "BULLISH",
+            "match": "ALL"
+          },
+          {
+            "op": "PRICE_IN_ZONE",
+            "id": "disc",
+            "zone": "DISCOUNT",
+            "tf": "1h",
+            "range_group": "A"
+          },
+          {
+            "op": "PRICE_IN_ZONE",
+            "id": "ote",
+            "zone": "OTE",
+            "tf": "1h",
+            "range_group": "A"
+          },
+          {
+            "op": "AOI_TOUCH",
+            "id": "aoi",
+            "kinds": [
+              "FVG",
+              "OB",
+              "BREAKER"
+            ],
+            "side": "bullish",
+            "within_bars": 3,
+            "touch": "WICK"
+          },
+          {
+            "op": "SEQUENCE",
+            "id": "seq",
+            "within_bars": 4,
+            "steps": [
+              {
+                "name": "SSL_SWEEP"
+              },
+              {
+                "name": "SELLER_FAILURE"
+              }
+            ]
+          },
+          {
+            "op": "RISK_REWARD",
+            "id": "rr",
+            "min_rr": "2.0"
+          }
+        ]
+      },
+      "risk": {
+        "min_rr": "2.0",
+        "stop_model": "AOI_INVALIDATION",
+        "target_model": "NEAREST_OPPOSING_LIQUIDITY",
+        "fee_bps_estimate": "5"
+      },
+      "notification": {
+        "cooldown_bars": 12,
+        "once_per_aoi": true,
+        "emit": [
+          "ENTRY_CONFIRMED",
+          "ENTRY_BLOCKED"
+        ],
+        "channels": [
+          "UI"
+        ]
+      },
+      "setup": {
+        "expire_after_bars": 24
+      },
+      "data_policy": {
+        "max_data_age_ms": 120000,
+        "allow_rest_poll": true
+      },
+      "execution_mode": "PAPER"
+    },
+    {
+      "schema_version": 2,
+      "strategy_id": "premium-ote-short",
+      "name": "Short B: HTF bear + premium OTE + bearish FVG/breaker + BSL sweep then buyer failure",
+      "direction": "SHORT",
+      "signal_timeframe": "5m",
+      "universe": {
+        "qualification": "QUALIFIED_ONLY",
+        "venues": [
+          "binance",
+          "bitget"
+        ]
+      },
+      "when": {
+        "op": "ALL",
+        "children": [
+          {
+            "op": "BIAS",
+            "timeframes": [
+              "1d",
+              "4h",
+              "1h"
+            ],
+            "value": "BEARISH",
+            "match": "K_OF_N",
+            "k": 2
+          },
+          {
+            "op": "PRICE_IN_ZONE",
+            "zone": "PREMIUM",
+            "tf": "1h",
+            "range_group": "R"
+          },
+          {
+            "op": "PRICE_IN_ZONE",
+            "zone": "OTE",
+            "tf": "1h",
+            "range_group": "R"
+          },
+          {
+            "op": "AOI_TOUCH",
+            "kinds": [
+              "FVG",
+              "BREAKER"
+            ],
+            "side": "bearish",
+            "within_bars": 3
+          },
+          {
+            "op": "SEQUENCE",
+            "within_bars": 4,
+            "steps": [
+              {
+                "name": "BSL_SWEEP"
+              },
+              {
+                "name": "BUYER_FAILURE"
+              }
+            ]
+          },
+          {
+            "op": "NOT",
+            "child": {
+              "op": "COMPARE",
+              "left": {
+                "kind": "market",
+                "field": "oi_change_pct"
+              },
+              "cmp": "lt",
+              "right": {
+                "kind": "const",
+                "value": "-5"
+              }
+            }
+          }
+        ]
+      },
+      "risk": {
+        "min_rr": "2.0",
+        "stop_model": "AOI_INVALIDATION",
+        "target_model": "NEAREST_OPPOSING_LIQUIDITY"
+      },
+      "notification": {
+        "cooldown_bars": 12,
+        "once_per_aoi": true
+      },
+      "execution_mode": "ALERT_ONLY"
+    }
+  ],
+  "invalid": [
+    {
+      "schema_version": 2,
+      "strategy_id": "discount-ote-reversal",
+      "name": "Long A: HTF bull + discount OTE + AOI + sweep then seller failure",
+      "direction": "LONG",
+      "signal_timeframe": "5m",
+      "universe": {
+        "qualification": "QUALIFIED_ONLY",
+        "venues": [
+          "binance",
+          "hyperliquid"
+        ]
+      },
+      "when": {
+        "op": "EVAL",
+        "code": "__import__('os')"
+      },
+      "risk": {
+        "min_rr": "2.0",
+        "stop_model": "AOI_INVALIDATION",
+        "target_model": "NEAREST_OPPOSING_LIQUIDITY",
+        "fee_bps_estimate": "5"
+      },
+      "notification": {
+        "cooldown_bars": 12,
+        "once_per_aoi": true,
+        "emit": [
+          "ENTRY_CONFIRMED",
+          "ENTRY_BLOCKED"
+        ],
+        "channels": [
+          "UI"
+        ]
+      },
+      "setup": {
+        "expire_after_bars": 24
+      },
+      "data_policy": {
+        "max_data_age_ms": 120000,
+        "allow_rest_poll": true
+      },
+      "execution_mode": "PAPER"
+    },
+    {
+      "schema_version": 2,
+      "strategy_id": "Bad Id!",
+      "name": "Long A: HTF bull + discount OTE + AOI + sweep then seller failure",
+      "direction": "LONG",
+      "signal_timeframe": "5m",
+      "universe": {
+        "qualification": "QUALIFIED_ONLY",
+        "venues": [
+          "binance",
+          "hyperliquid"
+        ]
+      },
+      "when": {
+        "op": "ALL",
+        "id": "root",
+        "children": [
+          {
+            "op": "BIAS",
+            "id": "htf",
+            "timeframes": [
+              "4h"
+            ],
+            "value": "BULLISH",
+            "match": "ALL"
+          },
+          {
+            "op": "PRICE_IN_ZONE",
+            "id": "disc",
+            "zone": "DISCOUNT",
+            "tf": "1h",
+            "range_group": "A"
+          },
+          {
+            "op": "PRICE_IN_ZONE",
+            "id": "ote",
+            "zone": "OTE",
+            "tf": "1h",
+            "range_group": "A"
+          },
+          {
+            "op": "AOI_TOUCH",
+            "id": "aoi",
+            "kinds": [
+              "FVG",
+              "OB",
+              "BREAKER"
+            ],
+            "side": "bullish",
+            "within_bars": 3,
+            "touch": "WICK"
+          },
+          {
+            "op": "SEQUENCE",
+            "id": "seq",
+            "within_bars": 4,
+            "steps": [
+              {
+                "name": "SSL_SWEEP"
+              },
+              {
+                "name": "SELLER_FAILURE"
+              }
+            ]
+          },
+          {
+            "op": "RISK_REWARD",
+            "id": "rr",
+            "min_rr": "2.0"
+          }
+        ]
+      },
+      "risk": {
+        "min_rr": "2.0",
+        "stop_model": "AOI_INVALIDATION",
+        "target_model": "NEAREST_OPPOSING_LIQUIDITY",
+        "fee_bps_estimate": "5"
+      },
+      "notification": {
+        "cooldown_bars": 12,
+        "once_per_aoi": true,
+        "emit": [
+          "ENTRY_CONFIRMED",
+          "ENTRY_BLOCKED"
+        ],
+        "channels": [
+          "UI"
+        ]
+      },
+      "setup": {
+        "expire_after_bars": 24
+      },
+      "data_policy": {
+        "max_data_age_ms": 120000,
+        "allow_rest_poll": true
+      },
+      "execution_mode": "PAPER"
+    },
+    {
+      "schema_version": 2,
+      "strategy_id": "discount-ote-reversal",
+      "name": "Long A: HTF bull + discount OTE + AOI + sweep then seller failure",
+      "direction": "LONG",
+      "signal_timeframe": "5m",
+      "universe": {
+        "qualification": "QUALIFIED_ONLY",
+        "venues": [
+          "binance",
+          "hyperliquid"
+        ]
+      },
+      "when": {
+        "op": "ALL",
+        "children": []
+      },
+      "risk": {
+        "min_rr": "2.0",
+        "stop_model": "AOI_INVALIDATION",
+        "target_model": "NEAREST_OPPOSING_LIQUIDITY",
+        "fee_bps_estimate": "5"
+      },
+      "notification": {
+        "cooldown_bars": 12,
+        "once_per_aoi": true,
+        "emit": [
+          "ENTRY_CONFIRMED",
+          "ENTRY_BLOCKED"
+        ],
+        "channels": [
+          "UI"
+        ]
+      },
+      "setup": {
+        "expire_after_bars": 24
+      },
+      "data_policy": {
+        "max_data_age_ms": 120000,
+        "allow_rest_poll": true
+      },
+      "execution_mode": "PAPER"
+    }
+  ]
+}

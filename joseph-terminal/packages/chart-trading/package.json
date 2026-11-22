@@ -1,0 +1,18 @@
+{
+  "name": "@joseph/chart-trading",
+  "version": "0.5.0",
+  "private": true,
+  "type": "module",
+  "license": "MIT",
+  "description": "Order ticket state machine, OrderIntentDraft builder with exact decimal rounding and order/position overlays. No secrets or signing.",
+  "exports": {
+    ".": "./src/index.ts"
+  },
+  "scripts": {
+    "typecheck": "tsc --noEmit -p tsconfig.json"
+  },
+  "dependencies": {
+    "@joseph/contracts": "workspace:*",
+    "@joseph/chart-core": "workspace:*"
+  }
+}

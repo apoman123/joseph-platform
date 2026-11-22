@@ -1,0 +1,80 @@
+{
+  "schema": "indicators.schema.json",
+  "definition": "AoiRecord",
+  "valid": [
+    {
+      "schema_version": 1,
+      "type": "aoi.updated",
+      "instrument_id": "binance:perp:BTCUSDT",
+      "timeframe": "5m",
+      "aoi_id": "fvg-5m-123",
+      "source": "fvg_ifvg",
+      "kind": "FVG",
+      "side": "bullish",
+      "state": "active",
+      "lower": "94700",
+      "upper": "94800",
+      "created_at_ms": 1795252800000,
+      "confirmed_at_ms": 1795253100000,
+      "invalidated_at_ms": null,
+      "as_of_ms": 1795253100000,
+      "quality_score": 76,
+      "range_id": null,
+      "indicator_version": "1.0.0",
+      "method": "pine_parity",
+      "meta": {
+        "mid": "94750"
+      }
+    }
+  ],
+  "invalid": [
+    {
+      "schema_version": 1,
+      "type": "aoi.updated",
+      "instrument_id": "binance:perp:BTCUSDT",
+      "timeframe": "5m",
+      "aoi_id": "fvg-5m-123",
+      "source": "fvg_ifvg",
+      "kind": "FVG",
+      "side": "bullish",
+      "state": "active",
+      "lower": "94700",
+      "upper": "94800",
+      "created_at_ms": 1795252800000,
+      "confirmed_at_ms": 1795253100000,
+      "invalidated_at_ms": null,
+      "as_of_ms": 1795253100000,
+      "quality_score": 140,
+      "range_id": null,
+      "indicator_version": "1.0.0",
+      "method": "pine_parity",
+      "meta": {
+        "mid": "94750"
+      }
+    },
+    {
+      "schema_version": 1,
+      "type": "aoi.updated",
+      "instrument_id": "binance:perp:BTCUSDT",
+      "timeframe": "5m",
+      "aoi_id": "fvg-5m-123",
+      "source": "fvg_ifvg",
+      "kind": "FVG",
+      "side": "bullish",
+      "state": "active",
+      "lower": "abc",
+      "upper": "94800",
+      "created_at_ms": 1795252800000,
+      "confirmed_at_ms": 1795253100000,
+      "invalidated_at_ms": null,
+      "as_of_ms": 1795253100000,
+      "quality_score": 76,
+      "range_id": null,
+      "indicator_version": "1.0.0",
+      "method": "pine_parity",
+      "meta": {
+        "mid": "94750"
+      }
+    }
+  ]
+}

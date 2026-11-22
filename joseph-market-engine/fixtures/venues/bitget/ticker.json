@@ -1,0 +1,32 @@
+{
+ "code": "00000",
+ "data": [
+  {
+   "askPr": "59774.9",
+   "askSz": "4.4802",
+   "baseVolume": "105632.5326",
+   "bidPr": "59774.8",
+   "bidSz": "1.5791",
+   "change24h": "0.00077",
+   "changeUtc24h": "0.01446",
+   "deliveryStartTime": null,
+   "deliveryStatus": "",
+   "deliveryTime": null,
+   "fundingRate": "-0.000008",
+   "high24h": "60972",
+   "holdingAmount": "34241.126799999977",
+   "indexPrice": "59812.4556521739130431",
+   "lastPr": "59774.9",
+   "low24h": "55098.5",
+   "markPrice": "59774.9",
+   "open24h": "59729",
+   "openUtc": "58920.1",
+   "quoteVolume": "6144376687.95089",
+   "symbol": "BTCUSDT",
+   "ts": "1795277530934",
+   "usdtVolume": "6144376687.95089"
+  }
+ ],
+ "msg": "success",
+ "requestTime": 1795277530933
+}

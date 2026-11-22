@@ -1,0 +1,267 @@
+"""Point-in-time indicator queries for the API layer.
+
+``IndicatorQueryService`` fetches closed candles through the
+``CandleSource`` port (implemented by the market-data context), runs the
+requested plugins with the same engine used for strategies, and returns
+contract dicts (``IndicatorSnapshotList`` / ``AoiList``).
+"""
+
+from __future__ import annotations
+
+import asyncio
+import dataclasses
+from collections.abc import Mapping
+from collections.abc import Sequence
+from typing import Protocol
+
+from joseph.domain import clock as clock_lib
+from joseph.domain import errors
+from joseph.domain import instruments
+from joseph.domain import market
+from joseph.domain import structures
+from joseph.domain import timeframes
+from joseph.indicators.sdk import engine as engine_lib
+from joseph.indicators.sdk import registry as registry_lib
+
+
+class CandleSource(Protocol):
+    """Port supplying historical candles (market-data context)."""
+
+    async def get_candles(
+        self,
+        instrument_id: instruments.InstrumentId,
+        timeframe: timeframes.Timeframe,
+        start_ms: int,
+        end_ms: int,
+    ) -> Sequence[market.Candle]:
+        """Returns candles whose start lies in ``[start_ms, end_ms)``.
+
+        Args:
+            instrument_id: Exact venue instrument.
+            timeframe: Bar resolution.
+            start_ms: Inclusive window start.
+            end_ms: Exclusive window end.
+        """
+        ...
+
+
+@dataclasses.dataclass(frozen=True, slots=True)
+class QueryConfig:
+    """Query tuning.
+
+    Attributes:
+        lookback_bars: Chart bars computed before the requested time.
+        intrabar_lookback_bars: Chart bars for which intrabars are fetched.
+        aux_lookback_bars: Extra higher-timeframe bars fetched before the
+            chart window.
+        max_events: Maximum events returned by ``aois``.
+        settings: Per-plugin setting overrides.
+    """
+
+    lookback_bars: int = 400
+    intrabar_lookback_bars: int = 60
+    aux_lookback_bars: int = 64
+    max_events: int = 500
+    settings: Mapping[str, Mapping[str, object]] = dataclasses.field(
+        default_factory=dict
+    )
+
+
+@dataclasses.dataclass(frozen=True, slots=True)
+class _Computation:
+    """Result of one point-in-time run.
+
+    Attributes:
+        frames: Frames produced.
+        plugin_ids: Plugins included.
+    """
+
+    frames: tuple[structures.BarFrame, ...]
+    plugin_ids: tuple[str, ...]
+
+
+class IndicatorQueryService:
+    """Computes indicator snapshots and AOIs on demand."""
+
+    def __init__(
+        self,
+        candle_source: CandleSource,
+        registry: registry_lib.PluginRegistry,
+        clock: clock_lib.Clock,
+        config: QueryConfig | None = None,
+    ) -> None:
+        """Creates the service.
+
+        Args:
+            candle_source: Historical candle port.
+            registry: Plugin registry.
+            clock: Time source for "latest" queries.
+            config: Tuning (defaults when omitted).
+        """
+        self._source = candle_source
+        self._registry = registry
+        self._clock = clock
+        self._config = config or QueryConfig()
+
+    def plugins(self) -> dict[str, object]:
+        """Returns the contract ``IndicatorPluginList``.
+
+        Returns:
+            Usable plugins.
+        """
+        return self._registry.list_infos()
+
+    async def snapshots(
+        self,
+        instrument_id: instruments.InstrumentId,
+        timeframe: timeframes.Timeframe,
+        plugin_ids: Sequence[str] | None = None,
+        at_ms: int | None = None,
+    ) -> dict[str, object]:
+        """Computes snapshots as of a point in time.
+
+        Args:
+            instrument_id: Exact venue instrument.
+            timeframe: Series timeframe.
+            plugin_ids: Plugins to include (all usable when omitted).
+            at_ms: Point in time; latest closed bar when omitted.
+
+        Returns:
+            Contract ``IndicatorSnapshotList``.
+        """
+        result = await self._compute(
+            instrument_id, timeframe, plugin_ids, at_ms
+        )
+        last = result.frames[-1]
+        snapshots = [
+            snapshot.to_contract()
+            for plugin_id in result.plugin_ids
+            if (snapshot := last.snapshot(plugin_id, timeframe)) is not None
+        ]
+        return {"snapshots": snapshots, "as_of_ms": last.close_ms}
+
+    async def aois(
+        self,
+        instrument_id: instruments.InstrumentId,
+        timeframe: timeframes.Timeframe,
+        plugin_ids: Sequence[str] | None = None,
+        at_ms: int | None = None,
+    ) -> dict[str, object]:
+        """Computes AOIs and recent events as of a point in time.
+
+        Args:
+            instrument_id: Exact venue instrument.
+            timeframe: Series timeframe.
+            plugin_ids: Plugins to include (all usable when omitted).
+            at_ms: Point in time; latest closed bar when omitted.
+
+        Returns:
+            Contract ``AoiList``.
+        """
+        result = await self._compute(
+            instrument_id, timeframe, plugin_ids, at_ms
+        )
+        last = result.frames[-1]
+        aois: list[dict[str, object]] = []
+        for plugin_id in result.plugin_ids:
+            snapshot = last.snapshot(plugin_id, timeframe)
+            if snapshot is not None:
+                aois.extend(aoi.to_contract() for aoi in snapshot.aois)
+        events = [
+            event.to_contract()
+            for frame in result.frames
+            for event in frame.events
+            if event.timeframe is timeframe
+        ][-self._config.max_events :]
+        return {
+            "instrument_id": str(instrument_id),
+            "timeframe": timeframe.value,
+            "aois": aois,
+            "events": events,
+            "as_of_ms": last.close_ms,
+            "feed_state": last.feed_state.value,
+        }
+
+    async def _compute(
+        self,
+        instrument_id: instruments.InstrumentId,
+        timeframe: timeframes.Timeframe,
+        plugin_ids: Sequence[str] | None,
+        at_ms: int | None,
+    ) -> _Computation:
+        """Runs the requested plugins over a lookback window.
+
+        Args:
+            instrument_id: Exact venue instrument.
+            timeframe: Series timeframe.
+            plugin_ids: Requested plugins.
+            at_ms: Point in time or ``None``.
+
+        Returns:
+            Frames and the included plugin ids.
+
+        Raises:
+            ValidationFailedError: If no plugin is requested/usable.
+            MissingDataError: If no closed candle is available.
+        """
+        ids = tuple(plugin_ids) if plugin_ids else self._registry.ids()
+        if not ids:
+            raise errors.ValidationFailedError("no indicator plugins selected")
+        for plugin_id in ids:
+            self._registry.get(plugin_id)
+        config = engine_lib.EngineConfig(
+            signal_timeframe=timeframe,
+            plugins={
+                plugin_id: engine_lib.PluginSpec(
+                    timeframes=(timeframe,),
+                    settings=self._config.settings.get(plugin_id, {}),
+                )
+                for plugin_id in ids
+            },
+        )
+        engine = engine_lib.IndicatorEngine(
+            self._registry, config, instrument_id
+        )
+        end_ms = self._clock.now_ms() if at_ms is None else at_ms
+        chart_start = (
+            timeframe.floor(end_ms)
+            - self._config.lookback_bars * timeframe.duration_ms
+        )
+        windows: dict[timeframes.Timeframe, int] = {}
+        for tf in engine.required_timeframes:
+            if tf is timeframe:
+                windows[tf] = chart_start
+            elif tf.duration_ms < timeframe.duration_ms:
+                windows[tf] = (
+                    timeframe.floor(end_ms)
+                    - self._config.intrabar_lookback_bars
+                    * timeframe.duration_ms
+                )
+            else:
+                windows[tf] = (
+                    chart_start
+                    - self._config.aux_lookback_bars * tf.duration_ms
+                )
+        ordered = sorted(windows, key=lambda tf: tf.duration_ms)
+        fetched = await asyncio.gather(
+            *(
+                self._source.get_candles(instrument_id, tf, windows[tf], end_ms)
+                for tf in ordered
+            )
+        )
+        candles_by_tf = {
+            tf: [
+                candle
+                for candle in candles
+                if candle.is_final
+                and candle.end_ms <= end_ms
+                and candle.start_ms >= windows[tf]
+            ]
+            for tf, candles in zip(ordered, fetched, strict=True)
+        }
+        frames = engine.run(candles_by_tf)
+        if not frames:
+            raise errors.MissingDataError(
+                f"no closed {timeframe.value} candles for {instrument_id}"
+            )
+        return _Computation(frames=tuple(frames), plugin_ids=ids)

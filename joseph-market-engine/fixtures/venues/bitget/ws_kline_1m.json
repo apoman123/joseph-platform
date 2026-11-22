@@ -1,0 +1,7 @@
+{
+ "captured_at_ms": 1795277392068,
+ "frames": [
+  "{\"event\": \"subscribe\", \"arg\": {\"instType\": \"USDT-FUTURES\", \"channel\": \"candle1m\", \"instId\": \"BTCUSDT\"}}",
+  "{\"action\": \"update\", \"arg\": {\"instType\": \"USDT-FUTURES\", \"channel\": \"candle1m\", \"instId\": \"BTCUSDT\"}, \"data\": [[\"1795277340000\", \"59794.7\", \"59813.8\", \"59786.2\", \"59808.5\", \"5.4966\", \"328700.49286\", \"328700.49286\"]], \"ts\": 1795277364105}"
+ ]
+}

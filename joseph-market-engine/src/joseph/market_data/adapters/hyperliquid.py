@@ -1,0 +1,565 @@
+"""Hyperliquid perpetuals market-data adapter.
+
+REST: ``POST https://api.hyperliquid.xyz/info`` with ``metaAndAssetCtxs``,
+``candleSnapshot`` and ``l2Book``. WebSocket: ``wss://api.hyperliquid.xyz/ws``
+``candle`` subscription. Candle frames do not flag closed bars, so each
+closed bar is confirmed over REST at rollover.
+
+Price precision follows Hyperliquid's rule (at most 5 significant figures
+and ``6 - szDecimals`` decimals), so ``tick_size`` is derived from the
+current mark price and refreshed with the instrument cache. Weekly candles
+are epoch-aligned (Thursday) and 6h candles do not exist, so neither is
+offered.
+"""
+
+from __future__ import annotations
+
+import asyncio
+import decimal
+import json
+import math
+from collections.abc import AsyncIterator
+from collections.abc import Mapping
+from collections.abc import Sequence
+from typing import Any
+
+from joseph.domain import clock as clock_lib
+from joseph.domain import decimals
+from joseph.domain import errors
+from joseph.domain import instruments
+from joseph.domain import market
+from joseph.domain import quality
+from joseph.domain import timeframes
+from joseph.market_data.adapters import base
+from joseph.market_data.adapters import http
+from joseph.market_data.adapters import ws
+from joseph.market_data.domain import books
+from joseph.market_data.domain import capabilities
+from joseph.market_data.domain import health
+
+REST_URL = "https://api.hyperliquid.xyz"
+WS_URL = "wss://api.hyperliquid.xyz/ws"
+_TF = tuple(
+    tf
+    for tf in timeframes.Timeframe
+    if tf not in (timeframes.Timeframe.H6, timeframes.Timeframe.W1)
+)
+_MAX_DECIMALS = 6
+_CTX_TTL_MS = 2_000
+_HOUR_MS = 3_600_000
+
+
+def tick_size(
+    mark: decimal.Decimal | None, sz_decimals: int
+) -> decimal.Decimal:
+    """Derives the price increment from Hyperliquid's precision rule.
+
+    Args:
+        mark: Current mark price (``None`` falls back to max decimals).
+        sz_decimals: Size decimals of the asset.
+
+    Returns:
+        Tick size.
+    """
+    floor_tick = base.pow10(-(_MAX_DECIMALS - sz_decimals))
+    if mark is None or mark <= decimals.ZERO:
+        return floor_tick
+    magnitude = math.floor(math.log10(float(mark)))
+    sig_tick = base.pow10(max(magnitude - 4, -_MAX_DECIMALS))
+    return max(sig_tick, floor_tick)
+
+
+def parse_universe(
+    meta: Mapping[str, Any], ctxs: Sequence[Mapping[str, Any]], now_ms: int
+) -> tuple[list[instruments.Instrument], dict[str, Mapping[str, Any]]]:
+    """Converts ``metaAndAssetCtxs`` to instruments.
+
+    Args:
+        meta: Universe metadata.
+        ctxs: Asset contexts aligned with the universe.
+        now_ms: Fetch time.
+
+    Returns:
+        Instruments and native metadata keyed by coin.
+    """
+    rows: list[instruments.Instrument] = []
+    meta_by_coin: dict[str, Mapping[str, Any]] = {}
+    for asset, ctx in zip(meta["universe"], ctxs, strict=False):
+        coin = str(asset["name"])
+        sz = int(asset["szDecimals"])
+        mark = base.opt_dec(ctx.get("markPx"))
+        lot = base.pow10(-sz)
+        rows.append(
+            instruments.Instrument(
+                key=instruments.InstrumentKey(
+                    instrument_id=instruments.InstrumentId(
+                        instruments.Venue.HYPERLIQUID,
+                        instruments.MarketType.PERP,
+                        coin,
+                    ),
+                    canonical_base=coin,
+                    quote="USD",
+                    settlement="USDC",
+                ),
+                display_symbol=f"{coin}-PERP",
+                tick_size=tick_size(mark, sz),
+                lot_size=lot,
+                min_qty=lot,
+                min_notional=decimal.Decimal(10),
+                contract_multiplier=decimals.ONE,
+                linear=True,
+                status=(
+                    instruments.InstrumentStatus.DELISTED
+                    if asset.get("isDelisted")
+                    else instruments.InstrumentStatus.TRADING
+                ),
+                asset_class=instruments.AssetClass.CRYPTO,
+                source="hyperliquid.rest",
+                as_of_ms=now_ms,
+                funding_interval_hours=1.0,
+                max_leverage=base.opt_dec(asset.get("maxLeverage")),
+            )
+        )
+        meta_by_coin[coin] = {"szDecimals": sz}
+    return rows, meta_by_coin
+
+
+def parse_candle(
+    row: Mapping[str, Any],
+    instrument_id: instruments.InstrumentId,
+    timeframe: timeframes.Timeframe,
+    now_ms: int,
+    source: str,
+) -> market.Candle:
+    """Converts a Hyperliquid candle object.
+
+    Args:
+        row: ``{t, T, o, c, h, l, v, n, ...}``.
+        instrument_id: Instrument.
+        timeframe: Resolution.
+        now_ms: Receipt time.
+        source: Provenance label.
+
+    Returns:
+        Candle (final once its end has passed for REST rows; never final for
+        WebSocket rows, which are confirmed over REST).
+    """
+    return base.make_candle(
+        instrument_id=instrument_id,
+        timeframe=timeframe,
+        start_ms=int(row["t"]),
+        open_=base.dec(row["o"]),
+        high=base.dec(row["h"]),
+        low=base.dec(row["l"]),
+        close=base.dec(row["c"]),
+        base_volume=base.dec(row["v"]),
+        trade_count=int(row.get("n", 0)),
+        now_ms=now_ms,
+        source=source,
+        is_final=False if source.endswith(".ws") else None,
+    )
+
+
+class HyperliquidAdapter(base.BaseVenueAdapter):
+    """``MarketDataPort`` for Hyperliquid perpetuals."""
+
+    VENUE = instruments.Venue.HYPERLIQUID
+
+    def __init__(
+        self,
+        http_client: http.VenueHttp,
+        clock: clock_lib.Clock,
+        connect: ws.ConnectFn = ws.default_connect,
+        verified_at_ms: int | None = None,
+    ) -> None:
+        """Initializes the adapter.
+
+        Args:
+            http_client: HTTP client for ``REST_URL``.
+            clock: Time source.
+            connect: WebSocket connector.
+            verified_at_ms: When capabilities were last verified live.
+        """
+        super().__init__(http_client, clock)
+        self._connect = connect
+        self._verified_at_ms = verified_at_ms
+        self._ctx_cache: tuple[int, Any] | None = None
+
+    def capabilities(self) -> capabilities.VenueCapabilities:
+        """Returns verified capabilities.
+
+        Returns:
+            Capabilities.
+        """
+        return capabilities.VenueCapabilities(
+            venue=self.VENUE,
+            display_name="Hyperliquid",
+            market_types=(instruments.MarketType.PERP,),
+            market_data=capabilities.MarketDataCapabilities(
+                rest_history=True,
+                native_ws_candles=True,
+                book_snapshot=True,
+                open_interest=True,
+                funding=True,
+            ),
+            timeframes=_TF,
+            notes=(
+                "Main perp dex only; HIP-3 builder dexes are not listed.",
+                "No last-trade price in asset contexts; `last` is null.",
+                "Weekly candles start Thursday and 6h is not offered.",
+                "Tick size is derived from the 5-significant-figure rule.",
+            ),
+            docs_url=(
+                "https://hyperliquid.gitbook.io/hyperliquid-docs/"
+                "for-developers/api"
+            ),
+            verified_at_ms=self._verified_at_ms,
+        )
+
+    async def _contexts(self) -> Any:
+        """Fetches ``metaAndAssetCtxs`` with a short cache.
+
+        Returns:
+            ``[meta, ctxs]`` payload.
+        """
+        now = self._clock.now_ms()
+        if self._ctx_cache and now - self._ctx_cache[0] < _CTX_TTL_MS:
+            return self._ctx_cache[1]
+        payload = await self._http.post("/info", {"type": "metaAndAssetCtxs"})
+        self._ctx_cache = (now, payload)
+        return payload
+
+    async def _load_instruments(
+        self,
+    ) -> tuple[list[instruments.Instrument], dict[str, Mapping[str, Any]]]:
+        """Loads the universe.
+
+        Returns:
+            Instruments and metadata.
+        """
+        meta, ctxs = await self._contexts()
+        return parse_universe(meta, ctxs, self._clock.now_ms())
+
+    async def _ctx_for(self, coin: str) -> Mapping[str, Any]:
+        """Returns the asset context for a coin.
+
+        Args:
+            coin: Coin name.
+
+        Returns:
+            Asset context.
+
+        Raises:
+            errors.NotFoundError: If the coin is not in the universe.
+        """
+        meta, ctxs = await self._contexts()
+        for asset, ctx in zip(meta["universe"], ctxs, strict=False):
+            if asset["name"] == coin:
+                return ctx  # type: ignore[no-any-return]
+        raise errors.NotFoundError(f"unknown hyperliquid coin {coin}")
+
+    async def fetch_candles(
+        self,
+        instrument: instruments.InstrumentId,
+        timeframe: timeframes.Timeframe,
+        start_ms: int,
+        end_ms: int,
+        limit: int | None = None,
+    ) -> list[market.Candle]:
+        """Fetches candles (Hyperliquid caps responses at 5000 bars).
+
+        Args:
+            instrument: Instrument.
+            timeframe: Resolution.
+            start_ms: Inclusive start.
+            end_ms: Exclusive end.
+            limit: Optional maximum bars.
+
+        Returns:
+            Ascending candles.
+        """
+        self._require_timeframe(timeframe)
+        await self._require(instrument)
+        start = timeframe.floor(start_ms)
+        if limit is not None:
+            start = max(
+                start,
+                timeframe.floor(end_ms - 1)
+                - (limit - 1) * timeframe.duration_ms,
+            )
+        payload = await self._http.post(
+            "/info",
+            {
+                "type": "candleSnapshot",
+                "req": {
+                    "coin": instrument.venue_market_id,
+                    "interval": timeframe.value,
+                    "startTime": start,
+                    "endTime": end_ms - 1,
+                },
+            },
+        )
+        now = self._clock.now_ms()
+        rows = [
+            parse_candle(r, instrument, timeframe, now, "hyperliquid.rest")
+            for r in payload
+        ]
+        return base.clip_range(rows, start_ms, end_ms, limit)
+
+    def _snapshot(
+        self,
+        instrument: instruments.InstrumentId,
+        ctx: Mapping[str, Any],
+        book: market.OrderBook | None,
+        now_ms: int,
+    ) -> market.MarketSnapshot:
+        """Assembles a snapshot from an asset context.
+
+        Args:
+            instrument: Instrument.
+            ctx: Asset context.
+            book: Optional book for best bid/ask.
+            now_ms: Receipt time.
+
+        Returns:
+            Snapshot.
+        """
+        mark = base.dec(ctx["markPx"])
+        prev = base.opt_dec(ctx.get("prevDayPx"))
+        change = (
+            (mark - prev) / prev * decimals.HUNDRED
+            if prev is not None and prev > decimals.ZERO
+            else None
+        )
+        oi_base = base.dec(ctx["openInterest"])
+        next_hour = (now_ms // _HOUR_MS + 1) * _HOUR_MS
+        return market.MarketSnapshot(
+            instrument_id=instrument,
+            feed_state=quality.FeedState.LIVE,
+            source="hyperliquid.rest",
+            as_of_ms=now_ms,
+            mark=mark,
+            index=base.opt_dec(ctx.get("oraclePx")),
+            best_bid=book.best_bid if book else None,
+            best_ask=book.best_ask if book else None,
+            turnover_24h_quote=base.opt_dec(ctx.get("dayNtlVlm")),
+            volume_24h_base=base.opt_dec(ctx.get("dayBaseVlm")),
+            change_24h_pct=change,
+            funding=market.Funding(
+                instrument_id=instrument,
+                rate=base.dec(ctx["funding"]),
+                interval_hours=1.0,
+                kind=market.FundingKind.PREDICTED,
+                effective_time_ms=next_hour,
+                next_funding_ms=next_hour,
+                source="hyperliquid.rest",
+                as_of_ms=now_ms,
+            ),
+            open_interest=market.OpenInterest(
+                instrument_id=instrument,
+                base_quantity=oi_base,
+                notional_usd=oi_base * mark,
+                mark_price=mark,
+                source="hyperliquid.rest",
+                as_of_ms=now_ms,
+            ),
+        )
+
+    async def fetch_snapshot(
+        self, instrument: instruments.InstrumentId
+    ) -> market.MarketSnapshot:
+        """Fetches context plus the top of book.
+
+        Args:
+            instrument: Instrument.
+
+        Returns:
+            Snapshot.
+        """
+        await self._require(instrument)
+        ctx, book = await asyncio.gather(
+            self._ctx_for(instrument.venue_market_id),
+            self.fetch_order_book(instrument, 1),
+        )
+        return self._snapshot(instrument, ctx, book, self._clock.now_ms())
+
+    async def fetch_snapshots(self) -> list[market.MarketSnapshot]:
+        """Builds snapshots for the whole universe from one request.
+
+        Returns:
+            Snapshots without best bid/ask.
+        """
+        await self.list_instruments()
+        meta, ctxs = await self._contexts()
+        now = self._clock.now_ms()
+        rows = []
+        for asset, ctx in zip(meta["universe"], ctxs, strict=False):
+            if asset.get("isDelisted") or not ctx.get("markPx"):
+                continue
+            rows.append(
+                self._snapshot(
+                    self.instrument_id(str(asset["name"])), ctx, None, now
+                )
+            )
+        return rows
+
+    async def fetch_order_book(
+        self, instrument: instruments.InstrumentId, depth: int
+    ) -> market.OrderBook:
+        """Fetches the L2 book (Hyperliquid returns up to 20 levels).
+
+        Args:
+            instrument: Instrument.
+            depth: Levels per side.
+
+        Returns:
+            Order book.
+        """
+        await self._require(instrument)
+        payload = await self._http.post(
+            "/info", {"type": "l2Book", "coin": instrument.venue_market_id}
+        )
+        now = self._clock.now_ms()
+        bids, asks = payload["levels"]
+        return books.snapshot_book(
+            instrument,
+            [
+                (base.dec(lvl["px"]), base.dec(lvl["sz"]))
+                for lvl in bids[:depth]
+            ],
+            [
+                (base.dec(lvl["px"]), base.dec(lvl["sz"]))
+                for lvl in asks[:depth]
+            ],
+            ts_ms=int(payload.get("time", now)),
+            received_ms=now,
+            source="hyperliquid.rest",
+        )
+
+    async def fetch_open_interest(
+        self, instrument: instruments.InstrumentId
+    ) -> market.OpenInterest:
+        """Returns open interest from the asset context.
+
+        Args:
+            instrument: Instrument.
+
+        Returns:
+            Open interest.
+        """
+        await self._require(instrument)
+        snapshot = self._snapshot(
+            instrument,
+            await self._ctx_for(instrument.venue_market_id),
+            None,
+            self._clock.now_ms(),
+        )
+        if snapshot.open_interest is None:  # pragma: no cover
+            raise errors.MissingDataError("open interest unavailable")
+        return snapshot.open_interest
+
+    async def fetch_funding(
+        self, instrument: instruments.InstrumentId
+    ) -> market.Funding:
+        """Returns the predicted hourly funding.
+
+        Args:
+            instrument: Instrument.
+
+        Returns:
+            Funding.
+        """
+        await self._require(instrument)
+        snapshot = self._snapshot(
+            instrument,
+            await self._ctx_for(instrument.venue_market_id),
+            None,
+            self._clock.now_ms(),
+        )
+        if snapshot.funding is None:  # pragma: no cover
+            raise errors.MissingDataError("funding unavailable")
+        return snapshot.funding
+
+    async def stream_candles(
+        self,
+        instrument: instruments.InstrumentId,
+        timeframe: timeframes.Timeframe,
+        tracker: health.FeedHealthTracker | None = None,
+    ) -> AsyncIterator[market.Candle]:
+        """Streams candles with REST confirmation of closed bars.
+
+        Args:
+            instrument: Instrument.
+            timeframe: Resolution.
+            tracker: Optional health tracker.
+
+        Yields:
+            Candle updates.
+        """
+        self._require_timeframe(timeframe)
+        await self._require(instrument)
+        coin = instrument.venue_market_id
+
+        def parse(raw: str | bytes, now_ms: int) -> list[market.Candle]:
+            """Parses one frame.
+
+            Args:
+                raw: Frame payload.
+                now_ms: Receipt time.
+
+            Returns:
+                Candles.
+            """
+            message = json.loads(raw)
+            if message.get("channel") != "candle":
+                return []
+            data = message.get("data")
+            rows = data if isinstance(data, list) else [data]
+            return [
+                parse_candle(r, instrument, timeframe, now_ms, "hyperliquid.ws")
+                for r in rows
+                if isinstance(r, dict)
+                and r.get("s") == coin
+                and r.get("i") == timeframe.value
+            ]
+
+        async def backfill(start: int, end: int) -> list[market.Candle]:
+            """Fetches missed or closing bars over REST.
+
+            Args:
+                start: Inclusive start.
+                end: Exclusive end.
+
+            Returns:
+                Candles.
+            """
+            return await self.fetch_candles(instrument, timeframe, start, end)
+
+        spec = ws.WsCandleSpec(
+            url=WS_URL,
+            subscribe=(
+                json.dumps(
+                    {
+                        "method": "subscribe",
+                        "subscription": {
+                            "type": "candle",
+                            "coin": coin,
+                            "interval": timeframe.value,
+                        },
+                    }
+                ),
+            ),
+            parse=parse,
+            timeframe=timeframe,
+            venue_marks_final=False,
+            ping_message=json.dumps({"method": "ping"}),
+            ping_interval_s=30.0,
+        )
+        async for candle in ws.stream_with_recovery(
+            spec,
+            backfill=backfill,
+            clock=self._clock,
+            connect=self._connect,
+            tracker=tracker,
+        ):
+            yield candle

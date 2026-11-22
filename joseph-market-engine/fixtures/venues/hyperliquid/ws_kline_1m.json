@@ -1,0 +1,7 @@
+{
+ "captured_at_ms": 1795277392068,
+ "frames": [
+  "{\"channel\": \"subscriptionResponse\", \"data\": {\"method\": \"subscribe\", \"subscription\": {\"type\": \"candle\", \"interval\": \"1m\", \"coin\": \"BTC\"}}}",
+  "{\"channel\": \"candle\", \"data\": {\"t\": 1795277340000, \"T\": 1795277399999, \"s\": \"BTC\", \"i\": \"1m\", \"o\": \"59809.0\", \"c\": \"59808.0\", \"h\": \"59809.0\", \"l\": \"59794.0\", \"v\": \"16.51832\", \"n\": 124}}"
+ ]
+}

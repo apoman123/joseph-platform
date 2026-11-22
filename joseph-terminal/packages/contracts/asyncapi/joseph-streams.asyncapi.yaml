@@ -1,0 +1,63 @@
+# AsyncAPI description of Joseph WebSocket streams. Payload shapes are the
+# JSON Schemas in ../schemas (single source of truth).
+asyncapi: 3.0.0
+info:
+  title: Joseph streams
+  version: 0.5.0
+  description: >
+    Resumable streams. Clients send `ClientMessage` (subscribe with optional
+    `last_sequence`); servers send `StreamEnvelope`s. Control envelopes
+    (subscribed, heartbeat, error, snapshot_required) carry sequence 0. When
+    the retention ring no longer covers `last_sequence` the server sends
+    `snapshot_required` and the client refetches REST snapshots.
+servers:
+  market:
+    host: localhost:8000
+    protocol: ws
+    description: Market engine (public channels; `signals` needs ?token=).
+  execution:
+    host: localhost:8100
+    protocol: ws
+    description: Execution engine (authenticated, tenant-scoped).
+channels:
+  market:
+    address: /v1/stream/market
+    servers: [{$ref: '#/servers/market'}]
+    messages:
+      clientMessage: {$ref: '#/components/messages/ClientMessage'}
+      envelope: {$ref: '#/components/messages/StreamEnvelope'}
+  user:
+    address: /v1/stream/user?token={token}
+    servers: [{$ref: '#/servers/execution'}]
+    parameters:
+      token: {description: Bearer session token.}
+    messages:
+      clientMessage: {$ref: '#/components/messages/ClientMessage'}
+      envelope: {$ref: '#/components/messages/StreamEnvelope'}
+operations:
+  subscribeMarket:
+    action: send
+    channel: {$ref: '#/channels/market'}
+    summary: Subscribe to candles, aois, feed_health, qualification or signals.
+    messages: [{$ref: '#/channels/market/messages/clientMessage'}]
+  receiveMarket:
+    action: receive
+    channel: {$ref: '#/channels/market'}
+    summary: candle.updated (Candle), aoi.updated (AoiRecord), feed.health (FeedHealth), qualification.changed, signal.created (Signal).
+    messages: [{$ref: '#/channels/market/messages/envelope'}]
+  subscribeUser:
+    action: send
+    channel: {$ref: '#/channels/user'}
+    summary: Subscribe to orders, fills, positions, account or risk.
+    messages: [{$ref: '#/channels/user/messages/clientMessage'}]
+  receiveUser:
+    action: receive
+    channel: {$ref: '#/channels/user'}
+    summary: order.updated (Order), fill.created (Fill), position.updated (Position), account.updated (AccountSummary), risk.kill_switch (KillSwitchState).
+    messages: [{$ref: '#/channels/user/messages/envelope'}]
+components:
+  messages:
+    ClientMessage:
+      payload: {$ref: '../schemas/stream.schema.json#/$defs/ClientMessage'}
+    StreamEnvelope:
+      payload: {$ref: '../schemas/stream.schema.json#/$defs/StreamEnvelope'}

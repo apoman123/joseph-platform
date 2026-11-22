@@ -1,0 +1,18 @@
+# Revisions to the V5 proposal
+
+The V5 proposal permits revising the design when a better fit exists. Each change below keeps the proposal's non-negotiable decisions (§0.1) intact.
+
+| # | V5 text | Revision | Why |
+|---|---|---|---|
+| R1 | One canonical instrument string was not fixed (`BINANCE:PERP:BTCUSDT`, `hyperliquid:perp:BTC:USDC`, `BTC-USDT-PERP@BINANCE` all appear) | `{venue}:{market_type}:{venue_market_id}`, lowercase venue, e.g. `binance:perp:BTCUSDT`, `hyperliquid:perp:BTC`. Quote/settlement/version live in `InstrumentKey` | One parseable id, regex-validated in both stacks; settlement changes bump `instrument_version` without changing the id |
+| R2 | Three different rule-AST examples (`op`, `all`/`any`, `ref`) | One form: Rule AST v2 with `op` discriminator (`strategy.schema.json`). BIAS takes `timeframes[]` + `match` (ALL / K_OF_N); zone binding uses `range_group` | A single typed union is easier to validate, generate and evolve; covers every example and the "K-of-N" requirement |
+| R3 | `packages/drawing-tools/*/` as separate packages | One `@joseph/drawing-tools` package with one directory per tool; cross-tool imports forbidden by dependency-cruiser | Same removability (delete a directory + manifest entry) with 1 package instead of 13 |
+| R4 | `packages/chart-indicators`, `indicator-viz-core` + `indicator-viz/*` | One `@joseph/indicator-viz` package mapping backend records to declarative `OverlayLayer`s | Rendering is data-driven; per-plugin modules stay separable inside the package |
+| R5 | React UI inside `strategy-builder`/`chart-trading` packages | Packages are framework-free TypeScript (models, state machines, validation); React views live in `apps/web/src/features/*` | Pure logic is unit-testable without a DOM and reusable by any renderer |
+| R6 | Features draw on the chart through `ChartEngineAdapter` methods | Features publish declarative overlay layers (`price-line`, `box`, `marker`) through `FeatureContext.chartLayers`; only `chart-core` talks to Lightweight Charts | Features cannot mutate chart state directly (an architecture-test requirement in §10) |
+| R7 | Parquet golden fixtures | JSON/JSONL fixtures (`fixtures/indicators/...`, `packages/contracts/fixtures`) with a loader ready for Pine exports | Diffable in review; no binary dependency; Parquet can be added for bulk research data |
+| R8 | PostgreSQL from day one | SQLAlchemy Core repositories; SQLite for local/dev/tests, PostgreSQL via `JOSEPH_DATABASE_URL` | Same SQL and unique constraints, zero-setup local runs; Postgres remains the production target |
+| R9 | LINE notifications | LINE Messaging API push (LINE Notify was discontinued on 2025-03-31) | The proposal's channel still works with a supported API |
+| R10 | Venue access via CCXT (starter) | Direct `httpx`/`websockets` adapters per venue | Exact control of timestamps, finality, sequence numbers and capability reporting; no hidden fallbacks |
+| R11 | Seconds timeframes | Minimum timeframe is 1m | Requires trade aggregation that the first release does not ingest; listed as a gap |
+| R12 | Risk-blocked order submission semantics unspecified | `POST /v1/orders/intents` records and audits blocked intents and returns `201` with the `RiskDecision` and `orders: []` | The UI can show every failed check; the audit trail captures attempts |

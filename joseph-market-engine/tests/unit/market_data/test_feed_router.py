@@ -1,0 +1,385 @@
+"""Unit tests for the FeedMode state machine."""
+
+from __future__ import annotations
+
+import asyncio
+import decimal
+import json
+import pathlib
+from collections.abc import AsyncIterator
+
+import pytest
+
+from joseph.domain import clock as clock_lib
+from joseph.domain import errors
+from joseph.domain import instruments
+from joseph.domain import market
+from joseph.domain import quality
+from joseph.domain import timeframes
+from joseph.market_data.adapters import replay as replay_lib
+from joseph.market_data.app import candle_store
+from joseph.market_data.app import feed_router
+from joseph.market_data.domain import candles as candle_rules
+from joseph.market_data.domain import capabilities
+from joseph.market_data.domain import health
+
+_TF = timeframes.Timeframe.M1
+_T0 = 1_795_277_340_000
+_D = decimal.Decimal
+
+
+def _candle(
+    instrument: instruments.InstrumentId, start: int, final: bool, now: int
+) -> market.Candle:
+    """Builds a candle.
+
+    Args:
+        instrument: Instrument.
+        start: Bar start.
+        final: Finality.
+        now: Receipt time.
+
+    Returns:
+        Candle.
+    """
+    return market.Candle(
+        instrument_id=instrument,
+        timeframe=_TF,
+        start_ms=start,
+        end_ms=_TF.end_of(start),
+        open=_D(1),
+        high=_D(1),
+        low=_D(1),
+        close=_D(1),
+        base_volume=_D(1),
+        is_final=final,
+        source="fake.rest",
+        feed_state=quality.FeedState.LIVE,
+        received_at_ms=now,
+    )
+
+
+class FakeAdapter:
+    """Controllable ``MarketDataPort`` double."""
+
+    def __init__(
+        self,
+        venue: instruments.Venue,
+        native: bool,
+        stream_fails: bool,
+        clock: clock_lib.ManualClock,
+    ) -> None:
+        """Initializes the fake.
+
+        Args:
+            venue: Venue.
+            native: Whether native candles are advertised.
+            stream_fails: Whether the stream raises immediately.
+            clock: Clock.
+        """
+        self.venue = venue
+        self.native = native
+        self.stream_fails = stream_fails
+        self.clock = clock
+        self.fetches = 0
+        self.streams = 0
+
+    def capabilities(self) -> capabilities.VenueCapabilities:
+        """Returns fake capabilities.
+
+        Returns:
+            Capabilities.
+        """
+        return capabilities.VenueCapabilities(
+            venue=self.venue,
+            display_name="fake",
+            market_types=(instruments.MarketType.PERP,),
+            market_data=capabilities.MarketDataCapabilities(
+                rest_history=True, native_ws_candles=self.native
+            ),
+            timeframes=(_TF,),
+            notes=(),
+            docs_url="x",
+        )
+
+    async def fetch_candles(
+        self,
+        instrument: instruments.InstrumentId,
+        timeframe: timeframes.Timeframe,
+        start_ms: int,
+        end_ms: int,
+        limit: int | None = None,
+    ) -> list[market.Candle]:
+        """Returns one live candle per call.
+
+        Args:
+            instrument: Instrument.
+            timeframe: Resolution.
+            start_ms: Start.
+            end_ms: End.
+            limit: Ignored.
+
+        Returns:
+            Candles.
+        """
+        del timeframe, start_ms, end_ms, limit
+        self.fetches += 1
+        return [_candle(instrument, _T0, False, self.clock.now_ms())]
+
+    async def stream_candles(
+        self,
+        instrument: instruments.InstrumentId,
+        timeframe: timeframes.Timeframe,
+        tracker: health.FeedHealthTracker | None = None,
+    ) -> AsyncIterator[market.Candle]:
+        """Yields candles or fails.
+
+        Args:
+            instrument: Instrument.
+            timeframe: Resolution.
+            tracker: Ignored.
+
+        Yields:
+            Candles.
+
+        Raises:
+            errors.VenueUnavailableError: When configured to fail.
+        """
+        del timeframe, tracker
+        self.streams += 1
+        if self.stream_fails:
+            raise errors.VenueUnavailableError("ws down")
+        while True:
+            yield _candle(instrument, _T0, False, self.clock.now_ms())
+            self.clock.advance(1)
+            await asyncio.sleep(0.01)
+
+
+async def _sleep(_: float) -> None:
+    """Yields control without waiting.
+
+    Args:
+        _: Ignored delay.
+    """
+    await asyncio.sleep(0.005)
+
+
+def _router(
+    adapter: FakeAdapter,
+    clock: clock_lib.ManualClock,
+    store: candle_store.CandleStore | None = None,
+    replay: replay_lib.ReplaySource | None = None,
+    emitted: list[tuple[str, market.Candle]] | None = None,
+) -> feed_router.FeedRouter:
+    """Builds a router around a fake adapter.
+
+    Args:
+        adapter: Fake adapter.
+        clock: Clock.
+        store: Optional store.
+        replay: Optional replay source.
+        emitted: Optional sink of ``(mode, candle)``.
+
+    Returns:
+        Router.
+    """
+
+    async def on_candle(
+        session: feed_router.FeedSession,
+        candle: market.Candle,
+        action: candle_rules.MergeAction,
+    ) -> None:
+        """Records emitted candles.
+
+        Args:
+            session: Session.
+            candle: Candle.
+            action: Merge action.
+        """
+        del action
+        if emitted is not None:
+            emitted.append((session.mode.value, candle))
+
+    return feed_router.FeedRouter(
+        {adapter.venue: adapter},  # type: ignore[dict-item]
+        store or candle_store.CandleStore(),
+        clock,
+        replay=replay,
+        on_candle=on_candle,
+        sleep=_sleep,
+        native_retry_s=3600,
+    )
+
+
+async def _wait_for(predicate: object, limit_s: float = 2.0) -> None:
+    """Waits until ``predicate()`` is truthy.
+
+    Args:
+        predicate: Zero-argument callable.
+        limit_s: Seconds before giving up.
+    """
+
+    async def loop() -> None:
+        """Polls the predicate (state lives in the router under test)."""
+        while not predicate():  # type: ignore[operator]  # noqa: ASYNC110
+            await asyncio.sleep(0.005)
+
+    await asyncio.wait_for(loop(), limit_s)
+
+
+async def test_auto_uses_native_stream_when_healthy() -> None:
+    """AUTO runs LIVE on the native stream."""
+    clock = clock_lib.ManualClock(_T0)
+    adapter = FakeAdapter(instruments.Venue.BINANCE, True, False, clock)
+    router = _router(adapter, clock)
+    instrument = instruments.InstrumentId.parse("binance:perp:BTCUSDT")
+    session = await router.acquire(instrument, _TF)
+    await _wait_for(lambda: session.state is feed_router.SessionState.LIVE)
+    health_state = router.venue_health(instruments.Venue.BINANCE)
+    assert health_state.transport is quality.Transport.NATIVE_WS
+    assert health_state.feed_state is quality.FeedState.LIVE
+    assert adapter.fetches == 0
+    await router.close()
+    assert session.state is feed_router.SessionState.STOPPED
+
+
+async def test_auto_falls_back_to_visible_rest_polling() -> None:
+    """A failing native stream degrades visibly to POLL."""
+    clock = clock_lib.ManualClock(_T0)
+    adapter = FakeAdapter(instruments.Venue.BINANCE, True, True, clock)
+    emitted: list[tuple[str, market.Candle]] = []
+    router = _router(adapter, clock, emitted=emitted)
+    instrument = instruments.InstrumentId.parse("binance:perp:BTCUSDT")
+    session = await router.acquire(instrument, _TF)
+    await _wait_for(lambda: emitted)
+    assert session.state is feed_router.SessionState.POLLING
+    snapshot = router.venue_health(instruments.Venue.BINANCE)
+    assert snapshot.state is quality.HealthState.DEGRADED
+    assert snapshot.transport is quality.Transport.REST_POLL
+    assert emitted[0][1].feed_state is quality.FeedState.POLL
+    assert emitted[0][1].source == "fake.poll"
+    await router.close()
+
+
+async def test_native_ws_mode_rejects_unsupported_venue() -> None:
+    """NATIVE_WS on a REST-only venue is UNSUPPORTED, never polled."""
+    clock = clock_lib.ManualClock(_T0)
+    adapter = FakeAdapter(instruments.Venue.LIGHTER, False, False, clock)
+    router = _router(adapter, clock)
+    instrument = instruments.InstrumentId.parse("lighter:perp:BTC")
+    with pytest.raises(errors.UnsupportedError):
+        await router.acquire(instrument, _TF, quality.FeedMode.NATIVE_WS)
+    assert adapter.fetches == 0
+
+
+async def test_native_ws_outage_goes_stale_without_polling() -> None:
+    """NATIVE_WS never silently polls during an outage."""
+    clock = clock_lib.ManualClock(_T0)
+    adapter = FakeAdapter(instruments.Venue.BINANCE, True, True, clock)
+    router = _router(adapter, clock)
+    instrument = instruments.InstrumentId.parse("binance:perp:BTCUSDT")
+    session = await router.acquire(instrument, _TF, quality.FeedMode.NATIVE_WS)
+    await _wait_for(lambda: session.state is feed_router.SessionState.STALE)
+    await asyncio.sleep(0.05)
+    assert adapter.fetches == 0
+    assert (
+        router.venue_health(instruments.Venue.BINANCE).state
+        is quality.HealthState.UNAVAILABLE
+    )
+    await router.close()
+
+
+async def test_rest_poll_mode_polls_and_labels_poll() -> None:
+    """REST_POLL emits POLL-labelled candles."""
+    clock = clock_lib.ManualClock(_T0)
+    adapter = FakeAdapter(instruments.Venue.BINANCE, True, False, clock)
+    emitted: list[tuple[str, market.Candle]] = []
+    router = _router(adapter, clock, emitted=emitted)
+    instrument = instruments.InstrumentId.parse("binance:perp:BTCUSDT")
+    await router.acquire(instrument, _TF, quality.FeedMode.REST_POLL)
+    await _wait_for(lambda: emitted)
+    assert emitted[0][0] == "REST_POLL"
+    assert adapter.streams == 0
+    await router.close()
+
+
+async def test_external_vendor_is_unsupported() -> None:
+    """No vendor feed is configured, so the mode is rejected."""
+    clock = clock_lib.ManualClock(_T0)
+    adapter = FakeAdapter(instruments.Venue.BINANCE, True, False, clock)
+    router = _router(adapter, clock)
+    with pytest.raises(errors.UnsupportedError):
+        router.validate(
+            instruments.InstrumentId.parse("binance:perp:BTCUSDT"),
+            _TF,
+            quality.FeedMode.EXTERNAL_VENDOR,
+        )
+
+
+async def test_replay_mode_replays_recording_then_stops(
+    tmp_path: pathlib.Path,
+) -> None:
+    """REPLAY serves recorded bars labelled REPLAY and then stops."""
+    clock = clock_lib.ManualClock(_T0)
+    adapter = FakeAdapter(instruments.Venue.BINANCE, True, False, clock)
+    instrument = instruments.InstrumentId.parse("binance:perp:BTCUSDT")
+    folder = tmp_path / "binance" / "perp" / "BTCUSDT"
+    folder.mkdir(parents=True)
+    lines = [
+        json.dumps(_candle(instrument, _T0 + i * 60_000, True, 0).to_contract())
+        for i in range(3)
+    ]
+    (folder / "1m.jsonl").write_text("\n".join(lines) + "\n")
+    emitted: list[tuple[str, market.Candle]] = []
+    replay = replay_lib.ReplaySource(tmp_path, sleep=_sleep)
+    router = _router(adapter, clock, replay=replay, emitted=emitted)
+    with pytest.raises(errors.MissingDataError):
+        router.validate(
+            instrument, timeframes.Timeframe.M5, quality.FeedMode.REPLAY
+        )
+    session = await router.acquire(instrument, _TF, quality.FeedMode.REPLAY)
+    await _wait_for(lambda: session.state is feed_router.SessionState.STOPPED)
+    assert len(emitted) == 3
+    assert {c.feed_state for _, c in emitted} == {quality.FeedState.REPLAY}
+
+
+async def test_sessions_are_reference_counted() -> None:
+    """Two acquirers share one session; the last release stops it."""
+    clock = clock_lib.ManualClock(_T0)
+    adapter = FakeAdapter(instruments.Venue.BINANCE, True, False, clock)
+    router = _router(adapter, clock)
+    instrument = instruments.InstrumentId.parse("binance:perp:BTCUSDT")
+    first = await router.acquire(instrument, _TF)
+    second = await router.acquire(instrument, _TF)
+    assert first is second
+    await router.release(instrument, _TF)
+    assert router.session(instrument, _TF) is first
+    await router.release(instrument, _TF)
+    assert router.session(instrument, _TF) is None
+    assert first.state is feed_router.SessionState.STOPPED
+
+
+def test_illegal_transition_raises() -> None:
+    """The transition table is enforced."""
+    session = feed_router.FeedSession(
+        instrument=instruments.InstrumentId.parse("binance:perp:BTCUSDT"),
+        timeframe=_TF,
+        mode=quality.FeedMode.AUTO,
+        tracker=health.FeedHealthTracker(instruments.Venue.BINANCE),
+    )
+    session.transition(feed_router.SessionState.STOPPED)
+    with pytest.raises(ValueError):
+        session.transition(feed_router.SessionState.LIVE)
+
+
+def test_unknown_venue_is_not_found() -> None:
+    """Disabled venues are reported, not guessed."""
+    clock = clock_lib.ManualClock(_T0)
+    adapter = FakeAdapter(instruments.Venue.BINANCE, True, False, clock)
+    router = _router(adapter, clock)
+    with pytest.raises(errors.NotFoundError):
+        router.validate(
+            instruments.InstrumentId.parse("mexc:perp:BTC_USDT"),
+            _TF,
+            quality.FeedMode.AUTO,
+        )

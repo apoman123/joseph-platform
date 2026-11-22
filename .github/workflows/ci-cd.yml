@@ -1,0 +1,329 @@
+# Joseph CI/CD: every push and pull request runs all verification tiers.
+# Pushes to main (and v* tags) then publish container images to GHCR and
+# deploy through protected GitHub environments when deployment targets are
+# configured (repository variables + secrets; see docs/CI_CD.md).
+name: ci-cd
+
+on:
+  push:
+    branches: ['**']
+    tags: ['v*']
+  pull_request:
+  workflow_dispatch:
+
+concurrency:
+  group: ci-cd-${{ github.ref }}
+  cancel-in-progress: ${{ github.ref != 'refs/heads/main' && !startsWith(github.ref, 'refs/tags/') }}
+
+permissions:
+  contents: read
+
+env:
+  COREPACK_ENABLE_DOWNLOAD_PROMPT: '0'
+  FORCE_COLOR: '1'
+
+jobs:
+  terminal:
+    name: Terminal — lint, types, unit, contracts, boundaries, build
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    defaults:
+      run:
+        working-directory: joseph-terminal
+    steps:
+      - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v4
+        with:
+          package_json_file: joseph-terminal/package.json
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: pnpm
+          cache-dependency-path: joseph-terminal/pnpm-lock.yaml
+      - run: pnpm install --frozen-lockfile
+      - name: Contracts are generated from the JSON Schemas
+        run: pnpm contracts:check
+      - name: Google TypeScript style (Prettier + ESLint) and types
+        run: |
+          pnpm format:check
+          pnpm lint
+          pnpm typecheck
+      - name: Unit, component, contract and architecture tests
+        run: pnpm test:coverage
+      - name: Dependency boundaries
+        run: pnpm arch:check
+      - name: Secret scan, license allowlist and vulnerability audit
+        run: |
+          pnpm secrets:scan
+          pnpm licenses:check
+          pnpm audit --prod --audit-level high
+      - name: Production build
+        run: pnpm build
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: terminal-coverage
+          path: joseph-terminal/coverage
+          if-no-files-found: ignore
+
+  terminal-e2e:
+    name: Terminal — browser system tests (DEMO) + accessibility
+    needs: terminal
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    defaults:
+      run:
+        working-directory: joseph-terminal
+    steps:
+      - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v4
+        with:
+          package_json_file: joseph-terminal/package.json
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: pnpm
+          cache-dependency-path: joseph-terminal/pnpm-lock.yaml
+      - run: pnpm install --frozen-lockfile
+      - run: pnpm --filter @joseph/web exec playwright install --with-deps chromium
+      - run: pnpm test:e2e
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: e2e-demo-evidence
+          path: |
+            joseph-terminal/apps/web/e2e/screenshots
+            joseph-terminal/apps/web/playwright-report
+            joseph-terminal/apps/web/test-results
+          if-no-files-found: ignore
+
+  engines:
+    name: Engine — ${{ matrix.project }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    strategy:
+      fail-fast: false
+      matrix:
+        project: [joseph-market-engine, joseph-execution-engine]
+    defaults:
+      run:
+        working-directory: ${{ matrix.project }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: astral-sh/setup-uv@v5
+        with:
+          enable-cache: true
+          cache-dependency-glob: ${{ matrix.project }}/uv.lock
+      - run: uv sync --frozen
+      - name: Google Python style (ruff format + ruff + docstrings)
+        run: |
+          uv run ruff format --check src tests scripts
+          uv run ruff check src tests scripts
+      - name: mypy --strict
+        run: uv run mypy
+      - name: Unit, integration, contract, architecture, property, security, chaos
+        run: uv run pytest --cov --cov-report=term --cov-report=xml
+      - name: OpenAPI document is up to date
+        run: uv run python scripts/export_openapi.py --check
+      - name: Dependency licenses and vulnerabilities
+        run: |
+          uv run pip-licenses --fail-on="GPL;AGPL" --partial-match
+          uv export --frozen --no-dev --no-hashes --no-emit-project -o /tmp/requirements.txt
+          uvx pip-audit -r /tmp/requirements.txt --no-deps --disable-pip
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: coverage-${{ matrix.project }}
+          path: ${{ matrix.project }}/coverage.xml
+          if-no-files-found: ignore
+
+  system:
+    name: Cross-service system tests
+    needs: engines
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+      - uses: astral-sh/setup-uv@v5
+        with:
+          enable-cache: true
+          cache-dependency-glob: '**/uv.lock'
+      - run: |
+          (cd joseph-market-engine && uv sync --frozen)
+          (cd joseph-execution-engine && uv sync --frozen)
+          (cd system-tests && uv sync --frozen)
+      - name: Both engines as real processes over HTTP and WebSocket
+        working-directory: system-tests
+        run: uv run pytest -s
+
+  fullstack:
+    name: Full-stack browser tests (web + both engines)
+    needs: [terminal, engines]
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+      - uses: astral-sh/setup-uv@v5
+        with:
+          enable-cache: true
+          cache-dependency-glob: '**/uv.lock'
+      - uses: pnpm/action-setup@v4
+        with:
+          package_json_file: joseph-terminal/package.json
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: pnpm
+          cache-dependency-path: joseph-terminal/pnpm-lock.yaml
+      - run: |
+          (cd joseph-market-engine && uv sync --frozen)
+          (cd joseph-execution-engine && uv sync --frozen)
+          (cd joseph-terminal && pnpm install --frozen-lockfile)
+      - working-directory: joseph-terminal
+        run: |
+          pnpm --filter @joseph/web exec playwright install --with-deps chromium
+          pnpm test:e2e:fullstack
+      - uses: actions/upload-artifact@v4
+        if: failure()
+        with:
+          name: e2e-fullstack-evidence
+          path: joseph-terminal/apps/web/test-results
+          if-no-files-found: ignore
+
+  images:
+    name: Image — ${{ matrix.image }}
+    needs: [terminal, terminal-e2e, engines, system, fullstack]
+    if: github.event_name == 'push' && (github.ref == 'refs/heads/main' || startsWith(github.ref, 'refs/tags/v'))
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    permissions:
+      contents: read
+      packages: write
+      id-token: write
+      attestations: write
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - image: joseph-market-engine
+            context: joseph-market-engine
+          - image: joseph-execution-engine
+            context: joseph-execution-engine
+          - image: joseph-terminal
+            context: joseph-terminal
+    steps:
+      - uses: actions/checkout@v4
+      - id: owner
+        run: echo "name=${GITHUB_REPOSITORY_OWNER,,}" >> "$GITHUB_OUTPUT"
+      - uses: docker/setup-buildx-action@v3
+      - uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+      - id: meta
+        uses: docker/metadata-action@v5
+        with:
+          images: ghcr.io/${{ steps.owner.outputs.name }}/${{ matrix.image }}
+          tags: |
+            type=sha,prefix=sha-,format=long
+            type=ref,event=tag
+            type=raw,value=latest,enable={{is_default_branch}}
+            type=semver,pattern={{version}}
+            type=semver,pattern={{major}}.{{minor}}
+      - id: build
+        uses: docker/build-push-action@v6
+        with:
+          context: ${{ matrix.context }}
+          push: true
+          tags: ${{ steps.meta.outputs.tags }}
+          labels: ${{ steps.meta.outputs.labels }}
+          cache-from: type=gha,scope=${{ matrix.image }}
+          cache-to: type=gha,mode=max,scope=${{ matrix.image }}
+          provenance: mode=max
+          sbom: true
+          build-args: |
+            NEXT_PUBLIC_MARKET_API_URL=${{ vars.PUBLIC_MARKET_API_URL }}
+            NEXT_PUBLIC_MARKET_WS_URL=${{ vars.PUBLIC_MARKET_WS_URL }}
+            NEXT_PUBLIC_EXECUTION_API_URL=${{ vars.PUBLIC_EXECUTION_API_URL }}
+            NEXT_PUBLIC_EXECUTION_WS_URL=${{ vars.PUBLIC_EXECUTION_WS_URL }}
+      # GitHub artifact attestations need a public repo (or Enterprise Cloud);
+      # the image always carries BuildKit SBOM + provenance regardless.
+      - uses: actions/attest-build-provenance@v2
+        if: ${{ !github.event.repository.private }}
+        with:
+          subject-name: ghcr.io/${{ steps.owner.outputs.name }}/${{ matrix.image }}
+          subject-digest: ${{ steps.build.outputs.digest }}
+          push-to-registry: true
+
+  deploy-staging:
+    name: Deploy — staging
+    needs: images
+    if: github.ref == 'refs/heads/main' && vars.STAGING_SSH_HOST != ''
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    permissions:
+      contents: read
+      packages: read
+    environment:
+      name: staging
+      url: ${{ vars.STAGING_WEB_URL }}
+    steps:
+      - uses: actions/checkout@v4
+      - name: Roll out sha-tagged images with docker compose
+        uses: ./.github/actions/deploy
+        with:
+          host: ${{ vars.STAGING_SSH_HOST }}
+          user: ${{ vars.STAGING_SSH_USER }}
+          ssh-key: ${{ secrets.STAGING_SSH_KEY }}
+          known-hosts: ${{ secrets.STAGING_SSH_KNOWN_HOSTS }}
+          deploy-dir: ${{ vars.STAGING_DEPLOY_DIR }}
+          registry: ghcr.io/${{ github.repository_owner }}
+          registry-user: ${{ github.actor }}
+          registry-token: ${{ secrets.GITHUB_TOKEN }}
+          image-tag: sha-${{ github.sha }}
+          health-urls: ${{ vars.STAGING_HEALTH_URLS }}
+
+  release:
+    name: GitHub release
+    needs: images
+    if: startsWith(github.ref, 'refs/tags/v')
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v4
+      - name: Create release with generated notes and API contracts
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          tar czf "contracts-${GITHUB_REF_NAME}.tar.gz" -C joseph-terminal/packages/contracts schemas openapi asyncapi
+          gh release create "$GITHUB_REF_NAME" --generate-notes --verify-tag \
+            "contracts-${GITHUB_REF_NAME}.tar.gz"
+
+  deploy-production:
+    name: Deploy — production
+    needs: [images, release]
+    if: startsWith(github.ref, 'refs/tags/v') && vars.PRODUCTION_SSH_HOST != ''
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    permissions:
+      contents: read
+      packages: read
+    environment:
+      name: production
+      url: ${{ vars.PRODUCTION_WEB_URL }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: ./.github/actions/deploy
+        with:
+          host: ${{ vars.PRODUCTION_SSH_HOST }}
+          user: ${{ vars.PRODUCTION_SSH_USER }}
+          ssh-key: ${{ secrets.PRODUCTION_SSH_KEY }}
+          known-hosts: ${{ secrets.PRODUCTION_SSH_KNOWN_HOSTS }}
+          deploy-dir: ${{ vars.PRODUCTION_DEPLOY_DIR }}
+          registry: ghcr.io/${{ github.repository_owner }}
+          registry-user: ${{ github.actor }}
+          registry-token: ${{ secrets.GITHUB_TOKEN }}
+          image-tag: ${{ github.ref_name }}
+          health-urls: ${{ vars.PRODUCTION_HEALTH_URLS }}

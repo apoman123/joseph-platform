@@ -1,0 +1,71 @@
+# Joseph platform: market engine, execution engine and terminal.
+#   Local:   docker compose -f deploy/docker-compose.yml --env-file deploy/.env up --build
+#   Server:  IMAGE_TAG=sha-<commit> docker compose -f deploy/docker-compose.yml --env-file deploy/.env pull && ... up -d
+# Images default to GHCR; `--build` builds them from this checkout instead.
+name: joseph
+
+x-engine-env: &engine-env
+  JOSEPH_ENV: ${JOSEPH_ENV:-development}
+  JOSEPH_DEV_TOKENS: ${JOSEPH_DEV_TOKENS:-}
+  JOSEPH_SERVICE_TOKEN: ${JOSEPH_SERVICE_TOKEN:?set JOSEPH_SERVICE_TOKEN in deploy/.env}
+  JOSEPH_CORS_ORIGINS: ${JOSEPH_CORS_ORIGINS:-http://localhost:3000}
+
+services:
+  market:
+    image: ${IMAGE_REGISTRY:-ghcr.io/joseph}/joseph-market-engine:${IMAGE_TAG:-latest}
+    build: ../joseph-market-engine
+    restart: unless-stopped
+    environment:
+      <<: *engine-env
+      JOSEPH_EXECUTION_URL: http://execution:8100
+      JOSEPH_ENABLED_VENUES: ${JOSEPH_ENABLED_VENUES:-binance,hyperliquid,lighter,bitget,mexc,mock}
+      JOSEPH_DEMO_ONLY: ${JOSEPH_DEMO_ONLY:-false}
+      JOSEPH_DATABASE_URL: ${JOSEPH_MARKET_DATABASE_URL:-sqlite:////app/var/market.db}
+      JOSEPH_TELEGRAM_BOT_TOKEN: ${JOSEPH_TELEGRAM_BOT_TOKEN:-}
+      JOSEPH_LINE_CHANNEL_TOKEN: ${JOSEPH_LINE_CHANNEL_TOKEN:-}
+      JOSEPH_WEBHOOK_SECRET: ${JOSEPH_WEBHOOK_SECRET:-}
+      JOSEPH_SMTP_HOST: ${JOSEPH_SMTP_HOST:-}
+      JOSEPH_SMTP_FROM: ${JOSEPH_SMTP_FROM:-}
+      JOSEPH_SMTP_USERNAME: ${JOSEPH_SMTP_USERNAME:-}
+      JOSEPH_SMTP_PASSWORD: ${JOSEPH_SMTP_PASSWORD:-}
+    volumes: [market-data:/app/var]
+    ports: ["${MARKET_PORT:-8000}:8000"]
+
+  execution:
+    image: ${IMAGE_REGISTRY:-ghcr.io/joseph}/joseph-execution-engine:${IMAGE_TAG:-latest}
+    build: ../joseph-execution-engine
+    restart: unless-stopped
+    depends_on:
+      market: {condition: service_healthy}
+    environment:
+      <<: *engine-env
+      JOSEPH_MARKET_GATEWAY: http
+      JOSEPH_MARKET_URL: http://market:8000
+      JOSEPH_DATABASE_URL: ${JOSEPH_EXECUTION_DATABASE_URL:-sqlite:////app/var/execution.db}
+      JOSEPH_VAULT_MASTER_KEY: ${JOSEPH_VAULT_MASTER_KEY:-}
+      JOSEPH_PREVIEW_SECRET: ${JOSEPH_PREVIEW_SECRET:-}
+      JOSEPH_STEP_UP_TOTP_SECRET: ${JOSEPH_STEP_UP_TOTP_SECRET:-}
+      JOSEPH_LIVE_TRADING_ENABLED: "false"
+      JOSEPH_EMERGENCY_HALT: ${JOSEPH_EMERGENCY_HALT:-false}
+    volumes: [execution-data:/app/var]
+    ports: ["${EXECUTION_PORT:-8100}:8100"]
+
+  web:
+    image: ${IMAGE_REGISTRY:-ghcr.io/joseph}/joseph-terminal:${IMAGE_TAG:-latest}
+    build:
+      context: ../joseph-terminal
+      args:
+        NEXT_PUBLIC_MARKET_API_URL: ${PUBLIC_MARKET_API_URL:-http://localhost:8000}
+        NEXT_PUBLIC_MARKET_WS_URL: ${PUBLIC_MARKET_WS_URL:-ws://localhost:8000}
+        NEXT_PUBLIC_EXECUTION_API_URL: ${PUBLIC_EXECUTION_API_URL:-http://localhost:8100}
+        NEXT_PUBLIC_EXECUTION_WS_URL: ${PUBLIC_EXECUTION_WS_URL:-ws://localhost:8100}
+        NEXT_PUBLIC_DEV_TOKEN: ${PUBLIC_DEV_TOKEN:-}
+    restart: unless-stopped
+    depends_on:
+      market: {condition: service_healthy}
+      execution: {condition: service_healthy}
+    ports: ["${WEB_PORT:-3000}:3000"]
+
+volumes:
+  market-data:
+  execution-data:

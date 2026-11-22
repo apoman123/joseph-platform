@@ -1,0 +1,19 @@
+{
+  "name": "@joseph/chart-core",
+  "version": "0.5.0",
+  "private": true,
+  "type": "module",
+  "license": "MIT",
+  "description": "ChartPort abstraction with the Lightweight Charts adapter; no other package imports the chart library.",
+  "exports": {
+    ".": "./src/index.ts",
+    "./lwc": "./src/adapters/lwc/index.ts"
+  },
+  "scripts": {
+    "typecheck": "tsc --noEmit -p tsconfig.json"
+  },
+  "dependencies": {
+    "@joseph/contracts": "workspace:*",
+    "lightweight-charts": "5.3.0"
+  }
+}

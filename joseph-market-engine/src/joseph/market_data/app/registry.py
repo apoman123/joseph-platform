@@ -1,0 +1,152 @@
+"""Instrument registry aggregated across venues.
+
+Results are always exact-venue instruments: searching ``BTC`` returns
+``binance:perp:BTCUSDT`` and ``hyperliquid:perp:BTC`` as separate entries
+and never merges them. A venue that cannot be reached is reported in
+``errors`` while the other venues keep serving.
+"""
+
+from __future__ import annotations
+
+import asyncio
+from collections.abc import Mapping
+
+from joseph.domain import errors as domain_errors
+from joseph.domain import instruments
+from joseph.market_data.app import ports
+
+_STATUS_ORDER = {
+    instruments.InstrumentStatus.TRADING: 0,
+    instruments.InstrumentStatus.PRE_LAUNCH: 1,
+    instruments.InstrumentStatus.HALTED: 2,
+    instruments.InstrumentStatus.UNKNOWN: 3,
+    instruments.InstrumentStatus.DELISTED: 4,
+}
+
+
+class InstrumentRegistry:
+    """Looks up and searches instruments of the configured venues."""
+
+    def __init__(
+        self, adapters: Mapping[instruments.Venue, ports.MarketDataPort]
+    ) -> None:
+        """Initializes the registry.
+
+        Args:
+            adapters: Adapter per venue.
+        """
+        self._adapters = dict(adapters)
+        self.errors: dict[instruments.Venue, str] = {}
+
+    @property
+    def venues(self) -> tuple[instruments.Venue, ...]:
+        """Returns configured venues in declaration order."""
+        return tuple(self._adapters)
+
+    async def all_instruments(
+        self, venue: instruments.Venue | None = None
+    ) -> list[instruments.Instrument]:
+        """Lists instruments of one or all venues.
+
+        Args:
+            venue: Optional venue filter.
+
+        Returns:
+            Instruments from reachable venues.
+
+        Raises:
+            domain_errors.NotFoundError: If ``venue`` is not configured.
+        """
+        targets = [venue] if venue is not None else list(self._adapters)
+        for target in targets:
+            if target not in self._adapters:
+                raise domain_errors.NotFoundError(
+                    f"venue {target.value} is not enabled"
+                )
+        results = await asyncio.gather(
+            *(self._adapters[t].list_instruments() for t in targets),
+            return_exceptions=True,
+        )
+        rows: list[instruments.Instrument] = []
+        for target, result in zip(targets, results, strict=True):
+            if isinstance(result, domain_errors.JosephError):
+                self.errors[target] = result.message
+                if venue is not None:
+                    raise result
+                continue
+            if isinstance(result, BaseException):
+                raise result
+            self.errors.pop(target, None)
+            rows.extend(result)
+        return rows
+
+    async def get(
+        self, instrument_id: instruments.InstrumentId
+    ) -> instruments.Instrument:
+        """Resolves one instrument.
+
+        Args:
+            instrument_id: Canonical id.
+
+        Returns:
+            Instrument.
+
+        Raises:
+            domain_errors.NotFoundError: If unknown or the venue is disabled.
+        """
+        for row in await self.all_instruments(instrument_id.venue):
+            if row.instrument_id == instrument_id:
+                return row
+        raise domain_errors.NotFoundError(f"unknown instrument {instrument_id}")
+
+    async def search(
+        self,
+        query: str | None = None,
+        venue: instruments.Venue | None = None,
+        market_type: instruments.MarketType | None = None,
+        limit: int = 200,
+    ) -> list[instruments.Instrument]:
+        """Searches by base asset, native id or display symbol.
+
+        Args:
+            query: Case-insensitive text such as ``btc``.
+            venue: Optional venue filter.
+            market_type: Optional market-type filter.
+            limit: Maximum results.
+
+        Returns:
+            Exact-venue instruments, best matches first.
+        """
+        needle = (query or "").strip().upper()
+        venue_rank = {v: i for i, v in enumerate(self._adapters)}
+        matches = []
+        for row in await self.all_instruments(venue):
+            if market_type is not None and (
+                row.instrument_id.market_type is not market_type
+            ):
+                continue
+            base = row.key.canonical_base.upper()
+            native = row.instrument_id.venue_market_id.upper()
+            if (
+                needle
+                and needle not in base
+                and needle not in native
+                and (needle not in row.display_symbol.upper())
+            ):
+                continue
+            exact = 0 if needle in (base, native) else 1
+            prefix = 0 if base.startswith(needle) else 1
+            matches.append(
+                (
+                    (
+                        exact,
+                        prefix,
+                        _STATUS_ORDER[row.status],
+                        venue_rank[row.instrument_id.venue],
+                        native,
+                    ),
+                    row,
+                )
+            )
+        matches.sort(key=lambda item: item[0])
+        return [row for _, row in matches[:limit]]
