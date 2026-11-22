@@ -6,13 +6,13 @@ All suites below were run on the final build (Linux, Python 3.13 via uv, Node 24
 
 | Tier | Project | Result |
 |---|---|---|
-| Unit, integration, contract, architecture, property, replay, in-process system | Market engine | **1,043 passed**, 10 skipped (9 opt-in network tests, 1 Pine parity test awaiting TradingView exports) · 96% line coverage |
-| Unit, scenario, property (batch == streaming, no look-ahead), code standards | `smc_indicators` (PineScripts `python_indicators/`) | **306 passed** · ruff, `mypy --strict` clean |
-| Live venue (opt-in, real public APIs) | Market engine | **9 passed**: Binance, Hyperliquid, Lighter, Bitget and MEXC |
+| Unit, integration, contract, architecture, property, replay, in-process system | Market engine | **1,195 passed**, 27 skipped (26 opt-in network tests, 1 Pine parity test awaiting TradingView exports) · 96% line coverage |
+| Unit, scenario, property (batch == streaming, no look-ahead, brute-force references), code standards | `smc_indicators` 1.1.0 (PineScripts `python_indicators/`) | **393 passed** · ruff, `mypy --strict` clean |
+| Live venue (opt-in, real public APIs) | Market engine | **26 passed**: Binance, Hyperliquid, Lighter, Bitget and MEXC (REST, kline streams, trade streams, trade history, seconds bars, `1M` klines, Binance taker volume) |
 | Unit, integration, contract, architecture, security, chaos, property, in-process system | Execution engine | **533 passed** · 95% line coverage |
-| Unit, component, contract, architecture (Vitest) | Terminal | **398 passed** (56 files) · 78% line coverage (the canvas chart adapter is covered by the browser tiers) |
-| Browser system, DEMO mode (Playwright + axe) | Terminal | **27 passed** (incl. panes, structure, settings, compare, replay, drawings + style editor + object list, alert triage, resizing) |
-| Full-stack browser: production build + both real engines | All three | **6 passed** (incl. Delta % series and `market_structure` output from the real engine) |
+| Unit, component, contract, architecture (Vitest) | Terminal | **698 passed** (88 files) · 80% line coverage (the canvas chart adapter is covered by the browser tiers) |
+| Browser system, DEMO mode (Playwright + axe) | Terminal | **34 passed** (incl. panes, structure, settings, compare, replay, drawings + style editor + object list, alert triage, resizing, seconds/1M bars, true delta, signal volume ranking, pop-out windows, P3 tools, anchored VWAP and regression channel) |
+| Full-stack browser: production build + both real engines | All three | **8 passed** (incl. Delta % series and `market_structure` output, seconds bars built from trades with true delta, and an anchored-VWAP drawing fed by the engine series) |
 | Cross-service system (real processes, HTTP + WebSocket) | Both engines | **26 passed** |
 
 ## Static checks
@@ -20,12 +20,12 @@ All suites below were run on the final build (Linux, Python 3.13 via uv, Node 24
 | Check | Result |
 |---|---|
 | ruff format + ruff (Google docstrings) on src, tests and scripts | Clean in both engines and system-tests |
-| `mypy --strict` | 141 files (market), 76 files (execution), 13 files (`smc_indicators`): no issues |
+| `mypy --strict` | 143 files (market), 76 files (execution), 15 files (`smc_indicators`): no issues |
 | Google style tests (docstring on every def/class, module-only imports) | Pass (part of the architecture tier) |
 | import-linter | Market 8/8 contracts kept (incl. "indicator adapters stay thin"); execution 7/7 kept |
 | ESLint (Google TS rules, JSDoc everywhere), Prettier, `tsc` per package | 0 problems |
 | Contracts drift (`contracts:check`), OpenAPI drift (`export_openapi.py --check`) | Up to date |
-| dependency-cruiser | 268 modules, 0 violations |
+| dependency-cruiser | 336 modules, 0 violations |
 | Secret scan | Pass |
 | Licenses | 65 production npm packages on the allowlist (1 reviewed exception: `@img/sharp-libvips`, LGPL, server-only via Next.js); Python dependencies have no GPL/AGPL |
 | Production build | `next build` succeeds; 103 kB shared first-load JS |
@@ -35,8 +35,8 @@ All suites below were run on the final build (Linux, Python 3.13 via uv, Node 24
 | Check | Result |
 |---|---|
 | `actionlint` on all workflows (`ci-cd`, `security`, `nightly`, `redeploy`, standalone terminal CI) and PineScripts `python-indicators` | No issues (fixed an unquoted comma in the deploy action's input description) |
-| Market-engine image with the private indicator library | Builds with only a forwarded ssh-agent (`docker build --ssh default`); runtime image loads all 8 plugins, runs as uid 10001, contains no git, ssh client or key |
-| Indicator performance | 5,000 5m frames through all 8 plugins (1m intrabars, 1h/4h/1d aux): 8.6 s (1.7 ms/frame); 18.5 s under coverage tracing |
+| Market-engine image with the private indicator library | Builds with only a forwarded ssh-agent (`docker build --ssh default`); runtime image loads all 10 plugins (library 1.1.0), runs as uid 10001, contains no git, ssh client or key |
+| Indicator performance | 5,000 5m frames through all 10 plugins, 11 series (1m intrabars, 1h/4h/1d aux): 9.7 s (1.9 ms/frame) |
 | Clean-checkout rehearsal: a fresh copy holding only the 706 committable files, frozen installs, then the CI command sequence | All green on a cold first run (it exposed a cold-start fixture flake, now fixed) |
 | Container images built from the Dockerfiles | market 285 MB, execution 303 MB, terminal 412 MB; all run as non-root with health checks |
 | Compose smoke test of the three containers | All healthy. Over the container network: paper market order FILLED, audit chain valid, unauthenticated request → 401 |

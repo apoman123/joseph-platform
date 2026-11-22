@@ -12,10 +12,32 @@ Verified behavior and assumptions:
   market's published price/size decimals.
 * ``fundings`` publishes hourly ``rate`` as a percentage with a separate
   ``direction``; ASSUMPTION: ``direction == "short"`` means a negative rate.
-* No public WebSocket candle channel was found, so native candle streaming
-  is reported unsupported (``AUTO`` polls REST and says so).
+* A public WebSocket candle channel (``candle/<market>/<resolution>``) exists
+  (verified 2026-11-22) but is not wired yet, so native candle streaming is
+  reported unsupported (``AUTO`` polls REST and says so). Resolutions are
+  exactly 1m, 5m, 15m, 30m, 1h, 4h, 12h and 1d: ``1w`` and ``1M`` are
+  rejected by the venue.
 * Asset class is not published; instruments are ``UNKNOWN`` (the stricter
   crypto qualification thresholds apply).
+
+Trades (verified live 2026-11-22, docs.lighter.xyz/api):
+
+* WebSocket ``wss://mainnet.zklighter.elliot.ai/stream`` channel
+  ``trade/<market_id>``: ``subscribed/trade`` replays the latest 50 trades,
+  ``update/trade`` frames follow; both list trades newest first. The client
+  must send a frame at least every 2 minutes (``{"type": "ping"}``).
+* ``is_maker_ask`` true means the resting maker sold, so the aggressor
+  bought (714/720 trades printed through the matching touch, none against).
+* ``trade_id`` is unique and increasing (a global sequence); ``timestamp``
+  is the block time in ms, shared by a block's trades; ``size`` is in base
+  units and ``usd_amount`` is the exact quote amount.
+* REST ``trades`` (``sort_by=timestamp``, ``from`` exclusive, newest first,
+  100 per page, ``next_cursor``) only reaches back about 53 minutes, so
+  older seconds history is unavailable (never fabricated).
+* ASSUMPTION: ``liquidation`` trades in ``trades[]`` are order-book fills
+  and count toward bars; ``deleverage`` and ``market-settlement`` entries
+  are off-book transfers and are excluded. The separate
+  ``liquidation_trades`` list (hours old in the replay) is ignored.
 """
 
 from __future__ import annotations
@@ -23,6 +45,7 @@ from __future__ import annotations
 import asyncio
 import collections
 import decimal
+import json
 from collections.abc import Mapping
 from collections.abc import Sequence
 from typing import Any
@@ -36,11 +59,14 @@ from joseph.domain import quality
 from joseph.domain import timeframes
 from joseph.market_data.adapters import base
 from joseph.market_data.adapters import http
+from joseph.market_data.adapters import ws
 from joseph.market_data.domain import books
 from joseph.market_data.domain import capabilities
+from joseph.market_data.domain import trades as trades_lib
 
 REST_URL = "https://mainnet.zklighter.elliot.ai/api/v1"
-_TF = (
+WS_URL = "wss://mainnet.zklighter.elliot.ai/stream"
+_KLINE_TF = (
     timeframes.Timeframe.M1,
     timeframes.Timeframe.M5,
     timeframes.Timeframe.M15,
@@ -50,7 +76,10 @@ _TF = (
     timeframes.Timeframe.H12,
     timeframes.Timeframe.D1,
 )
+_TF = (*timeframes.SECONDS, *_KLINE_TF)
 _MAX_CANDLES = 500
+_MAX_TRADES = 100
+_BOOK_TRADE_TYPES = frozenset({"trade", "liquidation"})
 _MAX_BOOK_ORDERS = 250
 _QUOTE_DECIMALS = 6
 _HOUR_MS = 3_600_000
@@ -193,6 +222,93 @@ def parse_funding(
     )
 
 
+def parse_trade(
+    row: Mapping[str, Any], instrument_id: instruments.InstrumentId, now_ms: int
+) -> market.Trade | None:
+    """Converts one REST or WebSocket trade object.
+
+    Args:
+        row: Trade object (``trade_id``, ``price``, ``size``, ...).
+        instrument_id: Instrument.
+        now_ms: Receipt time.
+
+    Returns:
+        Trade, or ``None`` for off-book entries (deleverage, settlement).
+    """
+    if str(row.get("type", "trade")) not in _BOOK_TRADE_TYPES:
+        return None
+    usd = base.opt_dec(row.get("usd_amount"))
+    return market.Trade(
+        instrument_id=instrument_id,
+        trade_id=str(row["trade_id"]),
+        venue_event_ts_ms=int(row["timestamp"]),
+        received_at_ms=now_ms,
+        price=base.dec(row["price"]),
+        base_quantity=base.dec(row["size"]),
+        aggressor_side=(
+            market.AggressorSide.BUY
+            if row["is_maker_ask"]
+            else market.AggressorSide.SELL
+        ),
+        is_aggregated=False,
+        quote_quantity=usd,
+    )
+
+
+def parse_trade_rows(
+    rows: Sequence[Mapping[str, Any]],
+    instrument_id: instruments.InstrumentId,
+    now_ms: int,
+) -> list[market.Trade]:
+    """Converts newest-first trade rows to ascending book trades.
+
+    Args:
+        rows: Trade objects.
+        instrument_id: Instrument.
+        now_ms: Receipt time.
+
+    Returns:
+        Trades ascending by time and trade id.
+    """
+    parsed = [parse_trade(row, instrument_id, now_ms) for row in rows]
+    return sorted(
+        (t for t in parsed if t is not None),
+        key=lambda t: (t.venue_event_ts_ms, int(t.trade_id)),
+    )
+
+
+def parse_trade_frame(
+    raw: str | bytes,
+    instrument_id: instruments.InstrumentId,
+    market_id: int,
+    now_ms: int,
+) -> list[market.Trade]:
+    """Parses a ``trade`` channel frame (replay or update).
+
+    Args:
+        raw: Frame payload.
+        instrument_id: Instrument.
+        market_id: Numeric market id.
+        now_ms: Receipt time.
+
+    Returns:
+        Trades ascending (empty for ``connected``, pongs and other frames).
+
+    Raises:
+        ValueError: On a venue error frame.
+    """
+    message = json.loads(raw)
+    if not isinstance(message, dict):
+        return []
+    if "error" in message:
+        raise ValueError(f"lighter stream error: {message['error']}")
+    if message.get("type") not in ("subscribed/trade", "update/trade"):
+        return []
+    if message.get("channel") != f"trade:{market_id}":
+        return []
+    return parse_trade_rows(message.get("trades") or [], instrument_id, now_ms)
+
+
 def aggregate_orders(
     orders: Sequence[Mapping[str, Any]],
 ) -> list[tuple[decimal.Decimal, decimal.Decimal]]:
@@ -215,7 +331,7 @@ def aggregate_orders(
 
 
 class LighterAdapter(base.BaseVenueAdapter):
-    """``MarketDataPort`` for Lighter perpetuals (REST only)."""
+    """``MarketDataPort`` for Lighter perpetuals (REST candles, WS trades)."""
 
     VENUE = instruments.Venue.LIGHTER
 
@@ -224,6 +340,7 @@ class LighterAdapter(base.BaseVenueAdapter):
         http_client: http.VenueHttp,
         clock: clock_lib.Clock,
         verified_at_ms: int | None = None,
+        connect: ws.ConnectFn = ws.default_connect,
     ) -> None:
         """Initializes the adapter.
 
@@ -231,9 +348,11 @@ class LighterAdapter(base.BaseVenueAdapter):
             http_client: HTTP client for ``REST_URL``.
             clock: Time source.
             verified_at_ms: When capabilities were last verified live.
+            connect: WebSocket connector (trade stream).
         """
         super().__init__(http_client, clock)
         self._verified_at_ms = verified_at_ms
+        self._connect = connect
 
     def capabilities(self) -> capabilities.VenueCapabilities:
         """Returns verified capabilities.
@@ -247,18 +366,26 @@ class LighterAdapter(base.BaseVenueAdapter):
             market_types=(instruments.MarketType.PERP,),
             market_data=capabilities.MarketDataCapabilities(
                 rest_history=True,
+                native_ws_trades=True,
                 book_snapshot=True,
                 open_interest=True,
                 funding=True,
+                trades_history=True,
             ),
             timeframes=_TF,
+            trade_built_timeframes=timeframes.SECONDS,
             notes=(
-                "No native WebSocket candle channel; AUTO polls REST.",
+                "Native WebSocket candles are not wired (the venue channel "
+                "exists); AUTO polls REST for minute and longer bars.",
                 "Funding is the last settled hourly rate.",
                 "Asset class is not published (treated as UNKNOWN).",
-                "3m, 2h, 6h and 1w candles are not offered.",
+                "3m, 2h, 6h, 1w and 1M candles are not offered by the venue.",
+                "Trade history reaches back only about 53 minutes; seconds "
+                "bars older than that are unavailable.",
+                "Klines publish no taker buy volume (taker_volume is false); "
+                "seconds bars built from trades do carry it.",
             ),
-            docs_url="https://apidocs.lighter.xyz/",
+            docs_url="https://docs.lighter.xyz/api",
             verified_at_ms=self._verified_at_ms,
         )
 
@@ -305,18 +432,21 @@ class LighterAdapter(base.BaseVenueAdapter):
             Ascending candles.
         """
         self._require_timeframe(timeframe)
+        if timeframe.is_seconds:
+            return await self._fetch_trade_candles(
+                instrument, timeframe, start_ms, end_ms, limit
+            )
         await self._require(instrument)
         meta = self._meta_for(instrument)
-        duration = timeframe.duration_ms
         start = timeframe.floor(start_ms)
         if limit is not None:
-            start = max(
-                start, timeframe.floor(end_ms - 1) - (limit - 1) * duration
-            )
+            start = base.newest_window_start(timeframe, start_ms, end_ms, limit)
         rows: list[market.Candle] = []
         cursor_end = end_ms
         while cursor_end > start:
-            wanted = min(_MAX_CANDLES, -(-(cursor_end - start) // duration))
+            wanted = min(
+                _MAX_CANDLES, timeframe.bars_between(start, cursor_end)
+            )
             payload = await self._http.get(
                 "/candles",
                 params={
@@ -586,3 +716,91 @@ class LighterAdapter(base.BaseVenueAdapter):
         if funding is None:
             raise errors.MissingDataError("no recent funding published")
         return funding
+
+    def _trade_spec(
+        self, instrument: instruments.InstrumentId
+    ) -> ws.WsTradeSpec:
+        """Describes the ``trade/<market_id>`` channel.
+
+        Args:
+            instrument: Instrument (already resolved).
+
+        Returns:
+            Trade stream spec.
+        """
+        market_id = self._market_id(instrument)
+
+        def parse(raw: str | bytes, now_ms: int) -> list[market.Trade]:
+            """Parses one frame.
+
+            Args:
+                raw: Frame payload.
+                now_ms: Receipt time.
+
+            Returns:
+                Trades.
+            """
+            return parse_trade_frame(raw, instrument, market_id, now_ms)
+
+        return ws.WsTradeSpec(
+            url=WS_URL,
+            subscribe=(
+                json.dumps(
+                    {"type": "subscribe", "channel": f"trade/{market_id}"}
+                ),
+            ),
+            parse=parse,
+            ping_message=json.dumps({"type": "ping"}),
+            ping_interval_s=5.0,
+            idle_timeout_s=30.0,
+            replays_recent=True,
+        )
+
+    async def _trade_history(
+        self,
+        instrument: instruments.InstrumentId,
+        start_ms: int,
+        end_ms: int,
+        max_pages: int,
+    ) -> trades_lib.TradeCoverage:
+        """Pages ``trades`` newest first from ``end_ms`` back to ``start_ms``.
+
+        Args:
+            instrument: Instrument (already resolved).
+            start_ms: Inclusive start.
+            end_ms: Exclusive end (``from`` is exclusive at the venue).
+            max_pages: Request budget.
+
+        Returns:
+            Complete suffix of the range.
+        """
+        market_id = self._market_id(instrument)
+        params: dict[str, Any] = {
+            "market_id": market_id,
+            "sort_by": "timestamp",
+            "limit": _MAX_TRADES,
+            "from": end_ms,
+        }
+        collected: list[market.Trade] = []
+        complete = False
+        for _ in range(max_pages):
+            payload = await self._http.get("/trades", params=params)
+            rows = payload.get("trades") or []
+            collected.extend(
+                parse_trade_rows(rows, instrument, self._clock.now_ms())
+            )
+            if any(int(row["timestamp"]) < start_ms for row in rows):
+                complete = True
+                break
+            cursor = payload.get("next_cursor")
+            if len(rows) < _MAX_TRADES or not cursor:
+                break
+            params = {
+                "market_id": market_id,
+                "sort_by": "timestamp",
+                "limit": _MAX_TRADES,
+                "cursor": cursor,
+            }
+        return trades_lib.coverage_from_suffix(
+            trades_lib.sort_trades(collected), start_ms, end_ms, complete
+        )

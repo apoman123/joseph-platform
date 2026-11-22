@@ -1,18 +1,19 @@
 /**
  * @fileoverview Session separators: thin vertical lines where a new UTC
- * session (day, week or month, depending on the timeframe) begins.
+ * session (minute, hour, day, week, month or year, depending on the
+ * timeframe) begins.
  *
  * Crypto perpetuals trade around the clock, so sessions are calendar
  * boundaries in UTC rather than exchange opening hours. The layer is pure
  * presentation; it never changes bars or indicator inputs.
  */
 import type {Timeframe} from '@joseph/contracts';
-import {TIMEFRAME_MS} from '@joseph/contracts';
+import {TIMEFRAME_MS, isCalendarTimeframe} from '@joseph/contracts';
 import type {CanvasLayer, CoordinateTransform} from './chart-port';
 import {withAlpha} from './theme';
 
 /** Calendar unit that separates sessions on a timeframe. */
-export type SessionUnit = 'day' | 'week' | 'month';
+export type SessionUnit = 'minute' | 'hour' | 'day' | 'week' | 'month' | 'year';
 
 /** Weekday names used in labels (UTC). */
 const WEEKDAYS = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'];
@@ -33,13 +34,16 @@ const MONTHS = [
 ];
 
 /**
- * Chooses the session unit for a timeframe: days below 1d, weeks on 1d and
- * months on 1w.
+ * Chooses the session unit for a timeframe: minutes on 1s, hours on 5s to
+ * 30s, days from 1m below 1d, weeks on 1d, months on 1w and years on 1M.
  * @param timeframe Chart timeframe.
  * @return Session unit.
  */
 export function sessionUnitFor(timeframe: Timeframe): SessionUnit {
+  if (isCalendarTimeframe(timeframe)) return 'year';
   const duration = TIMEFRAME_MS[timeframe];
+  if (duration < TIMEFRAME_MS['5s']) return 'minute';
+  if (duration < TIMEFRAME_MS['1m']) return 'hour';
   if (duration < TIMEFRAME_MS['1d']) return 'day';
   if (duration < TIMEFRAME_MS['1w']) return 'week';
   return 'month';
@@ -53,7 +57,10 @@ export function sessionUnitFor(timeframe: Timeframe): SessionUnit {
  */
 function sessionKey(timeMs: number, unit: SessionUnit): number {
   const date = new Date(timeMs);
+  if (unit === 'year') return date.getUTCFullYear();
   if (unit === 'month') return date.getUTCFullYear() * 12 + date.getUTCMonth();
+  if (unit === 'minute') return Math.floor(timeMs / 60_000);
+  if (unit === 'hour') return Math.floor(timeMs / 3_600_000);
   const day = Math.floor(timeMs / 86_400_000);
   // 1970-01-01 was a Thursday; shift so weeks start on Monday.
   return unit === 'week' ? Math.floor((day + 3) / 7) : day;
@@ -81,7 +88,9 @@ export function sessionBoundaries(
 }
 
 /**
- * Formats a separator label such as `Tue 12`, `Mon 9 Jun` or `Jun 2026`.
+ * Formats a separator label such as `14:05`, `Tue 12`, `Mon 9 Jun`,
+ * `Jun 2026` or `2026`. Minute and hour separators at UTC midnight name the
+ * day instead.
  * @param timeMs Session start (UTC ms).
  * @param unit Session unit.
  * @return Label.
@@ -90,8 +99,13 @@ export function sessionLabel(timeMs: number, unit: SessionUnit): string {
   const date = new Date(timeMs);
   const day = date.getUTCDate();
   const month = MONTHS[date.getUTCMonth()] ?? '';
-  if (unit === 'month') return `${month} ${date.getUTCFullYear()}`;
   const weekday = WEEKDAYS[date.getUTCDay()] ?? '';
+  if (unit === 'year') return String(date.getUTCFullYear());
+  if (unit === 'month') return `${month} ${date.getUTCFullYear()}`;
+  if (unit === 'minute' || unit === 'hour') {
+    const midnight = date.getUTCHours() === 0 && date.getUTCMinutes() === 0;
+    return midnight ? `${weekday} ${day}` : date.toISOString().slice(11, 16);
+  }
   return unit === 'week' ? `${weekday} ${day} ${month}` : `${weekday} ${day}`;
 }
 

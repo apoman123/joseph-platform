@@ -23,15 +23,26 @@ class _Series:
 
 
 class CandleStore:
-    """Thread-safe bounded store keyed by ``(instrument, timeframe)``."""
+    """Thread-safe bounded store keyed by ``(instrument, timeframe)``.
 
-    def __init__(self, max_bars_per_series: int = 20_000) -> None:
+    Seconds series grow by up to 86,400 bars a day, so they have their own,
+    smaller bound (two hours of 1s bars by default, which still holds a
+    full 5,000-bar batch).
+    """
+
+    def __init__(
+        self,
+        max_bars_per_series: int = 20_000,
+        max_seconds_bars_per_series: int = 7_200,
+    ) -> None:
         """Initializes the store.
 
         Args:
             max_bars_per_series: Oldest bars beyond this are evicted.
+            max_seconds_bars_per_series: Bound for seconds timeframes.
         """
         self._max = max_bars_per_series
+        self._max_seconds = max_seconds_bars_per_series
         self._series: dict[SeriesKey, _Series] = {}
         self._lock = threading.Lock()
         self.revisions = 0
@@ -57,9 +68,16 @@ class CandleStore:
                 series.bars[candle.start_ms] = result.candle
                 if result.action is candle_rules.MergeAction.REVISED:
                     self.revisions += 1
-                while len(series.starts) > self._max:
-                    oldest = series.starts.pop(0)
-                    del series.bars[oldest]
+                bound = (
+                    self._max_seconds
+                    if candle.timeframe.is_seconds
+                    else self._max
+                )
+                excess = len(series.starts) - bound
+                if excess > 0:
+                    for oldest in series.starts[:excess]:
+                        del series.bars[oldest]
+                    del series.starts[:excess]
             return result
 
     def upsert_many(

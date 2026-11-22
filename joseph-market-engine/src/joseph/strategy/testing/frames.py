@@ -104,7 +104,7 @@ class FrameFactory:
         Returns:
             Start time (UTC ms).
         """
-        return self.base_ms + index * self.timeframe.duration_ms
+        return self.timeframe.shift(self.base_ms, index)
 
     def close(self, index: int) -> int:
         """Returns the close (exclusive end) of signal bar ``index``.
@@ -248,7 +248,7 @@ class FrameFactory:
             timeframe=event_tf,
             source=source or _PLUGIN_BY_EVENT.get(name_enum, "test"),
             name=name_enum,
-            bar_start_ms=confirmed - event_tf.duration_ms,
+            bar_start_ms=event_tf.shift(event_tf.floor(confirmed), -1),
             confirmed_at_ms=confirmed,
             price=None if price is None else dec(price),
             aoi_id=aoi_id,
@@ -288,7 +288,7 @@ class FrameFactory:
             plugin_id=plugin_id,
             indicator_version="1.0.0",
             method=structures.IndicatorMethod.PINE_PARITY,
-            bar_start_ms=as_of - tf.duration_ms,
+            bar_start_ms=tf.shift(tf.floor(as_of), -1),
             as_of_ms=as_of,
             aois=tuple(aois),
             events=(),

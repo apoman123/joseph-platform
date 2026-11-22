@@ -254,6 +254,17 @@
           ],
           "minimum": 0
         },
+        "taker_buy_base_volume": {
+          "description": "Base volume of trades whose aggressor bought (venue-published or summed from the venue's public trades). Enables true volume delta; null when the venue publishes neither.",
+          "oneOf": [
+            {
+              "$ref": "common.schema.json#/$defs/NonNegativeDecimalString"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
         "is_final": {
           "type": "boolean"
         },
@@ -847,6 +858,10 @@
         },
         "trades_history": {
           "type": "boolean"
+        },
+        "taker_volume": {
+          "description": "The venue's klines (1m and above) carry taker_buy_base_volume, so true delta is available on every timeframe. Seconds bars built from trades (trade_built_timeframes) carry it on every venue regardless of this flag.",
+          "type": "boolean"
         }
       }
     },
@@ -880,6 +895,13 @@
           "$ref": "#/$defs/MarketDataCapabilities"
         },
         "timeframes": {
+          "type": "array",
+          "items": {
+            "$ref": "common.schema.json#/$defs/Timeframe"
+          }
+        },
+        "trade_built_timeframes": {
+          "description": "Subset of timeframes the engine builds from the venue's public trade stream (seconds bars), because the venue publishes no such klines. History is limited to what the venue's trade history endpoint returns.",
           "type": "array",
           "items": {
             "$ref": "common.schema.json#/$defs/Timeframe"

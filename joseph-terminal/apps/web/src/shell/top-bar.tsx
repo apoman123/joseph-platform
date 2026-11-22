@@ -4,22 +4,15 @@
  * command palette.
  */
 'use client';
-import {useState, type ReactElement} from 'react';
+import type {ReactElement} from 'react';
 import {
-  TIMEFRAMES,
   type ChartType,
   type FeedState,
   type LayoutId,
   type PriceScaleMode,
-  type Timeframe,
 } from '@joseph/contracts';
-import {PLUGIN_NAMES, STUDY_PLUGINS} from '@joseph/indicator-viz';
-import {
-  activeChart,
-  layerStyle,
-  layerVisible,
-  parseTimeframeInput,
-} from '@joseph/terminal-shell';
+import {DELTA_LEGEND, PLUGIN_NAMES, STUDY_PLUGINS} from '@joseph/indicator-viz';
+import {activeChart, layerStyle, layerVisible} from '@joseph/terminal-shell';
 import {
   Camera,
   Columns2,
@@ -34,7 +27,6 @@ import {
   Rows2,
   Settings2,
   Square,
-  Star,
   Sun,
 } from 'lucide-react';
 import {CompareMenu} from './compare-menu';
@@ -45,61 +37,7 @@ import {useStore} from './react-bindings';
 import {useRuntime} from './runtime-context';
 import {SlotInline} from './slot-host';
 import {TemplatesMenu} from './templates-menu';
-
-/**
- * Custom resolution input ("15", "4h", "1D").
- * @param props Apply callback.
- * @return Form.
- */
-function CustomTimeframe({
-  onApply,
-}: {
-  onApply: (timeframe: Timeframe) => void;
-}): ReactElement {
-  const [text, setText] = useState('');
-  const [error, setError] = useState<string | null>(null);
-  return (
-    <form
-      className="tf-custom"
-      onSubmit={event => {
-        event.preventDefault();
-        const parsed = parseTimeframeInput(text);
-        if (parsed.ok) {
-          setError(null);
-          setText('');
-          onApply(parsed.timeframe);
-        } else {
-          setError(parsed.error);
-        }
-      }}
-    >
-      <label className="j-label" htmlFor="tf-custom">
-        Type a resolution
-      </label>
-      <div className="tf-custom__row">
-        <input
-          id="tf-custom"
-          className="j-input"
-          placeholder="15, 4h, 1D"
-          value={text}
-          aria-invalid={error ? true : undefined}
-          aria-describedby="tf-custom-help"
-          onChange={event => setText(event.target.value)}
-        />
-        <button type="submit" className="j-btn j-btn--sm">
-          Go
-        </button>
-      </div>
-      <p
-        id="tf-custom-help"
-        className={error ? 'tf-custom__error' : 'tf-custom__help'}
-        role={error ? 'alert' : undefined}
-      >
-        {error ?? 'A bare number means minutes.'}
-      </p>
-    </form>
-  );
-}
+import {TimeframeControl} from './timeframe-menu';
 
 /** Chart type labels. */
 const CHART_TYPES: readonly [ChartType, string][] = [
@@ -164,7 +102,6 @@ export function TopBar(): ReactElement {
   const dataWindow = useStore(runtime.dataWindow);
   const chart = activeChart(workspace);
   const replaying = replayStates[chart.chart_id] !== undefined;
-  const favorites = workspace.favorites?.timeframes ?? [];
   const chartId = chart.chart_id;
   const run = (id: string) =>
     void runtime.commands.execute(id).catch(() => undefined);
@@ -182,82 +119,7 @@ export function TopBar(): ReactElement {
           runtime.dispatch({type: 'setInstrument', chartId, instrumentId})
         }
       />
-      <nav className="timeframes" aria-label="Timeframe">
-        {favorites.map(tf => (
-          <button
-            key={tf}
-            type="button"
-            className="timeframes__item"
-            aria-pressed={chart.timeframe === tf}
-            onClick={() =>
-              runtime.dispatch({type: 'setTimeframe', chartId, timeframe: tf})
-            }
-          >
-            {tf}
-          </button>
-        ))}
-        <Popover
-          ariaLabel="All timeframes"
-          label={
-            <span>
-              {favorites.includes(chart.timeframe) ? 'More' : chart.timeframe}
-            </span>
-          }
-          className="timeframes__item timeframes__more"
-        >
-          {close => (
-            <div className="tf-grid">
-              <CustomTimeframe
-                onApply={timeframe => {
-                  runtime.dispatch({type: 'setTimeframe', chartId, timeframe});
-                  close();
-                }}
-              />
-              {TIMEFRAMES.map(tf => (
-                <div key={tf} className="tf-grid__row">
-                  <button
-                    type="button"
-                    className="j-menu__item"
-                    aria-pressed={chart.timeframe === tf}
-                    onClick={() => {
-                      runtime.dispatch({
-                        type: 'setTimeframe',
-                        chartId,
-                        timeframe: tf,
-                      });
-                      close();
-                    }}
-                  >
-                    {tf}
-                  </button>
-                  <button
-                    type="button"
-                    className="j-btn j-btn--ghost j-btn--icon j-btn--sm"
-                    aria-label={
-                      favorites.includes(tf)
-                        ? `Remove ${tf} from favorites`
-                        : `Add ${tf} to favorites`
-                    }
-                    aria-pressed={favorites.includes(tf)}
-                    onClick={() =>
-                      runtime.dispatch({
-                        type: 'toggleFavoriteTimeframe',
-                        timeframe: tf,
-                      })
-                    }
-                  >
-                    <Star
-                      size={13}
-                      fill={favorites.includes(tf) ? 'currentColor' : 'none'}
-                      aria-hidden="true"
-                    />
-                  </button>
-                </div>
-              ))}
-            </div>
-          )}
-        </Popover>
-      </nav>
+      <TimeframeControl chart={chart} />
       <span className="topbar__divider" aria-hidden="true" />
       <label className="sr-only" htmlFor="chart-type">
         Chart style
@@ -339,7 +201,10 @@ export function TopBar(): ReactElement {
                     {name}
                   </label>
                   {hasPane && visible && (
-                    <label className="j-check layers-menu__sub">
+                    <label
+                      className="j-check layers-menu__sub"
+                      title={DELTA_LEGEND}
+                    >
                       <input
                         type="checkbox"
                         checked={paneOn}
@@ -513,7 +378,10 @@ export function TopBar(): ReactElement {
       </button>
       <div className="topbar__spacer" />
       <SlotInline slot="toolbar" />
-      <ProvenanceBadge state={worstFeedState(feedStates)} />
+      {/* With every chart detached, provenance shows in the pop-outs. */}
+      {Object.keys(feedStates).length > 0 && (
+        <ProvenanceBadge state={worstFeedState(feedStates)} />
+      )}
       <span
         className={`j-badge ${orderMode === 'LIVE' ? 'j-badge--ask' : ''}`}
         title="Order mode. Live trading stays off until the execution engine reports it is available and you consent."

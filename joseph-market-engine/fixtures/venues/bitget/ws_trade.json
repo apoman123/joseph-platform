@@ -1,0 +1,26 @@
+{
+ "captured_at_ms": 1795349322603,
+ "frames": [
+  "{\"event\":\"subscribe\",\"arg\":{\"instType\":\"USDT-FUTURES\",\"channel\":\"trade\",\"instId\":\"BTCUSDT\"}}",
+  "{\"action\":\"update\",\"arg\":{\"instType\":\"USDT-FUTURES\",\"channel\":\"trade\",\"instId\":\"BTCUSDT\"},\"data\":[{\"ts\":\"1795349323214\",\"price\":\"61139.1\",\"size\":\"0.0101\",\"side\":\"buy\",\"tradeId\":\"1508369875757449216\"}],\"ts\":1795349323215}",
+  "{\"action\":\"update\",\"arg\":{\"instType\":\"USDT-FUTURES\",\"channel\":\"trade\",\"instId\":\"BTCUSDT\"},\"data\":[{\"ts\":\"1795349323214\",\"price\":\"61139.1\",\"size\":\"0.0117\",\"side\":\"buy\",\"tradeId\":\"1508369875757449218\"}],\"ts\":1795349323215}",
+  "{\"action\":\"update\",\"arg\":{\"instType\":\"USDT-FUTURES\",\"channel\":\"trade\",\"instId\":\"BTCUSDT\"},\"data\":[{\"ts\":\"1795349323725\",\"price\":\"61139\",\"size\":\"0.0001\",\"side\":\"sell\",\"tradeId\":\"1508369877900738560\"}],\"ts\":1795349323726}",
+  "{\"action\":\"update\",\"arg\":{\"instType\":\"USDT-FUTURES\",\"channel\":\"trade\",\"instId\":\"BTCUSDT\"},\"data\":[{\"ts\":\"1795349323993\",\"price\":\"61139.1\",\"size\":\"0.0158\",\"side\":\"buy\",\"tradeId\":\"1508369879024812032\"}],\"ts\":1795349323993}",
+  "{\"action\":\"update\",\"arg\":{\"instType\":\"USDT-FUTURES\",\"channel\":\"trade\",\"instId\":\"BTCUSDT\"},\"data\":[{\"ts\":\"1795349324201\",\"price\":\"61139\",\"size\":\"0.0124\",\"side\":\"sell\",\"tradeId\":\"1508369879897227264\"}],\"ts\":1795349324201}",
+  "{\"action\":\"update\",\"arg\":{\"instType\":\"USDT-FUTURES\",\"channel\":\"trade\",\"instId\":\"BTCUSDT\"},\"data\":[{\"ts\":\"1795349324468\",\"price\":\"61141.8\",\"size\":\"0.0001\",\"side\":\"buy\",\"tradeId\":\"1508369881017106432\"}],\"ts\":1795349324469}",
+  "{\"action\":\"update\",\"arg\":{\"instType\":\"USDT-FUTURES\",\"channel\":\"trade\",\"instId\":\"BTCUSDT\"},\"data\":[{\"ts\":\"1795349324469\",\"price\":\"61143\",\"size\":\"0.0001\",\"side\":\"buy\",\"tradeId\":\"1508369881021300736\"}],\"ts\":1795349324470}"
+ ],
+ "subscribe": [
+  {
+   "args": [
+    {
+     "channel": "trade",
+     "instId": "BTCUSDT",
+     "instType": "USDT-FUTURES"
+    }
+   ],
+   "op": "subscribe"
+  }
+ ],
+ "url": "wss://ws.bitget.com/v2/ws/public"
+}

@@ -1,16 +1,20 @@
 /**
  * @fileoverview Floating style editor for the selected drawing: color,
- * width, dash, fill, extension, text, lock, visibility, z-order and delete.
- * Every change is an undoable drawing-store command.
+ * width, dash, fill, extension, text, tool inputs (for example anchored
+ * VWAP bands), lock, visibility, z-order and delete. Every change is an
+ * undoable drawing-store command.
  */
 'use client';
 import type {DrawingDocument, DrawingStyle} from '@joseph/contracts';
 import {
+  readInput,
   reorderDrawing,
   restyleDrawing,
   retextDrawing,
   setDrawingFlags,
+  setDrawingInputs,
   type DrawingStore,
+  type ToolInput,
   type ZOrderMove,
 } from '@joseph/drawing-core';
 import {
@@ -79,6 +83,15 @@ export function DrawingStyleBar({chartId}: StyleBarProps): ReactElement | null {
     if (!restyleDrawing(store, doc.drawing_id, patch, now())) {
       runtime.notifier.notify(
         'Unlock the drawing to change its style.',
+        'warning'
+      );
+    }
+    bump();
+  };
+  const setInput = (input: ToolInput, value: string | boolean) => {
+    if (!setDrawingInputs(store, doc.drawing_id, {[input.key]: value}, now())) {
+      runtime.notifier.notify(
+        'Unlock the drawing to change its inputs.',
         'warning'
       );
     }
@@ -166,6 +179,45 @@ export function DrawingStyleBar({chartId}: StyleBarProps): ReactElement | null {
           <option value="dotted">Dotted</option>
         </select>
       </label>
+      {tool?.inputs && tool.inputs.length > 0 && (
+        <span
+          className="style-bar__inputs"
+          role="group"
+          aria-label="Inputs"
+          data-testid="drawing-inputs"
+        >
+          {tool.inputs.map(input =>
+            input.kind === 'boolean' ? (
+              <label key={input.key} className="j-check">
+                <input
+                  type="checkbox"
+                  checked={readInput(doc, input) === true}
+                  disabled={locked}
+                  onChange={event => setInput(input, event.target.checked)}
+                />
+                {input.label}
+              </label>
+            ) : (
+              <label key={input.key} className="style-bar__field">
+                <span className="style-bar__label">{input.label}</span>
+                <select
+                  className="j-select"
+                  aria-label={input.label}
+                  value={String(readInput(doc, input))}
+                  disabled={locked}
+                  onChange={event => setInput(input, event.target.value)}
+                >
+                  {input.choices.map(choice => (
+                    <option key={choice.value} value={choice.value}>
+                      {choice.label}
+                    </option>
+                  ))}
+                </select>
+              </label>
+            )
+          )}
+        </span>
+      )}
       {fillable && (
         <label className="j-check">
           <input

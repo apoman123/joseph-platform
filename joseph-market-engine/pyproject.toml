@@ -19,7 +19,7 @@ dependencies = [
 [tool.uv.sources]
 # Indicator algorithms live in the private apoman123/PineScripts repository
 # (python_indicators/). Pinned to a commit; bump `rev` to adopt new ports.
-joseph-smc-indicators = { git = "ssh://git@github.com/apoman123/PineScripts.git", rev = "89aa506c8c90469a43d2300bbacc58e3491135b2", subdirectory = "python_indicators" }
+joseph-smc-indicators = { git = "ssh://git@github.com/apoman123/PineScripts.git", rev = "e9720b9f7e10e9b6ca27c1a5897ded29f0f6bc48", subdirectory = "python_indicators" }
 
 [dependency-groups]
 dev = [

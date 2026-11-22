@@ -213,7 +213,13 @@ def test_checkpoint_restore_continues_identically() -> None:
 def test_invalid_configurations_are_rejected() -> None:
     """Unsupported timeframes and non-nesting intrabars fail validation."""
     with pytest.raises(errors.ValidationFailedError):
-        _engine({"order_flow_pressure": engine_lib.PluginSpec((M1,))})
+        _engine(
+            {
+                "order_flow_pressure": engine_lib.PluginSpec(
+                    (M1,), {"intrabar_tf": "1m"}
+                )
+            }
+        )
     with pytest.raises(errors.ValidationFailedError):
         _engine(
             {

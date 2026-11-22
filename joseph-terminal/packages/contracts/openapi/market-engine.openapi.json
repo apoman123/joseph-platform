@@ -2111,6 +2111,10 @@
       "Timeframe": {
         "description": "Supported candle resolutions (contract ``Timeframe``).",
         "enum": [
+          "1s",
+          "5s",
+          "15s",
+          "30s",
           "1m",
           "3m",
           "5m",
@@ -2122,7 +2126,8 @@
           "6h",
           "12h",
           "1d",
-          "1w"
+          "1w",
+          "1M"
         ],
         "title": "Timeframe",
         "type": "string"

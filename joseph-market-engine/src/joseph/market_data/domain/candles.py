@@ -133,6 +133,9 @@ def find_gaps(
 ) -> list[tuple[int, int]]:
     """Finds missing bars in ``[from_ms, to_ms)``.
 
+    Runs in time proportional to the bars present, not to the slots in the
+    range, so wide ranges of seconds bars stay cheap.
+
     Args:
         starts: Bar start times present (any order, duplicates allowed).
         timeframe: Bar resolution.
@@ -142,24 +145,22 @@ def find_gaps(
     Returns:
         Missing ranges as ``(from_ms, to_ms)`` half-open pairs.
     """
-    duration = timeframe.duration_ms
     first = timeframe.floor(from_ms)
     if first < from_ms:
-        first += duration
-    present = set(starts)
+        first = timeframe.end_of(first)
+    present = sorted(
+        start
+        for start in set(starts)
+        if first <= start < to_ms and timeframe.is_aligned(start)
+    )
     gaps: list[tuple[int, int]] = []
-    gap_start: int | None = None
     cursor = first
-    while cursor < to_ms:
-        if cursor in present:
-            if gap_start is not None:
-                gaps.append((gap_start, cursor))
-                gap_start = None
-        elif gap_start is None:
-            gap_start = cursor
-        cursor += duration
-    if gap_start is not None:
-        gaps.append((gap_start, min(cursor, to_ms)))
+    for start in present:
+        if start > cursor:
+            gaps.append((cursor, start))
+        cursor = timeframe.end_of(start)
+    if cursor < to_ms:
+        gaps.append((cursor, to_ms))
     return gaps
 
 

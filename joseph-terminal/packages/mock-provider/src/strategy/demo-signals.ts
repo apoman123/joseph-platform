@@ -1,8 +1,11 @@
 /**
  * @fileoverview DEMO signal fixtures shaped exactly like backend output.
- * They are static examples for offline UI work, not computed signals.
+ * They are static examples for offline UI work, not computed signals. The
+ * signal bar's base volume and quote turnover come from the DEMO venue's
+ * candle for that bar (as the engine copies them from the venue candle).
  */
 import type {ReasonNode, Signal} from '@joseph/contracts';
+import {DEMO_INSTRUMENT_SPECS, demoCandle} from '../market/prices';
 
 /**
  * Builds a reason node.
@@ -28,6 +31,27 @@ function reason(
     detail,
     evidence: {},
     children,
+  };
+}
+
+/**
+ * Volume fields of a signal bar, read from the DEMO venue candle.
+ * @param instrumentId DEMO instrument.
+ * @param barStartMs Signal bar start (5m).
+ * @param nowMs Clock.
+ * @return Base volume and quote turnover (null for unknown instruments).
+ */
+function barVolumes(
+  instrumentId: string,
+  barStartMs: number,
+  nowMs: number
+): Pick<Signal, 'bar_base_volume' | 'bar_quote_volume'> {
+  const spec = DEMO_INSTRUMENT_SPECS.find(s => s.instrumentId === instrumentId);
+  if (!spec) return {bar_base_volume: null, bar_quote_volume: null};
+  const candle = demoCandle(spec, '5m', barStartMs, nowMs);
+  return {
+    bar_base_volume: candle.base_volume,
+    bar_quote_volume: candle.quote_turnover ?? null,
   };
 }
 
@@ -108,6 +132,7 @@ export function createDemoSignals(nowMs: number): Signal[] {
       ]),
       aoi_ids: ['demo-fvg-1'],
       range_ids: ['demo-r1'],
+      ...barVolumes('mock:perp:BTCUSD', close - bar, nowMs),
       entry_price: '94790',
       stop_price: '94650',
       target_price: '95100',
@@ -171,6 +196,7 @@ export function createDemoSignals(nowMs: number): Signal[] {
       ),
       aoi_ids: ['demo-brk-4'],
       range_ids: ['demo-r2'],
+      ...barVolumes('mock:perp:ETHUSD', close - 4 * bar, nowMs),
       entry_price: null,
       stop_price: null,
       target_price: null,
@@ -217,6 +243,7 @@ export function createDemoSignals(nowMs: number): Signal[] {
       ]),
       aoi_ids: ['demo-ob-2'],
       range_ids: [],
+      ...barVolumes('mock:perp:SOLUSD', close - 7 * bar, nowMs),
       entry_price: null,
       stop_price: null,
       target_price: null,

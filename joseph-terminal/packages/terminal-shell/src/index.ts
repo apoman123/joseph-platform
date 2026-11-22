@@ -2,6 +2,7 @@
  * @fileoverview Public entry point of `@joseph/terminal-shell`.
  */
 export * from './commands';
+export * from './detach';
 export * from './layout-sizes';
 export * from './persistence';
 export * from './replay';

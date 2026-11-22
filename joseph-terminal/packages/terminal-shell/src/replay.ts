@@ -6,6 +6,7 @@
  * the cursor bar), so nothing from the future is shown. While a chart is in
  * replay its provenance is REPLAY and trading from it is disabled.
  */
+import {timeframeEnd, type Timeframe} from '@joseph/contracts';
 
 /** Playback speeds in bars per second. */
 export const REPLAY_SPEEDS: readonly number[] = [1, 2, 5, 10];
@@ -136,15 +137,20 @@ export function replayVisibleBars<T extends {timeMs: number}>(
 
 /**
  * Point-in-time for backend indicator queries: the close of the cursor bar.
+ * Pass the timeframe so calendar months close on the 1st of the next month
+ * (28 to 31 days later); a number is a fixed bar duration.
  * @param state Replay state.
- * @param durationMs Bar duration.
+ * @param barLength Chart timeframe, or a fixed bar duration in ms.
  * @return `at_ms`, or null when not replaying a chosen bar.
  */
 export function replayAsOfMs(
   state: ReplayState | null,
-  durationMs: number
+  barLength: Timeframe | number
 ): number | null {
-  return state?.cursorMs == null ? null : state.cursorMs + durationMs;
+  if (state?.cursorMs == null) return null;
+  return typeof barLength === 'number'
+    ? state.cursorMs + barLength
+    : timeframeEnd(barLength, state.cursorMs);
 }
 
 /**

@@ -38,9 +38,12 @@ Every plugin is an adapter around the external ``smc_indicators`` library
 ``liquidity_sweeps``
     ``active_count``: ``int``. AOIs of kind BSL / SSL / EQH / EQL (lines).
 ``order_flow_pressure``
-    ``delta_pct``: ``Decimal | None`` (estimated, candle-direction method)
+    ``delta_pct``: ``Decimal | None``; ``method``: ``"taker_volume"`` (true
+    delta from the venue's taker buy volume; snapshot method ``trade``) or
+    ``"candle_direction"`` (Pine intrabar estimate)
+    ``buy_volume`` / ``sell_volume``: ``Decimal | None`` (base units)
     ``coverage_pct``: ``Decimal | None``; ``intrabar_count``: ``int``
-    ``rel_volume``: ``Decimal | None``; ``method``: ``"candle_direction"``
+    ``rel_volume``: ``Decimal | None``
     ``prior_high`` / ``prior_low``: the 20 bars before this one
 ``auction_value_areas``
     ``vah`` / ``poc`` / ``val``: chart-timeframe profile, ``Decimal | None``
@@ -52,6 +55,19 @@ Every plugin is an adapter around the external ``smc_indicators`` library
     ``in_ote``: ``bool | None`` for the bar close; ``position_pct``,
     ``zone`` and ``read`` mirror the Pine dashboard.
     AOIs of kind PREMIUM / DISCOUNT / EQUILIBRIUM / OTE carry ``range_id``.
+``anchored_vwap`` (Python-native study, TradingView VWAP definition)
+    ``vwap`` / ``stdev`` / ``upper_1..3`` / ``lower_1..3``: ``Decimal |
+    None`` (a band is ``None`` when its multiplier is 0); ``anchor_ms``:
+    ``int | None`` (current anchor bar); ``bars``: ``int``;
+    ``anchor_in_window``: ``bool`` (False: the anchor bar was not computed,
+    every value is ``None``)
+``regression_channel`` (Python-native study, least squares)
+    ``start_ms``: ``int | None`` (oldest bar of the fit); ``start`` /
+    ``end`` / ``upper_start`` / ``upper_end`` / ``lower_start`` /
+    ``lower_end`` / ``slope`` (price per bar) / ``stdev`` (sample stdev of
+    residuals) / ``max_up`` / ``max_down``: ``Decimal | None``;
+    ``pearson_r``: ``Decimal | None``; ``bars``: ``int``;
+    ``anchor_in_window``: ``bool``
 """
 
 from __future__ import annotations

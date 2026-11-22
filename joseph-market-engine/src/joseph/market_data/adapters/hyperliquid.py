@@ -2,19 +2,30 @@
 
 REST: ``POST https://api.hyperliquid.xyz/info`` with ``metaAndAssetCtxs``,
 ``candleSnapshot`` and ``l2Book``. WebSocket: ``wss://api.hyperliquid.xyz/ws``
-``candle`` subscription. Candle frames do not flag closed bars, so each
-closed bar is confirmed over REST at rollover.
+``candle`` and ``trades`` subscriptions. Candle frames do not flag closed
+bars, so each closed bar is confirmed over REST at rollover.
 
 Price precision follows Hyperliquid's rule (at most 5 significant figures
 and ``6 - szDecimals`` decimals), so ``tick_size`` is derived from the
 current mark price and refreshed with the instrument cache. Weekly candles
 are epoch-aligned (Thursday) and 6h candles do not exist, so neither is
-offered.
+offered. Verified live 2026-11-22: the ``1M`` interval is a 30-day bucket
+counted from the epoch (bars start e.g. 2026-10-04 and 2026-11-03), not a
+calendar month, so ``1M`` is not offered either.
+
+Trades (verified live 2026-11-22): ``side`` is the aggressor ("B" buy, "A"
+sell; 193/193 trades printed through the matching side of the BBO) and
+``users`` is ``[buyer, seller]``. ``tid`` is a hash, unique but not
+monotonic, so trades are keyed by ``time`` and ``tid``. Subscribing replays
+the latest 30 trades, which proves continuity after a short reconnect when
+the replay overlaps the last trade seen. There is no public time-range trade
+history (``recentTrades`` returns 10 trades), so longer outages are gaps.
 """
 
 from __future__ import annotations
 
 import asyncio
+import contextlib
 import decimal
 import json
 import math
@@ -39,11 +50,18 @@ from joseph.market_data.domain import health
 
 REST_URL = "https://api.hyperliquid.xyz"
 WS_URL = "wss://api.hyperliquid.xyz/ws"
-_TF = tuple(
+_KLINE_TF = tuple(
     tf
-    for tf in timeframes.Timeframe
-    if tf not in (timeframes.Timeframe.H6, timeframes.Timeframe.W1)
+    for tf in timeframes.MINUTE_AND_ABOVE
+    if tf
+    not in (
+        timeframes.Timeframe.H6,
+        timeframes.Timeframe.W1,
+        timeframes.Timeframe.MN1,
+    )
 )
+_TF = (*timeframes.SECONDS, *_KLINE_TF)
+_SIDES = {"B": market.AggressorSide.BUY, "A": market.AggressorSide.SELL}
 _MAX_DECIMALS = 6
 _CTX_TTL_MS = 2_000
 _HOUR_MS = 3_600_000
@@ -160,6 +178,42 @@ def parse_candle(
     )
 
 
+def parse_trades_frame(
+    raw: str | bytes, instrument_id: instruments.InstrumentId, now_ms: int
+) -> list[market.Trade]:
+    """Parses a ``trades`` channel frame.
+
+    Args:
+        raw: Frame payload.
+        instrument_id: Instrument (coin).
+        now_ms: Receipt time.
+
+    Returns:
+        Trades ascending by time (empty for acks and pongs).
+    """
+    message = json.loads(raw)
+    if not isinstance(message, dict) or message.get("channel") != "trades":
+        return []
+    coin = instrument_id.venue_market_id
+    trades = [
+        market.Trade(
+            instrument_id=instrument_id,
+            trade_id=f"{int(row['time'])}-{row['tid']}",
+            venue_event_ts_ms=int(row["time"]),
+            received_at_ms=now_ms,
+            price=base.dec(row["px"]),
+            base_quantity=base.dec(row["sz"]),
+            aggressor_side=_SIDES.get(
+                str(row["side"]), market.AggressorSide.UNKNOWN
+            ),
+            is_aggregated=False,
+        )
+        for row in message["data"]
+        if row.get("coin") == coin
+    ]
+    return sorted(trades, key=lambda t: t.venue_event_ts_ms)
+
+
 class HyperliquidAdapter(base.BaseVenueAdapter):
     """``MarketDataPort`` for Hyperliquid perpetuals."""
 
@@ -198,16 +252,25 @@ class HyperliquidAdapter(base.BaseVenueAdapter):
             market_data=capabilities.MarketDataCapabilities(
                 rest_history=True,
                 native_ws_candles=True,
+                native_ws_trades=True,
                 book_snapshot=True,
                 open_interest=True,
                 funding=True,
             ),
             timeframes=_TF,
+            trade_built_timeframes=timeframes.SECONDS,
             notes=(
                 "Main perp dex only; HIP-3 builder dexes are not listed.",
                 "No last-trade price in asset contexts; `last` is null.",
                 "Weekly candles start Thursday and 6h is not offered.",
+                "The venue's 1M interval is 30-day epoch buckets, not "
+                "calendar months, so 1M is not offered.",
                 "Tick size is derived from the 5-significant-figure rule.",
+                "Seconds bars are built from the live trade stream only (no "
+                "public trade history); outages are recorded as gaps unless "
+                "the 30-trade replay on resubscribe overlaps.",
+                "Klines publish no taker buy volume (taker_volume is false); "
+                "seconds bars built from trades do carry it.",
             ),
             docs_url=(
                 "https://hyperliquid.gitbook.io/hyperliquid-docs/"
@@ -279,14 +342,14 @@ class HyperliquidAdapter(base.BaseVenueAdapter):
             Ascending candles.
         """
         self._require_timeframe(timeframe)
+        if timeframe.is_seconds:
+            return await self._fetch_trade_candles(
+                instrument, timeframe, start_ms, end_ms, limit
+            )
         await self._require(instrument)
         start = timeframe.floor(start_ms)
         if limit is not None:
-            start = max(
-                start,
-                timeframe.floor(end_ms - 1)
-                - (limit - 1) * timeframe.duration_ms,
-            )
+            start = base.newest_window_start(timeframe, start_ms, end_ms, limit)
         payload = await self._http.post(
             "/info",
             {
@@ -480,6 +543,50 @@ class HyperliquidAdapter(base.BaseVenueAdapter):
             raise errors.MissingDataError("funding unavailable")
         return snapshot.funding
 
+    def _trade_spec(
+        self, instrument: instruments.InstrumentId
+    ) -> ws.WsTradeSpec:
+        """Describes the ``trades`` subscription.
+
+        Args:
+            instrument: Instrument.
+
+        Returns:
+            Trade stream spec.
+        """
+
+        def parse(raw: str | bytes, now_ms: int) -> list[market.Trade]:
+            """Parses one frame.
+
+            Args:
+                raw: Frame payload.
+                now_ms: Receipt time.
+
+            Returns:
+                Trades.
+            """
+            return parse_trades_frame(raw, instrument, now_ms)
+
+        return ws.WsTradeSpec(
+            url=WS_URL,
+            subscribe=(
+                json.dumps(
+                    {
+                        "method": "subscribe",
+                        "subscription": {
+                            "type": "trades",
+                            "coin": instrument.venue_market_id,
+                        },
+                    }
+                ),
+            ),
+            parse=parse,
+            ping_message=json.dumps({"method": "ping"}),
+            ping_interval_s=5.0,
+            idle_timeout_s=30.0,
+            replays_recent=True,
+        )
+
     async def stream_candles(
         self,
         instrument: instruments.InstrumentId,
@@ -497,6 +604,12 @@ class HyperliquidAdapter(base.BaseVenueAdapter):
             Candle updates.
         """
         self._require_timeframe(timeframe)
+        if timeframe.is_seconds:
+            bars = self._stream_trade_candles(instrument, timeframe, tracker)
+            async with contextlib.aclosing(bars):
+                async for bar in bars:
+                    yield bar
+            return
         await self._require(instrument)
         coin = instrument.venue_market_id
 
@@ -555,11 +668,13 @@ class HyperliquidAdapter(base.BaseVenueAdapter):
             ping_message=json.dumps({"method": "ping"}),
             ping_interval_s=30.0,
         )
-        async for candle in ws.stream_with_recovery(
+        candles = ws.stream_with_recovery(
             spec,
             backfill=backfill,
             clock=self._clock,
             connect=self._connect,
             tracker=tracker,
-        ):
-            yield candle
+        )
+        async with contextlib.aclosing(candles):
+            async for candle in candles:
+                yield candle

@@ -25,7 +25,8 @@ class MarketDataCapabilities:
         book_snapshot: REST order-book snapshot.
         open_interest: Open-interest endpoint.
         funding: Funding-rate endpoint.
-        trades_history: Historical trades over REST.
+        trades_history: Historical trades over REST for a time range.
+        taker_volume: Candles carry ``taker_buy_base_volume`` (true delta).
     """
 
     rest_history: bool = False
@@ -36,6 +37,7 @@ class MarketDataCapabilities:
     open_interest: bool = False
     funding: bool = False
     trades_history: bool = False
+    taker_volume: bool = False
 
     def to_contract(self) -> dict[str, bool]:
         """Serializes to the contract object.
@@ -55,10 +57,14 @@ class VenueCapabilities:
         display_name: Human-readable name.
         market_types: Supported product types.
         market_data: Feature matrix.
-        timeframes: Candle resolutions supported natively and UTC aligned.
+        timeframes: Candle resolutions served UTC aligned, either as native
+            klines or built from the venue's public trades.
         notes: Caveats such as unverified or unsupported features.
         docs_url: Official API documentation.
         verified_at_ms: When the capabilities were last verified live.
+        trade_built_timeframes: Subset of ``timeframes`` that the engine
+            builds from the venue's public trade stream (seconds bars),
+            because the venue publishes no such klines.
     """
 
     venue: instruments.Venue
@@ -69,6 +75,19 @@ class VenueCapabilities:
     notes: tuple[str, ...]
     docs_url: str
     verified_at_ms: int | None = None
+    trade_built_timeframes: tuple[timeframes_lib.Timeframe, ...] = ()
+
+    def __post_init__(self) -> None:
+        """Validates that trade-built timeframes are declared timeframes.
+
+        Raises:
+            ValueError: If a trade-built timeframe is not in ``timeframes``.
+        """
+        extra = set(self.trade_built_timeframes) - set(self.timeframes)
+        if extra:
+            raise ValueError(
+                "trade_built_timeframes must be a subset of timeframes"
+            )
 
     def supports_timeframe(self, timeframe: timeframes_lib.Timeframe) -> bool:
         """Checks timeframe support.
@@ -80,6 +99,17 @@ class VenueCapabilities:
             True when supported.
         """
         return timeframe in self.timeframes
+
+    def is_trade_built(self, timeframe: timeframes_lib.Timeframe) -> bool:
+        """Checks whether bars of a timeframe are built from public trades.
+
+        Args:
+            timeframe: Requested resolution.
+
+        Returns:
+            True when the engine aggregates the venue's trades into bars.
+        """
+        return timeframe in self.trade_built_timeframes
 
     def to_contract(self) -> dict[str, object]:
         """Serializes to the contract object.
@@ -93,6 +123,9 @@ class VenueCapabilities:
             "market_types": [m.value for m in self.market_types],
             "market_data": self.market_data.to_contract(),
             "timeframes": [tf.value for tf in self.timeframes],
+            "trade_built_timeframes": [
+                tf.value for tf in self.trade_built_timeframes
+            ],
             "notes": list(self.notes),
             "docs_url": self.docs_url,
             "verified_at_ms": self.verified_at_ms,

@@ -204,6 +204,11 @@ export interface StudyPoint {
   value: number;
   /** Optional color role, e.g. bid for positive delta columns. */
   tone?: OverlayTone;
+  /**
+   * Optional column opacity 0..1 (default 0.7), e.g. faint columns for
+   * estimated values next to measured ones.
+   */
+  opacity?: number;
 }
 
 /** Horizontal reference level inside a study pane (e.g. a threshold). */

@@ -3,6 +3,11 @@
 Implements ``ports.CandleSource`` (``get_candles`` returns final candles
 only) for the indicator engine, plus richer queries for the API: candle
 batches with provenance and gaps, snapshots, books and venue status.
+
+Seconds bars are built from public trades. Where the venue has a REST
+trade history they are fetched like klines (only the fully covered part);
+where it has none they exist only from a live trade-stream session, so
+batches serve what the store holds and report the rest as gaps.
 """
 
 from __future__ import annotations
@@ -235,13 +240,32 @@ class MarketDataService:
         gaps = self._store.final_gaps(
             instrument, timeframe, start_ms, closed_end
         )
+        caps = self.adapter(instrument.venue).capabilities()
+        if gaps and caps.is_trade_built(timeframe):
+            # Seconds history is page-capped and short-lived at the venue:
+            # gaps behind the newest stored final bar could not be covered
+            # before and are reported, not re-requested on every batch.
+            finals = [
+                c.start_ms
+                for c in self._store.range(
+                    instrument, timeframe, start_ms, closed_end
+                )
+                if c.is_final
+            ]
+            if finals:
+                tail = timeframe.end_of(finals[-1])
+                gaps = [gap for gap in gaps if gap[0] >= tail]
         if gaps:
             fetch_from = gaps[0][0]
         elif end_ms > current:
-            fetch_from = max(start_ms, current - timeframe.duration_ms)
+            fetch_from = max(start_ms, timeframe.shift(current, -1))
         else:
             return
         adapter = self.adapter(instrument.venue)
+        if caps.is_trade_built(timeframe) and (
+            not caps.market_data.trades_history
+        ):
+            return
         rows = await self._call(
             instrument.venue,
             adapter.fetch_candles(instrument, timeframe, fetch_from, end_ms),
@@ -311,7 +335,7 @@ class MarketDataService:
         start = (
             from_ms
             if from_ms is not None
-            else tf.floor(end - 1) - (bars - 1) * tf.duration_ms
+            else tf.shift(tf.floor(end - 1), -(bars - 1))
         )
         if end <= start:
             raise errors.ValidationFailedError("to_ms must be after from_ms")
@@ -363,6 +387,11 @@ class MarketDataService:
             return quality.FeedState.DEMO, "mock"
         session = self._router.session(instrument, timeframe)
         venue = instrument.venue.value
+        caps = self.adapter(instrument.venue).capabilities()
+        if caps.is_trade_built(timeframe):
+            venue = f"{venue}.trades"
+            if session is None and not caps.market_data.trades_history:
+                return quality.FeedState.LIVE, venue
         if session is not None:
             if session.state is feed_router.SessionState.POLLING:
                 return quality.FeedState.POLL, f"{venue}.poll"
@@ -372,7 +401,10 @@ class MarketDataService:
             ):
                 return quality.FeedState.STALE, f"{venue}.stale"
             if session.state is feed_router.SessionState.LIVE:
-                return quality.FeedState.LIVE, f"{venue}.ws"
+                return (
+                    quality.FeedState.LIVE,
+                    venue if venue.endswith(".trades") else f"{venue}.ws",
+                )
         return quality.FeedState.LIVE, f"{venue}.rest"
 
     async def get_snapshot(

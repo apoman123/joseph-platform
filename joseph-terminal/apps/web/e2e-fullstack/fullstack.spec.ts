@@ -1,10 +1,20 @@
 /**
  * @fileoverview Browser → real engines: market data and backend AOIs render,
- * a paper order placed in the ticket reaches the execution engine, and the
- * strategy builder validates against the Python compiler.
+ * seconds bars and true delta come from the engine, engine-backed drawings
+ * read engine series, a paper order placed in the ticket reaches the
+ * execution engine, and the strategy builder validates against the Python
+ * compiler.
  */
 import {expect, test, type Page} from '@playwright/test';
 import {API, TOKEN} from '../playwright.fullstack.config';
+import {
+  armTool,
+  clickChart,
+  hoverChart,
+  objectDetail,
+  pickTimeframe,
+  showDataWindow,
+} from '../e2e/support';
 import {
   loadTerminal,
   openPanel,
@@ -124,6 +134,104 @@ test('engine indicator series and market structure reach the chart', async ({
     /Delta %\s*[−+-]?\d/
   );
   await page.screenshot({path: 'e2e/screenshots/20-fullstack-indicators.png'});
+});
+
+/** Series point as served by `/v1/indicators/series`. */
+interface SeriesBody {
+  plugin_id: string;
+  indicator_version: string;
+  points: {bar_start_ms: number; values: Record<string, unknown>}[];
+}
+
+test('seconds bars and true delta come from the engine', async ({
+  page,
+  request,
+}) => {
+  const market = API.NEXT_PUBLIC_MARKET_API_URL;
+  const venues = (await (await request.get(`${market}/v1/venues`)).json()) as {
+    venues: {
+      capabilities: {
+        venue: string;
+        timeframes: string[];
+        trade_built_timeframes?: string[];
+        market_data: {taker_volume?: boolean};
+      };
+    }[];
+  };
+  const mock = venues.venues.find(v => v.capabilities.venue === 'mock');
+  expect(mock?.capabilities.timeframes).toEqual(
+    expect.arrayContaining(['1s', '5s', '1m', '1M'])
+  );
+  expect(mock?.capabilities.trade_built_timeframes).toContain('5s');
+  expect(mock?.capabilities.market_data.taker_volume).toBe(true);
+  // Seconds bars are folded from the venue's trades and carry taker volume.
+  const candles = await request.get(`${market}/v1/candles`, {
+    params: {instrument_id: 'mock:perp:BTCUSD', tf: '5s', limit: 60},
+  });
+  expect(candles.ok()).toBeTruthy();
+  const bars = (
+    (await candles.json()) as {
+      candles: {
+        start_ms: number;
+        end_ms: number;
+        taker_buy_base_volume: string | null;
+      }[];
+    }
+  ).candles;
+  expect(bars.length).toBeGreaterThan(10);
+  const [first] = bars;
+  expect(first ? first.end_ms - first.start_ms : 0).toBe(5_000);
+  expect(bars.filter(b => b.taker_buy_base_volume !== null).length).toBe(
+    bars.length
+  );
+
+  await loadOnDemoVenue(page);
+  await showDataWindow(page);
+  const series = page.waitForResponse(
+    response =>
+      response.url().startsWith(`${market}/v1/indicators/series`) &&
+      response.url().includes('plugin=order_flow_pressure') &&
+      response.url().includes('tf=5s') &&
+      response.ok(),
+    {timeout: 90_000}
+  );
+  await pickTimeframe(page, '5s');
+  const body = (await (await series).json()) as SeriesBody;
+  expect(body.indicator_version).not.toBe('demo');
+  expect(body.points.some(p => p.values.method === 'taker_volume')).toBe(true);
+  await hoverChart(page, 0.75, 0.4);
+  await expect(page.getByTestId('data-window')).toContainText(
+    'True (taker volume)'
+  );
+  await page.screenshot({path: 'e2e/screenshots/28-fullstack-seconds.png'});
+});
+
+test('an anchored VWAP drawing reads the engine series', async ({page}) => {
+  await loadOnDemoVenue(page);
+  const series = page.waitForResponse(
+    response =>
+      response
+        .url()
+        .startsWith(`${API.NEXT_PUBLIC_MARKET_API_URL}/v1/indicators/series`) &&
+      response.url().includes('plugin=anchored_vwap') &&
+      response.ok(),
+    {timeout: 60_000}
+  );
+  await armTool(page, 'studies', 'anchored-vwap');
+  await clickChart(page, 0.5, 0.5);
+  const body = (await (await series).json()) as SeriesBody;
+  expect(body.plugin_id).toBe('anchored_vwap');
+  expect(body.indicator_version).not.toBe('demo');
+  const priced = body.points.filter(p => p.values.vwap !== null);
+  expect(priced.length).toBeGreaterThan(0);
+  expect(priced[0]?.values.anchor_in_window).toBe(true);
+  await openPanel(page, 'Objects');
+  await expect(objectDetail(page, 'anchored-vwap')).toHaveText(
+    /^VWAP [\d,]+\.\d+ from \d{4}-\d\d-\d\d \d\d:\d\d UTC/
+  );
+  await page.screenshot({
+    path: 'e2e/screenshots/29-fullstack-anchored-vwap.png',
+  });
 });
 
 test('a paper order from the ticket is created by the execution engine', async ({

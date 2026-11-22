@@ -9,6 +9,7 @@ import {
   visibleCharts,
   type GridSizes,
 } from '@joseph/terminal-shell';
+import {parseInstrumentId, type ChartState} from '@joseph/contracts';
 import {
   useCallback,
   useEffect,
@@ -16,7 +17,9 @@ import {
   useState,
   type ReactElement,
 } from 'react';
+import type {TerminalRuntime} from '../composition/runtime';
 import {ChartPane, type PaneMenu} from './chart-pane';
+import {DetachedPlaceholder, PopOutButton, useDetached} from './detached';
 import {useStore} from './react-bindings';
 import {useRuntime} from './runtime-context';
 import {SlotInline} from './slot-host';
@@ -25,6 +28,114 @@ import {Splitter} from './splitter';
 
 /** Workspace panel key holding chart-grid track sizes per layout. */
 export const GRID_PANEL_KEY = 'shell.grid';
+
+/**
+ * Chart context menu (copy price, horizontal line, feature items).
+ * @param props Menu request, runtime and close callback.
+ * @return Menu.
+ */
+export function ChartContextMenu({
+  menu,
+  runtime,
+  onClose,
+}: {
+  menu: PaneMenu;
+  runtime: TerminalRuntime;
+  onClose: () => void;
+}): ReactElement {
+  return (
+    <div
+      className="j-menu chart-menu"
+      role="menu"
+      aria-label="Chart actions"
+      style={{left: menu.x, top: menu.y + 40}}
+      onPointerDown={event => event.stopPropagation()}
+    >
+      <p className="chart-menu__price j-tabular">
+        {menu.price === null
+          ? 'No price here'
+          : `Price ${formatNumber(menu.price, 2)}`}
+      </p>
+      <button
+        type="button"
+        role="menuitem"
+        className="j-menu__item"
+        onClick={() => {
+          if (menu.price !== null)
+            void navigator.clipboard
+              ?.writeText(String(menu.price))
+              .catch(() => undefined);
+          onClose();
+        }}
+      >
+        Copy price
+      </button>
+      <button
+        type="button"
+        role="menuitem"
+        className="j-menu__item"
+        onClick={() => {
+          void runtime.commands
+            .execute('drawing.tool.horizontal-line')
+            .catch(() => undefined);
+          onClose();
+        }}
+      >
+        Draw a horizontal line
+      </button>
+      <SlotInline slot="chart-context-menu" />
+    </div>
+  );
+}
+
+/**
+ * Human title of a chart pane (window titles, placeholders).
+ * @param chart Chart state.
+ * @return Text such as `BTCUSD 5m`.
+ */
+export function chartTitle(chart: ChartState): string {
+  return `${parseInstrumentId(chart.instrument_id).venueMarketId} ${chart.timeframe}`;
+}
+
+/**
+ * One grid cell: the chart pane, or a placeholder while it is detached.
+ * @param props Chart, activity, runtime and the menu callback.
+ * @return Pane or placeholder.
+ */
+function ChartSlot({
+  chart,
+  active,
+  runtime,
+  onMenu,
+}: {
+  chart: ChartState;
+  active: boolean;
+  runtime: TerminalRuntime;
+  onMenu: (chartId: string, menu: PaneMenu | null) => void;
+}): ReactElement {
+  const ref = {kind: 'chart' as const, chartId: chart.chart_id};
+  const detached = useDetached(ref);
+  if (detached) {
+    return (
+      <DetachedPlaceholder pane={detached.pane} status={detached.status} />
+    );
+  }
+  return (
+    <ChartPane
+      chart={chart}
+      active={active}
+      runtime={runtime}
+      onMenu={onMenu}
+      headerActions={
+        <PopOutButton
+          pane={ref}
+          title={chartTitle(chart)}
+          testId={`popout-${chart.chart_id}`}
+        />
+      }
+    />
+  );
+}
 
 /**
  * Chart grid.
@@ -141,7 +252,7 @@ export function ChartGrid(): ReactElement {
           className="chart-grid__cell"
           style={{position: 'relative'}}
         >
-          <ChartPane
+          <ChartSlot
             chart={chart}
             active={
               chart.chart_id === workspace.active_chart_id ||
@@ -152,47 +263,11 @@ export function ChartGrid(): ReactElement {
             onMenu={onMenu}
           />
           {menu?.chartId === chart.chart_id && (
-            <div
-              className="j-menu chart-menu"
-              role="menu"
-              aria-label="Chart actions"
-              style={{left: menu.menu.x, top: menu.menu.y + 40}}
-              onPointerDown={event => event.stopPropagation()}
-            >
-              <p className="chart-menu__price j-tabular">
-                {menu.menu.price === null
-                  ? 'No price here'
-                  : `Price ${formatNumber(menu.menu.price, 2)}`}
-              </p>
-              <button
-                type="button"
-                role="menuitem"
-                className="j-menu__item"
-                onClick={() => {
-                  if (menu.menu.price !== null)
-                    void navigator.clipboard
-                      ?.writeText(String(menu.menu.price))
-                      .catch(() => undefined);
-                  setMenu(null);
-                }}
-              >
-                Copy price
-              </button>
-              <button
-                type="button"
-                role="menuitem"
-                className="j-menu__item"
-                onClick={() => {
-                  void runtime.commands
-                    .execute('drawing.tool.horizontal-line')
-                    .catch(() => undefined);
-                  setMenu(null);
-                }}
-              >
-                Draw a horizontal line
-              </button>
-              <SlotInline slot="chart-context-menu" />
-            </div>
+            <ChartContextMenu
+              menu={menu.menu}
+              runtime={runtime}
+              onClose={() => setMenu(null)}
+            />
           )}
         </div>
       ))}

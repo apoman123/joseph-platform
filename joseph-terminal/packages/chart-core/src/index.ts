@@ -9,6 +9,7 @@ export * from './overlay-model';
 export * from './overlay-painter';
 export * from './session-separators';
 export * from './theme';
+export * from './time-scale';
 export * from './time-index';
 export * from './transforms/heikin-ashi';
 export * from './testing/fake-chart-port';

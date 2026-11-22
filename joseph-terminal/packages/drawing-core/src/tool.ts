@@ -5,14 +5,27 @@ import type {
   DrawingAnchor,
   DrawingDocument,
   DrawingStyle,
+  Timeframe,
 } from '@joseph/contracts';
 import {Decimal} from '@joseph/contracts';
-import {handleAt, type Point} from './geometry';
+import {handleAt, type Point, type Rect} from './geometry';
+import type {DrawingSeriesRequest, DrawingSeriesState} from './series';
 import type {PixelTransform} from './surface';
 
-/** Toolbar groups. */
+/**
+ * Toolbar groups. `studies` holds engine-backed tools (anchored VWAP,
+ * regression channel) whose values come from the market engine.
+ */
 export type ToolGroup =
-  'lines' | 'shapes' | 'fibonacci' | 'trading' | 'measure' | 'annotation';
+  | 'lines'
+  | 'shapes'
+  | 'fibonacci'
+  | 'gann'
+  | 'patterns'
+  | 'trading'
+  | 'measure'
+  | 'studies'
+  | 'annotation';
 
 /** Static tool description. */
 export interface ToolManifest {
@@ -60,6 +73,8 @@ export interface ToolPalette {
   background: string;
   /** Font family. */
   fontFamily: string;
+  /** Warning accent for inline status messages (additive, optional). */
+  warning?: string;
 }
 
 /** Render state for one drawing. */
@@ -74,6 +89,59 @@ export interface RenderState {
   tickSize: string | null;
   /** Bar duration (for measuring tools). */
   durationMs: number;
+  /**
+   * Engine series of this drawing for tools that declare `seriesRequest`
+   * (null or absent otherwise, and while no request was made).
+   */
+  series?: DrawingSeriesState | null;
+}
+
+/** Boolean tool input (a checkbox in the style bar). */
+export interface ToolBooleanInput {
+  /** Key in `DrawingDocument.props`. */
+  key: string;
+  /** Sentence-case label. */
+  label: string;
+  /** Kind discriminator. */
+  kind: 'boolean';
+  /** Value when the prop is missing. */
+  defaultValue: boolean;
+}
+
+/** Choice tool input (a select in the style bar). */
+export interface ToolChoiceInput {
+  /** Key in `DrawingDocument.props`. */
+  key: string;
+  /** Sentence-case label. */
+  label: string;
+  /** Kind discriminator. */
+  kind: 'choice';
+  /** Value when the prop is missing or not one of the choices. */
+  defaultValue: string;
+  /** Allowed values with their labels. */
+  choices: readonly {value: string; label: string}[];
+}
+
+/**
+ * Tool-specific input stored in `props` and edited generically by the
+ * host's style editor (for example the anchored VWAP band multipliers).
+ */
+export type ToolInput = ToolBooleanInput | ToolChoiceInput;
+
+/** Context passed to `describe` and `dataRows`. */
+export interface DescribeContext {
+  /** Engine series of the drawing, when the tool uses one. */
+  series: DrawingSeriesState | null;
+  /** Tick size of the instrument, when known. */
+  tickSize: string | null;
+}
+
+/** One labelled value shown by the host's data window. */
+export interface DrawingDataRow {
+  /** Row label. */
+  label: string;
+  /** Formatted value. */
+  value: string;
 }
 
 /** Hit test result. */
@@ -118,14 +186,45 @@ export interface ToolPlugin {
    * @param transform Transform.
    * @param point Pointer position.
    * @param tolerance Hit tolerance in pixels.
+   * @param series Engine series of the drawing (engine-backed tools only).
    * @return Hit or null.
    */
   hitTest(
     doc: DrawingDocument,
     transform: PixelTransform,
     point: Point,
-    tolerance: number
+    tolerance: number,
+    series?: DrawingSeriesState | null
   ): HitResult | null;
+  /**
+   * Tool-specific inputs kept in `props` and edited by the host's style
+   * editor. Changing one is an undoable command like any style change.
+   */
+  readonly inputs?: readonly ToolInput[];
+  /**
+   * Engine series this drawing displays (engine-backed tools only). Must be
+   * a pure function of the anchors, props and timeframe; the host fetches
+   * it and re-fetches when the request changes or a bar closes.
+   * @param doc Document.
+   * @param env Chart timeframe.
+   * @return Request, or null when the drawing needs no series.
+   */
+  seriesRequest?(
+    doc: DrawingDocument,
+    env: {timeframe: Timeframe}
+  ): DrawingSeriesRequest | null;
+  /**
+   * Values the host's data window shows for this drawing at a bar.
+   * @param doc Document.
+   * @param barStartMs Bar under the crosshair.
+   * @param context Series and tick size.
+   * @return Rows (empty when nothing applies).
+   */
+  dataRows?(
+    doc: DrawingDocument,
+    barStartMs: number,
+    context: DescribeContext
+  ): DrawingDataRow[];
   /**
    * Expands anchors placed by the user into the tool's full anchor set
    * (e.g. one click for a long position yields entry, target and stop).
@@ -144,11 +243,47 @@ export interface ToolPlugin {
    */
   migrate?(doc: DrawingDocument): DrawingDocument;
   /**
-   * Accessible one-line description.
+   * Accessible one-line description (shown in the object list).
    * @param doc Document.
+   * @param context Engine series and tick size, when the host has them.
    * @return Description.
    */
-  describe?(doc: DrawingDocument): string;
+  describe?(doc: DrawingDocument, context?: DescribeContext): string;
+}
+
+/**
+ * Reads a tool input from a drawing's props, falling back to the default
+ * when the prop is missing or invalid.
+ * @param doc Document.
+ * @param input Input declaration.
+ * @return Current value.
+ */
+export function readInput(
+  doc: Pick<DrawingDocument, 'props'>,
+  input: ToolInput
+): string | boolean {
+  const props = doc.props as Readonly<Record<string, unknown>> | undefined;
+  const value = props?.[input.key];
+  if (input.kind === 'boolean') {
+    return typeof value === 'boolean' ? value : input.defaultValue;
+  }
+  return typeof value === 'string' &&
+    input.choices.some(choice => choice.value === value)
+    ? value
+    : input.defaultValue;
+}
+
+/**
+ * Default props for a list of inputs.
+ * @param inputs Input declarations.
+ * @return Props with every input at its default.
+ */
+export function inputDefaults(
+  inputs: readonly ToolInput[]
+): Record<string, string | boolean> {
+  return Object.fromEntries(
+    inputs.map(input => [input.key, input.defaultValue])
+  );
 }
 
 /** Registry of available tools. Removing a tool never touches documents. */
@@ -287,6 +422,65 @@ export function drawLabel(
   ctx.fillStyle = color;
   ctx.textBaseline = 'middle';
   ctx.fillText(text, x, y);
+  ctx.restore();
+}
+
+/** Approximate width of one 11px label character, for hit-testing. */
+export const LABEL_CHAR_WIDTH_PX = 6;
+
+/**
+ * Plate of an inline status message, kept inside the plot horizontally.
+ * @param textWidth Text width in pixels (measured, or estimated with
+ *     `LABEL_CHAR_WIDTH_PX` when no context is at hand).
+ * @param x Preferred left x of the text.
+ * @param y Vertical centre.
+ * @param plotWidth Plot width.
+ * @return Plate rectangle (the text starts 5 px inside it).
+ */
+export function noticeBounds(
+  textWidth: number,
+  x: number,
+  y: number,
+  plotWidth: number
+): Rect {
+  const left = Math.max(4, Math.min(x, plotWidth - textWidth - 12));
+  return {x: left - 5, y: y - 10, width: textWidth + 10, height: 20};
+}
+
+/**
+ * Draws an inline status message (for example "Anchor is more than 2000
+ * bars back") on a bordered plate in the warning accent. Tools hit-test
+ * the same plate (`noticeBounds`) so a drawing whose anchor is off-screen
+ * can still be selected.
+ * @param ctx Context.
+ * @param text Message.
+ * @param x Preferred left x.
+ * @param y Baseline-middle y.
+ * @param state Render state.
+ * @param plotWidth Plot width (the plate is shifted left to fit).
+ */
+export function drawNotice(
+  ctx: CanvasRenderingContext2D,
+  text: string,
+  x: number,
+  y: number,
+  state: RenderState,
+  plotWidth: number
+): void {
+  ctx.save();
+  ctx.setLineDash([]);
+  ctx.globalAlpha = 1;
+  ctx.font = `11px ${state.palette.fontFamily}`;
+  const plate = noticeBounds(ctx.measureText(text).width, x, y, plotWidth);
+  const color = state.palette.warning ?? state.palette.text;
+  ctx.fillStyle = state.palette.background;
+  ctx.fillRect(plate.x, plate.y, plate.width, plate.height);
+  ctx.strokeStyle = color;
+  ctx.lineWidth = 1;
+  ctx.strokeRect(plate.x, plate.y, plate.width, plate.height);
+  ctx.fillStyle = color;
+  ctx.textBaseline = 'middle';
+  ctx.fillText(text, plate.x + 5, y);
   ctx.restore();
 }
 

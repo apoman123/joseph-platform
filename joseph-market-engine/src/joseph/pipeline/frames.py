@@ -103,9 +103,7 @@ def fetch_windows(
         if tf.duration_ms <= signal_tf.duration_ms:
             windows[tf] = start_ms
         else:
-            windows[tf] = tf.floor(start_ms) - _AUX_LOOKBACK_BARS * (
-                tf.duration_ms
-            )
+            windows[tf] = tf.shift(tf.floor(start_ms), -_AUX_LOOKBACK_BARS)
     return windows
 
 
@@ -240,8 +238,9 @@ class EngineFrameProvider:
             Frames, oldest first; warm-up frames precede ``from_ms``.
         """
         engine = await self.engine_for(instrument_id, requirements)
-        warmup = max(requirements.history_bars, 1) * signal_tf.duration_ms
-        start = signal_tf.floor(from_ms) - warmup
+        start = signal_tf.shift(
+            signal_tf.floor(from_ms), -max(requirements.history_bars, 1)
+        )
         candles = await self.candles(
             engine, instrument_id, signal_tf, start, to_ms
         )

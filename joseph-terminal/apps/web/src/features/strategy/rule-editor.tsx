@@ -526,25 +526,25 @@ function NodeFields(props: NodeFieldsProps): ReactNode {
         <>
           <fieldset className={styles.checks}>
             <legend className="j-label">Timeframes</legend>
-            {(['1w', '1d', '12h', '4h', '2h', '1h', '30m', '15m'] as const).map(
-              tf => (
-                <label key={tf} className="j-check">
-                  <input
-                    type="checkbox"
-                    checked={node.timeframes.includes(tf)}
-                    onChange={e =>
-                      set(
-                        'timeframes',
-                        e.target.checked
-                          ? [...node.timeframes, tf]
-                          : node.timeframes.filter(x => x !== tf)
-                      )
-                    }
-                  />
-                  {tf}
-                </label>
-              )
-            )}
+            {(
+              ['1M', '1w', '1d', '12h', '4h', '2h', '1h', '30m', '15m'] as const
+            ).map(tf => (
+              <label key={tf} className="j-check">
+                <input
+                  type="checkbox"
+                  checked={node.timeframes.includes(tf)}
+                  onChange={e =>
+                    set(
+                      'timeframes',
+                      e.target.checked
+                        ? [...node.timeframes, tf]
+                        : node.timeframes.filter(x => x !== tf)
+                    )
+                  }
+                />
+                {tf}
+              </label>
+            ))}
           </fieldset>
           <div className="j-segmented" role="group" aria-label="Bias">
             <button

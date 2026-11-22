@@ -145,4 +145,13 @@ describe('DemoStrategyClient', () => {
       (await client.listSignals({kinds: ['ENTRY_BLOCKED']})).signals
     ).toHaveLength(1);
   });
+
+  it('fills the signal bar volume from the DEMO venue candle', () => {
+    for (const signal of createDemoSignals(1_800_000_000_000)) {
+      expect(Number(signal.bar_base_volume)).toBeGreaterThan(0);
+      expect(Number(signal.bar_quote_volume)).toBeGreaterThan(
+        Number(signal.bar_base_volume)
+      );
+    }
+  });
 });

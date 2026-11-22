@@ -11,6 +11,7 @@ import {
   restyleDrawing,
   retextDrawing,
   setDrawingFlags,
+  setDrawingInputs,
   zOrderChanges,
 } from './editing';
 import {decimate} from './geometry';
@@ -22,7 +23,14 @@ import type {
   SurfaceEventMap,
   SurfacePointerEvent,
 } from './surface';
-import {MAX_ANCHORS, ToolRegistry, type ToolPlugin} from './tool';
+import {
+  MAX_ANCHORS,
+  ToolRegistry,
+  inputDefaults,
+  readInput,
+  type ToolInput,
+  type ToolPlugin,
+} from './tool';
 
 const TRANSFORM: PixelTransform = {
   width: 1000,
@@ -341,5 +349,42 @@ describe('object list edits', () => {
     store.undo();
     expect(store.find('a')?.text).toBeNull();
     expect(store.find('a')?.style.color).toBe('#123456');
+  });
+});
+
+describe('tool inputs', () => {
+  const inputs: ToolInput[] = [
+    {
+      key: 'band',
+      label: 'Band',
+      kind: 'choice',
+      defaultValue: '1',
+      choices: [
+        {value: '0', label: 'Off'},
+        {value: '1', label: '1σ'},
+      ],
+    },
+    {key: 'label', label: 'Label', kind: 'boolean', defaultValue: true},
+  ];
+
+  it('reads props with defaults and rejects unknown choices', () => {
+    expect(inputDefaults(inputs)).toEqual({band: '1', label: true});
+    const [band, label] = inputs;
+    if (!band || !label) throw new Error('inputs');
+    expect(readInput({props: {band: '0'}}, band)).toBe('0');
+    expect(readInput({props: {band: '7'}}, band)).toBe('1');
+    expect(readInput({props: {label: 'yes'}}, label)).toBe(true);
+    expect(readInput({}, label)).toBe(true);
+  });
+
+  it('changes inputs as one undoable entry, never on locked drawings', () => {
+    const store = new DrawingStore();
+    store.execute(createCommand(drawing('a', 1, {props: {band: '1'}})));
+    expect(setDrawingInputs(store, 'a', {band: '0'}, 9)).toBe(true);
+    expect(store.find('a')?.props).toEqual({band: '0'});
+    store.undo();
+    expect(store.find('a')?.props).toEqual({band: '1'});
+    setDrawingFlags(store, 'a', {locked: true}, 10);
+    expect(setDrawingInputs(store, 'a', {band: '0'}, 11)).toBe(false);
   });
 });

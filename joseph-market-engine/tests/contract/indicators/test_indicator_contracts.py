@@ -91,7 +91,7 @@ def test_snapshots_conform(contract_validate: Validate, frames: list) -> None:  
                 SCHEMA, "IndicatorSnapshot", snapshot.to_contract()
             )
             seen.add(key[0])
-    assert len(seen) == 8
+    assert len(seen) == 10
 
 
 def test_every_emitted_aoi_and_event_conforms(

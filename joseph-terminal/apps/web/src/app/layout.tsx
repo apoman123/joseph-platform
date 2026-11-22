@@ -7,6 +7,7 @@ import type {ReactNode, ReactElement} from 'react';
 import '../styles/tokens.css';
 import '../styles/components.css';
 import '../styles/shell.css';
+import '../styles/panes.css';
 
 /** Archivo variable font with the width axis (semi-condensed numerals). */
 const archivo = Archivo({

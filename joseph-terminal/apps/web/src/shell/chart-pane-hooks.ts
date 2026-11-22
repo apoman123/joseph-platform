@@ -16,7 +16,12 @@ import type {
   IndicatorSeries,
   InstrumentId,
 } from '@joseph/contracts';
-import {DELTA_STUDY_ID, deltaStudyFromSeries} from '@joseph/indicator-viz';
+import {
+  DELTA_STUDY_ID,
+  deltaBarsFromSeries,
+  deltaStudyFromSeries,
+  type DeltaBar,
+} from '@joseph/indicator-viz';
 import {layerSettings, layerStyle, layerVisible} from '@joseph/terminal-shell';
 import {useEffect, useMemo, useState, type MutableRefObject} from 'react';
 import type {TerminalRuntime} from '../composition/runtime';
@@ -44,12 +49,15 @@ function cssVar(name: string): string {
   return getComputedStyle(document.documentElement).getPropertyValue(name);
 }
 
+/** Engine delta bars by bar start time. */
+export type DeltaByTime = ReadonlyMap<number, DeltaBar>;
+
 /** State of the Delta % pane. */
 export interface DeltaPaneState {
   /** Whether the pane is requested by the chart's settings. */
   shown: boolean;
-  /** Values by bar start for the data window. */
-  values: ValueByTime;
+  /** Delta %, method (true/estimate) and volumes by bar start. */
+  bars: DeltaByTime;
   /** Why the series is unavailable, if it is. */
   error: string | null;
 }
@@ -135,7 +143,7 @@ export function useDeltaPane(
     if (error) {
       return {
         id: DELTA_STUDY_ID,
-        title: 'Delta % (estimate)',
+        title: 'Delta %',
         style: 'histogram' as const,
         points: [],
         caption: `unavailable: ${error}`,
@@ -154,11 +162,16 @@ export function useDeltaPane(
     },
     [port]
   );
-  const values = useMemo(
-    () => new Map((spec?.points ?? []).map(p => [p.timeMs, p.value])),
-    [spec]
+  const bars = useMemo(
+    () =>
+      new Map(
+        shown && series && series.instrument_id === instrumentId
+          ? deltaBarsFromSeries(series, atMs).map(bar => [bar.timeMs, bar])
+          : []
+      ),
+    [shown, series, instrumentId, atMs]
   );
-  return {shown, values, error};
+  return {shown, bars, error};
 }
 
 /** One compared instrument with its latest close change. */

@@ -1,0 +1,73 @@
+{
+  "plugin_id": "regression_channel",
+  "timeframe": "5m",
+  "settings": {
+    "anchor_ms": 1794787800000,
+    "source": "close",
+    "deviations": "2",
+    "tick_size": "0.01"
+  },
+  "description": "Anchored at bar 2; bars 0-1 (close 50) are excluded. Closes 101, 103, 102, 104 at x = 0..3: mean x 1.5, mean y 102.5, Sxy = 4, Sxx = Syy = 5, slope 0.8, line 101.3 -> 103.7, Pearson r = 4/5. Residuals -0.3, 0.9, -0.9, 0.3: sample stdev sqrt(1.8/3) = 0.774597, bands +/- 2 sigma = 1.549193. Flat bars, so max_up = max_down = 0.9.",
+  "bars": [
+    [
+      "50",
+      "50",
+      "50",
+      "50",
+      "1"
+    ],
+    [
+      "50",
+      "50",
+      "50",
+      "50",
+      "1"
+    ],
+    [
+      "101",
+      "101",
+      "101",
+      "101",
+      "1"
+    ],
+    [
+      "103",
+      "103",
+      "103",
+      "103",
+      "1"
+    ],
+    [
+      "102",
+      "102",
+      "102",
+      "102",
+      "1"
+    ],
+    [
+      "104",
+      "104",
+      "104",
+      "104",
+      "1"
+    ]
+  ],
+  "expect": {
+    "final_values": {
+      "start_ms": 1794787800000,
+      "start": "101.3",
+      "end": "103.7",
+      "slope": "0.8",
+      "stdev": "0.774597",
+      "upper_start": "102.849193",
+      "lower_start": "99.750807",
+      "upper_end": "105.249193",
+      "lower_end": "102.150807",
+      "pearson_r": "0.8",
+      "max_up": "0.9",
+      "max_down": "0.9",
+      "bars": 4,
+      "anchor_in_window": true
+    }
+  }
+}

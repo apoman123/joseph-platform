@@ -1,0 +1,39 @@
+{
+ "code": "00000",
+ "data": [
+  {
+   "price": "61015",
+   "side": "Sell",
+   "size": "0.0178",
+   "symbol": "BTCUSDT",
+   "tradeId": "1508367128312168448",
+   "ts": "1795348668172"
+  },
+  {
+   "price": "61015.1",
+   "side": "Buy",
+   "size": "0.0014",
+   "symbol": "BTCUSDT",
+   "tradeId": "1508367126714138624",
+   "ts": "1795348667791"
+  },
+  {
+   "price": "61015.1",
+   "side": "Buy",
+   "size": "0.02",
+   "symbol": "BTCUSDT",
+   "tradeId": "1508367122180096000",
+   "ts": "1795348666710"
+  },
+  {
+   "price": "61015",
+   "side": "Sell",
+   "size": "0.0047",
+   "symbol": "BTCUSDT",
+   "tradeId": "1508367119948726272",
+   "ts": "1795348666178"
+  }
+ ],
+ "msg": "success",
+ "requestTime": 1795349267856
+}

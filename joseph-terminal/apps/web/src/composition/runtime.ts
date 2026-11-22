@@ -13,7 +13,11 @@ import type {
   WorkspaceDocument,
 } from '@joseph/contracts';
 import type {ChartPort} from '@joseph/chart-core';
-import type {DrawingController, DrawingStore} from '@joseph/drawing-core';
+import type {
+  DrawingController,
+  DrawingSeriesSync,
+  DrawingStore,
+} from '@joseph/drawing-core';
 import {ToolRegistry} from '@joseph/drawing-core';
 import {
   BrowserStorage,
@@ -39,12 +43,15 @@ import {
   type WritableStore,
 } from '@joseph/feature-registry';
 import {
+  EMPTY_DETACH_STATE,
   TemplateRepository,
   WorkspaceRepository,
   activeChart,
   createAutosaver,
   createDefaultWorkspace,
   workspaceReducer,
+  type DetachState,
+  type DetachedPaneRef,
   type PaletteState,
   type ReplayState,
   type WorkspaceAction,
@@ -114,6 +121,8 @@ export interface DrawingSession {
   controllers: Map<string, DrawingController>;
   /** Stores per chart id. */
   stores: Map<string, DrawingStore>;
+  /** Engine series of engine-backed drawings, per chart id. */
+  series: Map<string, DrawingSeriesSync>;
   /** Armed tool id (null = pointer). */
   activeTool: WritableStore<string | null>;
   /** Magnet snapping. */
@@ -140,8 +149,59 @@ export interface IndicatorSettingsRequest {
   pluginId: string;
 }
 
+/** Window actions for detached panes (main window only). */
+export interface WindowActions {
+  /** Whether this browser can link windows (BroadcastChannel). */
+  readonly supported: boolean;
+  /**
+   * Opens a pane in another window. Call from a click handler: browsers
+   * block windows opened without a user gesture.
+   * @param ref Pane to detach.
+   * @param title Human title.
+   */
+  detach(ref: DetachedPaneRef, title: string): void;
+  /**
+   * Closes the pane's window and shows the pane here again.
+   * @param key Pane key.
+   */
+  redock(key: string): void;
+  /**
+   * Brings the pane's window to the front.
+   * @param key Pane key.
+   */
+  focus(key: string): void;
+  /**
+   * Re-opens a remembered pane's window (from a click).
+   * @param key Pane key.
+   */
+  reopen(key: string): void;
+  /** Re-opens every remembered pane without a window (from a click). */
+  reopenAll(): void;
+}
+
+/** Window role and pop-out wiring. */
+export interface RuntimeOptions {
+  /** `main` owns and saves the workspace; `popout` mirrors it. */
+  role?: 'main' | 'popout';
+  /** Workspace id (default `default`). */
+  workspaceId?: string;
+  /**
+   * Chart a pop-out shows; it stays the active chart, so commands, the
+   * order ticket and trading guards (replay) refer to it.
+   */
+  pinnedChartId?: string | null;
+  /**
+   * Receives every workspace action applied locally (pop-outs forward
+   * them to the main window).
+   * @param action Applied action.
+   */
+  onAction?: (action: WorkspaceAction) => void;
+}
+
 /** Everything the shell owns. */
 export interface TerminalRuntime {
+  /** Window role. */
+  role: 'main' | 'popout';
   /** Configuration. */
   config: TerminalConfig;
   /** Backend clients. */
@@ -206,6 +266,16 @@ export interface TerminalRuntime {
   indicatorSettings: WritableStore<IndicatorSettingsRequest | null>;
   /** Saved chart templates. */
   templates: TemplateRepository;
+  /** Panes living in other windows (main window view). */
+  detached: WritableStore<DetachState>;
+  /** Pop-out window actions; null until linked (and in pop-outs). */
+  windows: WritableStore<WindowActions | null>;
+  /**
+   * Replaces the workspace with one from another window without
+   * forwarding it (pop-outs adopt the main window's document).
+   * @param doc Workspace document.
+   */
+  adoptWorkspace(doc: WorkspaceDocument): void;
   /** Persists pending workspace changes immediately. */
   flush(): void;
 }
@@ -242,12 +312,28 @@ function savedTheme(storage: KeyValueStorage): 'dark' | 'light' {
  * Creates the runtime and registers features (not yet activated).
  * @param features Features to compose.
  * @param config Optional configuration override (tests).
+ * @param options Window role (main or pop-out) and pop-out wiring.
  * @return Runtime.
  */
 export function createRuntime(
   features: (runtime: TerminalRuntime) => readonly WebFeature[],
-  config: TerminalConfig = readConfig()
+  config: TerminalConfig = readConfig(),
+  options: RuntimeOptions = {}
 ): TerminalRuntime {
+  const role = options.role ?? 'main';
+  const workspaceId = options.workspaceId ?? 'default';
+  const pinned = options.pinnedChartId ?? null;
+  /**
+   * Keeps a pop-out's chart active.
+   * @param doc Workspace.
+   * @return Workspace with the pinned chart active.
+   */
+  const pin = (doc: WorkspaceDocument): WorkspaceDocument =>
+    pinned !== null &&
+    doc.active_chart_id !== pinned &&
+    doc.charts.some(chart => chart.chart_id === pinned)
+      ? {...doc, active_chart_id: pinned}
+      : doc;
   const storage = createStorage();
   const bundle = buildClients(config);
   const repository = new WorkspaceRepository(storage);
@@ -257,13 +343,15 @@ export function createRuntime(
     : 'binance:perp:BTCUSDT';
   const now = Date.now();
   const workspace = createStore<WorkspaceDocument>(
-    repository.load('default', now) ??
-      createDefaultWorkspace({
-        workspaceId: 'default',
-        instrumentId: defaultInstrument,
-        timeframe: '5m',
-        nowMs: now,
-      })
+    pin(
+      repository.load(workspaceId, now) ??
+        createDefaultWorkspace({
+          workspaceId,
+          instrumentId: defaultInstrument,
+          timeframe: '5m',
+          nowMs: now,
+        })
+    )
   );
   const account = createStore<string | null>(null);
   const orderMode = createStore<OrderMode>('PAPER');
@@ -294,10 +382,14 @@ export function createRuntime(
   replay.subscribe(refreshSelection);
   account.subscribe(refreshSelection);
   orderMode.subscribe(refreshSelection);
-  workspace.subscribe(doc => autosaver.schedule(doc));
+  // Only the main window writes the workspace; pop-outs mirror it.
+  if (role === 'main') workspace.subscribe(doc => autosaver.schedule(doc));
 
   const dispatch = (action: WorkspaceAction) => {
-    workspace.set(workspaceReducer(workspace.get(), action, Date.now()));
+    const before = workspace.get();
+    const next = workspaceReducer(before, action, Date.now());
+    workspace.set(pin(next));
+    if (next !== before) options.onAction?.(action);
   };
   const commands = createCommandRegistry();
   const hotkeys = createHotkeyRegistry(commands);
@@ -324,6 +416,7 @@ export function createRuntime(
   theme.subscribe(value => storage.setItem('joseph.theme', value));
 
   const runtime: TerminalRuntime = {
+    role,
     config,
     clients: bundle.clients,
     capabilities,
@@ -345,6 +438,7 @@ export function createRuntime(
     drawing: {
       controllers: new Map(),
       stores: new Map(),
+      series: new Map(),
       activeTool: createStore<string | null>(null),
       magnet: createStore(storage.getItem('joseph.magnet') === 'on'),
       revision: createStore(0),
@@ -360,7 +454,12 @@ export function createRuntime(
     dataWindow: createStore(storage.getItem('joseph.dataWindow') === 'on'),
     indicatorSettings: createStore<IndicatorSettingsRequest | null>(null),
     templates: new TemplateRepository(storage),
-    flush: () => autosaver.flush(),
+    detached: createStore<DetachState>(EMPTY_DETACH_STATE),
+    windows: createStore<WindowActions | null>(null),
+    adoptWorkspace: doc => workspace.set(pin(doc)),
+    flush: () => {
+      if (role === 'main') autosaver.flush();
+    },
   };
   runtime.dataWindow.subscribe(on =>
     storage.setItem('joseph.dataWindow', on ? 'on' : 'off')

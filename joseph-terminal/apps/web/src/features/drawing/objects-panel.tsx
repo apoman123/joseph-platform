@@ -31,14 +31,18 @@ export interface ObjectsPanelProps {
 }
 
 /**
- * Describes a drawing for the list.
+ * Describes a drawing for the list. Engine-backed drawings (anchored VWAP,
+ * regression channel) summarize their engine values or say why none are
+ * drawn.
  * @param runtime Runtime.
  * @param doc Drawing.
+ * @param chartId Chart hosting the drawing (defaults to the active chart).
  * @return Name and detail.
  */
 export function describeDrawing(
   runtime: TerminalRuntime,
-  doc: DrawingDocument
+  doc: DrawingDocument,
+  chartId: string = runtime.selection.get().chartId
 ): {name: string; detail: string} {
   const tool = runtime.tools.get(doc.tool_id);
   if (!tool) {
@@ -47,9 +51,12 @@ export function describeDrawing(
       detail: 'Kept until the tool returns',
     };
   }
+  const series =
+    runtime.drawing.series.get(chartId)?.get(doc.drawing_id) ?? null;
   const detail = doc.text?.trim()
     ? doc.text.trim()
-    : (tool.describe?.(doc) ?? `${doc.anchors.length} anchors`);
+    : (tool.describe?.(doc, {series, tickSize: null}) ??
+      `${doc.anchors.length} anchors`);
   return {name: tool.manifest.displayName, detail};
 }
 
@@ -95,7 +102,11 @@ export function ObjectsPanel({runtime}: ObjectsPanelProps): ReactElement {
         ) : (
           <ul className="objects" aria-label="Drawings, top first">
             {drawings.map((doc, index) => {
-              const {name, detail} = describeDrawing(runtime, doc);
+              const {name, detail} = describeDrawing(
+                runtime,
+                doc,
+                selection.chartId
+              );
               const isSelected = selected?.drawingId === doc.drawing_id;
               const tool = runtime.tools.get(doc.tool_id);
               return (
@@ -117,7 +128,13 @@ export function ObjectsPanel({runtime}: ObjectsPanelProps): ReactElement {
                     />
                     <Icon name={tool?.manifest.icon} size={14} />
                     <span className="objects__name">{name}</span>
-                    <span className="objects__detail j-muted">{detail}</span>
+                    <span
+                      className="objects__detail j-muted"
+                      title={detail}
+                      data-testid="object-detail"
+                    >
+                      {detail}
+                    </span>
                   </button>
                   <button
                     type="button"

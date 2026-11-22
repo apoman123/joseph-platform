@@ -33,6 +33,9 @@ _STATES: dict[str, structures.AoiState] = {
 _EXTRA_PLACES = 4
 """Decimal places kept beyond the tick's own precision."""
 
+_QUANTITY_PLACES = 8
+"""Decimal places of published volumes (base units)."""
+
 
 def to_bar(candle: market.Candle) -> smc_types.Bar:
     """Converts a closed platform candle to a library bar.
@@ -51,6 +54,11 @@ def to_bar(candle: market.Candle) -> smc_types.Bar:
         close=float(candle.close),
         volume=float(candle.base_volume),
         close_time_ms=candle.end_ms,
+        buy_volume=(
+            None
+            if candle.taker_buy_base_volume is None
+            else float(candle.taker_buy_base_volume)
+        ),
     )
 
 
@@ -102,6 +110,19 @@ def ratio(value: float | None, places: int = 4) -> decimal.Decimal | None:
         decimal.Decimal(1).scaleb(-places), rounding=decimal.ROUND_HALF_UP
     )
     return rounded.normalize() if rounded != 0 else decimal.Decimal(0)
+
+
+def quantity(value: float | None) -> decimal.Decimal | None:
+    """Converts a library volume (base units) to a decimal.
+
+    Args:
+        value: Float volume or ``None``.
+
+    Returns:
+        Decimal rounded half-up to eight places, or ``None`` when missing
+        or not finite.
+    """
+    return ratio(value, _QUANTITY_PLACES)
 
 
 def side(value: int) -> structures.ZoneSide:

@@ -41,9 +41,12 @@ Golden scenarios were re-derived by hand from the Pine source and now match it:
 | PDH/PDL, sessions | UTC day | Previous 1D bar; sessions in America/New_York (Asia 20:00–00:00, London 02:00–05:00, NY 08:30–11:00) |
 | HTF visibility | Bar end ≤ chart close | Engine supplies bars ending ≤ close; the library applies Pine `lookahead_on` + `[1]` (visible from the next chart bar) |
 
+## Decided rules
+
+- `ta.pivothigh/pivotlow`: an equal neighbour disqualifies a pivot (`pine.PIVOT_TIES_DISQUALIFY = True`). Confirmed by the owner on 2026-11-22: exactly equal neighbouring highs/lows are not pivots.
+
 ## Recorded assumptions (verify against TradingView exports)
 
-- `ta.pivothigh/pivotlow`: an equal neighbour disqualifies a pivot (`pine.PIVOT_TIES_DISQUALIFY`).
 - Values Pine computes only on `barstate.islast` (chart value area, OTE table) are published on every bar as if that bar were last.
 - `na` comparisons in the daily-bias agreement follow Pine (`na != 0` true).
 - Further per-script notes: `python_indicators/docs/<module>.md` in PineScripts.

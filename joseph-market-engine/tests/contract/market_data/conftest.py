@@ -58,7 +58,11 @@ def _binance(request: httpx.Request) -> httpx.Response:
     if path.endswith("/fundingInfo"):
         return _json(load("binance", "funding_info"))
     if path.endswith("/klines"):
+        if request.url.params.get("interval") == "1M":
+            return _json(load("binance", "klines_1M"))
         return _json(load("binance", "klines_5m"))
+    if path.endswith("/aggTrades"):
+        return _json(load("binance", "agg_trades"))
     if path.endswith("/premiumIndex"):
         row = load("binance", "premium_index")
         return _json(row if single else [row])
@@ -114,6 +118,8 @@ def _lighter(request: httpx.Request) -> httpx.Response:
         return _json(load("lighter", "order_book_details"))
     if path.endswith("/candles"):
         return _json(load("lighter", "candles_5m"))
+    if path.endswith("/trades"):
+        return _json(load("lighter", "trades_range"))
     if path.endswith("/fundings"):
         return _json(load("lighter", "fundings"))
     if path.endswith("/orderBookOrders"):
@@ -131,8 +137,14 @@ def _bitget(request: httpx.Request) -> httpx.Response:
         Response.
     """
     path = request.url.path
+    monthly = request.url.params.get("granularity") == "1Mutc"
+    if path.endswith("/history-candles") and monthly:
+        return _json(load("bitget", "history_candles_1Mutc"))
+    if path.endswith("/candles") and monthly:
+        return _json(load("bitget", "candles_1Mutc"))
     for suffix, name in (
         ("/contracts", "contracts"),
+        ("/fills-history", "fills_history"),
         ("/candles", "candles_5m"),
         ("/ticker", "ticker"),
         ("/tickers", "tickers"),
@@ -158,6 +170,8 @@ def _mexc(request: httpx.Request) -> httpx.Response:
     if path.endswith("/detail"):
         return _json(load("mexc", "detail"))
     if "/kline/" in path:
+        if request.url.params.get("interval") == "Month1":
+            return _json(load("mexc", "kline_month1"))
         return _json(load("mexc", "kline_min5"))
     if path.endswith("/ticker"):
         return _json(

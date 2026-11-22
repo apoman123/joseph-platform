@@ -246,12 +246,13 @@ def test_capabilities_are_contract_valid(
 ) -> None:
     """Capability declarations validate and never claim unverified data."""
     caps = _adapter(venue, capture_clock).capabilities()
-    contract_validate(
-        "market.schema.json", "VenueCapabilities", caps.to_contract()
-    )
+    payload = caps.to_contract()
+    contract_validate("market.schema.json", "VenueCapabilities", payload)
     assert caps.market_data.rest_history
-    assert not caps.market_data.native_ws_trades
     assert not caps.market_data.native_ws_book
+    assert set(payload["trade_built_timeframes"]) <= set(payload["timeframes"])
+    assert caps.trade_built_timeframes == timeframes.SECONDS
+    assert caps.market_data.native_ws_trades
 
 
 async def test_binance_metadata_details(

@@ -15,9 +15,16 @@ outputs; it never recomputes a tradable signal.
 | `fvg_ifvg` | FVG / IFVG zones with heat scores, first-test decay, inversion | chart |
 | `order_breaker_blocks` | OB / breaker zones | chart |
 | `liquidity_sweeps` | BSL / SSL / EQH / EQL pools, sweeps vs breaks | chart |
-| `order_flow_pressure` | estimated delta, buyer/seller failure & breakout | chart + `intrabars:1m` |
-| `auction_value_areas` | VAH / POC / VAL (chart and 1H profiles), 1m–30m charts | chart + `aux:1h` |
+| `order_flow_pressure` | true delta from venue taker volume (`method: taker_volume`, snapshot method `trade`) or the Pine candle-direction estimate; buyer/seller failure & breakout | chart + `intrabars:auto` (1s / 1m / 5m / 1h by chart) |
+| `auction_value_areas` | VAH / POC / VAL (chart and 1H profiles), 1s–30m charts | chart + `aux:1h` |
 | `premium_discount_ote` | dealing range, premium / discount / EQ / OTE (LuxAlgo, CC BY-NC-SA 4.0) | chart |
+| `anchored_vwap` | VWAP + 3 stdev bands from a session/week/month or an anchor bar (Python-native study) | chart |
+| `regression_channel` | least-squares channel, rolling or from an anchor bar, Pearson's R (Python-native study) | chart |
+
+The two Python-native studies follow TradingView's built-in VWAP and
+regression-channel definitions; they are not Pine ports. A study anchored to
+a bar outside the computed window (series cap 2000 bars) publishes `None`
+values and `anchor_in_window = false` rather than starting at the wrong bar.
 
 `licensing_status = PINE_PORT_PENDING_REVIEW`, `parity_status = SPEC_ONLY`
 until TradingView exports are compared (`golden.py`,
@@ -44,6 +51,11 @@ until TradingView exports are compared (`golden.py`,
 ## Conventions
 
 - Bars are closed `[start_ms, end_ms)` candles; events confirm at `end_ms`.
+  Timeframes run from `1s` (built from venue trades) to `1M` (calendar
+  month); step between bars with `Timeframe.shift`/`end_of`, never
+  `duration_ms` (an upper bound for `1M`).
+- `required_streams(settings, timeframe=...)` receives the series timeframe so
+  a plugin can choose intrabars that nest (`order_flow_pressure` `auto`).
 - The engine supplies higher-timeframe bars ending at or before the chart bar's
   close; the library then applies Pine `lookahead_on` + `[1]` visibility.
 - Prices leave the library as floats and become decimals rounded to the tick's

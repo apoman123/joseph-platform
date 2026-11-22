@@ -56,6 +56,7 @@ import type {
 import {paintOverlays} from '../../overlay-painter';
 import {DEFAULT_CHART_THEME, toneColor, withAlpha} from '../../theme';
 import {TimeIndex} from '../../time-index';
+import {timeScaleLabelsFor} from '../../time-scale';
 import {heikinAshiBar, toHeikinAshi} from '../../transforms/heikin-ashi';
 import {TIMEFRAME_MS, stepDecimals} from '@joseph/contracts';
 
@@ -719,7 +720,12 @@ export class LwcChartPort implements ChartPort {
         time: toTime(point.timeMs),
         value: point.value,
         ...(point.tone && study.spec.style === 'histogram'
-          ? {color: withAlpha(toneColor(this.theme, point.tone), 0.7)}
+          ? {
+              color: withAlpha(
+                toneColor(this.theme, point.tone),
+                point.opacity ?? 0.7
+              ),
+            }
           : {}),
       }));
     study.series.setData(points);
@@ -773,6 +779,9 @@ export class LwcChartPort implements ChartPort {
           ? PriceScaleMode.Percentage
           : PriceScaleMode.Normal;
     this.chart.priceScale('right').applyOptions({mode});
+    // Seconds bars need seconds on the axis and crosshair label; daily and
+    // longer bars (1d, 1w, 1M) show dates only.
+    this.chart.applyOptions({timeScale: timeScaleLabelsFor(config.timeframe)});
   }
 
   /**

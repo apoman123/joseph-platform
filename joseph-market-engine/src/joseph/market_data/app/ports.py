@@ -4,6 +4,8 @@
 Adapters own authentication, reconnects, heartbeats, rate limits, venue
 error mapping and timestamp normalization. A capability that is not
 implemented raises ``errors.UnsupportedError``; nothing is ever fabricated.
+Seconds candles are built from public trades (``stream_trades`` and
+``fetch_trades``) because no perpetual venue publishes them as klines.
 ``CandleSource`` is the narrow read port consumed by the indicator engine.
 """
 
@@ -138,6 +140,56 @@ class MarketDataPort(Protocol):
 
         Returns:
             Async iterator of updates (live and finalized bars).
+        """
+        ...
+
+    def stream_trades(
+        self,
+        instrument: instruments.InstrumentId,
+        tracker: health.FeedHealthTracker | None = None,
+    ) -> AsyncIterator[market.Trade]:
+        """Streams public trades over the venue's native WebSocket.
+
+        Reconnects with backoff; after a reconnect missed trades are
+        backfilled over REST where the venue supports it, otherwise a gap
+        is recorded on the tracker. Duplicates are dropped by trade id.
+
+        Args:
+            instrument: Exact venue instrument.
+            tracker: Optional health tracker updated by the stream.
+
+        Returns:
+            Async iterator of trades with the venue's aggressor side.
+
+        Raises:
+            errors.UnsupportedError: If the venue stream is not wired.
+        """
+        ...
+
+    async def fetch_trades(
+        self,
+        instrument: instruments.InstrumentId,
+        start_ms: int,
+        end_ms: int,
+        limit: int | None = None,
+    ) -> list[market.Trade]:
+        """Fetches public trades whose venue time lies in [start, end).
+
+        Requests are capped per call; when the cap or ``limit`` truncates
+        the range, the most recent trades are kept.
+
+        Args:
+            instrument: Exact venue instrument.
+            start_ms: Inclusive start.
+            end_ms: Exclusive end.
+            limit: Optional maximum number of most recent trades.
+
+        Returns:
+            Ascending trades.
+
+        Raises:
+            errors.UnsupportedError: If the venue has no time-range trade
+                history.
         """
         ...
 

@@ -62,7 +62,9 @@
       "mode": "PAPER",
       "data_source": "LIVE",
       "revision": 0,
-      "message": "Long A fired on binance:perp:BTCUSDT 5m"
+      "message": "Long A fired on binance:perp:BTCUSDT 5m",
+      "bar_base_volume": "412.538",
+      "bar_quote_volume": "39121894.55"
     }
   ],
   "invalid": [

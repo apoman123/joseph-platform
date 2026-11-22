@@ -116,10 +116,10 @@ def client(data: dict[TF, list[market.Candle]]) -> testclient.TestClient:
 
 
 def test_lists_plugins(client: testclient.TestClient) -> None:
-    """GET /v1/indicators/plugins returns the eight plugins."""
+    """GET /v1/indicators/plugins returns the ten plugins."""
     body = client.get("/v1/indicators/plugins").json()
     assert body["plugins"][0]["plugin_id"] == "daily_bias"
-    assert len(body["plugins"]) == 8
+    assert len(body["plugins"]) == 10
 
 
 def test_snapshot_set_filter(client: testclient.TestClient) -> None:
