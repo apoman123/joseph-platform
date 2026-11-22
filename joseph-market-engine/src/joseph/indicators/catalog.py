@@ -1,51 +1,29 @@
-"""Build-time composition of the first-party indicator plugins.
+"""Build-time composition of the indicator plugins.
 
-Adding a plugin means adding one import and one ``register`` line here plus
-the plugin package, schema fixtures and tests; no existing plugin changes.
+Every indicator algorithm lives in the external ``smc_indicators`` library
+(``apoman123/PineScripts``, ``python_indicators/``); the platform registers
+thin adapters around it. Adding an indicator means porting it in that
+repository, then adding one adapter in ``joseph.indicators.packaged``.
 """
 
 from __future__ import annotations
 
-from joseph.indicators.plugins.auction_value_areas import (
-    plugin as auction_value_areas,
-)
-from joseph.indicators.plugins.daily_bias import plugin as daily_bias
-from joseph.indicators.plugins.fvg_ifvg import plugin as fvg_ifvg
-from joseph.indicators.plugins.liquidity_sweeps import (
-    plugin as liquidity_sweeps,
-)
-from joseph.indicators.plugins.order_breaker_blocks import (
-    plugin as order_breaker_blocks,
-)
-from joseph.indicators.plugins.order_flow_pressure import (
-    plugin as order_flow_pressure,
-)
-from joseph.indicators.plugins.premium_discount_ote import (
-    plugin as premium_discount_ote,
-)
+from joseph.indicators.packaged import plugins as packaged
 from joseph.indicators.sdk import protocol
 from joseph.indicators.sdk import registry as registry_lib
 
 
 def default_plugins() -> tuple[protocol.IndicatorPlugin, ...]:
-    """Instantiates the seven first-party plugins.
+    """Instantiates every packaged plugin.
 
     Returns:
         Plugins in display order.
     """
-    return (
-        daily_bias.DailyBiasPlugin(),
-        fvg_ifvg.FvgIfvgPlugin(),
-        order_breaker_blocks.OrderBreakerBlocksPlugin(),
-        liquidity_sweeps.LiquiditySweepsPlugin(),
-        order_flow_pressure.OrderFlowPressurePlugin(),
-        auction_value_areas.AuctionValueAreasPlugin(),
-        premium_discount_ote.PremiumDiscountOtePlugin(),
-    )
+    return packaged.default_plugins()
 
 
 def build_default_registry() -> registry_lib.PluginRegistry:
-    """Builds a registry containing every first-party plugin.
+    """Builds a registry containing every packaged plugin.
 
     Returns:
         Populated registry.

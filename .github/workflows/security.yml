@@ -81,6 +81,7 @@ jobs:
       - name: Python dependencies
         run: |
           for project in joseph-market-engine joseph-execution-engine; do
-            (cd "$project" && uv export --frozen --no-dev --no-hashes --no-emit-project -o /tmp/req-$project.txt)
+            (cd "$project" && uv export --frozen --no-dev --no-hashes --no-emit-project \
+              --no-emit-package joseph-smc-indicators -o /tmp/req-$project.txt)
             uvx pip-audit -r /tmp/req-$project.txt --no-deps --disable-pip
           done

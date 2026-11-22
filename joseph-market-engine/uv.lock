@@ -529,6 +529,7 @@ source = { editable = "." }
 dependencies = [
     { name = "fastapi" },
     { name = "httpx" },
+    { name = "joseph-smc-indicators" },
     { name = "pydantic" },
     { name = "sqlalchemy" },
     { name = "tzdata" },
@@ -554,6 +555,7 @@ dev = [
 requires-dist = [
     { name = "fastapi", specifier = ">=0.115,<1" },
     { name = "httpx", specifier = ">=0.27,<1" },
+    { name = "joseph-smc-indicators", git = "ssh://git@github.com/apoman123/PineScripts.git?subdirectory=python_indicators&rev=89aa506c8c90469a43d2300bbacc58e3491135b2" },
     { name = "pydantic", specifier = ">=2.9,<3" },
     { name = "sqlalchemy", specifier = ">=2.0,<3" },
     { name = "tzdata", specifier = ">=2025.1" },
@@ -573,6 +575,14 @@ dev = [
     { name = "pytest-cov", specifier = ">=5,<8" },
     { name = "respx", specifier = ">=0.21,<1" },
     { name = "ruff", specifier = ">=0.8,<1" },
+]
+
+[[package]]
+name = "joseph-smc-indicators"
+version = "1.0.0"
+source = { git = "ssh://git@github.com/apoman123/PineScripts.git?subdirectory=python_indicators&rev=89aa506c8c90469a43d2300bbacc58e3491135b2#89aa506c8c90469a43d2300bbacc58e3491135b2" }
+dependencies = [
+    { name = "tzdata" },
 ]
 
 [[package]]

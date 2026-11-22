@@ -5,9 +5,28 @@
  * exact venue, instrument, bar and AOI on the chart.
  */
 import {formatUtcDateTime} from '@joseph/chart-trading';
-import type {ReasonNode, Severity, Signal, SignalKind} from '@joseph/contracts';
+import type {
+  AoiRecord,
+  ReasonNode,
+  Severity,
+  Signal,
+  SignalKind,
+} from '@joseph/contracts';
 import type {WritableStore} from '@joseph/feature-registry';
-import {Fragment, useMemo, useState, type ReactNode} from 'react';
+import {Fragment, useEffect, useMemo, useState, type ReactNode} from 'react';
+import {
+  SIGNAL_SORTS,
+  SNOOZE_MINUTES,
+  aoiDistancePct,
+  confluenceOf,
+  isSnoozed,
+  setDismissed,
+  snooze,
+  snoozeLabel,
+  sortSignals,
+  type SignalSort,
+  type SignalTriage,
+} from './ranking';
 import {useStore, type WebFeatureContext} from '../../shell/react-bindings';
 import {
   EmptyState,
@@ -36,6 +55,89 @@ export interface AlertsPanelProps {
   state: WritableStore<AlertsState>;
   /** Acknowledged signal ids. */
   acked: WritableStore<readonly string[]>;
+  /** Snoozed and dismissed signals. */
+  triage: WritableStore<SignalTriage>;
+}
+
+/** Signals considered for AOI distances (newest first). */
+const DISTANCE_LIMIT = 60;
+
+/**
+ * Computes the distance from the latest price to each signal's AOIs.
+ * Prices and AOIs come from the market engine; nothing is inferred.
+ * @param ctx Feature context.
+ * @param signals Signals (newest first).
+ * @return Percent distance by signal id (null when unknown).
+ */
+export function useAoiDistances(
+  ctx: WebFeatureContext,
+  signals: readonly Signal[]
+): Readonly<Record<string, number | null>> {
+  const [distances, setDistances] = useState<Record<string, number | null>>({});
+  const subset = signals.slice(0, DISTANCE_LIMIT);
+  const key = subset.map(s => `${s.signal_id}:${s.revision}`).join('|');
+  useEffect(() => {
+    if (!key) {
+      setDistances({});
+      return;
+    }
+    let alive = true;
+    const load = async () => {
+      const series = new Map<
+        string,
+        {instrumentId: string; timeframe: Signal['timeframe']}
+      >();
+      for (const signal of subset) {
+        if (signal.aoi_ids.length > 0)
+          series.set(`${signal.instrument_id}|${signal.timeframe}`, {
+            instrumentId: signal.instrument_id,
+            timeframe: signal.timeframe,
+          });
+      }
+      const instruments = [
+        ...new Set([...series.values()].map(s => s.instrumentId)),
+      ];
+      const [aoiResults, snapshotResults] = await Promise.all([
+        Promise.allSettled(
+          [...series.values()].map(s => ctx.clients.market.getAois(s))
+        ),
+        Promise.allSettled(
+          instruments.map(id => ctx.clients.market.getSnapshot(id))
+        ),
+      ]);
+      const aois = new Map<string, AoiRecord>();
+      for (const result of aoiResults) {
+        if (result.status === 'fulfilled')
+          for (const aoi of result.value.aois) aois.set(aoi.aoi_id, aoi);
+      }
+      const prices = new Map<string, number>();
+      snapshotResults.forEach((result, i) => {
+        const id = instruments[i];
+        if (!id || result.status !== 'fulfilled') return;
+        const price = Number(result.value.mark ?? result.value.last ?? NaN);
+        if (Number.isFinite(price)) prices.set(id, price);
+      });
+      const next: Record<string, number | null> = {};
+      for (const signal of subset) {
+        const referenced = signal.aoi_ids
+          .map(id => aois.get(id))
+          .filter((aoi): aoi is AoiRecord => aoi !== undefined);
+        next[signal.signal_id] = aoiDistancePct(
+          prices.get(signal.instrument_id) ?? null,
+          referenced
+        );
+      }
+      if (alive) setDistances(next);
+    };
+    void load().catch(() => undefined);
+    const timer = setInterval(() => void load().catch(() => undefined), 30_000);
+    return () => {
+      alive = false;
+      clearInterval(timer);
+    };
+    // `subset` is derived from `key`.
+  }, [ctx, key]); // eslint-disable-line react-hooks/exhaustive-deps
+  return distances;
 }
 
 /** Kind filter groups. */
@@ -114,22 +216,59 @@ export function ReasonTree({node}: {node: ReasonNode}): ReactNode {
  * @param props Props.
  * @return Panel element.
  */
-export function AlertsPanel({ctx, state, acked}: AlertsPanelProps): ReactNode {
+export function AlertsPanel({
+  ctx,
+  state,
+  acked,
+  triage,
+}: AlertsPanelProps): ReactNode {
   const {signals, error, loaded} = useStore(state);
   const ackedIds = useStore(acked);
+  const triaged = useStore(triage);
   const [filter, setFilter] = useState('all');
   const [severity, setSeverity] = useState<Severity | ''>('');
   const [showAcked, setShowAcked] = useState(false);
+  const [showHidden, setShowHidden] = useState(false);
+  const [sort, setSort] = useState<SignalSort>('newest');
   const [open, setOpen] = useState<string | null>(null);
+  const [now, setNow] = useState(() => Date.now());
+  useEffect(() => {
+    const timer = setInterval(() => setNow(Date.now()), 30_000);
+    return () => clearInterval(timer);
+  }, []);
+  const distances = useAoiDistances(ctx, signals);
+  const hiddenCount = signals.filter(
+    s =>
+      triaged.dismissed.includes(s.signal_id) ||
+      isSnoozed(triaged, s.signal_id, now)
+  ).length;
   const visible = useMemo(() => {
     const kinds = FILTERS.find(f => f.id === filter)?.kinds ?? null;
-    return signals.filter(
-      s =>
-        (!kinds || kinds.includes(s.kind)) &&
-        (!severity || s.severity === severity) &&
-        (showAcked || !ackedIds.includes(s.signal_id))
+    return sortSignals(
+      signals.filter(
+        s =>
+          (!kinds || kinds.includes(s.kind)) &&
+          (!severity || s.severity === severity) &&
+          (showAcked || !ackedIds.includes(s.signal_id)) &&
+          (showHidden ||
+            (!triaged.dismissed.includes(s.signal_id) &&
+              !isSnoozed(triaged, s.signal_id, now)))
+      ),
+      sort,
+      distances
     );
-  }, [signals, filter, severity, showAcked, ackedIds]);
+  }, [
+    signals,
+    filter,
+    severity,
+    showAcked,
+    showHidden,
+    ackedIds,
+    triaged,
+    now,
+    sort,
+    distances,
+  ]);
 
   const focus = (signal: Signal) => {
     ctx.select({
@@ -175,6 +314,21 @@ export function AlertsPanel({ctx, state, acked}: AlertsPanelProps): ReactNode {
             <option value="CRITICAL">Critical</option>
           </select>
         </label>
+        <label className={styles.inline}>
+          <span className="j-label">Sort</span>
+          <select
+            className="j-select"
+            value={sort}
+            data-testid="alerts-sort"
+            onChange={e => setSort(e.target.value as SignalSort)}
+          >
+            {SIGNAL_SORTS.map(option => (
+              <option key={option.id} value={option.id}>
+                {option.label}
+              </option>
+            ))}
+          </select>
+        </label>
         <label className="j-check">
           <input
             type="checkbox"
@@ -182,6 +336,15 @@ export function AlertsPanel({ctx, state, acked}: AlertsPanelProps): ReactNode {
             onChange={e => setShowAcked(e.target.checked)}
           />
           Show acknowledged
+        </label>
+        <label className="j-check">
+          <input
+            type="checkbox"
+            checked={showHidden}
+            data-testid="alerts-show-hidden"
+            onChange={e => setShowHidden(e.target.checked)}
+          />
+          Show snoozed and dismissed{hiddenCount > 0 ? ` (${hiddenCount})` : ''}
         </label>
         <span className={styles.grow} />
         <span className="j-muted">{visible.length} shown</span>
@@ -205,6 +368,18 @@ export function AlertsPanel({ctx, state, acked}: AlertsPanelProps): ReactNode {
                 <th>Side</th>
                 <th>TF</th>
                 <th className="j-num">R:R</th>
+                <th
+                  className="j-num"
+                  title="Conditions satisfied in the reason tree"
+                >
+                  Conf.
+                </th>
+                <th
+                  className="j-num"
+                  title="Distance from the latest price to the signal's AOI"
+                >
+                  To AOI
+                </th>
                 <th>Strategy</th>
                 <th>Data</th>
                 <th>
@@ -216,6 +391,13 @@ export function AlertsPanel({ctx, state, acked}: AlertsPanelProps): ReactNode {
               {visible.map(signal => {
                 const expanded = open === signal.signal_id;
                 const isAcked = ackedIds.includes(signal.signal_id);
+                const isDismissed = triaged.dismissed.includes(
+                  signal.signal_id
+                );
+                const snoozedUntil = isSnoozed(triaged, signal.signal_id, now)
+                  ? triaged.snoozed[signal.signal_id]
+                  : undefined;
+                const distance = distances[signal.signal_id];
                 return (
                   <Fragment key={signal.signal_id}>
                     <tr
@@ -249,6 +431,16 @@ export function AlertsPanel({ctx, state, acked}: AlertsPanelProps): ReactNode {
                       </td>
                       <td>{signal.timeframe}</td>
                       <td className="j-num">{signal.rr ?? '—'}</td>
+                      <td className="j-num">
+                        {confluenceOf(signal.reason_tree)}
+                      </td>
+                      <td className="j-num" data-testid="signal-distance">
+                        {distance === undefined || distance === null
+                          ? '—'
+                          : distance === 0
+                            ? 'Inside'
+                            : `${distance.toFixed(2)}%`}
+                      </td>
                       <td
                         className={styles.strategy}
                         title={signal.strategy_version_id}
@@ -275,11 +467,70 @@ export function AlertsPanel({ctx, state, acked}: AlertsPanelProps): ReactNode {
                             Acknowledge
                           </button>
                         )}
+                        {snoozedUntil !== undefined ? (
+                          <button
+                            type="button"
+                            className="j-btn j-btn--sm j-btn--ghost"
+                            title={`Snoozed ${snoozeLabel(snoozedUntil, now)}`}
+                            onClick={() =>
+                              triage.update(t => {
+                                const {[signal.signal_id]: _gone, ...rest} =
+                                  t.snoozed;
+                                return {...t, snoozed: rest};
+                              })
+                            }
+                          >
+                            Wake
+                          </button>
+                        ) : (
+                          <label className={styles.snooze}>
+                            <span className={styles.srOnly}>Snooze signal</span>
+                            <select
+                              className="j-select"
+                              aria-label="Snooze"
+                              value=""
+                              data-testid="signal-snooze"
+                              onChange={e => {
+                                const minutes = Number(e.target.value);
+                                if (minutes > 0)
+                                  triage.update(t =>
+                                    snooze(
+                                      t,
+                                      signal.signal_id,
+                                      minutes,
+                                      Date.now()
+                                    )
+                                  );
+                              }}
+                            >
+                              <option value="">Snooze</option>
+                              {SNOOZE_MINUTES.map(minutes => (
+                                <option key={minutes} value={minutes}>
+                                  {minutes >= 60
+                                    ? `${minutes / 60} h`
+                                    : `${minutes} min`}
+                                </option>
+                              ))}
+                            </select>
+                          </label>
+                        )}
+                        <button
+                          type="button"
+                          className="j-btn j-btn--sm j-btn--ghost"
+                          data-testid="signal-dismiss"
+                          onClick={() =>
+                            triage.update(t =>
+                              setDismissed(t, signal.signal_id, !isDismissed)
+                            )
+                          }
+                        >
+                          {isDismissed ? 'Restore' : 'Dismiss'}
+                        </button>
                       </td>
                     </tr>
                     {expanded && (
                       <tr className={styles.detail}>
-                        <td colSpan={9}>
+                        <td colSpan={11}>
                           {signal.message && (
                             <p className={styles.message}>{signal.message}</p>
                           )}

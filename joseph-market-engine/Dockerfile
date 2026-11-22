@@ -5,12 +5,20 @@ ARG PYTHON_VERSION=3.13
 FROM python:${PYTHON_VERSION}-slim-bookworm AS build
 COPY --from=ghcr.io/astral-sh/uv:0.12.15 /uv /bin/uv
 ENV UV_COMPILE_BYTECODE=1 UV_LINK_MODE=copy UV_PYTHON_DOWNLOADS=never
+# git + ssh fetch the private indicator library (apoman123/PineScripts).
+# Build with an agent holding its deploy key:  docker build --ssh default .
+# The key is only forwarded to RUN --mount=type=ssh, never stored in a layer.
+RUN apt-get update \
+ && apt-get install -y --no-install-recommends git openssh-client \
+ && rm -rf /var/lib/apt/lists/* \
+ && install -m 700 -d /root/.ssh \
+ && echo 'github.com ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIOMqqnkVzrm0SdG6UOoqKLsabgH5C9okWi0dh2l9GKJl' > /root/.ssh/known_hosts
 WORKDIR /app
 COPY pyproject.toml uv.lock README.md ./
-RUN --mount=type=cache,target=/root/.cache/uv \
+RUN --mount=type=cache,target=/root/.cache/uv --mount=type=ssh,required=true \
     uv sync --frozen --no-dev --no-install-project
 COPY src ./src
-RUN --mount=type=cache,target=/root/.cache/uv \
+RUN --mount=type=cache,target=/root/.cache/uv --mount=type=ssh,required=true \
     uv sync --frozen --no-dev --no-editable
 
 FROM python:${PYTHON_VERSION}-slim-bookworm

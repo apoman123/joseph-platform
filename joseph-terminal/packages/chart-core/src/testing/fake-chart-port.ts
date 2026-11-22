@@ -13,9 +13,11 @@ import type {
   ChartPort,
   ChartTheme,
   ChartViewState,
+  CompareSeriesSpec,
   CoordinateTransform,
   Disposer,
   SeriesConfig,
+  StudyPaneSpec,
   TimeRange,
 } from '../chart-port';
 import type {OverlayLayer} from '../overlay-model';
@@ -47,6 +49,8 @@ export class FakeChartPort implements ChartPort {
   bars: ChartBar[] = [];
   readonly layers = new Map<string, OverlayLayer>();
   readonly canvasLayers = new Map<string, CanvasLayer>();
+  readonly studyPanes = new Map<string, StudyPaneSpec>();
+  compare: readonly CompareSeriesSpec[] = [];
   crosshair: {timeMs: number; price: number} | null = null;
   visibleRange: TimeRange | null = null;
   invalidations = 0;
@@ -82,9 +86,15 @@ export class FakeChartPort implements ChartPort {
    * @param config Series configuration.
    */
   setSeries(config: SeriesConfig): void {
-    if (this.config && this.config.instrumentId !== config.instrumentId) {
+    if (
+      this.config &&
+      (this.config.instrumentId !== config.instrumentId ||
+        this.config.timeframe !== config.timeframe)
+    ) {
       this.bars = [];
       this.layers.clear();
+      this.studyPanes.clear();
+      this.compare = [];
     }
     this.config = config;
   }
@@ -225,6 +235,30 @@ export class FakeChartPort implements ChartPort {
   }
 
   /**
+   * Stores a study pane.
+   * @param spec Study spec.
+   */
+  setStudyPane(spec: StudyPaneSpec): void {
+    this.studyPanes.set(spec.id, spec);
+  }
+
+  /**
+   * Removes a study pane.
+   * @param id Study id.
+   */
+  removeStudyPane(id: string): void {
+    this.studyPanes.delete(id);
+  }
+
+  /**
+   * Stores comparison series.
+   * @param series Comparison specs.
+   */
+  setCompareSeries(series: readonly CompareSeriesSpec[]): void {
+    this.compare = series;
+  }
+
+  /**
    * Records interactivity.
    * @param enabled Whether pan/zoom is enabled.
    */
@@ -262,6 +296,8 @@ export class FakeChartPort implements ChartPort {
     this.handlers.clear();
     this.layers.clear();
     this.canvasLayers.clear();
+    this.studyPanes.clear();
+    this.compare = [];
   }
 
   /**

@@ -238,6 +238,11 @@ export interface TerminalSelection {
   accountId: string | null;
   /** Order mode selected in the UI (LIVE is never selectable by default). */
   orderMode: OrderMode;
+  /**
+   * Whether the active chart is in bar replay. Trading features must not
+   * place or change orders from a replayed chart.
+   */
+  replay?: boolean;
 }
 
 /** Capabilities known to the shell: `demo`, `market`, `strategy`, `execution`, `user-stream`, `venue:<id>:<capability>`. */
@@ -289,6 +294,7 @@ export interface ChartLayerRegistry {
       chartId: string;
       instrumentId: InstrumentId;
       timeframe: Timeframe;
+      atMs?: number | null;
     }) => ReadableStore<OverlayLayer | null>
   ): Disposer;
 }

@@ -158,7 +158,7 @@ class LiveSignalPipeline:
         """
         parsed = instruments.InstrumentId.parse(instrument_id)
         tf = requirements.signal_timeframe
-        engine = self._provider.new_engine(parsed, requirements)
+        engine = await self._provider.engine_for(parsed, requirements)
         now = self._clock.now_ms()
         start = tf.floor(now) - max(requirements.history_bars, 1) * (
             tf.duration_ms

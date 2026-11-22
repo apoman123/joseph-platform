@@ -89,7 +89,7 @@ ci: lint typecheck test ## Everything CI runs
 	cd $(EE) && uv run python scripts/export_openapi.py --check
 
 images: ## Build the three production container images locally
-	docker build -t joseph-market-engine:local $(ME)
+	docker build --ssh default -t joseph-market-engine:local $(ME)
 	docker build -t joseph-execution-engine:local $(EE)
 	docker build -t joseph-terminal:local $(TERM_DIR)
 

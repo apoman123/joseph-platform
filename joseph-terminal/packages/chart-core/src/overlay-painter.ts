@@ -108,7 +108,7 @@ function paintBox(
 ): void {
   const rect = layoutBox(box, transform);
   if (!rect) return;
-  const color = toneColor(theme, box.tone);
+  const color = box.color ?? toneColor(theme, box.tone);
   ctx.fillStyle = withAlpha(color, box.fillOpacity);
   ctx.fillRect(rect.x, rect.y, rect.width, rect.height);
   ctx.setLineDash(DASHES[box.lineStyle]);
@@ -147,7 +147,7 @@ function paintRay(
   const x = transform.timeToX(line.fromMs ?? 0);
   const y = transform.priceToY(Number(line.price));
   if (x === null || y === null) return;
-  const color = toneColor(theme, line.tone);
+  const color = line.color ?? toneColor(theme, line.tone);
   ctx.strokeStyle = color;
   ctx.lineWidth = 1;
   ctx.setLineDash(line.pending ? [4, 4] : DASHES[line.lineStyle]);

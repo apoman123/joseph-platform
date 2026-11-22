@@ -9,6 +9,7 @@ import {createRuntime, type TerminalRuntime} from '../composition/runtime';
 import {ChartGrid} from './chart-grid';
 import {CommandPalette, StatusBar, Toasts} from './chrome';
 import {DrawingToolbar} from './drawing-toolbar';
+import {IndicatorSettingsDialog} from './indicator-settings-dialog';
 import {useStore} from './react-bindings';
 import {RuntimeProvider} from './runtime-context';
 import {SlotTabs} from './slot-host';
@@ -108,6 +109,7 @@ export function TerminalApp(): ReactElement {
         </div>
         <StatusBar />
         <CommandPalette />
+        <IndicatorSettingsDialog />
         <Toasts />
       </div>
     </RuntimeProvider>

@@ -2,13 +2,29 @@
  * @fileoverview Chart grid for 1/2/4/8 layouts plus the chart context menu.
  */
 'use client';
-import {visibleCharts} from '@joseph/terminal-shell';
-import {useCallback, useEffect, useState, type ReactElement} from 'react';
+import {
+  gridSizesFor,
+  resizeTracks,
+  tracksToTemplate,
+  visibleCharts,
+  type GridSizes,
+} from '@joseph/terminal-shell';
+import {
+  useCallback,
+  useEffect,
+  useRef,
+  useState,
+  type ReactElement,
+} from 'react';
 import {ChartPane, type PaneMenu} from './chart-pane';
 import {useStore} from './react-bindings';
 import {useRuntime} from './runtime-context';
 import {SlotInline} from './slot-host';
 import {formatNumber} from './format';
+import {Splitter} from './splitter';
+
+/** Workspace panel key holding chart-grid track sizes per layout. */
+export const GRID_PANEL_KEY = 'shell.grid';
 
 /**
  * Chart grid.
@@ -18,6 +34,47 @@ export function ChartGrid(): ReactElement {
   const runtime = useRuntime();
   const workspace = useStore(runtime.workspace);
   const charts = visibleCharts(workspace);
+  const gridRef = useRef<HTMLDivElement>(null);
+  const savedSizes = (
+    workspace.panels as Record<string, unknown> | undefined
+  )?.[GRID_PANEL_KEY] as Record<string, unknown> | undefined;
+  const committed = gridSizesFor(
+    workspace.layout,
+    savedSizes?.[workspace.layout]
+  );
+  const [dragging, setDragging] = useState<GridSizes | null>(null);
+  const draggingRef = useRef<GridSizes | null>(null);
+  const sizes = dragging ?? committed;
+  const commit = (next: GridSizes) => {
+    runtime.dispatch({
+      type: 'setPanel',
+      featureId: GRID_PANEL_KEY,
+      state: {...(savedSizes ?? {}), [workspace.layout]: next},
+    });
+    setDragging(null);
+  };
+  const resize = (axis: 'cols' | 'rows', index: number, deltaPx: number) => {
+    const box = gridRef.current?.getBoundingClientRect();
+    const extent = axis === 'cols' ? box?.width : box?.height;
+    if (!extent) return;
+    const base = draggingRef.current ?? committed;
+    const next = {
+      ...base,
+      [axis]: resizeTracks(base[axis], index, deltaPx / extent),
+    };
+    draggingRef.current = next;
+    setDragging(next);
+  };
+  const finish = () => {
+    const value = draggingRef.current;
+    draggingRef.current = null;
+    if (value) commit(value);
+    else setDragging(null);
+  };
+  const boundaries = (tracks: readonly number[]) =>
+    tracks
+      .slice(0, -1)
+      .map((_, i) => tracks.slice(0, i + 1).reduce((sum, t) => sum + t, 0));
   const [menu, setMenu] = useState<{chartId: string; menu: PaneMenu} | null>(
     null
   );
@@ -39,10 +96,45 @@ export function ChartGrid(): ReactElement {
   }, [menu]);
   return (
     <div
+      ref={gridRef}
       className={`chart-grid chart-grid--${workspace.layout}`}
       data-testid="chart-grid"
       data-layout={workspace.layout}
+      style={{
+        gridTemplateColumns: tracksToTemplate(sizes.cols),
+        gridTemplateRows: tracksToTemplate(sizes.rows),
+      }}
     >
+      {boundaries(sizes.cols).map((at, index) => (
+        <Splitter
+          key={`col-${index}`}
+          orientation="vertical"
+          label={`Resize chart columns ${index + 1} and ${index + 2}`}
+          value={at * 100}
+          min={0}
+          max={100}
+          className="chart-grid__splitter"
+          style={{left: `calc(${at * 100}% - 3px)`}}
+          testId={`grid-splitter-col-${index}`}
+          onDrag={delta => resize('cols', index, delta)}
+          onCommit={finish}
+        />
+      ))}
+      {boundaries(sizes.rows).map((at, index) => (
+        <Splitter
+          key={`row-${index}`}
+          orientation="horizontal"
+          label={`Resize chart rows ${index + 1} and ${index + 2}`}
+          value={at * 100}
+          min={0}
+          max={100}
+          className="chart-grid__splitter"
+          style={{top: `calc(${at * 100}% - 3px)`}}
+          testId={`grid-splitter-row-${index}`}
+          onDrag={delta => resize('rows', index, delta)}
+          onCommit={finish}
+        />
+      ))}
       {charts.map((chart, index) => (
         <div
           key={chart.chart_id}

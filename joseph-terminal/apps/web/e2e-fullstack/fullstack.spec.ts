@@ -70,6 +70,62 @@ test('terminal runs on backend data, not the in-browser demo provider', async ({
   await page.screenshot({path: 'e2e/screenshots/09-fullstack-terminal.png'});
 });
 
+test('engine indicator series and market structure reach the chart', async ({
+  page,
+}) => {
+  const series = page.waitForResponse(
+    response =>
+      response
+        .url()
+        .startsWith(`${API.NEXT_PUBLIC_MARKET_API_URL}/v1/indicators/series`) &&
+      response.url().includes('mock%3Aperp%3ABTCUSD') &&
+      response.ok(),
+    {timeout: 60_000}
+  );
+  const aois = page.waitForResponse(
+    response =>
+      response.url().startsWith(`${API.NEXT_PUBLIC_MARKET_API_URL}/v1/aois`) &&
+      response.url().includes('mock%3Aperp%3ABTCUSD') &&
+      response.ok(),
+    {timeout: 60_000}
+  );
+  await loadOnDemoVenue(page);
+  // The Delta % sub-pane is fed by the Python order-flow port, bar by bar.
+  const seriesBody = (await (await series).json()) as {
+    plugin_id: string;
+    indicator_version: string;
+    points: {bar_start_ms: number; values: Record<string, unknown>}[];
+  };
+  expect(seriesBody.plugin_id).toBe('order_flow_pressure');
+  expect(seriesBody.indicator_version).not.toBe('demo');
+  expect(seriesBody.points.length).toBeGreaterThan(0);
+  expect(seriesBody.points[0]?.values).toHaveProperty('delta_pct');
+  // The current-timeframe structure port publishes swing labels or levels.
+  const aoiBody = (await (await aois).json()) as {
+    aois: {source: string}[];
+    events: {source: string; name: string}[];
+  };
+  const fromStructure = [...aoiBody.aois, ...aoiBody.events].filter(
+    item => item.source === 'market_structure'
+  );
+  expect(fromStructure.length).toBeGreaterThan(0);
+  // The data window shows the engine's Delta % under the crosshair.
+  await page.getByTestId('indicators-menu').click();
+  await page.getByTestId('data-window-toggle').check();
+  await page.keyboard.press('Escape');
+  const chart = page
+    .getByTestId('chart-pane-chart-1')
+    .locator('canvas')
+    .first();
+  const box = await chart.boundingBox();
+  if (!box) throw new Error('chart canvas has no box');
+  await page.mouse.move(box.x + box.width * 0.75, box.y + box.height * 0.4);
+  await expect(page.getByTestId('data-window')).toContainText(
+    /Delta %\s*[−+-]?\d/
+  );
+  await page.screenshot({path: 'e2e/screenshots/20-fullstack-indicators.png'});
+});
+
 test('a paper order from the ticket is created by the execution engine', async ({
   page,
   request,

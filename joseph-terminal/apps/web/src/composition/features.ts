@@ -19,6 +19,7 @@ import {
   themeFeature,
   workspaceFeature,
 } from '../features/shell/shell-features';
+import {chartToolsFeature} from '../features/shell/chart-tools-feature';
 import {STRATEGY_FEATURE} from '../features/strategy';
 import {TRADING_FEATURE} from '../features/trading';
 import {WATCHLIST_FEATURE} from '../features/watchlist';
@@ -35,6 +36,7 @@ export function shellFeatures(runtime: TerminalRuntime): WebFeature[] {
     workspaceFeature(runtime),
     themeFeature(runtime),
     paletteFeature(runtime),
+    chartToolsFeature(runtime),
     drawingFeature(runtime),
     ...toolFeatures(runtime),
     indicatorsFeature(runtime),

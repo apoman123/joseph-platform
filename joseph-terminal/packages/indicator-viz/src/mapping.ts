@@ -33,6 +33,7 @@ export const PLUGIN_NAMES: Readonly<Record<string, string>> = {
   order_flow_pressure: 'Order flow',
   auction_value_areas: 'Value areas',
   premium_discount_ote: 'Premium, discount and OTE',
+  market_structure: 'Market structure',
 };
 
 /** Paint order per plugin (zones below lines below markers). */
@@ -43,6 +44,7 @@ const PLUGIN_Z: Readonly<Record<string, number>> = {
   fvg_ifvg: 40,
   liquidity_sweeps: 50,
   daily_bias: 60,
+  market_structure: 65,
   order_flow_pressure: 70,
 };
 
@@ -59,6 +61,14 @@ const LEVEL_KINDS: ReadonlySet<AoiKind> = new Set([
   'PDL',
   'SESSION_HIGH',
   'SESSION_LOW',
+  'SWING_HIGH',
+  'SWING_LOW',
+]);
+
+/** Kinds that are pending levels (drawn dashed until broken). */
+const PENDING_KINDS: ReadonlySet<AoiKind> = new Set([
+  'SWING_HIGH',
+  'SWING_LOW',
 ]);
 
 /** Fill opacity per zone kind. */
@@ -81,6 +91,10 @@ export interface PluginVizSettings {
   hiddenKinds: readonly AoiKind[];
   /** Whether structure-event markers are shown. */
   showEvents: boolean;
+  /** When set, only these kinds are shown (per-chart kind filter). */
+  shownKinds?: readonly AoiKind[];
+  /** User colors per AOI kind or event name (`#rrggbb`). */
+  colors?: Readonly<Record<string, string>>;
 }
 
 /** Visualization settings (persisted per user). */
@@ -147,10 +161,14 @@ export function aoiLabel(aoi: AoiRecord): string {
     EQUILIBRIUM: 'EQ',
     SESSION_HIGH: 'Session high',
     SESSION_LOW: 'Session low',
+    SWING_HIGH: 'Swing high',
+    SWING_LOW: 'Swing low',
   };
   const base = names[aoi.kind] ?? aoi.kind;
   const score = aoi.quality_score != null ? ` ${aoi.quality_score}` : '';
   const range = aoi.range_id ? ` (range ${aoi.range_id.slice(-4)})` : '';
+  // Unbroken swings are drawn dashed; the line style carries "pending" so
+  // the in-chart label stays short next to liquidity labels.
   const state =
     aoi.state === 'tested' ? ', tested' : isEnded(aoi) ? `, ${aoi.state}` : '';
   return `${base}${score}${range}${state}`;
@@ -176,6 +194,7 @@ export function aoiToOverlay(aoi: AoiRecord): BoxOverlay | PriceLineOverlay {
           : 'dashed',
       label: aoiLabel(aoi),
       fromMs: aoi.created_at_ms,
+      ...(PENDING_KINDS.has(aoi.kind) && !isEnded(aoi) ? {pending: true} : {}),
     };
   }
   return {
@@ -256,7 +275,65 @@ const EVENT_MARKERS: Partial<
     tone: 'ask',
     text: 'Seller breakout',
   },
+  INITIAL_BREAK_BULL: {
+    position: 'below',
+    shape: 'arrow-up',
+    tone: 'bid',
+    text: 'Initial break',
+  },
+  INITIAL_BREAK_BEAR: {
+    position: 'above',
+    shape: 'arrow-down',
+    tone: 'ask',
+    text: 'Initial break',
+  },
+  SWING_HH: {position: 'above', shape: 'circle', tone: 'bid', text: 'HH'},
+  SWING_LH: {position: 'above', shape: 'circle', tone: 'ask', text: 'LH'},
+  SWING_EQH: {position: 'above', shape: 'circle', tone: 'neutral', text: 'EQH'},
+  SWING_HL: {position: 'below', shape: 'circle', tone: 'bid', text: 'HL'},
+  SWING_LL: {position: 'below', shape: 'circle', tone: 'ask', text: 'LL'},
+  SWING_EQL: {position: 'below', shape: 'circle', tone: 'neutral', text: 'EQL'},
 };
+
+/**
+ * Short marker text of an event name, if the event is drawn as a marker.
+ * @param name Event name.
+ * @return Marker text or null.
+ */
+export function markerText(name: StructureEventName): string | null {
+  return EVENT_MARKERS[name]?.text ?? null;
+}
+
+/** Events whose break line runs from the broken pivot to the break bar. */
+const BREAK_EVENTS: ReadonlySet<StructureEventName> = new Set([
+  'BOS_BULL',
+  'BOS_BEAR',
+  'CHOCH_BULL',
+  'CHOCH_BEAR',
+  'INITIAL_BREAK_BULL',
+  'INITIAL_BREAK_BEAR',
+]);
+
+/** Swing label events (drawn at the pivot bar once confirmed). */
+const SWING_EVENTS: ReadonlySet<StructureEventName> = new Set([
+  'SWING_HH',
+  'SWING_HL',
+  'SWING_LH',
+  'SWING_LL',
+  'SWING_EQH',
+  'SWING_EQL',
+]);
+
+/**
+ * Reads the pivot time a structure event refers to, if the engine sent one.
+ * @param event Structure event.
+ * @return Pivot bar start (UTC ms) or null.
+ */
+export function eventPivotMs(event: StructureEvent): number | null {
+  const pivot = (event.meta as Record<string, unknown> | undefined)
+    ?.pivot_time_ms;
+  return typeof pivot === 'number' && Number.isFinite(pivot) ? pivot : null;
+}
 
 /**
  * Maps a structure event to a marker, if it has one.
@@ -266,12 +343,56 @@ const EVENT_MARKERS: Partial<
 export function eventToMarker(event: StructureEvent): MarkerOverlay | null {
   const style = EVENT_MARKERS[event.name];
   if (!style) return null;
+  const mss =
+    event.source === 'market_structure' &&
+    (event.name === 'CHOCH_BULL' || event.name === 'CHOCH_BEAR');
+  const pivot = SWING_EVENTS.has(event.name) ? eventPivotMs(event) : null;
   return {
     kind: 'marker',
     id: event.event_id,
-    timeMs: event.bar_start_ms,
+    timeMs: pivot ?? event.bar_start_ms,
     ...style,
+    ...(mss ? {text: 'MSS'} : {}),
   };
+}
+
+/**
+ * Maps a break event to the line from the broken pivot to the break bar.
+ * @param event Structure event.
+ * @return Line-shaped box, or null without pivot time or price.
+ */
+export function eventToBreakLine(event: StructureEvent): BoxOverlay | null {
+  if (!BREAK_EVENTS.has(event.name) || !event.price) return null;
+  const pivot = eventPivotMs(event);
+  if (pivot === null || pivot >= event.bar_start_ms) return null;
+  const bullish = event.name.endsWith('_BULL');
+  return {
+    kind: 'box',
+    id: `${event.event_id}:line`,
+    fromMs: pivot,
+    toMs: event.bar_start_ms,
+    lower: event.price,
+    upper: event.price,
+    tone: bullish ? 'bid' : 'ask',
+    fillOpacity: 0,
+    lineStyle: event.name.startsWith('BOS') ? 'solid' : 'dashed',
+  };
+}
+
+/**
+ * Applies a user color to a model when one is configured for its key.
+ * @param model Overlay model.
+ * @param key AOI kind or event name.
+ * @param colors Configured colors.
+ * @return Model, colored when configured.
+ */
+function colored<T extends OverlayModel>(
+  model: T,
+  key: string,
+  colors: Readonly<Record<string, string>> | undefined
+): T {
+  const color = colors?.[key];
+  return color && /^#[0-9a-f]{6}$/i.test(color) ? {...model, color} : model;
 }
 
 /** Inputs for building indicator layers on one chart. */
@@ -290,6 +411,8 @@ export interface IndicatorLayerInput {
   feedState: FeedState;
   /** User settings. */
   settings: VizSettings;
+  /** Replay point-in-time; captions then say `replay`. */
+  atMs?: number | null;
 }
 
 /**
@@ -359,28 +482,53 @@ export function buildIndicatorLayers(
     const plugin = input.settings.plugins[aoi.source];
     if (plugin && (!plugin.visible || plugin.hiddenKinds.includes(aoi.kind)))
       return false;
+    if (plugin?.shownKinds && !plugin.shownKinds.includes(aoi.kind))
+      return false;
     return !isEnded(aoi) || input.settings.showEnded;
   });
   for (const aoi of limitPerKind(
     shown,
     input.settings.maxZonesPerKind ?? DEFAULT_MAX_ZONES_PER_KIND
   )) {
-    push(aoi.source, aoiToOverlay(aoi));
+    const colors = input.settings.plugins[aoi.source]?.colors;
+    push(aoi.source, colored(aoiToOverlay(aoi), aoi.kind, colors));
   }
+  // `daily_bias` and `market_structure` run the same Pine break rule on the
+  // chart series; draw each break once, preferring the structure layer.
+  const structureBreaks = new Set(
+    input.events
+      .filter(e => e.source === 'market_structure' && BREAK_EVENTS.has(e.name))
+      .filter(() => {
+        const ms = input.settings.plugins['market_structure'];
+        return !ms || (ms.visible && ms.showEvents);
+      })
+      .map(e => `${e.timeframe}|${e.bar_start_ms}|${e.name}`)
+  );
   for (const event of input.events) {
     if (event.instrument_id !== input.instrumentId) continue;
     const plugin = input.settings.plugins[event.source];
     if (plugin && (!plugin.visible || !plugin.showEvents)) continue;
+    if (
+      event.source === 'daily_bias' &&
+      structureBreaks.has(
+        `${event.timeframe}|${event.bar_start_ms}|${event.name}`
+      )
+    )
+      continue;
     const marker = eventToMarker(event);
-    if (marker) push(event.source, marker);
+    if (marker) push(event.source, colored(marker, event.name, plugin?.colors));
+    const line = eventToBreakLine(event);
+    if (line) push(event.source, colored(line, event.name, plugin?.colors));
   }
-  const time = new Date(input.asOfMs).toISOString().slice(11, 16);
+  const time = new Date(input.atMs ?? input.asOfMs).toISOString().slice(11, 16);
+  const provenance =
+    input.atMs != null ? 'replay' : feedStateLabel(input.feedState);
   return [...byPlugin.entries()].map(([plugin, models]) => ({
     layerId: `indicator-viz:${plugin}`,
     zIndex: PLUGIN_Z[plugin] ?? 80,
     visible: true,
     models,
-    caption: `${PLUGIN_NAMES[plugin] ?? plugin}, as of ${time} UTC (${feedStateLabel(input.feedState)})`,
+    caption: `${PLUGIN_NAMES[plugin] ?? plugin}, as of ${time} UTC (${provenance})`,
   }));
 }
 

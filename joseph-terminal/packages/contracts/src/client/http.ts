@@ -23,6 +23,7 @@ import type {
   ErrorResponse,
   FillList,
   IndicatorPluginList,
+  IndicatorSeries,
   IndicatorSnapshotList,
   InstrumentList,
   KillSwitchList,
@@ -50,6 +51,7 @@ import type {
 import type {
   CandleQuery,
   ExecutionClient,
+  IndicatorSeriesQuery,
   InstrumentQuery,
   MarketDataClient,
   SeriesQuery,
@@ -149,6 +151,20 @@ export class HttpTransport {
     }
     return parsed as T;
   }
+}
+
+/**
+ * Encodes per-plugin setting overrides as a compact JSON query value.
+ * @param settings Overrides keyed by plugin id.
+ * @return JSON text, or undefined when there are none.
+ */
+function encodeSettings(
+  settings:
+    Readonly<Record<string, Readonly<Record<string, unknown>>>> | undefined
+): string | undefined {
+  return settings && Object.keys(settings).length > 0
+    ? JSON.stringify(settings)
+    : undefined;
 }
 
 /**
@@ -282,6 +298,7 @@ export class HttpMarketDataClient implements MarketDataClient {
       tf: query.timeframe,
       set: query.plugins,
       at_ms: query.atMs,
+      settings: encodeSettings(query.settings),
     });
   }
 
@@ -296,6 +313,24 @@ export class HttpMarketDataClient implements MarketDataClient {
       tf: query.timeframe,
       set: query.plugins,
       at_ms: query.atMs,
+      settings: encodeSettings(query.settings),
+    });
+  }
+
+  /**
+   * Fetches per-bar values of one plugin.
+   * @param query Series query.
+   * @return Indicator series.
+   */
+  getIndicatorSeries(query: IndicatorSeriesQuery): Promise<IndicatorSeries> {
+    return this.http.request('GET', '/v1/indicators/series', {
+      instrument_id: query.instrumentId,
+      tf: query.timeframe,
+      plugin: query.pluginId,
+      from_ms: query.fromMs,
+      settings: query.settings
+        ? JSON.stringify({[query.pluginId]: query.settings})
+        : undefined,
     });
   }
 }

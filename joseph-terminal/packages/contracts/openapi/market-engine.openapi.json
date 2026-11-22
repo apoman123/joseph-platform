@@ -291,7 +291,9 @@
           "PDH",
           "PDL",
           "SESSION_HIGH",
-          "SESSION_LOW"
+          "SESSION_LOW",
+          "SWING_HIGH",
+          "SWING_LOW"
         ],
         "title": "AoiKind",
         "type": "string"
@@ -2095,7 +2097,13 @@
           "BUYER_BREAKOUT",
           "SELLER_BREAKOUT",
           "RANGE_RESET",
-          "VALUE_AREA_UPDATED"
+          "VALUE_AREA_UPDATED",
+          "SWING_HH",
+          "SWING_HL",
+          "SWING_LH",
+          "SWING_LL",
+          "SWING_EQH",
+          "SWING_EQL"
         ],
         "title": "StructureEventName",
         "type": "string"
@@ -2535,6 +2543,22 @@
               ],
               "title": "At Ms"
             }
+          },
+          {
+            "in": "query",
+            "name": "settings",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Settings"
+            }
           }
         ],
         "responses": {
@@ -2709,6 +2733,102 @@
         ]
       }
     },
+    "/v1/indicators/series": {
+      "get": {
+        "description": "Returns one plugin's per-bar values (contract IndicatorSeries).",
+        "operationId": "get_series_v1_indicators_series_get",
+        "parameters": [
+          {
+            "in": "query",
+            "name": "instrument_id",
+            "required": true,
+            "schema": {
+              "title": "Instrument Id",
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "tf",
+            "required": true,
+            "schema": {
+              "title": "Tf",
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "plugin",
+            "required": true,
+            "schema": {
+              "title": "Plugin",
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "from_ms",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "minimum": 0,
+                  "type": "integer"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "From Ms"
+            }
+          },
+          {
+            "in": "query",
+            "name": "settings",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Settings"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "additionalProperties": true,
+                  "title": "Response Get Series V1 Indicators Series Get",
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Get Series",
+        "tags": [
+          "indicators"
+        ]
+      }
+    },
     "/v1/indicators/snapshot": {
       "get": {
         "description": "Returns indicator snapshots (contract IndicatorSnapshotList).",
@@ -2763,6 +2883,22 @@
                 }
               ],
               "title": "At Ms"
+            }
+          },
+          {
+            "in": "query",
+            "name": "settings",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Settings"
             }
           }
         ],

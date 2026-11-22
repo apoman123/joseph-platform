@@ -26,6 +26,7 @@ import type {
   DeploymentRequest,
   FillList,
   IndicatorPluginList,
+  IndicatorSeries,
   IndicatorSnapshotList,
   InstrumentList,
   KillSwitchList,
@@ -89,6 +90,25 @@ export interface SeriesQuery {
   plugins?: readonly string[];
   /** Optional point-in-time (UTC ms); latest when omitted. */
   atMs?: number;
+  /**
+   * Optional per-plugin input overrides, e.g. `{fvg_ifvg: {min_gap_atr:
+   * 0.2}}`. The backend validates them against each plugin's input schema.
+   */
+  settings?: Readonly<Record<string, Readonly<Record<string, unknown>>>>;
+}
+
+/** Query for per-bar values of one plugin. */
+export interface IndicatorSeriesQuery {
+  /** Canonical instrument id. */
+  instrumentId: string;
+  /** Series timeframe. */
+  timeframe: Timeframe;
+  /** Plugin id, e.g. `order_flow_pressure`. */
+  pluginId: string;
+  /** Inclusive start (UTC ms); a default window when omitted. */
+  fromMs?: number;
+  /** Optional input overrides for this plugin. */
+  settings?: Readonly<Record<string, unknown>>;
 }
 
 /** Query for the signal history. */
@@ -166,6 +186,12 @@ export interface MarketDataClient {
    * @return AOI list.
    */
   getAois(query: SeriesQuery): Promise<AoiList>;
+  /**
+   * Fetches per-bar published values of one plugin (sub-pane data).
+   * @param query Series, plugin and optional range/settings.
+   * @return Point-in-time values per closed bar.
+   */
+  getIndicatorSeries(query: IndicatorSeriesQuery): Promise<IndicatorSeries>;
 }
 
 /** Authenticated strategy authoring, backtests and signal history. */

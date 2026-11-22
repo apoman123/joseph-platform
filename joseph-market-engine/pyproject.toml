@@ -13,7 +13,13 @@ dependencies = [
   "websockets>=13,<17",
   "sqlalchemy>=2.0,<3",
   "tzdata>=2025.1",
+  "joseph-smc-indicators",
 ]
+
+[tool.uv.sources]
+# Indicator algorithms live in the private apoman123/PineScripts repository
+# (python_indicators/). Pinned to a commit; bump `rev` to adopt new ports.
+joseph-smc-indicators = { git = "ssh://git@github.com/apoman123/PineScripts.git", rev = "89aa506c8c90469a43d2300bbacc58e3491135b2", subdirectory = "python_indicators" }
 
 [dependency-groups]
 dev = [

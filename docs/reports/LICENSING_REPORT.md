@@ -7,8 +7,8 @@
 | Next.js, React, lucide-react and transitive npm deps | MIT / ISC / Apache-2.0 / BSD family | Checked by `pnpm licenses:check` (allowlist; CI fails on anything else) |
 | Python deps (FastAPI, Pydantic, httpx, websockets, SQLAlchemy, uvicorn, cryptography) | MIT / BSD / Apache-2.0 | Private services; list with `uv run pip-licenses` |
 | TradingView Advanced Charts / Trading Platform | Proprietary | **Not used.** No code, assets or styles copied |
-| `apoman123/PineScripts` | Private | Not accessed and not included anywhere (see `PINE_SOURCE_REVISION.md`) |
-| `smc_premium_discount_ote_zones.pine` | Contains LuxAlgo CC BY-NC-SA 4.0 notice | Non-commercial + share-alike. The Python plugin is a clean-room functional implementation from the V5 text; obtain legal review or permission before commercial use or publishing derived logic |
+| `apoman123/PineScripts` incl. `python_indicators/` (`joseph-smc-indicators`) | Private (owner's) | Indicator library; installed into the market engine as a pinned git dependency, never vendored into this repo or the public terminal. Plugins report `PINE_PORT_PENDING_REVIEW` |
+| `smc_premium_discount_ote_zones.pine` and its port `smc_indicators/premium_discount_ote.py` | LuxAlgo, CC BY-NC-SA 4.0 | **The port is a derivative work.** Attribution (© LuxAlgo, licence link, change note) is kept in the module and in `python_indicators/LICENSES/`. **NonCommercial:** while the `premium_discount_ote` plugin is enabled, the market engine must not be used or offered commercially. **ShareAlike:** modified versions of that module must stay CC BY-NC-SA 4.0. For commercial use, get permission from LuxAlgo, or disable the plugin (`PluginRegistry.disable`) and remove it from strategies |
 | Exchange market data | Venue terms of service | Redistributing venue data through a hosted public terminal needs per-venue ToS review |
 
 Before publishing `joseph-terminal`: run `pnpm secrets:scan`, `pnpm licenses:check`, confirm `NOTICE`, and confirm no file references the private engines.

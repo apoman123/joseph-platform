@@ -6,6 +6,9 @@ to the contract ``ErrorResponse``.
 
 from __future__ import annotations
 
+import json
+from collections.abc import Mapping
+
 import fastapi
 
 from joseph.domain import errors
@@ -52,6 +55,47 @@ def _parse_set(raw: str | None) -> list[str] | None:
     return [part.strip() for part in raw.split(",") if part.strip()]
 
 
+_MAX_SETTINGS_CHARS = 4096
+"""Upper bound of the ``settings`` query value."""
+
+
+def _parse_settings(raw: str | None) -> dict[str, dict[str, object]] | None:
+    """Parses the JSON ``settings`` parameter.
+
+    The value maps plugin ids to setting overrides, e.g.
+    ``{"fvg_ifvg": {"min_gap_atr": "0.2"}}``. Each plugin validates its own
+    overrides against its input schema when the engine is built.
+
+    Args:
+        raw: Raw parameter value.
+
+    Returns:
+        Per-plugin overrides, or ``None`` when absent.
+
+    Raises:
+        ValidationFailedError: If the value is not a JSON object of objects
+            or is too long.
+    """
+    if raw is None or not raw.strip():
+        return None
+    if len(raw) > _MAX_SETTINGS_CHARS:
+        raise errors.ValidationFailedError("settings is too long")
+    try:
+        parsed = json.loads(raw)
+    except json.JSONDecodeError as err:
+        raise errors.ValidationFailedError(
+            f"settings is not valid JSON: {err.msg}"
+        ) from err
+    if not isinstance(parsed, Mapping) or not all(
+        isinstance(key, str) and isinstance(value, Mapping)
+        for key, value in parsed.items()
+    ):
+        raise errors.ValidationFailedError(
+            "settings must map plugin ids to objects of overrides"
+        )
+    return {key: dict(value) for key, value in parsed.items()}
+
+
 def build_router(
     query_service: service_lib.IndicatorQueryService,
     registry: registry_lib.PluginRegistry,
@@ -63,8 +107,8 @@ def build_router(
         registry: Plugin registry.
 
     Returns:
-        Router with ``/v1/indicators/plugins``, ``/v1/indicators/snapshot``
-        and ``/v1/aois``.
+        Router with ``/v1/indicators/plugins``, ``/v1/indicators/snapshot``,
+        ``/v1/indicators/series`` and ``/v1/aois``.
     """
     router = fastapi.APIRouter(tags=["indicators"])
 
@@ -79,11 +123,32 @@ def build_router(
         tf: str,
         plugin_set: str | None = fastapi.Query(None, alias="set"),
         at_ms: int | None = fastapi.Query(None, ge=0),
+        settings: str | None = None,
     ) -> dict[str, object]:
         """Returns indicator snapshots (contract IndicatorSnapshotList)."""
         instrument, timeframe = _parse_series(instrument_id, tf)
         return await query_service.snapshots(
-            instrument, timeframe, _parse_set(plugin_set), at_ms
+            instrument,
+            timeframe,
+            _parse_set(plugin_set),
+            at_ms,
+            _parse_settings(settings),
+        )
+
+    @router.get("/v1/indicators/series")
+    async def get_series(
+        instrument_id: str,
+        tf: str,
+        plugin: str,
+        from_ms: int | None = fastapi.Query(None, ge=0),
+        settings: str | None = None,
+    ) -> dict[str, object]:
+        """Returns one plugin's per-bar values (contract IndicatorSeries)."""
+        instrument, timeframe = _parse_series(instrument_id, tf)
+        registry.get(plugin)
+        overrides = _parse_settings(settings) or {}
+        return await query_service.series(
+            instrument, timeframe, plugin, from_ms, overrides.get(plugin)
         )
 
     @router.get("/v1/aois")
@@ -92,11 +157,16 @@ def build_router(
         tf: str,
         plugin_set: str | None = fastapi.Query(None, alias="set"),
         at_ms: int | None = fastapi.Query(None, ge=0),
+        settings: str | None = None,
     ) -> dict[str, object]:
         """Returns AOIs and recent events (contract AoiList)."""
         instrument, timeframe = _parse_series(instrument_id, tf)
         return await query_service.aois(
-            instrument, timeframe, _parse_set(plugin_set), at_ms
+            instrument,
+            timeframe,
+            _parse_set(plugin_set),
+            at_ms,
+            _parse_settings(settings),
         )
 
     return router

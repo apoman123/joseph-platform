@@ -58,3 +58,23 @@
   overflow: hidden;
   clip: rect(0 0 0 0);
 }
+.sortable {
+  padding: 0;
+  border: 0;
+  background: transparent;
+  color: inherit;
+  font: inherit;
+  cursor: pointer;
+}
+.sortable:hover {
+  color: var(--chalk);
+}
+.columns {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-1) var(--space-3);
+  margin: 0;
+  padding: var(--space-2);
+  border: 1px solid var(--fathom-soft);
+  border-radius: var(--radius-control);
+}

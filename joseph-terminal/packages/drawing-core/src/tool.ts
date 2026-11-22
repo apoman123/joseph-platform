@@ -26,11 +26,25 @@ export interface ToolManifest {
   group: ToolGroup;
   /** Icon name understood by the host (lucide icon id). */
   icon: string;
-  /** Anchors needed to complete a drawing. */
+  /**
+   * Anchors needed to complete a drawing. For `multi-click` and `freehand`
+   * tools this is the minimum.
+   */
   anchorCount: number;
   /** Optional hotkey hint, e.g. `alt+t`. */
   hotkey?: string;
+  /**
+   * How the drawing is created: fixed anchors (default), one anchor per
+   * click finished by a double-click or Escape (`multi-click`, e.g. a
+   * polyline), or a press-drag-release stroke (`freehand`, e.g. a brush).
+   */
+  creation?: 'anchors' | 'multi-click' | 'freehand';
+  /** Anchor cap for multi-click and freehand tools (schema maximum 64). */
+  maxAnchors?: number;
 }
+
+/** Schema maximum of anchors per drawing. */
+export const MAX_ANCHORS = 64;
 
 /** Colors resolved from the theme for painting. */
 export interface ToolPalette {

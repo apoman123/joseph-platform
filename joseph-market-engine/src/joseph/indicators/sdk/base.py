@@ -19,17 +19,16 @@ from typing import ClassVar
 
 from joseph.domain import ids
 from joseph.domain import instruments
-from joseph.domain import market
 from joseph.domain import quality
 from joseph.domain import structures
 from joseph.domain import timeframes as tfs
 from joseph.indicators.sdk import protocol
 from joseph.indicators.sdk import settings as settings_lib
 from joseph.indicators.sdk import state_codec
-from joseph.indicators.sdk import ta
 
 LICENSING_CLEAN_ROOM = "CLEAN_ROOM_FROM_SPEC"
 PARITY_SPEC_ONLY = "SPEC_ONLY"
+"""Default statuses; adapters of Pine ports override ``licensing_status``."""
 
 ALL_TIMEFRAMES: tuple[tfs.Timeframe, ...] = tuple(tfs.Timeframe)
 
@@ -45,10 +44,6 @@ _COMMON_STATE_TYPES: tuple[type, ...] = (
     structures.StructureEventName,
     tfs.Timeframe,
     quality.FeedState,
-    ta.Atr,
-    ta.BarPoint,
-    ta.Pivot,
-    ta.PivotTracker,
 )
 
 
@@ -584,18 +579,6 @@ class BasePlugin[StateT](abc.ABC):
         Args:
             state: Current state.
         """
-
-
-def candle_point(candle: market.Candle) -> ta.BarPoint:
-    """Shortcut for ``ta.BarPoint.of``.
-
-    Args:
-        candle: Source candle.
-
-    Returns:
-        Bar point.
-    """
-    return ta.BarPoint.of(candle)
 
 
 AnyPlugin = BasePlugin[Any]

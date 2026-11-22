@@ -33,7 +33,6 @@ source_modules =
     joseph.strategy.domain
     joseph.signals.domain
     joseph.alerts.domain
-    joseph.indicators.plugins
 forbidden_modules =
     joseph.platform
     joseph.api
@@ -43,17 +42,21 @@ forbidden_modules =
     websockets
     uvicorn
 
-[importlinter:contract:indicator-plugins-independent]
-name = Indicator plugins never import each other
-type = independence
-modules =
-    joseph.indicators.plugins.daily_bias
-    joseph.indicators.plugins.fvg_ifvg
-    joseph.indicators.plugins.order_breaker_blocks
-    joseph.indicators.plugins.liquidity_sweeps
-    joseph.indicators.plugins.order_flow_pressure
-    joseph.indicators.plugins.auction_value_areas
-    joseph.indicators.plugins.premium_discount_ote
+[importlinter:contract:indicator-adapters-thin]
+name = Indicator adapters depend only on the SDK, the domain and the external library
+type = forbidden
+source_modules =
+    joseph.indicators.packaged
+forbidden_modules =
+    joseph.platform
+    joseph.market_data
+    joseph.api
+    joseph.pipeline
+    fastapi
+    sqlalchemy
+    httpx
+    websockets
+    uvicorn
 
 [importlinter:contract:market-data-upstream]
 name = Market data does not depend on downstream contexts

@@ -40,7 +40,74 @@ export const DEFAULT_INDICATOR_LAYERS: ChartState['indicator_layers'] = [
   {plugin_id: 'auction_value_areas', visible: false},
   {plugin_id: 'daily_bias', visible: true},
   {plugin_id: 'order_flow_pressure', visible: true},
+  {plugin_id: 'market_structure', visible: true},
 ];
+
+/** Maximum instruments compared on one chart. */
+export const MAX_COMPARE = 3;
+
+/** Presentation settings stored in `IndicatorLayerState.style`. */
+export interface IndicatorLayerStyle {
+  /** User colors per AOI kind or event name (`#rrggbb`). */
+  colors?: Readonly<Record<string, string>>;
+  /** Whether structure-event markers are drawn (default true). */
+  show_events?: boolean;
+  /** Whether the plugin's values sub-pane is shown (default true). */
+  pane?: boolean;
+}
+
+/** Indicator layer configuration patch (visibility is set separately). */
+export interface IndicatorLayerPatch {
+  /** Kinds shown; null shows every kind. */
+  kinds?: ChartState['indicator_layers'][number]['kinds'] | null;
+  /** Presentation settings (replaces the previous style). */
+  style?: IndicatorLayerStyle;
+  /** Indicator inputs; null restores the plugin defaults. */
+  settings?: Readonly<Record<string, unknown>> | null;
+}
+
+/**
+ * Reads a layer's presentation settings.
+ * @param chart Chart state.
+ * @param pluginId Plugin id.
+ * @return Style (empty when unset).
+ */
+export function layerStyle(
+  chart: ChartState,
+  pluginId: string
+): IndicatorLayerStyle {
+  const style = chart.indicator_layers.find(l => l.plugin_id === pluginId)
+    ?.style as IndicatorLayerStyle | undefined;
+  return style ?? {};
+}
+
+/**
+ * Reads a layer's indicator inputs.
+ * @param chart Chart state.
+ * @param pluginId Plugin id.
+ * @return Inputs, or null when the plugin defaults apply.
+ */
+export function layerSettings(
+  chart: ChartState,
+  pluginId: string
+): Readonly<Record<string, unknown>> | null {
+  const settings = chart.indicator_layers.find(l => l.plugin_id === pluginId)
+    ?.settings as Record<string, unknown> | undefined;
+  return settings && Object.keys(settings).length > 0 ? settings : null;
+}
+
+/**
+ * Whether a plugin layer is shown (layers missing from older workspaces
+ * default to visible, matching the chart renderer).
+ * @param chart Chart state.
+ * @param pluginId Plugin id.
+ * @return Visibility.
+ */
+export function layerVisible(chart: ChartState, pluginId: string): boolean {
+  return (
+    chart.indicator_layers.find(l => l.plugin_id === pluginId)?.visible ?? true
+  );
+}
 
 /** Inputs for a fresh workspace. */
 export interface DefaultWorkspaceInput {
@@ -123,6 +190,23 @@ export type WorkspaceAction =
       pluginId: string;
       visible: boolean;
     }
+  | {
+      type: 'setIndicatorLayerConfig';
+      chartId: string;
+      pluginId: string;
+      patch: IndicatorLayerPatch;
+    }
+  | {
+      type: 'setCompare';
+      chartId: string;
+      instrumentIds: readonly InstrumentId[];
+    }
+  | {type: 'toggleSessionSeparators'; chartId: string}
+  | {
+      type: 'applyChartPresentation';
+      chartId: string;
+      presentation: ChartPresentation;
+    }
   | {type: 'setLinkGroup'; chartId: string; group: ChartState['link_group']}
   | {type: 'setSync'; key: keyof SyncOptions; value: boolean}
   | {
@@ -135,6 +219,40 @@ export type WorkspaceAction =
   | {type: 'rename'; name: string}
   | {type: 'setPanel'; featureId: string; state: unknown}
   | {type: 'replace'; workspace: WorkspaceDocument};
+
+/** Chart presentation captured by templates (never instrument-specific). */
+export type ChartPresentation = Pick<
+  ChartState,
+  'chart_type' | 'price_scale' | 'show_volume' | 'indicator_layers'
+> & {session_separators?: boolean};
+
+/**
+ * Applies a configuration patch to one indicator layer.
+ * @param layers Current layers.
+ * @param pluginId Plugin id.
+ * @param patch Patch.
+ * @return Updated layers (the layer is added when missing).
+ */
+export function patchIndicatorLayer(
+  layers: ChartState['indicator_layers'],
+  pluginId: string,
+  patch: IndicatorLayerPatch
+): ChartState['indicator_layers'] {
+  const exists = layers.some(l => l.plugin_id === pluginId);
+  const base = exists
+    ? layers
+    : [...layers, {plugin_id: pluginId, visible: true}];
+  return base.map(layer => {
+    if (layer.plugin_id !== pluginId) return layer;
+    const next = {...layer};
+    if (patch.kinds === null) delete next.kinds;
+    else if (patch.kinds !== undefined) next.kinds = [...patch.kinds];
+    if (patch.style !== undefined) next.style = {...patch.style};
+    if (patch.settings === null) delete next.settings;
+    else if (patch.settings !== undefined) next.settings = {...patch.settings};
+    return next;
+  });
+}
 
 /**
  * Charts that should follow a change made on `chartId`.
@@ -351,6 +469,53 @@ function reduce(
               ];
           return {...chart, indicator_layers: layers};
         }),
+      };
+    case 'setIndicatorLayerConfig':
+      return {
+        ...doc,
+        charts: mapCharts(doc, new Set([action.chartId]), chart => ({
+          ...chart,
+          indicator_layers: patchIndicatorLayer(
+            chart.indicator_layers,
+            action.pluginId,
+            action.patch
+          ),
+        })),
+      };
+    case 'setCompare': {
+      const ids = [...new Set(action.instrumentIds)].slice(0, MAX_COMPARE);
+      return {
+        ...doc,
+        charts: mapCharts(doc, new Set([action.chartId]), chart => {
+          const {compare: _previous, ...rest} = chart;
+          const kept = ids.filter(id => id !== chart.instrument_id);
+          return kept.length > 0
+            ? {...rest, compare: kept as ChartState['compare']}
+            : rest;
+        }),
+      };
+    }
+    case 'toggleSessionSeparators':
+      return {
+        ...doc,
+        charts: mapCharts(doc, new Set([action.chartId]), chart => ({
+          ...chart,
+          session_separators: !chart.session_separators,
+        })),
+      };
+    case 'applyChartPresentation':
+      return {
+        ...doc,
+        charts: mapCharts(doc, new Set([action.chartId]), chart => ({
+          ...chart,
+          chart_type: action.presentation.chart_type,
+          price_scale: action.presentation.price_scale,
+          show_volume: action.presentation.show_volume,
+          indicator_layers: structuredClone(
+            action.presentation.indicator_layers
+          ),
+          session_separators: action.presentation.session_separators === true,
+        })),
       };
     case 'setLinkGroup':
       return {

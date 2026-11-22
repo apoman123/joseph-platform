@@ -63,6 +63,7 @@ from joseph.pipeline import frames as pipeline_frames
 from joseph.pipeline import live as pipeline_live
 from joseph.pipeline import market_context
 from joseph.pipeline import qualification as pipeline_qualification
+from joseph.pipeline import ticks as pipeline_ticks
 from joseph.platform import auth
 from joseph.platform import bus
 from joseph.platform import config
@@ -496,8 +497,9 @@ def build_signal_stack(container: Container) -> SignalStack:
         market=context,
         available_plugins=available,
     )
+    tick_sizes = pipeline_ticks.RegistryTickSizes(container.registry, clock)
     provider = pipeline_frames.EngineFrameProvider(
-        container.market_data, plugins
+        container.market_data, plugins, tick_sizes=tick_sizes
     )
     pipeline = pipeline_live.LiveSignalPipeline(
         runtime,
@@ -516,7 +518,7 @@ def build_signal_stack(container: Container) -> SignalStack:
     return SignalStack(
         plugins=plugins,
         indicator_queries=indicator_service.IndicatorQueryService(
-            container.market_data, plugins, clock
+            container.market_data, plugins, clock, tick_sizes=tick_sizes
         ),
         versions=versions,
         signals=signals,

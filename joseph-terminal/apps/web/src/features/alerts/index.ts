@@ -13,11 +13,37 @@ import type {
 import {errorMessage} from '../trading/ui/hooks';
 import {AlertsPanel, type AlertsState} from './alerts-panel';
 import {NotificationsPanel} from './notifications-panel';
+import type {SignalTriage} from './ranking';
 
 /** Persisted alert settings (schema version 1). */
 export interface AlertSettings {
   /** Acknowledged signal ids, newest first. */
   acked: string[];
+  /** Dismissed signal ids (hidden from the list). */
+  dismissed?: string[];
+  /** Snoozed signal ids with their wake-up time (UTC ms). */
+  snoozed?: Record<string, number>;
+}
+
+/**
+ * Reads the triage part of stored settings defensively.
+ * @param settings Stored settings.
+ * @return Triage state.
+ */
+export function triageFromSettings(settings: AlertSettings): SignalTriage {
+  const snoozed: Record<string, number> = {};
+  if (settings.snoozed && typeof settings.snoozed === 'object') {
+    for (const [id, until] of Object.entries(settings.snoozed)) {
+      if (typeof until === 'number' && Number.isFinite(until))
+        snoozed[id] = until;
+    }
+  }
+  return {
+    dismissed: Array.isArray(settings.dismissed)
+      ? settings.dismissed.filter((id): id is string => typeof id === 'string')
+      : [],
+    snoozed,
+  };
 }
 
 /**
@@ -71,10 +97,16 @@ export const ALERTS_FEATURE: WebFeature = {
     const acked = createStore<readonly string[]>(
       Array.isArray(settings.acked) ? settings.acked : []
     );
+    const triage = createStore<SignalTriage>(triageFromSettings(settings));
+    const persist = () =>
+      ctx.settings.write<AlertSettings>({
+        acked: [...acked.get()],
+        dismissed: [...triage.get().dismissed],
+        snoozed: {...triage.get().snoozed},
+      });
     const disposers: Disposer[] = [
-      acked.subscribe(ids =>
-        ctx.settings.write<AlertSettings>({acked: [...ids]})
-      ),
+      acked.subscribe(persist),
+      triage.subscribe(persist),
     ];
     const load = async () => {
       try {
@@ -112,7 +144,12 @@ export const ALERTS_FEATURE: WebFeature = {
      * @return Element.
      */
     function AlertsSlot(props: WebSlotProps) {
-      return createElement(AlertsPanel, {ctx: props.ctx, state, acked});
+      return createElement(AlertsPanel, {
+        ctx: props.ctx,
+        state,
+        acked,
+        triage,
+      });
     }
     const view: WebView = AlertsSlot;
     /**

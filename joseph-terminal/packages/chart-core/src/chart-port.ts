@@ -6,7 +6,11 @@
  * the renderer can be replaced without touching strategy logic or contracts.
  */
 import type {ChartType, PriceScaleMode, Timeframe} from '@joseph/contracts';
-import type {OverlayLayer} from './overlay-model';
+import type {
+  OverlayLayer,
+  OverlayLineStyle,
+  OverlayTone,
+} from './overlay-model';
 
 /** Removes a registration (listener, layer, primitive). */
 export type Disposer = () => void;
@@ -192,6 +196,64 @@ export interface CanvasLayer {
   draw(ctx: CanvasRenderingContext2D, transform: CoordinateTransform): void;
 }
 
+/** One value of a study plotted in its own pane (display number only). */
+export interface StudyPoint {
+  /** Bar start (UTC ms); points for bars not on the chart are skipped. */
+  timeMs: number;
+  /** Plotted value. */
+  value: number;
+  /** Optional color role, e.g. bid for positive delta columns. */
+  tone?: OverlayTone;
+}
+
+/** Horizontal reference level inside a study pane (e.g. a threshold). */
+export interface StudyLevel {
+  /** Level value. */
+  value: number;
+  /** Axis label. */
+  label: string;
+  /** Color role. */
+  tone: OverlayTone;
+  /** Dash style. */
+  lineStyle: OverlayLineStyle;
+}
+
+/**
+ * Backend-computed values rendered in a separate pane below the price pane
+ * (for example order-flow Delta %). The chart only draws them.
+ */
+export interface StudyPaneSpec {
+  /** Unique id, e.g. `order_flow_pressure:delta_pct`. */
+  id: string;
+  /** Short title painted in the pane. */
+  title: string;
+  /** Columns or a line. */
+  style: 'histogram' | 'line';
+  /** Values per bar. */
+  points: readonly StudyPoint[];
+  /** Reference levels. */
+  levels?: readonly StudyLevel[];
+  /** Decimal places on the pane's axis (default 2). */
+  precision?: number;
+  /** Provenance caption such as `as of 12:05 UTC (live)`. */
+  caption?: string;
+}
+
+/**
+ * Another instrument overlaid on the price pane for comparison. It uses its
+ * own percentage axis on the left, so different price levels line up.
+ */
+export interface CompareSeriesSpec {
+  /** Unique id (usually the instrument id). */
+  id: string;
+  /** Legend label. */
+  label: string;
+  /** Line color (CSS). */
+  color: string;
+  /** Closes per bar; bars missing on the main series are skipped. */
+  points: readonly {timeMs: number; value: number}[];
+}
+
 /** Serializable view state for workspace persistence. */
 export interface ChartViewState {
   /** Visible range, if any. */
@@ -267,6 +329,21 @@ export interface ChartPort {
   setVisibleRange(range: TimeRange): void;
   /** Fits all bars into view. */
   fitContent(): void;
+  /**
+   * Adds or replaces a study pane below the price (and volume) pane.
+   * @param spec Study values and presentation.
+   */
+  setStudyPane(spec: StudyPaneSpec): void;
+  /**
+   * Removes a study pane.
+   * @param id Study id.
+   */
+  removeStudyPane(id: string): void;
+  /**
+   * Replaces the comparison overlays (empty hides the comparison axis).
+   * @param series Instruments to compare.
+   */
+  setCompareSeries(series: readonly CompareSeriesSpec[]): void;
   /**
    * Enables or disables built-in pan/zoom (disabled while a tool drags).
    * @param enabled Whether interaction is enabled.

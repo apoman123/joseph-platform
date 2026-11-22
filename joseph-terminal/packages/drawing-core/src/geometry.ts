@@ -155,3 +155,22 @@ export function handleAt(
   });
   return best;
 }
+
+/**
+ * Reduces a sequence to at most `max` items, always keeping the first and
+ * last and sampling the rest evenly (freehand strokes).
+ * @param items Items in order.
+ * @param max Maximum items (at least 2).
+ * @return Reduced copy.
+ */
+export function decimate<T>(items: readonly T[], max: number): T[] {
+  const limit = Math.max(2, Math.floor(max));
+  if (items.length <= limit) return [...items];
+  const result: T[] = [];
+  const step = (items.length - 1) / (limit - 1);
+  for (let i = 0; i < limit; i += 1) {
+    const item = items[Math.round(i * step)];
+    if (item !== undefined) result.push(item);
+  }
+  return result;
+}

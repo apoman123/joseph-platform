@@ -35,8 +35,18 @@ The terminal image bakes `NEXT_PUBLIC_*` at build time from repository variables
 2. **Environments:** create `staging` and `production`; give `production` required reviewers (manual approval before every production deploy).
 3. **Variables** (per environment or repository): `STAGING_SSH_HOST`, `STAGING_SSH_USER`, `STAGING_DEPLOY_DIR`, `STAGING_WEB_URL`, `STAGING_HEALTH_URLS` (space-separated, e.g. `https://api.example.com/health https://exec.example.com/health https://app.example.com/`), and the same with `PRODUCTION_`. Deploy jobs are skipped while the host variable is empty, so CI and image publishing work before any server exists.
 4. **Secrets:** `STAGING_SSH_KEY`, `STAGING_SSH_KNOWN_HOSTS` (output of `ssh-keyscan -H host`), and the `PRODUCTION_` pair. No application secrets go to GitHub.
-5. **Packages:** after the first publish, set the GHCR packages' visibility (private by default).
-6. **Private-repo limits:** CodeQL and dependency review need GitHub Advanced Security on private repositories — enable it and set the variable `CODE_SCANNING_ENABLED=true` (they run automatically on public repos). GitHub artifact attestations run only on public repos (or Enterprise Cloud); images still carry BuildKit SBOM and provenance.
+5. **Indicator library access (required — CI fails until done):** the market engine installs `joseph-smc-indicators` from the private `apoman123/PineScripts` repository over SSH. Create a dedicated read-only key, never a personal one:
+
+   ```bash
+   ssh-keygen -t ed25519 -N '' -C joseph-platform-ci -f pinescripts_deploy
+   gh repo deploy-key add pinescripts_deploy.pub -R apoman123/PineScripts --title joseph-platform-ci   # read-only
+   gh secret set PINESCRIPTS_DEPLOY_KEY -R apoman123/joseph-platform < pinescripts_deploy
+   shred -u pinescripts_deploy
+   ```
+
+   (Or: PineScripts → Settings → Deploy keys → add the `.pub` without write access; joseph-platform → Settings → Secrets → Actions → `PINESCRIPTS_DEPLOY_KEY`.) The composite action `.github/actions/indicators-access` loads it into an ssh-agent with GitHub's pinned host key; jobs installing the market engine use it, and the image build forwards the agent to BuildKit (`RUN --mount=type=ssh`), so the key never enters a layer. To adopt new indicator ports, bump `rev` under `[tool.uv.sources]` in `joseph-market-engine/pyproject.toml` and run `uv lock`.
+6. **Packages:** after the first publish, set the GHCR packages' visibility (private by default).
+7. **Private-repo limits:** CodeQL and dependency review need GitHub Advanced Security on private repositories — enable it and set the variable `CODE_SCANNING_ENABLED=true` (they run automatically on public repos). GitHub artifact attestations run only on public repos (or Enterprise Cloud); images still carry BuildKit SBOM and provenance.
 
 ## Server preparation (per environment)
 

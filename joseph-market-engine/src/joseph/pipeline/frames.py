@@ -16,6 +16,7 @@ from joseph.domain import market
 from joseph.domain import structures
 from joseph.domain import timeframes
 from joseph.indicators import service as indicator_service
+from joseph.indicators import ticks as ticks_lib
 from joseph.indicators.sdk import engine as engine_lib
 from joseph.indicators.sdk import registry as registry_lib
 from joseph.strategy.domain import compiler
@@ -121,6 +122,7 @@ class EngineFrameProvider:
         registry: registry_lib.PluginRegistry,
         *,
         settings: Mapping[str, Mapping[str, object]] | None = None,
+        tick_sizes: ticks_lib.TickSizeSource | None = None,
     ) -> None:
         """Initializes the provider.
 
@@ -128,17 +130,44 @@ class EngineFrameProvider:
             candle_source: Final-candle source (market-data service).
             registry: Plugin registry.
             settings: Optional per-plugin setting overrides.
+            tick_sizes: Optional instrument tick-size port.
         """
         self._source = candle_source
         self.registry = registry
         self._settings = settings
+        self._ticks = tick_sizes
 
     def new_engine(
         self,
         instrument_id: instruments.InstrumentId,
         requirements: compiler.EngineRequirements,
+        settings: Mapping[str, Mapping[str, object]] | None = None,
     ) -> engine_lib.IndicatorEngine:
         """Creates an engine for one instrument.
+
+        Args:
+            instrument_id: Exact venue instrument.
+            requirements: Plugins and timeframes to compute.
+            settings: Overrides replacing the configured ones.
+
+        Returns:
+            Fresh engine.
+        """
+        return engine_lib.IndicatorEngine(
+            self.registry,
+            engine_config(
+                requirements,
+                self._settings if settings is None else settings,
+            ),
+            instrument_id,
+        )
+
+    async def engine_for(
+        self,
+        instrument_id: instruments.InstrumentId,
+        requirements: compiler.EngineRequirements,
+    ) -> engine_lib.IndicatorEngine:
+        """Creates an engine with the instrument's tick size injected.
 
         Args:
             instrument_id: Exact venue instrument.
@@ -147,11 +176,14 @@ class EngineFrameProvider:
         Returns:
             Fresh engine.
         """
-        return engine_lib.IndicatorEngine(
+        tick = await ticks_lib.resolve(self._ticks, instrument_id)
+        settings = ticks_lib.with_tick_size(
             self.registry,
-            engine_config(requirements, self._settings),
-            instrument_id,
+            requirements.plugins,
+            self._settings or {},
+            tick,
         )
+        return self.new_engine(instrument_id, requirements, settings)
 
     async def candles(
         self,
@@ -207,7 +239,7 @@ class EngineFrameProvider:
         Returns:
             Frames, oldest first; warm-up frames precede ``from_ms``.
         """
-        engine = self.new_engine(instrument_id, requirements)
+        engine = await self.engine_for(instrument_id, requirements)
         warmup = max(requirements.history_bars, 1) * signal_tf.duration_ms
         start = signal_tf.floor(from_ms) - warmup
         candles = await self.candles(

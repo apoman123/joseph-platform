@@ -72,6 +72,8 @@ export function OrderTicket({ctx, runtime}: OrderTicketProps): ReactNode {
   const state = useStore(runtime.controller);
   const meta = useStore(runtime.meta);
   const amend = useStore(runtime.amend);
+  // Orders are never previewed or sent from a chart in bar replay.
+  const replay = useStore(ctx.selection).replay === true;
   const now = useNow(1000);
   const uid = useId();
   const accounts = usePolling(
@@ -241,7 +243,13 @@ export function OrderTicket({ctx, runtime}: OrderTicketProps): ReactNode {
         )}
       </header>
       <div className={`j-panel__body ${styles.body}`}>
-        {amend && <AmendPanel ctx={ctx} runtime={runtime} />}
+        {replay && (
+          <Notice tone="warning">
+            The active chart is in bar replay. Trading is off until you go back
+            to live data.
+          </Notice>
+        )}
+        {amend && !replay && <AmendPanel ctx={ctx} runtime={runtime} />}
         {meta.error && <Notice tone="warning">{meta.error}</Notice>}
         {accounts.error && (
           <Notice tone="danger">
@@ -615,7 +623,7 @@ export function OrderTicket({ctx, runtime}: OrderTicketProps): ReactNode {
             <button
               type="button"
               className="j-btn"
-              disabled={busy}
+              disabled={busy || replay}
               onClick={() => {
                 setAttempted(true);
                 void runtime.controller.preview();
@@ -632,8 +640,9 @@ export function OrderTicket({ctx, runtime}: OrderTicketProps): ReactNode {
               className={`j-btn ${inputs.side === 'buy' ? 'j-btn--bid' : 'j-btn--ask'}`}
               data-testid="confirm-order"
               disabled={
-                !canConfirm(state, now) &&
-                !(state.phase === 'FAILED' && state.idempotencyKey !== null)
+                replay ||
+                (!canConfirm(state, now) &&
+                  !(state.phase === 'FAILED' && state.idempotencyKey !== null))
               }
               aria-busy={state.phase === 'SUBMITTING'}
               onClick={() => void runtime.controller.confirm()}

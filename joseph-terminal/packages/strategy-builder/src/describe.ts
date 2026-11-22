@@ -33,6 +33,12 @@ const EVENT_NAMES: Readonly<Record<StructureEventName, string>> = {
   SELLER_BREAKOUT: 'seller breakout',
   RANGE_RESET: 'dealing range reset',
   VALUE_AREA_UPDATED: 'value area updated',
+  SWING_HH: 'higher high',
+  SWING_HL: 'higher low',
+  SWING_LH: 'lower high',
+  SWING_LL: 'lower low',
+  SWING_EQH: 'equal high',
+  SWING_EQL: 'equal low',
 };
 
 /** Human names of AOI kinds. */
@@ -56,6 +62,8 @@ const AOI_NAMES: Readonly<Record<AoiKind, string>> = {
   PDL: 'prior-day low',
   SESSION_HIGH: 'session high',
   SESSION_LOW: 'session low',
+  SWING_HIGH: 'unbroken swing high',
+  SWING_LOW: 'unbroken swing low',
 };
 
 /**

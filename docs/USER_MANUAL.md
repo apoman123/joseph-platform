@@ -33,18 +33,25 @@ Magenta marks are **yours** (drawings, draft orders, rule cards). Green/red are 
 ## 3. Charts
 
 - **Instrument**: click the symbol → pick a venue (or *All venues*) → search `BTC`. Results are exact venue instruments: `binance:perp:BTCUSDT` and `hyperliquid:perp:BTC` are different contracts.
-- **Timeframe**: `5m … 1d` buttons; *More* for the rest. **Chart type**: candles, bars, line, area, Heikin Ashi (display only — never used for signals). **Scale**: linear, log, percent.
+- **Timeframe**: `5m … 1d` buttons; *More* for the rest, ★ to pin favorites, or type a resolution (`15`, `4h`, `1D`; a bare number is minutes). Resolutions the engine doesn't serve are refused, never approximated. **Chart type**: candles, bars, line, area, Heikin Ashi (display only — never used for signals). **Scale**: linear, log, percent.
+- **Pane header**: feed mode (Auto, WebSocket, REST polling) and link group (*Unlinked*, *Link A–D*: linked charts follow each other when sync is on).
 - **Layouts**: *Layout* → 1, 2, 4 or 8 charts; toggle sync of crosshair, instrument, timeframe and viewport. Workspaces autosave; *⌘K → Export workspace* saves JSON, *Copy workspace share link* shares it.
-- **Layers**: show/hide each indicator, each zone kind and event markers; *Show or hide ended zones* reveals invalidated/swept history. By default the 4 most recent zones per kind and side are drawn.
+- **Layers**: show/hide each indicator; ⚙ opens its settings for this chart — engine **inputs** (validated against the plugin's schema and sent with every query), which **zone kinds** to draw, per-kind and per-marker **colors**, event markers and, for order flow, the **Delta % pane**. *Market structure* draws HH/HL/LH/LL/EQH/EQL, BOS/MSS/initial-break markers with break lines, and dashed rays for the unbroken swing high/low. *Session breaks* draws UTC day (week/month on 1d/1w) separators; *Data window* shows OHLC, change, volume, Delta % and compared closes under the crosshair. *Show or hide ended zones* reveals invalidated/swept history. By default the 4 most recent zones per kind and side are drawn.
+- **Panes**: volume and the order-flow **Delta % (estimate)** pane sit below the price pane (drag the separator to resize). The Delta pane shows ±threshold lines from `min_delta_share`; if the engine can't serve the series it says *unavailable* instead of drawing anything.
+- **Compare**: add up to 3 instruments; they share a percentage axis on the left, measured from the first visible bar. Remove with × on the chip.
+- **Templates** (▦): save the chart's style, scale, volume, layers (inputs, colors) and session breaks under a name; apply to any chart. Templates never change the instrument.
+- **Replay**: *Replay* → click a bar (or *Start 100 bars back*) → step, play/pause, change speed (1–10 bars/s). Later bars are hidden, zones are requested as of the cursor bar's close, the ribbon turns **Replay** and trading from that chart is off. *Back to live* restores everything.
+- **Screenshot** (📷): downloads a PNG with a header naming instrument, venue, timeframe, data provenance and UTC time.
+- **Resize**: drag the edge of the side or bottom dock, or the gap between charts in multi-chart layouts; sizes are kept.
 
 ### Drawing tools (left toolbar)
 
-Trendline, horizontal line/ray, vertical line, rectangle, Fibonacci retracement/extension, long/short position (risk/reward boxes, tick-rounded, never places orders), measure, parallel channel, text note. Drawings are saved per instrument with time/price anchors, so they survive zoom, reload and app updates. *Magnet* snaps to candle OHLC; *Lock* prevents edits; *Hide* toggles visibility. Drawings from tools that were removed are kept and shown as "unsupported", never deleted.
+Grouped flyouts (› opens a group): trendline, ray, extended line, horizontal line/ray, vertical line, parallel channel · rectangle, zone box (FVG-style box with 50% line and name), polyline (click each point; double-click or Esc to finish) · Fibonacci retracement/extension · long/short position (risk/reward boxes, tick-rounded, never places orders) · measure · text note, arrow, brush (freehand). Selecting a drawing opens a **style bar** (color, width, dash, fill, extend, text, z-order, lock, hide, delete); the **Objects** tab lists every drawing with show/hide, lock, reorder and delete. All edits undo with ⌘/Ctrl Z. Anchored VWAP and regression channels are not offered: they would compute values in the browser. Drawings are saved per instrument with time/price anchors, so they survive zoom, reload and app updates. *Magnet* snaps to candle OHLC; *Lock* prevents edits; *Hide* toggles visibility. Drawings from tools that were removed are kept and shown as "unsupported", never deleted.
 
 ## 4. Watchlist and screener
 
-- **Watchlist**: add instruments, reorder, see last price, 24h change, 8h funding and data freshness; click a row to chart it.
-- **Screener**: qualification per exact venue instrument. A contract is **Qualified** only if all five gates pass — 24h turnover, open-interest USD, turnover/OI, spread, and $50k slippage — with *strict* thresholds (a value equal to a threshold fails) and funding not high-risk. **Missing data** is never shown as a pass. Tags: *Watch* (|funding| ≥ 0.10%/8h), *High risk* (≥ 0.30%/8h).
+- **Watchlist**: *My list* (add, reorder) or *Qualified perpetuals* (the engine's current Qualified list, read-only). Columns ▥: last, mark, 24h, turnover, spread, 8h funding, OI, data freshness; click a header to sort (again to reverse, a third time to return to your order). Click a row to chart it.
+- **Screener**: qualification per exact venue instrument. A contract is **Qualified** only if all five gates pass — 24h turnover, open-interest USD, turnover/OI, spread, and $50k slippage — with *strict* thresholds (a value equal to a threshold fails) and funding not high-risk. **Missing data** is never shown as a pass. Tags: *Watch* (|funding| ≥ 0.10%/8h), *High risk* (≥ 0.30%/8h). *Preset*: save the venue/status/sort filters under a name and recall them.
 
 ## 5. Strategies
 
@@ -59,7 +66,7 @@ Signals fire only on **closed bars**, never on history that closed before activa
 
 ## 6. Alerts and notifications
 
-- **Alerts** (bottom dock) lists signals newest first: kind (Entry, Entry blocked, Setup forming…), instrument, R:R and data source. Expand a row for the **reason tree** (every condition true/false/unknown). *Show on chart* jumps to the exact venue, bar and zone. *Acknowledge* hides it locally.
+- **Alerts** (bottom dock) lists signals newest first: kind (Entry, Entry blocked, Setup forming…), instrument, R:R and data source. Expand a row for the **reason tree** (every condition true/false/unknown). *Show on chart* jumps to the exact venue, bar and zone. *Sort*: newest, R multiple, confluence (conditions satisfied), distance to AOI (latest engine price vs the signal's zones; *Inside* = 0) or oldest first. *Acknowledge*, *Snooze* (15 min / 1 h / 4 h) and *Dismiss* hide a signal locally; *Show snoozed and dismissed* brings them back (*Wake*, *Restore*).
 - **Notifications**: add Telegram (chat id), LINE (user/group id), e-mail or an HTTPS webhook; choose which signal kinds, a minimum severity, and quiet hours (critical alerts still arrive). If the server has no credentials for a channel the row shows *Not delivered*.
 
 ## 7. Trading (paper and shadow)
@@ -81,7 +88,8 @@ After submission the ticket shows the venue-reported state (*Submitting*, *Ackno
 | ⌘/Ctrl K | Command palette | Alt T / H / R / F / M | Trendline / horizontal / rectangle / Fib / measure |
 | ⌘/Ctrl Z, ⇧⌘Z or ⌘Y | Undo / redo drawing | Alt 1 / 2 / 4 / 8 | Layout |
 | Delete / Backspace | Delete selected drawing | Alt B / Alt S | Ticket buy / sell |
-| Esc | Cancel current drawing | | |
+| Esc | Cancel current drawing (finishes a polyline) | Alt 0 | Fit all bars |
+| Alt ⇧ R | Bar replay on/off | Alt ⇧ S | Screenshot |
 
 ## 9. Troubleshooting
 
