@@ -152,8 +152,15 @@ const DEMO_PLUGINS: readonly DemoPlugin[] = [
     id: 'order_flow_pressure',
     name: 'Order flow pressure',
     description:
-      'Estimated lower-timeframe volume delta and failure/breakout events.',
+      'Volume delta (true from taker volume when the venue publishes it, otherwise a candle-direction estimate) and failure/breakout events.',
     settings: [
+      [
+        'delta_source',
+        'enum',
+        'auto',
+        'auto uses taker buy/sell volume when the venue publishes it (true delta) and falls back to the candle-direction estimate; estimate always uses the estimate.',
+        ['auto', 'estimate'],
+      ],
       [
         'intrabar_tf',
         'enum',

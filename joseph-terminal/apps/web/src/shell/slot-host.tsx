@@ -18,7 +18,8 @@ import {
   type ReactNode,
   type ReactElement,
 } from 'react';
-import {clampDock} from '@joseph/terminal-shell';
+import {DETACHABLE_PANELS, clampDock} from '@joseph/terminal-shell';
+import {DetachedPlaceholder, PopOutButton, useDetached} from './detached';
 import {Icon} from './icons';
 import {Splitter} from './splitter';
 import {useStore, type WebFeatureContext, type WebView} from './react-bindings';
@@ -92,6 +93,57 @@ function ContributionView({item}: {item: SlotContribution<WebView>}) {
 }
 
 /**
+ * One contribution of a slot by id (pop-out windows show a single panel).
+ * @param props Slot and contribution id.
+ * @return View, or a notice while the contribution is not registered.
+ */
+export function SlotPanelView({
+  slot,
+  id,
+}: {
+  slot: UiSlot;
+  id: string;
+}): ReactElement {
+  const runtime = useRuntime();
+  const items = useStore(runtime.slots.observe(slot));
+  const item = items.find(entry => entry.id === id);
+  if (!item) {
+    return (
+      <div className="j-empty">
+        <strong>Loading the panel…</strong>
+        <p>It appears when its feature is ready.</p>
+      </div>
+    );
+  }
+  return <ContributionView item={item} />;
+}
+
+/**
+ * Body of the selected tab: its view, or a placeholder while detached.
+ * @param props Slot and contribution.
+ * @return Tab body.
+ */
+function TabBody({
+  slot,
+  item,
+}: {
+  slot: 'side-panel' | 'bottom-panel';
+  item: SlotContribution<WebView>;
+}): ReactElement {
+  const detached = useDetached({kind: 'panel', slot, panelId: item.id});
+  if (detached) {
+    return (
+      <DetachedPlaceholder
+        pane={detached.pane}
+        status={detached.status}
+        compact
+      />
+    );
+  }
+  return <ContributionView key={item.id} item={item} />;
+}
+
+/**
  * Inline contributions (toolbar, status bar).
  * @param props Slot.
  * @return Items.
@@ -139,20 +191,30 @@ export function SlotTabs({
   slot,
   label,
   orientation,
+  storagePrefix = 'joseph.panel',
+  defaultCollapsed = false,
+  detachable = true,
 }: {
   slot: 'side-panel' | 'bottom-panel';
   label: string;
   orientation: 'side' | 'bottom';
+  /** Storage key prefix (pop-out windows keep their own dock state). */
+  storagePrefix?: string;
+  /** Collapsed state before anything was saved. */
+  defaultCollapsed?: boolean;
+  /** Whether tabs may be popped out into other windows. */
+  detachable?: boolean;
 }): ReactElement {
   const runtime = useRuntime();
   const items = useStore(runtime.slots.observe(slot));
-  const key = `joseph.panel.${slot}`;
+  const key = `${storagePrefix}.${slot}`;
   const [selected, setSelected] = useState<string | null>(() =>
     runtime.storage.getItem(`${key}.tab`)
   );
-  const [collapsed, setCollapsed] = useState(
-    () => runtime.storage.getItem(`${key}.collapsed`) === 'yes'
-  );
+  const [collapsed, setCollapsed] = useState(() => {
+    const saved = runtime.storage.getItem(`${key}.collapsed`);
+    return saved === null ? defaultCollapsed : saved === 'yes';
+  });
   const [size, setSize] = useState<number | null>(() =>
     savedDockSize(runtime.storage.getItem(`${key}.size`), orientation)
   );
@@ -254,6 +316,16 @@ export function SlotTabs({
               </button>
             ))}
         </div>
+        {detachable &&
+          !collapsed &&
+          current &&
+          DETACHABLE_PANELS.has(current.id) && (
+            <PopOutButton
+              pane={{kind: 'panel', slot, panelId: current.id}}
+              title={current.title}
+              testId={`popout-panel-${current.id}`}
+            />
+          )}
         <button
           type="button"
           className="j-btn j-btn--ghost j-btn--icon j-btn--sm panel__collapse"
@@ -276,7 +348,11 @@ export function SlotTabs({
           aria-labelledby={current ? `tab-${current.id}` : undefined}
         >
           {current ? (
-            <ContributionView key={current.id} item={current} />
+            detachable ? (
+              <TabBody key={current.id} slot={slot} item={current} />
+            ) : (
+              <ContributionView key={current.id} item={current} />
+            )
           ) : (
             <div className="j-empty">
               <strong>No panels installed</strong>

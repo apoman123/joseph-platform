@@ -20,6 +20,8 @@ ORDER_FLOW_PRESSURE = "order_flow_pressure"
 AUCTION_VALUE_AREAS = "auction_value_areas"
 PREMIUM_DISCOUNT_OTE = "premium_discount_ote"
 MARKET_STRUCTURE = "market_structure"
+ANCHORED_VWAP = "anchored_vwap"
+REGRESSION_CHANNEL = "regression_channel"
 
 DEFAULT_PLUGINS: frozenset[str] = frozenset(
     {
@@ -31,6 +33,8 @@ DEFAULT_PLUGINS: frozenset[str] = frozenset(
         AUCTION_VALUE_AREAS,
         PREMIUM_DISCOUNT_OTE,
         MARKET_STRUCTURE,
+        ANCHORED_VWAP,
+        REGRESSION_CHANNEL,
     }
 )
 """First-party plugins assumed available when no registry is supplied."""
@@ -142,6 +146,8 @@ PUBLISHED_VALUES: Mapping[str, frozenset[str]] = {
             "intrabar_count",
             "rel_volume",
             "method",
+            "buy_volume",
+            "sell_volume",
             "prior_high",
             "prior_low",
         }
@@ -164,6 +170,39 @@ PUBLISHED_VALUES: Mapping[str, frozenset[str]] = {
             "position_pct",
             "zone",
             "read",
+        }
+    ),
+    ANCHORED_VWAP: frozenset(
+        {
+            "vwap",
+            "stdev",
+            "upper_1",
+            "lower_1",
+            "upper_2",
+            "lower_2",
+            "upper_3",
+            "lower_3",
+            "anchor_ms",
+            "bars",
+            "anchor_in_window",
+        }
+    ),
+    REGRESSION_CHANNEL: frozenset(
+        {
+            "start_ms",
+            "start",
+            "end",
+            "upper_start",
+            "upper_end",
+            "lower_start",
+            "lower_end",
+            "slope",
+            "stdev",
+            "pearson_r",
+            "max_up",
+            "max_down",
+            "bars",
+            "anchor_in_window",
         }
     ),
 }

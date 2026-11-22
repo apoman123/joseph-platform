@@ -105,7 +105,7 @@ def candles_from_rows(
         candles.append(
             make_candle(
                 timeframe,
-                start_ms + index * timeframe.duration_ms,
+                timeframe.shift(start_ms, index),
                 open_,
                 high,
                 low,
@@ -160,7 +160,7 @@ def random_walk(
         candles.append(
             make_candle(
                 timeframe,
-                start_ms + index * timeframe.duration_ms,
+                timeframe.shift(start_ms, index),
                 open_,
                 high,
                 low,
@@ -196,12 +196,12 @@ def aggregate(
     source_tf = candles[0].timeframe
     if not timeframe.contains(source_tf) and timeframe is not source_tf:
         raise ValueError(f"{source_tf} does not nest in {timeframe}")
-    per_bucket = timeframe.duration_ms // source_tf.duration_ms
     buckets: dict[int, list[market.Candle]] = {}
     for candle in candles:
         buckets.setdefault(timeframe.floor(candle.start_ms), []).append(candle)
     result = []
     for start, members in sorted(buckets.items()):
+        per_bucket = source_tf.bars_between(start, timeframe.end_of(start))
         if len(members) != per_bucket:
             continue
         result.append(

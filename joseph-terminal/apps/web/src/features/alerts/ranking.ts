@@ -1,19 +1,22 @@
 /**
  * @fileoverview Signal dashboard ranking and triage (pure): sort keys
- * (newest, R multiple, confluence, age, distance to the AOI), confluence
- * counts from the reason tree, AOI distance and local snooze/dismiss.
+ * (newest, R multiple, confluence, bar volume, age, distance to the AOI),
+ * confluence counts from the reason tree, AOI distance and local
+ * snooze/dismiss.
  * Display only: nothing here changes what the engine decided.
  */
 import type {AoiRecord, ReasonNode, Signal} from '@joseph/contracts';
 
 /** Sort keys offered by the alerts panel. */
-export type SignalSort = 'newest' | 'rr' | 'confluence' | 'age' | 'distance';
+export type SignalSort =
+  'newest' | 'rr' | 'confluence' | 'volume' | 'age' | 'distance';
 
 /** Sort labels in menu order. */
 export const SIGNAL_SORTS: readonly {id: SignalSort; label: string}[] = [
   {id: 'newest', label: 'Newest'},
   {id: 'rr', label: 'R multiple'},
   {id: 'confluence', label: 'Confluence'},
+  {id: 'volume', label: 'Bar volume'},
   {id: 'distance', label: 'Distance to AOI'},
   {id: 'age', label: 'Oldest first'},
 ];
@@ -76,6 +79,23 @@ function rrOf(signal: Signal): number | null {
   return Number.isFinite(value) ? value : null;
 }
 
+/** Tooltip of the bar volume column and sort. */
+export const BAR_VOLUME_HELP =
+  "Quote-currency turnover of the signal bar, as published by the venue (never estimated). Blank when the venue doesn't publish turnover.";
+
+/**
+ * Reads the signal bar's quote turnover (comparable across instruments,
+ * unlike base volume).
+ * @param signal Signal.
+ * @return Turnover, or null when the venue publishes none.
+ */
+export function barQuoteVolumeOf(signal: Signal): number | null {
+  const raw = signal.bar_quote_volume;
+  if (raw == null || raw === '') return null;
+  const value = Number(raw);
+  return Number.isFinite(value) && value >= 0 ? value : null;
+}
+
 /**
  * Compares nullable numbers, keeping nulls last.
  * @param a First.
@@ -113,6 +133,8 @@ export function sortSignals(
     if (sort === 'rr') result = byNumber(rrOf(a), rrOf(b), true);
     else if (sort === 'confluence')
       result = confluenceOf(b.reason_tree) - confluenceOf(a.reason_tree);
+    else if (sort === 'volume')
+      result = byNumber(barQuoteVolumeOf(a), barQuoteVolumeOf(b), true);
     else if (sort === 'age') result = a.bar_close_ms - b.bar_close_ms;
     else if (sort === 'distance')
       result = byNumber(

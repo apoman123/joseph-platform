@@ -52,7 +52,8 @@ def test_five_thousand_bars_all_plugins_within_budget() -> None:
     frames = engine.run(data)
     elapsed = time.perf_counter() - started
     per_frame = elapsed / len(frames) * 1000
-    message = f"[perf] {len(frames)} frames, 8 series, {elapsed:.2f}s"
+    series = sum(len(spec.timeframes) for spec in plugins.values())
+    message = f"[perf] {len(frames)} frames, {series} series, {elapsed:.2f}s"
     print(message, f"({per_frame:.2f} ms/frame)")  # noqa: T201
     assert len(frames) == 5_000
     assert elapsed < _budget(), message

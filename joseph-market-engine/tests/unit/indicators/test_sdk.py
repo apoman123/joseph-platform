@@ -109,7 +109,7 @@ def test_unknown_plugin_is_not_found() -> None:
         catalog.build_default_registry().get("nope")
 
 
-def test_default_registry_has_the_eight_plugins() -> None:
+def test_default_registry_has_the_ten_plugins() -> None:
     """Every packaged plugin is registered in display order."""
     assert catalog.build_default_registry().ids() == (
         "daily_bias",
@@ -120,6 +120,8 @@ def test_default_registry_has_the_eight_plugins() -> None:
         "order_flow_pressure",
         "auction_value_areas",
         "premium_discount_ote",
+        "anchored_vwap",
+        "regression_channel",
     )
 
 

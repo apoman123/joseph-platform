@@ -9,7 +9,12 @@ import {
   type ChartState,
   type FeedState,
 } from '@joseph/contracts';
-import {activeChart, parseWorkspace, startReplay} from '@joseph/terminal-shell';
+import {
+  activeChart,
+  paneKey,
+  parseWorkspace,
+  startReplay,
+} from '@joseph/terminal-shell';
 import type {TerminalRuntime} from '../../composition/runtime';
 import type {WebFeature} from '../../shell/react-bindings';
 import {shellManifest} from './manifest';
@@ -171,6 +176,14 @@ export function chartToolsFeature(runtime: TerminalRuntime): WebFeature {
           title: 'Start or stop bar replay on the active chart',
           run: () => {
             const chartId = active().chart_id;
+            const key = paneKey({kind: 'chart', chartId});
+            if (runtime.detached.get().panes.some(p => p.key === key)) {
+              ctx.notifier.notify(
+                'This chart is in another window. Start bar replay there.',
+                'info'
+              );
+              return;
+            }
             runtime.replay.update(all => {
               if (all[chartId]) {
                 const {[chartId]: _ended, ...rest} = all;

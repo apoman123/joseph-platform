@@ -319,6 +319,10 @@ export const STRUCTURE_EVENTS: readonly StructureEventName[] = Object.keys(
 
 /** Timeframes from shortest to longest. */
 export const TIMEFRAME_ORDER: readonly Timeframe[] = [
+  '1s',
+  '5s',
+  '15s',
+  '30s',
   '1m',
   '3m',
   '5m',
@@ -331,4 +335,5 @@ export const TIMEFRAME_ORDER: readonly Timeframe[] = [
   '12h',
   '1d',
   '1w',
+  '1M',
 ];

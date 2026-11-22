@@ -28,7 +28,7 @@ NEXT_PUBLIC_DEV_TOKEN=dev-local-token   # development only; production uses a se
 | `contracts` | JSON Schemas (single source of truth), generated types, exact `Decimal`, typed HTTP/WS clients, OpenAPI/AsyncAPI |
 | `feature-registry` | Feature manifests, lifecycle, dependency resolution and a leak-proof `FeatureContext` |
 | `chart-core` | `ChartPort` and the Lightweight Charts adapter (the only importer of the library) |
-| `drawing-core`, `drawing-tools` | Anchored drawing documents, commands with undo/redo, migrations; 12 tools |
+| `drawing-core`, `drawing-tools` | Anchored drawing documents, commands with undo/redo, migrations, engine-series sync; 37 tools incl. Gann, harmonic/Elliott patterns and the engine-backed anchored VWAP and regression channel |
 | `indicator-viz` | Render-only mapping of backend zones and events to overlays |
 | `terminal-shell` | Workspace model (1/2/4/8 charts, sync), persistence, hotkeys |
 | `chart-trading`, `strategy-builder` | Order-ticket state machine and rule-AST editing models |

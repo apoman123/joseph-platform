@@ -13,6 +13,13 @@
 ``REPLAY``
     Recorded candles only; never tradable.
 
+Seconds timeframes are built from the venue's public trades
+(``VenueCapabilities.trade_built_timeframes``): "native" then means the
+native *trade* stream, and REST polling means polling the REST trade
+history. A venue without a time-range trade history cannot poll seconds
+bars: ``REST_POLL`` is rejected at acquire and ``AUTO`` goes ``STALE`` and
+retries the trade stream instead of emulating bars from anything else.
+
 Session transitions::
 
     CONNECTING -> LIVE -> (failure) -> POLLING [AUTO] | STALE [NATIVE_WS]
@@ -28,6 +35,7 @@ import contextlib
 import dataclasses
 import enum
 import logging
+import math
 from collections.abc import Awaitable
 from collections.abc import Callable
 from collections.abc import Mapping
@@ -42,6 +50,7 @@ from joseph.market_data.adapters import replay as replay_lib
 from joseph.market_data.app import candle_store
 from joseph.market_data.app import ports
 from joseph.market_data.domain import candles as candle_rules
+from joseph.market_data.domain import capabilities
 from joseph.market_data.domain import health
 
 _LOG = logging.getLogger(__name__)
@@ -257,15 +266,33 @@ class FeedRouter:
             return
         adapter = self._adapter(instrument.venue)
         caps = adapter.capabilities()
+        venue = instrument.venue.value
         if not caps.supports_timeframe(timeframe):
             raise errors.UnsupportedError(
-                f"{instrument.venue.value} does not provide {timeframe.value}"
+                f"{venue} does not provide {timeframe.value}"
             )
+        if caps.is_trade_built(timeframe):
+            if mode is quality.FeedMode.NATIVE_WS and (
+                not caps.market_data.native_ws_trades
+            ):
+                raise errors.UnsupportedError(
+                    f"{venue} has no native trade stream for "
+                    f"{timeframe.value} bars"
+                )
+            if mode is quality.FeedMode.REST_POLL and (
+                not caps.market_data.trades_history
+            ):
+                raise errors.UnsupportedError(
+                    f"{venue} publishes no time-range trade history, so "
+                    f"{timeframe.value} bars cannot be polled; choose AUTO "
+                    "or NATIVE_WS (built from the trade stream)"
+                )
+            return
         if mode is quality.FeedMode.NATIVE_WS and (
             not caps.market_data.native_ws_candles
         ):
             raise errors.UnsupportedError(
-                f"{instrument.venue.value} has no native WebSocket candles; "
+                f"{venue} has no native WebSocket candles; "
                 "choose AUTO or REST_POLL"
             )
 
@@ -543,7 +570,10 @@ class FeedRouter:
             session: Session.
         """
         caps = self._adapter(session.instrument.venue).capabilities()
-        native = caps.market_data.native_ws_candles
+        native = _native(caps, session.timeframe)
+        if native and not _pollable(caps, session.timeframe):
+            await self._run_native_only(session)
+            return
         while True:
             if native:
                 try:
@@ -575,15 +605,20 @@ class FeedRouter:
         """
         adapter = self._adapter(session.instrument.venue)
         failures = 0
-        duration = session.timeframe.duration_ms
+        tf = session.timeframe
+        # Look back far enough that consecutive polls overlap; window
+        # sizing may use the nominal duration.
+        back = 1 + math.ceil(self._poll_interval_s * 1000 / tf.duration_ms)
+        if not tf.is_seconds:
+            back = 1
         while until_ms is None or self._clock.now_ms() < until_ms:
             now = self._clock.now_ms()
             try:
                 rows = await adapter.fetch_candles(
                     session.instrument,
-                    session.timeframe,
-                    session.timeframe.floor(now) - duration,
-                    now + duration,
+                    tf,
+                    tf.shift(tf.floor(now), -back),
+                    tf.end_of(tf.floor(now)),
                 )
             except errors.JosephError as err:
                 failures += 1
@@ -617,3 +652,37 @@ class FeedRouter:
                         ),
                     )
             await self._sleep(self._poll_interval_s)
+
+
+def _native(
+    caps: capabilities.VenueCapabilities, timeframe: timeframes.Timeframe
+) -> bool:
+    """Checks whether a series has a native stream.
+
+    Args:
+        caps: Venue capabilities.
+        timeframe: Resolution.
+
+    Returns:
+        True for native klines, or a native trade stream for seconds bars.
+    """
+    if caps.is_trade_built(timeframe):
+        return caps.market_data.native_ws_trades
+    return caps.market_data.native_ws_candles
+
+
+def _pollable(
+    caps: capabilities.VenueCapabilities, timeframe: timeframes.Timeframe
+) -> bool:
+    """Checks whether a series can be polled over REST.
+
+    Args:
+        caps: Venue capabilities.
+        timeframe: Resolution.
+
+    Returns:
+        True for REST klines, or a REST trade history for seconds bars.
+    """
+    if caps.is_trade_built(timeframe):
+        return caps.market_data.trades_history
+    return caps.market_data.rest_history

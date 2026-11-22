@@ -219,6 +219,28 @@
             "type": "string"
           }
         },
+        "bar_base_volume": {
+          "description": "Base volume of the evaluated (signal) bar. Not comparable across instruments; rank by bar_quote_volume.",
+          "oneOf": [
+            {
+              "$ref": "common.schema.json#/$defs/NonNegativeDecimalString"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "bar_quote_volume": {
+          "description": "Quote-currency turnover of the evaluated bar as published by the venue; null when the venue publishes none (never estimated).",
+          "oneOf": [
+            {
+              "$ref": "common.schema.json#/$defs/NonNegativeDecimalString"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
         "entry_price": {
           "oneOf": [
             {

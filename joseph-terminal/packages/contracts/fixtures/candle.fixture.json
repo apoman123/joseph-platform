@@ -14,6 +14,7 @@
       "base_volume": "152.334",
       "quote_turnover": "14432100.2",
       "trade_count": 4211,
+      "taker_buy_base_volume": "61.2",
       "is_final": true,
       "revision": 0,
       "source": "binance.ws",

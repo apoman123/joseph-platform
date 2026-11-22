@@ -1,16 +1,29 @@
 """Binance USDⓈ-M futures market-data adapter.
 
 REST: ``https://fapi.binance.com/fapi/v1`` (exchangeInfo, fundingInfo,
-klines, premiumIndex, ticker/24hr, ticker/bookTicker, openInterest, depth).
-WebSocket klines: ``wss://fstream.binance.com/market/ws/<sym>@kline_<tf>``
-(verified 2026-11: the legacy ``/ws/<sym>@kline`` path no longer streams
-klines). Binance flags closed klines (``k.x``), so finals come from the
-stream itself.
+klines, aggTrades, premiumIndex, ticker/24hr, ticker/bookTicker,
+openInterest, depth). WebSocket klines:
+``wss://fstream.binance.com/market/ws/<sym>@kline_<tf>`` (verified 2026-11:
+the legacy ``/ws/<sym>@kline`` path no longer streams klines). Binance flags
+closed klines (``k.x``), so finals come from the stream itself.
+
+Verified live 2026-11-22:
+
+* Every Joseph kline timeframe is native, including ``1M`` (bars open on the
+  1st 00:00 UTC). Kline row index 9 and WebSocket ``k.V`` are the taker buy
+  base volume (index 9 equals the sum of ``q`` over ``m=false`` aggTrades).
+* ``<sym>@aggTrade`` streams only on the ``/market`` route; ``m`` means "the
+  buyer is the maker", so ``m=true`` is a SELL aggressor (148/150 trades
+  printed through the matching side of the book). ``LIST_SUBSCRIPTIONS`` is
+  answered on that route and serves as an application heartbeat.
+* ``aggTrades`` (weight 20, no key) pages oldest first, ``startTime`` and
+  ``endTime`` inclusive, at most 1000 rows, and only reaches back 48 hours.
 """
 
 from __future__ import annotations
 
 import asyncio
+import contextlib
 import dataclasses
 import json
 from collections.abc import AsyncIterator
@@ -30,12 +43,17 @@ from joseph.market_data.adapters import ws
 from joseph.market_data.domain import books
 from joseph.market_data.domain import capabilities
 from joseph.market_data.domain import health
+from joseph.market_data.domain import trades as trades_lib
 
 REST_URL = "https://fapi.binance.com"
 WS_URL = "wss://fstream.binance.com/market/ws"
-_TF = tuple(timeframes.Timeframe)
+_TF = (*timeframes.SECONDS, *timeframes.MINUTE_AND_ABOVE)
 _DEPTH_LIMITS = (5, 10, 20, 50, 100, 500, 1000)
 _MAX_KLINES = 1500
+_MAX_AGG_TRADES = 1000
+_AGG_WINDOW_MS = 3_600_000 - 1
+_AGG_HISTORY_MS = 48 * 3_600_000 - 60_000
+"""``aggTrades`` serves the last 48 hours; keep a minute of margin."""
 _PERPETUAL_TYPES = frozenset({"PERPETUAL", "TRADIFI_PERPETUAL"})
 _STATUS = {
     "TRADING": instruments.InstrumentStatus.TRADING,
@@ -123,7 +141,8 @@ def parse_kline_row(
     """Converts a REST kline row to a candle.
 
     Args:
-        row: ``[openTime, o, h, l, c, v, closeTime, quoteVol, trades, ...]``.
+        row: ``[openTime, o, h, l, c, v, closeTime, quoteVol, trades,
+            takerBuyBaseVol, takerBuyQuoteVol, ignore]``.
         instrument_id: Instrument.
         timeframe: Resolution.
         now_ms: Receipt time.
@@ -142,6 +161,7 @@ def parse_kline_row(
         base_volume=base.dec(row[5]),
         quote_turnover=base.dec(row[7]),
         trade_count=int(row[8]),
+        taker_buy_base_volume=base.dec(row[9]) if len(row) > 9 else None,
         now_ms=now_ms,
         source="binance.rest",
     )
@@ -180,12 +200,79 @@ def parse_ws_kline(
             base_volume=base.dec(kline["v"]),
             quote_turnover=base.opt_dec(kline.get("q")),
             trade_count=int(kline.get("n", 0)),
+            taker_buy_base_volume=base.opt_dec(kline.get("V")),
             event_ts_ms=int(message.get("E", now_ms)),
             now_ms=now_ms,
             source="binance.ws",
             is_final=bool(kline.get("x")),
         )
     ]
+
+
+def _agg_trade(
+    row: Mapping[str, Any], instrument_id: instruments.InstrumentId, now_ms: int
+) -> market.Trade:
+    """Converts an aggregate trade (REST row or stream payload).
+
+    Args:
+        row: ``{a, p, q, T, m, ...}``.
+        instrument_id: Instrument.
+        now_ms: Receipt time.
+
+    Returns:
+        Trade; ``m`` (buyer is maker) means the aggressor sold.
+    """
+    return market.Trade(
+        instrument_id=instrument_id,
+        trade_id=str(row["a"]),
+        venue_event_ts_ms=int(row["T"]),
+        received_at_ms=now_ms,
+        price=base.dec(row["p"]),
+        base_quantity=base.dec(row["q"]),
+        aggressor_side=(
+            market.AggressorSide.SELL if row["m"] else market.AggressorSide.BUY
+        ),
+        is_aggregated=True,
+    )
+
+
+def parse_agg_trade_rows(
+    rows: list[Mapping[str, Any]],
+    instrument_id: instruments.InstrumentId,
+    now_ms: int,
+) -> list[market.Trade]:
+    """Converts a REST ``aggTrades`` page.
+
+    Args:
+        rows: Ascending aggregate trades.
+        instrument_id: Instrument.
+        now_ms: Receipt time.
+
+    Returns:
+        Trades.
+    """
+    return [_agg_trade(row, instrument_id, now_ms) for row in rows]
+
+
+def parse_ws_agg_trade(
+    raw: str | bytes, instrument_id: instruments.InstrumentId, now_ms: int
+) -> list[market.Trade]:
+    """Parses an ``aggTrade`` frame (acks and heartbeat replies are empty).
+
+    Args:
+        raw: Frame payload.
+        instrument_id: Instrument.
+        now_ms: Receipt time.
+
+    Returns:
+        Zero or one trade.
+    """
+    message = json.loads(raw)
+    if not isinstance(message, dict) or message.get("e") != "aggTrade":
+        return []
+    if message.get("s") != instrument_id.venue_market_id:
+        return []
+    return [_agg_trade(message, instrument_id, now_ms)]
 
 
 class BinanceAdapter(base.BaseVenueAdapter):
@@ -225,14 +312,21 @@ class BinanceAdapter(base.BaseVenueAdapter):
             market_data=capabilities.MarketDataCapabilities(
                 rest_history=True,
                 native_ws_candles=True,
+                native_ws_trades=True,
                 book_snapshot=True,
                 open_interest=True,
                 funding=True,
+                trades_history=True,
+                taker_volume=True,
             ),
             timeframes=_TF,
+            trade_built_timeframes=timeframes.SECONDS,
             notes=(
-                "Kline WebSocket uses the /market/ws route.",
-                "Trade and depth streams are not wired yet.",
+                "Kline and aggTrade WebSockets use the /market/ws route.",
+                "Seconds bars are built from aggTrades; their history only "
+                "reaches back 48 hours and trade_count is null (fills are "
+                "aggregated).",
+                "Depth streams are not wired yet.",
                 "Open interest is per symbol (no bulk endpoint).",
             ),
             docs_url=(
@@ -290,15 +384,17 @@ class BinanceAdapter(base.BaseVenueAdapter):
             Ascending candles.
         """
         self._require_timeframe(timeframe)
+        if timeframe.is_seconds:
+            return await self._fetch_trade_candles(
+                instrument, timeframe, start_ms, end_ms, limit
+            )
         await self._require(instrument)
         rows: list[market.Candle] = []
         cursor = timeframe.floor(start_ms)
         wanted = limit or 10_000
         if limit is not None:
-            cursor = max(
-                cursor,
-                timeframe.floor(end_ms - 1)
-                - (limit - 1) * timeframe.duration_ms,
+            cursor = base.newest_window_start(
+                timeframe, start_ms, end_ms, limit
             )
         while cursor < end_ms and len(rows) < wanted:
             batch = await self._http.get(
@@ -541,6 +637,101 @@ class BinanceAdapter(base.BaseVenueAdapter):
             raise errors.MissingDataError("funding unavailable")
         return snapshot.funding
 
+    def _trade_spec(
+        self, instrument: instruments.InstrumentId
+    ) -> ws.WsTradeSpec:
+        """Describes the ``<sym>@aggTrade`` stream on the /market route.
+
+        Args:
+            instrument: Instrument.
+
+        Returns:
+            Trade stream spec (``LIST_SUBSCRIPTIONS`` as heartbeat).
+        """
+
+        def parse(raw: str | bytes, now_ms: int) -> list[market.Trade]:
+            """Parses one frame.
+
+            Args:
+                raw: Frame payload.
+                now_ms: Receipt time.
+
+            Returns:
+                Trades.
+            """
+            return parse_ws_agg_trade(raw, instrument, now_ms)
+
+        stream = f"{instrument.venue_market_id.lower()}@aggTrade"
+        return ws.WsTradeSpec(
+            url=WS_URL,
+            subscribe=(
+                json.dumps(
+                    {"method": "SUBSCRIBE", "params": [stream], "id": 1}
+                ),
+            ),
+            parse=parse,
+            ping_message=json.dumps({"method": "LIST_SUBSCRIPTIONS", "id": 2}),
+            ping_interval_s=5.0,
+            idle_timeout_s=30.0,
+        )
+
+    async def _trade_history(
+        self,
+        instrument: instruments.InstrumentId,
+        start_ms: int,
+        end_ms: int,
+        max_pages: int,
+    ) -> trades_lib.TradeCoverage:
+        """Collects the newest complete aggTrades of a range.
+
+        Args:
+            instrument: Instrument.
+            start_ms: Inclusive start.
+            end_ms: Exclusive end.
+            max_pages: Request budget.
+
+        Returns:
+            Complete suffix of the range (empty beyond the 48h history).
+        """
+        oldest = self._clock.now_ms() - _AGG_HISTORY_MS
+        if end_ms <= oldest:
+            return trades_lib.TradeCoverage((), end_ms, end_ms)
+        symbol = instrument.venue_market_id
+
+        async def page(start: int, end: int) -> trades_lib.TradeCoverage:
+            """Fetches one oldest-first page.
+
+            Args:
+                start: Inclusive start.
+                end: Exclusive end.
+
+            Returns:
+                Prefix coverage of the page.
+            """
+            rows = await self._http.get(
+                "/fapi/v1/aggTrades",
+                params={
+                    "symbol": symbol,
+                    "startTime": start,
+                    "endTime": end - 1,
+                    "limit": _MAX_AGG_TRADES,
+                },
+            )
+            trades = parse_agg_trade_rows(
+                list(rows), instrument, self._clock.now_ms()
+            )
+            return trades_lib.coverage_from_prefix(
+                trades, start, end, len(rows) < _MAX_AGG_TRADES
+            )
+
+        return await base.suffix_by_chunks(
+            page,
+            max(start_ms, oldest),
+            end_ms,
+            max_pages,
+            max_window_ms=_AGG_WINDOW_MS,
+        )
+
     async def stream_candles(
         self,
         instrument: instruments.InstrumentId,
@@ -558,6 +749,12 @@ class BinanceAdapter(base.BaseVenueAdapter):
             Candle updates; closed bars carry ``is_final=True``.
         """
         self._require_timeframe(timeframe)
+        if timeframe.is_seconds:
+            bars = self._stream_trade_candles(instrument, timeframe, tracker)
+            async with contextlib.aclosing(bars):
+                async for bar in bars:
+                    yield bar
+            return
         await self._require(instrument)
         symbol = instrument.venue_market_id.lower()
 
@@ -592,11 +789,13 @@ class BinanceAdapter(base.BaseVenueAdapter):
             timeframe=timeframe,
             venue_marks_final=True,
         )
-        async for candle in ws.stream_with_recovery(
+        candles = ws.stream_with_recovery(
             spec,
             backfill=backfill,
             clock=self._clock,
             connect=self._connect,
             tracker=tracker,
-        ):
-            yield candle
+        )
+        async with contextlib.aclosing(candles):
+            async for candle in candles:
+                yield candle

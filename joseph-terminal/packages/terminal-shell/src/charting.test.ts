@@ -307,8 +307,8 @@ describe('custom timeframe input', () => {
 
   it.each([
     ['10m', /not offered/],
-    ['30s', /not offered/],
-    ['1M', /Monthly/],
+    ['45s', /not offered/],
+    ['2M', /not offered/],
     ['', /Type a resolution/],
     ['abc', /Type a resolution/],
     ['0m', /Type a resolution/],

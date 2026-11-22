@@ -19,8 +19,10 @@ from joseph.market_data.adapters import ws
 from joseph.market_data.app import ports
 
 # Live verification of every endpoint and stream used by the adapters
-# (scripts/probe_venues.py), 2026-11-21 16:10 UTC.
-VERIFIED_AT_MS = 1_795_277_400_000
+# (scripts/probe_venues.py, 2026-11-21; trade streams, trade history,
+# seconds bars, 1M klines and taker volume via the opt-in tests/network
+# suite, 26 passed), 2026-11-22 12:43 UTC.
+VERIFIED_AT_MS = 1_795_351_391_000
 
 _RATES: dict[instruments.Venue, tuple[float, int]] = {
     instruments.Venue.BINANCE: (10.0, 20),
@@ -95,6 +97,7 @@ def build_adapters(
                 venue_http(venue, lighter.REST_URL),
                 clock,
                 VERIFIED_AT_MS,
+                connect,
             )
         elif venue is instruments.Venue.BITGET:
             adapters[venue] = bitget.BitgetAdapter(

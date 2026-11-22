@@ -1,0 +1,37 @@
+{
+  "plugin_id": "anchored_vwap",
+  "timeframe": "5m",
+  "settings": {
+    "anchor": "time",
+    "anchor_ms": 1794786900000,
+    "source": "close",
+    "tick_size": "0.01"
+  },
+  "description": "The anchor bar (one bar before the first computed bar) is outside the window, so the study publishes no values instead of anchoring at the first bar it saw.",
+  "bars": [
+    [
+      "10",
+      "10",
+      "10",
+      "10",
+      "1"
+    ],
+    [
+      "16",
+      "16",
+      "16",
+      "16",
+      "1"
+    ]
+  ],
+  "expect": {
+    "final_values": {
+      "vwap": null,
+      "stdev": null,
+      "upper_1": null,
+      "anchor_ms": null,
+      "bars": 0,
+      "anchor_in_window": false
+    }
+  }
+}

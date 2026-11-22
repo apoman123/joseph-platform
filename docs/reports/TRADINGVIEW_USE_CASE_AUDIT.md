@@ -15,7 +15,7 @@ DEMO spec in `apps/web/e2e/`, **S** screenshot in `apps/web/e2e/screenshots/`.
 | | DONE | PARTIAL | MISSING |
 |---|---:|---:|---:|
 | Before | 54 | 16 | 24 |
-| After | 87 | 3 | 4 |
+| After | 94 | 0 | 0 |
 
 ## §1.2 Use cases
 
@@ -36,7 +36,7 @@ DEMO spec in `apps/web/e2e/`, **S** screenshot in `apps/web/e2e/screenshots/`.
 |---|---|---|
 | Left toolbar (crosshair, lines/rays, trendline, rectangle, Fib R/E, long/short, ruler, text, channel, undo/redo, magnet, lock) | DONE → DONE (grouped flyouts, 18 tools) | U `charting.test.tsx`, E |
 | Instrument selector venue/type/instrument | DONE → DONE | E `terminal.spec.ts` |
-| Timeframe control | DONE → DONE | E |
+| Timeframe control | DONE → DONE (grouped 1s → 1M, venue-unpublished dimmed) | E `timeframes.spec.ts`, U |
 | Chart type | DONE → DONE | E |
 | **Compare** | MISSING → DONE (≤3 symbols, left % axis, chips) | E, S 14, U |
 | **Indicator** control with parameters | PARTIAL → DONE (settings dialog from `input_schema`) | E, S 13, U |
@@ -45,7 +45,7 @@ DEMO spec in `apps/web/e2e/`, **S** screenshot in `apps/web/e2e/screenshots/`.
 | Data-quality indicator | DONE → DONE | E |
 | Candles canvas | DONE → DONE | E |
 | **Volume pane** | PARTIAL → DONE (own LWC pane) | E (pane canvases) |
-| **Indicator pane** | MISSING → DONE (Delta % columns, ±threshold, zero line) | E, S 12, U |
+| **Indicator pane** | MISSING → DONE (Delta % columns, true vs faint estimate per bar, ±threshold, zero line) | E, S 12, S 24, U |
 | AOI boxes/lines | DONE → DONE (+ per-kind colors/filters) | U |
 | BOS/CHoCH | DONE → DONE (+ MSS, initial break, break lines) | U |
 | Trading lines, entry/SL/TP | DONE → DONE | E |
@@ -81,13 +81,13 @@ DEMO spec in `apps/web/e2e/`, **S** screenshot in `apps/web/e2e/screenshots/`.
 | Crosshair with OHLC**V** | PARTIAL → DONE (data window: OHLC, change, volume, Delta %, compared closes) | E, S 12, U |
 | Session separators | MISSING → DONE (UTC day/week/month by timeframe) | U `panes.test.ts`, E |
 | Wheel zoom, keyboard shortcuts | PARTIAL → DONE (Alt 0 fit, Alt⇧R replay, Alt⇧S screenshot) | U |
-| Timeframes seconds → 1M | PARTIAL → PARTIAL | contract `Timeframe` is 1m–1w |
-| Custom resolutions | MISSING → DONE (typed `15`/`4h`/`1D`, unsupported refused) | U |
+| Timeframes seconds → 1M | PARTIAL → DONE (`1s 5s 15s 30s` … `1M`; seconds axis, minute/hour/year session breaks, calendar-month ends for replay, data window and bar-close countdown; DEMO serves them) | U `contracts/tests/timeframes.test.ts`, `terminal-shell/timeframes.test.ts`, `chart-core/time-scale.test.ts`, `mock-provider/timeframes-and-delta.test.ts`, E `timeframes.spec.ts`, S 24 |
+| Custom resolutions | MISSING → DONE (typed `15`/`4h`/`1D`/`5S`/`1M`; unsupported or venue-unpublished refused) | U, E |
 | Timeframe favorites | DONE → DONE | E |
 | Venue/instrument selector, registry search, health/latency | DONE → DONE | E |
 | Up to 8 charts with sync options | DONE → DONE | E |
 | Compare with separate price axis | MISSING → DONE | E, S 14 |
-| Detachable panes | MISSING → MISSING | see gaps |
+| Detachable panes | MISSING → DONE (chart, Market, Watchlist, Screener, Alerts in `/popout`; BroadcastChannel sync of link groups, crosshair, theme, workspace; re-dock on close/heartbeat loss; re-open after reload; same trading guards) | U `terminal-shell/detach.test.ts`, `web/composition/detach.test.ts`, E `popout.spec.ts`, S 21–23 |
 | Tool persistence by instrument/timeframe/workspace | DONE → DONE | E |
 | Chart templates | MISSING → DONE | E, U |
 | Favorites, per-user workspaces | DONE → DONE | E |
@@ -98,7 +98,7 @@ DEMO spec in `apps/web/e2e/`, **S** screenshot in `apps/web/e2e/screenshots/`.
 | Per-object visibility and lock | PARTIAL → DONE (object list, style bar) | E, S 17 |
 | Drawing colors/style | MISSING → DONE (color, width, dash, fill, extend, text, z-order) | E, U |
 | Backend AOIs: BOS/CHoCH, FVG/IFVG, OB/Breaker, BSL/SSL/EQH/EQL, VAH/POC/VAL, P/D/OTE | DONE → DONE | U |
-| Delta (estimate / true) | MISSING → PARTIAL (estimate pane; true delta needs trade-flow data) | U, E |
+| Delta (estimate / true) | MISSING → DONE (per-bar *true* from taker volume vs faint *estimate* from `values.method`; data window source and buy/sell volume; `delta_source` input) | U `indicator-viz/delta-method.test.ts`, `mock-provider/timeframes-and-delta.test.ts`, E `timeframes.spec.ts`, S 24 |
 | Per-indicator visibility, colors, parameters | PARTIAL → DONE (per chart) | U, E |
 
 ## §2.4 Drawing milestones
@@ -111,9 +111,9 @@ DEMO spec in `apps/web/e2e/`, **S** screenshot in `apps/web/e2e/screenshots/`.
 | P1 long/short, R/R overlay (no auto order) | DONE → DONE | U, E |
 | P2 parallel channel, vertical line | DONE → DONE | U |
 | P2 brush | MISSING → DONE (freehand, ≤64 time/price anchors) | U `editing.test.ts`, E |
-| P2 shape library | MISSING → PARTIAL (arrow, zone box, polyline; ellipse etc. are P3) | U |
-| P2 anchored VWAP | MISSING → MISSING | by design, see gaps |
-| P2 regression channel | MISSING → MISSING | by design, see gaps |
+| P2 shape library | MISSING → DONE (arrow, zone box, polyline plus the P3 set: ellipse, circle, triangle, rotated rectangle, arc, curve, pitchfork, Fib time zones/circles, Gann fan/box, XABCD, ABCD, head and shoulders, Elliott impulse/correction, triangle pattern) | U `drawing-tools/*/index.test.ts`, E `extended-drawings.spec.ts`, S 25 |
+| P2 anchored VWAP | MISSING → DONE (tool anchors a bar; the engine's `anchored_vwap` series supplies VWAP and bands) | U, E `extended-drawings.spec.ts`, full-stack E, S 26–27 |
+| P2 regression channel | MISSING → DONE (two anchors; the engine's `regression_channel` series supplies line, bands, Pearson's R) | U, E `extended-drawings.spec.ts`, S 26 |
 | P2 keyboard/touch, snapping, selection, locking | DONE → DONE (+ per-object lock, z-order) | U |
 
 ## Screening and alerts
@@ -127,7 +127,7 @@ DEMO spec in `apps/web/e2e/`, **S** screenshot in `apps/web/e2e/screenshots/`.
 | … confluence | MISSING → DONE (satisfied reason-tree conditions) | U |
 | … age | MISSING → DONE | U |
 | … distance to AOI | MISSING → DONE (engine price vs signal AOIs) | U |
-| … volume | MISSING → MISSING | `Signal` has no volume field |
+| … volume | MISSING → DONE (*Bar volume* sort and *Bar vol.* column on `bar_quote_volume`, nulls last) | U `alerts/volume.test.tsx`, E `timeframes.spec.ts` |
 | Click opens exact venue/symbol/timeframe/AOI | DONE → DONE | E |
 | Alert history, acknowledged | DONE → DONE | E |
 | Snooze / dismiss | MISSING → DONE (15 min/1 h/4 h, dismiss/restore, show hidden) | U, E, S 18 |
@@ -146,16 +146,17 @@ DEMO spec in `apps/web/e2e/`, **S** screenshot in `apps/web/e2e/screenshots/`.
 | Venue switch clears old overlays | DONE → DONE (also studies and comparisons) | U |
 | Bar replay | MISSING → DONE (start bar, step, play/pause, speed, truncation, `at_ms` AOIs, REPLAY provenance, trading off) | U, E, S 15 |
 
-## Remaining gaps (precise reasons)
+## Residual limits (no requirement open)
 
-| Gap | Status | Reason |
-|---|---|---|
-| Seconds and 1M timeframes | PARTIAL | Contract `Timeframe` enum and engine aggregation stop at 1m–1w; the typed-resolution box refuses them instead of approximating. |
-| True (trade-flow) delta | PARTIAL | Engine publishes only the candle-direction estimate (`method: candle_direction`); the pane is labeled "estimate". |
-| Shape library beyond arrow/zone/polyline | PARTIAL | Ellipse, Gann, harmonics are P3 in the proposal. |
-| Signal ranking by volume | MISSING | `Signal` contract has no volume field. |
-| Detachable panes | MISSING | Needs a pop-out window sharing the runtime and stream; not built in this increment. |
-| Anchored VWAP, regression channel | MISSING | Would compute values in the browser; policy keeps calculations in the engine (would need an engine series, then render like the Delta pane). |
+| Area | Limit |
+|---|---|
+| Seconds timeframes | Built by the engine from venue trades. History depth is the venue's trade history: Binance 48 h, Bitget 90 days, Lighter about 53 min; MEXC and Hyperliquid only from when the stream started. |
+| `1M` timeframe | Native calendar-month klines on Binance, Bitget and MEXC (and DEMO). Hyperliquid's `1M` is 30-day buckets and Lighter has none, so those venues do not offer it. |
+| True delta | From klines' taker volume on Binance and DEMO, and on every venue's seconds bars; other venues' minute-and-above bars stay *estimate* (drawn faint, `method: pine_parity`). |
+| Signal ranking by volume | Ranks by venue quote turnover of the signal bar; venues that publish none show *—* and sort last (never estimated). |
+| Detachable panes | Each window runs its own provider connection (in DEMO its own simulated broker); browsers allow one window per click, so re-opening several needs several clicks. |
+| Anchored VWAP / regression channel | Anchors more than 2000 bars back are refused with a message rather than computed from the wrong bar. |
+| Workspace export | Carries layouts, not drawings; drawings persist through the drawing store (as before). |
 
 ## Tests added
 
@@ -165,3 +166,10 @@ Vitest (+14 files): `chart-core/panes`, `terminal-shell/charting`,
 `polyline`, `brush`, `zone-box`; web `shell/charting.test.tsx`,
 `alerts/triage.test.tsx`, `watchlist/columns.test.tsx`.
 Playwright DEMO: `e2e/charting.spec.ts` (8 tests), screenshots 12–19.
+
+Second increment (2026-11-22): Vitest `contracts/timeframes`,
+`terminal-shell/{timeframes,detach}`, `chart-core/time-scale`,
+`drawing-core/{series,series-sync,patterns}`, one test file per new drawing
+tool, `alerts/ranking`; Playwright `popout.spec.ts`, `timeframes.spec.ts`,
+`extended-drawings.spec.ts`; full-stack `fullstack.spec.ts` (seconds bars,
+true delta, anchored VWAP from the engine).

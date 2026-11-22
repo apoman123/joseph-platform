@@ -160,9 +160,7 @@ class LiveSignalPipeline:
         tf = requirements.signal_timeframe
         engine = await self._provider.engine_for(parsed, requirements)
         now = self._clock.now_ms()
-        start = tf.floor(now) - max(requirements.history_bars, 1) * (
-            tf.duration_ms
-        )
+        start = tf.shift(tf.floor(now), -max(requirements.history_bars, 1))
         candles = await self._provider.candles(engine, parsed, tf, start, now)
         warm = engine.run(candles)
         self._runtime.warm_up(instrument_id, warm)
@@ -186,9 +184,7 @@ class LiveSignalPipeline:
         now = self._clock.now_ms()
         fresh: list[market.Candle] = []
         for tf in state.engine.required_timeframes:
-            since = state.last_end_ms.get(
-                tf, tf.floor(now) - 3 * (tf.duration_ms)
-            )
+            since = state.last_end_ms.get(tf, tf.shift(tf.floor(now), -3))
             rows = await self._market.get_candles(instrument_id, tf, since, now)
             fresh.extend(
                 c

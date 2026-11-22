@@ -1,4 +1,4 @@
-"""Plugin adapters for each ported Pine indicator.
+"""Plugin adapters for each ported Pine indicator and Python-native study.
 
 Each adapter declares the plugin metadata, exposes the Pine inputs as
 settings (same defaults and bounds as the Pine source), feeds the right data
@@ -14,6 +14,7 @@ from collections.abc import Mapping
 from collections.abc import Sequence
 from typing import ClassVar
 
+from smc_indicators import anchored_vwap
 from smc_indicators import auction_value_areas
 from smc_indicators import daily_bias
 from smc_indicators import fvg_ifvg
@@ -22,6 +23,7 @@ from smc_indicators import market_structure
 from smc_indicators import order_breaker_blocks
 from smc_indicators import order_flow_pressure
 from smc_indicators import premium_discount_ote
+from smc_indicators import regression_channel
 from smc_indicators import types as smc_types
 
 from joseph.domain import decimals
@@ -294,17 +296,21 @@ class DailyBiasPlugin(bridge.PackagedPlugin):
         return 2 * _int(settings, "swing_length") + 1
 
     def required_streams(
-        self, settings: Mapping[str, object] | None
+        self,
+        settings: Mapping[str, object] | None,
+        *,
+        timeframe: tfs.Timeframe | None = None,
     ) -> frozenset[str]:
         """Chart bars plus completed 1D, 4H and 1H bars.
 
         Args:
             settings: Overrides.
+            timeframe: Series timeframe (unused).
 
         Returns:
             Stream names.
         """
-        del settings
+        del settings, timeframe
         return frozenset(
             {
                 protocol.CHART_STREAM,
@@ -857,15 +863,33 @@ class LiquiditySweepsPlugin(bridge.PackagedPlugin):
         )
 
 
+_NO_AUTO_INTRABARS = frozenset({tfs.Timeframe.S1, tfs.Timeframe.M1})
+"""Charts on which ``intrabar_tf = auto`` reads no intrabars."""
+
+_AUTO_INTRABARS: Mapping[tfs.Timeframe, tfs.Timeframe] = {
+    tfs.Timeframe.D1: tfs.Timeframe.M5,
+}
+"""Daily-and-above ``auto`` intrabars other than the 1h default."""
+
+
 class OrderFlowPressurePlugin(bridge.PackagedPlugin):
-    """Intrabar delta estimate with failure and breakout signals."""
+    """Volume delta (true or estimated) with failure and breakout signals.
+
+    ``delta_source = "auto"`` uses true delta from the venue's taker buy
+    volume when the chart bar carries it (``method`` value
+    ``taker_volume``, snapshot method ``trade``); otherwise, and always with
+    ``"estimate"``, the Pine intrabar candle-direction estimate.
+    """
 
     PLUGIN_ID = "order_flow_pressure"
     DISPLAY_NAME = "Order-flow pressure"
     DESCRIPTION = (
-        "Signed intrabar volume share (candle-direction estimate) with "
-        "failed-auction and breakout signals beyond the 20-bar range."
+        "Volume delta share: true delta from taker volume where the venue "
+        "publishes it, else the Pine intrabar candle-direction estimate, "
+        "with failed-auction and breakout signals beyond the 20-bar range."
     )
+    INTRABAR_AUTO = "auto"
+    """Intrabar choice resolved per chart timeframe (TradingView's rule)."""
     PINE_SOURCE = f"{_PINE_DIR}/smc_order_flow_pressure.pine"
     OUTPUT_EVENTS = (
         _E.BUYER_FAILURE,
@@ -875,11 +899,22 @@ class OrderFlowPressurePlugin(bridge.PackagedPlugin):
     )
     SETTINGS = (
         _S(
+            "delta_source",
+            _ENUM,
+            "auto",
+            "auto: true delta from venue taker volume when available, else "
+            "the estimate; estimate: always the Pine candle-direction "
+            "estimate.",
+            choices=("auto", "estimate"),
+        ),
+        _S(
             "intrabar_tf",
             _ENUM,
-            "1m",
-            "Lower timeframe used for the delta estimate.",
-            choices=("1m", "3m", "5m", "15m"),
+            "auto",
+            "Lower timeframe used for the delta estimate (auto: 1s on "
+            "5s-30s charts, none on 1s/1m, 1m intraday, 5m daily, 1h "
+            "weekly/monthly).",
+            choices=("auto", "1s", "5s", "15s", "1m", "3m", "5m", "15m"),
         ),
         _S(
             "min_intrabars",
@@ -961,22 +996,77 @@ class OrderFlowPressurePlugin(bridge.PackagedPlugin):
         """
         return _int(settings, "lookback_bars") + 1
 
+    @classmethod
+    def intrabar_timeframe(
+        cls,
+        settings: Mapping[str, settings_lib.SettingValue],
+        timeframe: tfs.Timeframe | None,
+    ) -> tfs.Timeframe | None:
+        """Resolves the intrabar timeframe for a chart timeframe.
+
+        ``auto`` follows TradingView's volume-delta rule: 1s on seconds
+        charts, 1m intraday, 5m on daily and 1h on weekly/monthly charts.
+        1s and 1m charts have no practical lower timeframe (seconds bars
+        come from trade history), so ``auto`` reads no intrabars there and
+        only true delta can be published.
+
+        Args:
+            settings: Resolved settings.
+            timeframe: Chart timeframe, if known.
+
+        Returns:
+            The intrabar timeframe, or ``None`` when there is none.
+        """
+        choice = settings_lib.get_str(settings, "intrabar_tf")
+        if choice != cls.INTRABAR_AUTO:
+            return tfs.parse(choice)
+        if timeframe is None:
+            return tfs.Timeframe.M1
+        if timeframe in _NO_AUTO_INTRABARS:
+            return None
+        if timeframe.is_seconds:
+            return tfs.Timeframe.S1
+        if timeframe.duration_ms < tfs.Timeframe.D1.duration_ms:
+            return tfs.Timeframe.M1
+        return _AUTO_INTRABARS.get(timeframe, tfs.Timeframe.H1)
+
     def required_streams(
-        self, settings: Mapping[str, object] | None
+        self,
+        settings: Mapping[str, object] | None,
+        *,
+        timeframe: tfs.Timeframe | None = None,
     ) -> frozenset[str]:
-        """Chart bars plus intrabars of the configured lower timeframe.
+        """Chart bars plus intrabars of the resolved lower timeframe.
 
         Args:
             settings: Overrides.
+            timeframe: Chart timeframe, when known.
 
         Returns:
             Stream names.
         """
         resolved = self.resolve_settings(settings)
-        intrabar = tfs.parse(settings_lib.get_str(resolved, "intrabar_tf"))
+        intrabar = self.intrabar_timeframe(resolved, timeframe)
+        if intrabar is None:
+            return frozenset({protocol.CHART_STREAM})
         return frozenset(
             {protocol.CHART_STREAM, protocol.intrabar_stream(intrabar)}
         )
+
+    def snapshot_method(
+        self, values: Mapping[str, structures.ValueType]
+    ) -> structures.IndicatorMethod:
+        """Labels true-delta bars as trade-derived, never Pine parity.
+
+        Args:
+            values: Published values.
+
+        Returns:
+            ``trade`` for taker-volume bars, else ``pine_parity``.
+        """
+        if values.get("method") == "taker_volume":
+            return structures.IndicatorMethod.TRADE
+        return self.METHOD
 
     def _build(
         self,
@@ -998,6 +1088,7 @@ class OrderFlowPressurePlugin(bridge.PackagedPlugin):
         return {
             "main": order_flow_pressure.OrderFlowPressure(
                 float(tick),
+                delta_source=settings_lib.get_str(settings, "delta_source"),
                 min_intrabars=_int(settings, "min_intrabars"),
                 min_coverage=bridge.float_setting(settings, "min_coverage"),
                 lookback_bars=_int(settings, "lookback_bars"),
@@ -1039,10 +1130,14 @@ class OrderFlowPressurePlugin(bridge.PackagedPlugin):
         """
         indicator = _main(payload)
         assert isinstance(indicator, order_flow_pressure.OrderFlowPressure)
-        intrabar_tf = tfs.parse(settings_lib.get_str(settings, "intrabar_tf"))
+        intrabar_tf = self.intrabar_timeframe(settings, bar.candle.timeframe)
         intrabars = [
             convert.to_bar(candle)
-            for candle in bar.intrabars.get(intrabar_tf, ())
+            for candle in (
+                bar.intrabars.get(intrabar_tf, ())
+                if intrabar_tf is not None
+                else ()
+            )
         ]
         result = indicator.update(convert.to_bar(bar.candle), intrabars)
         raw = result.values
@@ -1054,7 +1149,13 @@ class OrderFlowPressurePlugin(bridge.PackagedPlugin):
             "rel_volume": convert.ratio(
                 _opt_float(raw.get("relative_volume")), 4
             ),
-            "method": "candle_direction",
+            "method": (
+                "taker_volume"
+                if raw.get("method") == "taker_volume"
+                else "candle_direction"
+            ),
+            "buy_volume": convert.quantity(_opt_float(raw.get("buy_volume"))),
+            "sell_volume": convert.quantity(_opt_float(raw.get("sell_volume"))),
             "prior_high": _price(raw.get("prior_high"), step),
             "prior_low": _price(raw.get("prior_low"), step),
         }
@@ -1081,6 +1182,7 @@ class AuctionValueAreasPlugin(bridge.PackagedPlugin):
     )
     PINE_SOURCE = f"{_PINE_DIR}/smc_auction_value_areas.pine"
     TIMEFRAMES = (
+        *tfs.SECONDS,
         tfs.Timeframe.M1,
         tfs.Timeframe.M3,
         tfs.Timeframe.M5,
@@ -1139,17 +1241,21 @@ class AuctionValueAreasPlugin(bridge.PackagedPlugin):
         return _int(settings, "chart_bars") + 1
 
     def required_streams(
-        self, settings: Mapping[str, object] | None
+        self,
+        settings: Mapping[str, object] | None,
+        *,
+        timeframe: tfs.Timeframe | None = None,
     ) -> frozenset[str]:
         """Chart bars plus completed 1H bars.
 
         Args:
             settings: Overrides.
+            timeframe: Series timeframe (unused).
 
         Returns:
             Stream names.
         """
-        del settings
+        del settings, timeframe
         return frozenset(
             {protocol.CHART_STREAM, protocol.aux_stream(tfs.Timeframe.H1)}
         )
@@ -1352,6 +1458,315 @@ class PremiumDiscountOtePlugin(bridge.PackagedPlugin):
         )
 
 
+_SOURCES = ("close", "hl2", "hlc3", "ohlc4")
+"""Price sources of the Python-native studies."""
+
+_MAX_ANCHOR_MS = 4_102_444_800_000
+"""Latest accepted anchor time (2100-01-01 UTC)."""
+
+
+def _anchor_spec(description: str) -> settings_lib.SettingSpec:
+    """Builds the shared ``anchor_ms`` setting.
+
+    Args:
+        description: Meaning of the anchor for the study.
+
+    Returns:
+        The setting spec.
+    """
+    return _S(
+        "anchor_ms",
+        _INT,
+        0,
+        description,
+        minimum=0,
+        maximum=_MAX_ANCHOR_MS,
+    )
+
+
+def _effective_anchor(
+    settings: Mapping[str, settings_lib.SettingValue],
+    timeframe: tfs.Timeframe,
+) -> int:
+    """Returns the start of the chart bar containing ``anchor_ms``.
+
+    Args:
+        settings: Resolved settings.
+        timeframe: Chart timeframe.
+
+    Returns:
+        Aligned anchor bar start (0 when no anchor is set).
+    """
+    anchor = _int(settings, "anchor_ms")
+    return timeframe.floor(anchor) if anchor > 0 else 0
+
+
+class AnchoredVwapPlugin(bridge.PackagedPlugin):
+    """Anchored VWAP with standard-deviation bands (Python-native study).
+
+    Not a Pine port: the library implements TradingView's built-in VWAP
+    definition. With ``anchor = "time"`` the anchor is the chart bar that
+    contains ``anchor_ms`` (the anchored-VWAP drawing tool); if that bar is
+    not inside the computed window every value is ``None`` and
+    ``anchor_in_window`` is False, so a too-distant anchor is never drawn
+    from the wrong bar.
+    """
+
+    PLUGIN_ID = "anchored_vwap"
+    DISPLAY_NAME = "Anchored VWAP"
+    DESCRIPTION = (
+        "Volume-weighted average price from a session, week, month or a "
+        "chosen bar, with up to three standard-deviation bands."
+    )
+    SETTINGS = (
+        _S(
+            "anchor",
+            _ENUM,
+            "session",
+            "Reset period (UTC day, ISO week, calendar month) or a fixed "
+            "anchor bar (time).",
+            choices=("session", "week", "month", "time"),
+        ),
+        _anchor_spec("Anchor time (UTC ms) when anchor is time."),
+        _S(
+            "source",
+            _ENUM,
+            "hlc3",
+            "Price averaged by volume.",
+            choices=_SOURCES,
+        ),
+        *(
+            _S(
+                f"band_{index}",
+                _DEC,
+                _D(default),
+                f"Band {index} width in standard deviations (0 hides it).",
+                minimum=_D(0),
+                maximum=_D(10),
+            )
+            for index, default in ((1, "1"), (2, "0"), (3, "0"))
+        ),
+        bridge.tick_spec(),
+    )
+
+    def _build(
+        self,
+        settings: Mapping[str, settings_lib.SettingValue],
+        tick: decimal.Decimal,
+        timeframe: tfs.Timeframe,
+    ) -> dict[str, object]:
+        """Creates the library object.
+
+        Args:
+            settings: Resolved settings.
+            tick: Tick size.
+            timeframe: Series timeframe.
+
+        Returns:
+            Objects by role.
+
+        Raises:
+            ValueError: If ``anchor`` is ``time`` without ``anchor_ms``.
+        """
+        anchor = settings_lib.get_str(settings, "anchor")
+        anchor_ms = _effective_anchor(settings, timeframe)
+        if anchor == "time" and anchor_ms == 0:
+            raise ValueError("anchored_vwap: anchor_ms is required for time")
+        return {
+            "main": anchored_vwap.AnchoredVwap(
+                float(tick),
+                anchor=anchor,
+                anchor_time_ms=anchor_ms,
+                source=settings_lib.get_str(settings, "source"),
+                band_multipliers=tuple(
+                    bridge.float_setting(settings, f"band_{index}")
+                    for index in (1, 2, 3)
+                ),
+            )
+        }
+
+    def _advance(
+        self,
+        payload: bridge.Payload,
+        bar: protocol.BarInput,
+        settings: Mapping[str, settings_lib.SettingValue],
+        step: decimal.Decimal,
+    ) -> bridge.LibraryStep:
+        """Feeds one bar.
+
+        Args:
+            payload: Live payload.
+            bar: Bar input.
+            settings: Resolved settings.
+            step: Price quantum.
+
+        Returns:
+            Library outputs and values.
+        """
+        indicator = _main(payload)
+        assert isinstance(indicator, anchored_vwap.AnchoredVwap)
+        raw = indicator.update(convert.to_bar(bar.candle)).values
+        started = _opt_int(raw.get("anchor_time_ms"))
+        in_window = True
+        if settings_lib.get_str(settings, "anchor") == "time":
+            wanted = _effective_anchor(settings, bar.candle.timeframe)
+            in_window = started is None or started == wanted
+        keys = (
+            "vwap",
+            "stdev",
+            *(
+                f"{side}_{index}"
+                for index in (1, 2, 3)
+                for side in ("upper", "lower")
+            ),
+        )
+        values: dict[str, structures.ValueType] = {
+            key: _price(raw.get(key), step) if in_window else None
+            for key in keys
+        }
+        values["anchor_ms"] = started if in_window else None
+        values["bars"] = (_opt_int(raw.get("bars")) or 0) if in_window else 0
+        values["anchor_in_window"] = in_window
+        return bridge.LibraryStep(values=values)
+
+
+class RegressionChannelPlugin(bridge.PackagedPlugin):
+    """Linear regression channel (Python-native study).
+
+    Not a Pine port: a least-squares line over the last ``length`` bars
+    (``anchor_ms = 0``) or over every bar since the anchor bar (the
+    regression-channel drawing tool reads the point at its second anchor),
+    with bands at ``deviations`` sample standard deviations of the
+    residuals. An anchor outside the computed window yields ``None`` values
+    and ``anchor_in_window`` False.
+    """
+
+    PLUGIN_ID = "regression_channel"
+    DISPLAY_NAME = "Regression channel"
+    DESCRIPTION = (
+        "Least-squares trend line with standard-deviation bands and "
+        "Pearson's R, rolling or from an anchor bar."
+    )
+    SETTINGS = (
+        _S(
+            "length",
+            _INT,
+            100,
+            "Bars in the rolling window (ignored with an anchor).",
+            minimum=2,
+            maximum=5000,
+        ),
+        _anchor_spec("Anchor time (UTC ms); 0 uses the rolling window."),
+        _S(
+            "source",
+            _ENUM,
+            "close",
+            "Price fitted.",
+            choices=_SOURCES,
+        ),
+        _S(
+            "deviations",
+            _DEC,
+            _D("2"),
+            "Band width in standard deviations.",
+            minimum=_D(0),
+            maximum=_D(10),
+        ),
+        bridge.tick_spec(),
+    )
+
+    def warmup_for(
+        self, settings: Mapping[str, settings_lib.SettingValue]
+    ) -> int:
+        """Returns bars until the first fit.
+
+        Args:
+            settings: Resolved settings.
+
+        Returns:
+            ``length`` for the rolling window, 2 with an anchor.
+        """
+        if _int(settings, "anchor_ms") > 0:
+            return 2
+        return _int(settings, "length")
+
+    def _build(
+        self,
+        settings: Mapping[str, settings_lib.SettingValue],
+        tick: decimal.Decimal,
+        timeframe: tfs.Timeframe,
+    ) -> dict[str, object]:
+        """Creates the library object.
+
+        Args:
+            settings: Resolved settings.
+            tick: Tick size.
+            timeframe: Series timeframe.
+
+        Returns:
+            Objects by role.
+        """
+        return {
+            "main": regression_channel.RegressionChannel(
+                float(tick),
+                length=_int(settings, "length"),
+                anchor_time_ms=_effective_anchor(settings, timeframe),
+                source=settings_lib.get_str(settings, "source"),
+                deviations=bridge.float_setting(settings, "deviations"),
+            )
+        }
+
+    def _advance(
+        self,
+        payload: bridge.Payload,
+        bar: protocol.BarInput,
+        settings: Mapping[str, settings_lib.SettingValue],
+        step: decimal.Decimal,
+    ) -> bridge.LibraryStep:
+        """Feeds one bar.
+
+        Args:
+            payload: Live payload.
+            bar: Bar input.
+            settings: Resolved settings.
+            step: Price quantum.
+
+        Returns:
+            Library outputs and values.
+        """
+        indicator = _main(payload)
+        assert isinstance(indicator, regression_channel.RegressionChannel)
+        raw = indicator.update(convert.to_bar(bar.candle)).values
+        started = _opt_int(raw.get("start_time_ms"))
+        wanted = _effective_anchor(settings, bar.candle.timeframe)
+        in_window = wanted == 0 or started is None or started == wanted
+        prices = (
+            "start",
+            "end",
+            "upper_start",
+            "upper_end",
+            "lower_start",
+            "lower_end",
+            "slope",
+            "stdev",
+            "max_up",
+            "max_down",
+        )
+        values: dict[str, structures.ValueType] = {
+            key: _price(raw.get(key), step) if in_window else None
+            for key in prices
+        }
+        values["start_ms"] = started if in_window else None
+        values["pearson_r"] = (
+            convert.ratio(_opt_float(raw.get("pearson_r")), 4)
+            if in_window
+            else None
+        )
+        values["bars"] = (_opt_int(raw.get("bars")) or 0) if in_window else 0
+        values["anchor_in_window"] = in_window
+        return bridge.LibraryStep(values=values)
+
+
 def _zone_step(
     result: smc_types.Result, step: decimal.Decimal
 ) -> bridge.LibraryStep:
@@ -1477,4 +1892,6 @@ def default_plugins() -> tuple[bridge.PackagedPlugin, ...]:
         OrderFlowPressurePlugin(),
         AuctionValueAreasPlugin(),
         PremiumDiscountOtePlugin(),
+        AnchoredVwapPlugin(),
+        RegressionChannelPlugin(),
     )

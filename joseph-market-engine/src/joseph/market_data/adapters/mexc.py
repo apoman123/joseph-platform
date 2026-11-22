@@ -3,10 +3,19 @@
 REST base: ``https://contract.mexc.com/api/v1/contract`` — ``detail``,
 ``kline/{symbol}``, ``ticker``, ``funding_rate/{symbol}`` and
 ``depth/{symbol}``. WebSocket: ``wss://contract.mexc.com/edge`` with
-``sub.kline``. Volumes and depth are quoted in contracts and converted to
-base units with ``contractSize``. Kline frames do not flag closed bars, so
-closed bars are confirmed over REST. MEXC requires a ``ping`` within one
-minute.
+``sub.kline`` and ``sub.deal``. Volumes and depth are quoted in contracts
+and converted to base units with ``contractSize``. Kline frames do not flag
+closed bars, so closed bars are confirmed over REST. MEXC requires a
+``ping`` within one minute (answered by a ``pong`` frame).
+
+Verified live 2026-11-22: ``Month1`` klines open on the 1st 00:00 UTC
+(``Week1`` on Monday, ``Day1`` at midnight UTC). ``push.deal`` frames carry
+``data`` as an array (or one object) of ``{p, v, T, O, M, t, i}``: ``T`` is
+the taker side (1 buy, 2 sell; 96.7% of 152 trades printed through the
+matching side of the book), ``v`` is in contracts and ``i`` is a unique,
+increasing (non-contiguous) trade id. ``deals/{symbol}`` only returns the
+latest 100 trades (no time range), so seconds bars come from the stream
+only and outages are recorded as gaps. Klines publish no taker volume.
 
 Market data is public; whether an account may trade a contract over the API
 (region, eligibility, ``apiAllowed``) is an execution-engine concern and is
@@ -15,6 +24,8 @@ verified per account there.
 
 from __future__ import annotations
 
+import contextlib
+import decimal
 import json
 from collections.abc import AsyncIterator
 from collections.abc import Mapping
@@ -46,8 +57,11 @@ _INTERVAL: dict[timeframes.Timeframe, str] = {
     timeframes.Timeframe.H4: "Hour4",
     timeframes.Timeframe.D1: "Day1",
     timeframes.Timeframe.W1: "Week1",
+    timeframes.Timeframe.MN1: "Month1",
 }
+_TF = (*timeframes.SECONDS, *_INTERVAL)
 _MAX_CANDLES = 2000
+_SIDES = {1: market.AggressorSide.BUY, 2: market.AggressorSide.SELL}
 _EQUITY_TAGS = frozenset(
     {
         "mc-trade-zone-Stock",
@@ -139,6 +153,50 @@ def parse_detail(
     )
 
 
+def parse_deal_frame(
+    raw: str | bytes,
+    instrument_id: instruments.InstrumentId,
+    contract_size: decimal.Decimal,
+    now_ms: int,
+) -> list[market.Trade]:
+    """Parses a ``push.deal`` frame (array or single-object ``data``).
+
+    Args:
+        raw: Frame payload.
+        instrument_id: Instrument.
+        contract_size: Base units per contract.
+        now_ms: Receipt time.
+
+    Returns:
+        Trades ascending by time and id (empty for acks and pongs).
+    """
+    message = json.loads(raw)
+    if not isinstance(message, dict) or message.get("channel") != "push.deal":
+        return []
+    if message.get("symbol") not in (None, instrument_id.venue_market_id):
+        return []
+    data = message.get("data")
+    rows: list[Mapping[str, Any]] = (
+        data if isinstance(data, list) else [data] if data else []
+    )
+    trades = [
+        market.Trade(
+            instrument_id=instrument_id,
+            trade_id=str(row["i"]),
+            venue_event_ts_ms=int(row["t"]),
+            received_at_ms=now_ms,
+            price=base.dec(row["p"]),
+            base_quantity=base.dec(row["v"]) * contract_size,
+            aggressor_side=_SIDES.get(
+                int(row["T"]), market.AggressorSide.UNKNOWN
+            ),
+            is_aggregated=False,
+        )
+        for row in rows
+    ]
+    return sorted(trades, key=lambda t: (t.venue_event_ts_ms, int(t.trade_id)))
+
+
 class MexcAdapter(base.BaseVenueAdapter):
     """``MarketDataPort`` for MEXC perpetual contracts."""
 
@@ -176,17 +234,24 @@ class MexcAdapter(base.BaseVenueAdapter):
             market_data=capabilities.MarketDataCapabilities(
                 rest_history=True,
                 native_ws_candles=True,
+                native_ws_trades=True,
                 book_snapshot=True,
                 open_interest=True,
                 funding=True,
             ),
-            timeframes=tuple(_INTERVAL),
+            timeframes=_TF,
+            trade_built_timeframes=timeframes.SECONDS,
             notes=(
                 "Volumes and depth converted from contracts via contractSize.",
                 "Funding interval is per contract (collectCycle) and only "
                 "known after a funding request.",
                 "API trading eligibility is verified per account in the "
                 "execution engine.",
+                "Seconds bars are built from the live deal stream only: the "
+                "deals endpoint has no time range, so there is no seconds "
+                "history and outages are recorded as gaps.",
+                "Klines publish no taker buy volume (taker_volume is false); "
+                "seconds bars built from trades do carry it.",
             ),
             docs_url="https://www.mexc.com/api-docs/futures/integration-guide",
             verified_at_ms=self._verified_at_ms,
@@ -246,17 +311,23 @@ class MexcAdapter(base.BaseVenueAdapter):
             Ascending candles.
         """
         self._require_timeframe(timeframe)
+        if timeframe.is_seconds:
+            return await self._fetch_trade_candles(
+                instrument, timeframe, start_ms, end_ms, limit
+            )
         await self._require(instrument)
         size = self._contract_size(instrument)
-        duration = timeframe.duration_ms
         cursor = timeframe.floor(start_ms)
         if limit is not None:
-            cursor = max(
-                cursor, timeframe.floor(end_ms - 1) - (limit - 1) * duration
+            cursor = base.newest_window_start(
+                timeframe, start_ms, end_ms, limit
             )
         rows: list[market.Candle] = []
         while cursor < end_ms:
-            window_end = min(end_ms, cursor + _MAX_CANDLES * duration)
+            # Window sizing only: the nominal (upper-bound) bar length.
+            window_end = min(
+                end_ms, cursor + _MAX_CANDLES * timeframe.duration_ms
+            )
             payload = await self._http.get(
                 f"{_PREFIX}/kline/{instrument.venue_market_id}",
                 params={
@@ -492,6 +563,47 @@ class MexcAdapter(base.BaseVenueAdapter):
             as_of_ms=int(data.get("timestamp") or now),
         )
 
+    def _trade_spec(
+        self, instrument: instruments.InstrumentId
+    ) -> ws.WsTradeSpec:
+        """Describes the ``sub.deal`` stream.
+
+        Args:
+            instrument: Instrument (already resolved).
+
+        Returns:
+            Trade stream spec.
+        """
+        size = self._contract_size(instrument)
+
+        def parse(raw: str | bytes, now_ms: int) -> list[market.Trade]:
+            """Parses one frame.
+
+            Args:
+                raw: Frame payload.
+                now_ms: Receipt time.
+
+            Returns:
+                Trades.
+            """
+            return parse_deal_frame(raw, instrument, size, now_ms)
+
+        return ws.WsTradeSpec(
+            url=WS_URL,
+            subscribe=(
+                json.dumps(
+                    {
+                        "method": "sub.deal",
+                        "param": {"symbol": instrument.venue_market_id},
+                    }
+                ),
+            ),
+            parse=parse,
+            ping_message=json.dumps({"method": "ping"}),
+            ping_interval_s=5.0,
+            idle_timeout_s=30.0,
+        )
+
     async def stream_candles(
         self,
         instrument: instruments.InstrumentId,
@@ -509,6 +621,12 @@ class MexcAdapter(base.BaseVenueAdapter):
             Candle updates.
         """
         self._require_timeframe(timeframe)
+        if timeframe.is_seconds:
+            bars = self._stream_trade_candles(instrument, timeframe, tracker)
+            async with contextlib.aclosing(bars):
+                async for bar in bars:
+                    yield bar
+            return
         await self._require(instrument)
         size = self._contract_size(instrument)
         interval = _INTERVAL[timeframe]
@@ -580,11 +698,13 @@ class MexcAdapter(base.BaseVenueAdapter):
             ping_message=json.dumps({"method": "ping"}),
             ping_interval_s=15.0,
         )
-        async for candle in ws.stream_with_recovery(
+        candles = ws.stream_with_recovery(
             spec,
             backfill=backfill,
             clock=self._clock,
             connect=self._connect,
             tracker=tracker,
-        ):
-            yield candle
+        )
+        async with contextlib.aclosing(candles):
+            async for candle in candles:
+                yield candle

@@ -38,6 +38,7 @@ import enum
 from collections.abc import Mapping
 
 from joseph.domain import ids
+from joseph.domain import timeframes
 from joseph.strategy.domain import compiler
 from joseph.strategy.domain import errors
 from joseph.strategy.domain import evaluator
@@ -299,7 +300,7 @@ class LifecyclePolicy:
     """Policy inputs of the state machine, derived from a plan.
 
     Attributes:
-        timeframe_ms: Signal bar length.
+        timeframe: Signal timeframe (bars are counted on its calendar).
         expire_after_bars: Lifetime of an unfired setup.
         cooldown_bars: Bars of blocked entries after a fire.
         once_per_aoi: Fire at most once per AOI.
@@ -308,7 +309,7 @@ class LifecyclePolicy:
         has_aoi_touch: Whether setups are anchored by AOI touches.
     """
 
-    timeframe_ms: int
+    timeframe: timeframes.Timeframe
     expire_after_bars: int
     cooldown_bars: int
     once_per_aoi: bool
@@ -328,7 +329,7 @@ class LifecyclePolicy:
         """
         definition = plan.definition
         return cls(
-            timeframe_ms=definition.signal_timeframe.duration_ms,
+            timeframe=definition.signal_timeframe,
             expire_after_bars=definition.setup.expire_after_bars,
             cooldown_bars=definition.notification.cooldown_bars,
             once_per_aoi=definition.notification.once_per_aoi,
@@ -609,13 +610,15 @@ def _close_setup(
     if setup is None:
         return
     policy = work.policy
-    lifetime_ms = policy.expire_after_bars * policy.timeframe_ms
+    expires_at_ms = policy.timeframe.shift(
+        setup.started_at_ms, policy.expire_after_bars
+    )
     if setup.anchor_aoi_id and _anchor_invalidated(
         evaluation, setup.anchor_aoi_id
     ):
         work.move(S.INVALIDATED, f"anchor {setup.anchor_aoi_id} invalidated")
         work.emit("AOI_INVALIDATED", f"AOI {setup.anchor_aoi_id} invalidated")
-    elif work.close_ms - setup.started_at_ms >= lifetime_ms:
+    elif work.close_ms >= expires_at_ms:
         work.move(S.EXPIRED, f"expired after {policy.expire_after_bars} bars")
         work.emit("SETUP_EXPIRED", "setup expired without an entry")
     elif target is S.WAITING:
@@ -775,7 +778,7 @@ def _advance(
     policy = work.policy
     cooldown = None
     if policy.cooldown_bars > 0:
-        cooldown = work.close_ms + policy.cooldown_bars * policy.timeframe_ms
+        cooldown = policy.timeframe.shift(work.close_ms, policy.cooldown_bars)
     return dataclasses.replace(
         base,
         fired_aoi_ids=state.fired_aoi_ids | frozenset(evaluation.aoi_ids),

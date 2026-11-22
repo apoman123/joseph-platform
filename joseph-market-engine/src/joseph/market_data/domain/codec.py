@@ -61,6 +61,9 @@ def candle_from_contract(
                 if payload.get("event_ts_ms") is None
                 else int(str(payload["event_ts_ms"]))
             ),
+            taker_buy_base_volume=decimals.to_optional_decimal(
+                payload.get("taker_buy_base_volume")
+            ),
         )
     except KeyError as err:
         raise ValueError(f"candle missing field {err}") from err

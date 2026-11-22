@@ -221,10 +221,10 @@ class IndicatorQueryService:
         end_ms = self._clock.now_ms()
         bars = self._config.lookback_bars
         if from_ms is not None:
-            wanted = (timeframe.floor(end_ms) - from_ms) // (
-                timeframe.duration_ms
+            wanted = timeframe.bars_between(
+                timeframe.floor(from_ms), timeframe.floor(end_ms)
             )
-            bars = max(bars, min(int(wanted) + 1, self._config.max_series_bars))
+            bars = max(bars, min(wanted + 1, self._config.max_series_bars))
         result = await self._compute(
             instrument_id,
             timeframe,
@@ -316,23 +316,22 @@ class IndicatorQueryService:
             self._registry, config, instrument_id
         )
         end_ms = self._clock.now_ms() if at_ms is None else at_ms
-        chart_start = timeframe.floor(end_ms) - (
-            lookback_bars or self._config.lookback_bars
-        ) * (timeframe.duration_ms)
+        chart_start = timeframe.shift(
+            timeframe.floor(end_ms),
+            -(lookback_bars or self._config.lookback_bars),
+        )
         windows: dict[timeframes.Timeframe, int] = {}
         for tf in engine.required_timeframes:
             if tf is timeframe:
                 windows[tf] = chart_start
             elif tf.duration_ms < timeframe.duration_ms:
-                windows[tf] = (
-                    timeframe.floor(end_ms)
-                    - (intrabar_bars or self._config.intrabar_lookback_bars)
-                    * timeframe.duration_ms
+                windows[tf] = timeframe.shift(
+                    timeframe.floor(end_ms),
+                    -(intrabar_bars or self._config.intrabar_lookback_bars),
                 )
             else:
-                windows[tf] = (
-                    chart_start
-                    - self._config.aux_lookback_bars * tf.duration_ms
+                windows[tf] = tf.shift(
+                    tf.floor(chart_start), -self._config.aux_lookback_bars
                 )
         ordered = sorted(windows, key=lambda tf: tf.duration_ms)
         fetched = await asyncio.gather(

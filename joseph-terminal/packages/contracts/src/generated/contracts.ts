@@ -49,12 +49,16 @@ export type MarketType = 'perp' | 'spot' | 'future';
  */
 export type InstrumentId = string;
 /**
- * Candle resolution. Boundaries are UTC-aligned half-open intervals [start_ms, end_ms).
+ * Candle resolution. Boundaries are UTC-aligned half-open intervals [start_ms, end_ms). Case matters: 1m is one minute, 1M one calendar month (starts on the 1st 00:00 UTC, 28-31 days). Seconds bars are built by the engine from the venue's public trades.
  *
  * This interface was referenced by `JosephContracts`'s JSON-Schema
  * via the `definition` "Timeframe".
  */
 export type Timeframe =
+  | '1s'
+  | '5s'
+  | '15s'
+  | '30s'
   | '1m'
   | '3m'
   | '5m'
@@ -66,7 +70,8 @@ export type Timeframe =
   | '6h'
   | '12h'
   | '1d'
-  | '1w';
+  | '1w'
+  | '1M';
 /**
  * Requested market-data transport policy.
  *
@@ -1218,6 +1223,10 @@ export interface Candle {
   base_volume: NonNegativeDecimalString;
   quote_turnover?: NonNegativeDecimalString | null;
   trade_count?: number | null;
+  /**
+   * Base volume of trades whose aggressor bought (venue-published or summed from the venue's public trades). Enables true volume delta; null when the venue publishes neither.
+   */
+  taker_buy_base_volume?: NonNegativeDecimalString | null;
   is_final: boolean;
   revision: number;
   /**
@@ -1374,6 +1383,10 @@ export interface MarketDataCapabilities {
   open_interest: boolean;
   funding: boolean;
   trades_history: boolean;
+  /**
+   * The venue's klines (1m and above) carry taker_buy_base_volume, so true delta is available on every timeframe. Seconds bars built from trades (trade_built_timeframes) carry it on every venue regardless of this flag.
+   */
+  taker_volume?: boolean;
 }
 /**
  * This interface was referenced by `JosephContracts`'s JSON-Schema
@@ -1385,6 +1398,10 @@ export interface VenueCapabilities {
   market_types: MarketType[];
   market_data: MarketDataCapabilities;
   timeframes: Timeframe[];
+  /**
+   * Subset of timeframes the engine builds from the venue's public trade stream (seconds bars), because the venue publishes no such klines. History is limited to what the venue's trade history endpoint returns.
+   */
+  trade_built_timeframes?: Timeframe[];
   notes: string[];
   docs_url: string;
   verified_at_ms?: TimestampMs | null;
@@ -1524,6 +1541,14 @@ export interface Signal {
   reason_tree: ReasonNode;
   aoi_ids: string[];
   range_ids?: string[];
+  /**
+   * Base volume of the evaluated (signal) bar. Not comparable across instruments; rank by bar_quote_volume.
+   */
+  bar_base_volume?: NonNegativeDecimalString | null;
+  /**
+   * Quote-currency turnover of the evaluated bar as published by the venue; null when the venue publishes none (never estimated).
+   */
+  bar_quote_volume?: NonNegativeDecimalString | null;
   entry_price?: DecimalString | null;
   stop_price?: DecimalString | null;
   target_price?: DecimalString | null;

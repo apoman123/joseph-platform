@@ -24,7 +24,7 @@ Browser: joseph-terminal (PUBLIC, Next.js)            Private: Python services
 | Canonical contracts (JSON Schema 2020-12) | `joseph-terminal/packages/contracts/schemas/` |
 | Shared example payloads (both stacks validate) | `joseph-terminal/packages/contracts/fixtures/` |
 | Market-engine domain kernel (ids, decimals, timeframes, candles, AOIs, BarFrame) | `joseph-market-engine/src/joseph/domain/` |
-| Venue adapters, feed router, order books | `joseph-market-engine/src/joseph/market_data/` |
+| Venue adapters (klines and public trades), seconds bars built from trades, feed router, order books | `joseph-market-engine/src/joseph/market_data/` |
 | Qualification filter | `joseph-market-engine/src/joseph/screening/` |
 | Indicator SDK, engine and adapters | `joseph-market-engine/src/joseph/indicators/` |
 | Indicator algorithms (Pine ports) | `apoman123/PineScripts` → `python_indicators/` (pinned dependency, ADR 0009) |

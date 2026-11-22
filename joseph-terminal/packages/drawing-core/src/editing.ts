@@ -122,6 +122,32 @@ export function retextDrawing(
 }
 
 /**
+ * Changes tool inputs kept in `props` (for example anchored VWAP bands).
+ * Locked drawings are not changed.
+ * @param store Drawing store.
+ * @param id Drawing id.
+ * @param patch Props to set.
+ * @param nowMs Clock.
+ * @return True when applied.
+ */
+export function setDrawingInputs(
+  store: DrawingStore,
+  id: string,
+  patch: Readonly<Record<string, string | boolean>>,
+  nowMs: number
+): boolean {
+  return store.update(
+    id,
+    doc => ({
+      ...doc,
+      props: {...(doc.props as Record<string, unknown> | undefined), ...patch},
+      updated_at_ms: nowMs,
+    }),
+    'Change drawing inputs'
+  );
+}
+
+/**
  * Shows/hides or locks/unlocks one drawing (allowed on locked drawings).
  * @param store Drawing store.
  * @param id Drawing id.

@@ -6,15 +6,20 @@ import {
   type IndicatorSeries,
   type IndicatorSeriesQuery,
   Decimal,
-  TIMEFRAME_MS,
   TIMEFRAMES,
+  barsBetween,
   floorToTimeframe,
+  isSecondsTimeframe,
+  shiftTimeframe,
+  timeframeEnd,
   type AoiList,
   type AoiRecord,
+  type Candle,
   type CandleBatch,
   type CandleQuery,
   type ChannelSpec,
   type IndicatorPluginList,
+  type IndicatorSeriesPoint,
   type IndicatorSnapshotList,
   type Instrument,
   type InstrumentList,
@@ -35,6 +40,7 @@ import {
   type VenueStatusList,
 } from '@joseph/contracts';
 import {DEMO_AOIS, DEMO_EVENTS} from './demo-indicators';
+import {demoDrawingSeries} from './demo-drawing-series';
 import {demoPluginInfos} from './demo-plugins';
 import {
   DEMO_INSTRUMENT_SPECS,
@@ -142,10 +148,13 @@ export class DemoMarketDataClient implements MarketDataClient {
               open_interest: true,
               funding: true,
               trades_history: false,
+              taker_volume: true,
             },
             timeframes: [...TIMEFRAMES],
+            trade_built_timeframes: TIMEFRAMES.filter(isSecondsTimeframe),
             notes: [
               'Synthetic data generated in the browser. Not a real market.',
+              'Seconds bars stand in for bars the engine builds from public trades.',
             ],
             docs_url: '',
             verified_at_ms: null,
@@ -193,13 +202,19 @@ export class DemoMarketDataClient implements MarketDataClient {
   async getCandles(query: CandleQuery): Promise<CandleBatch> {
     const spec = demoSpec(query.instrumentId);
     const now = this.now();
-    const duration = TIMEFRAME_MS[query.timeframe];
     const toMs = query.toMs ?? now;
     const limit =
       query.fromMs !== undefined
         ? Math.min(
             2000,
-            Math.max(1, Math.ceil((toMs - query.fromMs) / duration))
+            Math.max(
+              1,
+              barsBetween(
+                query.timeframe,
+                floorToTimeframe(query.timeframe, query.fromMs),
+                toMs
+              )
+            )
           )
         : Math.min(2000, query.limit ?? DEFAULT_LIMIT);
     return {
@@ -369,7 +384,7 @@ export class DemoMarketDataClient implements MarketDataClient {
         indicator_version: '1.0.0',
         method: 'pine_parity',
         as_of_ms: list.as_of_ms,
-        bar_start_ms: list.as_of_ms - TIMEFRAME_MS[list.timeframe],
+        bar_start_ms: shiftTimeframe(list.timeframe, list.as_of_ms, -1),
         aois: list.aois.filter(a => a.source === source),
         events: (list.events ?? []).filter(e => e.source === source),
         values: {},
@@ -380,9 +395,13 @@ export class DemoMarketDataClient implements MarketDataClient {
   }
 
   /**
-   * Returns DEMO per-bar values shaped like the backend series. Only the
-   * order-flow plugin has a sub-pane series; values are synthetic, derived
-   * from the demo candles' body direction, and labelled DEMO.
+   * Returns DEMO per-bar values shaped like the backend series. The
+   * order-flow plugin has a sub-pane series: DEMO candles carry taker-buy
+   * volume, so the delta is "true" (`method: taker_volume`, buy and sell
+   * volume published) unless the `delta_source` input asks for the
+   * candle-direction estimate. The drawing plugins `anchored_vwap` and
+   * `regression_channel` come from `demo-drawing-series`. Values are
+   * synthetic and labelled DEMO.
    * @param query Series query.
    * @return DEMO indicator series.
    */
@@ -391,34 +410,27 @@ export class DemoMarketDataClient implements MarketDataClient {
   ): Promise<IndicatorSeries> {
     const spec = demoSpec(query.instrumentId);
     const now = this.now();
-    const duration = TIMEFRAME_MS[query.timeframe];
-    const lastStart = floorToTimeframe(query.timeframe, now) - duration;
+    const drawingSeries = demoDrawingSeries(spec, query, now);
+    if (drawingSeries) return drawingSeries;
+    const tf = query.timeframe;
+    const lastStart = shiftTimeframe(tf, floorToTimeframe(tf, now), -1);
+    const estimate = query.settings?.delta_source === 'estimate';
     const points =
       query.pluginId === 'order_flow_pressure'
-        ? Array.from({length: 200}, (_, i) => {
-            const start = lastStart - (199 - i) * duration;
-            const bar = demoCandle(spec, query.timeframe, start, now);
-            const open = Number(bar.open);
-            const close = Number(bar.close);
-            const range = Math.max(Number(bar.high) - Number(bar.low), 1e-9);
-            const share = Math.max(-1, Math.min(1, (close - open) / range));
-            return {
-              bar_start_ms: start,
-              values: {
-                delta_pct: (share * 60).toFixed(2),
-                coverage_pct: '100',
-                intrabar_count: 5,
-              },
-            };
-          })
+        ? Array.from({length: 200}, (_, i) =>
+            demoDeltaPoint(
+              demoCandle(spec, tf, shiftTimeframe(tf, lastStart, i - 199), now),
+              estimate
+            )
+          )
         : [];
     return {
       instrument_id: spec.instrumentId,
-      timeframe: query.timeframe,
+      timeframe: tf,
       plugin_id: query.pluginId,
       indicator_version: 'demo',
       points,
-      as_of_ms: lastStart + duration,
+      as_of_ms: timeframeEnd(tf, lastStart),
       feed_state: 'DEMO',
     };
   }
@@ -431,9 +443,11 @@ export class DemoMarketDataClient implements MarketDataClient {
   async getAois(query: SeriesQuery): Promise<AoiList> {
     const spec = demoSpec(query.instrumentId);
     const now = this.now();
-    const duration = TIMEFRAME_MS[query.timeframe];
-    const lastStart = floorToTimeframe(query.timeframe, now) - duration;
-    const asOf = lastStart + duration;
+    const tf = query.timeframe;
+    const asOf = floorToTimeframe(tf, now);
+    const lastStart = shiftTimeframe(tf, asOf, -1);
+    const bars = (start: number, count: number) =>
+      shiftTimeframe(tf, start, count);
     const close = Decimal.parse(
       demoCandle(spec, query.timeframe, lastStart, now).close
     );
@@ -445,7 +459,7 @@ export class DemoMarketDataClient implements MarketDataClient {
     const aois: AoiRecord[] = DEMO_AOIS.filter(
       a => !wanted || wanted.has(a.source)
     ).map(a => {
-      const created = lastStart - a.barsAgo * duration;
+      const created = bars(lastStart, -a.barsAgo);
       const ended = a.state === 'swept' || a.state === 'invalidated';
       return {
         schema_version: 1,
@@ -460,9 +474,9 @@ export class DemoMarketDataClient implements MarketDataClient {
         lower: at(a.lowerRatio),
         upper: at(a.upperRatio),
         created_at_ms: created,
-        confirmed_at_ms: created + (a.confirmBars + 1) * duration,
+        confirmed_at_ms: bars(created, a.confirmBars + 1),
         invalidated_at_ms: ended
-          ? lastStart - Math.floor(a.barsAgo / 3) * duration
+          ? bars(lastStart, -Math.floor(a.barsAgo / 3))
           : null,
         as_of_ms: asOf,
         quality_score: a.score,
@@ -475,7 +489,7 @@ export class DemoMarketDataClient implements MarketDataClient {
     const events: StructureEvent[] = DEMO_EVENTS.filter(
       e => !wanted || wanted.has(e.source)
     ).map(e => {
-      const start = lastStart - e.barsAgo * duration;
+      const start = bars(lastStart, -e.barsAgo);
       return {
         event_id: `demo-${e.key}-${query.timeframe}`,
         instrument_id: spec.instrumentId,
@@ -483,7 +497,7 @@ export class DemoMarketDataClient implements MarketDataClient {
         source: e.source,
         name: e.name,
         bar_start_ms: start,
-        confirmed_at_ms: start + duration,
+        confirmed_at_ms: timeframeEnd(tf, start),
         price: at(e.priceRatio),
         aoi_id: null,
         score: null,
@@ -492,7 +506,7 @@ export class DemoMarketDataClient implements MarketDataClient {
             ? {demo: true}
             : {
                 demo: true,
-                pivot_time_ms: lastStart - e.pivotBarsAgo * duration,
+                pivot_time_ms: bars(lastStart, -e.pivotBarsAgo),
               },
       };
     });
@@ -523,6 +537,53 @@ export class DemoMarketDataClient implements MarketDataClient {
       feed_state: 'DEMO',
     };
   }
+}
+
+/**
+ * One DEMO order-flow point for a candle. True delta uses the candle's
+ * taker-buy volume (buy − sell over the bar volume); the estimate signs the
+ * bar volume by candle direction, as the engine's fallback does.
+ * @param candle DEMO candle (with `taker_buy_base_volume`).
+ * @param estimate Force the candle-direction estimate.
+ * @return Series point.
+ */
+export function demoDeltaPoint(
+  candle: Candle,
+  estimate: boolean
+): IndicatorSeriesPoint {
+  const base = Decimal.parse(candle.base_volume);
+  const taker = candle.taker_buy_base_volume;
+  if (!estimate && taker != null && base.toNumber() > 0) {
+    const buy = Decimal.parse(taker);
+    const sell = base.sub(buy);
+    const share = buy.sub(sell).toNumber() / base.toNumber();
+    return {
+      bar_start_ms: candle.start_ms,
+      values: {
+        delta_pct: (share * 100).toFixed(2),
+        coverage_pct: '100',
+        intrabar_count: 0,
+        method: 'taker_volume',
+        buy_volume: buy.toString(),
+        sell_volume: sell.toString(),
+      },
+    };
+  }
+  const open = Number(candle.open);
+  const close = Number(candle.close);
+  const range = Math.max(Number(candle.high) - Number(candle.low), 1e-9);
+  const share = Math.max(-1, Math.min(1, (close - open) / range));
+  return {
+    bar_start_ms: candle.start_ms,
+    values: {
+      delta_pct: (share * 60).toFixed(2),
+      coverage_pct: '100',
+      intrabar_count: 5,
+      method: 'candle_direction',
+      buy_volume: null,
+      sell_volume: null,
+    },
+  };
 }
 
 /**

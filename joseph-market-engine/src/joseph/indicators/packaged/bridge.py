@@ -683,7 +683,9 @@ class PackagedPlugin(base.BasePlugin[PackagedState]):
             meta=meta,
         )
         confirmed = min(
-            zone.confirmed_time_ms + header.timeframe.duration_ms,
+            header.timeframe.end_of(
+                header.timeframe.floor(zone.confirmed_time_ms)
+            ),
             header.as_of_ms,
         )
         return dataclasses.replace(aoi, confirmed_at_ms=confirmed)

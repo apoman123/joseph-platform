@@ -565,3 +565,94 @@ def test_ws_native_mode_on_rest_only_venue_is_unsupported(
         error = _receive_until(ws, "error")
         assert error["payload"]["code"] == "UNSUPPORTED"  # type: ignore[index]
         assert _receive_until(ws, "subscribed")["payload"] == {"channels": []}
+
+
+@pytest.mark.parametrize("tf", ["1s", "5s", "30s", "1M"])
+def test_seconds_and_monthly_candles_are_served_for_demo(
+    demo_client: testclient.TestClient, contract_validate: Validate, tf: str
+) -> None:
+    """DEMO serves seconds (from synthetic trades) and calendar months."""
+    response = demo_client.get(
+        "/v1/candles",
+        params={"instrument_id": "mock:perp:BTCUSD", "tf": tf, "limit": 12},
+    )
+    assert response.status_code == 200, response.text
+    body = response.json()
+    contract_validate("market.schema.json", "CandleBatch", body)
+    assert body["feed_state"] == "DEMO"
+    assert body["candles"]
+    assert all(c["timeframe"] == tf for c in body["candles"])
+    assert all(c["taker_buy_base_volume"] is not None for c in body["candles"])
+
+
+def test_venue_capabilities_expose_trade_built_timeframes(
+    venue_client: tuple[testclient.TestClient, respx.Router],
+    contract_validate: Validate,
+) -> None:
+    """Every venue lists its trade-built seconds and taker-volume flag."""
+    client, _ = venue_client
+    body = client.get("/v1/venues").json()
+    contract_validate("market.schema.json", "VenueStatusList", body)
+    caps = {
+        v["capabilities"]["venue"]: v["capabilities"] for v in body["venues"]
+    }
+    for venue, cap in caps.items():
+        assert cap["trade_built_timeframes"] == ["1s", "5s", "15s", "30s"], (
+            venue
+        )
+        assert cap["market_data"]["native_ws_trades"], venue
+    assert caps["binance"]["market_data"]["taker_volume"] is True
+    assert caps["bitget"]["market_data"]["taker_volume"] is False
+    assert "1M" in caps["binance"]["timeframes"]
+    assert "1M" not in caps["hyperliquid"]["timeframes"]
+    assert "1M" not in caps["lighter"]["timeframes"]
+
+
+def test_unsupported_monthly_and_unbacked_seconds_are_explicit(
+    venue_client: tuple[testclient.TestClient, respx.Router],
+) -> None:
+    """Hyperliquid 1M is refused; its seconds history is an honest gap."""
+    client, _ = venue_client
+    _error(
+        client.get(
+            "/v1/candles",
+            params={"instrument_id": "hyperliquid:perp:BTC", "tf": "1M"},
+        ),
+        422,
+        "UNSUPPORTED",
+    )
+    seconds = client.get(
+        "/v1/candles",
+        params={"instrument_id": "hyperliquid:perp:BTC", "tf": "5s"},
+    )
+    assert seconds.status_code == 200, seconds.text
+    body = seconds.json()
+    assert body["candles"] == []
+    assert body["complete"] is False
+    assert body["source"] == "hyperliquid.trades"
+
+
+def test_ws_streams_demo_seconds_candles(
+    demo_client: testclient.TestClient, contract_validate: Validate
+) -> None:
+    """A 1s candle subscription streams bars built from DEMO trades."""
+    with demo_client.websocket_connect("/v1/stream/market") as ws:
+        ws.send_text(
+            json.dumps(
+                {
+                    "action": "subscribe",
+                    "channels": [
+                        {
+                            "channel": "candles",
+                            "instrument_id": "mock:perp:ETHUSD",
+                            "timeframe": "1s",
+                        }
+                    ],
+                }
+            )
+        )
+        _receive_until(ws, "subscribed")
+        candle = _receive_until(ws, "candle.updated", limit=200)
+        contract_validate("market.schema.json", "Candle", candle["payload"])
+        assert candle["channel"] == "candles:mock:perp:ETHUSD:1s"
+        assert candle["payload"]["source"] == "mock.trades"  # type: ignore[index]

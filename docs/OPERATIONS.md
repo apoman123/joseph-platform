@@ -44,6 +44,7 @@ Production checklist: `JOSEPH_ENV=production` on the execution engine (refuses d
 - `GET /health` on each engine; `GET /metrics` (Prometheus text; execution needs the service token).
 - Watch: `joseph_feed_lag_ms`, `joseph_feed_reconnects`, `joseph_candle_revisions_total`, `joseph_http_requests_total{status=5xx}` (market); `joseph_order_unknown_total`, `joseph_risk_block_total`, `joseph_reconcile_lag_ms` (execution).
 - The terminal's *Data health* tab shows per-venue transport (native WS / REST poll), lag, reconnects and gaps.
+- Seconds charts (`1s`–`30s`) are built from each venue's public trade stream. Their history is only what the venue's trade history serves (Binance 48 h, Bitget 90 days, Lighter about 53 minutes; none on Hyperliquid and MEXC), and a reconnect that cannot be backfilled shows up as a gap rather than invented bars. `REST_POLL` of seconds bars is refused on venues without trade history.
 
 ## Routine tasks
 

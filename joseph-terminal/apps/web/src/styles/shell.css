@@ -1333,6 +1333,26 @@ kbd {
   background: var(--fathom);
 }
 
+.style-bar__inputs {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px;
+  padding-left: 6px;
+  border-left: 1px solid var(--fathom);
+}
+
+.style-bar__field {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+}
+
+.style-bar__label {
+  color: var(--haze);
+  font-size: var(--text-xs);
+}
+
 /* Top bar menus. */
 .tf-custom {
   display: grid;

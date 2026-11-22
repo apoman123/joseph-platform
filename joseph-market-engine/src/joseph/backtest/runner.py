@@ -159,9 +159,9 @@ def count_missing(frames: Sequence[structures.BarFrame]) -> int:
     """
     missing = 0
     for previous, frame in itertools.pairwise(frames):
-        gap = frame.candle.start_ms - previous.candle.end_ms
-        if gap > 0:
-            missing += gap // frame.timeframe.duration_ms
+        missing += frame.timeframe.bars_between(
+            previous.candle.end_ms, frame.candle.start_ms
+        )
     return missing
 
 

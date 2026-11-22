@@ -143,6 +143,24 @@ class BasePlugin[StateT](abc.ABC):
         """Returns the parity status (no Pine golden export yet)."""
         return PARITY_SPEC_ONLY
 
+    def snapshot_method(
+        self, values: Mapping[str, structures.ValueType]
+    ) -> structures.IndicatorMethod:
+        """Returns the calculation method of one published snapshot.
+
+        Plugins whose bars may switch to venue trade data (for example true
+        volume delta) override this so such outputs are never labelled as
+        Pine parity.
+
+        Args:
+            values: The snapshot's published values.
+
+        Returns:
+            ``METHOD`` by default.
+        """
+        del values
+        return self.METHOD
+
     def input_schema(self) -> dict[str, object]:
         """Returns the JSON Schema of the settings."""
         return settings_lib.json_schema(self.SETTINGS)
@@ -179,17 +197,21 @@ class BasePlugin[StateT](abc.ABC):
         return 1
 
     def required_streams(
-        self, settings: Mapping[str, object] | None
+        self,
+        settings: Mapping[str, object] | None,
+        *,
+        timeframe: tfs.Timeframe | None = None,
     ) -> frozenset[str]:
         """Returns needed data streams (chart bars only by default).
 
         Args:
             settings: Overrides.
+            timeframe: Series timeframe, when known.
 
         Returns:
             Stream names.
         """
-        del settings
+        del settings, timeframe
         return frozenset({protocol.CHART_STREAM})
 
     def lookback(
@@ -281,7 +303,7 @@ class BasePlugin[StateT](abc.ABC):
             timeframe=header.timeframe,
             plugin_id=self.PLUGIN_ID,
             indicator_version=self.VERSION,
-            method=self.METHOD,
+            method=self.snapshot_method(values),
             bar_start_ms=header.bar_start_ms,
             as_of_ms=header.as_of_ms,
             aois=tuple(live) + header.ended,

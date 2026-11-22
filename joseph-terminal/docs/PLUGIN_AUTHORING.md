@@ -8,6 +8,12 @@ Terminal extensions are vetted modules composed at build time — never fetched 
 2. Add it to `FIRST_PARTY_TOOLS` in `src/index.ts`. Tools never import each other.
 3. Removal: delete the directory and its list entry. Saved drawings of that tool stay stored and are shown as "unsupported".
 
+Shared behaviour lives in `drawing-core`, never in another tool: geometry helpers (`distanceToPolyline`, `rayToEdge`, `sampleArc`, …), multi-point patterns (`createPatternTool` in `patterns.ts`) and long/short positions (`position.ts`). Tool-specific settings go in `props` and are declared as `inputs` (boolean or choice); the style bar edits them through the undoable `setDrawingInputs`. `hitTest` must return `handleIndex` equal to the anchor index the handle moves.
+
+### Engine-backed drawing tools
+
+A tool that shows engine values (anchored VWAP, regression channel) never computes them. It declares `seriesRequest(doc, {timeframe})`, a pure mapping from its anchors and props to an `/v1/indicators/series` request (`barStartAt` maps an anchor to its bar). Each chart's `DrawingSeriesSync` fetches it through `MarketDataClient.getIndicatorSeries`, debounces anchor drags, re-requests when a bar closes and drops superseded responses. The tool receives the result as `RenderState.series` (and as the last `hitTest` argument), draws only what the engine returned, and shows a `drawNotice` when values are missing (for example `ANCHOR_TOO_FAR_MESSAGE` for the engine's 2000-bar cap). `dataRows` and `describe(doc, {series})` feed the data window and the object list. The DEMO stand-in lives in `mock-provider/src/market/demo-drawing-series.ts`.
+
 ## Add a terminal feature (TypeScript)
 
 1. Create `apps/web/src/features/<name>/index.ts` exporting a `WebFeature`. Its manifest needs an id, version, slots, required capabilities, permissions, settings schema version, contract version and a removal plan.

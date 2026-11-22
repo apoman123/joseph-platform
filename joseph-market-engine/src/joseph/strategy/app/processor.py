@@ -149,6 +149,8 @@ def build_signal(
         mode=mode,
         data_source=frame.feed_state.value,
         message=message,
+        bar_base_volume=frame.candle.base_volume,
+        bar_quote_volume=frame.candle.quote_turnover,
     )
 
 

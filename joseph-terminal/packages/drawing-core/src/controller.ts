@@ -22,6 +22,7 @@ import {
   translateDrawing,
 } from './document';
 import {MOUSE_TOLERANCE_PX, decimate, distance, type Point} from './geometry';
+import type {DrawingSeriesState} from './series';
 import {magnetSnap} from './snapping';
 import {createCommand, type DrawingStore} from './store';
 import type {
@@ -72,6 +73,11 @@ export interface DrawingControllerOptions {
   onSelectionChange?: (drawingId: string | null) => void;
   /** Whether the armed tool stays armed after a drawing (default false). */
   stickyTools?: () => boolean;
+  /**
+   * Engine series of a drawing (engine-backed tools), usually from a
+   * `DrawingSeriesSync`.
+   */
+  series?: (doc: DrawingDocument) => DrawingSeriesState | null;
 }
 
 /** In-progress creation. */
@@ -540,7 +546,13 @@ export class DrawingController {
         }
         continue;
       }
-      const hit = tool.hitTest(doc, transform, point, MOUSE_TOLERANCE_PX);
+      const hit = tool.hitTest(
+        doc,
+        transform,
+        point,
+        MOUSE_TOLERANCE_PX,
+        this.options.series?.(doc) ?? null
+      );
       if (hit) {
         return {
           doc,
@@ -585,10 +597,11 @@ export class DrawingController {
     for (const doc of this.visibleDrawings()) {
       ctx.save();
       const tool = this.tools.get(doc.tool_id);
-      const state = {
+      const state: RenderState = {
         ...base,
         selected: doc.drawing_id === this.selectedId,
         preview: false,
+        series: this.options.series?.(doc) ?? null,
       };
       if (tool) {
         tool.render(ctx, doc, transform, state);

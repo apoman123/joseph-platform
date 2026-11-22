@@ -2,14 +2,21 @@
  * @fileoverview Terminal application shell (client only).
  */
 'use client';
-import {decodeShareLink} from '@joseph/terminal-shell';
+import {
+  POPOUT_CHANNEL,
+  broadcastChannelPort,
+  decodeShareLink,
+} from '@joseph/terminal-shell';
 import {useEffect, useState, type ReactElement} from 'react';
+import {startMainDetach} from '../composition/detach';
 import {composeFeatures} from '../composition/features';
 import {createRuntime, type TerminalRuntime} from '../composition/runtime';
 import {ChartGrid} from './chart-grid';
 import {CommandPalette, StatusBar, Toasts} from './chrome';
+import {DetachedBanner} from './detached';
 import {DrawingToolbar} from './drawing-toolbar';
 import {IndicatorSettingsDialog} from './indicator-settings-dialog';
+import {ids} from './ids';
 import {useStore} from './react-bindings';
 import {RuntimeProvider} from './runtime-context';
 import {SlotTabs} from './slot-host';
@@ -87,6 +94,21 @@ export function TerminalApp(): ReactElement {
     document.documentElement.dataset.theme = theme;
   }, [theme]);
 
+  // Detachable panes: pop-out windows linked over BroadcastChannel.
+  useEffect(() => {
+    const controller = startMainDetach(runtime, {
+      port: broadcastChannelPort(POPOUT_CHANNEL),
+      open: (url, name, features) => window.open(url, name, features),
+      now: () => Date.now(),
+      windowId: `main-${ids.next()}`,
+    });
+    runtime.windows.set(controller.actions);
+    return () => {
+      runtime.windows.set(null);
+      controller.dispose();
+    };
+  }, [runtime]);
+
   return (
     <RuntimeProvider runtime={runtime}>
       <div
@@ -98,6 +120,7 @@ export function TerminalApp(): ReactElement {
         <div className="terminal__body">
           <DrawingToolbar />
           <main className="terminal__charts" aria-label="Charts">
+            <DetachedBanner />
             <ChartGrid />
           </main>
           <SlotTabs slot="side-panel" label="Side panel" orientation="side" />

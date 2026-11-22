@@ -1,0 +1,59 @@
+{
+  "plugin_id": "anchored_vwap",
+  "timeframe": "5m",
+  "settings": {
+    "anchor": "time",
+    "anchor_ms": 1794787800123,
+    "source": "close",
+    "band_1": "1",
+    "band_2": "2",
+    "band_3": "0",
+    "tick_size": "0.01"
+  },
+  "description": "Anchor inside bar 2 (anchor_ms is floored to that bar's start). Bars 0-1 (close 50, volume 100) precede the anchor and are excluded. Bars 2-3 close 10 and 16 with volume 1 each: VWAP = 26/2 = 13; variance = (100 + 256)/2 - 13^2 = 9, so stdev = 3, band 1 = 13 +/- 3, band 2 = 13 +/- 6, band 3 disabled.",
+  "bars": [
+    [
+      "50",
+      "50",
+      "50",
+      "50",
+      "100"
+    ],
+    [
+      "50",
+      "50",
+      "50",
+      "50",
+      "100"
+    ],
+    [
+      "10",
+      "10",
+      "10",
+      "10",
+      "1"
+    ],
+    [
+      "16",
+      "16",
+      "16",
+      "16",
+      "1"
+    ]
+  ],
+  "expect": {
+    "final_values": {
+      "vwap": "13",
+      "stdev": "3",
+      "upper_1": "16",
+      "lower_1": "10",
+      "upper_2": "19",
+      "lower_2": "7",
+      "upper_3": null,
+      "lower_3": null,
+      "anchor_ms": 1794787800000,
+      "bars": 2,
+      "anchor_in_window": true
+    }
+  }
+}

@@ -4,17 +4,26 @@
  * Price is a pure function of absolute time, so every request, timeframe
  * and reload sees the same path without stored state:
  *
- *   p(t) = base * (1 + Σ_k A_k sin(2πt/P_k + φ_k) + 0.0006 n(t))
+ *   p(t) = base * (1 + Σ_k A_k sin(2πt/P_k + φ_k) + 0.0006 n(t) + 0.00008 s(t))
  *
  * over ten periods P_k from 20 days down to 14 minutes with amplitudes
  * A_k = 0.045 * sqrt(P_k / 20 days) (a brownian-like spectrum), phases
- * φ_k = k * 1.7 + (base mod 7), and n(t) a hashed noise term per minute.
+ * φ_k = k * 1.7 + (base mod 7), n(t) a hashed noise term per minute and
+ * s(t) a small, well-mixed noise term per second (texture for seconds
+ * bars).
  * The Python engine can reproduce it exactly for fixtures.
+ *
+ * Candles also carry the DEMO venue's quote turnover and taker-buy volume
+ * (the aggressor-bought share follows the bar's direction plus noise), so
+ * true volume delta and turnover ranking work offline. Sub-minute bars
+ * scale wicks and volume to their length; monthly bars end on the 1st.
  */
 import {
   Decimal,
   TIMEFRAME_MS,
   floorToTimeframe,
+  shiftTimeframe,
+  timeframeEnd,
   type Candle,
   type Timeframe,
 } from '@joseph/contracts';
@@ -102,6 +111,16 @@ export function hashNoise(seed: number): number {
 }
 
 /**
+ * Spreads consecutive integers over the 32-bit range (multiplicative
+ * hashing), so neighbouring seconds get unrelated noise.
+ * @param seed Integer seed.
+ * @return Mixed seed.
+ */
+export function mixSeed(seed: number): number {
+  return Math.imul(Math.trunc(seed) | 0, 0x9e3779b1) ^ 0x5bd1e995;
+}
+
+/**
  * Synthetic price at a time.
  * @param spec Instrument.
  * @param timeMs UTC ms.
@@ -118,6 +137,8 @@ export function priceAt(spec: DemoInstrumentSpec, timeMs: number): number {
     shape += amplitude * Math.sin((tau * timeMs) / period + k * 1.7 + phase);
   });
   shape += 0.0006 * hashNoise(minute * 31 + Math.round(spec.basePrice));
+  const second = Math.floor(timeMs / 1000);
+  shape += 0.00008 * hashNoise(mixSeed(second + Math.round(spec.basePrice)));
   return spec.basePrice * (1 + shape);
 }
 
@@ -148,7 +169,7 @@ export function demoCandle(
   nowMs: number
 ): Candle {
   const duration = TIMEFRAME_MS[timeframe];
-  const endMs = startMs + duration;
+  const endMs = timeframeEnd(timeframe, startMs);
   const final = endMs <= nowMs;
   const closeAt = final ? endMs - 1 : Math.max(startMs, nowMs);
   const samples = 6;
@@ -158,17 +179,52 @@ export function demoCandle(
   }
   const open = prices[0] ?? spec.basePrice;
   const close = prices[prices.length - 1] ?? open;
+  // Sub-minute bars get proportionally shorter wicks (random-walk scaling).
+  const wickScale = duration < 60_000 ? Math.sqrt(duration / 60_000) : 1;
   const wick =
-    spec.basePrice * 0.0009 * (1 + Math.abs(hashNoise(startMs / 60_000 + 7)));
+    spec.basePrice *
+    0.0009 *
+    wickScale *
+    (1 + Math.abs(hashNoise(startMs / 60_000 + 7)));
   const high =
     Math.max(...prices) + wick * Math.abs(hashNoise(startMs / 1000 + 3));
   const low =
     Math.min(...prices) - wick * Math.abs(hashNoise(startMs / 1000 + 5));
-  const minutes = Math.max(1, (closeAt - startMs) / 60_000);
+  const minutes =
+    duration < 60_000
+      ? Math.max(1 / 60, (closeAt - startMs + 1) / 60_000)
+      : Math.max(1, (closeAt - startMs) / 60_000);
   const volume =
     spec.volumePerMinute *
     minutes *
-    (0.6 + Math.abs(hashNoise(startMs / 60_000 + 11)));
+    (0.6 +
+      Math.abs(
+        hashNoise(
+          duration < 60_000
+            ? mixSeed(Math.floor(startMs / 1000) + 11)
+            : startMs / 60_000 + 11
+        )
+      ));
+  const lot = Decimal.parse(spec.lotSize);
+  const baseVolume = Decimal.fromNumber(volume, 4).floorToStep(lot);
+  const range = Math.max(
+    Math.max(high, open, close) - Math.min(low, open, close),
+    1e-9
+  );
+  const buyShare = Math.min(
+    0.96,
+    Math.max(
+      0.04,
+      0.5 +
+        0.38 * ((close - open) / range) +
+        0.12 * hashNoise(mixSeed(Math.floor(startMs / 1000) + 13))
+    )
+  );
+  const takerBuy = Decimal.fromNumber(
+    baseVolume.toNumber() * buyShare,
+    4
+  ).floorToStep(lot);
+  const typical = prices.reduce((sum, p) => sum + p, 0) / prices.length;
   return {
     instrument_id: spec.instrumentId,
     timeframe,
@@ -178,11 +234,13 @@ export function demoCandle(
     high: tick(spec, Math.max(high, open, close)),
     low: tick(spec, Math.min(low, open, close)),
     close: tick(spec, close),
-    base_volume: Decimal.fromNumber(volume, 4)
-      .floorToStep(Decimal.parse(spec.lotSize))
-      .toString(),
-    quote_turnover: null,
+    base_volume: baseVolume.toString(),
+    quote_turnover: Decimal.fromNumber(
+      baseVolume.toNumber() * typical,
+      2
+    ).toString(),
     trade_count: null,
+    taker_buy_base_volume: takerBuy.toString(),
     is_final: final,
     revision: 0,
     source: 'mock',
@@ -208,11 +266,12 @@ export function demoSeries(
   nowMs: number,
   toMs = nowMs
 ): Candle[] {
-  const duration = TIMEFRAME_MS[timeframe];
   const last = floorToTimeframe(timeframe, Math.min(toMs, nowMs));
   const candles: Candle[] = [];
   for (let i = limit - 1; i >= 0; i -= 1) {
-    candles.push(demoCandle(spec, timeframe, last - i * duration, nowMs));
+    candles.push(
+      demoCandle(spec, timeframe, shiftTimeframe(timeframe, last, -i), nowMs)
+    );
   }
   return candles;
 }

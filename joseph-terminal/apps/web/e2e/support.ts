@@ -87,3 +87,92 @@ export async function savedTools(
     );
   }, key);
 }
+
+/**
+ * Clicks at a relative position of the first chart canvas.
+ * @param page Page.
+ * @param x Fraction of the width.
+ * @param y Fraction of the height.
+ */
+export async function clickChart(
+  page: Page,
+  x: number,
+  y: number
+): Promise<void> {
+  const box = await firstCanvas(page).boundingBox();
+  if (!box) throw new Error('chart canvas not visible');
+  await page.mouse.click(box.x + box.width * x, box.y + box.height * y);
+}
+
+/**
+ * Hovers a relative position of the first chart canvas.
+ * @param page Page.
+ * @param x Fraction of the width.
+ * @param y Fraction of the height.
+ */
+export async function hoverChart(
+  page: Page,
+  x: number,
+  y: number
+): Promise<void> {
+  const box = await firstCanvas(page).boundingBox();
+  if (!box) throw new Error('chart canvas not visible');
+  await page.mouse.move(box.x + box.width * x, box.y + box.height * y, {
+    steps: 3,
+  });
+}
+
+/**
+ * Arms a tool from its toolbar group flyout.
+ * @param page Page.
+ * @param group Tool group.
+ * @param toolId Tool id.
+ */
+export async function armTool(
+  page: Page,
+  group: string,
+  toolId: string
+): Promise<void> {
+  await page.getByTestId(`tool-group-${group}`).click();
+  await page.getByTestId(`tool-option-${toolId}`).click();
+}
+
+/**
+ * Turns on the data window from the Layers menu.
+ * @param page Page.
+ */
+export async function showDataWindow(page: Page): Promise<void> {
+  await page.getByTestId('indicators-menu').click();
+  await page.getByTestId('data-window-toggle').check();
+  await page.keyboard.press('Escape');
+}
+
+/**
+ * Detail text of a drawing in the object list.
+ * @param page Page.
+ * @param toolId Tool id.
+ * @return Locator of the detail.
+ */
+export function objectDetail(page: Page, toolId: string): Locator {
+  return page
+    .getByRole('list', {name: 'Drawings, top first'})
+    .getByTestId(`object-${toolId}`)
+    .getByTestId('object-detail');
+}
+
+/**
+ * Picks a timeframe from the "More" menu.
+ * @param page Page.
+ * @param timeframe Timeframe id.
+ */
+export async function pickTimeframe(
+  page: Page,
+  timeframe: string
+): Promise<void> {
+  await page
+    .getByRole('navigation', {name: 'Timeframe'})
+    .locator('.timeframes__more')
+    .click();
+  await page.getByTestId(`timeframe-${timeframe}`).click();
+  await expect(page.getByText('Loading candles…')).toHaveCount(0);
+}

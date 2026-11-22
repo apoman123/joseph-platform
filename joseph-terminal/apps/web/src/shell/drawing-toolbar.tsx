@@ -38,8 +38,11 @@ const GROUP_NAMES: Readonly<Record<ToolGroup, string>> = {
   lines: 'Lines',
   shapes: 'Shapes',
   fibonacci: 'Fibonacci',
+  gann: 'Gann',
+  patterns: 'Patterns',
   trading: 'Positions',
   measure: 'Measure',
+  studies: 'Engine studies',
   annotation: 'Annotations',
 };
 

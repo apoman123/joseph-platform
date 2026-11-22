@@ -44,6 +44,10 @@ class Candle:
         quote_turnover: Optional quote-currency turnover.
         trade_count: Optional number of trades.
         event_ts_ms: Optional venue event timestamp.
+        taker_buy_base_volume: Optional base volume of trades whose
+            aggressor bought (venue-published or summed from the venue's
+            public trades); enables true volume delta. ``None`` when the
+            venue publishes neither.
     """
 
     instrument_id: instruments.InstrumentId
@@ -63,6 +67,7 @@ class Candle:
     quote_turnover: decimal.Decimal | None = None
     trade_count: int | None = None
     event_ts_ms: int | None = None
+    taker_buy_base_volume: decimal.Decimal | None = None
 
     def __post_init__(self) -> None:
         """Validates bar invariants.
@@ -82,6 +87,9 @@ class Candle:
             raise ValueError("close outside [low, high]")
         if self.base_volume < decimals.ZERO:
             raise ValueError("volume must be non-negative")
+        taker = self.taker_buy_base_volume
+        if taker is not None and not decimals.ZERO <= taker <= self.base_volume:
+            raise ValueError("taker buy volume outside [0, base_volume]")
 
     @property
     def body_high(self) -> decimal.Decimal:
@@ -121,6 +129,9 @@ class Candle:
             "base_volume": decimals.format_decimal(self.base_volume),
             "quote_turnover": decimals.format_optional(self.quote_turnover),
             "trade_count": self.trade_count,
+            "taker_buy_base_volume": decimals.format_optional(
+                self.taker_buy_base_volume
+            ),
             "is_final": self.is_final,
             "revision": self.revision,
             "source": self.source,

@@ -201,6 +201,9 @@ class Signal:
         data_source: Provenance of the evaluated bar.
         revision: Revision counter (0 for originals).
         message: Human-readable summary.
+        bar_base_volume: Base volume of the evaluated bar.
+        bar_quote_volume: Venue-published quote turnover of the evaluated
+            bar (``None`` when the venue publishes none; never estimated).
     """
 
     signal_id: str
@@ -235,6 +238,8 @@ class Signal:
     data_source: str
     revision: int = 0
     message: str = ""
+    bar_base_volume: decimal.Decimal | None = None
+    bar_quote_volume: decimal.Decimal | None = None
 
     def to_contract(self) -> dict[str, object]:
         """Serializes to the contract ``Signal`` object.
@@ -277,6 +282,8 @@ class Signal:
             "data_source": self.data_source,
             "revision": self.revision,
             "message": self.message,
+            "bar_base_volume": decimals.format_optional(self.bar_base_volume),
+            "bar_quote_volume": decimals.format_optional(self.bar_quote_volume),
         }
 
     @classmethod
@@ -335,6 +342,12 @@ class Signal:
             data_source=str(data["data_source"]),
             revision=_int(data.get("revision", 0)),
             message=str(data.get("message", "")),
+            bar_base_volume=decimals.to_optional_decimal(
+                data.get("bar_base_volume")
+            ),
+            bar_quote_volume=decimals.to_optional_decimal(
+                data.get("bar_quote_volume")
+            ),
         )
 
 

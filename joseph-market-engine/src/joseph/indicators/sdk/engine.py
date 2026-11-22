@@ -263,7 +263,8 @@ class IndicatorEngine:
             raise errors.ValidationFailedError(str(err)) from err
         intrabar_tfs: list[timeframes.Timeframe] = []
         aux: dict[timeframes.Timeframe, int] = {}
-        for stream in sorted(plugin.required_streams(settings)):
+        streams = plugin.required_streams(settings, timeframe=timeframe)
+        for stream in sorted(streams):
             kind, tf = protocol.parse_stream(stream)
             if kind == "intrabars" and tf is not None:
                 if not timeframe.contains(tf):
@@ -331,11 +332,11 @@ class IndicatorEngine:
         if (
             tf is self._config.signal_timeframe
             and last is not None
-            and candle.start_ms > last + tf.duration_ms
+            and candle.start_ms > tf.end_of(last)
         ):
-            self._signal_missing += (
-                candle.start_ms - last - tf.duration_ms
-            ) // tf.duration_ms
+            self._signal_missing += tf.bars_between(
+                tf.end_of(last), candle.start_ms
+            )
         self._last_start[tf] = candle.start_ms
         self._store[tf].append(candle)
         self._watermark[tf] = max(self._watermark[tf], candle.end_ms)

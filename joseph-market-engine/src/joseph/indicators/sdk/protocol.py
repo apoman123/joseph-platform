@@ -174,11 +174,11 @@ class SeriesHeader:
         if self.last_start_ms is not None:
             if candle.start_ms <= self.last_start_ms:
                 raise ValueError("bars must be strictly increasing")
-            expected = self.last_start_ms + self.timeframe.duration_ms
+            expected = self.timeframe.end_of(self.last_start_ms)
             if candle.start_ms > expected:
-                missing += (
-                    candle.start_ms - expected
-                ) // self.timeframe.duration_ms
+                missing += self.timeframe.bars_between(
+                    expected, candle.start_ms
+                )
         return dataclasses.replace(
             self,
             bars=self.bars + 1,
@@ -260,12 +260,17 @@ class IndicatorPlugin(Protocol):
         ...
 
     def required_streams(
-        self, settings: Mapping[str, object] | None
+        self,
+        settings: Mapping[str, object] | None,
+        *,
+        timeframe: tfs.Timeframe | None = None,
     ) -> frozenset[str]:
         """Returns the data streams needed for the given settings.
 
         Args:
             settings: Overrides (``None`` for defaults).
+            timeframe: Series timeframe, when known (``None`` for the
+                plugin descriptor), so a plugin can pick nesting intrabars.
         """
         ...
 

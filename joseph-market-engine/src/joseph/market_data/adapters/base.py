@@ -1,10 +1,23 @@
-"""Shared building blocks for REST/WebSocket venue adapters."""
+"""Shared building blocks for REST/WebSocket venue adapters.
+
+Besides parsing helpers, ``BaseVenueAdapter`` implements the venue-neutral
+half of public trades and seconds candles. A venue opts in by overriding
+``_trade_spec`` (native trade stream) and/or ``_trade_history`` (REST trade
+history for a time range, newest trades kept when a page cap truncates).
+Seconds bars are then built from trades (``fetch_candles`` from the REST
+history, ``stream_candles`` from the stream) and never fabricated: only the
+fully covered part of a range is returned.
+"""
 
 from __future__ import annotations
 
 import asyncio
+import contextlib
 import decimal
+from collections.abc import AsyncGenerator
 from collections.abc import AsyncIterator
+from collections.abc import Awaitable
+from collections.abc import Callable
 from collections.abc import Mapping
 from typing import Any
 
@@ -16,8 +29,20 @@ from joseph.domain import market
 from joseph.domain import quality
 from joseph.domain import timeframes
 from joseph.market_data.adapters import http
+from joseph.market_data.adapters import ws
 from joseph.market_data.domain import capabilities
 from joseph.market_data.domain import health
+from joseph.market_data.domain import trade_bars
+from joseph.market_data.domain import trades as trades_lib
+
+TRADE_PUBLISH_LAG_MS = 1_000
+"""REST trade history may trail real time; bars this close stay open."""
+_SEED_MS = 10_000
+"""History fetched before a seconds range to find the previous close."""
+MAX_TRADE_BARS = 10_000
+"""Newest seconds bars built per REST call (bounds flat runs and memory)."""
+
+TradePage = Callable[[int, int], Awaitable[trades_lib.TradeCoverage]]
 
 
 def dec(value: object) -> decimal.Decimal:
@@ -86,12 +111,14 @@ def make_candle(
     trade_count: int | None = None,
     event_ts_ms: int | None = None,
     is_final: bool | None = None,
+    taker_buy_base_volume: decimal.Decimal | None = None,
 ) -> market.Candle:
     """Builds a canonical candle from venue values.
 
     Finality defaults to "the bar has ended by ``now_ms``", so the
     in-progress bar is never final. High/low are widened to contain open and
-    close when a venue publishes a slightly inconsistent bar.
+    close when a venue publishes a slightly inconsistent bar, and the taker
+    buy volume is clamped into ``[0, base_volume]`` likewise.
 
     Args:
         instrument_id: Exact venue instrument.
@@ -109,6 +136,7 @@ def make_candle(
         trade_count: Optional trade count.
         event_ts_ms: Optional venue event time.
         is_final: Explicit finality (e.g. Binance ``x``); derived if None.
+        taker_buy_base_volume: Optional venue-published taker buy volume.
 
     Returns:
         Candle.
@@ -126,6 +154,12 @@ def make_candle(
         if is_final is None
         else is_final and (end_ms <= now_ms + 1_000)
     )
+    volume = max(base_volume, decimals.ZERO)
+    taker = (
+        None
+        if taker_buy_base_volume is None
+        else min(max(taker_buy_base_volume, decimals.ZERO), volume)
+    )
     return market.Candle(
         instrument_id=instrument_id,
         timeframe=timeframe,
@@ -135,7 +169,7 @@ def make_candle(
         high=max(high, open_, close),
         low=min(low, open_, close),
         close=close,
-        base_volume=max(base_volume, decimals.ZERO),
+        base_volume=volume,
         is_final=final,
         source=source,
         feed_state=feed_state,
@@ -143,7 +177,97 @@ def make_candle(
         quote_turnover=quote_turnover,
         trade_count=trade_count,
         event_ts_ms=event_ts_ms,
+        taker_buy_base_volume=taker,
     )
+
+
+def first_start(timeframe: timeframes.Timeframe, start_ms: int) -> int:
+    """Returns the first bar start at or after ``start_ms``.
+
+    Args:
+        timeframe: Resolution.
+        start_ms: Any time.
+
+    Returns:
+        Aligned bar start.
+    """
+    floor = timeframe.floor(start_ms)
+    return floor if floor == start_ms else timeframe.end_of(floor)
+
+
+def newest_window_start(
+    timeframe: timeframes.Timeframe, start_ms: int, end_ms: int, limit: int
+) -> int:
+    """Returns the paging start that still yields the newest ``limit`` bars.
+
+    Args:
+        timeframe: Resolution.
+        start_ms: Requested inclusive start.
+        end_ms: Requested exclusive end.
+        limit: Maximum bars wanted.
+
+    Returns:
+        Aligned start no earlier than ``floor(start_ms)``.
+    """
+    newest = timeframe.floor(end_ms - 1)
+    return max(timeframe.floor(start_ms), timeframe.shift(newest, -(limit - 1)))
+
+
+async def suffix_by_chunks(
+    page: TradePage,
+    start_ms: int,
+    end_ms: int,
+    max_pages: int,
+    *,
+    first_window_ms: int = 5_000,
+    max_window_ms: int = 3_600_000,
+) -> trades_lib.TradeCoverage:
+    """Collects the newest complete trades of a range with forward pages.
+
+    For venues whose trade history pages forwards in time, the range is
+    walked backwards in windows (growing while one page suffices), each
+    window paged forwards to completion. A window that runs out of the page
+    budget is discarded, so the result is a complete suffix of the range.
+
+    Args:
+        page: ``(start, end) -> coverage`` of one request (a prefix).
+        start_ms: Inclusive start.
+        end_ms: Exclusive end.
+        max_pages: Request budget.
+        first_window_ms: First window length.
+        max_window_ms: Largest window the venue accepts.
+
+    Returns:
+        Coverage ``[from, end_ms)`` with ``from >= start_ms``.
+    """
+    collected: list[market.Trade] = []
+    cover_from = end_ms
+    pages = 0
+    window = first_window_ms
+    while cover_from > start_ms and pages < max_pages:
+        chunk_start = max(start_ms, cover_from - window)
+        chunk: list[market.Trade] = []
+        cursor = chunk_start
+        used = 0
+        complete = False
+        while pages < max_pages:
+            coverage = await page(cursor, cover_from)
+            pages += 1
+            used += 1
+            chunk.extend(coverage.trades)
+            if coverage.to_ms >= cover_from:
+                complete = True
+                break
+            if coverage.to_ms <= cursor:
+                break
+            cursor = coverage.to_ms
+        if not complete:
+            break
+        collected[:0] = chunk
+        cover_from = chunk_start
+        if used == 1:
+            window = min(max_window_ms, window * 4)
+    return trades_lib.TradeCoverage(tuple(collected), cover_from, end_ms)
 
 
 def clip_range(
@@ -176,6 +300,7 @@ class BaseVenueAdapter:
 
     VENUE: instruments.Venue = instruments.Venue.MOCK
     INSTRUMENT_TTL_MS = 300_000
+    TRADE_MAX_PAGES = 5
 
     def __init__(
         self, http_client: http.VenueHttp, clock: clock_lib.Clock
@@ -188,6 +313,7 @@ class BaseVenueAdapter:
         """
         self._http = http_client
         self._clock = clock
+        self._connect: ws.ConnectFn = ws.default_connect
         self._instruments: dict[str, instruments.Instrument] = {}
         self._meta: dict[str, Mapping[str, Any]] = {}
         self._loaded_at_ms: int | None = None
@@ -318,19 +444,291 @@ class BaseVenueAdapter:
         timeframe: timeframes.Timeframe,
         tracker: health.FeedHealthTracker | None = None,
     ) -> AsyncIterator[market.Candle]:
-        """Native candle streams are unsupported unless overridden.
+        """Streams trade-built seconds candles; klines unless overridden.
 
         Args:
             instrument: Canonical id.
             timeframe: Resolution.
-            tracker: Unused health tracker.
+            tracker: Optional health tracker.
+
+        Returns:
+            Async iterator of seconds candles built from the trade stream.
+
+        Raises:
+            errors.UnsupportedError: For kline timeframes (no native candle
+                stream) or seconds without a native trade stream.
+        """
+        caps = self.capabilities()
+        if caps.is_trade_built(timeframe) and caps.market_data.native_ws_trades:
+            return self._stream_trade_candles(instrument, timeframe, tracker)
+        raise errors.UnsupportedError(
+            f"{self.VENUE.value} has no native candle stream in Joseph"
+        )
+
+    def stream_trades(
+        self,
+        instrument: instruments.InstrumentId,
+        tracker: health.FeedHealthTracker | None = None,
+    ) -> AsyncIterator[market.Trade]:
+        """Streams public trades over the native WebSocket.
+
+        Args:
+            instrument: Canonical id.
+            tracker: Optional health tracker.
+
+        Returns:
+            Async iterator of de-duplicated trades.
+
+        Raises:
+            errors.UnsupportedError: When the venue stream is not wired.
+        """
+        if not self.capabilities().market_data.native_ws_trades:
+            raise errors.UnsupportedError(
+                f"{self.VENUE.value} has no native trade stream in Joseph"
+            )
+        return self._stream_trades(instrument, tracker)
+
+    async def _stream_trades(
+        self,
+        instrument: instruments.InstrumentId,
+        tracker: health.FeedHealthTracker | None,
+    ) -> AsyncGenerator[market.Trade, None]:
+        """Runs the reconnecting trade stream.
+
+        Args:
+            instrument: Canonical id.
+            tracker: Optional health tracker.
+
+        Yields:
+            Trades.
+        """
+        await self._require(instrument)
+        trades = ws.stream_trades_with_recovery(
+            self._trade_spec(instrument),
+            clock=self._clock,
+            connect=self._connect,
+            backfill=self._trade_backfill(instrument),
+            tracker=tracker,
+        )
+        async with contextlib.aclosing(trades):
+            async for trade in trades:
+                yield trade
+
+    async def fetch_trades(
+        self,
+        instrument: instruments.InstrumentId,
+        start_ms: int,
+        end_ms: int,
+        limit: int | None = None,
+    ) -> list[market.Trade]:
+        """Fetches public trades whose venue time lies in [start, end).
+
+        At most ``TRADE_MAX_PAGES`` requests are made; when they (or
+        ``limit``) truncate the range, the most recent trades are kept.
+
+        Args:
+            instrument: Canonical id.
+            start_ms: Inclusive start.
+            end_ms: Exclusive end.
+            limit: Optional maximum number of most recent trades.
+
+        Returns:
+            Ascending trades.
+
+        Raises:
+            errors.UnsupportedError: Without a time-range trade history.
+        """
+        if not self.capabilities().market_data.trades_history:
+            raise errors.UnsupportedError(
+                f"{self.VENUE.value} publishes no time-range trade history"
+            )
+        if end_ms <= start_ms:
+            return []
+        await self._require(instrument)
+        coverage = await self._trade_history(
+            instrument, start_ms, end_ms, self.TRADE_MAX_PAGES
+        )
+        return trades_lib.keep_latest(coverage.trades, limit)
+
+    def _trade_spec(
+        self, instrument: instruments.InstrumentId
+    ) -> ws.WsTradeSpec:
+        """Describes the native trade stream (overridden by venues).
+
+        Args:
+            instrument: Canonical id.
 
         Raises:
             errors.UnsupportedError: Always in the base class.
         """
         raise errors.UnsupportedError(
-            f"{self.VENUE.value} has no native candle stream in Joseph"
+            f"{self.VENUE.value} has no native trade stream in Joseph"
         )
+
+    async def _trade_history(
+        self,
+        instrument: instruments.InstrumentId,
+        start_ms: int,
+        end_ms: int,
+        max_pages: int,
+    ) -> trades_lib.TradeCoverage:
+        """Collects the newest complete trades of a range (venue hook).
+
+        Args:
+            instrument: Canonical id.
+            start_ms: Inclusive start.
+            end_ms: Exclusive end.
+            max_pages: Request budget.
+
+        Raises:
+            errors.UnsupportedError: Always in the base class.
+        """
+        raise errors.UnsupportedError(
+            f"{self.VENUE.value} publishes no time-range trade history"
+        )
+
+    def _trade_backfill(
+        self, instrument: instruments.InstrumentId
+    ) -> ws.TradeBackfill | None:
+        """Returns the REST trade backfill of an instrument, if any.
+
+        Args:
+            instrument: Canonical id.
+
+        Returns:
+            Backfill callable, or ``None`` without trade history.
+        """
+        if not self.capabilities().market_data.trades_history:
+            return None
+
+        async def backfill(start: int, end: int) -> trades_lib.TradeCoverage:
+            """Fetches missed trades over REST.
+
+            Args:
+                start: Inclusive start.
+                end: Exclusive end.
+
+            Returns:
+                Coverage.
+            """
+            return await self._trade_history(
+                instrument, start, end, self.TRADE_MAX_PAGES
+            )
+
+        return backfill
+
+    def _trade_source(self) -> str:
+        """Returns the provenance label of stream-built seconds bars."""
+        return f"{self.VENUE.value}.trades"
+
+    def _require_trade_built(self, timeframe: timeframes.Timeframe) -> None:
+        """Rejects seconds resolutions the venue cannot build.
+
+        Args:
+            timeframe: Requested resolution.
+
+        Raises:
+            errors.UnsupportedError: If not built from this venue's trades.
+        """
+        if not self.capabilities().is_trade_built(timeframe):
+            raise errors.UnsupportedError(
+                f"{self.VENUE.value} does not provide {timeframe.value} "
+                "candles (seconds bars need a native trade stream)"
+            )
+
+    async def _fetch_trade_candles(
+        self,
+        instrument: instruments.InstrumentId,
+        timeframe: timeframes.Timeframe,
+        start_ms: int,
+        end_ms: int,
+        limit: int | None,
+    ) -> list[market.Candle]:
+        """Builds historical seconds candles from the REST trade history.
+
+        Only the fully covered part of the range is returned: at most the
+        newest ``MAX_TRADE_BARS`` bars are built, the page cap keeps the
+        newest trades, and the bar straddling the live edge stays
+        non-final.
+
+        Args:
+            instrument: Canonical id.
+            timeframe: Seconds resolution.
+            start_ms: Inclusive start.
+            end_ms: Exclusive end.
+            limit: Optional maximum bars (newest kept).
+
+        Returns:
+            Ascending candles.
+
+        Raises:
+            errors.UnsupportedError: Without a time-range trade history.
+        """
+        self._require_trade_built(timeframe)
+        if not self.capabilities().market_data.trades_history:
+            raise errors.UnsupportedError(
+                f"{self.VENUE.value} publishes no time-range trade history; "
+                f"{timeframe.value} bars exist only from the live trade stream"
+            )
+        await self._require(instrument)
+        now = self._clock.now_ms()
+        first = first_start(timeframe, start_ms)
+        stop = min(end_ms, timeframe.end_of(timeframe.floor(now)))
+        if stop > first:
+            wanted = (
+                MAX_TRADE_BARS if limit is None else min(limit, MAX_TRADE_BARS)
+            )
+            first = max(
+                first, newest_window_start(timeframe, first, stop, wanted)
+            )
+        cover_to = min(stop, now - TRADE_PUBLISH_LAG_MS)
+        seed_from = timeframe.floor(first - _SEED_MS)
+        if cover_to <= first:
+            return []
+        coverage = await self._trade_history(
+            instrument, seed_from, cover_to, self.TRADE_MAX_PAGES
+        )
+        bars = trade_bars.bars_from_coverage(
+            coverage,
+            instrument,
+            timeframe,
+            source=f"{self._trade_source()}.rest",
+            now_ms=now,
+        )
+        return clip_range(bars, first, stop, limit)
+
+    async def _stream_trade_candles(
+        self,
+        instrument: instruments.InstrumentId,
+        timeframe: timeframes.Timeframe,
+        tracker: health.FeedHealthTracker | None,
+    ) -> AsyncGenerator[market.Candle, None]:
+        """Streams seconds candles built from the native trade stream.
+
+        Args:
+            instrument: Canonical id.
+            timeframe: Seconds resolution.
+            tracker: Optional health tracker.
+
+        Yields:
+            Live and final seconds candles.
+        """
+        self._require_trade_built(timeframe)
+        await self._require(instrument)
+        builder = trade_bars.TradeBarBuilder(
+            instrument, timeframe, source=self._trade_source()
+        )
+        candles = ws.stream_trade_candles(
+            self._trade_spec(instrument),
+            builder,
+            clock=self._clock,
+            connect=self._connect,
+            backfill=self._trade_backfill(instrument),
+            tracker=tracker,
+        )
+        async with contextlib.aclosing(candles):
+            async for candle in candles:
+                yield candle
 
     async def close(self) -> None:
         """Closes network resources."""

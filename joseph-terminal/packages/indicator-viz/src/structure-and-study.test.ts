@@ -23,6 +23,7 @@ import {
 import {
   DEFAULT_MIN_DELTA_SHARE,
   DELTA_STUDY_ID,
+  ESTIMATE_DELTA_OPACITY,
   deltaStudyFromSeries,
   minDeltaShare,
   numericValue,
@@ -258,11 +259,14 @@ describe('order-flow Delta % pane', () => {
     const study = deltaStudyFromSeries(series);
     expect(study.id).toBe(DELTA_STUDY_ID);
     expect(study.style).toBe('histogram');
+    // Without `values.method` a bar is never called true delta.
+    const faint = ESTIMATE_DELTA_OPACITY;
     expect(study.points).toEqual([
-      {timeMs: T0, value: 34.5, tone: 'bid'},
-      {timeMs: T0 + BAR, value: -12.25, tone: 'ask'},
-      {timeMs: T0 + 4 * BAR, value: 0, tone: 'bid'},
+      {timeMs: T0, value: 34.5, tone: 'bid', opacity: faint},
+      {timeMs: T0 + BAR, value: -12.25, tone: 'ask', opacity: faint},
+      {timeMs: T0 + 4 * BAR, value: 0, tone: 'bid', opacity: faint},
     ]);
+    expect(study.title).toBe('Delta % (estimate)');
     expect(study.levels?.map(l => l.value)).toEqual([0, 20, -20]);
     expect(study.caption).toBe('as of 09:40 UTC (live)');
   });

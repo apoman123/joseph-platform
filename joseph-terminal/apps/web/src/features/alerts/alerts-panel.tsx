@@ -15,9 +15,11 @@ import type {
 import type {WritableStore} from '@joseph/feature-registry';
 import {Fragment, useEffect, useMemo, useState, type ReactNode} from 'react';
 import {
+  BAR_VOLUME_HELP,
   SIGNAL_SORTS,
   SNOOZE_MINUTES,
   aoiDistancePct,
+  barQuoteVolumeOf,
   confluenceOf,
   isSnoozed,
   setDismissed,
@@ -27,6 +29,7 @@ import {
   type SignalSort,
   type SignalTriage,
 } from './ranking';
+import {formatCompact, formatDecimal} from '../../shell/format';
 import {useStore, type WebFeatureContext} from '../../shell/react-bindings';
 import {
   EmptyState,
@@ -323,7 +326,11 @@ export function AlertsPanel({
             onChange={e => setSort(e.target.value as SignalSort)}
           >
             {SIGNAL_SORTS.map(option => (
-              <option key={option.id} value={option.id}>
+              <option
+                key={option.id}
+                value={option.id}
+                title={option.id === 'volume' ? BAR_VOLUME_HELP : undefined}
+              >
                 {option.label}
               </option>
             ))}
@@ -373,6 +380,9 @@ export function AlertsPanel({
                   title="Conditions satisfied in the reason tree"
                 >
                   Conf.
+                </th>
+                <th className="j-num" title={BAR_VOLUME_HELP}>
+                  Bar vol.
                 </th>
                 <th
                   className="j-num"
@@ -433,6 +443,19 @@ export function AlertsPanel({
                       <td className="j-num">{signal.rr ?? '—'}</td>
                       <td className="j-num">
                         {confluenceOf(signal.reason_tree)}
+                      </td>
+                      <td
+                        className="j-num j-tabular"
+                        data-testid="signal-volume"
+                        title={
+                          signal.bar_quote_volume == null
+                            ? BAR_VOLUME_HELP
+                            : `Quote turnover of the signal bar: ${formatDecimal(signal.bar_quote_volume, 2)} (venue-published)`
+                        }
+                      >
+                        {barQuoteVolumeOf(signal) === null
+                          ? '—'
+                          : formatCompact(signal.bar_quote_volume)}
                       </td>
                       <td className="j-num" data-testid="signal-distance">
                         {distance === undefined || distance === null
@@ -530,7 +553,7 @@ export function AlertsPanel({
                     </tr>
                     {expanded && (
                       <tr className={styles.detail}>
-                        <td colSpan={11}>
+                        <td colSpan={12}>
                           {signal.message && (
                             <p className={styles.message}>{signal.message}</p>
                           )}

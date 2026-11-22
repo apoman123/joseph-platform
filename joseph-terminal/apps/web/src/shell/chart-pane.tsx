@@ -10,6 +10,7 @@ import {
   TIMEFRAME_MS,
   VENUE_NAMES,
   parseInstrumentId,
+  shiftTimeframe,
   type Candle,
   type ChartState,
   type FeedMode,
@@ -19,19 +20,24 @@ import {
 } from '@joseph/contracts';
 import {
   chooseReplayStart,
+  formatCountdown,
+  msUntilBarClose,
   nextReplaySpeed,
   replayAsOfMs,
   replayAtEnd,
   replayVisibleBars,
   stepReplay,
+  timeframeTitle,
   type ReplayState,
 } from '@joseph/terminal-shell';
 import {X} from 'lucide-react';
 import {
   DrawingController,
   DrawingRepository,
+  DrawingSeriesSync,
   DrawingStore,
   bindAutosave,
+  seriesAsOf,
 } from '@joseph/drawing-core';
 import {ids} from './ids';
 import {
@@ -41,6 +47,7 @@ import {
   useRef,
   useState,
   type ReactElement,
+  type ReactNode,
 } from 'react';
 import type {TerminalRuntime} from '../composition/runtime';
 import {toChartBar as candleToBar} from './chart-bars';
@@ -49,7 +56,7 @@ import {
   useDeltaPane,
   useSessionSeparators,
 } from './chart-pane-hooks';
-import {DataWindow} from './data-window';
+import {ChartDataWindow} from './data-window';
 import {DrawingStyleBar} from './drawing-style-bar';
 import {formatAge, formatPrice, formatUtcTime} from './format';
 import {ProvenanceBadge, ProvenanceRibbon} from './provenance';
@@ -129,6 +136,8 @@ interface ChartPaneProps {
   runtime: TerminalRuntime;
   /** Opens the context menu. */
   onMenu: (chartId: string, menu: PaneMenu | null) => void;
+  /** Extra header buttons (e.g. open in another window). */
+  headerActions?: ReactNode;
 }
 
 /**
@@ -141,6 +150,7 @@ export function ChartPane({
   active,
   runtime,
   onMenu,
+  headerActions,
 }: ChartPaneProps): ReactElement {
   const hostRef = useRef<HTMLDivElement>(null);
   const [port, setPort] = useState<ChartPort | null>(null);
@@ -168,7 +178,10 @@ export function ChartPane({
   const replay: ReplayState | null = replayStates[chartId] ?? null;
   const replayRef = useRef(replay);
   replayRef.current = replay;
-  const atMs = replayAsOfMs(replay, TIMEFRAME_MS[timeframe]);
+  // Calendar-aware: a monthly cursor bar closes on the 1st of next month.
+  const atMs = replayAsOfMs(replay, timeframe);
+  const atMsRef = useRef(atMs);
+  atMsRef.current = atMs;
   const tickSize = instrument?.tick_size ?? null;
 
   // Mount the chart library lazily on the client.
@@ -256,7 +269,6 @@ export function ChartPane({
           setBarCount(bars.length);
           port.setBars(shown);
           const saved = chartRef.current.visible_range;
-          const duration = TIMEFRAME_MS[timeframe];
           const first = bars[Math.max(0, bars.length - INITIAL_VISIBLE_BARS)];
           const lastStart = bars.at(-1)?.timeMs;
           if (saved) {
@@ -264,7 +276,7 @@ export function ChartPane({
           } else if (first && lastStart !== undefined) {
             port.setVisibleRange({
               fromMs: first.timeMs,
-              toMs: lastStart + 6 * duration,
+              toMs: shiftTimeframe(timeframe, lastStart, 6),
             });
           } else {
             port.fitContent();
@@ -315,6 +327,9 @@ export function ChartPane({
         if (last && bar.timeMs < last.timeMs) return;
         if (last && bar.timeMs === last.timeMs) bars[bars.length - 1] = bar;
         else bars.push(bar);
+        // A closed bar adds a point to engine-backed drawings (VWAP...).
+        if (bar.final || (last && bar.timeMs > last.timeMs))
+          runtime.drawing.series.get(chartId)?.refresh();
         setBarCount(bars.length);
         // During replay new bars are kept but stay hidden behind the cursor.
         if (replayRef.current) return;
@@ -345,7 +360,7 @@ export function ChartPane({
       unsubscribe();
       offStatus();
     };
-  }, [port, instrumentId, timeframe, runtime]);
+  }, [port, instrumentId, timeframe, runtime, chartId]);
 
   // Staleness clock.
   useEffect(() => {
@@ -391,8 +406,19 @@ export function ChartPane({
         ask: t.ask,
         background: t.background,
         fontFamily: t.fontFamily,
+        warning: t.warning,
       };
     };
+    // Engine-backed drawings request their values from the market engine.
+    const series = new DrawingSeriesSync(store, runtime.tools, {
+      fetch: query => runtime.clients.market.getIndicatorSeries(query),
+      instrumentId: () => instrumentId,
+      timeframe: () => timeframe,
+      onChange: () => {
+        port.invalidate();
+        runtime.drawing.revision.update(n => n + 1);
+      },
+    });
     const controller = new DrawingController(port, store, runtime.tools, {
       instrumentId: () => instrumentId,
       timeframe: () => timeframe,
@@ -403,6 +429,7 @@ export function ChartPane({
       palette,
       now: () => Date.now(),
       newId: ids.next,
+      series: doc => seriesAsOf(series.get(doc.drawing_id), atMsRef.current),
       onToolChange: tool => {
         if (runtime.selection.get().chartId === chartId)
           runtime.drawing.activeTool.set(tool);
@@ -420,6 +447,7 @@ export function ChartPane({
     );
     runtime.drawing.controllers.set(chartId, controller);
     runtime.drawing.stores.set(chartId, store);
+    runtime.drawing.series.set(chartId, series);
     const armed = runtime.drawing.activeTool.get();
     if (armed && runtime.selection.get().chartId === chartId)
       controller.setTool(armed);
@@ -430,6 +458,9 @@ export function ChartPane({
       if (runtime.drawing.selection.get()?.chartId === chartId)
         runtime.drawing.selection.set(null);
       controller.dispose();
+      series.dispose();
+      if (runtime.drawing.series.get(chartId) === series)
+        runtime.drawing.series.delete(chartId);
       if (runtime.drawing.controllers.get(chartId) === controller)
         runtime.drawing.controllers.delete(chartId);
       if (runtime.drawing.stores.get(chartId) === store)
@@ -676,7 +707,18 @@ export function ChartPane({
             {instrument?.display_symbol ?? venueMarketId}
           </strong>
           <span className="pane__chip">{VENUE_NAMES[venue]}</span>
-          <span className="pane__chip">{timeframe}</span>
+          <span className="pane__chip" title={timeframeTitle(timeframe)}>
+            {timeframe}
+          </span>
+          {!replay && status.phase === 'ready' && (
+            <span
+              className="pane__chip pane__countdown j-tabular"
+              title="Time until this bar closes (UTC calendar)"
+              data-testid="bar-countdown"
+            >
+              {formatCountdown(msUntilBarClose(timeframe, now))}
+            </span>
+          )}
           <button
             type="button"
             className="pane__chip pane__chip--button"
@@ -758,6 +800,7 @@ export function ChartPane({
           ))}
         </dl>
         <div className="pane__meta">
+          {headerActions}
           <ProvenanceBadge state={effectiveState} ageMs={ageMs} />
           {status.lastUpdateMs !== null && (
             <span className="pane__asof j-tabular">
@@ -773,11 +816,15 @@ export function ChartPane({
         data-replay={replay?.phase ?? 'off'}
       />
       {dataWindow && status.phase === 'ready' && (
-        <DataWindow
+        <ChartDataWindow
+          runtime={runtime}
+          chartId={chartId}
+          atMs={atMs}
           bar={shown}
+          timeframe={timeframe}
           previousClose={previousClose}
           tickSize={tickSize}
-          delta={delta.shown ? delta.values : null}
+          delta={delta.shown ? delta.bars : null}
           compare={compare}
           label={symbolOf}
         />

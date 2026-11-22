@@ -323,9 +323,23 @@ describe('DataWindow', () => {
     render(
       <DataWindow
         bar={bar}
+        timeframe="5m"
         previousClose={100}
         tickSize="0.1"
-        delta={new Map([[bar.timeMs, -22.5]])}
+        delta={
+          new Map([
+            [
+              bar.timeMs,
+              {
+                timeMs: bar.timeMs,
+                value: -22.5,
+                method: 'estimate' as const,
+                buyVolume: null,
+                sellVolume: null,
+              },
+            ],
+          ])
+        }
         compare={[
           {
             instrumentId: 'mock:perp:ETHUSD',
@@ -446,14 +460,27 @@ describe('drawing editing UI', () => {
       'lines',
       'shapes',
       'fibonacci',
+      'gann',
+      'patterns',
       'trading',
       'measure',
+      'studies',
       'annotation',
     ]);
     expect(groups[1]?.tools.map(t => t.manifest.id)).toEqual([
       'rectangle',
       'zone-box',
       'polyline',
+      'ellipse',
+      'circle',
+      'triangle',
+      'rotated-rectangle',
+      'arc',
+      'curve',
+    ]);
+    expect(groups[7]?.tools.map(t => t.manifest.id)).toEqual([
+      'anchored-vwap',
+      'regression-channel',
     ]);
     expect(savedDockSize('5000', 'side')).toBe(720);
     expect(savedDockSize('abc', 'bottom')).toBeNull();
