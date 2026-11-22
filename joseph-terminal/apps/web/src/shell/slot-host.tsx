@@ -12,12 +12,15 @@ import {
 import {
   Component,
   useEffect,
+  useRef,
   useState,
   type ErrorInfo,
   type ReactNode,
   type ReactElement,
 } from 'react';
+import {clampDock} from '@joseph/terminal-shell';
 import {Icon} from './icons';
+import {Splitter} from './splitter';
 import {useStore, type WebFeatureContext, type WebView} from './react-bindings';
 import {useRuntime} from './runtime-context';
 
@@ -105,6 +108,28 @@ export function SlotInline({slot}: {slot: UiSlot}): ReactElement {
   );
 }
 
+/** Dock size limits in pixels. */
+const DOCK_LIMITS = {
+  side: {min: 260, max: 720, fallback: 340},
+  bottom: {min: 120, max: 560, fallback: 220},
+} as const;
+
+/**
+ * Reads a saved dock size.
+ * @param raw Stored text.
+ * @param orientation Dock orientation.
+ * @return Size in pixels, or null for the CSS default.
+ */
+export function savedDockSize(
+  raw: string | null,
+  orientation: 'side' | 'bottom'
+): number | null {
+  const value = Number(raw);
+  if (!raw || !Number.isFinite(value)) return null;
+  const limits = DOCK_LIMITS[orientation];
+  return clampDock(value, limits.min, limits.max);
+}
+
 /**
  * Tabbed panel host (side panel or bottom panel).
  * @param props Slot, labels and collapse behaviour.
@@ -128,6 +153,23 @@ export function SlotTabs({
   const [collapsed, setCollapsed] = useState(
     () => runtime.storage.getItem(`${key}.collapsed`) === 'yes'
   );
+  const [size, setSize] = useState<number | null>(() =>
+    savedDockSize(runtime.storage.getItem(`${key}.size`), orientation)
+  );
+  const sizeRef = useRef(size);
+  sizeRef.current = size;
+  const limits = DOCK_LIMITS[orientation];
+  const viewportMax =
+    typeof window === 'undefined'
+      ? limits.max
+      : Math.min(
+          limits.max,
+          Math.round(
+            (orientation === 'side' ? window.innerWidth : window.innerHeight) *
+              0.6
+          )
+        );
+  const currentSize = size ?? limits.fallback;
   useEffect(
     () => runtime.storage.setItem(`${key}.collapsed`, collapsed ? 'yes' : 'no'),
     [collapsed, key, runtime]
@@ -153,7 +195,38 @@ export function SlotTabs({
     <section
       className={`panel panel--${orientation} ${collapsed ? 'panel--collapsed' : ''}`}
       aria-label={label}
+      style={
+        collapsed || size === null
+          ? undefined
+          : orientation === 'side'
+            ? {width: size}
+            : {height: size}
+      }
     >
+      {!collapsed && (
+        <Splitter
+          orientation={orientation === 'side' ? 'vertical' : 'horizontal'}
+          label={`Resize ${label.toLowerCase()}`}
+          value={currentSize}
+          min={limits.min}
+          max={viewportMax}
+          testId={`resize-${slot}`}
+          className={`panel__resize panel__resize--${orientation}`}
+          onDrag={delta => {
+            const next = clampDock(
+              (sizeRef.current ?? limits.fallback) - delta,
+              limits.min,
+              viewportMax
+            );
+            sizeRef.current = next;
+            setSize(next);
+          }}
+          onCommit={() => {
+            if (sizeRef.current !== null)
+              runtime.storage.setItem(`${key}.size`, String(sizeRef.current));
+          }}
+        />
+      )}
       <div className="panel__head">
         <div className="j-tabs panel__tabs" role="tablist" aria-label={label}>
           {!collapsed &&

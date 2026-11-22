@@ -89,7 +89,9 @@ def _fingerprint(frames: list) -> list:  # type: ignore[type-arg]
 
 def test_required_timeframes_include_dependencies() -> None:
     """Intrabar and aux timeframes are consumed automatically."""
-    assert _engine().required_timeframes == frozenset({M1, M5, H1, H4})
+    assert _engine().required_timeframes == frozenset(
+        {TF.M1, TF.M5, TF.H1, TF.H4, TF.D1}
+    )
 
 
 def test_one_frame_per_closed_signal_bar() -> None:

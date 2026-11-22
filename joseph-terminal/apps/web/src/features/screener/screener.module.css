@@ -56,3 +56,16 @@
   color: var(--haze-dim);
   font-size: var(--text-xs);
 }
+.presets {
+  display: grid;
+  gap: var(--space-2);
+}
+.presetForm {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-2);
+}
+.presetForm input {
+  flex: 1;
+  min-width: 120px;
+}

@@ -29,7 +29,7 @@ describe('composed feature graph', () => {
     await runtime.registry.activateAll();
     const statuses = runtime.registry.status.get();
     expect(statuses.filter(s => s.lifecycle !== 'ENABLED')).toEqual([]);
-    expect(runtime.tools.list().length).toBe(12);
+    expect(runtime.tools.list().length).toBe(18);
     expect(runtime.commands.list().length).toBeGreaterThan(20);
     runtime.registry.deactivateAll();
     expect(runtime.commands.list()).toEqual([]);

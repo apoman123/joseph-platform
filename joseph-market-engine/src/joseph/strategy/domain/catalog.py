@@ -19,6 +19,7 @@ LIQUIDITY_SWEEPS = "liquidity_sweeps"
 ORDER_FLOW_PRESSURE = "order_flow_pressure"
 AUCTION_VALUE_AREAS = "auction_value_areas"
 PREMIUM_DISCOUNT_OTE = "premium_discount_ote"
+MARKET_STRUCTURE = "market_structure"
 
 DEFAULT_PLUGINS: frozenset[str] = frozenset(
     {
@@ -29,6 +30,7 @@ DEFAULT_PLUGINS: frozenset[str] = frozenset(
         ORDER_FLOW_PRESSURE,
         AUCTION_VALUE_AREAS,
         PREMIUM_DISCOUNT_OTE,
+        MARKET_STRUCTURE,
     }
 )
 """First-party plugins assumed available when no registry is supplied."""
@@ -56,6 +58,8 @@ AOI_KIND_PLUGIN: Mapping[structures.AoiKind, str] = {
     _K.PDL: DAILY_BIAS,
     _K.SESSION_HIGH: DAILY_BIAS,
     _K.SESSION_LOW: DAILY_BIAS,
+    _K.SWING_HIGH: MARKET_STRUCTURE,
+    _K.SWING_LOW: MARKET_STRUCTURE,
 }
 """Plugin publishing each AOI kind."""
 
@@ -82,6 +86,12 @@ EVENT_PLUGIN: Mapping[structures.StructureEventName, str | None] = {
     _E.SELLER_BREAKOUT: ORDER_FLOW_PRESSURE,
     _E.RANGE_RESET: PREMIUM_DISCOUNT_OTE,
     _E.VALUE_AREA_UPDATED: AUCTION_VALUE_AREAS,
+    _E.SWING_HH: MARKET_STRUCTURE,
+    _E.SWING_HL: MARKET_STRUCTURE,
+    _E.SWING_LH: MARKET_STRUCTURE,
+    _E.SWING_LL: MARKET_STRUCTURE,
+    _E.SWING_EQH: MARKET_STRUCTURE,
+    _E.SWING_EQL: MARKET_STRUCTURE,
 }
 """Plugin publishing each event; ``None`` means any plugin may emit it."""
 
@@ -96,13 +106,45 @@ PUBLISHED_VALUES: Mapping[str, frozenset[str]] = {
             "pdh",
             "pdl",
             "session",
+            "event_age",
+            "previous_day_mid",
+            "range_location",
+            "bias",
+            "agreement",
+            "d1_trend",
+            "h4_trend",
+            "h1_trend",
         }
     ),
-    FVG_IFVG: frozenset({"active_count"}),
-    ORDER_BREAKER_BLOCKS: frozenset({"active_count"}),
+    MARKET_STRUCTURE: frozenset(
+        {
+            "trend",
+            "last_event",
+            "last_event_direction",
+            "event_age",
+            "last_pivot_high",
+            "last_pivot_low",
+            "high_type",
+            "low_type",
+            "swing_alignment",
+            "agreement",
+            "pending_high",
+            "pending_low",
+        }
+    ),
+    FVG_IFVG: frozenset({"active_count", "atr"}),
+    ORDER_BREAKER_BLOCKS: frozenset({"active_count", "atr"}),
     LIQUIDITY_SWEEPS: frozenset({"active_count"}),
     ORDER_FLOW_PRESSURE: frozenset(
-        {"delta_pct", "coverage_pct", "intrabar_count", "rel_volume", "method"}
+        {
+            "delta_pct",
+            "coverage_pct",
+            "intrabar_count",
+            "rel_volume",
+            "method",
+            "prior_high",
+            "prior_low",
+        }
     ),
     AUCTION_VALUE_AREAS: frozenset(
         {"vah", "poc", "val", "vah_1h", "poc_1h", "val_1h"}
@@ -119,6 +161,9 @@ PUBLISHED_VALUES: Mapping[str, frozenset[str]] = {
             "in_premium",
             "in_discount",
             "in_ote",
+            "position_pct",
+            "zone",
+            "read",
         }
     ),
 }

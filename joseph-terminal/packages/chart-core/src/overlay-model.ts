@@ -25,6 +25,8 @@ export interface PriceLineOverlay {
   price: DecimalString;
   /** Color role. */
   tone: OverlayTone;
+  /** Optional user color (`#rrggbb`) overriding the tone. */
+  color?: string;
   /** Dash style. */
   lineStyle: OverlayLineStyle;
   /** Axis/label text. */
@@ -53,6 +55,8 @@ export interface BoxOverlay {
   upper: DecimalString;
   /** Color role. */
   tone: OverlayTone;
+  /** Optional user color (`#rrggbb`) overriding the tone. */
+  color?: string;
   /** Fill opacity 0..1. */
   fillOpacity: number;
   /** Border dash style. */
@@ -77,6 +81,8 @@ export interface MarkerOverlay {
   shape: 'arrow-up' | 'arrow-down' | 'circle' | 'square';
   /** Color role. */
   tone: OverlayTone;
+  /** Optional user color (`#rrggbb`) overriding the tone. */
+  color?: string;
   /** Short text. */
   text?: string;
 }

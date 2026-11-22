@@ -21,7 +21,7 @@ import {
   createDrawing,
   translateDrawing,
 } from './document';
-import {MOUSE_TOLERANCE_PX, distance, type Point} from './geometry';
+import {MOUSE_TOLERANCE_PX, decimate, distance, type Point} from './geometry';
 import {magnetSnap} from './snapping';
 import {createCommand, type DrawingStore} from './store';
 import type {
@@ -31,10 +31,20 @@ import type {
   SnapBar,
   SurfacePointerEvent,
 } from './surface';
-import {type RenderState, type ToolPalette, type ToolRegistry} from './tool';
+import {
+  MAX_ANCHORS,
+  type RenderState,
+  type ToolPalette,
+  type ToolPlugin,
+  type ToolRegistry,
+} from './tool';
 
 /** Movement (px) that turns a press into a drag. */
 const DRAG_SLOP_PX = 4;
+/** Minimum spacing (px) between recorded freehand points. */
+const FREEHAND_STEP_PX = 3;
+/** Distance (px) at which a second click finishes a multi-click drawing. */
+const FINISH_CLICK_PX = 6;
 
 /** Environment the controller reads on every gesture. */
 export interface DrawingControllerOptions {
@@ -74,6 +84,10 @@ interface Draft {
   placed: number;
   /** Where the press started. */
   pressPoint: Point;
+  /** Creation mode of the tool. */
+  mode: 'anchors' | 'multi-click' | 'freehand';
+  /** Last recorded pointer position (freehand spacing). */
+  lastPoint: Point;
 }
 
 /** In-progress edit drag. */
@@ -178,8 +192,11 @@ export class DrawingController {
   handleKey(key: string): boolean {
     if (key === 'Escape') {
       if (this.draft) {
-        this.draft = null;
-        this.surface.invalidate();
+        // Escape finishes a polyline that already has a segment.
+        if (!this.finishDraft()) {
+          this.draft = null;
+          this.surface.invalidate();
+        }
         return true;
       }
       if (this.toolId) {
@@ -195,6 +212,30 @@ export class DrawingController {
       return removed;
     }
     return false;
+  }
+
+  /**
+   * Finishes a multi-click drawing with the anchors placed so far.
+   * @return True when a drawing was created.
+   */
+  finishDraft(): boolean {
+    const draft = this.draft;
+    const tool = draft ? this.tools.get(draft.toolId) : undefined;
+    if (!draft || !tool || draft.mode !== 'multi-click') return false;
+    const placed = draft.anchors.slice(0, draft.placed);
+    if (placed.length < Math.max(2, tool.manifest.anchorCount)) return false;
+    this.draft = null;
+    this.commit(draft.toolId, placed);
+    this.surface.invalidate();
+    return true;
+  }
+
+  /**
+   * Whether a multi-click or freehand drawing is being created.
+   * @return True while drafting.
+   */
+  get drafting(): boolean {
+    return this.draft !== null;
   }
 
   /**
@@ -258,8 +299,22 @@ export class DrawingController {
     const tool = this.toolId ? this.tools.get(this.toolId) : undefined;
     const anchor = this.anchorFor(event);
     if (!tool || !anchor) return;
+    const mode = tool.manifest.creation ?? 'anchors';
+    const point = {x: event.x, y: event.y};
+    if (mode === 'freehand') {
+      this.draft = {
+        toolId: tool.manifest.id,
+        anchors: [anchor],
+        placed: 1,
+        pressPoint: point,
+        mode,
+        lastPoint: point,
+      };
+      this.surface.invalidate();
+      return;
+    }
     if (!this.draft) {
-      if (tool.manifest.anchorCount <= 1) {
+      if (mode === 'anchors' && tool.manifest.anchorCount <= 1) {
         this.commit(tool.manifest.id, [anchor]);
         return;
       }
@@ -267,8 +322,12 @@ export class DrawingController {
         toolId: tool.manifest.id,
         anchors: [anchor, {...anchor}],
         placed: 1,
-        pressPoint: {x: event.x, y: event.y},
+        pressPoint: point,
+        mode,
+        lastPoint: point,
       };
+    } else if (this.draft.mode === 'multi-click') {
+      this.advanceMultiClick(tool, anchor, point);
     } else {
       this.draft.anchors[this.draft.anchors.length - 1] = anchor;
       this.draft.placed += 1;
@@ -276,6 +335,36 @@ export class DrawingController {
       this.advanceOrCommit(tool.manifest.anchorCount);
     }
     this.surface.invalidate();
+  }
+
+  /**
+   * Places the next polyline vertex, or finishes on a second click at the
+   * same spot (double-click) or when the anchor cap is reached.
+   * @param tool Tool plugin.
+   * @param anchor Anchor under the pointer.
+   * @param point Pointer position.
+   */
+  private advanceMultiClick(
+    tool: ToolPlugin,
+    anchor: DrawingAnchor,
+    point: Point
+  ): void {
+    const draft = this.draft;
+    if (!draft) return;
+    if (distance(draft.lastPoint, point) <= FINISH_CLICK_PX) {
+      this.finishDraft();
+      return;
+    }
+    draft.anchors[draft.anchors.length - 1] = anchor;
+    draft.placed += 1;
+    draft.pressPoint = point;
+    draft.lastPoint = point;
+    const cap = Math.min(MAX_ANCHORS, tool.manifest.maxAnchors ?? MAX_ANCHORS);
+    if (draft.placed >= cap) {
+      this.finishDraft();
+      return;
+    }
+    draft.anchors.push({...anchor});
   }
 
   /**
@@ -299,6 +388,17 @@ export class DrawingController {
    * @param event Pointer event.
    */
   private onPointerMove(event: SurfacePointerEvent): void {
+    if (this.draft?.mode === 'freehand') {
+      const point = {x: event.x, y: event.y};
+      if (distance(this.draft.lastPoint, point) < FREEHAND_STEP_PX) return;
+      const anchor = this.anchorFor(event);
+      if (anchor) {
+        this.draft.anchors.push(anchor);
+        this.draft.lastPoint = point;
+        this.surface.invalidate();
+      }
+      return;
+    }
     if (this.draft) {
       const anchor = this.anchorFor(event);
       if (anchor) {
@@ -344,6 +444,30 @@ export class DrawingController {
    */
   private onPointerUp(event: SurfacePointerEvent): void {
     const draft = this.draft;
+    if (draft?.mode === 'freehand') {
+      const tool = this.tools.get(draft.toolId);
+      this.draft = null;
+      if (tool && draft.anchors.length >= 2) {
+        const cap = Math.min(
+          MAX_ANCHORS,
+          tool.manifest.maxAnchors ?? MAX_ANCHORS
+        );
+        this.commit(draft.toolId, decimate(draft.anchors, cap));
+      }
+      this.surface.invalidate();
+      return;
+    }
+    if (draft?.mode === 'multi-click') {
+      // Vertices are placed by clicks; a drag places one at the release.
+      if (distance(draft.pressPoint, event) >= DRAG_SLOP_PX) {
+        const tool = this.tools.get(draft.toolId);
+        const anchor = this.anchorFor(event);
+        if (tool && anchor)
+          this.advanceMultiClick(tool, anchor, {x: event.x, y: event.y});
+      }
+      this.surface.invalidate();
+      return;
+    }
     if (draft) {
       const tool = this.tools.get(draft.toolId);
       const dragged = distance(draft.pressPoint, event) >= DRAG_SLOP_PX;

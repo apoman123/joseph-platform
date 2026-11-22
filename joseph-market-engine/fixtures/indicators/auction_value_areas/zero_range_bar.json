@@ -2,16 +2,17 @@
   "plugin_id": "auction_value_areas",
   "timeframe": "5m",
   "settings": {
-    "chart_bars": 2
+    "chart_bars": 5,
+    "tick_size": "0.00001"
   },
-  "description": "Two-bar chart profile over [0, 10] where only a zero-range bar at 5 carries volume: POC is bin 16 (5.15625), the value area is that single bin.",
+  "description": "chartBars 5 over [0, 10], 32 rows of 0.3125: bar 0 spreads 1 unit over every row, bars 1-4 are zero-range at 5 with 10 each (row floor(5/0.3125) = 16). The profile on bar 5 excludes bar 5 itself. POC row 16 = 5.15625; 40 of 41 units exceed the 70% target, so the value area is that single row [5, 5.3125].",
   "bars": [
     [
       "0",
       "10",
       "0",
       "10",
-      "0"
+      "1"
     ],
     [
       "5",
@@ -19,13 +20,42 @@
       "5",
       "5",
       "10"
+    ],
+    [
+      "5",
+      "5",
+      "5",
+      "5",
+      "10"
+    ],
+    [
+      "5",
+      "5",
+      "5",
+      "5",
+      "10"
+    ],
+    [
+      "5",
+      "5",
+      "5",
+      "5",
+      "10"
+    ],
+    [
+      "5",
+      "6",
+      "4",
+      "5",
+      "3"
     ]
   ],
   "expect": {
     "final_values": {
       "poc": "5.15625",
       "val": "5",
-      "vah": "5.3125"
+      "vah": "5.3125",
+      "poc_1h": null
     }
   }
 }

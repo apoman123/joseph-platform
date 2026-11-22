@@ -3,6 +3,8 @@
  * market stream. Every record carries `feed_state: 'DEMO'`.
  */
 import {
+  type IndicatorSeries,
+  type IndicatorSeriesQuery,
   Decimal,
   TIMEFRAME_MS,
   TIMEFRAMES,
@@ -12,7 +14,6 @@ import {
   type CandleBatch,
   type CandleQuery,
   type ChannelSpec,
-  type IndicatorPluginInfo,
   type IndicatorPluginList,
   type IndicatorSnapshotList,
   type Instrument,
@@ -34,6 +35,7 @@ import {
   type VenueStatusList,
 } from '@joseph/contracts';
 import {DEMO_AOIS, DEMO_EVENTS} from './demo-indicators';
+import {demoPluginInfos} from './demo-plugins';
 import {
   DEMO_INSTRUMENT_SPECS,
   demoCandle,
@@ -98,45 +100,6 @@ export function demoInstrument(
     as_of_ms: nowMs,
   };
 }
-
-/** Static descriptors of the backend indicator plugins. */
-const PLUGINS: readonly [string, string, string][] = [
-  [
-    'daily_bias',
-    'Daily bias',
-    'Confirmed BOS/CHoCH per timeframe, sessions and prior-day levels.',
-  ],
-  [
-    'fvg_ifvg',
-    'FVG and IFVG',
-    'Three-candle fair value gaps and their inversions.',
-  ],
-  [
-    'order_breaker_blocks',
-    'Order and breaker blocks',
-    'Order blocks behind structure breaks and their breaker conversions.',
-  ],
-  [
-    'liquidity_sweeps',
-    'Liquidity sweeps',
-    'Buy-side and sell-side liquidity pools, equal highs/lows and sweeps.',
-  ],
-  [
-    'order_flow_pressure',
-    'Order flow pressure',
-    'Estimated lower-timeframe volume delta and failure/breakout events.',
-  ],
-  [
-    'auction_value_areas',
-    'Auction value areas',
-    'Rolling VAH/POC/VAL from 1H and chart-timeframe bars.',
-  ],
-  [
-    'premium_discount_ote',
-    'Premium, discount and OTE',
-    'Dealing range, equilibrium and 62-79% optimal trade entry.',
-  ],
-];
 
 /** Options for the DEMO client. */
 export interface DemoMarketOptions {
@@ -380,24 +343,7 @@ export class DemoMarketDataClient implements MarketDataClient {
    * @return Plugins.
    */
   async listIndicatorPlugins(): Promise<IndicatorPluginList> {
-    const plugins: IndicatorPluginInfo[] = PLUGINS.map(
-      ([id, name, description]) => ({
-        plugin_id: id,
-        indicator_version: '1.0.0',
-        schema_version: 1,
-        display_name: name,
-        description,
-        timeframes: [...TIMEFRAMES],
-        warmup_bars: 50,
-        required_streams: ['candles:chart'],
-        input_schema: {},
-        output_kinds: [],
-        output_events: [],
-        licensing_status: 'CLEAN_ROOM_FROM_SPEC',
-        parity_status: 'SPEC_ONLY',
-      })
-    );
-    return {plugins};
+    return {plugins: demoPluginInfos()};
   }
 
   /**
@@ -430,6 +376,50 @@ export class DemoMarketDataClient implements MarketDataClient {
         warmup_complete: true,
         data_quality: {feed_state: 'DEMO', missing_bars: 0, coverage_pct: null},
       })),
+    };
+  }
+
+  /**
+   * Returns DEMO per-bar values shaped like the backend series. Only the
+   * order-flow plugin has a sub-pane series; values are synthetic, derived
+   * from the demo candles' body direction, and labelled DEMO.
+   * @param query Series query.
+   * @return DEMO indicator series.
+   */
+  async getIndicatorSeries(
+    query: IndicatorSeriesQuery
+  ): Promise<IndicatorSeries> {
+    const spec = demoSpec(query.instrumentId);
+    const now = this.now();
+    const duration = TIMEFRAME_MS[query.timeframe];
+    const lastStart = floorToTimeframe(query.timeframe, now) - duration;
+    const points =
+      query.pluginId === 'order_flow_pressure'
+        ? Array.from({length: 200}, (_, i) => {
+            const start = lastStart - (199 - i) * duration;
+            const bar = demoCandle(spec, query.timeframe, start, now);
+            const open = Number(bar.open);
+            const close = Number(bar.close);
+            const range = Math.max(Number(bar.high) - Number(bar.low), 1e-9);
+            const share = Math.max(-1, Math.min(1, (close - open) / range));
+            return {
+              bar_start_ms: start,
+              values: {
+                delta_pct: (share * 60).toFixed(2),
+                coverage_pct: '100',
+                intrabar_count: 5,
+              },
+            };
+          })
+        : [];
+    return {
+      instrument_id: spec.instrumentId,
+      timeframe: query.timeframe,
+      plugin_id: query.pluginId,
+      indicator_version: 'demo',
+      points,
+      as_of_ms: lastStart + duration,
+      feed_state: 'DEMO',
     };
   }
 
@@ -497,15 +487,39 @@ export class DemoMarketDataClient implements MarketDataClient {
         price: at(e.priceRatio),
         aoi_id: null,
         score: null,
-        meta: {demo: true},
+        meta:
+          e.pivotBarsAgo === undefined
+            ? {demo: true}
+            : {
+                demo: true,
+                pivot_time_ms: lastStart - e.pivotBarsAgo * duration,
+              },
       };
     });
+    const atMs = query.atMs;
+    if (atMs === undefined || atMs >= asOf) {
+      return {
+        instrument_id: spec.instrumentId,
+        timeframe: query.timeframe,
+        aois,
+        events,
+        as_of_ms: asOf,
+        feed_state: 'DEMO',
+      };
+    }
+    // Point-in-time view for replay: only what was known when `atMs` closed.
     return {
       instrument_id: spec.instrumentId,
       timeframe: query.timeframe,
-      aois,
-      events,
-      as_of_ms: asOf,
+      aois: aois
+        .filter(a => a.confirmed_at_ms <= atMs)
+        .map(a =>
+          a.invalidated_at_ms != null && a.invalidated_at_ms > atMs
+            ? {...a, state: 'active', invalidated_at_ms: null, as_of_ms: atMs}
+            : {...a, as_of_ms: atMs}
+        ),
+      events: events.filter(e => e.confirmed_at_ms <= atMs),
+      as_of_ms: atMs,
       feed_state: 'DEMO',
     };
   }

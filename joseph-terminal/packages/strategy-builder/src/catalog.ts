@@ -270,6 +270,8 @@ export const AOI_KIND_PLUGIN: Readonly<Record<AoiKind, string>> = {
   PDL: 'daily_bias',
   SESSION_HIGH: 'daily_bias',
   SESSION_LOW: 'daily_bias',
+  SWING_HIGH: 'market_structure',
+  SWING_LOW: 'market_structure',
 };
 
 /** Plugin that emits each structure event (null = any plugin). */
@@ -297,6 +299,12 @@ export const EVENT_PLUGIN: Readonly<Record<StructureEventName, string | null>> =
     SELLER_BREAKOUT: 'order_flow_pressure',
     RANGE_RESET: 'premium_discount_ote',
     VALUE_AREA_UPDATED: 'auction_value_areas',
+    SWING_HH: 'market_structure',
+    SWING_HL: 'market_structure',
+    SWING_LH: 'market_structure',
+    SWING_LL: 'market_structure',
+    SWING_EQH: 'market_structure',
+    SWING_EQL: 'market_structure',
   };
 
 /** All AOI kinds in display order. */

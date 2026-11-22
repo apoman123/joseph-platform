@@ -4,34 +4,102 @@
  * command palette.
  */
 'use client';
-import type {ReactElement} from 'react';
+import {useState, type ReactElement} from 'react';
 import {
   TIMEFRAMES,
   type ChartType,
   type FeedState,
   type LayoutId,
   type PriceScaleMode,
+  type Timeframe,
 } from '@joseph/contracts';
-import {PLUGIN_NAMES} from '@joseph/indicator-viz';
-import {activeChart} from '@joseph/terminal-shell';
+import {PLUGIN_NAMES, STUDY_PLUGINS} from '@joseph/indicator-viz';
 import {
+  activeChart,
+  layerStyle,
+  layerVisible,
+  parseTimeframeInput,
+} from '@joseph/terminal-shell';
+import {
+  Camera,
   Columns2,
   Command,
+  GitCompareArrows,
   Grid2x2,
+  History,
+  LayoutTemplate,
   Layers,
   LayoutGrid,
   Moon,
   Rows2,
+  Settings2,
   Square,
   Star,
   Sun,
 } from 'lucide-react';
+import {CompareMenu} from './compare-menu';
 import {InstrumentSelector} from './instrument-selector';
 import {Popover} from './popover';
 import {ProvenanceBadge} from './provenance';
 import {useStore} from './react-bindings';
 import {useRuntime} from './runtime-context';
 import {SlotInline} from './slot-host';
+import {TemplatesMenu} from './templates-menu';
+
+/**
+ * Custom resolution input ("15", "4h", "1D").
+ * @param props Apply callback.
+ * @return Form.
+ */
+function CustomTimeframe({
+  onApply,
+}: {
+  onApply: (timeframe: Timeframe) => void;
+}): ReactElement {
+  const [text, setText] = useState('');
+  const [error, setError] = useState<string | null>(null);
+  return (
+    <form
+      className="tf-custom"
+      onSubmit={event => {
+        event.preventDefault();
+        const parsed = parseTimeframeInput(text);
+        if (parsed.ok) {
+          setError(null);
+          setText('');
+          onApply(parsed.timeframe);
+        } else {
+          setError(parsed.error);
+        }
+      }}
+    >
+      <label className="j-label" htmlFor="tf-custom">
+        Type a resolution
+      </label>
+      <div className="tf-custom__row">
+        <input
+          id="tf-custom"
+          className="j-input"
+          placeholder="15, 4h, 1D"
+          value={text}
+          aria-invalid={error ? true : undefined}
+          aria-describedby="tf-custom-help"
+          onChange={event => setText(event.target.value)}
+        />
+        <button type="submit" className="j-btn j-btn--sm">
+          Go
+        </button>
+      </div>
+      <p
+        id="tf-custom-help"
+        className={error ? 'tf-custom__error' : 'tf-custom__help'}
+        role={error ? 'alert' : undefined}
+      >
+        {error ?? 'A bare number means minutes.'}
+      </p>
+    </form>
+  );
+}
 
 /** Chart type labels. */
 const CHART_TYPES: readonly [ChartType, string][] = [
@@ -92,7 +160,10 @@ export function TopBar(): ReactElement {
   const theme = useStore(runtime.theme);
   const orderMode = useStore(runtime.orderMode);
   const feedStates = useStore(runtime.feedStates);
+  const replayStates = useStore(runtime.replay);
+  const dataWindow = useStore(runtime.dataWindow);
   const chart = activeChart(workspace);
+  const replaying = replayStates[chart.chart_id] !== undefined;
   const favorites = workspace.favorites?.timeframes ?? [];
   const chartId = chart.chart_id;
   const run = (id: string) =>
@@ -136,6 +207,12 @@ export function TopBar(): ReactElement {
         >
           {close => (
             <div className="tf-grid">
+              <CustomTimeframe
+                onApply={timeframe => {
+                  runtime.dispatch({type: 'setTimeframe', chartId, timeframe});
+                  close();
+                }}
+              />
               {TIMEFRAMES.map(tf => (
                 <div key={tf} className="tf-grid__row">
                   <button
@@ -241,25 +318,61 @@ export function TopBar(): ReactElement {
               reported.
             </p>
             {Object.entries(PLUGIN_NAMES).map(([pluginId, name]) => {
-              const visible =
-                chart.indicator_layers.find(l => l.plugin_id === pluginId)
-                  ?.visible ?? false;
+              const visible = layerVisible(chart, pluginId);
+              const hasPane = STUDY_PLUGINS[pluginId] !== undefined;
+              const paneOn = layerStyle(chart, pluginId).pane !== false;
               return (
-                <label key={pluginId} className="j-check layers-menu__item">
-                  <input
-                    type="checkbox"
-                    checked={visible}
-                    onChange={() =>
-                      runtime.dispatch({
-                        type: 'setIndicatorLayer',
-                        chartId,
-                        pluginId,
-                        visible: !visible,
-                      })
+                <div key={pluginId} className="layers-menu__row">
+                  <label className="j-check layers-menu__item">
+                    <input
+                      type="checkbox"
+                      checked={visible}
+                      onChange={() =>
+                        runtime.dispatch({
+                          type: 'setIndicatorLayer',
+                          chartId,
+                          pluginId,
+                          visible: !visible,
+                        })
+                      }
+                    />
+                    {name}
+                  </label>
+                  {hasPane && visible && (
+                    <label className="j-check layers-menu__sub">
+                      <input
+                        type="checkbox"
+                        checked={paneOn}
+                        data-testid="delta-pane-toggle"
+                        onChange={() =>
+                          runtime.dispatch({
+                            type: 'setIndicatorLayerConfig',
+                            chartId,
+                            pluginId,
+                            patch: {
+                              style: {
+                                ...layerStyle(chart, pluginId),
+                                pane: !paneOn,
+                              },
+                            },
+                          })
+                        }
+                      />
+                      Delta % pane
+                    </label>
+                  )}
+                  <button
+                    type="button"
+                    className="j-btn j-btn--ghost j-btn--icon j-btn--sm"
+                    aria-label={`${name} settings`}
+                    data-testid={`indicator-settings-${pluginId}`}
+                    onClick={() =>
+                      runtime.indicatorSettings.set({chartId, pluginId})
                     }
-                  />
-                  {name}
-                </label>
+                  >
+                    <Settings2 size={14} aria-hidden="true" />
+                  </button>
+                </div>
               );
             })}
             <div className="j-menu__sep" />
@@ -272,6 +385,24 @@ export function TopBar(): ReactElement {
                 }
               />
               Volume
+            </label>
+            <label className="j-check layers-menu__item">
+              <input
+                type="checkbox"
+                checked={chart.session_separators === true}
+                data-testid="session-separators-toggle"
+                onChange={() => run('chart.sessionSeparators')}
+              />
+              Session breaks (UTC)
+            </label>
+            <label className="j-check layers-menu__item">
+              <input
+                type="checkbox"
+                checked={dataWindow}
+                data-testid="data-window-toggle"
+                onChange={() => run('chart.dataWindow')}
+              />
+              Data window
             </label>
             <button
               type="button"
@@ -341,6 +472,45 @@ export function TopBar(): ReactElement {
           </div>
         )}
       </Popover>
+      <Popover
+        ariaLabel="Compare symbols"
+        triggerLabel="Compare symbols"
+        testId="compare-menu"
+        className="j-btn j-btn--ghost j-btn--icon"
+        label={<GitCompareArrows size={16} aria-hidden="true" />}
+      >
+        {() => <CompareMenu chart={chart} />}
+      </Popover>
+      <Popover
+        ariaLabel="Chart templates"
+        triggerLabel="Chart templates"
+        testId="templates-menu"
+        label={<LayoutTemplate size={16} aria-hidden="true" />}
+        className="j-btn j-btn--ghost j-btn--icon"
+      >
+        {close => <TemplatesMenu chart={chart} close={close} />}
+      </Popover>
+      <button
+        type="button"
+        className="j-btn j-btn--ghost j-btn--icon"
+        aria-label="Bar replay"
+        aria-pressed={replaying}
+        title="Bar replay (Alt + Shift + R)"
+        data-testid="replay-toggle"
+        onClick={() => run('chart.replay.toggle')}
+      >
+        <History size={16} aria-hidden="true" />
+      </button>
+      <button
+        type="button"
+        className="j-btn j-btn--ghost j-btn--icon"
+        aria-label="Download chart screenshot"
+        title="Screenshot (Alt + Shift + S)"
+        data-testid="screenshot"
+        onClick={() => run('chart.screenshot')}
+      >
+        <Camera size={16} aria-hidden="true" />
+      </button>
       <div className="topbar__spacer" />
       <SlotInline slot="toolbar" />
       <ProvenanceBadge state={worstFeedState(feedStates)} />

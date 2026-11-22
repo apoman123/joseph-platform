@@ -18,7 +18,7 @@ uv run python scripts/probe_venues.py                # connectivity evidence
 | `domain/` | Standard-library kernel: ids (UUIDv7), decimals, timeframes, instruments, candles, AOIs, `BarFrame` |
 | `market_data/` | Venue adapters (httpx + websockets), feed router (AUTO / NATIVE_WS / REST_POLL / REPLAY), candle store, order books |
 | `screening/` | Five strict gates, funding risk, three-state qualification with reasons and policy version |
-| `indicators/` | Plugin SDK, multi-timeframe engine (no look-ahead), the seven plugins (each with a README of semantics and assumptions) |
+| `indicators/` | Plugin SDK, multi-timeframe engine (no look-ahead), adapters for the eight indicators of the external `smc_indicators` library (`apoman123/PineScripts`) |
 | `strategy/` | Rule AST v2 models, compiler, tri-state evaluator with reason trees, setup state machine, immutable versions |
 | `signals/`, `alerts/` | Signal records with dedupe keys; durable alert outbox → UI stream, Telegram, LINE Messaging API, e-mail, webhook, execution forwarder |
 | `pipeline/` | Live loop: closed candles → indicator engine → runtime (history warms up without firing) |

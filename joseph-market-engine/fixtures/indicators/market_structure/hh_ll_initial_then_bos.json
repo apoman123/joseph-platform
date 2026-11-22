@@ -1,0 +1,174 @@
+{
+  "plugin_id": "market_structure",
+  "timeframe": "5m",
+  "description": "Same bars through the current-timeframe structure port: first pivots H 105 / L 96.5 carry no contract label; 106.5 is a higher high and 94 a lower low (MIXED alignment). Bar 14 is the initial bearish break, bar 19 a BOS; the broken low leaves no pending low while 106.5 stays pending.",
+  "bars": [
+    [
+      "100",
+      "101",
+      "99",
+      "100.5"
+    ],
+    [
+      "100.5",
+      "102",
+      "100",
+      "101.5"
+    ],
+    [
+      "101.5",
+      "103",
+      "101",
+      "102.5"
+    ],
+    [
+      "102.5",
+      "105",
+      "102",
+      "103"
+    ],
+    [
+      "103",
+      "104",
+      "101",
+      "101.5"
+    ],
+    [
+      "101.5",
+      "103",
+      "100",
+      "100.5"
+    ],
+    [
+      "100.5",
+      "102",
+      "99",
+      "99.5"
+    ],
+    [
+      "99.5",
+      "101",
+      "98",
+      "98.5"
+    ],
+    [
+      "98.5",
+      "100",
+      "97",
+      "97.5"
+    ],
+    [
+      "97.5",
+      "99",
+      "96.5",
+      "98"
+    ],
+    [
+      "98",
+      "104",
+      "97.5",
+      "103.5"
+    ],
+    [
+      "103.5",
+      "106",
+      "103",
+      "105.5"
+    ],
+    [
+      "105.5",
+      "106.5",
+      "104",
+      "106"
+    ],
+    [
+      "106",
+      "106.2",
+      "100",
+      "100.5"
+    ],
+    [
+      "100.5",
+      "101",
+      "95",
+      "96"
+    ],
+    [
+      "96",
+      "97",
+      "94",
+      "94.5"
+    ],
+    [
+      "94.5",
+      "96",
+      "94.5",
+      "95.5"
+    ],
+    [
+      "95.5",
+      "97",
+      "95",
+      "96.5"
+    ],
+    [
+      "96.5",
+      "97.5",
+      "96",
+      "97"
+    ],
+    [
+      "97",
+      "97.2",
+      "93",
+      "93.5"
+    ]
+  ],
+  "expect": {
+    "events": [
+      {
+        "bar": 14,
+        "name": "INITIAL_BREAK_BEAR",
+        "price": "96.5"
+      },
+      {
+        "bar": 15,
+        "name": "SWING_HH",
+        "price": "106.5"
+      },
+      {
+        "bar": 18,
+        "name": "SWING_LL",
+        "price": "94"
+      },
+      {
+        "bar": 19,
+        "name": "BOS_BEAR",
+        "price": "94"
+      }
+    ],
+    "no_events": [
+      "CHOCH_BEAR",
+      "CHOCH_BULL",
+      "BOS_BULL"
+    ],
+    "final_values": {
+      "trend": "BEARISH",
+      "last_event": "BOS",
+      "high_type": "HH",
+      "low_type": "LL",
+      "swing_alignment": "MIXED",
+      "agreement": "UNCONFIRMED",
+      "pending_high": "106.5",
+      "pending_low": null
+    },
+    "final_aois": [
+      {
+        "kind": "SWING_HIGH",
+        "side": "bearish",
+        "lower": "106.5",
+        "upper": "106.5"
+      }
+    ]
+  }
+}

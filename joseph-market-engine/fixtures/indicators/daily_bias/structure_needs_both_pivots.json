@@ -1,0 +1,154 @@
+{
+  "plugin_id": "daily_bias",
+  "timeframe": "5m",
+  "description": "Pine f_structure(3): pivot high 105 (bar 3) confirms at bar 6, pivot low 96.5 (bar 9) at bar 12. A break needs both pivots known, so the close above 105 at bar 11 breaks nothing; the first break is the close below 96.5 at bar 14 (INITIAL, trend was flat). Pivot high 106.5 (bar 12) confirms at 15, pivot low 94 (bar 15) at 18; the close below 94 at bar 19 is a BOS.",
+  "bars": [
+    [
+      "100",
+      "101",
+      "99",
+      "100.5"
+    ],
+    [
+      "100.5",
+      "102",
+      "100",
+      "101.5"
+    ],
+    [
+      "101.5",
+      "103",
+      "101",
+      "102.5"
+    ],
+    [
+      "102.5",
+      "105",
+      "102",
+      "103"
+    ],
+    [
+      "103",
+      "104",
+      "101",
+      "101.5"
+    ],
+    [
+      "101.5",
+      "103",
+      "100",
+      "100.5"
+    ],
+    [
+      "100.5",
+      "102",
+      "99",
+      "99.5"
+    ],
+    [
+      "99.5",
+      "101",
+      "98",
+      "98.5"
+    ],
+    [
+      "98.5",
+      "100",
+      "97",
+      "97.5"
+    ],
+    [
+      "97.5",
+      "99",
+      "96.5",
+      "98"
+    ],
+    [
+      "98",
+      "104",
+      "97.5",
+      "103.5"
+    ],
+    [
+      "103.5",
+      "106",
+      "103",
+      "105.5"
+    ],
+    [
+      "105.5",
+      "106.5",
+      "104",
+      "106"
+    ],
+    [
+      "106",
+      "106.2",
+      "100",
+      "100.5"
+    ],
+    [
+      "100.5",
+      "101",
+      "95",
+      "96"
+    ],
+    [
+      "96",
+      "97",
+      "94",
+      "94.5"
+    ],
+    [
+      "94.5",
+      "96",
+      "94.5",
+      "95.5"
+    ],
+    [
+      "95.5",
+      "97",
+      "95",
+      "96.5"
+    ],
+    [
+      "96.5",
+      "97.5",
+      "96",
+      "97"
+    ],
+    [
+      "97",
+      "97.2",
+      "93",
+      "93.5"
+    ]
+  ],
+  "expect": {
+    "events": [
+      {
+        "bar": 14,
+        "name": "INITIAL_BREAK_BEAR",
+        "price": "96.5"
+      },
+      {
+        "bar": 19,
+        "name": "BOS_BEAR",
+        "price": "94"
+      }
+    ],
+    "no_events": [
+      "INITIAL_BREAK_BULL",
+      "CHOCH_BEAR",
+      "BOS_BULL",
+      "CHOCH_BULL"
+    ],
+    "final_values": {
+      "trend": "BEARISH",
+      "last_event": "BOS",
+      "last_event_direction": "BEARISH",
+      "last_pivot_low": "94",
+      "last_pivot_high": "106.5"
+    }
+  }
+}

@@ -76,8 +76,9 @@
       "properties": {
         "plugin_id": {"type": "string"},
         "visible": {"type": "boolean"},
-        "kinds": {"type": "array", "items": {"$ref": "indicators.schema.json#/$defs/AoiKind"}},
-        "style": {"type": "object"}
+        "kinds": {"type": "array", "items": {"$ref": "indicators.schema.json#/$defs/AoiKind"}, "description": "AOI kinds shown; all kinds when omitted."},
+        "style": {"type": "object", "description": "Presentation only: per-kind colors, event markers, sub-pane visibility."},
+        "settings": {"type": "object", "description": "Indicator inputs validated by the backend against the plugin's input_schema."}
       }
     },
     "ChartState": {
@@ -95,6 +96,8 @@
         "indicator_layers": {"type": "array", "items": {"$ref": "#/$defs/IndicatorLayerState"}},
         "link_group": {"type": ["string", "null"], "enum": ["A", "B", "C", "D", null]},
         "feed_mode": {"$ref": "common.schema.json#/$defs/FeedMode"},
+        "compare": {"type": "array", "maxItems": 3, "uniqueItems": true, "items": {"$ref": "common.schema.json#/$defs/InstrumentId"}, "description": "Instruments overlaid on a separate percentage axis."},
+        "session_separators": {"type": "boolean", "description": "Draw UTC session boundaries."},
         "visible_range": {
           "oneOf": [
             {

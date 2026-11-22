@@ -12,6 +12,7 @@ import type {
   OrderMode,
   WorkspaceDocument,
 } from '@joseph/contracts';
+import type {ChartPort} from '@joseph/chart-core';
 import type {DrawingController, DrawingStore} from '@joseph/drawing-core';
 import {ToolRegistry} from '@joseph/drawing-core';
 import {
@@ -38,12 +39,14 @@ import {
   type WritableStore,
 } from '@joseph/feature-registry';
 import {
+  TemplateRepository,
   WorkspaceRepository,
   activeChart,
   createAutosaver,
   createDefaultWorkspace,
   workspaceReducer,
   type PaletteState,
+  type ReplayState,
   type WorkspaceAction,
 } from '@joseph/terminal-shell';
 import type {WebFeature, WebView} from '../shell/react-bindings';
@@ -117,6 +120,24 @@ export interface DrawingSession {
   magnet: WritableStore<boolean>;
   /** Bumped whenever history availability may have changed. */
   revision: WritableStore<number>;
+  /** Selected drawing (style editor and object list). */
+  selection: WritableStore<DrawingSelection | null>;
+}
+
+/** A selected drawing on one chart. */
+export interface DrawingSelection {
+  /** Chart id. */
+  chartId: string;
+  /** Drawing id. */
+  drawingId: string;
+}
+
+/** Request to open the indicator settings dialog. */
+export interface IndicatorSettingsRequest {
+  /** Chart whose layer is configured. */
+  chartId: string;
+  /** Plugin id. */
+  pluginId: string;
 }
 
 /** Everything the shell owns. */
@@ -175,6 +196,16 @@ export interface TerminalRuntime {
    * select and expand the tab when its slot matches.
    */
   panelRequest: WritableStore<PanelRequest | null>;
+  /** Bar replay state per chart id (absent = live). */
+  replay: WritableStore<Readonly<Record<string, ReplayState>>>;
+  /** Mounted chart ports per chart id (screenshots, data window). */
+  charts: Map<string, ChartPort>;
+  /** Whether the data window is shown on charts. */
+  dataWindow: WritableStore<boolean>;
+  /** Open indicator settings dialog, if any. */
+  indicatorSettings: WritableStore<IndicatorSettingsRequest | null>;
+  /** Saved chart templates. */
+  templates: TemplateRepository;
   /** Persists pending workspace changes immediately. */
   flush(): void;
 }
@@ -236,6 +267,7 @@ export function createRuntime(
   );
   const account = createStore<string | null>(null);
   const orderMode = createStore<OrderMode>('PAPER');
+  const replay = createStore<Readonly<Record<string, ReplayState>>>({});
   const deriveSelection = (): TerminalSelection => {
     const doc = workspace.get();
     const chart = activeChart(doc);
@@ -246,6 +278,7 @@ export function createRuntime(
       feedMode: chart.feed_mode,
       accountId: account.get(),
       orderMode: orderMode.get(),
+      replay: replay.get()[chart.chart_id] !== undefined,
     };
   };
   const selection = createStore<TerminalSelection>(deriveSelection());
@@ -258,6 +291,7 @@ export function createRuntime(
     if (changed) selection.set(next);
   };
   workspace.subscribe(refreshSelection);
+  replay.subscribe(refreshSelection);
   account.subscribe(refreshSelection);
   orderMode.subscribe(refreshSelection);
   workspace.subscribe(doc => autosaver.schedule(doc));
@@ -314,14 +348,23 @@ export function createRuntime(
       activeTool: createStore<string | null>(null),
       magnet: createStore(storage.getItem('joseph.magnet') === 'on'),
       revision: createStore(0),
+      selection: createStore<DrawingSelection | null>(null),
     },
     toasts,
     theme,
     palette: createStore<PaletteState>({open: false, query: '', index: 0}),
     crosshair: createBroadcast<SyncedPoint>(),
     feedStates: createStore<Readonly<Record<string, FeedState>>>({}),
+    replay,
+    charts: new Map(),
+    dataWindow: createStore(storage.getItem('joseph.dataWindow') === 'on'),
+    indicatorSettings: createStore<IndicatorSettingsRequest | null>(null),
+    templates: new TemplateRepository(storage),
     flush: () => autosaver.flush(),
   };
+  runtime.dataWindow.subscribe(on =>
+    storage.setItem('joseph.dataWindow', on ? 'on' : 'off')
+  );
   runtime.drawing.magnet.subscribe(on =>
     storage.setItem('joseph.magnet', on ? 'on' : 'off')
   );

@@ -273,7 +273,9 @@ export type AoiKind =
   | 'PDH'
   | 'PDL'
   | 'SESSION_HIGH'
-  | 'SESSION_LOW';
+  | 'SESSION_LOW'
+  | 'SWING_HIGH'
+  | 'SWING_LOW';
 /**
  * This interface was referenced by `JosephContracts`'s JSON-Schema
  * via the `definition` "AoiState".
@@ -313,7 +315,13 @@ export type StructureEventName =
   | 'BUYER_BREAKOUT'
   | 'SELLER_BREAKOUT'
   | 'RANGE_RESET'
-  | 'VALUE_AREA_UPDATED';
+  | 'VALUE_AREA_UPDATED'
+  | 'SWING_HH'
+  | 'SWING_HL'
+  | 'SWING_LH'
+  | 'SWING_LL'
+  | 'SWING_EQH'
+  | 'SWING_EQL';
 /**
  * Scalar indicator output. Decimals are strings.
  *
@@ -1117,6 +1125,33 @@ export interface IndicatorPluginInfo {
  */
 export interface IndicatorPluginList {
   plugins: IndicatorPluginInfo[];
+}
+/**
+ * Published values of one plugin on one closed bar.
+ *
+ * This interface was referenced by `JosephContracts`'s JSON-Schema
+ * via the `definition` "IndicatorSeriesPoint".
+ */
+export interface IndicatorSeriesPoint {
+  bar_start_ms: TimestampMs;
+  values: {
+    [k: string]: IndicatorValue;
+  };
+}
+/**
+ * Per-bar values of one plugin (e.g. order-flow Delta % for a sub-pane). Values are point-in-time: each point is what the plugin published when that bar closed.
+ *
+ * This interface was referenced by `JosephContracts`'s JSON-Schema
+ * via the `definition` "IndicatorSeries".
+ */
+export interface IndicatorSeries {
+  instrument_id: InstrumentId;
+  timeframe: Timeframe;
+  plugin_id: string;
+  indicator_version: string;
+  points: IndicatorSeriesPoint[];
+  as_of_ms: TimestampMs;
+  feed_state: FeedState;
 }
 /**
  * Structured identity of a tradable contract. Never key solely on a symbol such as BTCUSDT.
@@ -2222,8 +2257,18 @@ export interface DrawingCollection {
 export interface IndicatorLayerState {
   plugin_id: string;
   visible: boolean;
+  /**
+   * AOI kinds shown; all kinds when omitted.
+   */
   kinds?: AoiKind[];
+  /**
+   * Presentation only: per-kind colors, event markers, sub-pane visibility.
+   */
   style?: {};
+  /**
+   * Indicator inputs validated by the backend against the plugin's input_schema.
+   */
+  settings?: {};
 }
 /**
  * This interface was referenced by `JosephContracts`'s JSON-Schema
@@ -2239,6 +2284,20 @@ export interface ChartState {
   indicator_layers: IndicatorLayerState[];
   link_group?: 'A' | 'B' | 'C' | 'D' | null;
   feed_mode: FeedMode;
+  /**
+   * Instruments overlaid on a separate percentage axis.
+   *
+   * @maxItems 3
+   */
+  compare?:
+    | []
+    | [InstrumentId]
+    | [InstrumentId, InstrumentId]
+    | [InstrumentId, InstrumentId, InstrumentId];
+  /**
+   * Draw UTC session boundaries.
+   */
+  session_separators?: boolean;
   visible_range?: {
     from_ms: TimestampMs;
     to_ms: TimestampMs;

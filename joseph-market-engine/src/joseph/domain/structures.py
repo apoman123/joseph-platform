@@ -7,23 +7,41 @@ only these published types, never a plugin's private state.
 Published values contract (``IndicatorSnapshot.values`` keys per plugin; all
 decimals are ``Decimal`` objects in-process and strings on the wire):
 
+Every plugin is an adapter around the external ``smc_indicators`` library
+(``apoman123/PineScripts``), a line-by-line port of the Pine sources.
+
 ``daily_bias`` (run on each timeframe it is configured for)
     ``trend``: ``"BULLISH" | "BEARISH" | "NEUTRAL"``
     ``last_event``: ``"BOS" | "CHOCH" | "INITIAL" | "NONE"``
     ``last_event_direction``: ``"BULLISH" | "BEARISH" | None``
+    ``event_age``: bars since the last event, ``int | None``
     ``last_pivot_high`` / ``last_pivot_low``: ``Decimal | None``
-    ``pdh`` / ``pdl``: prior UTC-day high / low, ``Decimal | None``
+    ``pdh`` / ``pdl`` / ``previous_day_mid``: previous 1D bar, ``Decimal |
+    None``; ``range_location``: ``"ABOVE" | "BELOW" | "PREMIUM" |
+    "DISCOUNT" | None`` of the close versus that range
     ``session``: ``"ASIA" | "LONDON" | "NEW_YORK" | "NONE"`` for the bar
+    (New York windows 20:00-00:00, 02:00-05:00, 08:30-11:00)
+    ``bias``: 1D/4H/1H consensus ``"BULLISH" | "BEARISH" | "NEUTRAL"``;
+    ``agreement``: dashboard agreement code; ``d1_trend`` / ``h4_trend`` /
+    ``h1_trend``: each timeframe's structure as seen by the dashboard
+``market_structure``
+    ``trend``, ``last_event`` (``"BOS" | "MSS" | "INITIAL" | "NONE"``),
+    ``last_event_direction``, ``event_age``, ``last_pivot_high`` /
+    ``last_pivot_low``, ``high_type`` / ``low_type`` (``H HH LH EQH`` /
+    ``L HL LL EQL``), ``swing_alignment``, ``agreement``,
+    ``pending_high`` / ``pending_low`` (unbroken latest pivots).
+    AOIs of kind SWING_HIGH / SWING_LOW (lines).
 ``fvg_ifvg``
-    ``active_count``: ``int``. AOIs of kind FVG / IFVG.
+    ``active_count``: ``int``; ``atr``. AOIs of kind FVG / IFVG.
 ``order_breaker_blocks``
-    ``active_count``: ``int``. AOIs of kind OB / BREAKER.
+    ``active_count``: ``int``; ``atr``. AOIs of kind OB / BREAKER.
 ``liquidity_sweeps``
     ``active_count``: ``int``. AOIs of kind BSL / SSL / EQH / EQL (lines).
 ``order_flow_pressure``
     ``delta_pct``: ``Decimal | None`` (estimated, candle-direction method)
     ``coverage_pct``: ``Decimal | None``; ``intrabar_count``: ``int``
     ``rel_volume``: ``Decimal | None``; ``method``: ``"candle_direction"``
+    ``prior_high`` / ``prior_low``: the 20 bars before this one
 ``auction_value_areas``
     ``vah`` / ``poc`` / ``val``: chart-timeframe profile, ``Decimal | None``
     ``vah_1h`` / ``poc_1h`` / ``val_1h``: 1H profile, ``Decimal | None``
@@ -31,7 +49,8 @@ decimals are ``Decimal`` objects in-process and strings on the wire):
     ``range_id``: ``str | None``; ``direction``: ``"BULLISH" | "BEARISH" |
     None``; ``range_high`` / ``range_low`` / ``eq`` / ``ote_lower`` /
     ``ote_upper``: ``Decimal | None``; ``in_premium`` / ``in_discount`` /
-    ``in_ote``: ``bool | None`` for the bar close.
+    ``in_ote``: ``bool | None`` for the bar close; ``position_pct``,
+    ``zone`` and ``read`` mirror the Pine dashboard.
     AOIs of kind PREMIUM / DISCOUNT / EQUILIBRIUM / OTE carry ``range_id``.
 """
 
@@ -81,6 +100,8 @@ class AoiKind(enum.StrEnum):
     PDL = "PDL"
     SESSION_HIGH = "SESSION_HIGH"
     SESSION_LOW = "SESSION_LOW"
+    SWING_HIGH = "SWING_HIGH"
+    SWING_LOW = "SWING_LOW"
 
 
 class AoiState(enum.StrEnum):
@@ -131,6 +152,12 @@ class StructureEventName(enum.StrEnum):
     SELLER_BREAKOUT = "SELLER_BREAKOUT"
     RANGE_RESET = "RANGE_RESET"
     VALUE_AREA_UPDATED = "VALUE_AREA_UPDATED"
+    SWING_HH = "SWING_HH"
+    SWING_HL = "SWING_HL"
+    SWING_LH = "SWING_LH"
+    SWING_LL = "SWING_LL"
+    SWING_EQH = "SWING_EQH"
+    SWING_EQL = "SWING_EQL"
 
 
 def _contract_value(value: object) -> object:

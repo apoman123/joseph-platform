@@ -245,6 +245,7 @@ export function fakeMarketClient(): MarketDataClient {
     listIndicatorPlugins: unsupported,
     getIndicatorSnapshots: unsupported,
     getAois: unsupported,
+    getIndicatorSeries: unsupported,
   };
 }
 

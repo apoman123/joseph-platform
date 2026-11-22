@@ -9,12 +9,45 @@ import type {
   WebSlotProps,
   WebView,
 } from '../../shell/react-bindings';
+import {
+  normalizeColumns,
+  type WatchColumn,
+  type WatchSort,
+  type WatchlistPrefs,
+} from './columns';
+
+export type {WatchlistPrefs} from './columns';
 import {WatchlistPanel} from './watchlist-panel';
 
 /** Persisted watchlist settings (schema version 1). */
 export interface WatchlistSettings {
   /** Ordered instrument ids. */
   items: string[];
+  /** Visible columns. */
+  columns?: WatchColumn[];
+  /** Sort (null keeps the manual order). */
+  sort?: WatchSort;
+  /** Row source: the user's list or the engine's qualified perpetuals. */
+  source?: 'mine' | 'qualified';
+}
+
+/**
+ * Reads view preferences from stored settings defensively.
+ * @param stored Stored settings.
+ * @return Preferences.
+ */
+export function prefsFromSettings(stored: WatchlistSettings): WatchlistPrefs {
+  const sort = stored.sort;
+  return {
+    columns: normalizeColumns(stored.columns),
+    sort:
+      sort &&
+      typeof sort.key === 'string' &&
+      (sort.dir === 'asc' || sort.dir === 'desc')
+        ? sort
+        : null,
+    source: stored.source === 'qualified' ? 'qualified' : 'mine',
+  };
 }
 
 /** Default rows in DEMO mode. */
@@ -60,16 +93,29 @@ export const WATCHLIST_FEATURE: WebFeature = {
     const items = createStore<readonly string[]>(
       Array.isArray(stored.items) ? stored.items : fallback.items
     );
-    const off = items.subscribe(value =>
-      ctx.settings.write<WatchlistSettings>({items: [...value]})
-    );
+    const prefs = createStore<WatchlistPrefs>(prefsFromSettings(stored));
+    const persist = () => {
+      const view = prefs.get();
+      ctx.settings.write<WatchlistSettings>({
+        items: [...items.get()],
+        columns: [...view.columns],
+        sort: view.sort,
+        source: view.source,
+      });
+    };
+    const offItems = items.subscribe(persist);
+    const offPrefs = prefs.subscribe(persist);
+    const off = () => {
+      offItems();
+      offPrefs();
+    };
     /**
      * Slot view bound to the feature's item store.
      * @param props Slot props.
      * @return Element.
      */
     function WatchlistSlot(props: WebSlotProps) {
-      return createElement(WatchlistPanel, {ctx: props.ctx, items});
+      return createElement(WatchlistPanel, {ctx: props.ctx, items, prefs});
     }
     const view: WebView = WatchlistSlot;
     const remove = ctx.slots.contribute('side-panel', {

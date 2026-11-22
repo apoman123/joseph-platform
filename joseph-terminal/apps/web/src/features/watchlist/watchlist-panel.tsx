@@ -6,12 +6,22 @@
  */
 import {
   formatAge,
+  formatCompactUsd,
+  formatFixed,
   formatSignedPct,
   groupThousands,
 } from '@joseph/chart-trading';
 import type {Instrument, MarketSnapshot} from '@joseph/contracts';
 import type {WritableStore} from '@joseph/feature-registry';
-import {X, ArrowUp, ArrowDown} from 'lucide-react';
+import {X, ArrowUp, ArrowDown, Columns3, Plus} from 'lucide-react';
+import {
+  WATCH_COLUMNS,
+  nextSort,
+  sortRows,
+  type WatchColumn,
+  type WatchSortKey,
+  type WatchlistPrefs,
+} from './columns';
 import {
   useEffect,
   useRef,
@@ -35,6 +45,55 @@ export interface WatchlistPanelProps {
   ctx: WebFeatureContext;
   /** Ordered instrument ids (persisted by the feature). */
   items: WritableStore<readonly string[]>;
+  /** Columns, sort and row source (persisted by the feature). */
+  prefs: WritableStore<WatchlistPrefs>;
+}
+
+/**
+ * Renders one snapshot cell.
+ * @param column Column id.
+ * @param snap Snapshot, or null while loading or unavailable.
+ * @param failed Whether the snapshot request failed.
+ * @return Cell content.
+ */
+function cellContent(
+  column: WatchColumn,
+  snap: MarketSnapshot | null,
+  failed: boolean
+): ReactNode {
+  if (column === 'data') {
+    if (snap)
+      return (
+        <FeedBadge
+          state={snap.stale ? 'STALE' : snap.feed_state}
+          detail={snap.stale ? formatAge(snap.data_age_ms) : undefined}
+        />
+      );
+    return failed ? (
+      <FeedBadge state="UNAVAILABLE" />
+    ) : (
+      <span className="j-muted">…</span>
+    );
+  }
+  if (!snap) return '—';
+  switch (column) {
+    case 'last':
+      return snap.last ? groupThousands(snap.last) : '—';
+    case 'mark':
+      return snap.mark ? groupThousands(snap.mark) : '—';
+    case 'change':
+      return formatSignedPct(snap.change_24h_pct ?? null);
+    case 'turnover':
+      return formatCompactUsd(snap.turnover_24h_quote ?? null);
+    case 'spread':
+      return snap.spread_pct ? `${formatFixed(snap.spread_pct, 3)}%` : '—';
+    case 'funding':
+      return formatSignedPct(snap.funding?.normalized_8h_pct ?? null, 4);
+    case 'oi':
+      return formatCompactUsd(snap.open_interest?.notional_usd ?? null);
+    default:
+      return '—';
+  }
 }
 
 /** Snapshot load result per instrument. */
@@ -65,8 +124,28 @@ export function moveItem<T>(
  * @param props Props.
  * @return Panel element.
  */
-export function WatchlistPanel({ctx, items}: WatchlistPanelProps): ReactNode {
-  const list = useStore(items);
+export function WatchlistPanel({
+  ctx,
+  items,
+  prefs,
+}: WatchlistPanelProps): ReactNode {
+  const mine = useStore(items);
+  const view = useStore(prefs);
+  const qualifiedSource = view.source === 'qualified';
+  const qualified = usePolling(
+    async () =>
+      qualifiedSource
+        ? (await ctx.clients.market.getQualification(undefined, 'QUALIFIED'))
+            .records
+        : [],
+    `qualified|${qualifiedSource}`,
+    60_000
+  );
+  const qualifiedIds = (qualified.data ?? [])
+    .filter(record => record.status === 'QUALIFIED')
+    .map(record => record.instrument_id);
+  const list = qualifiedSource ? qualifiedIds : mine;
+  const [showColumns, setShowColumns] = useState(false);
   const selection = useStore(ctx.selection);
   const [query, setQuery] = useState('');
   const [results, setResults] = useState<Instrument[]>([]);
@@ -109,16 +188,34 @@ export function WatchlistPanel({ctx, items}: WatchlistPanelProps): ReactNode {
   }, [ctx.clients.market, query]);
 
   const add = (instrumentId: string) => {
-    if (!list.includes(instrumentId)) items.set([...list, instrumentId]);
+    if (!mine.includes(instrumentId)) items.set([...mine, instrumentId]);
     setQuery('');
     setResults([]);
   };
-  const remove = (instrumentId: string) =>
-    items.set(list.filter(id => id !== instrumentId));
+  const remove = (instrumentId: string) => {
+    if (!qualifiedSource) items.set(mine.filter(id => id !== instrumentId));
+  };
+  const manual = view.sort === null && !qualifiedSource;
   const move = (index: number, delta: -1 | 1) => {
-    items.set(moveItem(list, index, delta));
+    if (!manual) return;
+    items.set(moveItem(mine, index, delta));
     requestAnimationFrame(() => rows.current[index + delta]?.focus());
   };
+  const snapshotById: Record<string, MarketSnapshot | null> = {};
+  for (const id of list) {
+    const snap = snapshots.data?.[id];
+    snapshotById[id] = snap && !('error' in snap) ? snap : null;
+  }
+  const ordered = sortRows(list, view.sort, snapshotById);
+  const columns = WATCH_COLUMNS.filter(c => view.columns.includes(c.id));
+  const sortBy = (key: WatchSortKey) =>
+    prefs.update(p => ({...p, sort: nextSort(p.sort, key)}));
+  const ariaSort = (key: WatchSortKey) =>
+    view.sort?.key === key
+      ? view.sort.dir === 'asc'
+        ? 'ascending'
+        : 'descending'
+      : undefined;
   const onRowKey = (
     event: KeyboardEvent<HTMLTableRowElement>,
     index: number,
@@ -146,9 +243,70 @@ export function WatchlistPanel({ctx, items}: WatchlistPanelProps): ReactNode {
         {ctx.clients.demo && (
           <span className="j-badge j-badge--demo">Demo</span>
         )}
+        <button
+          type="button"
+          className="j-btn j-btn--ghost j-btn--icon j-btn--sm"
+          aria-label="Choose columns"
+          aria-expanded={showColumns}
+          data-testid="watch-columns"
+          onClick={() => setShowColumns(open => !open)}
+        >
+          <Columns3 size={14} aria-hidden="true" />
+        </button>
       </header>
       <div className={`j-panel__body ${styles.body}`}>
-        <div className={styles.search}>
+        <div className="j-segmented" role="group" aria-label="Watchlist source">
+          <button
+            type="button"
+            aria-pressed={!qualifiedSource}
+            onClick={() => prefs.update(p => ({...p, source: 'mine'}))}
+          >
+            My list
+          </button>
+          <button
+            type="button"
+            aria-pressed={qualifiedSource}
+            data-testid="watch-source-qualified"
+            onClick={() => prefs.update(p => ({...p, source: 'qualified'}))}
+          >
+            Qualified perpetuals
+          </button>
+        </div>
+        {showColumns && (
+          <fieldset className={styles.columns} aria-label="Columns">
+            <legend className="j-label">Columns</legend>
+            {WATCH_COLUMNS.map(column => (
+              <label key={column.id} className="j-check" title={column.title}>
+                <input
+                  type="checkbox"
+                  checked={view.columns.includes(column.id)}
+                  data-testid={`watch-column-${column.id}`}
+                  onChange={event =>
+                    prefs.update(p => {
+                      const next = event.target.checked
+                        ? [...p.columns, column.id]
+                        : p.columns.filter(c => c !== column.id);
+                      return next.length > 0 ? {...p, columns: next} : p;
+                    })
+                  }
+                />
+                {column.label}
+              </label>
+            ))}
+          </fieldset>
+        )}
+        {qualifiedSource && (
+          <p className={styles.hint}>
+            Exact-venue perpetuals the engine currently marks Qualified. Missing
+            data is never counted as qualified.
+          </p>
+        )}
+        {qualified.error && qualifiedSource && (
+          <Notice tone="danger">
+            Qualified list unavailable: {qualified.error}
+          </Notice>
+        )}
+        <div className={styles.search} hidden={qualifiedSource}>
           <label className="j-label" htmlFor="watchlist-search">
             Add instrument
           </label>
@@ -186,7 +344,7 @@ export function WatchlistPanel({ctx, items}: WatchlistPanelProps): ReactNode {
                       instrumentId={instrument.instrument_id}
                       showType
                     />
-                    {list.includes(instrument.instrument_id) && (
+                    {mine.includes(instrument.instrument_id) && (
                       <span className="j-muted">Added</span>
                     )}
                   </button>
@@ -201,28 +359,60 @@ export function WatchlistPanel({ctx, items}: WatchlistPanelProps): ReactNode {
           </Notice>
         )}
         {list.length === 0 ? (
-          <EmptyState title="Your watchlist is empty">
-            Search above to add an instrument from any venue. Each venue&apos;s
-            contract is listed separately.
-          </EmptyState>
+          qualifiedSource ? (
+            <EmptyState title="No qualified perpetuals">
+              {qualified.loading
+                ? 'Loading the qualification results…'
+                : 'The engine reports no instrument as Qualified right now.'}
+            </EmptyState>
+          ) : (
+            <EmptyState title="Your watchlist is empty">
+              Search above to add an instrument from any venue. Each
+              venue&apos;s contract is listed separately.
+            </EmptyState>
+          )
         ) : (
           <table className="j-table" aria-label="Watched instruments">
             <thead>
               <tr>
-                <th>Instrument</th>
-                <th className="j-num">Last</th>
-                <th className="j-num">24h</th>
-                <th className="j-num" title="Funding normalized to 8 hours">
-                  Fund 8h
+                <th aria-sort={ariaSort('symbol')}>
+                  <button
+                    type="button"
+                    className={styles.sortable}
+                    onClick={() => sortBy('symbol')}
+                  >
+                    Instrument
+                  </button>
                 </th>
-                <th>Data</th>
+                {columns.map(column => (
+                  <th
+                    key={column.id}
+                    className={column.id === 'data' ? undefined : 'j-num'}
+                    title={column.title}
+                    aria-sort={ariaSort(column.id)}
+                  >
+                    <button
+                      type="button"
+                      className={styles.sortable}
+                      data-testid={`watch-sort-${column.id}`}
+                      onClick={() => sortBy(column.id)}
+                    >
+                      {column.label}
+                      {view.sort?.key === column.id
+                        ? view.sort.dir === 'asc'
+                          ? ' ▲'
+                          : ' ▼'
+                        : ''}
+                    </button>
+                  </th>
+                ))}
                 <th>
                   <span className={styles.srOnly}>Actions</span>
                 </th>
               </tr>
             </thead>
             <tbody>
-              {list.map((id, index) => {
+              {ordered.map((id, index) => {
                 const snap = snapshots.data?.[id];
                 const ok = snap && !('error' in snap) ? snap : null;
                 const change = ok?.change_24h_pct ?? null;
@@ -242,70 +432,73 @@ export function WatchlistPanel({ctx, items}: WatchlistPanelProps): ReactNode {
                     <td>
                       <InstrumentLabel instrumentId={id} />
                     </td>
-                    <td className="j-num">
-                      {ok?.last ? groupThousands(ok.last) : '—'}
-                    </td>
-                    <td
-                      className={`j-num ${change ? (change.startsWith('-') ? 'j-neg' : 'j-pos') : ''}`}
-                    >
-                      {formatSignedPct(change)}
-                    </td>
-                    <td className="j-num">
-                      {formatSignedPct(
-                        ok?.funding?.normalized_8h_pct ?? null,
-                        4
-                      )}
-                    </td>
-                    <td>
-                      {ok ? (
-                        <FeedBadge
-                          state={ok.stale ? 'STALE' : ok.feed_state}
-                          detail={
-                            ok.stale ? formatAge(ok.data_age_ms) : undefined
-                          }
-                        />
-                      ) : snap ? (
-                        <FeedBadge state="UNAVAILABLE" />
-                      ) : (
-                        <span className="j-muted">…</span>
-                      )}
-                    </td>
+                    {columns.map(column => (
+                      <td
+                        key={column.id}
+                        className={
+                          column.id === 'data'
+                            ? undefined
+                            : column.id === 'change' && change
+                              ? `j-num ${change.startsWith('-') ? 'j-neg' : 'j-pos'}`
+                              : 'j-num'
+                        }
+                      >
+                        {cellContent(column.id, ok, Boolean(snap) && !ok)}
+                      </td>
+                    ))}
                     <td className={styles.actions}>
-                      <button
-                        type="button"
-                        className="j-btn j-btn--ghost j-btn--sm j-btn--icon"
-                        aria-label={`Move ${id} up`}
-                        disabled={index === 0}
-                        onClick={e => {
-                          e.stopPropagation();
-                          move(index, -1);
-                        }}
-                      >
-                        <ArrowUp size={14} aria-hidden />
-                      </button>
-                      <button
-                        type="button"
-                        className="j-btn j-btn--ghost j-btn--sm j-btn--icon"
-                        aria-label={`Move ${id} down`}
-                        disabled={index === list.length - 1}
-                        onClick={e => {
-                          e.stopPropagation();
-                          move(index, 1);
-                        }}
-                      >
-                        <ArrowDown size={14} aria-hidden />
-                      </button>
-                      <button
-                        type="button"
-                        className="j-btn j-btn--ghost j-btn--sm j-btn--icon"
-                        aria-label={`Remove ${id} from watchlist`}
-                        onClick={e => {
-                          e.stopPropagation();
-                          remove(id);
-                        }}
-                      >
-                        <X size={14} aria-hidden />
-                      </button>
+                      {qualifiedSource ? (
+                        <button
+                          type="button"
+                          className="j-btn j-btn--ghost j-btn--sm j-btn--icon"
+                          aria-label={`Add ${id} to my list`}
+                          disabled={mine.includes(id)}
+                          onClick={e => {
+                            e.stopPropagation();
+                            add(id);
+                          }}
+                        >
+                          <Plus size={14} aria-hidden />
+                        </button>
+                      ) : (
+                        <>
+                          <button
+                            type="button"
+                            className="j-btn j-btn--ghost j-btn--sm j-btn--icon"
+                            aria-label={`Move ${id} up`}
+                            disabled={index === 0 || !manual}
+                            onClick={e => {
+                              e.stopPropagation();
+                              move(index, -1);
+                            }}
+                          >
+                            <ArrowUp size={14} aria-hidden />
+                          </button>
+                          <button
+                            type="button"
+                            className="j-btn j-btn--ghost j-btn--sm j-btn--icon"
+                            aria-label={`Move ${id} down`}
+                            disabled={index === list.length - 1 || !manual}
+                            onClick={e => {
+                              e.stopPropagation();
+                              move(index, 1);
+                            }}
+                          >
+                            <ArrowDown size={14} aria-hidden />
+                          </button>
+                          <button
+                            type="button"
+                            className="j-btn j-btn--ghost j-btn--sm j-btn--icon"
+                            aria-label={`Remove ${id} from watchlist`}
+                            onClick={e => {
+                              e.stopPropagation();
+                              remove(id);
+                            }}
+                          >
+                            <X size={14} aria-hidden />
+                          </button>
+                        </>
+                      )}
                     </td>
                   </tr>
                 );
@@ -314,8 +507,9 @@ export function WatchlistPanel({ctx, items}: WatchlistPanelProps): ReactNode {
           </table>
         )}
         <p className={styles.hint}>
-          Arrow keys move between rows, Enter opens the chart, Alt+arrows
-          reorder, Delete removes.
+          Arrow keys move between rows, Enter opens the chart
+          {manual ? ', Alt+arrows reorder, Delete removes' : ''}. Click a column
+          to sort; click it again to return to your order.
         </p>
       </div>
     </section>

@@ -26,7 +26,8 @@ Browser: joseph-terminal (PUBLIC, Next.js)            Private: Python services
 | Market-engine domain kernel (ids, decimals, timeframes, candles, AOIs, BarFrame) | `joseph-market-engine/src/joseph/domain/` |
 | Venue adapters, feed router, order books | `joseph-market-engine/src/joseph/market_data/` |
 | Qualification filter | `joseph-market-engine/src/joseph/screening/` |
-| Indicator SDK, engine and 7 plugins | `joseph-market-engine/src/joseph/indicators/` |
+| Indicator SDK, engine and adapters | `joseph-market-engine/src/joseph/indicators/` |
+| Indicator algorithms (Pine ports) | `apoman123/PineScripts` → `python_indicators/` (pinned dependency, ADR 0009) |
 | Rule AST, compiler, evaluator, setup FSM | `joseph-market-engine/src/joseph/strategy/` |
 | Signals, alerts, backtests | `joseph-market-engine/src/joseph/{signals,alerts,backtest}/` |
 | Live signal pipeline (candles → engine → runtime) | `joseph-market-engine/src/joseph/pipeline/` |

@@ -12,13 +12,16 @@ Every extension is a local change: new files, one registration line, tests. CI f
 
 Forbidden: changing indicators, strategies or the risk gateway for a venue.
 
-## Add an indicator plugin (Python)
+## Add or change an indicator (Python)
 
-1. Create `joseph/indicators/plugins/<plugin_id>/` with `plugin.py` (subclass the SDK base in `indicators/sdk/base.py` or implement `IndicatorPlugin`) and a `README.md` documenting semantics and every `ASSUMPTION:`.
-2. Publish only `Aoi`, `StructureEvent` and documented `values` keys (add them to the contract list in `joseph/domain/structures.py`). Never import another plugin.
-3. Register it in `indicators/catalog.py` (`default_plugins`).
-4. Add scenario fixtures (`fixtures/indicators/<plugin_id>/`), unit tests and the property tests (batch == incremental == restore, no look-ahead) by following an existing plugin's tests.
-5. Optional terminal rendering: map its kinds in `packages/indicator-viz/src/mapping.ts`.
+Indicator logic lives only in `apoman123/PineScripts` (`python_indicators/`, package `smc_indicators`); the platform holds adapters.
+
+1. **In PineScripts:** port the Pine script line by line into `src/smc_indicators/<module>.py` (subclass `base.Indicator`; outputs are `types.Zone` / `types.Event` / `Result.values`), add `tests/test_<module>.py` (scenarios + batch == streaming + no look-ahead) and `docs/<module>.md`. Push; its CI runs ruff, mypy and pytest.
+2. **In the platform:** bump `rev` in `joseph-market-engine/pyproject.toml` and run `uv lock`.
+3. Add an adapter class in `joseph/indicators/packaged/plugins.py` (subclass `bridge.PackagedPlugin`: settings mirroring the Pine inputs and bounds, `_build`, `_advance`, value mapping) and list it in `default_plugins()`. Never put indicator rules in the adapter.
+4. Publish only `Aoi`, `StructureEvent` and documented `values` keys: add new kinds/events to `joseph/domain/structures.py` and the JSON Schema, new values to `strategy/domain/catalog.py` (`PUBLISHED_VALUES`, `AOI_KIND_PLUGIN`, `EVENT_PLUGIN`).
+5. Add a hand-derived golden scenario (`fixtures/indicators/<plugin_id>/`); `tests/unit/indicators/test_packaged_bridge.py` checks catalog consistency and library parity.
+6. Optional terminal rendering: map its kinds in `packages/indicator-viz/src/mapping.ts`.
 
 Changing an algorithm means a new `indicator_version`; `method: trade` outputs must never replace `pine_parity` ones.
 

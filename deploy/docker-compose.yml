@@ -13,7 +13,10 @@ x-engine-env: &engine-env
 services:
   market:
     image: ${IMAGE_REGISTRY:-ghcr.io/joseph}/joseph-market-engine:${IMAGE_TAG:-latest}
-    build: ../joseph-market-engine
+    build:
+      context: ../joseph-market-engine
+      # Forwards the local ssh-agent (PineScripts access) to the build.
+      ssh: [default]
     restart: unless-stopped
     environment:
       <<: *engine-env

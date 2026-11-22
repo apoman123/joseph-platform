@@ -60,7 +60,64 @@ const STATUS_FILTERS: readonly {
 ];
 
 /** Sort keys. */
-type SortKey = 'rank' | 'status' | 'turnover';
+export type SortKey = 'rank' | 'status' | 'turnover';
+
+/** A saved filter preset. */
+export interface ScreenerPreset {
+  /** Name shown in the menu. */
+  name: string;
+  /** Venue filter ('' = all venues). */
+  venue: Venue | '';
+  /** Status filter. */
+  status: QualificationStatus | 'ALL';
+  /** Sort key. */
+  sort: SortKey;
+}
+
+/** Persisted screener settings (schema version 1). */
+export interface ScreenerSettings {
+  /** Saved presets, newest first. */
+  presets: ScreenerPreset[];
+}
+
+/**
+ * Keeps only well-formed presets.
+ * @param value Stored value (untrusted).
+ * @return Presets.
+ */
+export function normalizePresets(value: unknown): ScreenerPreset[] {
+  if (!Array.isArray(value)) return [];
+  const statuses = ['ALL', 'QUALIFIED', 'REJECTED', 'INSUFFICIENT_DATA'];
+  const sorts = ['rank', 'status', 'turnover'];
+  return value.filter(
+    (p): p is ScreenerPreset =>
+      !!p &&
+      typeof p === 'object' &&
+      typeof (p as ScreenerPreset).name === 'string' &&
+      (p as ScreenerPreset).name.trim() !== '' &&
+      ((p as ScreenerPreset).venue === '' ||
+        (VENUES as readonly string[]).includes((p as ScreenerPreset).venue)) &&
+      statuses.includes((p as ScreenerPreset).status) &&
+      sorts.includes((p as ScreenerPreset).sort)
+  );
+}
+
+/**
+ * Adds or replaces a preset by name (case-insensitive), newest first.
+ * @param presets Existing presets.
+ * @param preset New preset.
+ * @return Updated list (at most 20).
+ */
+export function savePreset(
+  presets: readonly ScreenerPreset[],
+  preset: ScreenerPreset
+): ScreenerPreset[] {
+  const name = preset.name.trim().slice(0, 40);
+  return [
+    {...preset, name},
+    ...presets.filter(p => p.name.toLowerCase() !== name.toLowerCase()),
+  ].slice(0, 20);
+}
 
 /**
  * Formats a gate value by unit.
@@ -139,6 +196,18 @@ export function ScreenerPanel({ctx}: ScreenerPanelProps): ReactNode {
   const [status, setStatus] = useState<QualificationStatus | 'ALL'>('ALL');
   const [sort, setSort] = useState<SortKey>('rank');
   const [expanded, setExpanded] = useState<string | null>(null);
+  const [presets, setPresets] = useState<ScreenerPreset[]>(() =>
+    normalizePresets(ctx.settings.read<ScreenerSettings>({presets: []}).presets)
+  );
+  const [presetName, setPresetName] = useState('');
+  const storePresets = (next: ScreenerPreset[]) => {
+    setPresets(next);
+    ctx.settings.write<ScreenerSettings>({presets: next});
+  };
+  const activePreset =
+    presets.find(
+      p => p.venue === venue && p.status === status && p.sort === sort
+    )?.name ?? '';
   const report = usePolling(
     () =>
       ctx.clients.market.getQualification(
@@ -214,6 +283,74 @@ export function ScreenerPanel({ctx}: ScreenerPanelProps): ReactNode {
               <option value="turnover">Turnover</option>
             </select>
           </label>
+        </div>
+        <div className={styles.presets}>
+          <label className="j-field">
+            <span className="j-label">Preset</span>
+            <select
+              className="j-select"
+              value={activePreset}
+              data-testid="screener-preset"
+              onChange={e => {
+                const preset = presets.find(p => p.name === e.target.value);
+                if (!preset) return;
+                setVenue(preset.venue);
+                setStatus(preset.status);
+                setSort(preset.sort);
+              }}
+            >
+              <option value="">
+                {presets.length ? 'Choose a preset' : 'No saved presets'}
+              </option>
+              {presets.map(p => (
+                <option key={p.name} value={p.name}>
+                  {p.name}
+                </option>
+              ))}
+            </select>
+          </label>
+          <form
+            className={styles.presetForm}
+            onSubmit={e => {
+              e.preventDefault();
+              if (!presetName.trim()) return;
+              storePresets(
+                savePreset(presets, {name: presetName, venue, status, sort})
+              );
+              setPresetName('');
+            }}
+          >
+            <label className="sr-only" htmlFor="screener-preset-name">
+              Preset name
+            </label>
+            <input
+              id="screener-preset-name"
+              className="j-input"
+              placeholder="Save filters as…"
+              maxLength={40}
+              value={presetName}
+              onChange={e => setPresetName(e.target.value)}
+            />
+            <button
+              type="submit"
+              className="j-btn j-btn--sm"
+              data-testid="screener-preset-save"
+              disabled={!presetName.trim()}
+            >
+              Save
+            </button>
+            {activePreset && (
+              <button
+                type="button"
+                className="j-btn j-btn--sm j-btn--ghost"
+                onClick={() =>
+                  storePresets(presets.filter(p => p.name !== activePreset))
+                }
+              >
+                Delete “{activePreset}”
+              </button>
+            )}
+          </form>
         </div>
         <div className="j-segmented" role="group" aria-label="Status">
           {STATUS_FILTERS.map(option => (

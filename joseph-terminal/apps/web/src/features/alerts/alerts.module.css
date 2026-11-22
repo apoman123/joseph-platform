@@ -106,3 +106,9 @@
   padding: 0;
   border: 0;
 }
+
+.snooze select {
+  height: 24px;
+  padding: 0 4px;
+  font-size: var(--text-sm);
+}

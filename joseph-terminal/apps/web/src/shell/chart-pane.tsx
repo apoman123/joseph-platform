@@ -12,10 +12,21 @@ import {
   parseInstrumentId,
   type Candle,
   type ChartState,
+  type FeedMode,
   type FeedState,
   type Instrument,
   type StreamStatus,
 } from '@joseph/contracts';
+import {
+  chooseReplayStart,
+  nextReplaySpeed,
+  replayAsOfMs,
+  replayAtEnd,
+  replayVisibleBars,
+  stepReplay,
+  type ReplayState,
+} from '@joseph/terminal-shell';
+import {X} from 'lucide-react';
 import {
   DrawingController,
   DrawingRepository,
@@ -23,11 +34,27 @@ import {
   bindAutosave,
 } from '@joseph/drawing-core';
 import {ids} from './ids';
-import {useEffect, useMemo, useRef, useState, type ReactElement} from 'react';
+import {
+  useCallback,
+  useEffect,
+  useMemo,
+  useRef,
+  useState,
+  type ReactElement,
+} from 'react';
 import type {TerminalRuntime} from '../composition/runtime';
+import {toChartBar as candleToBar} from './chart-bars';
+import {
+  useCompare,
+  useDeltaPane,
+  useSessionSeparators,
+} from './chart-pane-hooks';
+import {DataWindow} from './data-window';
+import {DrawingStyleBar} from './drawing-style-bar';
 import {formatAge, formatPrice, formatUtcTime} from './format';
 import {ProvenanceBadge, ProvenanceRibbon} from './provenance';
 import {useStore} from './react-bindings';
+import {ReplayBar} from './replay-bar';
 
 /** Bars requested on load. */
 const HISTORY_BARS = 500;
@@ -35,6 +62,20 @@ const HISTORY_BARS = 500;
 const INITIAL_VISIBLE_BARS = 140;
 /** Age after which a live feed counts as stale. */
 const STALE_AFTER_MS = 60_000;
+/** Feed modes offered per chart (REPLAY is entered with bar replay). */
+const FEED_MODES: readonly [FeedMode, string][] = [
+  ['AUTO', 'Auto feed'],
+  ['NATIVE_WS', 'WebSocket'],
+  ['REST_POLL', 'REST polling'],
+];
+/** Link groups cycled from the pane header. */
+const LINK_GROUPS: readonly ChartState['link_group'][] = [
+  null,
+  'A',
+  'B',
+  'C',
+  'D',
+];
 
 /** Pane load status. */
 interface PaneStatus {
@@ -66,15 +107,7 @@ export interface PaneMenu {
  * @return Bar (display numbers only).
  */
 export function toChartBar(candle: Candle): ChartBar {
-  return {
-    timeMs: candle.start_ms,
-    open: Number(candle.open),
-    high: Number(candle.high),
-    low: Number(candle.low),
-    close: Number(candle.close),
-    volume: Number(candle.base_volume),
-    final: candle.is_final,
-  };
+  return candleToBar(candle);
 }
 
 /**
@@ -122,11 +155,20 @@ export function ChartPane({
   const [lastBar, setLastBar] = useState<ChartBar | null>(null);
   const [now, setNow] = useState(() => Date.now());
   const barsRef = useRef<ChartBar[]>([]);
+  /** Bars actually displayed (truncated during replay). */
+  const shownRef = useRef<readonly ChartBar[]>([]);
+  const [barCount, setBarCount] = useState(0);
   const chartRef = useRef(chart);
   chartRef.current = chart;
   const workspace = useStore(runtime.workspace);
   const theme = useStore(runtime.theme);
+  const dataWindow = useStore(runtime.dataWindow);
+  const replayStates = useStore(runtime.replay);
   const {chart_id: chartId, instrument_id: instrumentId, timeframe} = chart;
+  const replay: ReplayState | null = replayStates[chartId] ?? null;
+  const replayRef = useRef(replay);
+  replayRef.current = replay;
+  const atMs = replayAsOfMs(replay, TIMEFRAME_MS[timeframe]);
   const tickSize = instrument?.tick_size ?? null;
 
   // Mount the chart library lazily on the client.
@@ -137,15 +179,18 @@ export function ChartPane({
       if (disposed || !hostRef.current) return;
       created = createLwcChartPort();
       created.mount(hostRef.current, themeFromCss(cssVar));
+      runtime.charts.set(chartId, created);
       setPort(created);
     });
     return () => {
       disposed = true;
+      if (created && runtime.charts.get(chartId) === created)
+        runtime.charts.delete(chartId);
       created?.destroy();
       setPort(null);
     };
     // Theme changes remount so canvas colors follow the tokens.
-  }, [theme]);
+  }, [theme, chartId, runtime]);
 
   // Instrument metadata (tick size for formatting and drawings).
   useEffect(() => {
@@ -206,7 +251,10 @@ export function ChartPane({
           if (!alive) return;
           const bars = batch.candles.map(toChartBar);
           barsRef.current = bars;
-          port.setBars(bars);
+          const shown = replayVisibleBars(bars, replayRef.current);
+          shownRef.current = shown;
+          setBarCount(bars.length);
+          port.setBars(shown);
           const saved = chartRef.current.visible_range;
           const duration = TIMEFRAME_MS[timeframe];
           const first = bars[Math.max(0, bars.length - INITIAL_VISIBLE_BARS)];
@@ -267,6 +315,10 @@ export function ChartPane({
         if (last && bar.timeMs < last.timeMs) return;
         if (last && bar.timeMs === last.timeMs) bars[bars.length - 1] = bar;
         else bars.push(bar);
+        setBarCount(bars.length);
+        // During replay new bars are kept but stay hidden behind the cursor.
+        if (replayRef.current) return;
+        shownRef.current = bars;
         port.updateBar(bar);
         setLastBar(bar);
         setStatus(s => ({
@@ -301,10 +353,11 @@ export function ChartPane({
     return () => clearInterval(timer);
   }, []);
   const ageMs = status.lastUpdateMs === null ? 0 : now - status.lastUpdateMs;
-  const effectiveState: FeedState =
-    status.feedState !== 'DEMO' &&
-    status.phase === 'ready' &&
-    ageMs > STALE_AFTER_MS
+  const effectiveState: FeedState = replay
+    ? 'REPLAY'
+    : status.feedState !== 'DEMO' &&
+        status.phase === 'ready' &&
+        ageMs > STALE_AFTER_MS
       ? 'STALE'
       : status.feedState;
   useEffect(() => {
@@ -354,6 +407,12 @@ export function ChartPane({
         if (runtime.selection.get().chartId === chartId)
           runtime.drawing.activeTool.set(tool);
       },
+      onSelectionChange: drawingId => {
+        const current = runtime.drawing.selection.get();
+        if (drawingId) runtime.drawing.selection.set({chartId, drawingId});
+        else if (current?.chartId === chartId)
+          runtime.drawing.selection.set(null);
+      },
     });
     const offAutosave = bindAutosave(store, repository, instrumentId);
     const offStore = store.subscribe(() =>
@@ -368,6 +427,8 @@ export function ChartPane({
     return () => {
       offStore();
       offAutosave();
+      if (runtime.drawing.selection.get()?.chartId === chartId)
+        runtime.drawing.selection.set(null);
       controller.dispose();
       if (runtime.drawing.controllers.get(chartId) === controller)
         runtime.drawing.controllers.delete(chartId);
@@ -407,7 +468,7 @@ export function ChartPane({
       for (const id of applied) port.removeOverlayLayer(id);
       applied.clear();
       for (const provider of runtime.chartLayers.providers.get()) {
-        const store = provider({chartId, instrumentId, timeframe});
+        const store = provider({chartId, instrumentId, timeframe, atMs});
         let current: string | null = null;
         const handle = (layer: OverlayLayer | null) => {
           if (current && (!layer || layer.layerId !== current)) {
@@ -429,7 +490,7 @@ export function ChartPane({
       for (const id of applied) port.removeOverlayLayer(id);
       latest.clear();
     };
-  }, [port, chartId, instrumentId, timeframe, runtime]);
+  }, [port, chartId, instrumentId, timeframe, atMs, runtime]);
   useEffect(() => {
     if (!port) return;
     for (const layer of latestLayers.current.values()) {
@@ -463,6 +524,7 @@ export function ChartPane({
       port.setCrosshair(point);
     });
     const offMenu = port.on('contextMenu', event => {
+      if (replayRef.current) return;
       onMenu(chartId, {
         x: event.x,
         y: event.y,
@@ -477,7 +539,18 @@ export function ChartPane({
       });
     });
     const offDrag = port.on('overlayDragEnd', event => {
+      // Orders are never changed from a replayed chart.
+      if (replayRef.current) return;
       runtime.events.emit('chart.overlayDragEnd', {chartId, ...event});
+    });
+    const offClick = port.on('click', event => {
+      const state = replayRef.current;
+      if (state?.phase !== 'select' || event.timeMs === null) return;
+      const times = barsRef.current.map(bar => bar.timeMs);
+      runtime.replay.update(all => ({
+        ...all,
+        [chartId]: chooseReplayStart(state, times, event.timeMs),
+      }));
     });
     let rangeTimer: ReturnType<typeof setTimeout> | null = null;
     const offRange = port.on('visibleRangeChange', range => {
@@ -506,6 +579,7 @@ export function ChartPane({
       offSync();
       offMenu();
       offDrag();
+      offClick();
       offRange();
       if (rangeTimer) clearTimeout(rangeTimer);
     };
@@ -525,9 +599,66 @@ export function ChartPane({
     port.setVisibleRange({fromMs: range.from_ms, toMs: range.to_ms});
   }, [port, range, workspace.sync.viewport]);
 
+  // Replay: show bars up to the cursor; restore everything on exit.
+  const replayCursor = replay?.cursorMs ?? null;
+  const replaying = replay !== null;
+  useEffect(() => {
+    if (!port || status.phase !== 'ready') return;
+    const all = barsRef.current;
+    const shownBars = replayVisibleBars(all, replayRef.current);
+    if (shownBars === shownRef.current && !replaying) return;
+    shownRef.current = shownBars;
+    port.setBars(shownBars);
+    setLastBar(shownBars.at(-1) ?? null);
+    port.invalidate();
+  }, [port, replayCursor, replaying, status.phase]);
+  const replayPhase = replay?.phase ?? null;
+  const replaySpeed = replay?.speed ?? 1;
+  const updateReplay = useCallback(
+    (change: (state: ReplayState) => ReplayState) =>
+      runtime.replay.update(all => {
+        const current = all[chartId];
+        return current ? {...all, [chartId]: change(current)} : all;
+      }),
+    [runtime, chartId]
+  );
+  useEffect(() => {
+    if (replayPhase !== 'playing') return;
+    const timer = setInterval(() => {
+      const times = barsRef.current.map(bar => bar.timeMs);
+      updateReplay(state => stepReplay(state, times, 1));
+    }, 1000 / replaySpeed);
+    return () => clearInterval(timer);
+  }, [replayPhase, replaySpeed, updateReplay]);
+  // Leaving the instrument or timeframe ends replay on this chart.
+  useEffect(
+    () => () => runtime.replay.update(({[chartId]: _ended, ...rest}) => rest),
+    [runtime, chartId, instrumentId, timeframe]
+  );
+
+  const symbolOf = useCallback(
+    (id: string) => parseInstrumentId(id).venueMarketId,
+    []
+  );
+  const delta = useDeltaPane(port, chart, runtime, atMs);
+  const compare = useCompare(port, chart, runtime, symbolOf);
+  useSessionSeparators(
+    port,
+    chart.session_separators === true,
+    shownRef,
+    timeframe
+  );
+
   const shown = hover ?? lastBar;
   const direction = shown && shown.close >= shown.open ? 'j-pos' : 'j-neg';
   const {venue, venueMarketId} = parseInstrumentId(instrumentId);
+  const shownBars = shownRef.current;
+  const shownIndex = shown
+    ? shownBars.findIndex(bar => bar.timeMs === shown.timeMs)
+    : -1;
+  const previousClose =
+    shownIndex > 0 ? (shownBars[shownIndex - 1]?.close ?? null) : null;
+  const linkIndex = LINK_GROUPS.indexOf(chart.link_group ?? null);
   return (
     <section
       className={`pane ${active ? 'pane--active' : ''}`}
@@ -546,6 +677,72 @@ export function ChartPane({
           </strong>
           <span className="pane__chip">{VENUE_NAMES[venue]}</span>
           <span className="pane__chip">{timeframe}</span>
+          <button
+            type="button"
+            className="pane__chip pane__chip--button"
+            data-testid="link-group"
+            title="Link group: linked charts follow each other when sync is on"
+            aria-label={`${chart.link_group ? `Link ${chart.link_group}` : 'Unlinked'}: change link group`}
+            onClick={() =>
+              runtime.dispatch({
+                type: 'setLinkGroup',
+                chartId,
+                group:
+                  LINK_GROUPS[(linkIndex + 1) % LINK_GROUPS.length] ?? null,
+              })
+            }
+          >
+            {chart.link_group ? `Link ${chart.link_group}` : 'Unlinked'}
+          </button>
+          <label className="sr-only" htmlFor={`feed-mode-${chartId}`}>
+            Feed mode
+          </label>
+          <select
+            id={`feed-mode-${chartId}`}
+            className="pane__feed"
+            value={chart.feed_mode === 'REPLAY' ? 'AUTO' : chart.feed_mode}
+            title="Requested market-data transport"
+            onChange={event =>
+              runtime.dispatch({
+                type: 'setFeedMode',
+                chartId,
+                feedMode: event.target.value as FeedMode,
+              })
+            }
+          >
+            {FEED_MODES.map(([mode, label]) => (
+              <option key={mode} value={mode}>
+                {label}
+              </option>
+            ))}
+          </select>
+          {compare.map(entry => (
+            <span
+              key={entry.instrumentId}
+              className="pane__compare"
+              style={{borderColor: entry.color, color: entry.color}}
+              data-testid={`compare-chip-${entry.instrumentId}`}
+              title={entry.error ?? `Compared on the left % axis`}
+            >
+              {symbolOf(entry.instrumentId)}
+              {entry.error ? ' (unavailable)' : ''}
+              <button
+                type="button"
+                aria-label={`Stop comparing ${symbolOf(entry.instrumentId)}`}
+                onClick={() =>
+                  runtime.dispatch({
+                    type: 'setCompare',
+                    chartId,
+                    instrumentIds: (chart.compare ?? []).filter(
+                      id => id !== entry.instrumentId
+                    ),
+                  })
+                }
+              >
+                <X size={11} aria-hidden="true" />
+              </button>
+            </span>
+          ))}
         </div>
         <dl
           className="pane__ohlc j-tabular"
@@ -569,7 +766,62 @@ export function ChartPane({
           )}
         </div>
       </header>
-      <div className="pane__canvas" ref={hostRef} data-testid="chart-canvas" />
+      <div
+        className="pane__canvas"
+        ref={hostRef}
+        data-testid="chart-canvas"
+        data-replay={replay?.phase ?? 'off'}
+      />
+      {dataWindow && status.phase === 'ready' && (
+        <DataWindow
+          bar={shown}
+          previousClose={previousClose}
+          tickSize={tickSize}
+          delta={delta.shown ? delta.values : null}
+          compare={compare}
+          label={symbolOf}
+        />
+      )}
+      {active && <DrawingStyleBar chartId={chartId} />}
+      {replay && (
+        <ReplayBar
+          state={replay}
+          shown={replay.cursorMs === null ? barCount : shownBars.length}
+          total={barCount}
+          atEnd={replayAtEnd(
+            replay,
+            barsRef.current.map(bar => bar.timeMs)
+          )}
+          onStep={step =>
+            updateReplay(state =>
+              stepReplay(
+                state,
+                barsRef.current.map(bar => bar.timeMs),
+                step
+              )
+            )
+          }
+          onPlayPause={() =>
+            updateReplay(state => ({
+              ...state,
+              phase: state.phase === 'playing' ? 'paused' : 'playing',
+            }))
+          }
+          onSpeed={() => updateReplay(nextReplaySpeed)}
+          onStartDefault={() =>
+            updateReplay(state =>
+              chooseReplayStart(
+                state,
+                barsRef.current.map(bar => bar.timeMs),
+                null
+              )
+            )
+          }
+          onExit={() =>
+            runtime.replay.update(({[chartId]: _ended, ...rest}) => rest)
+          }
+        />
+      )}
       {status.phase === 'loading' && (
         <div className="pane__overlay j-muted">Loading candles…</div>
       )}

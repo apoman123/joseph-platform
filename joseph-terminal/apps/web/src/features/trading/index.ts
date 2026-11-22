@@ -146,6 +146,7 @@ export const TRADING_FEATURE: WebFeature = {
     );
     disposers.push(
       ctx.events.on('chart.contextMenu', event => {
+        if (ctx.selection.get().replay) return;
         void runtime.openMenu(event.chartId, event.instrumentId, event.price);
       }),
       ctx.events.on('ticket.open', event => {
@@ -171,6 +172,7 @@ export const TRADING_FEATURE: WebFeature = {
         });
       }),
       ctx.events.on('chart.overlayDragEnd', event => {
+        if (ctx.selection.get().replay) return;
         const precision = runtime.precisionFor(
           runtime.controller.get().inputs.instrumentId
         );

@@ -300,6 +300,11 @@ export interface ChartIdentity {
   instrumentId: InstrumentId;
   /** Timeframe on the chart. */
   timeframe: Timeframe;
+  /**
+   * Replay point-in-time (UTC ms) when the chart is in bar replay; layers
+   * must then show only what the backend knew at that time.
+   */
+  atMs?: number | null;
 }
 
 /** Overlay layer provider registered by a feature. */

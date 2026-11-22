@@ -40,9 +40,11 @@ import type {
   ChartPort,
   ChartTheme,
   ChartViewState,
+  CompareSeriesSpec,
   CoordinateTransform,
   Disposer,
   SeriesConfig,
+  StudyPaneSpec,
   TimeRange,
 } from '../../chart-port';
 import type {
@@ -61,6 +63,24 @@ import {TIMEFRAME_MS, stepDecimals} from '@joseph/contracts';
 const DRAG_TOLERANCE_PX = 6;
 /** Movement (px) after which a press is a drag rather than a click. */
 const CLICK_SLOP_PX = 4;
+/** Share of the chart height given to the volume pane. */
+const VOLUME_PANE_SHARE = 0.14;
+/** Share of the chart height given to each study pane. */
+const STUDY_PANE_SHARE = 0.16;
+/** Smallest share kept for the price pane. */
+const MIN_PRICE_PANE_SHARE = 0.45;
+
+/** Native objects backing one study pane. */
+interface StudyState {
+  /** Latest spec. */
+  spec: StudyPaneSpec;
+  /** Series in the study's pane. */
+  series: ISeriesApi<'Histogram'> | ISeriesApi<'Line'> | null;
+  /** Caption primitive attached to the series. */
+  primitive: HostPrimitive | null;
+  /** Shape the series was created with. */
+  style: StudyPaneSpec['style'] | null;
+}
 
 /**
  * Converts milliseconds to an LWC UTC timestamp (seconds).
@@ -110,7 +130,7 @@ export function toLwcMarker(
     time: toTime(snap(marker.timeMs) ?? marker.timeMs),
     position,
     shape,
-    color: toneColor(theme, marker.tone),
+    color: marker.color ?? toneColor(theme, marker.tone),
     text: marker.text ?? '',
   };
 }
@@ -208,6 +228,10 @@ export class LwcChartPort implements ChartPort {
   private volume: ISeriesApi<'Histogram'> | null = null;
   private markers: ISeriesMarkersPluginApi<Time> | null = null;
   private primitive: HostPrimitive | null = null;
+  private volumePrimitive: HostPrimitive | null = null;
+  private readonly studies = new Map<string, StudyState>();
+  private compareSpecs: readonly CompareSeriesSpec[] = [];
+  private readonly compareSeries = new Map<string, ISeriesApi<'Line'>>();
   private theme: ChartTheme = DEFAULT_CHART_THEME;
   private config: SeriesConfig | null = null;
   private bars: ChartBar[] = [];
@@ -240,12 +264,22 @@ export class LwcChartPort implements ChartPort {
         fontFamily: theme.fontFamily,
         fontSize: 11,
         attributionLogo: false,
+        panes: {
+          separatorColor: theme.border,
+          separatorHoverColor: withAlpha(theme.crosshair, 0.35),
+          enableResize: true,
+        },
       },
       grid: {
         vertLines: {color: theme.grid},
         horzLines: {color: theme.grid},
       },
       rightPriceScale: {borderColor: theme.border},
+      leftPriceScale: {
+        borderColor: theme.border,
+        visible: false,
+        mode: PriceScaleMode.Percentage,
+      },
       timeScale: {
         borderColor: theme.border,
         timeVisible: true,
@@ -318,20 +352,29 @@ export class LwcChartPort implements ChartPort {
     const previous = this.config;
     this.config = config;
     this.index = new TimeIndex(this.bars, TIMEFRAME_MS[config.timeframe]);
-    if (
-      previous &&
+    const switched =
+      previous !== null &&
       (previous.instrumentId !== config.instrumentId ||
-        previous.timeframe !== config.timeframe)
-    ) {
-      // Venue/instrument switches must never show the old venue's overlays.
+        previous.timeframe !== config.timeframe);
+    if (switched) {
+      // Venue/instrument switches must never show the old venue's overlays,
+      // studies or comparisons.
       this.bars = [];
       for (const id of [...this.layers.keys()]) this.removeOverlayLayer(id);
+      this.removeAuxSeries();
+      this.studies.clear();
+      this.removeCompareSeries();
+      this.compareSpecs = [];
     }
     if (!this.chart) return;
     if (!previous || previous.chartType !== config.chartType || !this.series) {
       this.rebuildSeries();
     } else {
       this.applySeriesOptions();
+      if (switched || previous.showVolume !== config.showVolume) {
+        this.rebuildAux();
+        this.buildCompareSeries();
+      }
       this.renderData();
     }
   }
@@ -347,8 +390,9 @@ export class LwcChartPort implements ChartPort {
     this.nativeLines.clear();
     this.markers?.detach();
     if (this.primitive) this.series?.detachPrimitive(this.primitive);
+    this.removeAuxSeries();
+    this.removeCompareSeries();
     if (this.series) chart.removeSeries(this.series);
-    if (this.volume) chart.removeSeries(this.volume);
     const theme = this.theme;
     const common = {priceLineVisible: true, lastValueVisible: true};
     switch (config.chartType) {
@@ -384,22 +428,324 @@ export class LwcChartPort implements ChartPort {
           borderVisible: false,
         });
     }
-    this.volume = chart.addSeries(HistogramSeries, {
-      priceScaleId: 'volume',
-      priceFormat: {type: 'volume'},
-      lastValueVisible: false,
-      priceLineVisible: false,
-    });
-    this.volume
-      .priceScale()
-      .applyOptions({scaleMargins: {top: 0.82, bottom: 0}});
     this.markers = createSeriesMarkers(this.series, []);
     this.primitive = new HostPrimitive(ctx => this.paint(ctx));
     this.series.attachPrimitive(this.primitive);
     this.applySeriesOptions();
+    this.buildAuxSeries();
+    this.buildCompareSeries();
     this.renderData();
     for (const layer of this.layers.values()) this.applyNativeLayer(layer);
     this.refreshMarkers();
+  }
+
+  /** Removes the volume and study series and their now-empty panes. */
+  private removeAuxSeries(): void {
+    const chart = this.chart;
+    if (!chart) return;
+    if (this.volume) {
+      if (this.volumePrimitive)
+        this.volume.detachPrimitive(this.volumePrimitive);
+      chart.removeSeries(this.volume);
+    }
+    this.volume = null;
+    this.volumePrimitive = null;
+    for (const study of this.studies.values()) {
+      if (study.series) {
+        if (study.primitive) study.series.detachPrimitive(study.primitive);
+        chart.removeSeries(study.series);
+      }
+      study.series = null;
+      study.primitive = null;
+      study.style = null;
+    }
+    const panes = chart.panes();
+    for (let index = panes.length - 1; index > 0; index -= 1) {
+      if ((panes[index]?.getSeries().length ?? 0) === 0)
+        chart.removePane(index);
+    }
+  }
+
+  /**
+   * Creates the volume pane (when shown) and one pane per study, then sizes
+   * the panes so the price pane keeps most of the height.
+   */
+  private buildAuxSeries(): void {
+    const chart = this.chart;
+    const config = this.config;
+    if (!chart || !config) return;
+    let pane = 1;
+    if (config.showVolume) {
+      this.volume = chart.addSeries(
+        HistogramSeries,
+        {
+          priceFormat: {type: 'volume'},
+          lastValueVisible: false,
+          priceLineVisible: false,
+        },
+        pane
+      );
+      this.volume.priceScale().applyOptions({
+        scaleMargins: {top: 0.12, bottom: 0},
+        borderColor: this.theme.border,
+      });
+      this.volumePrimitive = new HostPrimitive(ctx =>
+        this.paintPaneTitle(ctx, 'Volume', undefined)
+      );
+      this.volume.attachPrimitive(this.volumePrimitive);
+      pane += 1;
+    }
+    for (const study of this.studies.values()) {
+      this.createStudySeries(study, pane);
+      pane += 1;
+    }
+    this.applyPaneSizes();
+  }
+
+  /**
+   * Creates the native series of one study in a given pane.
+   * @param study Study state.
+   * @param pane Pane index.
+   */
+  private createStudySeries(study: StudyState, pane: number): void {
+    const chart = this.chart;
+    if (!chart) return;
+    const precision = study.spec.precision ?? 2;
+    const common = {
+      priceFormat: {
+        type: 'price' as const,
+        precision,
+        minMove: 1 / 10 ** precision,
+      },
+      lastValueVisible: true,
+      priceLineVisible: false,
+    };
+    const series =
+      study.spec.style === 'line'
+        ? chart.addSeries(
+            LineSeries,
+            {...common, color: this.theme.text, lineWidth: 2},
+            pane
+          )
+        : chart.addSeries(HistogramSeries, {...common}, pane);
+    series.priceScale().applyOptions({
+      scaleMargins: {top: 0.18, bottom: 0.08},
+      borderColor: this.theme.border,
+    });
+    for (const level of study.spec.levels ?? []) {
+      series.createPriceLine({
+        price: level.value,
+        color: withAlpha(toneColor(this.theme, level.tone), 0.8),
+        lineWidth: 1,
+        lineStyle: lineStyleOf(level.lineStyle),
+        axisLabelVisible: true,
+        title: level.label,
+      });
+    }
+    const primitive = new HostPrimitive(ctx =>
+      this.paintPaneTitle(ctx, study.spec.title, study.spec.caption)
+    );
+    series.attachPrimitive(primitive);
+    study.series = series;
+    study.primitive = primitive;
+    study.style = study.spec.style;
+  }
+
+  /** Gives each auxiliary pane its share of the height. */
+  private applyPaneSizes(): void {
+    const panes = this.chart?.panes() ?? [];
+    if (panes.length <= 1) return;
+    const shares = panes
+      .slice(1)
+      .map((_, i) =>
+        i === 0 && this.volume ? VOLUME_PANE_SHARE : STUDY_PANE_SHARE
+      );
+    const auxTotal = shares.reduce((sum, share) => sum + share, 0);
+    const scale =
+      1 - auxTotal < MIN_PRICE_PANE_SHARE
+        ? (1 - MIN_PRICE_PANE_SHARE) / auxTotal
+        : 1;
+    panes[0]?.setStretchFactor(1 - auxTotal * scale);
+    shares.forEach((share, i) => panes[i + 1]?.setStretchFactor(share * scale));
+  }
+
+  /**
+   * Paints a pane title and optional provenance caption at the top-left.
+   * @param ctx Context in CSS pixels.
+   * @param title Title.
+   * @param caption Optional caption.
+   */
+  private paintPaneTitle(
+    ctx: CanvasRenderingContext2D,
+    title: string,
+    caption: string | undefined
+  ): void {
+    const text = caption ? `${title} · ${caption}` : title;
+    ctx.save();
+    ctx.font = `11px ${this.theme.fontFamily}`;
+    ctx.textBaseline = 'middle';
+    const width = ctx.measureText(text).width;
+    ctx.fillStyle = withAlpha(this.theme.background, 0.85);
+    ctx.fillRect(6, 4, width + 8, 16);
+    ctx.fillStyle = this.theme.text;
+    ctx.fillText(text, 10, 12);
+    ctx.restore();
+  }
+
+  /** Removes every comparison series. */
+  private removeCompareSeries(): void {
+    for (const series of this.compareSeries.values()) {
+      this.chart?.removeSeries(series);
+    }
+    this.compareSeries.clear();
+  }
+
+  /** Creates comparison series on the left percentage axis. */
+  private buildCompareSeries(): void {
+    const chart = this.chart;
+    if (!chart) return;
+    for (const spec of this.compareSpecs) {
+      const series = chart.addSeries(
+        LineSeries,
+        {
+          priceScaleId: 'left',
+          color: spec.color,
+          lineWidth: 2,
+          title: spec.label,
+          lastValueVisible: true,
+          priceLineVisible: false,
+          crosshairMarkerVisible: false,
+        },
+        0
+      );
+      this.compareSeries.set(spec.id, series);
+    }
+    chart.applyOptions({
+      leftPriceScale: {
+        visible: this.compareSpecs.length > 0,
+        mode: PriceScaleMode.Percentage,
+        borderColor: this.theme.border,
+      },
+    });
+  }
+
+  /**
+   * Adds or replaces a study pane.
+   * @param spec Study spec.
+   */
+  setStudyPane(spec: StudyPaneSpec): void {
+    const existing = this.studies.get(spec.id);
+    if (
+      existing &&
+      existing.series &&
+      existing.style === spec.style &&
+      JSON.stringify(existing.spec.levels ?? []) ===
+        JSON.stringify(spec.levels ?? [])
+    ) {
+      existing.spec = spec;
+      this.renderStudy(existing);
+      existing.primitive?.update();
+      return;
+    }
+    this.studies.set(spec.id, {
+      spec,
+      series: null,
+      primitive: null,
+      style: null,
+    });
+    this.rebuildAux();
+  }
+
+  /**
+   * Removes a study pane.
+   * @param id Study id.
+   */
+  removeStudyPane(id: string): void {
+    if (!this.studies.has(id)) return;
+    this.removeAuxSeries();
+    this.studies.delete(id);
+    this.buildAuxSeries();
+    this.renderAuxData();
+  }
+
+  /**
+   * Replaces comparison overlays.
+   * @param series Instruments to compare.
+   */
+  setCompareSeries(series: readonly CompareSeriesSpec[]): void {
+    const sameShape =
+      series.length === this.compareSpecs.length &&
+      series.every(
+        (spec, i) =>
+          spec.id === this.compareSpecs[i]?.id &&
+          spec.color === this.compareSpecs[i]?.color
+      );
+    this.compareSpecs = series;
+    if (!this.chart || !this.series) return;
+    if (!sameShape) {
+      this.removeCompareSeries();
+      this.buildCompareSeries();
+    }
+    this.renderCompare();
+  }
+
+  /** Rebuilds the volume and study panes (structure changed). */
+  private rebuildAux(): void {
+    if (!this.chart || !this.series) return;
+    this.removeAuxSeries();
+    this.buildAuxSeries();
+    this.renderAuxData();
+  }
+
+  /**
+   * Bar start times currently on the main series.
+   * @return Set of times.
+   */
+  private barTimes(): Set<number> {
+    return new Set(this.bars.map(bar => bar.timeMs));
+  }
+
+  /**
+   * Pushes one study's points (only bars present on the main series).
+   * @param study Study state.
+   * @param times Main series bar times.
+   */
+  private renderStudy(study: StudyState, times = this.barTimes()): void {
+    if (!study.series) return;
+    const points = study.spec.points
+      .filter(point => times.has(point.timeMs) && Number.isFinite(point.value))
+      .sort((a, b) => a.timeMs - b.timeMs)
+      .map(point => ({
+        time: toTime(point.timeMs),
+        value: point.value,
+        ...(point.tone && study.spec.style === 'histogram'
+          ? {color: withAlpha(toneColor(this.theme, point.tone), 0.7)}
+          : {}),
+      }));
+    study.series.setData(points);
+  }
+
+  /** Pushes comparison closes (only bars present on the main series). */
+  private renderCompare(): void {
+    const times = this.barTimes();
+    for (const spec of this.compareSpecs) {
+      const series = this.compareSeries.get(spec.id);
+      if (!series) continue;
+      series.setData(
+        spec.points
+          .filter(p => times.has(p.timeMs) && Number.isFinite(p.value))
+          .sort((a, b) => a.timeMs - b.timeMs)
+          .map(p => ({time: toTime(p.timeMs), value: p.value}))
+      );
+    }
+  }
+
+  /** Pushes volume, study and comparison data. */
+  private renderAuxData(): void {
+    this.volume?.setData(this.bars.map(bar => this.toVolumePoint(bar)));
+    const times = this.barTimes();
+    for (const study of this.studies.values()) this.renderStudy(study, times);
+    this.renderCompare();
   }
 
   /** Applies price format and scale mode. */
@@ -427,7 +773,6 @@ export class LwcChartPort implements ChartPort {
           ? PriceScaleMode.Percentage
           : PriceScaleMode.Normal;
     this.chart.priceScale('right').applyOptions({mode});
-    this.volume?.applyOptions({visible: config.showVolume});
   }
 
   /**
@@ -473,7 +818,12 @@ export class LwcChartPort implements ChartPort {
       display = heikinAshiBar(bar, previousHa);
     }
     this.series.update(this.toSeriesPoint(display));
-    this.volume?.update(this.toVolumePoint(bar));
+    if (appended) {
+      // Studies and comparisons may already hold a value for the new bar.
+      this.renderAuxData();
+    } else {
+      this.volume?.update(this.toVolumePoint(bar));
+    }
   }
 
   /**
@@ -522,7 +872,7 @@ export class LwcChartPort implements ChartPort {
         ? toHeikinAshi(this.bars)
         : this.bars;
     this.series.setData(display.map(bar => this.toSeriesPoint(bar)));
-    this.volume?.setData(this.bars.map(bar => this.toVolumePoint(bar)));
+    this.renderAuxData();
   }
 
   /**
@@ -582,7 +932,7 @@ export class LwcChartPort implements ChartPort {
   private priceLineOptions(model: PriceLineOverlay) {
     return {
       price: Number(model.price),
-      color: toneColor(this.theme, model.tone),
+      color: model.color ?? toneColor(this.theme, model.tone),
       lineWidth: 1 as const,
       lineStyle: model.pending
         ? LineStyle.Dashed
@@ -658,7 +1008,11 @@ export class LwcChartPort implements ChartPort {
     const timeScale = chart.timeScale();
     const index = this.index;
     const width = Math.max(0, timeScale.width());
-    const height = Math.max(0, container.clientHeight - timeScale.height());
+    const paneHeight = chart.paneSize(0).height;
+    const height = Math.max(
+      0,
+      paneHeight > 0 ? paneHeight : container.clientHeight - timeScale.height()
+    );
     return {
       width,
       height,
@@ -672,7 +1026,8 @@ export class LwcChartPort implements ChartPort {
         return logical === null ? null : index.toTime(logical);
       },
       priceToY: price => series.priceToCoordinate(price),
-      yToPrice: y => series.coordinateToPrice(y),
+      // Below the price pane (volume and study panes) there is no price.
+      yToPrice: y => (y < 0 || y > height ? null : series.coordinateToPrice(y)),
     };
   }
 
@@ -731,7 +1086,10 @@ export class LwcChartPort implements ChartPort {
     }
     if (param.sourceEvent === undefined) return;
     this.lastCrosshairNull = false;
-    const price = this.series?.coordinateToPrice(param.point.y) ?? null;
+    const inPricePane = param.paneIndex === undefined || param.paneIndex === 0;
+    const price = inPricePane
+      ? (this.series?.coordinateToPrice(param.point.y) ?? null)
+      : null;
     this.emit('crosshairMove', {
       x: param.point.x,
       y: param.point.y,
@@ -751,7 +1109,7 @@ export class LwcChartPort implements ChartPort {
     button?: number
   ): ChartPointerEvent {
     const rect = this.container?.getBoundingClientRect();
-    const x = event.clientX - (rect?.left ?? 0);
+    const x = event.clientX - (rect?.left ?? 0) - this.leftScaleWidth();
     const y = event.clientY - (rect?.top ?? 0);
     const transform = this.transform();
     return {
@@ -767,6 +1125,19 @@ export class LwcChartPort implements ChartPort {
         if (this.interactive) this.applyInteractive(false);
       },
     };
+  }
+
+  /**
+   * Width of the left (comparison) price axis, which offsets the plot.
+   * @return Width in CSS pixels (0 when hidden).
+   */
+  private leftScaleWidth(): number {
+    if (!this.chart || this.compareSpecs.length === 0) return 0;
+    try {
+      return this.chart.priceScale('left').width();
+    } catch {
+      return 0;
+    }
   }
 
   /**
@@ -976,6 +1347,10 @@ export class LwcChartPort implements ChartPort {
     this.canvasLayers.clear();
     this.markers = null;
     this.primitive = null;
+    this.volumePrimitive = null;
+    this.studies.clear();
+    this.compareSeries.clear();
+    this.compareSpecs = [];
     this.chart?.remove();
     this.chart = null;
     this.series = null;

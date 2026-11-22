@@ -1,0 +1,42 @@
+# Grants a job read access to the private indicator library
+# (apoman123/PineScripts, python_indicators/), which uv installs over SSH.
+#
+# Setup (once): generate a key pair, add the public key to PineScripts as a
+# read-only deploy key, and store the private key in this repository as the
+# Actions secret PINESCRIPTS_DEPLOY_KEY. See docs/CI_CD.md.
+name: Indicator library access
+description: Loads the PineScripts deploy key into an ssh-agent for uv and BuildKit.
+
+inputs:
+  deploy-key:
+    description: Private deploy key for apoman123/PineScripts (secret).
+    required: true
+
+outputs:
+  socket:
+    description: SSH_AUTH_SOCK of the started agent (for BuildKit ssh forwarding).
+    value: ${{ steps.agent.outputs.socket }}
+
+runs:
+  using: composite
+  steps:
+    - id: agent
+      shell: bash
+      env:
+        DEPLOY_KEY: ${{ inputs.deploy-key }}
+      run: |
+        set -euo pipefail
+        if [ -z "${DEPLOY_KEY}" ]; then
+          echo "::error title=Missing PINESCRIPTS_DEPLOY_KEY::The market engine depends on the private apoman123/PineScripts repository. Add a read-only deploy key to PineScripts and its private half as the Actions secret PINESCRIPTS_DEPLOY_KEY (see docs/CI_CD.md)."
+          exit 1
+        fi
+        install -m 700 -d ~/.ssh
+        # GitHub's published ed25519 host key (pinned; no trust-on-first-use).
+        echo 'github.com ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIOMqqnkVzrm0SdG6UOoqKLsabgH5C9okWi0dh2l9GKJl' >> ~/.ssh/known_hosts
+        chmod 644 ~/.ssh/known_hosts
+        socket="${RUNNER_TEMP}/pinescripts-agent.sock"
+        eval "$(ssh-agent -s -a "${socket}")" >/dev/null
+        printf '%s\n' "${DEPLOY_KEY}" | ssh-add - 2>/dev/null
+        echo "SSH_AUTH_SOCK=${socket}" >> "${GITHUB_ENV}"
+        echo "SSH_AGENT_PID=${SSH_AGENT_PID}" >> "${GITHUB_ENV}"
+        echo "socket=${socket}" >> "${GITHUB_OUTPUT}"

@@ -1,0 +1,52 @@
+/**
+ * @fileoverview Extended line: a line through two anchors that spans the
+ * whole chart in both directions.
+ */
+import {
+  anchorPoints,
+  applyStroke,
+  distanceToSegment,
+  drawHandles,
+  extendSegment,
+  hitHandles,
+  strokePath,
+  type ToolPlugin,
+} from '@joseph/drawing-core';
+
+/** Extended line tool. */
+export const extendedLineTool: ToolPlugin = {
+  manifest: {
+    id: 'extended-line',
+    version: 1,
+    displayName: 'Extended line',
+    group: 'lines',
+    icon: 'move-diagonal',
+    anchorCount: 2,
+  },
+  defaultStyle: palette => ({
+    color: palette.user,
+    line_width: 1,
+    line_style: 'solid',
+    extend_left: true,
+    extend_right: true,
+  }),
+  render(ctx, doc, transform, state) {
+    const [a, b] = anchorPoints(transform, doc) ?? [];
+    if (!a || !b) return;
+    applyStroke(ctx, doc.style, state);
+    strokePath(ctx, extendSegment(a, b, transform.width, true, true));
+    drawHandles(ctx, [a, b], state);
+  },
+  hitTest(doc, transform, point, tolerance) {
+    const [a, b] = anchorPoints(transform, doc) ?? [];
+    if (!a || !b) return null;
+    const handle = hitHandles([a, b], point, tolerance);
+    if (handle) return handle;
+    const [start, end] = extendSegment(a, b, transform.width, true, true);
+    return distanceToSegment(point, start, end) <= tolerance
+      ? {part: 'body'}
+      : null;
+  },
+  describe: doc =>
+    `Extended line through ${doc.anchors[0]?.price ?? '?'} and ${doc.anchors[1]?.price ?? '?'}`,
+};

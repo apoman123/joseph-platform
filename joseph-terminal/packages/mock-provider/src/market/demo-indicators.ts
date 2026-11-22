@@ -52,6 +52,8 @@ export interface RelativeEvent {
   barsAgo: number;
   /** Reference price ratio. */
   priceRatio: number;
+  /** Bars before the latest closed bar of the pivot the event refers to. */
+  pivotBarsAgo?: number;
 }
 
 /** DEMO AOIs. */
@@ -251,6 +253,30 @@ export const DEMO_AOIS: readonly RelativeAoi[] = [
     upperRatio: 0.9771,
     score: null,
   },
+  {
+    key: 'ms-pending-high',
+    source: 'market_structure',
+    kind: 'SWING_HIGH',
+    side: 'bearish',
+    state: 'active',
+    barsAgo: 10,
+    confirmBars: 3,
+    lowerRatio: 1.0118,
+    upperRatio: 1.0118,
+    score: null,
+  },
+  {
+    key: 'ms-pending-low',
+    source: 'market_structure',
+    kind: 'SWING_LOW',
+    side: 'bullish',
+    state: 'active',
+    barsAgo: 24,
+    confirmBars: 3,
+    lowerRatio: 0.9965,
+    upperRatio: 0.9965,
+    score: null,
+  },
 ];
 
 /** DEMO structure events. */
@@ -289,5 +315,77 @@ export const DEMO_EVENTS: readonly RelativeEvent[] = [
     name: 'BUYER_BREAKOUT',
     barsAgo: 28,
     priceRatio: 1.0032,
+  },
+  {
+    key: 'ms-ib',
+    source: 'market_structure',
+    name: 'INITIAL_BREAK_BEAR',
+    barsAgo: 140,
+    priceRatio: 0.989,
+    pivotBarsAgo: 150,
+  },
+  {
+    key: 'ms-ll',
+    source: 'market_structure',
+    name: 'SWING_LL',
+    barsAgo: 117,
+    priceRatio: 0.9835,
+    pivotBarsAgo: 120,
+  },
+  {
+    key: 'ms-lh',
+    source: 'market_structure',
+    name: 'SWING_LH',
+    barsAgo: 99,
+    priceRatio: 1.0062,
+    pivotBarsAgo: 102,
+  },
+  {
+    key: 'ms-mss',
+    source: 'market_structure',
+    name: 'CHOCH_BULL',
+    barsAgo: 66,
+    priceRatio: 1.0062,
+    pivotBarsAgo: 102,
+  },
+  {
+    key: 'ms-hl',
+    source: 'market_structure',
+    name: 'SWING_HL',
+    barsAgo: 52,
+    priceRatio: 0.993,
+    pivotBarsAgo: 55,
+  },
+  {
+    key: 'ms-hh',
+    source: 'market_structure',
+    name: 'SWING_HH',
+    barsAgo: 36,
+    priceRatio: 1.011,
+    pivotBarsAgo: 39,
+  },
+  {
+    key: 'ms-hl-2',
+    source: 'market_structure',
+    name: 'SWING_HL',
+    barsAgo: 21,
+    priceRatio: 0.9965,
+    pivotBarsAgo: 24,
+  },
+  {
+    key: 'ms-bos',
+    source: 'market_structure',
+    name: 'BOS_BULL',
+    barsAgo: 14,
+    priceRatio: 1.011,
+    pivotBarsAgo: 39,
+  },
+  {
+    key: 'ms-eqh',
+    source: 'market_structure',
+    name: 'SWING_EQH',
+    barsAgo: 7,
+    priceRatio: 1.0118,
+    pivotBarsAgo: 10,
   },
 ];
