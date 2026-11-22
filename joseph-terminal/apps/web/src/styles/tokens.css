@@ -1,0 +1,124 @@
+/*
+ * Joseph Terminal design tokens — "navigator's night chart".
+ *
+ * Roles, not raw colors, are referenced by components:
+ *   --course   everything the user authored (drawings, rules, draft orders),
+ *              like a navigator's magenta pencil on a chart.
+ *   --bid/--ask  port/starboard green and red for market direction.
+ *   --sodium   warnings and polled (degraded) data.
+ *   --replay   historical replay provenance.
+ * Dark is the default theme; [data-theme="light"] is the daylight chart.
+ */
+
+:root {
+  color-scheme: dark;
+
+  /* Surfaces */
+  --abyss: #0c1820;
+  --hull: #122431;
+  --swell: #1a3141;
+  --swell-strong: #213b4e;
+  --fathom: #2a4558;
+  --fathom-soft: #1f3646;
+
+  /* Text */
+  --chalk: #e4edf1;
+  --haze: #8fa5b3;
+  --haze-dim: #7f96a5;
+
+  /* Roles */
+  --bid: #3cc79a;
+  --bid-soft: rgba(60, 199, 154, 0.16);
+  --ask: #f0645a;
+  --ask-soft: rgba(240, 100, 90, 0.16);
+  --course: #e66fd2;
+  --course-soft: rgba(230, 111, 210, 0.16);
+  --sodium: #f2b544;
+  --sodium-soft: rgba(242, 181, 68, 0.16);
+  --replay: #9c8cff;
+  --info: #5cb8e6;
+  --focus-ring: #e66fd2;
+
+  /* Chart canvas */
+  --chart-bg: #0e1c25;
+  --chart-grid: #172b38;
+  --chart-text: #8fa5b3;
+  --chart-crosshair: #5d7686;
+
+  /* Typography */
+  --font-ui: var(--font-archivo), 'Archivo', system-ui, sans-serif;
+  --text-xs: 11px;
+  --text-sm: 12px;
+  --text-md: 13px;
+  --text-lg: 15px;
+  --text-xl: 18px;
+  --text-2xl: 24px;
+  --width-condensed: 88;
+  --width-normal: 100;
+  --width-wide: 112;
+
+  /* Spacing (4px grid) */
+  --space-1: 4px;
+  --space-2: 8px;
+  --space-3: 12px;
+  --space-4: 16px;
+  --space-5: 24px;
+  --space-6: 32px;
+
+  /* Shape: radius follows hierarchy */
+  --radius-pane: 0;
+  --radius-control: 3px;
+  --radius-dialog: 6px;
+
+  /* Sizing */
+  --row-height: 28px;
+  --header-height: 44px;
+  --toolbar-width: 44px;
+  --side-panel-width: 340px;
+  --bottom-panel-height: 220px;
+  --statusbar-height: 24px;
+
+  /* Elevation (floating surfaces only) */
+  --shadow-float: 0 8px 24px rgba(3, 10, 15, 0.55);
+
+  /* Motion */
+  --ease-out: cubic-bezier(0.2, 0.7, 0.2, 1);
+  --duration-fast: 120ms;
+  --duration-base: 200ms;
+}
+
+:root[data-theme='light'] {
+  color-scheme: light;
+  --abyss: #eef3f2;
+  --hull: #ffffff;
+  --swell: #e6eef0;
+  --swell-strong: #d9e5e9;
+  --fathom: #c3d2d8;
+  --fathom-soft: #d8e3e7;
+  --chalk: #0f2430;
+  --haze: #4e6572;
+  --haze-dim: #586d78;
+  --bid: #0a7552;
+  --bid-soft: rgba(15, 154, 110, 0.12);
+  --ask: #c0392f;
+  --ask-soft: rgba(210, 63, 53, 0.12);
+  --course: #b5179e;
+  --course-soft: rgba(181, 23, 158, 0.12);
+  --sodium: #8a5a0c;
+  --sodium-soft: rgba(168, 106, 18, 0.12);
+  --replay: #6e5bd8;
+  --info: #1f7fb3;
+  --focus-ring: #b5179e;
+  --chart-bg: #fbfdfd;
+  --chart-grid: #e6eef0;
+  --chart-text: #4e6572;
+  --chart-crosshair: #8aa0ab;
+  --shadow-float: 0 8px 24px rgba(15, 36, 48, 0.18);
+}
+
+@media (prefers-reduced-motion: reduce) {
+  :root {
+    --duration-fast: 0ms;
+    --duration-base: 0ms;
+  }
+}

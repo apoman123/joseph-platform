@@ -1,0 +1,84 @@
+{
+  "schema": "workspace.schema.json",
+  "definition": "DrawingDocument",
+  "valid": [
+    {
+      "schema_version": 1,
+      "drawing_id": "d-1",
+      "tool_id": "fib-retracement",
+      "tool_version": 1,
+      "instrument_id": "binance:perp:BTCUSDT",
+      "timeframe": null,
+      "anchors": [
+        {
+          "time_ms": 1795252800000,
+          "price": "94000"
+        },
+        {
+          "time_ms": 1795260000000,
+          "price": "95500"
+        }
+      ],
+      "style": {
+        "color": "#F4B740",
+        "line_width": 1,
+        "line_style": "solid"
+      },
+      "text": null,
+      "props": {
+        "levels": [
+          "0",
+          "0.236",
+          "0.382",
+          "0.5",
+          "0.618",
+          "0.786",
+          "1"
+        ]
+      },
+      "locked": false,
+      "visible": true,
+      "z_index": 3,
+      "created_at_ms": 1795252800000,
+      "updated_at_ms": 1795252800000
+    }
+  ],
+  "invalid": [
+    {
+      "schema_version": 1,
+      "drawing_id": "d-1",
+      "tool_id": "fib-retracement",
+      "tool_version": 1,
+      "instrument_id": "binance:perp:BTCUSDT",
+      "timeframe": null,
+      "anchors": [
+        {
+          "x": 10,
+          "y": 20
+        }
+      ],
+      "style": {
+        "color": "#F4B740",
+        "line_width": 1,
+        "line_style": "solid"
+      },
+      "text": null,
+      "props": {
+        "levels": [
+          "0",
+          "0.236",
+          "0.382",
+          "0.5",
+          "0.618",
+          "0.786",
+          "1"
+        ]
+      },
+      "locked": false,
+      "visible": true,
+      "z_index": 3,
+      "created_at_ms": 1795252800000,
+      "updated_at_ms": 1795252800000
+    }
+  ]
+}

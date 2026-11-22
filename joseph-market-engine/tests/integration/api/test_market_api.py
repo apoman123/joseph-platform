@@ -1,0 +1,567 @@
+"""Integration tests of the market-engine HTTP and WebSocket API."""
+
+from __future__ import annotations
+
+import json
+from collections.abc import Callable
+from typing import Any
+
+import httpx
+import pytest
+import respx
+from fastapi import testclient
+
+from joseph import bootstrap
+
+Validate = Callable[[str, str, object], None]
+
+
+def _error(response: httpx.Response, status: int, code: str) -> None:
+    """Asserts a contract error response.
+
+    Args:
+        response: Response.
+        status: Expected status.
+        code: Expected error code.
+    """
+    assert response.status_code == status, response.text
+    body = response.json()
+    assert body["code"] == code
+    assert body["trace_id"] == response.headers["x-trace-id"]
+    assert set(body) == {
+        "code",
+        "message",
+        "trace_id",
+        "retryable",
+        "field_errors",
+        "source_status",
+    }
+
+
+def test_health_and_metrics(demo_client: testclient.TestClient) -> None:
+    """Liveness reports venues and metrics are Prometheus text."""
+    health = demo_client.get("/health").json()
+    assert health["status"] == "ok"
+    assert health["demo_only"] is True
+    assert "mock" in health["venues"]
+    metrics = demo_client.get("/metrics")
+    assert metrics.headers["content-type"].startswith("text/plain")
+    assert "joseph_http_requests_total" in metrics.text
+
+
+def test_demo_endpoints_are_contract_valid(
+    demo_client: testclient.TestClient, contract_validate: Validate
+) -> None:
+    """Every DEMO response conforms to its JSON Schema."""
+    btc = "mock:perp:BTCUSD"
+    checks = [
+        ("/v1/venues", {}, "market.schema.json", "VenueStatusList"),
+        (
+            "/v1/instruments",
+            {"q": "btc"},
+            "market.schema.json",
+            "InstrumentList",
+        ),
+        (
+            "/v1/candles",
+            {"instrument_id": btc, "tf": "5m", "limit": 50},
+            "market.schema.json",
+            "CandleBatch",
+        ),
+        (
+            "/v1/market/snapshot",
+            {"instrument_id": btc},
+            "market.schema.json",
+            "MarketSnapshot",
+        ),
+        (
+            "/v1/market/orderbook",
+            {"instrument_id": btc, "depth": 10},
+            "market.schema.json",
+            "OrderBook",
+        ),
+        (
+            "/v1/market/qualification",
+            {},
+            "qualification.schema.json",
+            "QualificationReport",
+        ),
+    ]
+    for path, params, schema, definition in checks:
+        response = demo_client.get(path, params=params)
+        assert response.status_code == 200, (path, response.text)
+        contract_validate(schema, definition, response.json())
+
+
+def test_candles_carry_demo_provenance(
+    demo_client: testclient.TestClient,
+) -> None:
+    """DEMO data is always labelled DEMO."""
+    body = demo_client.get(
+        "/v1/candles",
+        params={
+            "instrument_id": "mock:perp:ETHUSD",
+            "tf": "1m",
+            "limit": 20,
+        },
+    ).json()
+    assert body["feed_state"] == "DEMO"
+    assert {c["feed_state"] for c in body["candles"]} == {"DEMO"}
+    assert body["complete"] is True
+    assert len(body["candles"]) == 20
+
+
+def test_qualification_reports_gate_evidence(
+    demo_client: testclient.TestClient,
+) -> None:
+    """Every record exposes observed values, thresholds and reasons."""
+    body = demo_client.get(
+        "/v1/market/qualification", params={"venue": "mock"}
+    ).json()
+    statuses = {r["instrument_id"]: r for r in body["records"]}
+    assert statuses["mock:perp:BTCUSD"]["status"] == "QUALIFIED"
+    assert statuses["mock:perp:ETHUSD"]["risk_tags"] == ["WATCH"]
+    rejected = statuses["mock:perp:SOLUSD"]
+    assert rejected["status"] == "REJECTED"
+    spread = next(g for g in rejected["gates"] if g["gate"] == "SPREAD_PCT")
+    assert spread["passed"] is False and spread["comparator"] == "lt"
+    only = demo_client.get(
+        "/v1/market/qualification", params={"status": "REJECTED"}
+    ).json()
+    assert [r["instrument_id"] for r in only["records"]] == ["mock:perp:SOLUSD"]
+
+
+def test_validation_and_not_found_errors(
+    demo_client: testclient.TestClient,
+) -> None:
+    """Bad input yields actionable contract errors."""
+    _error(
+        demo_client.get(
+            "/v1/candles", params={"instrument_id": "BTCUSDT", "tf": "5m"}
+        ),
+        422,
+        "VALIDATION_FAILED",
+    )
+    _error(
+        demo_client.get(
+            "/v1/candles",
+            params={"instrument_id": "mock:perp:BTCUSD", "tf": "7m"},
+        ),
+        422,
+        "VALIDATION_FAILED",
+    )
+    _error(
+        demo_client.get(
+            "/v1/candles",
+            params={"instrument_id": "mock:perp:DOGEUSD", "tf": "5m"},
+        ),
+        404,
+        "NOT_FOUND",
+    )
+    _error(
+        demo_client.get(
+            "/v1/candles",
+            params={"instrument_id": "binance:perp:BTCUSDT", "tf": "5m"},
+        ),
+        404,
+        "NOT_FOUND",
+    )
+    _error(
+        demo_client.get(
+            "/v1/market/orderbook",
+            params={"instrument_id": "mock:perp:BTCUSD", "depth": 0},
+        ),
+        422,
+        "VALIDATION_FAILED",
+    )
+    _error(
+        demo_client.get("/v1/instruments", params={"venue": "kraken"}),
+        422,
+        "VALIDATION_FAILED",
+    )
+    _error(demo_client.get("/v1/candles"), 422, "VALIDATION_FAILED")
+    _error(demo_client.get("/v1/nope"), 404, "NOT_FOUND")
+
+
+def test_cors_allows_configured_origin_only(
+    demo_client: testclient.TestClient,
+) -> None:
+    """Only configured browser origins are allowed."""
+    ok = demo_client.get("/health", headers={"Origin": "http://localhost:3000"})
+    assert ok.headers.get("access-control-allow-origin") == (
+        "http://localhost:3000"
+    )
+    denied = demo_client.get(
+        "/health", headers={"Origin": "https://evil.example"}
+    )
+    assert "access-control-allow-origin" not in denied.headers
+
+
+def test_all_venues_served_from_captured_fixtures(
+    venue_client: tuple[testclient.TestClient, respx.Router],
+    contract_validate: Validate,
+) -> None:
+    """Every real venue answers candles and snapshots via its adapter."""
+    client, _ = venue_client
+    venues = client.get("/v1/venues").json()
+    contract_validate("market.schema.json", "VenueStatusList", venues)
+    assert {v["capabilities"]["venue"] for v in venues["venues"]} == {
+        "binance",
+        "hyperliquid",
+        "lighter",
+        "bitget",
+        "mexc",
+        "mock",
+    }
+    for instrument in (
+        "binance:perp:BTCUSDT",
+        "hyperliquid:perp:BTC",
+        "lighter:perp:BTC",
+        "bitget:perp:BTCUSDT",
+        "mexc:perp:BTC_USDT",
+    ):
+        batch = client.get(
+            "/v1/candles",
+            params={"instrument_id": instrument, "tf": "5m", "limit": 3},
+        )
+        assert batch.status_code == 200, (instrument, batch.text)
+        contract_validate("market.schema.json", "CandleBatch", batch.json())
+        assert batch.json()["feed_state"] == "LIVE"
+        snapshot = client.get(
+            "/v1/market/snapshot", params={"instrument_id": instrument}
+        )
+        assert snapshot.status_code == 200, (instrument, snapshot.text)
+
+
+def test_search_never_merges_same_symbol_across_venues(
+    venue_client: tuple[testclient.TestClient, respx.Router],
+) -> None:
+    """BTC on each venue is a separate instrument."""
+    client, _ = venue_client
+    ids = [
+        i["instrument_id"]
+        for i in client.get("/v1/instruments", params={"q": "BTC"}).json()[
+            "instruments"
+        ]
+    ]
+    for expected in (
+        "binance:perp:BTCUSDT",
+        "hyperliquid:perp:BTC",
+        "lighter:perp:BTC",
+        "bitget:perp:BTCUSDT",
+        "mexc:perp:BTC_USDT",
+        "mock:perp:BTCUSD",
+    ):
+        assert expected in ids
+    assert len(ids) == len(set(ids))
+
+
+def test_unsupported_timeframe_is_explicit(
+    venue_client: tuple[testclient.TestClient, respx.Router],
+) -> None:
+    """Hyperliquid weekly bars are refused, not faked."""
+    client, _ = venue_client
+    _error(
+        client.get(
+            "/v1/candles",
+            params={"instrument_id": "hyperliquid:perp:BTC", "tf": "1w"},
+        ),
+        422,
+        "UNSUPPORTED",
+    )
+
+
+@pytest.mark.parametrize(
+    ("side_effect", "status", "code", "retryable"),
+    [
+        (httpx.Response(429), 429, "RATE_LIMITED", True),
+        (httpx.ReadTimeout("slow"), 503, "VENUE_UNAVAILABLE", True),
+        (httpx.Response(502), 503, "VENUE_UNAVAILABLE", True),
+    ],
+)
+def test_venue_failures_map_to_contract_errors(
+    venue_client: tuple[testclient.TestClient, respx.Router],
+    side_effect: object,
+    status: int,
+    code: str,
+    retryable: bool,
+    binance_handler: Callable[[httpx.Request], httpx.Response],
+) -> None:
+    """Rate limits and outages surface as retryable errors."""
+    client, router = venue_client
+    original = binance_handler
+
+    def failing(request: httpx.Request) -> httpx.Response:
+        """Fails klines requests and serves everything else.
+
+        Args:
+            request: Request.
+
+        Returns:
+            Response.
+
+        Raises:
+            Exception: The configured transport error.
+        """
+        if not request.url.path.endswith("/klines"):
+            return original(request)
+        if isinstance(side_effect, Exception):
+            raise side_effect
+        return side_effect  # type: ignore[return-value]
+
+    router.route(host="fapi.binance.com").mock(side_effect=failing)
+    response = client.get(
+        "/v1/candles",
+        params={
+            "instrument_id": "binance:perp:BTCUSDT",
+            "tf": "5m",
+            "limit": 3,
+        },
+    )
+    _error(response, status, code)
+    assert response.json()["retryable"] is retryable
+    venues = client.get("/v1/venues").json()["venues"]
+    binance = next(v for v in venues if v["capabilities"]["venue"] == "binance")
+    assert binance["health"]["last_error"]
+
+
+def _receive_until(ws: Any, kind: str, limit: int = 20) -> dict[str, object]:
+    """Receives envelopes until one of ``kind`` arrives.
+
+    Args:
+        ws: WebSocket session.
+        kind: Envelope type.
+        limit: Maximum frames to read.
+
+    Returns:
+        The matching envelope.
+
+    Raises:
+        AssertionError: If not received within ``limit`` frames.
+    """
+    for _ in range(limit):
+        envelope = json.loads(ws.receive_text())
+        if envelope["type"] == kind:
+            return envelope  # type: ignore[no-any-return]
+    raise AssertionError(f"no {kind} envelope")
+
+
+def test_ws_streams_contract_valid_candles(
+    demo_client: testclient.TestClient, contract_validate: Validate
+) -> None:
+    """Subscribing to candles streams sequenced DEMO candles."""
+    with demo_client.websocket_connect("/v1/stream/market") as ws:
+        ws.send_text(
+            json.dumps(
+                {
+                    "action": "subscribe",
+                    "channels": [
+                        {
+                            "channel": "candles",
+                            "instrument_id": "mock:perp:BTCUSD",
+                            "timeframe": "1m",
+                        },
+                        {"channel": "feed_health"},
+                    ],
+                }
+            )
+        )
+        subscribed = _receive_until(ws, "subscribed")
+        contract_validate("stream.schema.json", "StreamEnvelope", subscribed)
+        assert subscribed["sequence"] == 0
+        candle = _receive_until(ws, "candle.updated")
+        contract_validate("stream.schema.json", "StreamEnvelope", candle)
+        contract_validate("market.schema.json", "Candle", candle["payload"])
+        assert candle["sequence"] > 0  # type: ignore[operator]
+        assert candle["channel"] == "candles:mock:perp:BTCUSD:1m"
+        ws.send_text(
+            json.dumps(
+                {
+                    "action": "unsubscribe",
+                    "channels": [
+                        {
+                            "channel": "candles",
+                            "instrument_id": "mock:perp:BTCUSD",
+                            "timeframe": "1m",
+                        }
+                    ],
+                }
+            )
+        )
+        after = _receive_until(ws, "subscribed")
+        assert after["payload"] == {"channels": ["feed_health"]}
+
+
+def test_ws_rejects_bad_frames_and_actions(
+    demo_client: testclient.TestClient,
+) -> None:
+    """Malformed input yields error envelopes, not disconnects."""
+    with demo_client.websocket_connect("/v1/stream/market") as ws:
+        ws.send_text("not json")
+        assert _receive_until(ws, "error")["payload"]["code"] == (  # type: ignore[index]
+            "VALIDATION_FAILED"
+        )
+        ws.send_text(json.dumps({"action": "dance"}))
+        assert _receive_until(ws, "error")
+        ws.send_text(
+            json.dumps(
+                {
+                    "action": "subscribe",
+                    "channels": [
+                        {
+                            "channel": "candles",
+                            "instrument_id": "mock:perp:BTCUSD",
+                        }
+                    ],
+                }
+            )
+        )
+        assert _receive_until(ws, "error")
+        ws.send_text(json.dumps({"action": "ping"}))
+        assert _receive_until(ws, "heartbeat")
+
+
+def test_ws_signals_require_token_and_are_tenant_scoped(
+    demo_client: testclient.TestClient,
+    demo_container: bootstrap.Container,
+    tokens: tuple[str, str],
+) -> None:
+    """Signals need a token and never cross tenants."""
+    token_a, token_b = tokens
+    with demo_client.websocket_connect("/v1/stream/market") as anon:
+        anon.send_text(
+            json.dumps(
+                {"action": "subscribe", "channels": [{"channel": "signals"}]}
+            )
+        )
+        error = _receive_until(anon, "error")
+        assert error["payload"]["code"] == "UNAUTHENTICATED"  # type: ignore[index]
+    url = "/v1/stream/market?token="
+    with (
+        demo_client.websocket_connect(url + token_a) as ws_a,
+        demo_client.websocket_connect(url + token_b) as ws_b,
+    ):
+        for ws in (ws_a, ws_b):
+            ws.send_text(
+                json.dumps(
+                    {
+                        "action": "subscribe",
+                        "channels": [{"channel": "signals"}],
+                    }
+                )
+            )
+            assert _receive_until(ws, "subscribed")["payload"] == {
+                "channels": ["signals"]
+            }
+        hub = demo_container.stream_hub
+        demo_client.portal.call(  # type: ignore[union-attr]
+            lambda: hub.publish(
+                "signals",
+                "signal.created",
+                {"for": "tenant-02"},
+                tenant_id="tenant-02",
+            )
+        )
+        demo_client.portal.call(  # type: ignore[union-attr]
+            lambda: hub.publish(
+                "signals",
+                "signal.created",
+                {"for": "tenant-01"},
+                tenant_id="tenant-01",
+            )
+        )
+        got_a = _receive_until(ws_a, "signal.created")
+        got_b = _receive_until(ws_b, "signal.created")
+        assert got_a["payload"] == {"for": "tenant-01"}
+        assert got_b["payload"] == {"for": "tenant-02"}
+
+
+def test_ws_invalid_token_is_rejected(
+    demo_client: testclient.TestClient,
+) -> None:
+    """A bad token closes the socket with an error envelope."""
+    with demo_client.websocket_connect("/v1/stream/market?token=wrong") as ws:
+        assert json.loads(ws.receive_text())["payload"]["code"] == (
+            "UNAUTHENTICATED"
+        )
+
+
+def test_ws_resume_replays_or_requires_snapshot(
+    demo_client: testclient.TestClient, demo_container: bootstrap.Container
+) -> None:
+    """``last_sequence`` resumes within retention, else snapshot_required."""
+    hub = demo_container.stream_hub
+
+    def burst() -> int:
+        """Publishes three health envelopes.
+
+        Returns:
+            Sequence of the first one.
+        """
+        first = hub.publish("feed_health", "feed.health", {"n": 1}).sequence
+        hub.publish("feed_health", "feed.health", {"n": 2})
+        hub.publish("feed_health", "feed.health", {"n": 3})
+        return first
+
+    first = demo_client.portal.call(burst)  # type: ignore[union-attr]
+    with demo_client.websocket_connect("/v1/stream/market") as ws:
+        ws.send_text(
+            json.dumps(
+                {
+                    "action": "subscribe",
+                    "channels": [{"channel": "feed_health"}],
+                    "last_sequence": first,
+                }
+            )
+        )
+        _receive_until(ws, "subscribed")
+        replayed = [
+            e
+            for e in (json.loads(ws.receive_text()) for _ in range(4))
+            if e["sequence"] > 0
+        ]
+        assert [e["payload"] for e in replayed][-2:] == [{"n": 2}, {"n": 3}]
+
+    def flood() -> None:
+        """Publishes past the retention window."""
+        for i in range(demo_container.settings.stream_retention + 5):
+            hub.publish("qualification", "qualification.changed", {"i": i})
+
+    demo_client.portal.call(flood)  # type: ignore[union-attr]
+    with demo_client.websocket_connect("/v1/stream/market") as ws:
+        ws.send_text(
+            json.dumps(
+                {
+                    "action": "subscribe",
+                    "channels": [{"channel": "feed_health"}],
+                    "last_sequence": 1,
+                }
+            )
+        )
+        assert _receive_until(ws, "snapshot_required")
+
+
+def test_ws_native_mode_on_rest_only_venue_is_unsupported(
+    venue_client: tuple[testclient.TestClient, respx.Router],
+) -> None:
+    """NATIVE_WS for Lighter is refused instead of silently polling."""
+    client, _ = venue_client
+    with client.websocket_connect("/v1/stream/market") as ws:
+        ws.send_text(
+            json.dumps(
+                {
+                    "action": "subscribe",
+                    "channels": [
+                        {
+                            "channel": "candles",
+                            "instrument_id": "lighter:perp:BTC",
+                            "timeframe": "5m",
+                            "feed_mode": "NATIVE_WS",
+                        }
+                    ],
+                }
+            )
+        )
+        error = _receive_until(ws, "error")
+        assert error["payload"]["code"] == "UNSUPPORTED"  # type: ignore[index]
+        assert _receive_until(ws, "subscribed")["payload"] == {"channels": []}

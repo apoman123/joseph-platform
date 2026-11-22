@@ -1,0 +1,1654 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://schemas.joseph.local/v1/execution.schema.json",
+  "title": "JosephExecution",
+  "description": "Execution trust-boundary contracts. Every manual, chart and automated order travels OrderIntent -> Risk Gateway -> OMS -> Venue adapter. Prices and quantities are decimal strings.",
+  "$defs": {
+    "OrderSide": {
+      "title": "OrderSide",
+      "type": "string",
+      "enum": [
+        "buy",
+        "sell"
+      ]
+    },
+    "PositionEffect": {
+      "title": "PositionEffect",
+      "type": "string",
+      "enum": [
+        "open",
+        "close",
+        "reduce"
+      ]
+    },
+    "OrderType": {
+      "title": "OrderType",
+      "type": "string",
+      "enum": [
+        "market",
+        "limit",
+        "stop_market",
+        "stop_limit"
+      ]
+    },
+    "TimeInForce": {
+      "title": "TimeInForce",
+      "type": "string",
+      "enum": [
+        "GTC",
+        "IOC",
+        "FOK",
+        "POST_ONLY"
+      ]
+    },
+    "MarginMode": {
+      "title": "MarginMode",
+      "type": "string",
+      "enum": [
+        "isolated",
+        "cross"
+      ]
+    },
+    "PriceBasis": {
+      "title": "PriceBasis",
+      "type": "string",
+      "enum": [
+        "mark",
+        "last"
+      ]
+    },
+    "IntentSource": {
+      "title": "IntentSource",
+      "type": "string",
+      "enum": [
+        "MANUAL_TICKET",
+        "CHART",
+        "QUICK_TRADE",
+        "STRATEGY",
+        "EMERGENCY"
+      ]
+    },
+    "StopLossSpec": {
+      "title": "StopLossSpec",
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "trigger",
+        "basis"
+      ],
+      "properties": {
+        "trigger": {
+          "$ref": "common.schema.json#/$defs/DecimalString"
+        },
+        "basis": {
+          "$ref": "#/$defs/PriceBasis"
+        }
+      }
+    },
+    "TakeProfitSpec": {
+      "title": "TakeProfitSpec",
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "trigger",
+        "fraction"
+      ],
+      "properties": {
+        "trigger": {
+          "$ref": "common.schema.json#/$defs/DecimalString"
+        },
+        "fraction": {
+          "$ref": "common.schema.json#/$defs/NonNegativeDecimalString"
+        }
+      }
+    },
+    "Bracket": {
+      "title": "Bracket",
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "stop_loss": {
+          "oneOf": [
+            {
+              "$ref": "#/$defs/StopLossSpec"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "take_profit": {
+          "type": "array",
+          "maxItems": 4,
+          "items": {
+            "$ref": "#/$defs/TakeProfitSpec"
+          }
+        }
+      }
+    },
+    "OrderIntentRequest": {
+      "title": "OrderIntentRequest",
+      "description": "Client-submitted draft. The server assigns intent_id, tenant, user and client_order_id and re-runs every risk check.",
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "account_id",
+        "instrument_id",
+        "side",
+        "position_effect",
+        "order_type",
+        "quantity_base",
+        "time_in_force",
+        "reduce_only",
+        "mode",
+        "source"
+      ],
+      "properties": {
+        "account_id": {
+          "type": "string"
+        },
+        "instrument_id": {
+          "$ref": "common.schema.json#/$defs/InstrumentId"
+        },
+        "side": {
+          "$ref": "#/$defs/OrderSide"
+        },
+        "position_effect": {
+          "$ref": "#/$defs/PositionEffect"
+        },
+        "order_type": {
+          "$ref": "#/$defs/OrderType"
+        },
+        "quantity_base": {
+          "$ref": "common.schema.json#/$defs/NonNegativeDecimalString"
+        },
+        "limit_price": {
+          "oneOf": [
+            {
+              "$ref": "common.schema.json#/$defs/DecimalString"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "trigger_price": {
+          "oneOf": [
+            {
+              "$ref": "common.schema.json#/$defs/DecimalString"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "trigger_basis": {
+          "oneOf": [
+            {
+              "$ref": "#/$defs/PriceBasis"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "time_in_force": {
+          "$ref": "#/$defs/TimeInForce"
+        },
+        "reduce_only": {
+          "type": "boolean"
+        },
+        "margin_mode": {
+          "$ref": "#/$defs/MarginMode"
+        },
+        "leverage": {
+          "oneOf": [
+            {
+              "$ref": "common.schema.json#/$defs/NonNegativeDecimalString"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "bracket": {
+          "oneOf": [
+            {
+              "$ref": "#/$defs/Bracket"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "mode": {
+          "$ref": "common.schema.json#/$defs/OrderMode"
+        },
+        "source": {
+          "$ref": "#/$defs/IntentSource"
+        },
+        "strategy_version_id": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "signal_id": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "expires_at_ms": {
+          "oneOf": [
+            {
+              "$ref": "common.schema.json#/$defs/TimestampMs"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "preview_token": {
+          "type": [
+            "string",
+            "null"
+          ],
+          "description": "Token from /v1/orders/preview binding the confirmed parameters. Required for manual LIVE submissions."
+        }
+      }
+    },
+    "OrderIntent": {
+      "title": "OrderIntent",
+      "description": "Immutable server-side intent.",
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "intent_id",
+        "tenant_id",
+        "user_id",
+        "idempotency_key",
+        "client_order_id",
+        "created_at_ms",
+        "request"
+      ],
+      "properties": {
+        "intent_id": {
+          "type": "string",
+          "description": "UUIDv7 generated server-side."
+        },
+        "tenant_id": {
+          "type": "string"
+        },
+        "user_id": {
+          "type": "string"
+        },
+        "idempotency_key": {
+          "type": "string"
+        },
+        "client_order_id": {
+          "type": "string"
+        },
+        "created_at_ms": {
+          "$ref": "common.schema.json#/$defs/TimestampMs"
+        },
+        "request": {
+          "$ref": "#/$defs/OrderIntentRequest"
+        }
+      }
+    },
+    "RiskDomain": {
+      "title": "RiskDomain",
+      "type": "string",
+      "enum": [
+        "MODE",
+        "IDENTITY",
+        "ACCOUNT",
+        "MARKET_STATUS",
+        "DATA_QUALITY",
+        "SIZE",
+        "EXPOSURE",
+        "LIQUIDITY",
+        "DECISION_QUALITY",
+        "DUPLICATE",
+        "CONNECTIVITY",
+        "KILL_SWITCH",
+        "PROTECTION"
+      ]
+    },
+    "RiskCheckResult": {
+      "title": "RiskCheckResult",
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "check",
+        "domain",
+        "outcome",
+        "message"
+      ],
+      "properties": {
+        "check": {
+          "type": "string"
+        },
+        "domain": {
+          "$ref": "#/$defs/RiskDomain"
+        },
+        "outcome": {
+          "type": "string",
+          "enum": [
+            "PASS",
+            "FAIL",
+            "WARN",
+            "SKIP",
+            "UNKNOWN"
+          ]
+        },
+        "code": {
+          "oneOf": [
+            {
+              "$ref": "common.schema.json#/$defs/ErrorCode"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "message": {
+          "type": "string"
+        },
+        "observed": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "limit": {
+          "type": [
+            "string",
+            "null"
+          ]
+        }
+      }
+    },
+    "RiskDecision": {
+      "title": "RiskDecision",
+      "description": "Deny-by-default policy pipeline verdict. Any FAIL or UNKNOWN on a mandatory check blocks new exposure.",
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "decision",
+        "checks",
+        "policy_version",
+        "evaluated_at_ms"
+      ],
+      "properties": {
+        "decision": {
+          "type": "string",
+          "enum": [
+            "ALLOW",
+            "REJECT",
+            "BLOCK",
+            "PAUSE"
+          ]
+        },
+        "checks": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/RiskCheckResult"
+          }
+        },
+        "policy_version": {
+          "type": "string"
+        },
+        "evaluated_at_ms": {
+          "$ref": "common.schema.json#/$defs/TimestampMs"
+        },
+        "reservation_id": {
+          "type": [
+            "string",
+            "null"
+          ]
+        }
+      }
+    },
+    "ProtectionInfo": {
+      "title": "ProtectionInfo",
+      "description": "Whether protective orders are venue-native. Server-side software stops are never presented as guaranteed.",
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "native_stop_loss",
+        "native_take_profit",
+        "note"
+      ],
+      "properties": {
+        "native_stop_loss": {
+          "type": "boolean"
+        },
+        "native_take_profit": {
+          "type": "boolean"
+        },
+        "note": {
+          "type": "string"
+        }
+      }
+    },
+    "OrderPreview": {
+      "title": "OrderPreview",
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "allowed",
+        "normalized",
+        "notional",
+        "estimated_fee",
+        "margin_required",
+        "risk",
+        "warnings",
+        "preview_token",
+        "expires_at_ms",
+        "protection"
+      ],
+      "properties": {
+        "allowed": {
+          "type": "boolean"
+        },
+        "normalized": {
+          "$ref": "#/$defs/OrderIntentRequest",
+          "description": "Request after tick/lot rounding."
+        },
+        "notional": {
+          "$ref": "common.schema.json#/$defs/DecimalString"
+        },
+        "estimated_fee": {
+          "$ref": "common.schema.json#/$defs/DecimalString"
+        },
+        "estimated_slippage_pct": {
+          "oneOf": [
+            {
+              "$ref": "common.schema.json#/$defs/DecimalString"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "margin_required": {
+          "$ref": "common.schema.json#/$defs/DecimalString"
+        },
+        "mark_price": {
+          "oneOf": [
+            {
+              "$ref": "common.schema.json#/$defs/DecimalString"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "best_bid": {
+          "oneOf": [
+            {
+              "$ref": "common.schema.json#/$defs/DecimalString"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "best_ask": {
+          "oneOf": [
+            {
+              "$ref": "common.schema.json#/$defs/DecimalString"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "risk": {
+          "$ref": "#/$defs/RiskDecision"
+        },
+        "warnings": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        },
+        "preview_token": {
+          "type": "string"
+        },
+        "expires_at_ms": {
+          "$ref": "common.schema.json#/$defs/TimestampMs"
+        },
+        "protection": {
+          "$ref": "#/$defs/ProtectionInfo"
+        }
+      }
+    },
+    "OrderState": {
+      "title": "OrderState",
+      "type": "string",
+      "enum": [
+        "DRAFT",
+        "VALIDATED",
+        "RESERVED",
+        "SUBMITTING",
+        "ACKNOWLEDGED",
+        "PARTIALLY_FILLED",
+        "FILLED",
+        "REJECTED",
+        "CANCEL_PENDING",
+        "CANCELED",
+        "EXPIRED",
+        "FAILED",
+        "UNKNOWN_RECONCILING"
+      ]
+    },
+    "OrderRole": {
+      "title": "OrderRole",
+      "type": "string",
+      "enum": [
+        "PRIMARY",
+        "STOP_LOSS",
+        "TAKE_PROFIT",
+        "CLOSE"
+      ]
+    },
+    "Order": {
+      "title": "Order",
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "order_id",
+        "intent_id",
+        "tenant_id",
+        "account_id",
+        "instrument_id",
+        "client_order_id",
+        "mode",
+        "role",
+        "side",
+        "order_type",
+        "time_in_force",
+        "quantity_base",
+        "filled_base",
+        "reduce_only",
+        "state",
+        "created_at_ms",
+        "updated_at_ms",
+        "version"
+      ],
+      "properties": {
+        "order_id": {
+          "type": "string"
+        },
+        "intent_id": {
+          "type": "string"
+        },
+        "tenant_id": {
+          "type": "string"
+        },
+        "account_id": {
+          "type": "string"
+        },
+        "instrument_id": {
+          "$ref": "common.schema.json#/$defs/InstrumentId"
+        },
+        "client_order_id": {
+          "type": "string"
+        },
+        "exchange_order_id": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "parent_order_id": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "mode": {
+          "$ref": "common.schema.json#/$defs/OrderMode"
+        },
+        "role": {
+          "$ref": "#/$defs/OrderRole"
+        },
+        "side": {
+          "$ref": "#/$defs/OrderSide"
+        },
+        "order_type": {
+          "$ref": "#/$defs/OrderType"
+        },
+        "time_in_force": {
+          "$ref": "#/$defs/TimeInForce"
+        },
+        "quantity_base": {
+          "$ref": "common.schema.json#/$defs/NonNegativeDecimalString"
+        },
+        "filled_base": {
+          "$ref": "common.schema.json#/$defs/NonNegativeDecimalString"
+        },
+        "avg_fill_price": {
+          "oneOf": [
+            {
+              "$ref": "common.schema.json#/$defs/DecimalString"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "limit_price": {
+          "oneOf": [
+            {
+              "$ref": "common.schema.json#/$defs/DecimalString"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "trigger_price": {
+          "oneOf": [
+            {
+              "$ref": "common.schema.json#/$defs/DecimalString"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "reduce_only": {
+          "type": "boolean"
+        },
+        "state": {
+          "$ref": "#/$defs/OrderState"
+        },
+        "state_reason": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "strategy_version_id": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "signal_id": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "created_at_ms": {
+          "$ref": "common.schema.json#/$defs/TimestampMs"
+        },
+        "updated_at_ms": {
+          "$ref": "common.schema.json#/$defs/TimestampMs"
+        },
+        "version": {
+          "type": "integer",
+          "minimum": 0
+        }
+      }
+    },
+    "SubmitIntentResponse": {
+      "title": "SubmitIntentResponse",
+      "description": "Result of POST /v1/orders/intents. A repeated Idempotency-Key returns the original response with replayed=true.",
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "intent",
+        "risk",
+        "orders",
+        "replayed"
+      ],
+      "properties": {
+        "intent": {
+          "$ref": "#/$defs/OrderIntent"
+        },
+        "risk": {
+          "$ref": "#/$defs/RiskDecision"
+        },
+        "orders": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/Order"
+          }
+        },
+        "replayed": {
+          "type": "boolean"
+        }
+      }
+    },
+    "AmendRequest": {
+      "title": "AmendRequest",
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "limit_price": {
+          "oneOf": [
+            {
+              "$ref": "common.schema.json#/$defs/DecimalString"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "trigger_price": {
+          "oneOf": [
+            {
+              "$ref": "common.schema.json#/$defs/DecimalString"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "quantity_base": {
+          "oneOf": [
+            {
+              "$ref": "common.schema.json#/$defs/NonNegativeDecimalString"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "expected_version": {
+          "type": "integer",
+          "minimum": 0
+        }
+      }
+    },
+    "Fill": {
+      "title": "Fill",
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "fill_id",
+        "order_id",
+        "account_id",
+        "instrument_id",
+        "exchange_fill_id",
+        "side",
+        "price",
+        "quantity_base",
+        "fee",
+        "fee_asset",
+        "liquidity",
+        "ts_ms",
+        "mode"
+      ],
+      "properties": {
+        "fill_id": {
+          "type": "string"
+        },
+        "order_id": {
+          "type": "string"
+        },
+        "account_id": {
+          "type": "string"
+        },
+        "instrument_id": {
+          "$ref": "common.schema.json#/$defs/InstrumentId"
+        },
+        "exchange_fill_id": {
+          "type": "string"
+        },
+        "side": {
+          "$ref": "#/$defs/OrderSide"
+        },
+        "price": {
+          "$ref": "common.schema.json#/$defs/DecimalString"
+        },
+        "quantity_base": {
+          "$ref": "common.schema.json#/$defs/NonNegativeDecimalString"
+        },
+        "fee": {
+          "$ref": "common.schema.json#/$defs/DecimalString"
+        },
+        "fee_asset": {
+          "type": "string"
+        },
+        "liquidity": {
+          "type": "string",
+          "enum": [
+            "maker",
+            "taker"
+          ]
+        },
+        "ts_ms": {
+          "$ref": "common.schema.json#/$defs/TimestampMs"
+        },
+        "mode": {
+          "$ref": "common.schema.json#/$defs/OrderMode"
+        }
+      }
+    },
+    "Position": {
+      "title": "Position",
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "position_id",
+        "account_id",
+        "instrument_id",
+        "side",
+        "quantity_base",
+        "realized_pnl",
+        "mode",
+        "stale",
+        "as_of_ms"
+      ],
+      "properties": {
+        "position_id": {
+          "type": "string"
+        },
+        "account_id": {
+          "type": "string"
+        },
+        "instrument_id": {
+          "$ref": "common.schema.json#/$defs/InstrumentId"
+        },
+        "side": {
+          "type": "string",
+          "enum": [
+            "long",
+            "short",
+            "flat"
+          ]
+        },
+        "quantity_base": {
+          "$ref": "common.schema.json#/$defs/NonNegativeDecimalString"
+        },
+        "entry_price": {
+          "oneOf": [
+            {
+              "$ref": "common.schema.json#/$defs/DecimalString"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "mark_price": {
+          "oneOf": [
+            {
+              "$ref": "common.schema.json#/$defs/DecimalString"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "unrealized_pnl": {
+          "oneOf": [
+            {
+              "$ref": "common.schema.json#/$defs/DecimalString"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "realized_pnl": {
+          "$ref": "common.schema.json#/$defs/DecimalString"
+        },
+        "liquidation_price": {
+          "oneOf": [
+            {
+              "$ref": "common.schema.json#/$defs/DecimalString"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "margin": {
+          "oneOf": [
+            {
+              "$ref": "common.schema.json#/$defs/DecimalString"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "leverage": {
+          "oneOf": [
+            {
+              "$ref": "common.schema.json#/$defs/DecimalString"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "funding_accrued": {
+          "oneOf": [
+            {
+              "$ref": "common.schema.json#/$defs/DecimalString"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "mode": {
+          "$ref": "common.schema.json#/$defs/OrderMode"
+        },
+        "stale": {
+          "type": "boolean"
+        },
+        "as_of_ms": {
+          "$ref": "common.schema.json#/$defs/TimestampMs"
+        }
+      }
+    },
+    "TradingStatus": {
+      "title": "TradingStatus",
+      "type": "string",
+      "enum": [
+        "AVAILABLE",
+        "READ_ONLY",
+        "TRADING_UNAVAILABLE"
+      ]
+    },
+    "TradingCapabilities": {
+      "title": "TradingCapabilities",
+      "description": "What the venue adapter can do for this account, negotiated at runtime. Unsupported features are rejected, never emulated silently.",
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "venue",
+        "status",
+        "order_types",
+        "time_in_force",
+        "native_reduce_only",
+        "native_stop_loss",
+        "native_take_profit",
+        "native_oco",
+        "amend",
+        "batch",
+        "position_modes",
+        "margin_modes",
+        "client_order_id",
+        "query_by_client_id",
+        "notes"
+      ],
+      "properties": {
+        "venue": {
+          "$ref": "common.schema.json#/$defs/Venue"
+        },
+        "status": {
+          "$ref": "#/$defs/TradingStatus"
+        },
+        "order_types": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/OrderType"
+          }
+        },
+        "time_in_force": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/TimeInForce"
+          }
+        },
+        "native_reduce_only": {
+          "type": "boolean"
+        },
+        "native_stop_loss": {
+          "type": "boolean"
+        },
+        "native_take_profit": {
+          "type": "boolean"
+        },
+        "native_oco": {
+          "type": "boolean"
+        },
+        "amend": {
+          "type": "boolean"
+        },
+        "batch": {
+          "type": "boolean"
+        },
+        "position_modes": {
+          "type": "array",
+          "items": {
+            "type": "string",
+            "enum": [
+              "ONE_WAY",
+              "HEDGE"
+            ]
+          }
+        },
+        "margin_modes": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/MarginMode"
+          }
+        },
+        "client_order_id": {
+          "type": "boolean"
+        },
+        "query_by_client_id": {
+          "type": "boolean"
+        },
+        "notes": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        }
+      }
+    },
+    "AccountStatus": {
+      "title": "AccountStatus",
+      "type": "string",
+      "enum": [
+        "CONNECTED",
+        "PENDING_VERIFICATION",
+        "READ_ONLY",
+        "TRADING_UNAVAILABLE",
+        "DISCONNECTED"
+      ]
+    },
+    "AccountSummary": {
+      "title": "AccountSummary",
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "account_id",
+        "tenant_id",
+        "venue",
+        "label",
+        "status",
+        "modes",
+        "currency",
+        "positions",
+        "open_orders",
+        "capabilities",
+        "health",
+        "stale",
+        "last_sync_ms"
+      ],
+      "properties": {
+        "account_id": {
+          "type": "string"
+        },
+        "tenant_id": {
+          "type": "string"
+        },
+        "venue": {
+          "$ref": "common.schema.json#/$defs/Venue"
+        },
+        "label": {
+          "type": "string"
+        },
+        "status": {
+          "$ref": "#/$defs/AccountStatus"
+        },
+        "modes": {
+          "type": "array",
+          "items": {
+            "$ref": "common.schema.json#/$defs/OrderMode"
+          },
+          "description": "Order modes currently permitted for this account."
+        },
+        "equity": {
+          "oneOf": [
+            {
+              "$ref": "common.schema.json#/$defs/DecimalString"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "available_margin": {
+          "oneOf": [
+            {
+              "$ref": "common.schema.json#/$defs/DecimalString"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "currency": {
+          "type": "string"
+        },
+        "positions": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/Position"
+          }
+        },
+        "open_orders": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/Order"
+          }
+        },
+        "capabilities": {
+          "$ref": "#/$defs/TradingCapabilities"
+        },
+        "health": {
+          "$ref": "common.schema.json#/$defs/HealthState"
+        },
+        "stale": {
+          "type": "boolean"
+        },
+        "last_sync_ms": {
+          "oneOf": [
+            {
+              "$ref": "common.schema.json#/$defs/TimestampMs"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        }
+      }
+    },
+    "KillSwitchScope": {
+      "title": "KillSwitchScope",
+      "type": "string",
+      "enum": [
+        "GLOBAL",
+        "ACCOUNT",
+        "STRATEGY"
+      ]
+    },
+    "KillSwitchRequest": {
+      "title": "KillSwitchRequest",
+      "description": "Engaging blocks new opening orders. Cancelling and flattening are separate explicit options.",
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "scope",
+        "engage",
+        "cancel_open_orders",
+        "flatten_positions",
+        "reason"
+      ],
+      "properties": {
+        "scope": {
+          "$ref": "#/$defs/KillSwitchScope"
+        },
+        "target_id": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "engage": {
+          "type": "boolean"
+        },
+        "cancel_open_orders": {
+          "type": "boolean"
+        },
+        "flatten_positions": {
+          "type": "boolean"
+        },
+        "reason": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 500
+        }
+      }
+    },
+    "KillSwitchState": {
+      "title": "KillSwitchState",
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "scope",
+        "engaged",
+        "cancel_open_orders",
+        "flatten_positions",
+        "reason",
+        "actor",
+        "changed_at_ms"
+      ],
+      "properties": {
+        "scope": {
+          "$ref": "#/$defs/KillSwitchScope"
+        },
+        "target_id": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "engaged": {
+          "type": "boolean"
+        },
+        "cancel_open_orders": {
+          "type": "boolean"
+        },
+        "flatten_positions": {
+          "type": "boolean"
+        },
+        "reason": {
+          "type": "string"
+        },
+        "actor": {
+          "type": "string"
+        },
+        "changed_at_ms": {
+          "$ref": "common.schema.json#/$defs/TimestampMs"
+        }
+      }
+    },
+    "KillSwitchList": {
+      "title": "KillSwitchList",
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "switches"
+      ],
+      "properties": {
+        "switches": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/KillSwitchState"
+          }
+        }
+      }
+    },
+    "AuditEvent": {
+      "title": "AuditEvent",
+      "description": "Append-only, hash-chained audit record.",
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "event_id",
+        "tenant_id",
+        "actor",
+        "action",
+        "entity_type",
+        "entity_id",
+        "trace_id",
+        "ts_ms",
+        "payload",
+        "prev_hash",
+        "hash"
+      ],
+      "properties": {
+        "event_id": {
+          "type": "string"
+        },
+        "tenant_id": {
+          "type": "string"
+        },
+        "account_id": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "actor": {
+          "type": "string"
+        },
+        "action": {
+          "type": "string"
+        },
+        "entity_type": {
+          "type": "string"
+        },
+        "entity_id": {
+          "type": "string"
+        },
+        "trace_id": {
+          "type": "string"
+        },
+        "ts_ms": {
+          "$ref": "common.schema.json#/$defs/TimestampMs"
+        },
+        "payload": {
+          "type": "object"
+        },
+        "prev_hash": {
+          "type": "string"
+        },
+        "hash": {
+          "type": "string"
+        }
+      }
+    },
+    "AuditEventList": {
+      "title": "AuditEventList",
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "events",
+        "chain_valid"
+      ],
+      "properties": {
+        "events": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/AuditEvent"
+          }
+        },
+        "chain_valid": {
+          "type": "boolean"
+        }
+      }
+    },
+    "DeploymentLimits": {
+      "title": "DeploymentLimits",
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "max_notional",
+        "max_open_positions",
+        "max_daily_loss",
+        "allowed_instruments",
+        "max_leverage"
+      ],
+      "properties": {
+        "max_notional": {
+          "$ref": "common.schema.json#/$defs/NonNegativeDecimalString"
+        },
+        "max_open_positions": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "max_daily_loss": {
+          "$ref": "common.schema.json#/$defs/NonNegativeDecimalString"
+        },
+        "allowed_instruments": {
+          "type": "array",
+          "items": {
+            "$ref": "common.schema.json#/$defs/InstrumentId"
+          }
+        },
+        "max_leverage": {
+          "$ref": "common.schema.json#/$defs/NonNegativeDecimalString"
+        }
+      }
+    },
+    "SizingModel": {
+      "title": "SizingModel",
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "model"
+      ],
+      "properties": {
+        "model": {
+          "type": "string",
+          "enum": [
+            "RISK_PCT",
+            "FIXED_QTY"
+          ]
+        },
+        "risk_pct": {
+          "$ref": "common.schema.json#/$defs/NonNegativeDecimalString"
+        },
+        "fixed_qty": {
+          "$ref": "common.schema.json#/$defs/NonNegativeDecimalString"
+        }
+      }
+    },
+    "LiveConsent": {
+      "title": "LiveConsent",
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "consented_at_ms",
+        "expires_at_ms",
+        "scope_hash",
+        "actor"
+      ],
+      "properties": {
+        "consented_at_ms": {
+          "$ref": "common.schema.json#/$defs/TimestampMs"
+        },
+        "expires_at_ms": {
+          "$ref": "common.schema.json#/$defs/TimestampMs"
+        },
+        "scope_hash": {
+          "type": "string"
+        },
+        "actor": {
+          "type": "string"
+        }
+      }
+    },
+    "DeploymentRequest": {
+      "title": "DeploymentRequest",
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "strategy_version_id",
+        "account_id",
+        "mode",
+        "limits",
+        "sizing"
+      ],
+      "properties": {
+        "strategy_version_id": {
+          "type": "string"
+        },
+        "account_id": {
+          "type": "string"
+        },
+        "mode": {
+          "type": "string",
+          "enum": [
+            "PAPER",
+            "SHADOW",
+            "AUTO_LIVE"
+          ]
+        },
+        "limits": {
+          "$ref": "#/$defs/DeploymentLimits"
+        },
+        "sizing": {
+          "$ref": "#/$defs/SizingModel"
+        }
+      }
+    },
+    "Deployment": {
+      "title": "Deployment",
+      "description": "Binding of one immutable strategy version to one account. AUTO_LIVE stays PENDING_CONSENT until scoped consent, step-up and the global live gate all pass.",
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "deployment_id",
+        "tenant_id",
+        "strategy_version_id",
+        "account_id",
+        "mode",
+        "state",
+        "limits",
+        "sizing",
+        "created_at_ms",
+        "updated_at_ms"
+      ],
+      "properties": {
+        "deployment_id": {
+          "type": "string"
+        },
+        "tenant_id": {
+          "type": "string"
+        },
+        "strategy_version_id": {
+          "type": "string"
+        },
+        "account_id": {
+          "type": "string"
+        },
+        "mode": {
+          "type": "string",
+          "enum": [
+            "PAPER",
+            "SHADOW",
+            "AUTO_LIVE"
+          ]
+        },
+        "state": {
+          "type": "string",
+          "enum": [
+            "ENABLED",
+            "DISABLED",
+            "PENDING_CONSENT",
+            "REVOKED"
+          ]
+        },
+        "limits": {
+          "$ref": "#/$defs/DeploymentLimits"
+        },
+        "sizing": {
+          "$ref": "#/$defs/SizingModel"
+        },
+        "live_consent": {
+          "oneOf": [
+            {
+              "$ref": "#/$defs/LiveConsent"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "created_at_ms": {
+          "$ref": "common.schema.json#/$defs/TimestampMs"
+        },
+        "updated_at_ms": {
+          "$ref": "common.schema.json#/$defs/TimestampMs"
+        }
+      }
+    },
+    "OrderList": {
+      "title": "OrderList",
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "orders"
+      ],
+      "properties": {
+        "orders": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/Order"
+          }
+        }
+      }
+    },
+    "FillList": {
+      "title": "FillList",
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "fills"
+      ],
+      "properties": {
+        "fills": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/Fill"
+          }
+        }
+      }
+    },
+    "PositionList": {
+      "title": "PositionList",
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "positions"
+      ],
+      "properties": {
+        "positions": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/Position"
+          }
+        }
+      }
+    },
+    "AccountList": {
+      "title": "AccountList",
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "accounts"
+      ],
+      "properties": {
+        "accounts": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/AccountSummary"
+          }
+        }
+      }
+    },
+    "DeploymentList": {
+      "title": "DeploymentList",
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "deployments"
+      ],
+      "properties": {
+        "deployments": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/Deployment"
+          }
+        }
+      }
+    },
+    "ClosePositionRequest": {
+      "title": "ClosePositionRequest",
+      "description": "Close or reduce a position with a reduce-only order. Never reverses the position.",
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "fraction",
+        "order_type"
+      ],
+      "properties": {
+        "fraction": {
+          "$ref": "common.schema.json#/$defs/NonNegativeDecimalString",
+          "description": "Fraction of the position to close, 0 < f <= 1."
+        },
+        "order_type": {
+          "type": "string",
+          "enum": [
+            "market",
+            "limit"
+          ]
+        },
+        "limit_price": {
+          "oneOf": [
+            {
+              "$ref": "common.schema.json#/$defs/DecimalString"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "preview_token": {
+          "type": [
+            "string",
+            "null"
+          ]
+        }
+      }
+    }
+  }
+}

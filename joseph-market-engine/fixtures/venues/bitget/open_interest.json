@@ -1,0 +1,14 @@
+{
+ "code": "00000",
+ "data": {
+  "openInterestList": [
+   {
+    "size": "34241.126799999977",
+    "symbol": "BTCUSDT"
+   }
+  ],
+  "ts": "1795277531112"
+ },
+ "msg": "success",
+ "requestTime": 1795277531111
+}

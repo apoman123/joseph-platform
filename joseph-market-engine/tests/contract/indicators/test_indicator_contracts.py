@@ -1,0 +1,146 @@
+"""Every indicator output conforms to indicators.schema.json."""
+
+from __future__ import annotations
+
+import asyncio
+from collections.abc import Callable
+from collections.abc import Sequence
+
+import pytest
+
+from joseph.domain import clock
+from joseph.domain import instruments
+from joseph.domain import market
+from joseph.domain import timeframes
+from joseph.indicators import catalog
+from joseph.indicators import service
+from joseph.indicators import testing
+from joseph.indicators.sdk import engine as engine_lib
+
+TF = timeframes.Timeframe
+Validate = Callable[[str, str, object], None]
+SCHEMA = "indicators.schema.json"
+
+
+class _Source:
+    """In-memory candle source."""
+
+    def __init__(self, data: dict[TF, list[market.Candle]]) -> None:
+        """Stores candles.
+
+        Args:
+            data: Candles per timeframe.
+        """
+        self._data = data
+
+    async def get_candles(
+        self,
+        instrument_id: instruments.InstrumentId,
+        timeframe: TF,
+        start_ms: int,
+        end_ms: int,
+    ) -> Sequence[market.Candle]:
+        """Returns stored candles in the window.
+
+        Args:
+            instrument_id: Ignored (single instrument).
+            timeframe: Timeframe.
+            start_ms: Window start.
+            end_ms: Window end.
+
+        Returns:
+            Candles.
+        """
+        del instrument_id
+        return [
+            c
+            for c in self._data.get(timeframe, [])
+            if start_ms <= c.start_ms < end_ms
+        ]
+
+
+@pytest.fixture(scope="module")
+def frames() -> list:  # type: ignore[type-arg]
+    """Runs all plugins on 5m and 1h over synthetic data.
+
+    Returns:
+        Frames.
+    """
+    m1 = testing.random_walk(2400, seed=17)
+    data = {
+        TF.M1: m1,
+        TF.M5: testing.aggregate(m1, TF.M5),
+        TF.H1: testing.aggregate(m1, TF.H1),
+    }
+    registry = catalog.build_default_registry()
+    plugins = {pid: engine_lib.PluginSpec((TF.M5,)) for pid in registry.ids()}
+    plugins["daily_bias"] = engine_lib.PluginSpec((TF.M5, TF.H1))
+    engine = engine_lib.IndicatorEngine(
+        registry,
+        engine_lib.EngineConfig(TF.M5, plugins),
+        testing.DEFAULT_INSTRUMENT,
+    )
+    return engine.run(data)
+
+
+def test_snapshots_conform(contract_validate: Validate, frames: list) -> None:  # type: ignore[type-arg]
+    """Snapshots (with nested AOIs and events) validate."""
+    seen = set()
+    for frame in frames[::7] + frames[-1:]:
+        for key, snapshot in frame.snapshots.items():
+            contract_validate(
+                SCHEMA, "IndicatorSnapshot", snapshot.to_contract()
+            )
+            seen.add(key[0])
+    assert len(seen) == 7
+
+
+def test_every_emitted_aoi_and_event_conforms(
+    contract_validate: Validate, frames: list
+) -> None:  # type: ignore[type-arg]
+    """AOI records and structure events validate individually."""
+    kinds = set()
+    names = set()
+    for frame in frames:
+        for event in frame.events:
+            contract_validate(SCHEMA, "StructureEvent", event.to_contract())
+            names.add(event.name.value)
+        for snapshot in frame.snapshots.values():
+            for aoi in snapshot.aois:
+                kinds.add(aoi.kind.value)
+    for snapshot in frames[-1].snapshots.values():
+        for aoi in snapshot.aois:
+            contract_validate(SCHEMA, "AoiRecord", aoi.to_contract())
+    assert {"FVG", "OB", "BSL", "SSL", "VAH", "POC", "VAL"} <= kinds
+    assert len(names) >= 8
+
+
+def test_plugin_infos_conform(contract_validate: Validate) -> None:
+    """Plugin descriptors and the list envelope validate."""
+    registry = catalog.build_default_registry()
+    listing = registry.list_infos()
+    contract_validate(SCHEMA, "IndicatorPluginList", listing)
+    for plugin in catalog.default_plugins():
+        info = plugin.info()
+        contract_validate(SCHEMA, "IndicatorPluginInfo", info)
+        assert info["licensing_status"] == "CLEAN_ROOM_FROM_SPEC"
+        assert info["parity_status"] == "SPEC_ONLY"
+
+
+def test_query_service_outputs_conform(contract_validate: Validate) -> None:
+    """IndicatorSnapshotList and AoiList validate."""
+    m1 = testing.random_walk(1800, seed=23)
+    data = {
+        TF.M1: m1,
+        TF.M5: testing.aggregate(m1, TF.M5),
+        TF.H1: testing.aggregate(m1, TF.H1),
+    }
+    query = service.IndicatorQueryService(
+        _Source(data),
+        catalog.build_default_registry(),
+        clock.ManualClock(m1[-1].end_ms),
+    )
+    snapshots = asyncio.run(query.snapshots(testing.DEFAULT_INSTRUMENT, TF.M5))
+    contract_validate(SCHEMA, "IndicatorSnapshotList", snapshots)
+    aois = asyncio.run(query.aois(testing.DEFAULT_INSTRUMENT, TF.M5))
+    contract_validate(SCHEMA, "AoiList", aois)

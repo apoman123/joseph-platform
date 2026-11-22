@@ -1,0 +1,186 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://schemas.joseph.local/v1/indicators.schema.json",
+  "title": "JosephIndicators",
+  "description": "Backend-authoritative indicator outputs. The terminal renders these records; it never recomputes trading signals.",
+  "$defs": {
+    "AoiKind": {
+      "title": "AoiKind",
+      "type": "string",
+      "enum": ["FVG", "IFVG", "OB", "BREAKER", "BSL", "SSL", "EQH", "EQL", "PREMIUM", "DISCOUNT", "EQUILIBRIUM", "OTE", "VAH", "POC", "VAL", "PDH", "PDL", "SESSION_HIGH", "SESSION_LOW"]
+    },
+    "AoiState": {
+      "title": "AoiState",
+      "type": "string",
+      "enum": ["active", "tested", "inverted", "swept", "invalidated", "expired"]
+    },
+    "IndicatorMethod": {
+      "title": "IndicatorMethod",
+      "description": "`pine_parity` reproduces the reference Pine semantics; `trade` uses venue trades and is never presented as parity.",
+      "type": "string",
+      "enum": ["pine_parity", "trade"]
+    },
+    "AoiRecord": {
+      "title": "AoiRecord",
+      "description": "Versioned presentation record of an area of interest. Lines use lower == upper.",
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["schema_version", "type", "instrument_id", "timeframe", "aoi_id", "source", "kind", "side", "state", "lower", "upper", "created_at_ms", "confirmed_at_ms", "as_of_ms", "indicator_version", "method"],
+      "properties": {
+        "schema_version": {"const": 1},
+        "type": {"type": "string", "enum": ["aoi.updated"]},
+        "instrument_id": {"$ref": "common.schema.json#/$defs/InstrumentId"},
+        "timeframe": {"$ref": "common.schema.json#/$defs/Timeframe"},
+        "aoi_id": {"type": "string", "minLength": 1, "maxLength": 128},
+        "source": {"type": "string", "description": "Indicator plugin id."},
+        "kind": {"$ref": "#/$defs/AoiKind"},
+        "side": {"$ref": "common.schema.json#/$defs/ZoneSide"},
+        "state": {"$ref": "#/$defs/AoiState"},
+        "lower": {"$ref": "common.schema.json#/$defs/DecimalString"},
+        "upper": {"$ref": "common.schema.json#/$defs/DecimalString"},
+        "created_at_ms": {"$ref": "common.schema.json#/$defs/TimestampMs", "description": "Start of the bar where the structure originates."},
+        "confirmed_at_ms": {"$ref": "common.schema.json#/$defs/TimestampMs", "description": "Close time of the bar that confirmed the structure. Never earlier than it could be known."},
+        "invalidated_at_ms": {"oneOf": [{"$ref": "common.schema.json#/$defs/TimestampMs"}, {"type": "null"}]},
+        "as_of_ms": {"$ref": "common.schema.json#/$defs/TimestampMs"},
+        "quality_score": {"type": ["integer", "null"], "minimum": 0, "maximum": 100},
+        "range_id": {"type": ["string", "null"]},
+        "indicator_version": {"type": "string"},
+        "method": {"$ref": "#/$defs/IndicatorMethod"},
+        "meta": {"type": "object"}
+      }
+    },
+    "StructureEventName": {
+      "title": "StructureEventName",
+      "type": "string",
+      "enum": [
+        "BOS_BULL", "BOS_BEAR", "CHOCH_BULL", "CHOCH_BEAR", "INITIAL_BREAK_BULL", "INITIAL_BREAK_BEAR",
+        "FVG_FORMED", "IFVG_FORMED", "OB_FORMED", "BREAKER_FORMED", "AOI_INVALIDATED", "AOI_EXPIRED",
+        "SSL_SWEEP", "BSL_SWEEP", "SSL_BREAK", "BSL_BREAK",
+        "BUYER_FAILURE", "SELLER_FAILURE", "BUYER_BREAKOUT", "SELLER_BREAKOUT",
+        "RANGE_RESET", "VALUE_AREA_UPDATED"
+      ]
+    },
+    "StructureEvent": {
+      "title": "StructureEvent",
+      "description": "Market-structure event confirmed at a closed bar.",
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["event_id", "instrument_id", "timeframe", "source", "name", "bar_start_ms", "confirmed_at_ms"],
+      "properties": {
+        "event_id": {"type": "string"},
+        "instrument_id": {"$ref": "common.schema.json#/$defs/InstrumentId"},
+        "timeframe": {"$ref": "common.schema.json#/$defs/Timeframe"},
+        "source": {"type": "string"},
+        "name": {"$ref": "#/$defs/StructureEventName"},
+        "bar_start_ms": {"$ref": "common.schema.json#/$defs/TimestampMs"},
+        "confirmed_at_ms": {"$ref": "common.schema.json#/$defs/TimestampMs"},
+        "price": {"oneOf": [{"$ref": "common.schema.json#/$defs/DecimalString"}, {"type": "null"}]},
+        "aoi_id": {"type": ["string", "null"]},
+        "score": {"type": ["integer", "null"], "minimum": 0, "maximum": 100},
+        "meta": {"type": "object"}
+      }
+    },
+    "IndicatorValue": {
+      "title": "IndicatorValue",
+      "description": "Scalar indicator output. Decimals are strings.",
+      "type": ["string", "integer", "boolean", "null"]
+    },
+    "DataQuality": {
+      "title": "DataQuality",
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["feed_state", "missing_bars"],
+      "properties": {
+        "feed_state": {"$ref": "common.schema.json#/$defs/FeedState"},
+        "missing_bars": {"type": "integer", "minimum": 0},
+        "coverage_pct": {"oneOf": [{"$ref": "common.schema.json#/$defs/DecimalString"}, {"type": "null"}]}
+      }
+    },
+    "IndicatorSnapshot": {
+      "title": "IndicatorSnapshot",
+      "description": "State of one indicator plugin on one instrument/timeframe as of a closed bar.",
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["schema_version", "instrument_id", "timeframe", "plugin_id", "indicator_version", "method", "as_of_ms", "bar_start_ms", "aois", "events", "values", "warmup_complete", "data_quality"],
+      "properties": {
+        "schema_version": {"const": 1},
+        "instrument_id": {"$ref": "common.schema.json#/$defs/InstrumentId"},
+        "timeframe": {"$ref": "common.schema.json#/$defs/Timeframe"},
+        "plugin_id": {"type": "string"},
+        "indicator_version": {"type": "string"},
+        "method": {"$ref": "#/$defs/IndicatorMethod"},
+        "as_of_ms": {"$ref": "common.schema.json#/$defs/TimestampMs"},
+        "bar_start_ms": {"$ref": "common.schema.json#/$defs/TimestampMs"},
+        "aois": {"type": "array", "items": {"$ref": "#/$defs/AoiRecord"}},
+        "events": {"type": "array", "items": {"$ref": "#/$defs/StructureEvent"}},
+        "values": {"type": "object", "additionalProperties": {"$ref": "#/$defs/IndicatorValue"}},
+        "warmup_complete": {"type": "boolean"},
+        "data_quality": {"$ref": "#/$defs/DataQuality"}
+      }
+    },
+    "IndicatorSnapshotList": {
+      "title": "IndicatorSnapshotList",
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["snapshots", "as_of_ms"],
+      "properties": {
+        "snapshots": {"type": "array", "items": {"$ref": "#/$defs/IndicatorSnapshot"}},
+        "as_of_ms": {"$ref": "common.schema.json#/$defs/TimestampMs"}
+      }
+    },
+    "AoiList": {
+      "title": "AoiList",
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["instrument_id", "timeframe", "aois", "as_of_ms", "feed_state"],
+      "properties": {
+        "instrument_id": {"$ref": "common.schema.json#/$defs/InstrumentId"},
+        "timeframe": {"$ref": "common.schema.json#/$defs/Timeframe"},
+        "aois": {"type": "array", "items": {"$ref": "#/$defs/AoiRecord"}},
+        "events": {"type": "array", "items": {"$ref": "#/$defs/StructureEvent"}},
+        "as_of_ms": {"$ref": "common.schema.json#/$defs/TimestampMs"},
+        "feed_state": {"$ref": "common.schema.json#/$defs/FeedState"}
+      }
+    },
+    "LicensingStatus": {
+      "title": "LicensingStatus",
+      "type": "string",
+      "enum": ["CLEAN_ROOM_FROM_SPEC", "PINE_PORT_REVIEWED", "PINE_PORT_PENDING_REVIEW"]
+    },
+    "ParityStatus": {
+      "title": "ParityStatus",
+      "type": "string",
+      "enum": ["SPEC_ONLY", "GOLDEN_VERIFIED"]
+    },
+    "IndicatorPluginInfo": {
+      "title": "IndicatorPluginInfo",
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["plugin_id", "indicator_version", "schema_version", "display_name", "description", "timeframes", "warmup_bars", "required_streams", "input_schema", "output_kinds", "output_events", "licensing_status", "parity_status"],
+      "properties": {
+        "plugin_id": {"type": "string"},
+        "indicator_version": {"type": "string"},
+        "schema_version": {"type": "integer", "minimum": 1},
+        "display_name": {"type": "string"},
+        "description": {"type": "string"},
+        "timeframes": {"type": "array", "items": {"$ref": "common.schema.json#/$defs/Timeframe"}},
+        "warmup_bars": {"type": "integer", "minimum": 0},
+        "required_streams": {"type": "array", "items": {"type": "string"}},
+        "input_schema": {"type": "object"},
+        "output_kinds": {"type": "array", "items": {"$ref": "#/$defs/AoiKind"}},
+        "output_events": {"type": "array", "items": {"$ref": "#/$defs/StructureEventName"}},
+        "licensing_status": {"$ref": "#/$defs/LicensingStatus"},
+        "parity_status": {"$ref": "#/$defs/ParityStatus"}
+      }
+    },
+    "IndicatorPluginList": {
+      "title": "IndicatorPluginList",
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["plugins"],
+      "properties": {
+        "plugins": {"type": "array", "items": {"$ref": "#/$defs/IndicatorPluginInfo"}}
+      }
+    }
+  }
+}

@@ -1,0 +1,12 @@
+# Secret scanning config: gitleaks defaults plus a narrow allowlist for
+# deliberately fake credentials that redaction tests assert are never leaked.
+title = "joseph"
+
+[extend]
+useDefault = true
+
+[allowlist]
+description = "Fake credentials used by redaction/security tests"
+paths = [
+  '''joseph-execution-engine/tests/security/test_security\.py''',
+]

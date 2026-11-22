@@ -1,0 +1,15 @@
+{
+  "name": "@joseph/contracts",
+  "version": "0.5.0",
+  "private": true,
+  "type": "module",
+  "license": "MIT",
+  "description": "Versioned JSON Schemas, generated TypeScript types and API client ports shared by the terminal and the Python engines.",
+  "exports": {
+    ".": "./src/index.ts"
+  },
+  "scripts": {
+    "typecheck": "tsc --noEmit -p tsconfig.json"
+  },
+  "dependencies": {}
+}

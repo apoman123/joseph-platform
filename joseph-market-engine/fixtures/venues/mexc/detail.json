@@ -1,0 +1,310 @@
+{
+ "code": 0,
+ "data": [
+  {
+   "amountScale": 4,
+   "apiAllowed": true,
+   "appraisal": 0,
+   "askLimitPriceRate": 0.1,
+   "automaticDelivery": 0,
+   "baseCoin": "BTC",
+   "baseCoinId": "febc9973be4d4d53bb374476239eb219",
+   "baseCoinName": "BTC",
+   "bidLimitPriceRate": 0.1,
+   "conceptPlate": [
+    "mc-trade-zone-mainly",
+    "mc-trade-zone-layer2",
+    "mc-trade-zone-pow"
+   ],
+   "conceptPlateId": [
+    50,
+    5,
+    12
+   ],
+   "contractSize": 0.0001,
+   "countryConfigContractMaxLeverage": 0,
+   "createTime": 1591242684000,
+   "depthStepList": [
+    "0.1",
+    "1",
+    "10",
+    "100"
+   ],
+   "displayName": "BTC_USDT\u6c38\u7eed",
+   "displayNameEn": "BTC_USDT PERPETUAL",
+   "feeRateMode": "NORMAL",
+   "feeRateType": "BASE",
+   "fn": "BTC_USDT\u6c38\u7eed",
+   "futureType": 1,
+   "id": 10,
+   "indexOrigin": [
+    "BITGET",
+    "BYBIT",
+    "BINANCE",
+    "HTX",
+    "UPBIT",
+    "OKX",
+    "MEXC",
+    "KUCOIN"
+   ],
+   "initialMarginRate": 0.002,
+   "isHidden": false,
+   "isHot": false,
+   "isMaxLeverage": true,
+   "isNew": false,
+   "isZeroFeeRate": false,
+   "isZeroFeeSymbol": false,
+   "leverageFeeRates": [],
+   "limitMaxVol": 2500000,
+   "liquidationFeeRate": 0.0004,
+   "maintenanceMarginRate": 0.001,
+   "makerFeeRate": 0,
+   "marketOrderMaxLevel": 20,
+   "marketOrderPriceLimitRate1": 0.1,
+   "marketOrderPriceLimitRate2": 0.005,
+   "maxLeverage": 500,
+   "maxNumOrders": [
+    200,
+    50
+   ],
+   "maxVol": 400000,
+   "minLeverage": 1,
+   "minVol": 1,
+   "openingCountdownOption": 1,
+   "openingTime": 0,
+   "positionOpenType": 3,
+   "preMarket": false,
+   "priceCoefficientVariation": 0.004,
+   "priceScale": 1,
+   "priceUnit": 0.1,
+   "quoteCoin": "USDT",
+   "quoteCoinName": "USDT",
+   "regularMaxLeverage": 500,
+   "riskBaseVol": 19000000,
+   "riskIncrImr": 0,
+   "riskIncrMmr": 0,
+   "riskIncrVol": 0,
+   "riskLevelLimit": 1,
+   "riskLimitCustom": [
+    {
+     "imr": 0.002,
+     "level": 1,
+     "maxLeverage": 500,
+     "maxVol": 120000,
+     "mmr": 0.001
+    },
+    {
+     "imr": 0.005,
+     "level": 2,
+     "maxLeverage": 200,
+     "maxVol": 310000,
+     "mmr": 0.004
+    },
+    {
+     "imr": 0.01,
+     "level": 3,
+     "maxLeverage": 100,
+     "maxVol": 480000,
+     "mmr": 0.005
+    },
+    {
+     "imr": 0.02,
+     "level": 4,
+     "maxLeverage": 50,
+     "maxVol": 2800000,
+     "mmr": 0.01
+    },
+    {
+     "imr": 0.05,
+     "level": 5,
+     "maxLeverage": 20,
+     "maxVol": 17500000,
+     "mmr": 0.02
+    },
+    {
+     "imr": 0.1,
+     "level": 6,
+     "maxLeverage": 10,
+     "maxVol": 19000000,
+     "mmr": 0.05
+    }
+   ],
+   "riskLimitMode": "CUSTOM",
+   "riskLimitType": "BY_VOLUME",
+   "riskLongShortSwitch": 0,
+   "settleCoin": "USDT",
+   "showAppraisalCountdown": 0,
+   "showBeforeOpen": true,
+   "state": 0,
+   "stopOnlyFair": false,
+   "symbol": "BTC_USDT",
+   "tagIdList": [
+    5,
+    8
+   ],
+   "takerFeeRate": 0.0002,
+   "tempMaxLeverageLimited": false,
+   "threshold": 0,
+   "tieredFeeRates": [],
+   "triggerProtect": 0.1,
+   "type": 1,
+   "typeLabel": 0,
+   "vid": "128f589271cb4951b03e71e6323eb7be",
+   "volScale": 0,
+   "volUnit": 1
+  },
+  {
+   "amountScale": 4,
+   "apiAllowed": true,
+   "appraisal": 0,
+   "askLimitPriceRate": 0.2,
+   "automaticDelivery": 0,
+   "baseCoin": "ETH",
+   "baseCoinId": "93c38b0169214f8689763ce9a63a73ff",
+   "baseCoinName": "ETH",
+   "bidLimitPriceRate": 0.2,
+   "conceptPlate": [
+    "mc-trade-zone-mainly",
+    "mc-trade-zone-layer2",
+    "mc-trade-zone-0fees"
+   ],
+   "conceptPlateId": [
+    50,
+    5,
+    45
+   ],
+   "contractSize": 0.01,
+   "countryConfigContractMaxLeverage": 0,
+   "createTime": 1591243107000,
+   "depthStepList": [
+    "0.01",
+    "0.1",
+    "1",
+    "10"
+   ],
+   "displayName": "ETH_USDT\u6c38\u7eed",
+   "displayNameEn": "ETH_USDT PERPETUAL",
+   "feeRateMode": "NORMAL",
+   "feeRateType": "BASE",
+   "fn": "ETH_USDT\u6c38\u7eed",
+   "futureType": 1,
+   "id": 11,
+   "indexOrigin": [
+    "BITGET",
+    "BYBIT",
+    "BINANCE",
+    "HTX",
+    "UPBIT",
+    "OKX",
+    "MEXC",
+    "KUCOIN"
+   ],
+   "initialMarginRate": 0.002,
+   "isHidden": false,
+   "isHot": false,
+   "isMaxLeverage": true,
+   "isNew": false,
+   "isZeroFeeRate": false,
+   "isZeroFeeSymbol": false,
+   "leverageFeeRates": [],
+   "limitMaxVol": 200000,
+   "liquidationFeeRate": 0.0001,
+   "maintenanceMarginRate": 0.001,
+   "makerFeeRate": 0,
+   "marketOrderMaxLevel": 20,
+   "marketOrderPriceLimitRate1": 0.2,
+   "marketOrderPriceLimitRate2": 0.005,
+   "maxLeverage": 500,
+   "maxNumOrders": [
+    200,
+    50
+   ],
+   "maxVol": 70000,
+   "minLeverage": 1,
+   "minVol": 1,
+   "openingCountdownOption": 1,
+   "openingTime": 0,
+   "positionOpenType": 3,
+   "preMarket": false,
+   "priceCoefficientVariation": 0.004,
+   "priceScale": 2,
+   "priceUnit": 0.01,
+   "quoteCoin": "USDT",
+   "quoteCoinName": "USDT",
+   "regularMaxLeverage": 500,
+   "riskBaseVol": 4800000,
+   "riskIncrImr": 0,
+   "riskIncrMmr": 0,
+   "riskIncrVol": 0,
+   "riskLevelLimit": 1,
+   "riskLimitCustom": [
+    {
+     "imr": 0.002,
+     "level": 1,
+     "maxLeverage": 500,
+     "maxVol": 37000,
+     "mmr": 0.001
+    },
+    {
+     "imr": 0.005,
+     "level": 2,
+     "maxLeverage": 200,
+     "maxVol": 107000,
+     "mmr": 0.004
+    },
+    {
+     "imr": 0.01,
+     "level": 3,
+     "maxLeverage": 100,
+     "maxVol": 150000,
+     "mmr": 0.005
+    },
+    {
+     "imr": 0.02,
+     "level": 4,
+     "maxLeverage": 50,
+     "maxVol": 860000,
+     "mmr": 0.01
+    },
+    {
+     "imr": 0.05,
+     "level": 5,
+     "maxLeverage": 20,
+     "maxVol": 4100000,
+     "mmr": 0.02
+    },
+    {
+     "imr": 0.1,
+     "level": 6,
+     "maxLeverage": 10,
+     "maxVol": 4800000,
+     "mmr": 0.05
+    }
+   ],
+   "riskLimitMode": "CUSTOM",
+   "riskLimitType": "BY_VOLUME",
+   "riskLongShortSwitch": 0,
+   "settleCoin": "USDT",
+   "showAppraisalCountdown": 0,
+   "showBeforeOpen": true,
+   "state": 0,
+   "stopOnlyFair": false,
+   "symbol": "ETH_USDT",
+   "tagIdList": [
+    5,
+    8
+   ],
+   "takerFeeRate": 0.0002,
+   "tempMaxLeverageLimited": false,
+   "threshold": 0,
+   "tieredFeeRates": [],
+   "triggerProtect": 0.1,
+   "type": 1,
+   "typeLabel": 0,
+   "vid": "128f589271cb4951b03e71e6323eb7be",
+   "volScale": 0,
+   "volUnit": 1
+  }
+ ],
+ "success": true
+}

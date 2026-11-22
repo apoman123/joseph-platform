@@ -1,0 +1,17 @@
+{
+  "name": "@joseph/mock-provider",
+  "version": "0.5.0",
+  "private": true,
+  "type": "module",
+  "license": "MIT",
+  "description": "Deterministic DEMO market feed, broker and strategy services for development and tests. Always labeled DEMO.",
+  "exports": {
+    ".": "./src/index.ts"
+  },
+  "scripts": {
+    "typecheck": "tsc --noEmit -p tsconfig.json"
+  },
+  "dependencies": {
+    "@joseph/contracts": "workspace:*"
+  }
+}

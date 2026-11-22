@@ -1,0 +1,102 @@
+/**
+ * @fileoverview Declarative overlay models rendered by the chart.
+ *
+ * Features (indicator visualization, chart trading, alerts) never touch the
+ * chart library. They publish overlay layers made of these plain models and
+ * the chart adapter renders them. Prices are contract decimal strings so the
+ * values that may later become order parameters are never float-derived.
+ */
+import type {DecimalString, TimestampMs} from '@joseph/contracts';
+
+/** Line dash style. */
+export type OverlayLineStyle = 'solid' | 'dashed' | 'dotted';
+
+/** Visual emphasis hints mapped to design tokens by the renderer. */
+export type OverlayTone =
+  'bid' | 'ask' | 'user' | 'neutral' | 'warning' | 'danger' | 'muted';
+
+/** Horizontal price line, e.g. an order line, SL/TP or liquidity level. */
+export interface PriceLineOverlay {
+  /** Discriminator. */
+  kind: 'price-line';
+  /** Stable id unique within the layer. */
+  id: string;
+  /** Price level. */
+  price: DecimalString;
+  /** Color role. */
+  tone: OverlayTone;
+  /** Dash style. */
+  lineStyle: OverlayLineStyle;
+  /** Axis/label text. */
+  label: string;
+  /** Whether the user may drag the line (emits `overlay.dragEnd`). */
+  draggable?: boolean;
+  /** Optional time from which the line starts (ray); full width if unset. */
+  fromMs?: TimestampMs;
+  /** Optional pending/unknown styling (e.g. awaiting venue ACK). */
+  pending?: boolean;
+}
+
+/** Rectangular zone between two prices over a time span (AOIs, ranges). */
+export interface BoxOverlay {
+  /** Discriminator. */
+  kind: 'box';
+  /** Stable id unique within the layer. */
+  id: string;
+  /** Left edge (UTC ms). */
+  fromMs: TimestampMs;
+  /** Right edge (UTC ms); `null` extends to the latest bar. */
+  toMs: TimestampMs | null;
+  /** Lower price. */
+  lower: DecimalString;
+  /** Upper price. */
+  upper: DecimalString;
+  /** Color role. */
+  tone: OverlayTone;
+  /** Fill opacity 0..1. */
+  fillOpacity: number;
+  /** Border dash style. */
+  lineStyle: OverlayLineStyle;
+  /** Short label drawn inside the box. */
+  label?: string;
+  /** Optional midline (e.g. FVG 50%). */
+  midline?: boolean;
+}
+
+/** Point marker on a bar (structure events, signals, fills). */
+export interface MarkerOverlay {
+  /** Discriminator. */
+  kind: 'marker';
+  /** Stable id unique within the layer. */
+  id: string;
+  /** Bar time (UTC ms). */
+  timeMs: TimestampMs;
+  /** Placement relative to the bar. */
+  position: 'above' | 'below' | 'at';
+  /** Marker glyph. */
+  shape: 'arrow-up' | 'arrow-down' | 'circle' | 'square';
+  /** Color role. */
+  tone: OverlayTone;
+  /** Short text. */
+  text?: string;
+}
+
+/** Union of all overlay models. */
+export type OverlayModel = PriceLineOverlay | BoxOverlay | MarkerOverlay;
+
+/** A named, ordered group of overlay models owned by one feature. */
+export interface OverlayLayer {
+  /** Unique layer id, e.g. `indicator-viz:fvg_ifvg`. */
+  layerId: string;
+  /** Paint order; higher draws on top. */
+  zIndex: number;
+  /** Whether the layer is currently shown. */
+  visible: boolean;
+  /** Models to render. */
+  models: readonly OverlayModel[];
+  /**
+   * Provenance caption such as `as of 12:05 UTC · LIVE`. Rendered by the
+   * chart so users always see when backend data was computed.
+   */
+  caption?: string;
+}

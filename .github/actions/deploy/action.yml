@@ -1,0 +1,70 @@
+name: Deploy with docker compose over SSH
+description: >
+  Copies deploy/docker-compose.yml to the target host, logs the host in to
+  GHCR with the workflow token, pulls the requested image tag, restarts the
+  stack and waits for every health URL. The host keeps its own deploy .env
+  (secrets never leave the server). All inputs reach the shell through
+  environment variables, never through template interpolation.
+inputs:
+  host: {description: SSH host, required: true}
+  user: {description: SSH user, required: true}
+  ssh-key: {description: Private SSH key (secret), required: true}
+  known-hosts: {description: Pinned known_hosts line(s) for the host, required: true}
+  deploy-dir: {description: Directory on the host holding .env, required: true}
+  image-tag: {description: Image tag to roll out, required: true}
+  registry: {description: Image registry prefix, e.g. ghcr.io/owner, required: true}
+  registry-user: {description: Registry user, required: true}
+  registry-token: {description: Registry token with packages:read, required: true}
+  health-urls: {description: Space-separated URLs that must return 2xx, required: false, default: ''}
+runs:
+  using: composite
+  steps:
+    - name: Configure SSH with pinned host keys
+      shell: bash
+      env:
+        SSH_KEY: ${{ inputs.ssh-key }}
+        KNOWN_HOSTS: ${{ inputs.known-hosts }}
+      run: |
+        install -m 700 -d ~/.ssh
+        printf '%s\n' "$SSH_KEY" > ~/.ssh/deploy_key && chmod 600 ~/.ssh/deploy_key
+        printf '%s\n' "$KNOWN_HOSTS" > ~/.ssh/known_hosts && chmod 644 ~/.ssh/known_hosts
+    - name: Upload compose file
+      shell: bash
+      env:
+        TARGET: ${{ inputs.user }}@${{ inputs.host }}
+        DEPLOY_DIR: ${{ inputs.deploy-dir }}
+      run: |
+        scp -i ~/.ssh/deploy_key -o StrictHostKeyChecking=yes \
+          deploy/docker-compose.yml "$TARGET:$DEPLOY_DIR/docker-compose.yml"
+    - name: Pull and restart
+      shell: bash
+      env:
+        TARGET: ${{ inputs.user }}@${{ inputs.host }}
+        DEPLOY_DIR: ${{ inputs.deploy-dir }}
+        IMAGE_TAG: ${{ inputs.image-tag }}
+        REGISTRY: ${{ inputs.registry }}
+        REGISTRY_USER: ${{ inputs.registry-user }}
+        REGISTRY_TOKEN: ${{ inputs.registry-token }}
+      run: |
+        registry="$(printf '%s' "$REGISTRY" | tr '[:upper:]' '[:lower:]')"
+        remote=$(printf 'docker login ghcr.io -u %q --password-stdin >/dev/null && cd %q && export IMAGE_REGISTRY=%q IMAGE_TAG=%q && docker compose --env-file .env pull --quiet && docker compose --env-file .env up -d --no-build --wait --wait-timeout 180 && docker image prune -f >/dev/null' \
+          "$REGISTRY_USER" "$DEPLOY_DIR" "$registry" "$IMAGE_TAG")
+        printf '%s' "$REGISTRY_TOKEN" | ssh -i ~/.ssh/deploy_key -o StrictHostKeyChecking=yes "$TARGET" "$remote"
+    - name: Smoke-check health endpoints
+      if: inputs.health-urls != ''
+      shell: bash
+      env:
+        HEALTH_URLS: ${{ inputs.health-urls }}
+      run: |
+        for url in $HEALTH_URLS; do
+          for attempt in $(seq 1 20); do
+            if curl -fsS --max-time 5 "$url" >/dev/null; then echo "healthy: $url"; continue 2; fi
+            sleep 6
+          done
+          echo "::error::health check failed: $url"
+          exit 1
+        done
+    - name: Remove key
+      if: always()
+      shell: bash
+      run: rm -f ~/.ssh/deploy_key

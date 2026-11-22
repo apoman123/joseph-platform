@@ -1,0 +1,159 @@
+/**
+ * @fileoverview Drawing document migrations.
+ *
+ * Saved workspaces must stay loadable after upgrades. Documents from older
+ * schema versions are migrated step by step; documents from unknown (newer)
+ * versions are preserved verbatim as opaque payloads and saved back
+ * unchanged, never deleted.
+ */
+import type {DrawingDocument} from '@joseph/contracts';
+import {DRAWING_SCHEMA_VERSION} from './document';
+
+/** Migrates a raw document from `version` to `version + 1`. */
+export type SchemaMigration = (
+  raw: Record<string, unknown>
+) => Record<string, unknown>;
+
+/** Result of reading one stored drawing. */
+export type MigrationOutcome =
+  | {kind: 'document'; doc: DrawingDocument; migrated: boolean}
+  | {kind: 'opaque'; raw: unknown; reason: string};
+
+/** Legacy v0 shape written by the V4 starter's simple line tool. */
+interface LegacyV0 {
+  /** Id. */
+  id?: unknown;
+  /** Tool id. */
+  tool?: unknown;
+  /** Instrument. */
+  instrument?: unknown;
+  /** Points with numeric price. */
+  points?: {t: number; p: number}[];
+  /** Hex color. */
+  color?: unknown;
+}
+
+/**
+ * v0 → v1: numeric `points` become decimal-string anchors with full style.
+ * @param raw Legacy document.
+ * @return v1 document.
+ */
+export const migrateV0ToV1: SchemaMigration = raw => {
+  const legacy = raw as LegacyV0;
+  const points = Array.isArray(legacy.points) ? legacy.points : [];
+  const now = points[0]?.t ?? 0;
+  return {
+    schema_version: 1,
+    drawing_id: String(legacy.id ?? `legacy-${now}`),
+    tool_id: String(legacy.tool ?? 'horizontal-line'),
+    tool_version: 1,
+    instrument_id: String(legacy.instrument ?? ''),
+    timeframe: null,
+    anchors: points.map(point => ({
+      time_ms: Math.max(0, Math.round(point.t)),
+      price: String(point.p),
+    })),
+    style: {
+      color: typeof legacy.color === 'string' ? legacy.color : '#e66fd2',
+      line_width: 1,
+      line_style: 'solid',
+    },
+    text: null,
+    props: {},
+    locked: false,
+    visible: true,
+    z_index: 0,
+    created_at_ms: now,
+    updated_at_ms: now,
+  };
+};
+
+/** Ordered schema migrations keyed by source version. */
+export class MigrationRegistry {
+  private readonly steps = new Map<number, SchemaMigration>([
+    [0, migrateV0ToV1],
+  ]);
+
+  /**
+   * Registers a migration from `fromVersion` to `fromVersion + 1`.
+   * @param fromVersion Source version.
+   * @param migration Migration step.
+   */
+  register(fromVersion: number, migration: SchemaMigration): void {
+    this.steps.set(fromVersion, migration);
+  }
+
+  /**
+   * Reads one stored drawing, migrating it to the current version.
+   * @param raw Stored JSON value.
+   * @return Document, or an opaque payload when it cannot be read.
+   */
+  read(raw: unknown): MigrationOutcome {
+    if (!raw || typeof raw !== 'object') {
+      return {kind: 'opaque', raw, reason: 'Not an object'};
+    }
+    let current = raw as Record<string, unknown>;
+    let version =
+      typeof current.schema_version === 'number' ? current.schema_version : 0;
+    if (version > DRAWING_SCHEMA_VERSION) {
+      return {
+        kind: 'opaque',
+        raw,
+        reason: `Saved by a newer version (schema ${version})`,
+      };
+    }
+    let migrated = false;
+    while (version < DRAWING_SCHEMA_VERSION) {
+      const step = this.steps.get(version);
+      if (!step) {
+        return {
+          kind: 'opaque',
+          raw,
+          reason: `No migration from schema ${version}`,
+        };
+      }
+      try {
+        current = step(current);
+      } catch {
+        return {
+          kind: 'opaque',
+          raw,
+          reason: `Migration from schema ${version} failed`,
+        };
+      }
+      version += 1;
+      migrated = true;
+    }
+    if (!isDrawingDocument(current)) {
+      return {kind: 'opaque', raw, reason: 'Missing required fields'};
+    }
+    return {kind: 'document', doc: current, migrated};
+  }
+}
+
+/**
+ * Structural check of a v1 drawing document.
+ * @param value Candidate.
+ * @return True when it has every required field.
+ */
+export function isDrawingDocument(value: unknown): value is DrawingDocument {
+  if (!value || typeof value !== 'object') return false;
+  const doc = value as Partial<DrawingDocument>;
+  return (
+    doc.schema_version === 1 &&
+    typeof doc.drawing_id === 'string' &&
+    typeof doc.tool_id === 'string' &&
+    typeof doc.tool_version === 'number' &&
+    typeof doc.instrument_id === 'string' &&
+    Array.isArray(doc.anchors) &&
+    doc.anchors.every(
+      anchor =>
+        typeof anchor?.time_ms === 'number' && typeof anchor?.price === 'string'
+    ) &&
+    typeof doc.style === 'object' &&
+    doc.style !== null &&
+    typeof doc.locked === 'boolean' &&
+    typeof doc.visible === 'boolean' &&
+    typeof doc.z_index === 'number'
+  );
+}

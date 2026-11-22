@@ -1,0 +1,60 @@
+/* Watchlist layout. */
+.grow {
+  flex: 1;
+}
+.body {
+  display: grid;
+  align-content: start;
+  gap: var(--space-3);
+}
+.search {
+  position: relative;
+  display: grid;
+  gap: var(--space-1);
+}
+.results {
+  position: absolute;
+  top: 100%;
+  left: 0;
+  right: 0;
+  z-index: 5;
+  margin: 2px 0 0;
+  padding: var(--space-1);
+  list-style: none;
+  border: 1px solid var(--fathom);
+  border-radius: var(--radius-dialog);
+  background: var(--hull);
+  box-shadow: var(--shadow-float);
+}
+.results button {
+  width: 100%;
+  justify-content: space-between;
+}
+.row {
+  cursor: pointer;
+}
+.row:focus-visible {
+  outline-offset: -2px;
+}
+.actions {
+  width: 1%;
+  text-align: right;
+  opacity: 0.35;
+}
+.row:hover .actions,
+.row:focus-within .actions,
+.row:focus .actions {
+  opacity: 1;
+}
+.hint {
+  margin: 0;
+  color: var(--haze-dim);
+  font-size: var(--text-xs);
+}
+.srOnly {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  overflow: hidden;
+  clip: rect(0 0 0 0);
+}
