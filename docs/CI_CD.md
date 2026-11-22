@@ -1,5 +1,7 @@
 # CI/CD
 
+Repository: `git@github.com:apoman123/joseph-platform.git` (private). This checkout pushes with `core.sshCommand` set to the apoman123 deploy key.
+
 All workflows live in `.github/workflows/` at the repository root, so they run on every push regardless of which project changed.
 
 ## Pipelines
