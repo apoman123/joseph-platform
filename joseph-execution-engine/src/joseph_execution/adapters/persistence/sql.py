@@ -43,6 +43,37 @@ def _opt_d(value: object) -> decimal.Decimal | None:
     return None if value is None else _D(value)
 
 
+_SQLITE_BUSY_TIMEOUT_MS = 10_000
+"""How long a SQLite writer waits for another writer before failing."""
+
+
+def _enable_sqlite_wal(engine: sa.Engine) -> None:
+    """Configures every file-based SQLite connection for concurrent access.
+
+    The default rollback journal lets one connection's read transaction block
+    another connection's commit; because commits run on the event loop, that
+    froze every request. WAL lets readers and the single writer proceed
+    concurrently, and ``busy_timeout`` makes writers wait instead of failing.
+
+    Args:
+        engine: SQLite engine backed by a file.
+    """
+
+    @sa.event.listens_for(engine, "connect")
+    def _on_connect(dbapi_connection: object, _record: object) -> None:
+        """Applies the pragmas to a new DB-API connection.
+
+        Args:
+            dbapi_connection: Raw sqlite3 connection.
+            _record: Pool record (unused).
+        """
+        cursor = dbapi_connection.cursor()  # type: ignore[attr-defined]
+        cursor.execute("PRAGMA journal_mode=WAL")
+        cursor.execute("PRAGMA synchronous=NORMAL")
+        cursor.execute(f"PRAGMA busy_timeout={_SQLITE_BUSY_TIMEOUT_MS}")
+        cursor.close()
+
+
 def create_engine(url: str) -> sa.Engine:
     """Creates an engine and the schema.
 
@@ -68,6 +99,7 @@ def create_engine(url: str) -> sa.Engine:
             engine = sa.create_engine(
                 url, connect_args={"check_same_thread": False}
             )
+            _enable_sqlite_wal(engine)
     else:
         engine = sa.create_engine(url, pool_pre_ping=True)
     schema.METADATA.create_all(engine)

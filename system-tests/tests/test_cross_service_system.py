@@ -95,9 +95,31 @@ def test_signal_creates_exactly_one_paper_order(
     )
     assert deployment.status_code in (200, 201), deployment.text
     validate("execution.schema.json", "Deployment", deployment.json())
-    mark = execution.get(f"/v1/accounts/{PAPER}/summary").json()
-    del mark
-    signal = _signal(version_id, "95000", "94500", "96000")
+    # Price the signal around the live DEMO mark: the synthetic price walks
+    # with time, and fixed prices would put the stop on the wrong side.
+    probe = execution.post(
+        "/v1/orders/preview",
+        json={
+            "account_id": PAPER,
+            "instrument_id": MOCK_BTC,
+            "side": "buy",
+            "position_effect": "open",
+            "order_type": "market",
+            "quantity_base": "0.001",
+            "time_in_force": "IOC",
+            "reduce_only": False,
+            "mode": "PAPER",
+            "source": "MANUAL_TICKET",
+        },
+    ).json()
+    mark = decimal.Decimal(probe["mark_price"])
+    tick = decimal.Decimal("0.1")
+    signal = _signal(
+        version_id,
+        str(mark.quantize(tick)),
+        str((mark * decimal.Decimal("0.99")).quantize(tick)),
+        str((mark * decimal.Decimal("1.02")).quantize(tick)),
+    )
     headers = {"X-Joseph-Service-Token": conftest.SERVICE_TOKEN}
     first = httpx.post(
         f"{services['execution']}/internal/v1/signals",
@@ -106,6 +128,8 @@ def test_signal_creates_exactly_one_paper_order(
         timeout=30,
     )
     assert first.status_code in (200, 201, 202), first.text
+    results = first.json()["results"]
+    assert [r.get("decision") for r in results] == ["ALLOW"], results
     again = httpx.post(
         f"{services['execution']}/internal/v1/signals",
         json=signal,

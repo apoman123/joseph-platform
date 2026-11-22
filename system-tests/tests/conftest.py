@@ -61,16 +61,26 @@ def _wait_healthy(
     Raises:
         RuntimeError: If the server never becomes healthy.
     """
-    deadline = time.monotonic() + timeout_s
+    started = time.monotonic()
+    deadline = started + timeout_s
+    last_error = "no response"
     while time.monotonic() < deadline:
         if process.poll() is not None:
             break
-        with contextlib.suppress(httpx.HTTPError):
-            if httpx.get(url, timeout=2).status_code == 200:
+        try:
+            response = httpx.get(url, timeout=2)
+            if response.status_code == 200:
                 return
+            last_error = f"HTTP {response.status_code}"
+        except httpx.HTTPError as err:
+            last_error = f"{type(err).__name__}: {err}"
         time.sleep(0.5)
     log = log_path.read_text(errors="replace")[-4000:]
-    raise RuntimeError(f"server at {url} not healthy:\n{log}")
+    raise RuntimeError(
+        f"server at {url} not healthy after "
+        f"{time.monotonic() - started:.1f}s (exit code {process.poll()}, "
+        f"last error {last_error}):\n{log}"
+    )
 
 
 def _start(
