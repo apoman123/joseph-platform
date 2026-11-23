@@ -5,10 +5,12 @@ Joseph routes exchange-listed stocks and ETFs through brokers. Every order still
 | Broker (account venue) | Routes | Currency | Adapter | Status |
 |---|---|---|---|---|
 | `ibkr` Interactive Brokers | `nasdaq`, `nyse` (incl. NYSE Arca/American) | USD | `adapters/brokers/ibkr.py` (`ib_async` -> IB Gateway/TWS) | Implemented |
-| `sinopac` SinoPac Shioaji | `twse` | TWD | `adapters/brokers/sinopac.py` (`shioaji`) | Implemented |
-| `cathay` Cathay Securities | `twse` | TWD | `adapters/brokers/cathay.py` | Fail-closed: awaiting the Cathay API SDK/spec from the owner's Cathay representative |
+| `sinopac` SinoPac Shioaji | `twse`, `tpex` | TWD | `adapters/brokers/sinopac.py` (`shioaji`) | Implemented |
+| `cathay` Cathay Securities | `twse`, `tpex` | TWD | `adapters/brokers/cathay.py` | Fail-closed: awaiting the Cathay API SDK/spec from the owner's Cathay representative |
 
-Crypto accounts trade only their own venue. `treasury:rate:*` series are never tradable. Paper trading has two accounts per tenant: `acct-paper-<tenant>` (USD: crypto, Nasdaq, NYSE) and `acct-twd-paper-<tenant>` (TWD: TWSE).
+Crypto accounts trade only their own venue. `treasury:rate:*` series are never tradable. Paper trading has two accounts per tenant: `acct-paper-<tenant>` (USD: crypto, Nasdaq, NYSE) and `acct-twd-paper-<tenant>` (TWD: TWSE and TPEx).
+
+`twse` is the Taiwan Stock Exchange and `tpex` the Taipei Exchange (櫃買中心) mainboard, where most Taiwan bond ETFs (e.g. `tpex:etf:00679B` 元大美債20年, `tpex:etf:00937B`) and many stocks (e.g. `tpex:stock:6488`) are listed; the emerging-stock board (興櫃) is not offered. SinoPac resolves TWSE codes in Shioaji's `Stocks.TSE` contracts and TPEx codes in `Stocks.OTC`; the order goes to the contract's exchange, so a code sent with the wrong venue is refused before anything is sent. TPEx's published rules ([上櫃有價證券交易系統簡介](https://www.tpex.org.tw/zh-tw/mainboard/trading/rules/system.html)) match TWSE's for everything below: tick ladders, the 10% limit, 1000-share board lots and intraday odd lots, 09:00-13:30 sessions (XTAI calendar) and T+2 settlement.
 
 ## Order rules (Risk Gateway)
 
@@ -16,16 +18,16 @@ Crypto accounts trade only their own venue. `treasury:rate:*` series are never t
 |---|---|
 | `routing.venue` | Account venue must serve the instrument's exchange (table above); rate series rejected |
 | `market.session` | From the instrument calendar (market engine `GET /v1/calendars/{id}/sessions`). Closed market: market orders are rejected, or with `JOSEPH_EQUITY_CLOSED_MARKET_ORDERS=queue` a DAY market order queues for the next open where the broker allows it (IBKR yes, SinoPac no). IOC/FOK need an open session; limit orders rest. `DAY` and `outside_rth` are refused for 24x7 crypto markets |
-| `size.tick` | Ladder-aware (TWSE `tick_ladder`) |
-| `size.price_limit` | Limit prices within +-`price_limit_pct` (TWSE 10%) of the previous close; unknown reference blocks |
-| `size.board_lot` | TWSE: whole 1000-share lots, or one intraday odd-lot order of 1-999 shares (limit, ROD/DAY only). Mixed quantities are rejected with the split to send |
+| `size.tick` | Ladder-aware (TWSE/TPEx `tick_ladder`: stocks 0.01 below 10, 0.05 below 50, 0.1 below 100, 0.5 below 500, 1 below 1000, else 5; ETFs 0.01 below 50, else 0.05) |
+| `size.price_limit` | Limit prices within +-`price_limit_pct` (TWSE and TPEx 10%; none for foreign-constituent ETFs such as most TPEx bond ETFs and for a new listing's first five days) of the previous close; unknown reference blocks |
+| `size.board_lot` | TWSE and TPEx: whole 1000-share lots, or one intraday odd-lot order of 1-999 shares (limit, ROD/DAY only). Mixed quantities are rejected with the split to send |
 | `account.cash` | Cash buying power in the instrument's currency (no margin); sells of held shares need none |
 | `size.cash_account` | Leverage 1; long-only unless the account may short (IBKR margin account with `JOSEPH_IBKR_SHORT_SELLING=true`) |
 | `protection.bracket_orders` | Brackets need stop-market, limit and GTC orders (SinoPac has none, so no brackets) |
 
 Notional and loss limits are in the account currency; for TWD accounts the defaults and hard caps are the USD values x30 (a sizing convention, not an FX rate).
 
-Paper securities fill only in session, clamp market fills into the daily limits on the tick ladder, charge TWSE brokerage (0.1425%) and sale tax (0.3% stocks / 0.1% ETFs), and model settlement as unsettled cash until the T+2 (TWSE) / T+1 (US) session opens. The ledger is in memory; unsettled sale proceeds count as buying power; no funding applies.
+Paper securities fill only in session, clamp market fills into the daily limits on the tick ladder, charge Taiwan brokerage (0.1425%) and sale tax (0.3% stocks / 0.1% ETFs) on TWSE and TPEx fills, and model settlement as unsettled cash until the T+2 (TWSE, TPEx) / T+1 (US) session opens. The ledger is in memory; unsettled sale proceeds count as buying power; no funding applies.
 
 ## Configuration
 
@@ -67,16 +69,18 @@ Broker secrets come only from the environment or `*_FILE` secret files, are regi
 4. **Secrets.** Write the API key, secret key, CA password and person id into `deploy/secrets/sinopac_*` files and point the `JOSEPH_SINOPAC_*_FILE` variables at `/run/joseph-secrets/...`.
 5. **Simulation test (required by SinoPac before production).** With `JOSEPH_SINOPAC_SIMULATION=true` run, Mon-Fri 08:00-20:00 Taipei (18:00-20:00 from a Taiwan IP only): `JOSEPH_SINOPAC_SIM_TESTS=1 JOSEPH_SINOPAC_ACCOUNT=9A95-0000000 uv run --extra sinopac pytest -m sinopac_sim tests/brokers` (logs in with `simulation=True` and calls `place_order`). Wait at least five minutes for SinoPac's review.
 6. **Check signing.** In production mode the stock account must report `signed=True`; until then Joseph keeps the account `TRADING_UNAVAILABLE` with a note.
-7. **Production.** `JOSEPH_SINOPAC_SIMULATION=false`, `JOSEPH_SINOPAC_ENABLED=true`; connect `{"venue": "sinopac", "credentials": {"account": "9A95-0000000"}}`, verify and arm the account (`POST /v1/accounts/{id}/live-consent`). Orders: `price_type` LMT/MKT, ROD (DAY)/IOC/FOK, `order_lot` Common (lots of 1000) or IntradayOdd (shares), `order_cond` Cash. No stop orders, so no brackets or AUTO_LIVE. SinoPac allows 250 order calls per 10 s and 25 account queries per 5 s; Joseph paces below both.
+7. **Production.** `JOSEPH_SINOPAC_SIMULATION=false`, `JOSEPH_SINOPAC_ENABLED=true`; connect `{"venue": "sinopac", "credentials": {"account": "9A95-0000000"}}`, verify and arm the account (`POST /v1/accounts/{id}/live-consent`). The same account trades `twse:*` and `tpex:*` listings. Orders: `price_type` LMT/MKT, ROD (DAY)/IOC/FOK, `order_lot` Common (lots of 1000) or IntradayOdd (shares), `order_cond` Cash. No stop orders, so no brackets or AUTO_LIVE. SinoPac allows 250 order calls per 10 s and 25 account queries per 5 s; Joseph paces below both.
 
 ## Cathay Securities
 
-Cathay publishes no developer API. The `cathay` entry declares TWSE, TWD and a cash account and refuses every call ("Awaiting the Cathay API SDK/spec from the owner's Cathay representative"). When the SDK arrives, implement `TradingAdapter` in `adapters/brokers/cathay.py` (follow `sinopac.py`: a client protocol, a fake for tests, pure order mappings), keep `cathay.build()` as the factory and update `capabilities.cathay()`; routing, risk checks and the OMS already treat `cathay` as a TWSE broker.
+Cathay publishes no developer API. The `cathay` entry declares TWSE and TPEx, TWD and a cash account and refuses every call ("Awaiting the Cathay API SDK/spec from the owner's Cathay representative"). When the SDK arrives, implement `TradingAdapter` in `adapters/brokers/cathay.py` (follow `sinopac.py`: a client protocol, a fake for tests, pure order mappings), keep `cathay.build()` as the factory and update `capabilities.cathay()`; routing, risk checks and the OMS already treat `cathay` as a TWSE and TPEx broker (the SDK must be told the exchange of TPEx codes, as Shioaji's `Stocks.OTC` group does).
 
 ## Known limitations
 
 - Position reconciliation is skipped for LIVE accounts (as before); holdings bought outside Joseph are not managed by it, and long-only checks use Joseph's own positions (the broker rejects uncovered sells in a cash account anyway).
-- TWSE's reference price is the previous daily close from the market engine; on ex-rights/ex-dividend days the exchange's adjusted reference may differ, and the exchange remains the final authority.
+- The TWSE/TPEx reference price is the previous daily close from the market engine; on ex-rights/ex-dividend days the exchange's adjusted reference may differ, and the exchange remains the final authority.
 - IBKR executions corrected by IBKR (same exec id prefix) are ignored rather than double counted; a fill emitted before its commission report keeps fee 0.
 - Shioaji fills carry estimated fees; fills are recorded from deal callbacks of the running process (Shioaji keeps no client order id; orders are matched by trade id or the 6-character `custom_field` tag).
-- TWSE after-hours fixed-price and after-hours odd-lot sessions are not offered.
+- TWSE/TPEx after-hours fixed-price and after-hours odd-lot sessions are not offered.
+- Fee estimates charge the 0.1% ETF sale tax on bond ETFs too, although the tax on bond ETFs is suspended through 2026-12-31 (證券交易稅條例 §2-1; an extension is pending); the broker's statement is authoritative.
+- SinoPac positions carry no exchange: a held code is resolved through the contract tree (TSE -> `twse`, OTC -> `tpex`); codes the tree cannot resolve (or emerging-board holdings) are listed under `twse`.

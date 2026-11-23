@@ -137,7 +137,7 @@ test('routes US shares to the paper or IBKR account with DAY and outside RTH', a
     'IOC · Immediate or cancel',
   ]);
   await expect(t.getByTestId('market-hours')).toContainText(
-    'NYSE / Nasdaq is closed now. The next session opens Mon 30 Nov 09:30 New York.'
+    'NYSE is closed now. The next session opens Mon 30 Nov 09:30 New York.'
   );
   // IBKR queues DAY market orders placed while closed.
   await t
@@ -168,11 +168,11 @@ test('routes US shares to the paper or IBKR account with DAY and outside RTH', a
   );
   await page.waitForTimeout(300);
   await page.screenshot({path: `${SHOTS}/39-equity-ticket-ibkr.png`});
-  // A TWSE broker account does not route US listings.
+  // A Taiwan broker account does not route US listings.
   await account.selectOption('acct-sinopac-demo');
   await expect(
     t.getByText(
-      'SinoPac Securities (Shioaji) accounts route TWSE listings only.'
+      'SinoPac Securities (Shioaji) accounts route TWSE and TPEx listings only.'
     )
   ).toBeVisible();
   await expect(t.getByTestId('outside-rth')).toHaveCount(0);

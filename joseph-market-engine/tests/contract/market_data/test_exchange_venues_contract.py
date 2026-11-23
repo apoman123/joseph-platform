@@ -1,7 +1,9 @@
-"""Contract tests: TWSE, Nasdaq/NYSE (Alpaca) and Treasury adapters.
+"""Contract tests: TWSE, TPEx, Nasdaq/NYSE (Alpaca) and Treasury adapters.
 
-TWSE (OpenAPI, STOCK_DAY, holiday schedules, MIS), the Nasdaq Trader
-symbol directory and the Treasury CSVs were captured live on 2026-11-23;
+TWSE (OpenAPI, STOCK_DAY, holiday schedules, MIS), TPEx (OpenAPI,
+tradingStock, tradingDate, MIS ``otc_`` channels after the close), the
+Nasdaq Trader symbol directory and the Treasury CSVs were captured live on
+2026-11-23;
 Alpaca responses are hand-written from its documentation (no key on the
 build host, see ``fixtures/venues/alpaca/README.md``). Every produced
 object must validate against the JSON contracts and follow the instrument's
@@ -33,6 +35,7 @@ from joseph.domain import sessions
 from joseph.domain import timeframes
 from joseph.market_data.adapters import alpaca
 from joseph.market_data.adapters import factory
+from joseph.market_data.adapters import tpex
 from joseph.market_data.adapters import treasury
 from joseph.market_data.adapters import twse
 from joseph.market_data.app import ports
@@ -52,8 +55,12 @@ _US_OPEN = _US_SESSION.open_ms
 _ALPACA_MS = _US_OPEN + 7 * 60_000 + 30_000
 """2026-11-20 09:37:30 New York."""
 _KEYS = alpaca.AlpacaConfig(key_id="test-key", secret_key="test-secret")
+_TPEX_MS = 1_795_421_880_000
+"""2026-11-23 16:18:00 Taipei, just after the TPEx capture (after the close)."""
 _TSMC = instruments.InstrumentId.parse("twse:stock:2330")
 _ETF50 = instruments.InstrumentId.parse("twse:etf:0050")
+_GW = instruments.InstrumentId.parse("tpex:stock:6488")
+_BOND = instruments.InstrumentId.parse("tpex:etf:00679B")
 _AAPL = instruments.InstrumentId.parse("nasdaq:stock:AAPL")
 _UST10 = instruments.InstrumentId.parse("treasury:rate:UST10Y")
 
@@ -481,6 +488,294 @@ async def test_twse_refuses_what_it_does_not_have(
         await adapter.fetch_funding(_TSMC)
     caps = adapter.capabilities()
     assert caps.calendar == "XTAI"
+    assert caps.market_data.classified_delta
+    assert not caps.market_data.taker_volume
+    assert not set(caps.timeframes) & set(timeframes.SECONDS)
+
+
+# TPEx ----------------------------------------------------------------
+
+
+def _limit_prices(
+    instrument: instruments.Instrument, reference: decimal.Decimal
+) -> tuple[decimal.Decimal, decimal.Decimal]:
+    """Computes limit prices from a reference price, on the tick ladder.
+
+    Args:
+        instrument: Instrument with a price limit.
+        reference: Reference (previous close) price.
+
+    Returns:
+        Limit-up rounded down and limit-down rounded up to their ticks.
+    """
+    assert instrument.price_limit_pct is not None
+    move = instrument.price_limit_pct / 100
+    up = reference * (1 + move)
+    down = reference * (1 - move)
+    up_tick = instrument.tick_for(up)
+    down_tick = instrument.tick_for(down)
+    return (
+        (up / up_tick).to_integral_value(decimal.ROUND_FLOOR) * up_tick,
+        (down / down_tick).to_integral_value(decimal.ROUND_CEILING) * down_tick,
+    )
+
+
+async def test_tpex_instruments_follow_listing_rules(
+    venue_api: respx.Router, contract_validate: Validate
+) -> None:
+    """Mainboard stocks and ETFs carry TPEx ticks, limits, lots and classes."""
+    del venue_api
+    rows = await _adapter(
+        instruments.Venue.TPEX, clock_lib.ManualClock(_TPEX_MS)
+    ).list_instruments()
+    by_id = {str(r.instrument_id): r for r in rows}
+    for row in rows:
+        contract_validate("market.schema.json", "Instrument", row.to_contract())
+        assert row.calendar == "XTAI"
+        assert row.board_lot == _D(1000) and row.lot_size == _D(1)
+        assert row.key.quote == "TWD" and row.listing_exchange == "TPEx"
+    gw = by_id["tpex:stock:6488"]
+    assert (gw.display_symbol, gw.local_name, gw.name) == (
+        "6488",
+        "環球晶",
+        "GWC",
+    )
+    assert gw.tick_ladder == twse.STOCK_TICKS
+    assert gw.price_limit_pct == _D(10)
+    assert gw.status is instruments.InstrumentStatus.TRADING
+    # Ticks seen in MIS quote ladders on 2026-11-23.
+    assert gw.tick_for(_D("460.5")) == _D("0.5")
+    assert by_id["tpex:stock:5274"].tick_for(_D(8310)) == _D(5)
+    assert by_id["tpex:stock:4714"].tick_for(_D("8.70")) == _D("0.01")
+    bond = by_id["tpex:etf:00679B"]
+    assert bond.tick_ladder == twse.ETF_TICKS
+    assert bond.asset_class is instruments.AssetClass.BOND
+    assert bond.price_limit_pct is None
+    assert bond.tick_for(_D("26.33")) == _D("0.01")
+    assert by_id["tpex:etf:00758B"].tick_for(_D("50.50")) == _D("0.05")
+    for code in ("00937B", "00687B", "00980D"):
+        assert by_id[f"tpex:etf:{code}"].asset_class is (
+            instruments.AssetClass.BOND
+        )
+    domestic = by_id["tpex:etf:006201"]
+    assert domestic.asset_class is instruments.AssetClass.EQUITY
+    assert domestic.price_limit_pct == _D(10)
+    for halted in ("4804", "8084"):
+        assert by_id[f"tpex:stock:{halted}"].status is (
+            instruments.InstrumentStatus.HALTED
+        )
+    for excluded in ("00687C", "8349A", "020025"):
+        assert not any(
+            r.instrument_id.venue_market_id == excluded for r in rows
+        )
+
+
+async def test_tpex_published_limit_prices_follow_the_rules(
+    venue_api: respx.Router,
+) -> None:
+    """TPEx's next-session limits are 10 % of the close on the tick ladder."""
+    del venue_api
+    rows = await _adapter(
+        instruments.Venue.TPEX, clock_lib.ManualClock(_TPEX_MS)
+    ).list_instruments()
+    by_code = {r.instrument_id.venue_market_id: r for r in rows}
+    checked = 0
+    for quote in _load("tpex", "mainboard_quotes"):
+        listed = by_code.get(quote["SecuritiesCompanyCode"])
+        close = twse.number(quote["Close"])
+        if listed is None or close is None:
+            continue
+        published = (
+            twse.number(quote["NextLimitUp"]),
+            twse.number(quote["NextLimitDown"]),
+        )
+        if listed.price_limit_pct is None:
+            assert published[0] == tpex.UNLIMITED_UP
+            continue
+        assert _limit_prices(listed, close) == published
+        checked += 1
+    assert checked >= 8
+
+
+async def test_tpex_daily_history_is_session_aligned(
+    venue_api: respx.Router, contract_validate: Validate
+) -> None:
+    """The tradingStock rows become final XTAI daily bars in shares, TWD."""
+    del venue_api
+    adapter = _adapter(instruments.Venue.TPEX, clock_lib.ManualClock(_TPEX_MS))
+    start = twse.taipei_ms(datetime.date(2026, 11, 1))
+    rows = await adapter.fetch_candles(_GW, _TF.D1, start, _TPEX_MS)
+    raw = _load("tpex", "trading_stock_6488")["tables"][0]["data"]
+    assert len(rows) == len(raw) and all(r.is_final for r in rows)
+    first, last = rows[0], rows[-1]
+    assert first.base_volume == _D(10402) * 1000
+    assert first.quote_turnover == _D(7831069) * 1000
+    assert first.close == _D(760) and first.trade_count == 22796
+    assert last.close == _D("460.50") and last.source == tpex.REST_SOURCE
+    for candle in rows:
+        contract_validate("market.schema.json", "Candle", candle.to_contract())
+        found = sessions.XTAI.session(twse.taipei_date(candle.start_ms))
+        assert found is not None and found.open_ms == candle.start_ms
+    weeks = await adapter.fetch_candles(_GW, _TF.W1, start, _TPEX_MS)
+    assert sum(w.base_volume for w in weeks) == sum(r.base_volume for r in rows)
+    months = await adapter.fetch_candles(_GW, _TF.MN1, start, _TPEX_MS, 1)
+    assert len(months) == 1 and months[0].high == max(r.high for r in rows)
+    covered = await adapter.fetch_candle_coverage(_GW, _TF.D1, start, _TPEX_MS)
+    today = twse.taipei_ms(datetime.date(2026, 11, 23))
+    assert covered.covered == ((start, today),) and covered.complete
+
+
+async def test_tpex_daily_history_stops_at_the_listing_day(
+    venue_api: respx.Router,
+) -> None:
+    """The listing-day mark (``106/01/17*``) ends the walk back in time."""
+    adapter = _adapter(instruments.Venue.TPEX, clock_lib.ManualClock(_TPEX_MS))
+    await adapter.list_instruments()
+    assert isinstance(adapter, tpex.TpexAdapter)
+    assert adapter.listing["00679B"].listed is None
+    start = twse.taipei_ms(datetime.date(2015, 1, 1))
+    end = twse.taipei_ms(datetime.date(2017, 2, 1))
+    before = venue_api.calls.call_count
+    fetched = await adapter.fetch_candle_coverage(_BOND, _TF.D1, start, end)
+    months = [
+        c.request.url.params["date"]
+        for c in venue_api.calls[before:]
+        if c.request.url.path.endswith("/tradingStock")
+    ]
+    assert months == ["2017/01/01"]
+    assert adapter.listing["00679B"].listed == datetime.date(2017, 1, 17)
+    assert fetched.complete and len(fetched.candles) == 6
+    assert fetched.candles[0].base_volume == _D(928_000)
+    assert fetched.covered == (
+        (twse.taipei_ms(datetime.date(2017, 1, 1)), end),
+    )
+
+
+async def test_tpex_snapshot_and_book_come_from_otc_mis_channels(
+    venue_api: respx.Router, contract_validate: Validate
+) -> None:
+    """MIS ``otc_`` records give the last trade, quotes and a 5-level book."""
+    adapter = _adapter(instruments.Venue.TPEX, clock_lib.ManualClock(_TPEX_MS))
+    snapshot = await adapter.fetch_snapshot(_GW)
+    contract_validate(
+        "market.schema.json",
+        "MarketSnapshot",
+        snapshot.to_contract(_TPEX_MS, 30_000),
+    )
+    assert snapshot.source == tpex.MIS_SOURCE
+    assert snapshot.last == _D("460.5")
+    assert (snapshot.best_bid, snapshot.best_ask) == (_D(460), _D("460.5"))
+    assert snapshot.volume_24h_base == _D(11812) * 1000
+    channels = [
+        c.request.url.params["ex_ch"]
+        for c in venue_api.calls
+        if c.request.url.host == "mis.twse.com.tw"
+    ]
+    assert channels == ["otc_6488.tw"]
+    book = await adapter.fetch_order_book(_BOND, 5)
+    contract_validate("market.schema.json", "OrderBook", book.to_contract())
+    assert len(book.bids) == len(book.asks) == 5
+    assert book.bids[0].price == _D("26.32")
+    assert book.asks[0].price == _D("26.33")
+    assert book.asks[0].quantity == _D(182) * 1000
+    assert all(level.quantity % 1000 == 0 for level in book.bids)
+
+
+async def test_tpex_bulk_snapshots_are_last_session_values(
+    venue_api: respx.Router, contract_validate: Validate
+) -> None:
+    """tpex_mainboard_quotes rows are stamped at that session's close."""
+    del venue_api
+    adapter = _adapter(instruments.Venue.TPEX, clock_lib.ManualClock(_TPEX_MS))
+    rows = {str(s.instrument_id): s for s in await adapter.fetch_snapshots()}
+    monday = sessions.XTAI.session(datetime.date(2026, 11, 23))
+    assert monday is not None
+    bond = rows["tpex:etf:00679B"]
+    assert bond.as_of_ms == monday.close_ms
+    assert bond.last == _D("26.33")
+    assert bond.turnover_24h_quote == _D(1047529510)
+    assert bond.volume_24h_base == _D(39822000)
+    assert "tpex:etf:00687C" not in rows
+    for row in rows.values():
+        contract_validate(
+            "market.schema.json",
+            "MarketSnapshot",
+            row.to_contract(_TPEX_MS, 30_000),
+        )
+
+
+async def test_tpex_recorder_polls_otc_channels_with_sparse_coverage(
+    venue_api: respx.Router,
+) -> None:
+    """Intraday requests start MIS recording of ``otc_`` channels."""
+    session = sessions.XTAI.session(datetime.date(2026, 11, 23))
+    assert session is not None
+    clock = clock_lib.ManualClock(session.open_ms + 3_600_000)
+    adapter = _adapter(instruments.Venue.TPEX, clock)
+    assert isinstance(adapter, tpex.TpexAdapter)
+    assert ports.sparse_bars(adapter)
+    window = (session.open_ms, session.close_ms)
+    empty = await adapter.fetch_candle_coverage(_GW, _TF.M1, *window)
+    assert empty.candles == () and empty.covered == () and empty.complete
+    # The capture is one closing snapshot: a baseline (applied by this poll
+    # or the recorder's own), no bar yet.
+    await adapter.poll_once()
+    builder = adapter._builders["6488"]
+    assert builder.applied == 1 and builder.bars(*window, clock.now_ms()) == []
+    channels = {
+        c.request.url.params["ex_ch"]
+        for c in venue_api.calls
+        if c.request.url.host == "mis.twse.com.tw"
+    }
+    assert channels == {"otc_6488.tw"}
+    assert await adapter.close() is None
+
+
+async def test_tpex_schedule_lists_the_xtai_closures(
+    venue_api: respx.Router,
+) -> None:
+    """TPEx's 2026 and 2027 schedules close exactly the XTAI days."""
+    del venue_api
+    for year, unscheduled in (
+        (2026, {datetime.date(2026, 7, 10), datetime.date(2026, 10, 23)}),
+        (2027, set()),
+    ):
+        closures = tpex.schedule_closures(
+            _load("tpex", f"trading_date_{year}"),
+            year,
+            datetime.date(year, 1, 1),
+        )
+        day = datetime.date(year, 1, 1)
+        xtai = set()
+        while day.year == year:
+            if day.weekday() < 5 and sessions.XTAI.session(day) is None:
+                xtai.add(day)
+            day += datetime.timedelta(days=1)
+        # Typhoon closures are announced on the day, not in the schedule.
+        assert closures == xtai - unscheduled
+    adapter = _adapter(instruments.Venue.TPEX, clock_lib.ManualClock(_TPEX_MS))
+    assert isinstance(adapter, tpex.TpexAdapter)
+    assert await adapter.refresh_calendar() == set()
+
+
+async def test_tpex_refuses_what_it_does_not_have(
+    venue_api: respx.Router,
+) -> None:
+    """Seconds bars, streams, trades, funding and OI are unsupported."""
+    del venue_api
+    adapter = _adapter(instruments.Venue.TPEX, clock_lib.ManualClock(_TPEX_MS))
+    with pytest.raises(errors.UnsupportedError):
+        await adapter.fetch_candles(_GW, _TF.S5, 0, 1)
+    with pytest.raises(errors.UnsupportedError):
+        adapter.stream_trades(_GW)
+    with pytest.raises(errors.UnsupportedError):
+        await adapter.fetch_trades(_GW, 0, 1)
+    with pytest.raises(errors.UnsupportedError, match="tpex"):
+        await adapter.fetch_open_interest(_GW)
+    with pytest.raises(errors.UnsupportedError, match="tpex"):
+        await adapter.fetch_funding(_GW)
+    caps = adapter.capabilities()
+    assert caps.calendar == "XTAI" and caps.venue is instruments.Venue.TPEX
     assert caps.market_data.classified_delta
     assert not caps.market_data.taker_volume
     assert not set(caps.timeframes) & set(timeframes.SECONDS)

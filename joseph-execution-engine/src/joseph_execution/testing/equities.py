@@ -16,12 +16,14 @@ from joseph_execution.domain import market
 _D = decimal.Decimal
 TSMC = "twse:stock:2330"
 YUANTA_50 = "twse:etf:0050"
+GLOBALWAFERS = "tpex:stock:6488"
+YUANTA_US20 = "tpex:etf:00679B"
 AAPL = "nasdaq:stock:AAPL"
 SPY = "nyse:etf:SPY"
 UST10Y = "treasury:rate:UST10Y"
 MOCK_STOCK = "mock:stock:DEMO"
 
-TWSE_STOCK_LADDER = (
+TAIWAN_STOCK_LADDER = (
     market.TickStep(_D(0), _D("0.01")),
     market.TickStep(_D(10), _D("0.05")),
     market.TickStep(_D(50), _D("0.1")),
@@ -29,13 +31,13 @@ TWSE_STOCK_LADDER = (
     market.TickStep(_D(500), _D(1)),
     market.TickStep(_D(1000), _D(5)),
 )
-"""TWSE stock tick ladder."""
+"""TWSE and TPEx stock tick ladder."""
 
-TWSE_ETF_LADDER = (
+TAIWAN_ETF_LADDER = (
     market.TickStep(_D(0), _D("0.01")),
     market.TickStep(_D(50), _D("0.05")),
 )
-"""TWSE ETF tick ladder."""
+"""TWSE and TPEx ETF tick ladder."""
 
 _TAIPEI = datetime.timezone(datetime.timedelta(hours=8))
 _NEW_YORK_WINTER = datetime.timezone(datetime.timedelta(hours=-5))
@@ -62,8 +64,40 @@ def twse(symbol: str = "2330", etf: bool = False) -> market.InstrumentMeta:
         quote="TWD",
         calendar="XTAI",
         listing_exchange="TWSE",
-        tick_ladder=TWSE_ETF_LADDER if etf else TWSE_STOCK_LADDER,
+        tick_ladder=TAIWAN_ETF_LADDER if etf else TAIWAN_STOCK_LADDER,
         price_limit_pct=_D(10),
+        board_lot=_D(1000),
+    )
+
+
+def tpex(
+    symbol: str = "6488", etf: bool = False, limited: bool = True
+) -> market.InstrumentMeta:
+    """Builds TPEx instrument metadata (as the market engine publishes it).
+
+    Args:
+        symbol: TPEx code.
+        etf: ETF instead of stock.
+        limited: False for listings without a daily limit (foreign-
+            constituent ETFs such as 00679B, new listings' first days).
+
+    Returns:
+        Metadata with the TWSE tick ladders, the 10% limit (or none),
+        1000-share board lots and the XTAI calendar.
+    """
+    kind = "etf" if etf else "stock"
+    return market.InstrumentMeta(
+        instrument_id=f"tpex:{kind}:{symbol}",
+        venue="tpex",
+        tick_size=_D("0.01"),
+        lot_size=_D(1),
+        min_qty=_D(1),
+        status=enums.InstrumentStatus.TRADING,
+        quote="TWD",
+        calendar="XTAI",
+        listing_exchange="TPEx",
+        tick_ladder=TAIWAN_ETF_LADDER if etf else TAIWAN_STOCK_LADDER,
+        price_limit_pct=_D(10) if limited else None,
         board_lot=_D(1000),
     )
 
@@ -216,7 +250,7 @@ def install(
     tsmc_close: str = "600",
     aapl_mark: str = "190",
 ) -> None:
-    """Registers TWSE/US instruments, quotes, closes and sessions.
+    """Registers TWSE/TPEx/US instruments, quotes, closes and sessions.
 
     Args:
         gateway: Static gateway.
@@ -227,10 +261,14 @@ def install(
     """
     gateway.add_instrument(twse(), _D(tsmc_mark))
     gateway.add_instrument(twse("0050", etf=True), _D("150"))
+    gateway.add_instrument(tpex(), _D("460"))
+    gateway.add_instrument(tpex("00679B", etf=True, limited=False), _D("26"))
     gateway.add_instrument(us(), _D(aapl_mark))
     gateway.add_instrument(us(SPY, "NYSE Arca"), _D("580"))
     gateway.add_instrument(treasury(), _D("4.25"))
     gateway.set_previous_close(TSMC, _D(tsmc_close))
     gateway.set_previous_close(YUANTA_50, _D("150"))
+    gateway.set_previous_close(GLOBALWAFERS, _D("441.5"))
+    gateway.set_previous_close(YUANTA_US20, _D("26.15"))
     gateway.set_sessions("XTAI", xtai_sessions(start))
     gateway.set_sessions("XNYS", xnys_sessions(start))

@@ -1,8 +1,9 @@
 /**
  * @fileoverview Time-axis presentation per timeframe: seconds on the axis
  * and crosshair label for sub-minute bars, dates only from daily bars up,
- * and exchange-local labels for session markets (a TWSE chart reads
- * 09:00-13:30, an NYSE chart 09:30-16:00). `24x7` markets keep UTC labels.
+ * and exchange-local labels for session markets (a TWSE or TPEx chart
+ * reads 09:00-13:30, an NYSE chart 09:30-16:00). `24x7` markets keep UTC
+ * labels.
  */
 import {
   TIMEFRAME_MS,

@@ -27,7 +27,7 @@ export type NonNegativeDecimalString = string;
  */
 export type TimestampMs = number;
 /**
- * Market venue identifier: a crypto venue, a securities exchange (`twse`, `nasdaq`, `nyse`; `nyse` also covers NYSE Arca and NYSE American listings) or a rate publisher (`treasury`, US Treasury yield curves). `mock` is the synthetic DEMO venue and is never tradable live.
+ * Market venue identifier: a crypto venue, a securities exchange (`twse` Taiwan Stock Exchange, `tpex` Taipei Exchange mainboard, `nasdaq`, `nyse`; `nyse` also covers NYSE Arca and NYSE American listings) or a rate publisher (`treasury`, US Treasury yield curves). `mock` is the synthetic DEMO venue and is never tradable live.
  *
  * This interface was referenced by `JosephContracts`'s JSON-Schema
  * via the `definition` "Venue".
@@ -39,12 +39,13 @@ export type Venue =
   | 'bitget'
   | 'mexc'
   | 'twse'
+  | 'tpex'
   | 'nasdaq'
   | 'nyse'
   | 'treasury'
   | 'mock';
 /**
- * Securities broker that executes orders on exchange venues: `ibkr` (Interactive Brokers: nasdaq, nyse), `sinopac` (SinoPac Shioaji: twse), `cathay` (Cathay Securities: twse).
+ * Securities broker that executes orders on exchange venues: `ibkr` (Interactive Brokers: nasdaq, nyse), `sinopac` (SinoPac Shioaji: twse, tpex), `cathay` (Cathay Securities: twse, tpex).
  *
  * This interface was referenced by `JosephContracts`'s JSON-Schema
  * via the `definition` "Broker".
@@ -67,7 +68,7 @@ export type TradingVenue =
   | 'cathay'
   | 'mock';
 /**
- * Session calendar. `24x7` markets never close and use UTC-aligned bars. Exchange calendars align intraday bars to the session open (the last bar of a session is cut at the close), make a daily bar one session and weekly/monthly bars the sessions of an ISO week/calendar month in exchange time. XTAI: TWSE 09:00-13:30 Asia/Taipei. XNYS: NYSE/Nasdaq 09:30-16:00 America/New_York with early closes. USBOND: US Treasury market business days 08:00-17:00 America/New_York.
+ * Session calendar. `24x7` markets never close and use UTC-aligned bars. Exchange calendars align intraday bars to the session open (the last bar of a session is cut at the close), make a daily bar one session and weekly/monthly bars the sessions of an ISO week/calendar month in exchange time. XTAI: TWSE and TPEx 09:00-13:30 Asia/Taipei. XNYS: NYSE/Nasdaq 09:30-16:00 America/New_York with early closes. USBOND: US Treasury market business days 08:00-17:00 America/New_York.
  *
  * This interface was referenced by `JosephContracts`'s JSON-Schema
  * via the `definition` "CalendarId".
@@ -81,7 +82,7 @@ export type CalendarId = '24x7' | 'XTAI' | 'XNYS' | 'USBOND';
  */
 export type MarketType = 'perp' | 'spot' | 'future' | 'stock' | 'etf' | 'rate';
 /**
- * Canonical venue-scoped instrument id `{venue}:{market_type}:{venue_market_id}`, e.g. `binance:perp:BTCUSDT`, `hyperliquid:perp:BTC`, `twse:stock:2330`, `nasdaq:etf:TLT` or `treasury:rate:UST10Y`. The same base asset on two venues is two instruments.
+ * Canonical venue-scoped instrument id `{venue}:{market_type}:{venue_market_id}`, e.g. `binance:perp:BTCUSDT`, `hyperliquid:perp:BTC`, `twse:stock:2330`, `tpex:etf:00679B`, `nasdaq:etf:TLT` or `treasury:rate:UST10Y`. The same base asset on two venues is two instruments.
  *
  * This interface was referenced by `JosephContracts`'s JSON-Schema
  * via the `definition` "InstrumentId".
@@ -879,7 +880,7 @@ export interface TradingCapabilities {
   query_by_client_id: boolean;
   notes: string[];
   /**
-   * Exchange venues this broker (or paper account) routes securities to, e.g. ibkr -> nasdaq, nyse; sinopac and cathay -> twse. Empty for crypto venues, which trade their own instruments.
+   * Exchange venues this broker (or paper account) routes securities to, e.g. ibkr -> nasdaq, nyse; sinopac and cathay -> twse, tpex. Empty for crypto venues, which trade their own instruments.
    */
   tradable_venues?: Venue[];
   /**
@@ -1342,19 +1343,19 @@ export interface Instrument {
   as_of_ms: TimestampMs;
   calendar?: CalendarId;
   /**
-   * Exchange that lists a security, e.g. `Nasdaq`, `NYSE Arca`, `TWSE`; null for crypto.
+   * Exchange that lists a security, e.g. `Nasdaq`, `NYSE Arca`, `TWSE`, `TPEx`; null for crypto.
    */
   listing_exchange?: string | null;
   /**
-   * Price-dependent ticks (TWSE). Empty when tick_size applies at every price.
+   * Price-dependent ticks (TWSE, TPEx). Empty when tick_size applies at every price.
    */
   tick_ladder?: TickStep[];
   /**
-   * Daily price limit from the reference price in percent (TWSE 10); null when unlimited.
+   * Daily price limit from the reference price in percent (TWSE and TPEx 10); null when unlimited.
    */
   price_limit_pct?: NonNegativeDecimalString | null;
   /**
-   * Shares per board lot (TWSE 1000); null when orders are in single units.
+   * Shares per board lot (TWSE and TPEx 1000); null when orders are in single units.
    */
   board_lot?: NonNegativeDecimalString | null;
   /**
@@ -1362,7 +1363,7 @@ export interface Instrument {
    */
   name?: string | null;
   /**
-   * Name in the listing market's language, e.g. `台積電` on TWSE; null when none.
+   * Name in the listing market's language, e.g. `台積電` on TWSE, `環球晶` on TPEx; null when none.
    */
   local_name?: string | null;
 }

@@ -12,16 +12,17 @@ Exchange-listed securities (``stock``/``etf``) follow exchange semantics:
   placed while the exchange is closed wait for the open, IOC/FOK are
   canceled and DAY orders expire at the close of their session.
 * Market fills are rounded to the tick ladder and clamped into the daily
-  price limits (TWSE +-10% from the previous close).
+  price limits (TWSE and TPEx +-10% from the previous close).
 * The account is a long-only cash account in shares: sells are capped at
-  the shares held. TWSE fills charge the estimated brokerage fee and
-  securities transaction tax; other exchanges use the maker/taker rates.
+  the shares held. TWSE and TPEx fills charge the estimated brokerage fee
+  and securities transaction tax; other exchanges use the maker/taker
+  rates.
 * Settlement is modelled as unsettled cash: each fill's cash flow becomes
-  settled at the open of the T+n session (TWSE T+2, US T+1), falling back
-  to weekdays when no calendar is available. The ledger lives in memory
-  (like the simulator's orders), so a restart treats pending amounts as
-  settled. Unsettled sale proceeds count as buying power, as both markets
-  allow; no funding applies to securities.
+  settled at the open of the T+n session (TWSE/TPEx T+2, US T+1), falling
+  back to weekdays when no calendar is available. The ledger lives in
+  memory (like the simulator's orders), so a restart treats pending
+  amounts as settled. Unsettled sale proceeds count as buying power, as
+  both markets allow; no funding applies to securities.
 """
 
 from __future__ import annotations
@@ -1007,8 +1008,10 @@ class PaperTradingAdapter:
             return self._fill(account_id, order, quantity, price, maker)
         ref = equities.parse_instrument_id(req.instrument_id)
         fee = None
-        if ref.venue == enums.Venue.TWSE.value:
-            fee = equities.twse_fee(req.side, quantity * price, ref.market_type)
+        if equities.is_taiwan(ref.venue):
+            fee = equities.taiwan_fee(
+                req.side, quantity * price, ref.market_type
+            )
         now = self._clock.now_ms()
         days = equities.SETTLEMENT_DAYS.get(meta.calendar, 2)
         sessions = await self._sessions(meta)

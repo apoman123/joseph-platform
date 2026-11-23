@@ -11,7 +11,7 @@ import type {
 
 /** Canonical instrument id pattern `{venue}:{market_type}:{venue_market_id}`. */
 const INSTRUMENT_ID_PATTERN =
-  /^(binance|hyperliquid|lighter|bitget|mexc|twse|nasdaq|nyse|treasury|mock):(perp|spot|future|stock|etf|rate):([A-Za-z0-9._/-]{1,64})$/;
+  /^(binance|hyperliquid|lighter|bitget|mexc|twse|tpex|nasdaq|nyse|treasury|mock):(perp|spot|future|stock|etf|rate):([A-Za-z0-9._/-]{1,64})$/;
 
 /** Parsed parts of a canonical instrument id. */
 export interface InstrumentIdParts {
@@ -65,6 +65,7 @@ export const VENUES: readonly Venue[] = [
   'bitget',
   'mexc',
   'twse',
+  'tpex',
   'nasdaq',
   'nyse',
   'treasury',
@@ -79,6 +80,7 @@ export const VENUE_NAMES: Readonly<Record<Venue, string>> = {
   bitget: 'Bitget Futures',
   mexc: 'MEXC Futures',
   twse: 'Taiwan Stock Exchange',
+  tpex: 'Taipei Exchange (TPEx)',
   nasdaq: 'Nasdaq',
   nyse: 'NYSE',
   treasury: 'US Treasury yields',

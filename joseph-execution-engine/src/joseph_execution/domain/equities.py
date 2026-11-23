@@ -5,12 +5,22 @@ simulator:
 
 * Routing: crypto accounts trade their own venue; broker accounts trade
   the exchanges their broker serves (``ibkr`` -> Nasdaq/NYSE, ``sinopac``
-  and ``cathay`` -> TWSE); paper accounts trade in their own currency.
-  Treasury rates are published series and are never tradable.
+  and ``cathay`` -> TWSE and TPEx); paper accounts trade in their own
+  currency. Treasury rates are published series and are never tradable.
 * Sessions from exchange calendars, DAY-order expiry and settlement days.
-* Price-dependent tick ladders and daily price limits (TWSE +-10% from the
-  reference price), board lots and intraday odd lots.
-* Estimated TWSE brokerage fees and securities transaction tax.
+* Price-dependent tick ladders and daily price limits (TWSE and TPEx +-10%
+  from the reference price), board lots and intraday odd lots.
+* Estimated Taiwan brokerage fees and securities transaction tax.
+
+TPEx (Taipei Exchange) mainboard listings follow the TWSE rules here, as
+TPEx publishes them ("上櫃有價證券交易系統簡介",
+https://www.tpex.org.tw/zh-tw/mainboard/trading/rules/system.html,
+read 2026-11-23): the same stock and ETF tick ladders, a 10% limit from
+the reference price (none for foreign-constituent ETFs and the first five
+days of a new listing; the market engine publishes ``price_limit_pct``
+null then), 1,000-share board lots, intraday odd lots of 1-999 shares,
+09:00-13:30 sessions on the XTAI calendar and T+2 settlement. The
+emerging-stock board (興櫃) is not a ``tpex`` listing.
 """
 
 from __future__ import annotations
@@ -37,9 +47,17 @@ CRYPTO_VENUES = frozenset(
 """Venues whose accounts trade the venue's own instruments."""
 
 EXCHANGE_VENUES = frozenset(
-    {enums.Venue.TWSE.value, enums.Venue.NASDAQ.value, enums.Venue.NYSE.value}
+    {
+        enums.Venue.TWSE.value,
+        enums.Venue.TPEX.value,
+        enums.Venue.NASDAQ.value,
+        enums.Venue.NYSE.value,
+    }
 )
 """Securities exchanges reached through a broker."""
+
+TAIWAN_VENUES = frozenset({enums.Venue.TWSE.value, enums.Venue.TPEX.value})
+"""Taiwan exchanges: Taiwan fees and taxes, TWD, board and odd lots."""
 
 RATE_VENUES = frozenset({enums.Venue.TREASURY.value})
 """Publishers of rate series that are never tradable."""
@@ -49,8 +67,14 @@ SECURITY_TYPES = frozenset({"stock", "etf"})
 
 BROKER_EXCHANGES: Mapping[str, tuple[str, ...]] = {
     enums.Broker.IBKR.value: (enums.Venue.NASDAQ.value, enums.Venue.NYSE.value),
-    enums.Broker.SINOPAC.value: (enums.Venue.TWSE.value,),
-    enums.Broker.CATHAY.value: (enums.Venue.TWSE.value,),
+    enums.Broker.SINOPAC.value: (
+        enums.Venue.TWSE.value,
+        enums.Venue.TPEX.value,
+    ),
+    enums.Broker.CATHAY.value: (
+        enums.Venue.TWSE.value,
+        enums.Venue.TPEX.value,
+    ),
 }
 """Exchange venues each broker routes orders to."""
 
@@ -63,6 +87,7 @@ BROKER_CURRENCY: Mapping[str, str] = {
 
 EXCHANGE_CURRENCY: Mapping[str, str] = {
     enums.Venue.TWSE.value: "TWD",
+    enums.Venue.TPEX.value: "TWD",
     enums.Venue.NASDAQ.value: "USD",
     enums.Venue.NYSE.value: "USD",
 }
@@ -71,7 +96,7 @@ EXCHANGE_CURRENCY: Mapping[str, str] = {
 SETTLEMENT_DAYS: Mapping[str, int] = {"XTAI": 2, "XNYS": 1}
 """Settlement cycle in trading days by calendar.
 
-TWSE settles T+2. US equities settle T+1 since 2024-05-28 (SEC rule
+TWSE and TPEx settle T+2. US equities settle T+1 since 2024-05-28 (SEC rule
 15c6-1 as amended).
 """
 
@@ -80,19 +105,20 @@ DISPLAY_NAMES: Mapping[str, str] = {
     enums.Broker.SINOPAC.value: "SinoPac",
     enums.Broker.CATHAY.value: "Cathay Securities",
     enums.Venue.TWSE.value: "TWSE",
+    enums.Venue.TPEX.value: "TPEx",
     enums.Venue.NASDAQ.value: "Nasdaq",
     enums.Venue.NYSE.value: "NYSE",
     enums.Venue.TREASURY.value: "US Treasury",
 }
 """Human-facing names used in risk messages."""
 
-TWSE_BROKERAGE_RATE = decimal.Decimal("0.001425")
+TAIWAN_BROKERAGE_RATE = decimal.Decimal("0.001425")
 """Statutory maximum brokerage commission (0.1425%) before discounts."""
 
-TWSE_STOCK_TAX_RATE = decimal.Decimal("0.003")
+TAIWAN_STOCK_TAX_RATE = decimal.Decimal("0.003")
 """Securities transaction tax on stock sales (0.3%)."""
 
-TWSE_ETF_TAX_RATE = decimal.Decimal("0.001")
+TAIWAN_ETF_TAX_RATE = decimal.Decimal("0.001")
 """Securities transaction tax on ETF sales (0.1%)."""
 
 _DAY_MS = 86_400_000
@@ -359,8 +385,8 @@ def price_limits(
 ) -> PriceLimits | None:
     """Computes the daily limits from a reference price.
 
-    TWSE rounds limit-up down and limit-down up to the tick that applies at
-    the limit price.
+    TWSE and TPEx round limit-up down and limit-down up to the tick that
+    applies at the limit price.
 
     Args:
         reference: Reference price (previous close).
@@ -538,16 +564,29 @@ class CashBalance:
     source: str = "joseph"
 
 
-def twse_fee(
+def is_taiwan(venue: str) -> bool:
+    """Checks whether a venue is a Taiwan exchange (TWSE or TPEx).
+
+    Args:
+        venue: Venue code.
+
+    Returns:
+        True for ``twse`` and ``tpex``.
+    """
+    return venue in TAIWAN_VENUES
+
+
+def taiwan_fee(
     side: enums.OrderSide,
     notional: decimal.Decimal,
     market_type: str,
 ) -> decimal.Decimal:
-    """Estimates TWSE brokerage fee plus transaction tax for one fill.
+    """Estimates Taiwan brokerage fee plus transaction tax for one fill.
 
-    Uses the statutory maximum commission (brokers discount it) and the
-    sale tax (0.3% stocks, 0.1% ETFs); each part is floored to whole TWD.
-    Minimum commissions are not modelled.
+    TWSE and TPEx listings pay the same statutory rates: the maximum
+    commission (brokers discount it) and the sale tax (0.3% stocks, 0.1%
+    ETFs); each part is floored to whole TWD. Minimum commissions are not
+    modelled.
 
     Args:
         side: Fill side (tax applies to sales).
@@ -558,12 +597,14 @@ def twse_fee(
         Estimated charge in TWD.
     """
     brokerage = decimals.floor_to_step(
-        notional * TWSE_BROKERAGE_RATE, decimals.ONE
+        notional * TAIWAN_BROKERAGE_RATE, decimals.ONE
     )
     tax = decimals.ZERO
     if side is enums.OrderSide.SELL:
         rate = (
-            TWSE_ETF_TAX_RATE if market_type == "etf" else (TWSE_STOCK_TAX_RATE)
+            TAIWAN_ETF_TAX_RATE
+            if market_type == "etf"
+            else TAIWAN_STOCK_TAX_RATE
         )
         tax = decimals.floor_to_step(notional * rate, decimals.ONE)
     return brokerage + tax

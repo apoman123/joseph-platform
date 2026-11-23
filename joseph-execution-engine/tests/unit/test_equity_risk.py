@@ -16,6 +16,7 @@ from joseph_execution.domain import identity
 from joseph_execution.domain import intents
 from joseph_execution.domain import market
 from joseph_execution.domain import positions
+from joseph_execution.domain import risk
 from joseph_execution.risk import checks
 from joseph_execution.risk import context
 from joseph_execution.risk import gateway
@@ -178,10 +179,68 @@ def test_clean_securities_order_is_allowed() -> None:
     assert names["size.cash_account"] is OUT.PASS
 
 
+def test_tpex_orders_follow_taiwan_rules() -> None:
+    """TPEx orders route via SinoPac and use the TWSE lot and limit rules."""
+    meta = fixtures.tpex()
+    quote = market.MarketQuote(
+        fixtures.GLOBALWAFERS,
+        enums.FeedState.LIVE,
+        OPEN_NOW,
+        D(460),
+        D(460),
+        D("459.5"),
+        D("460.5"),
+    )
+    book = market.BookView(
+        fixtures.GLOBALWAFERS,
+        ((D("459.5"), D(5000)),),
+        ((D("460.5"), D(5000)),),
+        OPEN_NOW,
+    )
+
+    def run(**overrides: object) -> dict[str, risk.RiskCheckResult]:
+        """Evaluates a TPEx limit buy.
+
+        Args:
+            **overrides: Request overrides.
+
+        Returns:
+            Results by check name.
+        """
+        fields: dict[str, object] = {
+            "instrument_id": fixtures.GLOBALWAFERS,
+            "limit_price": D(460),
+        }
+        fields.update(overrides)
+        request = _request(**fields)
+        ctx = _ctx(
+            request=request,
+            instrument=meta,
+            quote=quote,
+            book=book,
+            previous_close=D("441.5"),
+            notional=D(460_000),
+        )
+        decision = gateway.RiskGateway().evaluate(ctx)
+        return {c.check: c for c in decision.checks}
+
+    clean = run()
+    assert all(c.outcome is not OUT.FAIL for c in clean.values()), [
+        c.to_contract() for c in clean.values() if c.outcome is OUT.FAIL
+    ]
+    assert clean["routing.venue"].outcome is OUT.PASS
+    assert run(limit_price=D("460.1"))["size.tick"].outcome is OUT.FAIL
+    above = run(limit_price=D(486))["size.price_limit"]
+    assert above.outcome is OUT.FAIL
+    mixed = run(quantity_base=D(1500))["size.board_lot"]
+    assert mixed.outcome is OUT.FAIL
+    assert run(quantity_base=D(300))["size.board_lot"].outcome is OUT.PASS
+
+
 @pytest.mark.parametrize(
     ("account", "instrument", "fragment"),
     [
-        (SINOPAC, fixtures.AAPL, "TWSE listings"),
+        (SINOPAC, fixtures.AAPL, "TWSE and TPEx listings"),
         (
             dataclasses.replace(SINOPAC, venue="ibkr", currency="USD"),
             fixtures.TSMC,

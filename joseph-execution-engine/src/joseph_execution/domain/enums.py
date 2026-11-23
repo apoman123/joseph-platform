@@ -8,9 +8,10 @@ import enum
 class Venue(enum.StrEnum):
     """Venue identifiers (contract ``Venue``).
 
-    Crypto venues trade their own instruments; ``twse``, ``nasdaq`` and
-    ``nyse`` are securities exchanges reached through a broker;
-    ``treasury`` publishes rates that are never tradable.
+    Crypto venues trade their own instruments; ``twse`` (Taiwan Stock
+    Exchange), ``tpex`` (Taipei Exchange mainboard), ``nasdaq`` and ``nyse``
+    are securities exchanges reached through a broker; ``treasury``
+    publishes rates that are never tradable.
     """
 
     BINANCE = "binance"
@@ -19,6 +20,7 @@ class Venue(enum.StrEnum):
     BITGET = "bitget"
     MEXC = "mexc"
     TWSE = "twse"
+    TPEX = "tpex"
     NASDAQ = "nasdaq"
     NYSE = "nyse"
     TREASURY = "treasury"

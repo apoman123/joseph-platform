@@ -1,4 +1,4 @@
-"""SinoPac Shioaji adapter (TWSE stocks and ETFs).
+"""SinoPac Shioaji adapter (TWSE and TPEx stocks and ETFs).
 
 Uses the ``shioaji`` SDK (optional extra ``sinopac``; SinoPac's
 proprietary binary wheels, no OSS license, CPython abi3 wheels for Linux
@@ -16,8 +16,20 @@ against Shioaji 1.7.11:
   price=..., qty=...)`` (qty is the new, smaller quantity; odd-lot prices
   cannot change), ``api.update_status``, ``api.list_trades``,
   ``api.list_positions(unit=sj.Unit.Share)``, ``api.account_balance``,
-  ``api.settlements``, ``api.trading_limits`` and
-  ``api.contracts.stocks[code]``.
+  ``api.settlements``, ``api.trading_limits`` and the stock contract
+  tree: ``api.contracts.stocks`` (``api.Contracts.Stocks`` in the legacy
+  spelling) is a ``ContractCategory`` whose ``[code]`` searches every
+  exchange and whose attributes ``TSE``, ``OTC`` and ``OES`` are the
+  per-exchange ``ContractGroup``s (``api.Contracts.Stocks.TSE["2890"]``
+  in the docs; ``Contracts(Stocks=(OES, OTC, TSE))``). TWSE codes are
+  looked up in ``TSE`` and TPEx (OTC) codes in ``OTC``; the emerging
+  board (``OES``, 興櫃) is never routed. ``sj.StockOrder`` has no exchange
+  field: ``place_order(contract, order)`` sends the order to the
+  contract's ``exchange`` (``Exchange.TSE`` or ``Exchange.OTC``). Checked
+  in the Shioaji 1.7.11 type stubs (``shioaji/_core.pyi``: ``Contracts``,
+  ``ContractCategory.__getattr__ -> ContractGroup``, ``Exchange``,
+  ``StockOrder``) and https://sinotrade.github.io/tutor/contract/ and
+  https://sinotrade.github.io/zh/shioaji.pdf (5.3 商品檔), 2026-11-23.
 * ``api.set_order_callback(cb(state, event))`` with ``StockOrder``
   (``operation.op_type``/``op_code`` "00" = success) and ``StockDeal``
   events; ``api.set_event_callback(cb(resp_code, event_code, info,
@@ -67,6 +79,15 @@ _TIFS = {
     enums.TimeInForce.DAY: "ROD",
     enums.TimeInForce.IOC: "IOC",
     enums.TimeInForce.FOK: "FOK",
+}
+SJ_EXCHANGES = {
+    enums.Venue.TWSE.value: "TSE",
+    enums.Venue.TPEX.value: "OTC",
+}
+"""Shioaji contract group (``api.contracts.stocks.<group>``) per venue."""
+_EXCHANGE_ALIASES = {
+    enums.Venue.TWSE.value: frozenset({"TSE", "TWSE"}),
+    enums.Venue.TPEX.value: frozenset({"OTC"}),
 }
 _WORKING = frozenset({"PendingSubmit", "PreSubmitted", "Submitted"})
 _REFUSED = frozenset(
@@ -410,7 +431,8 @@ def order_fields(
 
     Args:
         request: Venue request.
-        unit: Shares per board lot (``contract.unit``, 1000 on TWSE).
+        unit: Shares per board lot (``contract.unit``, 1000 on TWSE and
+            TPEx).
         account: Shioaji stock account.
 
     Returns:
@@ -424,7 +446,7 @@ def order_fields(
     if tif is None:
         raise errors.AdapterUnavailableError(
             f"time in force {request.time_in_force.value} is not available "
-            "for TWSE stock orders (ROD/IOC/FOK)",
+            "for Taiwan stock orders (ROD/IOC/FOK)",
             code="UNSUPPORTED_ORDER_TYPE",
         )
     if request.order_type is enums.OrderType.MARKET:
@@ -442,7 +464,7 @@ def order_fields(
         request.quantity_base, decimals.ONE
     ):
         raise errors.AdapterUnavailableError(
-            "TWSE orders are whole board lots or one odd lot",
+            "Taiwan orders are whole board lots or one odd lot",
             code="INVALID_LOT_SIZE",
         )
     if kind is equities.LotKind.ODD:
@@ -550,15 +572,64 @@ def fill_key(trade_id: str, seq: object) -> str:
 
 
 def market_type(code: str) -> str:
-    """Guesses the market type of a TWSE code (ETF codes start with 00).
+    """Guesses the market type of a Taiwan code (ETF codes start with 00).
 
     Args:
-        code: TWSE code.
+        code: TWSE or TPEx code.
 
     Returns:
         ``etf`` or ``stock``.
     """
     return "etf" if code.startswith("00") else "stock"
+
+
+def exchange_of(contract: Any) -> str:
+    """Returns a Shioaji contract's exchange code (``TSE``, ``OTC``, ...).
+
+    Args:
+        contract: ``sj.Stock``/``StockInfo`` (1.7 info objects also carry
+            it on ``base``) or ``None``.
+
+    Returns:
+        Exchange text, empty when unknown.
+    """
+    if contract is None:
+        return ""
+    found = text(getattr(contract, "exchange", None))
+    if not found:
+        found = text(getattr(getattr(contract, "base", None), "exchange", None))
+    return found
+
+
+def venue_of(exchange: str) -> str | None:
+    """Maps a Shioaji exchange code to a Joseph venue.
+
+    Args:
+        exchange: ``TSE``, ``OTC``, ``OES``, ...
+
+    Returns:
+        ``twse`` or ``tpex``; ``None`` for exchanges Joseph does not route
+        (e.g. the emerging board ``OES``).
+    """
+    for venue, aliases in _EXCHANGE_ALIASES.items():
+        if exchange in aliases:
+            return venue
+    return None
+
+
+def instrument_id(code: str, exchange: str) -> str:
+    """Builds the Joseph instrument id of a Shioaji stock code.
+
+    Args:
+        code: Security code.
+        exchange: Contract exchange; unknown exchanges keep the TWSE
+            prefix (positions of codes the contract tree cannot resolve).
+
+    Returns:
+        ``twse:...`` or ``tpex:...`` id.
+    """
+    venue = venue_of(exchange) or enums.Venue.TWSE.value
+    return f"{venue}:{market_type(code)}:{code}"
 
 
 # ---------------------------------------------------------------------------
@@ -618,7 +689,7 @@ class _Tracked:
 
 
 class SinopacAdapter:
-    """``TradingAdapter`` for SinoPac Shioaji (TWSE).
+    """``TradingAdapter`` for SinoPac Shioaji (TWSE and TPEx).
 
     Attributes:
         calls: Methods invoked (safety tests assert none while gated).
@@ -675,6 +746,7 @@ class SinopacAdapter:
         self._cancel_requested: dict[str, int] = {}
         self._failures: dict[str, str] = {}
         self._snapshots: dict[str, trading.VenueAccountSnapshot] = {}
+        self._position_ids: dict[str, str] = {}
         self._events = base.EventBuffer()
         self._tasks: set[asyncio.Task[Any]] = set()
         self.calls: list[str] = []
@@ -999,7 +1071,7 @@ class SinopacAdapter:
             client_order_id=cid,
             price=price,
             quantity_base=qty,
-            fee=equities.twse_fee(tracked.side, qty * price, ref.market_type),
+            fee=equities.taiwan_fee(tracked.side, qty * price, ref.market_type),
             fee_asset="TWD",
             liquidity="taker",
             ts_ms=base.to_ms(float(event.get("ts") or 0.0))
@@ -1237,16 +1309,14 @@ class SinopacAdapter:
             qty = decimal.Decimal(int(str(row.quantity or 0)))
             if text(row.direction) == "Sell":
                 qty = -qty
-            instrument_id = (
-                known.get(code) or f"twse:{market_type(code)}:{code}"
-            )
+            held = known.get(code) or await self._position_id(api, code)
             last = base.exact_decimal(
                 float(getattr(row, "last_price", 0.0) or 0.0)
             )
             result.append(
                 (
                     trading.VenuePosition(
-                        instrument_id=instrument_id,
+                        instrument_id=held,
                         signed_qty=qty,
                         entry_price=base.exact_decimal(float(row.price)),
                     ),
@@ -1255,10 +1325,34 @@ class SinopacAdapter:
             )
         return result
 
+    async def _position_id(self, api: SjClient, code: str) -> str:
+        """Resolves the instrument id of a held code (cached per code).
+
+        Positions carry no exchange, so the contract tree decides between
+        TWSE and TPEx; unresolvable codes keep the TWSE prefix.
+
+        Args:
+            api: Client.
+            code: Security code.
+
+        Returns:
+            Instrument id.
+        """
+        cached = self._position_ids.get(code)
+        if cached is not None:
+            return cached
+        try:
+            contract = await self._run(lambda: api.contracts.stocks[code])
+        except (KeyError, IndexError):
+            contract = None
+        resolved = instrument_id(code, exchange_of(contract))
+        self._position_ids[code] = resolved
+        return resolved
+
     async def list_positions(
         self, account_id: str
     ) -> Sequence[trading.VenuePosition]:
-        """Lists TWSE positions in shares.
+        """Lists TWSE and TPEx positions in shares.
 
         Args:
             account_id: Joseph account.
@@ -1320,7 +1414,11 @@ class SinopacAdapter:
     async def submit_order(
         self, request: trading.VenueOrderRequest
     ) -> trading.VenueSubmitResult:
-        """Places a TWSE stock order.
+        """Places a TWSE or TPEx stock order.
+
+        The code is looked up in the venue's Shioaji contract group
+        (``TSE`` for ``twse``, ``OTC`` for ``tpex``), so a code listed on
+        the other exchange (or on the emerging board) is refused.
 
         Args:
             request: Venue request.
@@ -1344,25 +1442,25 @@ class SinopacAdapter:
                 state.status is not S.REJECTED, state
             )
         ref = equities.parse_instrument_id(request.instrument_id)
-        if ref.venue != enums.Venue.TWSE.value:
+        group = SJ_EXCHANGES.get(ref.venue)
+        if group is None:
             raise errors.AdapterUnavailableError(
-                "SinoPac routes TWSE listings only, not "
+                "SinoPac routes TWSE and TPEx listings only, not "
                 f"{request.instrument_id}",
                 code="UNSUPPORTED",
             )
+        name = equities.DISPLAY_NAMES[ref.venue]
         try:
-            contract = await self._run(lambda: api.contracts.stocks[ref.symbol])
-        except (KeyError, IndexError) as err:
+            contract = await self._run(
+                lambda: getattr(api.contracts.stocks, group)[ref.symbol]
+            )
+        except (KeyError, IndexError, AttributeError) as err:
             raise errors.AdapterUnavailableError(
-                f"unknown TWSE code {ref.symbol}", code="UNSUPPORTED"
+                f"unknown {name} code {ref.symbol}", code="UNSUPPORTED"
             ) from err
-        if contract is None or text(getattr(contract, "exchange", "")) not in (
-            "TSE",
-            "TWSE",
-        ):
+        if venue_of(exchange_of(contract)) != ref.venue:
             raise errors.AdapterUnavailableError(
-                f"{ref.symbol} is not a TWSE listing (TPEx is not routed)",
-                code="UNSUPPORTED",
+                f"{ref.symbol} is not a {name} listing", code="UNSUPPORTED"
             )
         unit = int(float(getattr(contract, "unit", 1000) or 1000))
         fields = order_fields(request, unit, account)
@@ -1558,7 +1656,7 @@ class SinopacAdapter:
             self._tracked[client_order_id] = _Tracked(
                 account_id,
                 trade,
-                f"twse:{market_type(code)}:{code}",
+                instrument_id(code, exchange_of(trade.contract)),
                 side,
                 unit,
                 lot,

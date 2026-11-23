@@ -5,7 +5,8 @@
  * Groups follow what an instrument is, not where it is listed: Treasury
  * yields and bond ETFs (asset class `BOND`) are "Bonds & rates" even when
  * an ETF trades on Nasdaq; other securities go by their session calendar
- * (XTAI → Taiwan stocks, XNYS → US stocks); everything else is crypto.
+ * (XTAI → Taiwan stocks: TWSE and TPEx; XNYS → US stocks); everything else
+ * is crypto.
  */
 import {
   instrumentCalendarId,
@@ -42,9 +43,9 @@ export const MARKET_GROUP_LABELS: Readonly<Record<MarketGroup, string>> = {
 /** Venues listed per group (the engine may serve only some of them). */
 export const GROUP_VENUES: Readonly<Record<MarketGroup, readonly string[]>> = {
   crypto: ['binance', 'hyperliquid', 'lighter', 'bitget', 'mexc'],
-  tw: ['twse'],
+  tw: ['twse', 'tpex'],
   us: ['nasdaq', 'nyse'],
-  bonds: ['treasury', 'nasdaq', 'nyse'],
+  bonds: ['treasury', 'nasdaq', 'nyse', 'twse', 'tpex'],
 };
 
 /**

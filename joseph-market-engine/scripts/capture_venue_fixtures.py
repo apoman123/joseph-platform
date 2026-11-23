@@ -4,9 +4,10 @@ Run manually (network required); never run in CI::
 
     uv run python scripts/capture_venue_fixtures.py [venue ...]
 
-Venues: binance hyperliquid lighter bitget mexc twse nasdaqtrader treasury
-(default: all). ``twse`` records a short MIS snapshot series and must run
-during a TWSE session (09:00-13:30 Asia/Taipei) to capture live data. Alpaca
+Venues: binance hyperliquid lighter bitget mexc twse tpex nasdaqtrader
+treasury (default: all). ``twse`` records a short MIS snapshot series and
+must run during a TWSE session (09:00-13:30 Asia/Taipei) to capture live
+data; ``tpex`` polls MIS three times (moving data only in a session). Alpaca
 fixtures are hand-written from Alpaca's documentation (no key is needed or
 used here; see ``fixtures/venues/alpaca/README.md``).
 
@@ -424,6 +425,127 @@ def _twse(client: httpx.Client) -> None:
     _save("twse", "mis_series", {"query": query, "responses": series})
 
 
+_TPEX_CODES = (
+    "6488",
+    "3105",
+    "8069",
+    "5274",
+    "4714",
+    "7848",
+    "4804",
+    "8084",
+    "00679B",
+    "00937B",
+    "00687B",
+    "00758B",
+    "00980D",
+    "006201",
+    "00888",
+    "00687C",
+    "8349A",
+    "020025",
+)
+"""Stocks (tick bands, a new listing, suspensions), domestic and bond ETFs
+and exclusions (foreign-currency counter, preferred share, ETN)."""
+_TPEX_MIS_CODES = ("6488", "3105", "00679B", "00937B", "006201", "2330")
+"""``2330`` is a TWSE listing: ``otc_2330.tw`` returns MIS's empty record."""
+_TPEX_PACE_S = 2.5
+_TPEX_COMPANY_FIELDS = (
+    "Date",
+    "SecuritiesCompanyCode",
+    "CompanyName",
+    "CompanyAbbreviation",
+    "Symbol",
+    "SecuritiesIndustryCode",
+    "DateOfListing",
+)
+
+
+def _tpex(client: httpx.Client) -> None:
+    """Captures TPEx OpenAPI, daily quotes, holiday and MIS samples.
+
+    MIS is polled three times; run during a session (09:00-13:30
+    Asia/Taipei) for moving data, after it for the closing state.
+
+    Args:
+        client: HTTP client.
+    """
+    openapi = "https://www.tpex.org.tw/openapi/v1"
+    keep = set(_TPEX_CODES)
+    quotes = client.get(f"{openapi}/tpex_mainboard_quotes").json()
+    _save(
+        "tpex",
+        "mainboard_quotes",
+        [r for r in quotes if r["SecuritiesCompanyCode"].strip() in keep],
+    )
+    time.sleep(_TPEX_PACE_S)
+    companies = client.get(f"{openapi}/mopsfin_t187ap03_O").json()
+    _save(
+        "tpex",
+        "t187ap03_O",
+        [
+            {k: r.get(k) for k in _TPEX_COMPANY_FIELDS}
+            for r in companies
+            if r["SecuritiesCompanyCode"].strip() in keep
+        ],
+    )
+    time.sleep(_TPEX_PACE_S)
+    _save(
+        "tpex",
+        "ipo_no_limit",
+        client.get(f"{openapi}/tpex_ipo_no_limit").json(),
+    )
+    time.sleep(_TPEX_PACE_S)
+    modes = client.get(f"{openapi}/tpex_cmode").json()
+    _save(
+        "tpex",
+        "cmode",
+        [
+            r
+            for r in modes
+            if r["SecuritiesCompanyCode"].strip() in keep | {"2067", "3629"}
+        ],
+    )
+    www = "https://www.tpex.org.tw/www/zh-tw"
+    year = datetime.datetime.now(datetime.UTC).year
+    for offset in (0, 1):
+        time.sleep(_TPEX_PACE_S)
+        _save(
+            "tpex",
+            f"trading_date_{year + offset}",
+            client.get(
+                f"{www}/bulletin/tradingDate",
+                params={"date": str(year + offset), "response": "json"},
+            ).json(),
+        )
+    month = datetime.datetime.now(datetime.UTC).strftime("%Y/%m/01")
+    for code, when, name in (
+        ("6488", month, "trading_stock_6488"),
+        ("00679B", month, "trading_stock_00679B"),
+        ("00679B", "2017/01/01", "trading_stock_00679B_201701"),
+    ):
+        time.sleep(_TPEX_PACE_S)
+        _save(
+            "tpex",
+            name,
+            client.get(
+                f"{www}/afterTrading/tradingStock",
+                params={"code": code, "date": when, "response": "json"},
+            ).json(),
+        )
+    series = []
+    query = "|".join(f"otc_{code}.tw" for code in _TPEX_MIS_CODES)
+    for _ in range(3):
+        time.sleep(5.0)
+        started = int(time.time() * 1000)
+        body = client.get(
+            "https://mis.twse.com.tw/stock/api/getStockInfo.jsp",
+            params={"ex_ch": query, "json": "1", "delay": "0", "_": started},
+        ).json()
+        series.append({"received_ms": started, "response": body})
+    _save("tpex", "mis_series", {"query": query, "responses": series})
+
+
 _NASDAQ_KEEP = frozenset(
     {
         "AAPL", "QQQ", "TLT", "IEF", "SHY", "BND", "MBB", "EMB", "VCIT",
@@ -495,6 +617,7 @@ def main() -> None:
         "bitget": _bitget,
         "mexc": _mexc,
         "twse": _twse,
+        "tpex": _tpex,
         "nasdaqtrader": _nasdaqtrader,
         "treasury": _treasury,
     }

@@ -24,6 +24,8 @@ _POLICY = policy.QualificationPolicy()
 _AAPL = instruments.InstrumentId.parse("nasdaq:stock:AAPL")
 _TLT = instruments.InstrumentId.parse("nasdaq:etf:TLT")
 _TSMC = instruments.InstrumentId.parse("twse:stock:2330")
+_GW = instruments.InstrumentId.parse("tpex:stock:6488")
+_TPEX_BOND = instruments.InstrumentId.parse("tpex:etf:00679B")
 _GATES_WITHOUT_OI = [
     policy.Gate.TURNOVER_24H,
     policy.Gate.SPREAD_PCT,
@@ -133,6 +135,51 @@ def test_twse_thresholds_are_in_twd_and_tick_aware(
     bond = _POLICY.thresholds(instruments.AssetClass.BOND, _TSMC)
     assert bond.turnover_24h == _D(100_000_000)
     assert _POLICY.slippage_notional(bond) == _D(1_500_000)
+
+
+def test_tpex_thresholds_are_in_twd_with_twse_values(
+    contract_validate: Validate,
+) -> None:
+    """TPEx stocks and bond ETFs use their own TWD sets (TWSE's values)."""
+    record = policy.evaluate(
+        _listed(
+            _GW, instruments.AssetClass.EQUITY, "5218083500", spread="0.11"
+        ),
+        _POLICY,
+        _NOW,
+    )
+    assert record.status is policy.Status.QUALIFIED
+    assert record.gates[0].unit == "TWD"
+    assert record.gates[0].threshold == _D(300_000_000)
+    contract_validate(
+        "qualification.schema.json", "QualificationRecord", record.to_contract()
+    )
+    bond = policy.evaluate(
+        _listed(_TPEX_BOND, instruments.AssetClass.BOND, "150000000"),
+        _POLICY,
+        _NOW,
+    )
+    assert bond.status is policy.Status.QUALIFIED
+    limits = _POLICY.thresholds(instruments.AssetClass.BOND, _TPEX_BOND)
+    assert limits is _POLICY.tpex_bond and limits.currency == "TWD"
+    assert _POLICY.slippage_notional(limits) == _D(1_500_000)
+    tuned = dataclasses.replace(
+        _POLICY,
+        tpex_equity=dataclasses.replace(
+            _POLICY.tpex_equity, turnover_24h=_D(6_000_000_000)
+        ),
+    )
+    assert (
+        policy.evaluate(
+            _listed(_GW, instruments.AssetClass.EQUITY, "5218083500"),
+            tuned,
+            _NOW,
+        ).status
+        is policy.Status.REJECTED
+    )
+    assert tuned.thresholds(instruments.AssetClass.EQUITY, _TSMC) is (
+        _POLICY.tw_equity
+    )
 
 
 def test_missing_listed_inputs_are_insufficient_data_not_funding() -> None:

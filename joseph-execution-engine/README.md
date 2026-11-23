@@ -8,7 +8,7 @@ OrderIntent -> Risk Gateway (deny by default) -> OMS (transactional outbox) -> T
 
 **LIVE trading** runs on Binance USDⓈ-M, Bitget USDT-M (Unified Trading Account), Hyperliquid perps, Lighter perps and MEXC futures through signed REST requests and private WebSocket streams (see [Live venues](#live-venues)). The code default keeps the global gate off (`JOSEPH_LIVE_TRADING_ENABLED=false`); the deploy compose and `deploy/.env.example` turn it on. An account without stored credentials reports `TRADING_UNAVAILABLE` and refuses before anything is sent. PAPER runs on a simulated venue. SHADOW records the orders Joseph would send but never sends them.
 
-**Securities brokers** (`adapters/brokers/`): Interactive Brokers (`ib_async` to IB Gateway/TWS; Nasdaq and NYSE), SinoPac Shioaji (TWSE) and a fail-closed Cathay Securities entry awaiting its SDK. They stay gated (no client is even created) unless `JOSEPH_LIVE_TRADING_ENABLED=true` and the broker is enabled, and every order still passes every LIVE gate. Setup, 2FA, SinoPac's simulation test and the securities risk rules are in [`docs/BROKERS.md`](../docs/BROKERS.md). Optional extras: `uv sync --extra ibkr --extra sinopac`.
+**Securities brokers** (`adapters/brokers/`): Interactive Brokers (`ib_async` to IB Gateway/TWS; Nasdaq and NYSE), SinoPac Shioaji (TWSE and TPEx) and a fail-closed Cathay Securities entry (TWSE and TPEx) awaiting its SDK. They stay gated (no client is even created) unless `JOSEPH_LIVE_TRADING_ENABLED=true` and the broker is enabled, and every order still passes every LIVE gate. Setup, 2FA, SinoPac's simulation test and the securities risk rules are in [`docs/BROKERS.md`](../docs/BROKERS.md). Optional extras: `uv sync --extra ibkr --extra sinopac`.
 
 ## Run
 
@@ -37,7 +37,7 @@ The defaults are for development: dev token `dev-local-token` maps to `tenant-01
 | `JOSEPH_CORS_ORIGINS` | `http://localhost:3000,...` | Browser origins |
 | `JOSEPH_PAPER_STARTING_EQUITY` | `100000` | Paper account equity |
 | `JOSEPH_BACKGROUND_TASKS` | `true` | Outbox worker, paper ticker, reconciler and broker event loops |
-| `JOSEPH_PAPER_TWD_STARTING_CASH` | `3000000` | TWD paper account for TWSE securities (`off` disables it) |
+| `JOSEPH_PAPER_TWD_STARTING_CASH` | `3000000` | TWD paper account for TWSE and TPEx securities (`off` disables it) |
 | `JOSEPH_EQUITY_CLOSED_MARKET_ORDERS` | `reject` | `queue` lets DAY market orders wait for the next open |
 | `JOSEPH_IBKR_*`, `JOSEPH_SINOPAC_*` | disabled | Broker connections; see `docs/BROKERS.md` |
 | `JOSEPH_VENUE_SANDBOX` | empty | `all` or venues (`binance,bitget,…`) whose accounts default to the test environment |

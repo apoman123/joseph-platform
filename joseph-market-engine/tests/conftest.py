@@ -169,32 +169,43 @@ def _twse_www(request: httpx.Request) -> httpx.Response:
 
 
 def mis_response(
-    codes: list[str], series: str = "mis_series"
+    channels: list[str], series: str = "mis_series"
 ) -> dict[str, Any]:
-    """Builds a MIS body for codes from the newest captured response.
+    """Builds a MIS body for channels from the newest captured responses.
+
+    ``tse_`` channels are served from the TWSE capture, ``otc_`` channels
+    from the TPEx capture, like MIS (a code under the other market's prefix
+    gets the empty record).
 
     Args:
-        codes: Requested security codes.
-        series: Fixture with captured responses.
+        channels: Requested channels such as ``tse_2330.tw``.
+        series: Fixture with captured responses (in both venue folders).
 
     Returns:
         ``getStockInfo.jsp`` body (unknown codes get MIS's empty record).
     """
-    responses = _fixture("twse", series)["responses"]
-    newest = max(responses, key=lambda r: r["response"]["queryTime"]["sysTime"])
-    body = newest["response"]
-    records = {r.get("c"): r for r in body["msgArray"] if r.get("c")}
+    records: dict[str, dict[str, Any]] = {}
+    body: dict[str, Any] = {}
+    for market, venue in (("tse", "twse"), ("otc", "tpex")):
+        responses = _fixture(venue, series)["responses"]
+        newest = max(
+            responses, key=lambda r: r["response"]["queryTime"]["sysTime"]
+        )
+        body = body or newest["response"]
+        for record in newest["response"]["msgArray"]:
+            if record.get("c"):
+                records[f"{market}_{record['c']}.tw"] = record
     return {
         **body,
         "msgArray": [
-            records.get(code, {"tv": "-", "s": "-", "c": "", "z": "-"})
-            for code in codes
+            records.get(channel, {"tv": "-", "s": "-", "c": "", "z": "-"})
+            for channel in channels
         ],
     }
 
 
 def _twse_mis(request: httpx.Request) -> httpx.Response:
-    """Serves MIS snapshots from the captured series.
+    """Serves MIS snapshots of both markets from the captured series.
 
     Args:
         request: Request.
@@ -203,8 +214,66 @@ def _twse_mis(request: httpx.Request) -> httpx.Response:
         Response.
     """
     channels = request.url.params.get("ex_ch", "").split("|")
-    codes = [c.removeprefix("tse_").removesuffix(".tw") for c in channels if c]
-    return _ok(mis_response(codes))
+    return _ok(mis_response([c for c in channels if c]))
+
+
+_TPEX_OPENAPI = {
+    "/openapi/v1/tpex_mainboard_quotes": "mainboard_quotes",
+    "/openapi/v1/mopsfin_t187ap03_O": "t187ap03_O",
+    "/openapi/v1/tpex_ipo_no_limit": "ipo_no_limit",
+    "/openapi/v1/tpex_cmode": "cmode",
+}
+
+
+def tpex_empty_month(code: str, date: str) -> dict[str, Any]:
+    """Returns what TPEx's tradingStock answers for a month without data.
+
+    Args:
+        code: Security code.
+        date: Requested ``YYYY/MM/01``.
+
+    Returns:
+        Body with ``stat`` ``ok`` and no rows.
+    """
+    day = date.replace("/", "")
+    return {
+        "code": code,
+        "date": day,
+        "stat": "ok",
+        "tables": [{"data": [], "date": day, "totalCount": 0}],
+    }
+
+
+def _tpex(request: httpx.Request) -> httpx.Response:
+    """Serves the TPEx OpenAPI, tradingStock and tradingDate fixtures.
+
+    Args:
+        request: Request.
+
+    Returns:
+        Response (TPEx's empty month for months not captured, its no-data
+        body for years not published).
+    """
+    path, params = request.url.path, request.url.params
+    name = _TPEX_OPENAPI.get(path)
+    if name is not None:
+        return _ok(_fixture("tpex", name))
+    if path == "/www/zh-tw/bulletin/tradingDate":
+        file = _VENUE_FIXTURES / "tpex" / f"trading_date_{params['date']}.json"
+        return _ok(
+            json.loads(file.read_text("utf-8")) if file.exists() else _NO_DATA
+        )
+    if path == "/www/zh-tw/afterTrading/tradingStock":
+        code, date = params["code"], params["date"]
+        month = date.replace("/", "")[:6]
+        for stem in (f"trading_stock_{code}_{month}", f"trading_stock_{code}"):
+            file = _VENUE_FIXTURES / "tpex" / f"{stem}.json"
+            if file.exists():
+                payload = json.loads(file.read_text("utf-8"))
+                if payload.get("date", "")[:6] == month:
+                    return _ok(payload)
+        return _ok(tpex_empty_month(code, date))
+    return httpx.Response(404)
 
 
 def _nasdaqtrader(request: httpx.Request) -> httpx.Response:
@@ -277,7 +346,7 @@ def _treasury(request: httpx.Request) -> httpx.Response:
 
 
 def install_exchange_routes(router: respx.Router) -> None:
-    """Registers the TWSE, Nasdaq Trader, Alpaca and Treasury routes.
+    """Registers the TWSE, TPEx, Nasdaq Trader, Alpaca and Treasury routes.
 
     Args:
         router: respx router.
@@ -285,6 +354,7 @@ def install_exchange_routes(router: respx.Router) -> None:
     router.route(host="openapi.twse.com.tw").mock(side_effect=_twse_openapi)
     router.route(host="www.twse.com.tw").mock(side_effect=_twse_www)
     router.route(host="mis.twse.com.tw").mock(side_effect=_twse_mis)
+    router.route(host="www.tpex.org.tw").mock(side_effect=_tpex)
     router.route(host="www.nasdaqtrader.com").mock(side_effect=_nasdaqtrader)
     router.route(host="data.alpaca.markets").mock(side_effect=_alpaca)
     router.route(host="home.treasury.gov").mock(side_effect=_treasury)

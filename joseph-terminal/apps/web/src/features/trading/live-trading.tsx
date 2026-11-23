@@ -210,7 +210,7 @@ export interface LiveConfirmDialogProps {
 
 /**
  * Dedicated LIVE confirmation naming LIVE money, the broker, the account,
- * the exact action, the quantity (shares and TWSE lots), price and currency.
+ * the exact action, the quantity (shares and Taiwan lots), price and currency.
  * @param props Props.
  * @return Dialog.
  */

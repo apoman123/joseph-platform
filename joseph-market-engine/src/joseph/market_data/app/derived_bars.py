@@ -445,11 +445,11 @@ def wrap(
 ) -> dict[instruments.Venue, ports.MarketDataPort]:
     """Wraps every crypto venue adapter.
 
-    DEMO, exchange venues (TWSE, Nasdaq, NYSE) and rate venues (Treasury)
-    are left as is: their adapters aggregate on their own session calendars
-    (where a minute without trades has no bar, so a missing child is not a
-    gap), and they publish no aggressor side, so recorded trades must never
-    add a taker delta to their classified bars.
+    DEMO, exchange venues (TWSE, TPEx, Nasdaq, NYSE) and rate venues
+    (Treasury) are left as is: their adapters aggregate on their own session
+    calendars (where a minute without trades has no bar, so a missing child
+    is not a gap), and they publish no aggressor side, so recorded trades
+    must never add a taker delta to their classified bars.
 
     Args:
         adapters: Raw adapters.

@@ -7,7 +7,7 @@
         "properties": {
           "instruments": {
             "items": {
-              "pattern": "^(binance|hyperliquid|lighter|bitget|mexc|twse|nasdaq|nyse|treasury|mock):(perp|spot|future|stock|etf|rate):[A-Za-z0-9._/-]{1,64}$",
+              "pattern": "^(binance|hyperliquid|lighter|bitget|mexc|twse|tpex|nasdaq|nyse|treasury|mock):(perp|spot|future|stock|etf|rate):[A-Za-z0-9._/-]{1,64}$",
               "type": "string"
             },
             "title": "Instruments",
@@ -517,7 +517,7 @@
             "type": "integer"
           },
           "instrument_id": {
-            "pattern": "^(binance|hyperliquid|lighter|bitget|mexc|twse|nasdaq|nyse|treasury|mock):(perp|spot|future|stock|etf|rate):[A-Za-z0-9._/-]{1,64}$",
+            "pattern": "^(binance|hyperliquid|lighter|bitget|mexc|twse|tpex|nasdaq|nyse|treasury|mock):(perp|spot|future|stock|etf|rate):[A-Za-z0-9._/-]{1,64}$",
             "title": "Instrument Id",
             "type": "string"
           },
@@ -2138,7 +2138,7 @@
         "properties": {
           "blacklist": {
             "items": {
-              "pattern": "^(binance|hyperliquid|lighter|bitget|mexc|twse|nasdaq|nyse|treasury|mock):(perp|spot|future|stock|etf|rate):[A-Za-z0-9._/-]{1,64}$",
+              "pattern": "^(binance|hyperliquid|lighter|bitget|mexc|twse|tpex|nasdaq|nyse|treasury|mock):(perp|spot|future|stock|etf|rate):[A-Za-z0-9._/-]{1,64}$",
               "type": "string"
             },
             "title": "Blacklist",
@@ -2168,7 +2168,7 @@
           },
           "whitelist": {
             "items": {
-              "pattern": "^(binance|hyperliquid|lighter|bitget|mexc|twse|nasdaq|nyse|treasury|mock):(perp|spot|future|stock|etf|rate):[A-Za-z0-9._/-]{1,64}$",
+              "pattern": "^(binance|hyperliquid|lighter|bitget|mexc|twse|tpex|nasdaq|nyse|treasury|mock):(perp|spot|future|stock|etf|rate):[A-Za-z0-9._/-]{1,64}$",
               "type": "string"
             },
             "title": "Whitelist",
@@ -2231,6 +2231,7 @@
           "bitget",
           "mexc",
           "twse",
+          "tpex",
           "nasdaq",
           "nyse",
           "treasury",
