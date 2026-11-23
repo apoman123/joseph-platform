@@ -327,12 +327,12 @@ export type AoiKind =
 export type AoiState =
   'active' | 'tested' | 'inverted' | 'swept' | 'invalidated' | 'expired';
 /**
- * `pine_parity` reproduces the reference Pine semantics; `trade` uses venue trades and is never presented as parity.
+ * `pine_parity` reproduces the reference Pine semantics; `trade` uses venue trades with a published aggressor side (true delta); `trade_classification` uses trades classified against the quote (Lee-Ready / quote rule) on stock exchanges that publish no aggressor side, an estimate distinct from true delta. Neither trade method is ever presented as parity.
  *
  * This interface was referenced by `JosephContracts`'s JSON-Schema
  * via the `definition` "IndicatorMethod".
  */
-export type IndicatorMethod = 'pine_parity' | 'trade';
+export type IndicatorMethod = 'pine_parity' | 'trade' | 'trade_classification';
 /**
  * This interface was referenced by `JosephContracts`'s JSON-Schema
  * via the `definition` "StructureEventName".
@@ -436,10 +436,13 @@ export type QualificationStatus =
  */
 export type RiskTag = 'WATCH' | 'HIGH_RISK';
 /**
+ * UNKNOWN: funding applies but is unavailable. NOT_APPLICABLE: the instrument has no funding (exchange-listed securities).
+ *
  * This interface was referenced by `JosephContracts`'s JSON-Schema
  * via the `definition` "FundingRisk".
  */
-export type FundingRisk = 'NORMAL' | 'WATCH' | 'HIGH_RISK' | 'UNKNOWN';
+export type FundingRisk =
+  'NORMAL' | 'WATCH' | 'HIGH_RISK' | 'UNKNOWN' | 'NOT_APPLICABLE';
 /**
  * This interface was referenced by `JosephContracts`'s JSON-Schema
  * via the `definition` "GateName".
@@ -1570,7 +1573,10 @@ export interface GateResult {
   threshold: DecimalString;
   comparator: 'gt' | 'lt';
   passed: boolean | null;
-  unit: 'USD' | 'ratio' | 'pct';
+  /**
+   * Currency of turnover thresholds is the listing currency (TWD on TWSE).
+   */
+  unit: 'USD' | 'TWD' | 'ratio' | 'pct';
   as_of_ms?: TimestampMs | null;
   reason: string;
 }

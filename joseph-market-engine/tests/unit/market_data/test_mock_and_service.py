@@ -235,7 +235,8 @@ async def test_registry_search_keeps_venues_separate() -> None:
     reg = registry.InstrumentRegistry(adapters)
     rows = await reg.search("eth")
     assert [str(r.instrument_id) for r in rows] == ["mock:perp:ETHUSD"]
-    assert len(await reg.search(None)) == 3
+    # Three DEMO perpetuals and the DEMO stock mock:stock:ACME.
+    assert len(await reg.search(None)) == 4
     with pytest.raises(errors.NotFoundError):
         await reg.all_instruments(instruments.Venue.BINANCE)
 
