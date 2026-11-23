@@ -2,7 +2,7 @@
 
 Multi-venue perpetual-futures research and trading: a public charting terminal, a private Python market engine (venues, screening, 7 SMC indicators, rule AST strategies, signals, alerts, backtests) and a private execution engine (risk gateway, OMS, paper/shadow trading, audit, kill switch).
 
-> **Status:** paper and shadow trading work end to end. **Live order placement is disabled and fails closed**: venue signing is not implemented or sandbox-verified. Indicators are line-by-line Python ports of the Pine scripts, kept in the private `apoman123/PineScripts` repository (`python_indicators/`) and installed as a pinned dependency (`parity_status: SPEC_ONLY` until TradingView exports are compared). See `docs/SPEC_GAP_MATRIX.md`.
+> **Status:** paper and shadow trading work end to end. **Live order placement** is implemented for Binance, Bitget, Hyperliquid, Lighter and MEXC and gated by account verification, the risk gateway, preview/consent and the kill switch; it is on in the deploy config and off by default in code. Indicators are line-by-line Python ports of the Pine scripts, kept in the private `apoman123/PineScripts` repository (`python_indicators/`) and installed as a pinned dependency (`parity_status: SPEC_ONLY` until TradingView exports are compared). See `docs/SPEC_GAP_MATRIX.md`.
 
 ## Repository layout
 

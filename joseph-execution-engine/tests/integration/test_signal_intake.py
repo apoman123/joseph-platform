@@ -166,7 +166,7 @@ def test_signal_edge_cases(
 def test_auto_live_signal_is_blocked_and_audited(
     ctx: tuple[harness.Harness, testclient.TestClient],
 ) -> None:
-    """AUTO_LIVE deployments never reach a live adapter in this build."""
+    """AUTO_LIVE without a LIVE-capable account never reaches an adapter."""
     h, client = ctx
     _deploy(h, enums.DeploymentMode.AUTO_LIVE, (harness.BTC,))
     result = _post(client, _signal(h, signal_id="live-1"))
