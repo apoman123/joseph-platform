@@ -1,6 +1,7 @@
 # TPEx fixtures
 
-Captured live on 2026-11-23 at 16:17 Asia/Taipei (a Monday, after the
+Contract-test inputs for the TPEx adapter, recorded from the official free
+TPEx and MIS endpoints. Captured live on 2026-11-23 at 16:17 Asia/Taipei (a Monday, after the
 09:00-13:30 session and after TPEx refreshed its OpenAPI quotes to that
 session) by `scripts/capture_venue_fixtures.py tpex`, trimmed to a few
 securities. No credentials are involved.

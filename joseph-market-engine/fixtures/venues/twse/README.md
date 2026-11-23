@@ -1,6 +1,7 @@
 # TWSE fixtures
 
-Captured live on 2026-11-23 (a Monday, during the 09:00-13:30 Asia/Taipei
+Contract-test inputs for the TWSE adapter, recorded from TWSE's official
+free endpoints. Captured live on 2026-11-23 (a Monday, during the 09:00-13:30 Asia/Taipei
 session) by `scripts/capture_venue_fixtures.py twse`, trimmed to a few
 securities. No credentials are involved.
 
