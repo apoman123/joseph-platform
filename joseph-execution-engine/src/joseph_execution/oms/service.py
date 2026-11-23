@@ -2149,9 +2149,9 @@ def _security_close_qty(
 ) -> decimal.Decimal:
     """Sizes a securities close to what one order may carry.
 
-    Board-lot markets (TWSE) cannot mix board and odd lots in one order:
-    above one board lot the close covers the whole lots (close the odd
-    remainder separately); below one lot it is an odd-lot limit order.
+    Board-lot markets (TWSE, TPEx) cannot mix board and odd lots in one
+    order: above one board lot the close covers the whole lots (close the
+    odd remainder separately); below one lot it is an odd-lot limit order.
 
     Args:
         held: Shares held.

@@ -1,0 +1,46 @@
+[
+ {
+  " FinancialAnnouncements": "\uff39",
+  "AlteredTrading": "\uff39",
+  "CompanyName": "\u5609\u92fc",
+  "Date": "1151123",
+  "ManagedStock": "",
+  "MatchingFrequency": "",
+  "PeriodicTrading": "",
+  "SecuritiesCompanyCode": "2067",
+  "SuspensionOfTrading": ""
+ },
+ {
+  " FinancialAnnouncements": "\uff39",
+  "AlteredTrading": "\uff39",
+  "CompanyName": "\u5730\u5fc3\u5f15\u529b",
+  "Date": "1151123",
+  "ManagedStock": "",
+  "MatchingFrequency": "030",
+  "PeriodicTrading": "\uff39",
+  "SecuritiesCompanyCode": "3629",
+  "SuspensionOfTrading": ""
+ },
+ {
+  " FinancialAnnouncements": "\uff39",
+  "AlteredTrading": "",
+  "CompanyName": "\u5927\u7565-KY",
+  "Date": "1151123",
+  "ManagedStock": "",
+  "MatchingFrequency": "",
+  "PeriodicTrading": "",
+  "SecuritiesCompanyCode": "4804",
+  "SuspensionOfTrading": "\uff39"
+ },
+ {
+  " FinancialAnnouncements": "\uff39",
+  "AlteredTrading": "",
+  "CompanyName": "\u5de8\u8679",
+  "Date": "1151123",
+  "ManagedStock": "",
+  "MatchingFrequency": "",
+  "PeriodicTrading": "",
+  "SecuritiesCompanyCode": "8084",
+  "SuspensionOfTrading": "\uff39"
+ }
+]

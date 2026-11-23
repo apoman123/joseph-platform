@@ -27,11 +27,16 @@ Sources (all public, verified live 2026-11-23):
   ``exKey`` and ``cachedAlive`` (ms in cache). Polling one query every 5 s,
   109 of 120 responses were cached and per-symbol data times advanced every
   4-120 s. TWSE blocks clients above roughly 3 requests per 5 s, so MIS and
-  ``www`` requests are paced at one per 2 s.
+  ``www`` requests are paced at one per 2 s. MIS also serves TPEx listings
+  (``otc_6488.tw``, ``adapters/tpex.py``); both venues share the MIS pace.
 * Holidays: ``openapi.../holidaySchedule/holidaySchedule`` (the latest
   published year) and ``www.../rwd/zh/holidaySchedule/holidaySchedule``
   (per year). Entries named ...開始交易 or ...最後交易 are trading days;
   every other weekday entry is a closure added to the XTAI calendar.
+
+``TaiwanExchangeAdapter`` holds what TWSE and TPEx share (MIS snapshots,
+recording, monthly daily-report caching, XTAI alignment); ``TwseAdapter``
+adds the TWSE listings, reports and holiday schedule.
 
 Intraday bars are reconstructed from MIS snapshots recorded while the
 engine runs (``snapshot_bars``); there is no intraday history. Bars are
@@ -82,6 +87,8 @@ MIS_URL = "https://mis.twse.com.tw"
 DOCS_URL = "https://openapi.twse.com.tw/"
 MIS_SOURCE = "twse.mis"
 REST_SOURCE = "twse.rest"
+MIS_MARKET = "tse"
+"""MIS channel prefix of TWSE listings (``tse_2330.tw``)."""
 _TPE = zoneinfo.ZoneInfo("Asia/Taipei")
 _TF = timeframes.MINUTE_AND_ABOVE
 _M1 = timeframes.Timeframe.M1
@@ -671,16 +678,17 @@ def parse_mis_record(
     )
 
 
-def mis_key(code: str) -> str:
-    """Returns the MIS channel of a TWSE security.
+def mis_key(code: str, market: str = MIS_MARKET) -> str:
+    """Returns the MIS channel of a security.
 
     Args:
         code: Security code.
+        market: MIS market prefix (``tse`` for TWSE, ``otc`` for TPEx).
 
     Returns:
-        ``tse_{code}.tw``.
+        ``{market}_{code}.tw`` (e.g. ``tse_2330.tw``).
     """
-    return f"tse_{code}.tw"
+    return f"{market}_{code}.tw"
 
 
 class MisClient:
@@ -689,6 +697,8 @@ class MisClient:
     Concurrent callers within a few milliseconds share one request (up to
     ``batch`` symbols), and a symbol fetched within ``cache_ms`` is served
     from memory, so screening and the recorder stay within TWSE's limits.
+    MIS serves TWSE (``tse_``) and TPEx (``otc_``) listings from the same
+    host; one client serves one market.
     """
 
     def __init__(
@@ -699,6 +709,7 @@ class MisClient:
         cache_ms: int = _MIS_CACHE_MS,
         batch: int = _MIS_BATCH,
         coalesce_s: float = 0.02,
+        market: str = MIS_MARKET,
     ) -> None:
         """Initializes the client.
 
@@ -708,12 +719,14 @@ class MisClient:
             cache_ms: Reuse window per symbol.
             batch: Symbols per request.
             coalesce_s: Wait before a request so concurrent callers join.
+            market: MIS market prefix of the channels (``tse``/``otc``).
         """
         self._http = http_client
         self._clock = clock
         self._cache_ms = cache_ms
         self._batch = batch
         self._coalesce_s = coalesce_s
+        self._market = market
         self._cache: dict[str, MisQuote | None] = {}
         self._cached_at: dict[str, int] = {}
         self._pending: set[str] = set()
@@ -791,14 +804,18 @@ class MisClient:
         payload = await self._http.get(
             "/stock/api/getStockInfo.jsp",
             params={
-                "ex_ch": "|".join(mis_key(code) for code in codes),
+                "ex_ch": "|".join(
+                    mis_key(code, self._market) for code in codes
+                ),
                 "json": "1",
                 "delay": "0",
                 "_": str(self._clock.now_ms()),
             },
         )
         if not isinstance(payload, Mapping) or payload.get("rtcode") != "0000":
-            raise errors.VenueUnavailableError("twse MIS returned an error")
+            raise errors.VenueUnavailableError(
+                f"{self._market} MIS returned an error"
+            )
         now = self._clock.now_ms()
         for code in codes:
             self._cache[code] = None
@@ -810,9 +827,36 @@ class MisClient:
                 self._cached_at[quote.code] = now
 
 
+MIS_NOTES: tuple[str, ...] = (
+    "Intraday bars (1m and above) are rebuilt from MIS "
+    "snapshots recorded while the engine runs; there is no "
+    "intraday history before recording started. They count "
+    "regular board-lot trading only (no odd lots).",
+    "MIS data refreshes irregularly: per-symbol data times "
+    "advanced every 4-120 s in testing and identical queries are "
+    "served from a server cache. Volume between two snapshots is "
+    "assigned to the bar just before the newer one; highs and "
+    "lows printed between snapshots of different bars can be "
+    "missed (they are exact when the day high/low moves inside "
+    "one bar), and volume without a known trade price leaves "
+    "that bar without buy volume (or without the bar).",
+    "Seconds timeframes are not offered: 5-second snapshots "
+    "cannot make honest seconds bars.",
+    "MIS publishes no trade feed or aggressor side: derived "
+    "trades (volume increments) are classified with the quote "
+    "rule against the previous snapshot's best bid/ask and the "
+    "tick test as fallback (taker_buy_method = classified); "
+    "they are not exposed as public trades.",
+    "Order books are MIS 5-level snapshots (sizes converted "
+    "from board lots to shares); there is no WebSocket, no "
+    "funding, open interest or taker volume.",
+)
+"""Capability notes shared by the venues whose live data is MIS."""
+
+
 @dataclasses.dataclass(slots=True)
 class _Month:
-    """Cached STOCK_DAY month.
+    """Cached month of daily bars.
 
     Attributes:
         bars: Daily candles.
@@ -823,13 +867,23 @@ class _Month:
     fetched_ms: int
 
 
-class TwseAdapter(base.BaseVenueAdapter):
-    """``SparseBarsPort`` for TWSE-listed stocks and ETFs."""
+class TaiwanExchangeAdapter(base.BaseVenueAdapter):
+    """``SparseBarsPort`` shared by the exchanges MIS serves (TWSE, TPEx).
+
+    Daily history comes from the exchange's own monthly report
+    (``_fetch_month``); intraday bars are recorded from MIS snapshots of
+    the ``MIS_MARKET`` channel; both follow the XTAI calendar. Subclasses
+    provide the listings, capabilities, holiday schedule, monthly report
+    and bulk snapshots.
+    """
 
     VENUE = instruments.Venue.TWSE
     INSTRUMENT_TTL_MS = 6 * 3_600_000
     TRADE_BUY_VOLUME_METHOD = market.BuyVolumeMethod.CLASSIFIED
     SPARSE_BARS = True
+    MIS_MARKET = MIS_MARKET
+    MIS_SOURCE_NAME = MIS_SOURCE
+    """Source stamped on MIS-built bars, snapshots and books."""
 
     def __init__(
         self,
@@ -845,8 +899,8 @@ class TwseAdapter(base.BaseVenueAdapter):
         """Initializes the adapter.
 
         Args:
-            openapi: Client for ``OPENAPI_URL``.
-            www: Client for ``WWW_URL``.
+            openapi: Client for the exchange's OpenAPI.
+            www: Client for the exchange's website reports.
             mis: Client for ``MIS_URL``.
             clock: Time source.
             verified_at_ms: When capabilities were last verified live.
@@ -856,7 +910,7 @@ class TwseAdapter(base.BaseVenueAdapter):
         super().__init__(openapi, clock)
         self._www = www
         self._mis_http = mis
-        self.mis = MisClient(mis, clock)
+        self.mis = MisClient(mis, clock, market=self.MIS_MARKET)
         self._verified_at_ms = verified_at_ms
         self._sleep = sleep
         self._poll_interval_s = poll_interval_s
@@ -866,68 +920,6 @@ class TwseAdapter(base.BaseVenueAdapter):
         self._poller: asyncio.Task[None] | None = None
         self._calendar_day: datetime.date | None = None
         self.listing: dict[str, ListingMeta] = {}
-
-    def capabilities(self) -> capabilities.VenueCapabilities:
-        """Returns verified capabilities.
-
-        Returns:
-            Capabilities.
-        """
-        return capabilities.VenueCapabilities(
-            venue=self.VENUE,
-            display_name="Taiwan Stock Exchange",
-            market_types=(
-                instruments.MarketType.STOCK,
-                instruments.MarketType.ETF,
-            ),
-            market_data=capabilities.MarketDataCapabilities(
-                rest_history=True,
-                book_snapshot=True,
-                classified_delta=True,
-            ),
-            timeframes=_TF,
-            aggregated_timeframes=(
-                *(tf for tf in _INTRADAY if tf is not _M1),
-                *_PERIODIC,
-            ),
-            notes=(
-                "Daily bars come from STOCK_DAY (one month per request, "
-                "volume in shares, raw prices: not adjusted for dividends "
-                "or splits); they include odd-lot, after-hours fixed-price "
-                "and block trades. 1w and 1M are aggregated from them.",
-                "Intraday bars (1m and above) are rebuilt from MIS "
-                "snapshots recorded while the engine runs; there is no "
-                "intraday history before recording started. They count "
-                "regular board-lot trading only (no odd lots).",
-                "MIS data refreshes irregularly: per-symbol data times "
-                "advanced every 4-120 s in testing and identical queries are "
-                "served from a server cache. Volume between two snapshots is "
-                "assigned to the bar just before the newer one; highs and "
-                "lows printed between snapshots of different bars can be "
-                "missed (they are exact when the day high/low moves inside "
-                "one bar), and volume without a known trade price leaves "
-                "that bar without buy volume (or without the bar).",
-                "Seconds timeframes are not offered: 5-second snapshots "
-                "cannot make honest seconds bars.",
-                "MIS publishes no trade feed or aggressor side: derived "
-                "trades (volume increments) are classified with the quote "
-                "rule against the previous snapshot's best bid/ask and the "
-                "tick test as fallback (taker_buy_method = classified); "
-                "they are not exposed as public trades.",
-                "Order books are MIS 5-level snapshots (sizes converted "
-                "from board lots to shares); there is no WebSocket, no "
-                "funding, open interest or taker volume.",
-                "Bulk snapshots for screening are the last session's "
-                "official values (STOCK_DAY_ALL); turnover is in TWD.",
-                "Taiwan-listed bond ETFs on TPEx (e.g. 00679B, 00937B) are "
-                "not TWSE listings and are not served; TWSE-listed bond "
-                "ETFs (e.g. 00865B) are, with asset class BOND.",
-                "Requests are paced at one per 2 s per host (TWSE blocks "
-                "clients above roughly 3 requests per 5 s).",
-            ),
-            docs_url=DOCS_URL,
-            verified_at_ms=self._verified_at_ms,
-        )
 
     def instrument_id(self, venue_market_id: str) -> instruments.InstrumentId:
         """Builds the canonical id of a listed code.
@@ -948,81 +940,35 @@ class TwseAdapter(base.BaseVenueAdapter):
             self.VENUE, market_type, venue_market_id
         )
 
-    async def _load_instruments(
-        self,
-    ) -> tuple[list[instruments.Instrument], dict[str, Mapping[str, Any]]]:
-        """Fetches the listed universe and refreshes the calendar.
-
-        Returns:
-            Instruments and empty native metadata.
-        """
-        day_all, companies, funds, first_five, halts = await asyncio.gather(
-            self._http.get("/v1/exchangeReport/STOCK_DAY_ALL"),
-            self._http.get("/v1/opendata/t187ap03_L"),
-            self._http.get("/v1/opendata/t187ap47_L"),
-            self._http.get("/v1/exchangeReport/TWT88U"),
-            self._http.get("/v1/exchangeReport/TWTAWU"),
-        )
-        rows, meta = parse_instruments(
-            day_all or [],
-            companies or [],
-            funds or [],
-            first_five or [],
-            halts or [],
-            now_ms=self._clock.now_ms(),
-        )
-        self.listing = meta
-        await self.refresh_calendar()
-        return rows, {}
-
     async def refresh_calendar(self) -> set[datetime.date]:
-        """Adds newly published closures to the XTAI calendar (daily).
+        """Adds newly published closures to the XTAI calendar.
 
-        Returns:
-            Closures added (empty when already refreshed today or when the
-            schedules are unreachable).
+        Raises:
+            NotImplementedError: Always in the base class.
         """
-        now = self._clock.now_ms()
-        today = taipei_date(now)
-        if self._calendar_day == today:
-            return set()
-        entries: list[tuple[datetime.date, str]] = []
-        try:
-            entries.extend(
-                parse_holidays_openapi(
-                    await self._http.get("/v1/holidaySchedule/holidaySchedule")
-                    or []
-                )
-            )
-            for year in (today.year, today.year + 1):
-                entries.extend(
-                    parse_holidays_rwd(
-                        await self._www.get(
-                            "/rwd/zh/holidaySchedule/holidaySchedule",
-                            params={"response": "json", "date": f"{year}0101"},
-                        )
-                        or {}
-                    )
-                )
-        except errors.JosephError as err:
-            _LOG.warning("twse holiday schedule unavailable: %s", err.message)
-            return set()
-        closures = schedule_closures(entries, today)
-        added = {
-            day for day in closures if sessions.XTAI.session(day) is not None
-        }
-        if added:
-            sessions.XTAI.add_closures(added)
-            _LOG.info("twse: %d closures added to XTAI", len(added))
-        self._calendar_day = today
-        return added
+        raise NotImplementedError
+
+    async def _fetch_month(
+        self, instrument: instruments.InstrumentId, year: int, month: int
+    ) -> list[market.Candle]:
+        """Reads one month of the exchange's daily report.
+
+        Args:
+            instrument: Instrument.
+            year: Year.
+            month: Month.
+
+        Raises:
+            NotImplementedError: Always in the base class.
+        """
+        raise NotImplementedError
 
     # Daily history -----------------------------------------------------
 
     async def _month(
         self, instrument: instruments.InstrumentId, year: int, month: int
     ) -> list[market.Candle]:
-        """Returns one STOCK_DAY month, cached while it cannot change.
+        """Returns one month of daily bars, cached while it cannot change.
 
         Args:
             instrument: Instrument.
@@ -1049,15 +995,7 @@ class TwseAdapter(base.BaseVenueAdapter):
             )
             if now - cached.fetched_ms < ttl:
                 return cached.bars
-        payload = await self._www.get(
-            "/rwd/zh/afterTrading/STOCK_DAY",
-            params={
-                "date": f"{year:04d}{month:02d}01",
-                "stockNo": code,
-                "response": "json",
-            },
-        )
-        bars = parse_stock_day(payload or {}, instrument, self._clock.now_ms())
+        bars = await self._fetch_month(instrument, year, month)
         self._months[key] = _Month(bars, self._clock.now_ms())
         return bars
 
@@ -1094,18 +1032,13 @@ class TwseAdapter(base.BaseVenueAdapter):
 
         Returns:
             Ascending final daily bars plus, during or after today's
-            session, today's non-final bar from MIS when STOCK_DAY has no
-            row yet; the spans of the months read, each up to the day
-            before it was read (a trading day there without a row had no
-            trades); and whether every month of the range was read.
+            session, today's non-final bar from MIS when the monthly report
+            has no row yet; the spans of the months read, each up to the
+            day before it was read (a trading day there without a row had
+            no trades); and whether every month of the range was read.
         """
         now = self._clock.now_ms()
-        meta = self.listing.get(instrument.venue_market_id)
-        floor = max(
-            _HISTORY_FLOOR,
-            meta.listed if meta and meta.listed else _HISTORY_FLOOR,
-        )
-        first = max(floor, taipei_date(max(start_ms, 0)))
+        first = self._first_day(instrument, start_ms)
         last = taipei_date(min(end_ms - 1, now))
         rows: dict[int, market.Candle] = {}
         covered: list[candle_rules.Span] = []
@@ -1131,6 +1064,7 @@ class TwseAdapter(base.BaseVenueAdapter):
                 )
             )
             year, month = (year, month - 1) if month > 1 else (year - 1, 12)
+            first = self._first_day(instrument, start_ms)
             if (
                 wanted is not None
                 and sum(1 for s in rows if start_ms <= s < end_ms) >= wanted
@@ -1152,6 +1086,26 @@ class TwseAdapter(base.BaseVenueAdapter):
             covered,
             complete,
         )
+
+    def _first_day(
+        self, instrument: instruments.InstrumentId, start_ms: int
+    ) -> datetime.date:
+        """Returns the first date worth reading for a range.
+
+        Args:
+            instrument: Instrument.
+            start_ms: Inclusive range start.
+
+        Returns:
+            The latest of the range start, the listing date (when known;
+            it can become known while months are read) and the floor.
+        """
+        meta = self.listing.get(instrument.venue_market_id)
+        floor = max(
+            _HISTORY_FLOOR,
+            meta.listed if meta and meta.listed else _HISTORY_FLOOR,
+        )
+        return max(floor, taipei_date(max(start_ms, 0)))
 
     async def _live_daily(
         self, instrument: instruments.InstrumentId
@@ -1183,7 +1137,7 @@ class TwseAdapter(base.BaseVenueAdapter):
             close=last,
             base_volume=snap.cumulative_volume,
             now_ms=self._clock.now_ms(),
-            source=MIS_SOURCE,
+            source=self.MIS_SOURCE_NAME,
             is_final=False,
             event_ts_ms=snap.data_ms,
         )
@@ -1199,7 +1153,7 @@ class TwseAdapter(base.BaseVenueAdapter):
         self._watch[code] = self._clock.now_ms()
         if code not in self._builders:
             self._builders[code] = snapshot_bars.SnapshotBarBuilder(
-                self.instrument_id(code), source=MIS_SOURCE
+                self.instrument_id(code), source=self.MIS_SOURCE_NAME
             )
         if self._poller is None or self._poller.done():
             self._poller = asyncio.create_task(self._poll_loop())
@@ -1268,7 +1222,9 @@ class TwseAdapter(base.BaseVenueAdapter):
             try:
                 await self.poll_once()
             except errors.JosephError as err:
-                _LOG.warning("twse MIS poll failed: %s", err.message)
+                _LOG.warning(
+                    "%s MIS poll failed: %s", self.VENUE.value, err.message
+                )
             await self._sleep(self._poll_interval_s)
 
     def _intraday(
@@ -1363,8 +1319,8 @@ class TwseAdapter(base.BaseVenueAdapter):
 
         Returns:
             Ascending candles on the XTAI calendar and the spans proven
-            complete: the MIS recording for intraday bars, the STOCK_DAY
-            months read for daily, weekly and monthly bars.
+            complete: the MIS recording for intraday bars, the monthly
+            reports read for daily, weekly and monthly bars.
         """
         self._require_timeframe(timeframe)
         await self._require(instrument)
@@ -1458,7 +1414,7 @@ class TwseAdapter(base.BaseVenueAdapter):
         return market.MarketSnapshot(
             instrument_id=instrument,
             feed_state=quality.FeedState.LIVE,
-            source=MIS_SOURCE,
+            source=self.MIS_SOURCE_NAME,
             as_of_ms=quote.snapshot.data_ms,
             last=last,
             best_bid=quote.snapshot.best_bid,
@@ -1466,6 +1422,210 @@ class TwseAdapter(base.BaseVenueAdapter):
             volume_24h_base=quote.snapshot.cumulative_volume,
             change_24h_pct=change,
         )
+
+    async def fetch_order_book(
+        self, instrument: instruments.InstrumentId, depth: int
+    ) -> market.OrderBook:
+        """Returns the MIS 5-level book (sizes in shares).
+
+        Args:
+            instrument: Instrument.
+            depth: Levels per side (MIS publishes at most 5).
+
+        Returns:
+            Order book.
+        """
+        quote = await self._quote(instrument)
+        return books.snapshot_book(
+            instrument,
+            quote.bids[: max(depth, 0)],
+            quote.asks[: max(depth, 0)],
+            ts_ms=quote.snapshot.data_ms,
+            received_ms=quote.received_ms,
+            source=self.MIS_SOURCE_NAME,
+        )
+
+    async def fetch_open_interest(
+        self, instrument: instruments.InstrumentId
+    ) -> market.OpenInterest:
+        """Cash securities have no open interest.
+
+        Args:
+            instrument: Instrument.
+
+        Raises:
+            errors.UnsupportedError: Always.
+        """
+        del instrument
+        raise errors.UnsupportedError(
+            f"{self.VENUE.value} securities have no open interest"
+        )
+
+    async def fetch_funding(
+        self, instrument: instruments.InstrumentId
+    ) -> market.Funding:
+        """Cash securities have no funding.
+
+        Args:
+            instrument: Instrument.
+
+        Raises:
+            errors.UnsupportedError: Always.
+        """
+        del instrument
+        raise errors.UnsupportedError(
+            f"{self.VENUE.value} securities have no funding"
+        )
+
+    async def close(self) -> None:
+        """Stops the recorder and closes the HTTP clients."""
+        self._watch.clear()
+        if self._poller is not None:
+            self._poller.cancel()
+            with contextlib.suppress(asyncio.CancelledError, Exception):
+                await self._poller
+        await self._http.close()
+        await self._www.close()
+        await self._mis_http.close()
+
+
+class TwseAdapter(TaiwanExchangeAdapter):
+    """``SparseBarsPort`` for TWSE-listed stocks and ETFs."""
+
+    VENUE = instruments.Venue.TWSE
+
+    def capabilities(self) -> capabilities.VenueCapabilities:
+        """Returns verified capabilities.
+
+        Returns:
+            Capabilities.
+        """
+        return capabilities.VenueCapabilities(
+            venue=self.VENUE,
+            display_name="Taiwan Stock Exchange",
+            market_types=(
+                instruments.MarketType.STOCK,
+                instruments.MarketType.ETF,
+            ),
+            market_data=capabilities.MarketDataCapabilities(
+                rest_history=True,
+                book_snapshot=True,
+                classified_delta=True,
+            ),
+            timeframes=_TF,
+            aggregated_timeframes=(
+                *(tf for tf in _INTRADAY if tf is not _M1),
+                *_PERIODIC,
+            ),
+            notes=(
+                "Daily bars come from STOCK_DAY (one month per request, "
+                "volume in shares, raw prices: not adjusted for dividends "
+                "or splits); they include odd-lot, after-hours fixed-price "
+                "and block trades. 1w and 1M are aggregated from them.",
+                *MIS_NOTES,
+                "Bulk snapshots for screening are the last session's "
+                "official values (STOCK_DAY_ALL); turnover is in TWD.",
+                "Bond ETFs listed on TPEx (e.g. 00679B, 00937B) are served "
+                "by the tpex venue; TWSE-listed bond ETFs (e.g. 00865B) are "
+                "served here, with asset class BOND.",
+                "Requests are paced at one per 2 s per host (TWSE blocks "
+                "clients above roughly 3 requests per 5 s).",
+            ),
+            docs_url=DOCS_URL,
+            verified_at_ms=self._verified_at_ms,
+        )
+
+    async def _load_instruments(
+        self,
+    ) -> tuple[list[instruments.Instrument], dict[str, Mapping[str, Any]]]:
+        """Fetches the listed universe and refreshes the calendar.
+
+        Returns:
+            Instruments and empty native metadata.
+        """
+        day_all, companies, funds, first_five, halts = await asyncio.gather(
+            self._http.get("/v1/exchangeReport/STOCK_DAY_ALL"),
+            self._http.get("/v1/opendata/t187ap03_L"),
+            self._http.get("/v1/opendata/t187ap47_L"),
+            self._http.get("/v1/exchangeReport/TWT88U"),
+            self._http.get("/v1/exchangeReport/TWTAWU"),
+        )
+        rows, meta = parse_instruments(
+            day_all or [],
+            companies or [],
+            funds or [],
+            first_five or [],
+            halts or [],
+            now_ms=self._clock.now_ms(),
+        )
+        self.listing = meta
+        await self.refresh_calendar()
+        return rows, {}
+
+    async def refresh_calendar(self) -> set[datetime.date]:
+        """Adds newly published closures to the XTAI calendar (daily).
+
+        Returns:
+            Closures added (empty when already refreshed today or when the
+            schedules are unreachable).
+        """
+        now = self._clock.now_ms()
+        today = taipei_date(now)
+        if self._calendar_day == today:
+            return set()
+        entries: list[tuple[datetime.date, str]] = []
+        try:
+            entries.extend(
+                parse_holidays_openapi(
+                    await self._http.get("/v1/holidaySchedule/holidaySchedule")
+                    or []
+                )
+            )
+            for year in (today.year, today.year + 1):
+                entries.extend(
+                    parse_holidays_rwd(
+                        await self._www.get(
+                            "/rwd/zh/holidaySchedule/holidaySchedule",
+                            params={"response": "json", "date": f"{year}0101"},
+                        )
+                        or {}
+                    )
+                )
+        except errors.JosephError as err:
+            _LOG.warning("twse holiday schedule unavailable: %s", err.message)
+            return set()
+        closures = schedule_closures(entries, today)
+        added = {
+            day for day in closures if sessions.XTAI.session(day) is not None
+        }
+        if added:
+            sessions.XTAI.add_closures(added)
+            _LOG.info("twse: %d closures added to XTAI", len(added))
+        self._calendar_day = today
+        return added
+
+    async def _fetch_month(
+        self, instrument: instruments.InstrumentId, year: int, month: int
+    ) -> list[market.Candle]:
+        """Reads one ``STOCK_DAY`` month.
+
+        Args:
+            instrument: Instrument.
+            year: Year.
+            month: Month.
+
+        Returns:
+            Daily candles of the month.
+        """
+        payload = await self._www.get(
+            "/rwd/zh/afterTrading/STOCK_DAY",
+            params={
+                "date": f"{year:04d}{month:02d}01",
+                "stockNo": instrument.venue_market_id,
+                "response": "json",
+            },
+        )
+        return parse_stock_day(payload or {}, instrument, self._clock.now_ms())
 
     async def fetch_snapshots(self) -> list[market.MarketSnapshot]:
         """Returns the last session's official values of every listing.
@@ -1507,64 +1667,3 @@ class TwseAdapter(base.BaseVenueAdapter):
                 )
             )
         return out
-
-    async def fetch_order_book(
-        self, instrument: instruments.InstrumentId, depth: int
-    ) -> market.OrderBook:
-        """Returns the MIS 5-level book (sizes in shares).
-
-        Args:
-            instrument: Instrument.
-            depth: Levels per side (MIS publishes at most 5).
-
-        Returns:
-            Order book.
-        """
-        quote = await self._quote(instrument)
-        return books.snapshot_book(
-            instrument,
-            quote.bids[: max(depth, 0)],
-            quote.asks[: max(depth, 0)],
-            ts_ms=quote.snapshot.data_ms,
-            received_ms=quote.received_ms,
-            source=MIS_SOURCE,
-        )
-
-    async def fetch_open_interest(
-        self, instrument: instruments.InstrumentId
-    ) -> market.OpenInterest:
-        """Cash securities have no open interest.
-
-        Args:
-            instrument: Instrument.
-
-        Raises:
-            errors.UnsupportedError: Always.
-        """
-        del instrument
-        raise errors.UnsupportedError("twse securities have no open interest")
-
-    async def fetch_funding(
-        self, instrument: instruments.InstrumentId
-    ) -> market.Funding:
-        """Cash securities have no funding.
-
-        Args:
-            instrument: Instrument.
-
-        Raises:
-            errors.UnsupportedError: Always.
-        """
-        del instrument
-        raise errors.UnsupportedError("twse securities have no funding")
-
-    async def close(self) -> None:
-        """Stops the recorder and closes the HTTP clients."""
-        self._watch.clear()
-        if self._poller is not None:
-            self._poller.cancel()
-            with contextlib.suppress(asyncio.CancelledError, Exception):
-                await self._poller
-        await self._http.close()
-        await self._www.close()
-        await self._mis_http.close()

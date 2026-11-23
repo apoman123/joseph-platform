@@ -25,7 +25,7 @@ from joseph.domain import timeframes
 
 _DECIMAL_PATTERN = re.compile(r"^-?(0|[1-9][0-9]*)(\.[0-9]+)?$")
 _INSTRUMENT_PATTERN = (
-    r"^(binance|hyperliquid|lighter|bitget|mexc|twse|nasdaq|nyse|treasury"
+    r"^(binance|hyperliquid|lighter|bitget|mexc|twse|tpex|nasdaq|nyse|treasury"
     r"|mock):(perp|spot|future|stock|etf|rate):[A-Za-z0-9._/-]{1,64}$"
 )
 """Contract ``InstrumentId`` (rate series parse, then fail compilation)."""

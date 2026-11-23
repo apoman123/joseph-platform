@@ -9,11 +9,11 @@
  * engine.
  *
  * Accounts: the crypto paper account plus simulated broker accounts
- * (IBKR paper for Nasdaq/NYSE, a SinoPac Shioaji simulation for TWSE, a
- * SinoPac live account without credentials and Cathay awaiting its API
- * SDK). Orders route like the engine: IBKR trades XNYS listings, TWSE
- * brokers XTAI listings. Stock orders use whole shares (TWSE board lots
- * or odd lots), tick-ladder prices and cash, never leverage.
+ * (IBKR paper for Nasdaq/NYSE, a SinoPac Shioaji simulation for TWSE and
+ * TPEx, a SinoPac live account without credentials and Cathay awaiting
+ * its API SDK). Orders route like the engine: IBKR trades XNYS listings,
+ * Taiwan brokers XTAI listings (TWSE and TPEx). Stock orders use whole
+ * shares (Taiwan board lots or odd lots), tick-ladder prices and cash, never leverage.
  *
  * LIVE: like the engine, manual LIVE orders need a server-side arming of
  * the account (`grantAccountLiveConsent` with a step-up code, here
@@ -225,7 +225,7 @@ export class DemoExecutionClient implements ExecutionClient {
   }
 
   /**
-   * Tick size of an instrument at a price (TWSE ladder, else tick size).
+   * Tick size of an instrument at a price (Taiwan ladder, else tick size).
    * @param instrument Instrument.
    * @param price Price.
    * @return Tick.
@@ -790,7 +790,7 @@ export class DemoExecutionClient implements ExecutionClient {
           'size.board_lot',
           'SIZE',
           'FAIL',
-          `TWSE orders are whole board lots of ${boardLot.toString()} shares or odd lots below ${boardLot.toString()} shares.`,
+          `${instrument.listing_exchange ?? 'TWSE'} orders are whole board lots of ${boardLot.toString()} shares or odd lots below ${boardLot.toString()} shares.`,
           'INVALID_LOT_SIZE',
           qty.toString(),
           boardLot.toString()

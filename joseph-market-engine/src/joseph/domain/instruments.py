@@ -24,6 +24,7 @@ class Venue(enum.StrEnum):
     BITGET = "bitget"
     MEXC = "mexc"
     TWSE = "twse"
+    TPEX = "tpex"
     NASDAQ = "nasdaq"
     NYSE = "nyse"
     TREASURY = "treasury"
@@ -66,11 +67,11 @@ class AssetClass(enum.StrEnum):
 
 
 _ID_PATTERN = re.compile(
-    r"^(binance|hyperliquid|lighter|bitget|mexc|twse|nasdaq|nyse|treasury"
+    r"^(binance|hyperliquid|lighter|bitget|mexc|twse|tpex|nasdaq|nyse|treasury"
     r"|mock):(perp|spot|future|stock|etf|rate):([A-Za-z0-9._/-]{1,64})$"
 )
 
-EXCHANGE_VENUES = frozenset({Venue.TWSE, Venue.NASDAQ, Venue.NYSE})
+EXCHANGE_VENUES = frozenset({Venue.TWSE, Venue.TPEX, Venue.NASDAQ, Venue.NYSE})
 """Venues that are securities exchanges (session calendars, brokers)."""
 
 RATE_VENUES = frozenset({Venue.TREASURY})
@@ -78,6 +79,7 @@ RATE_VENUES = frozenset({Venue.TREASURY})
 
 _CALENDAR_BY_VENUE: dict[Venue, str] = {
     Venue.TWSE: "XTAI",
+    Venue.TPEX: "XTAI",
     Venue.NASDAQ: "XNYS",
     Venue.NYSE: "XNYS",
     Venue.TREASURY: "USBOND",
@@ -230,12 +232,12 @@ class Instrument:
         max_leverage: Optional maximum leverage.
         listing_exchange: Exchange that lists a security (e.g. ``NYSE
             Arca``), ``None`` for crypto.
-        tick_ladder: Price-dependent ticks (TWSE); empty when ``tick_size``
-            applies at every price.
+        tick_ladder: Price-dependent ticks (TWSE, TPEx); empty when
+            ``tick_size`` applies at every price.
         price_limit_pct: Daily price limit from the reference price in
-            percent (TWSE 10), ``None`` when unlimited.
-        board_lot: Shares per board lot (TWSE 1000), ``None`` when orders
-            are in single units.
+            percent (TWSE and TPEx 10), ``None`` when unlimited.
+        board_lot: Shares per board lot (TWSE and TPEx 1000), ``None``
+            when orders are in single units.
         name: Issuer or series name in English (e.g. ``TSMC``), ``None``
             when the venue publishes none.
         local_name: Name in the listing market's language (e.g. ``台積電``

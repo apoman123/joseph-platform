@@ -95,7 +95,7 @@ CURRENCY_SCALE: Mapping[str, decimal.Decimal] = {"TWD": _D(30)}
 
 Notional and loss limits are expressed in the account's own currency; the
 USD-sized defaults and platform hard caps are scaled by this factor for
-TWD accounts (TWSE), so one board lot of a large-cap is not blocked by a
+TWD accounts (TWSE, TPEx), so one board lot of a large-cap is not blocked by a
 USD-sized cap. It is a sizing convention, not an exchange rate.
 """
 

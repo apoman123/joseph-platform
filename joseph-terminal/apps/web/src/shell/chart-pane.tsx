@@ -203,7 +203,7 @@ export function ChartPane({
   const atMsRef = useRef(atMs);
   atMsRef.current = atMs;
   const tickSize = instrument?.tick_size ?? null;
-  // Ladder markets (TWSE) format the axis with the finest tick that can
+  // Ladder markets (TWSE, TPEx) format the axis with the finest tick that can
   // apply within a 10% day band around the latest price.
   const reference = lastBar?.close ?? null;
   const axisTick = useMemo(() => {

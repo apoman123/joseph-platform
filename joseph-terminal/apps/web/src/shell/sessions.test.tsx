@@ -51,6 +51,7 @@ import {
   delayLabel,
   isRateInstrument,
   isSecurity,
+  GROUP_VENUES,
   marketGroupOf,
   marketTypeLabel,
   searchRank,
@@ -123,6 +124,16 @@ describe('market groups and search', () => {
         asset_class: 'EQUITY',
       })
     ).toBe('tw');
+    // TPEx stocks are Taiwan stocks; TPEx bond ETFs are bonds.
+    expect(
+      marketGroupOf({instrument_id: 'tpex:stock:6488', asset_class: 'EQUITY'})
+    ).toBe('tw');
+    expect(
+      marketGroupOf({instrument_id: 'tpex:etf:00679B', asset_class: 'BOND'})
+    ).toBe('bonds');
+    expect(marketGroupOf(demo('mock:etf:00999B'))).toBe('bonds');
+    expect(GROUP_VENUES.tw).toEqual(['twse', 'tpex']);
+    expect(GROUP_VENUES.bonds).toContain('tpex');
     expect(isRateInstrument('mock:rate:UST10Y')).toBe(true);
     expect(isSecurity('mock:etf:TLTD')).toBe(true);
     expect(isSecurity('bad id')).toBe(false);
@@ -139,7 +150,14 @@ describe('market groups and search', () => {
     expect(searchRank(demo('mock:stock:ACME'), 'acme corp')).toBe(4);
     const ranked = rankInstruments([], INSTRUMENTS, '半導', 'all');
     expect(ranked.map(i => i.instrument_id)).toEqual(['mock:stock:9901']);
-    expect(rankInstruments(INSTRUMENTS, [], '', 'bonds')).toHaveLength(2);
+    expect(
+      rankInstruments(INSTRUMENTS, [], '', 'bonds')
+        .map(i => i.instrument_id)
+        .sort()
+    ).toEqual(['mock:etf:00999B', 'mock:etf:TLTD', 'mock:rate:UST10Y']);
+    expect(
+      rankInstruments([], INSTRUMENTS, '美債', 'all').map(i => i.instrument_id)
+    ).toEqual(['mock:etf:00999B']);
     // Engine matches are kept even when the browser rule would miss them.
     expect(
       rankInstruments([demo('mock:perp:BTCUSD')], [], 'XBT', 'all')
@@ -177,12 +195,18 @@ describe('session formatting', () => {
     expect(formatInstrumentPrice('4.253', demo('mock:rate:UST10Y'))).toBe(
       '4.253%'
     );
+    // TPEx ETFs: 0.01 below 50, 0.05 from 50.
+    const etf = demo('mock:etf:00999B');
+    expect(tickAt(etf.tick_size, etf.tick_ladder, 26.15)).toBe('0.01');
+    expect(tickAt(etf.tick_size, etf.tick_ladder, 57.7)).toBe('0.05');
+    expect(formatInstrumentPrice('26.15', etf)).toBe('26.15');
     expect(formatInstrumentPrice(null, tw)).toBe('—');
     expect(formatInstrumentPrice('1.5', null)).toBe('1.50');
   });
 
   it('shows TWSE volume in lots (張) and stock volume in shares', () => {
     expect(formatVolume(1_234_000, demo('mock:stock:9901'))).toBe('1,234 張');
+    expect(formatVolume(56_441_000, demo('mock:etf:00999B'))).toBe('56,441 張');
     expect(formatVolume(52_300, demo('mock:stock:ACME'))).toBe('52,300 sh');
     expect(formatVolume(12.5, demo('mock:perp:BTCUSD'))).toBe('12.50');
     expect(formatVolume(null, null)).toBe('—');
@@ -356,14 +380,17 @@ describe('instrument picker', () => {
       expect(within(listbox).getByRole('group', {name: group})).toBeVisible();
     fireEvent.click(screen.getByTestId('market-group-bonds'));
     await waitFor(() =>
-      expect(within(listbox).getAllByRole('option')).toHaveLength(2)
+      expect(within(listbox).getAllByRole('option')).toHaveLength(3)
     );
+    expect(
+      within(listbox).getByRole('option', {name: /00999B/})
+    ).toHaveTextContent('TPEx');
     expect(
       within(listbox).getByRole('option', {name: /UST10Y/})
     ).toHaveTextContent('Yield, %');
     fireEvent.click(screen.getByTestId('market-group-all'));
     fireEvent.change(screen.getByLabelText('Search instruments'), {
-      target: {value: '示範'},
+      target: {value: '半導體'},
     });
     const option = await within(listbox).findByRole('option', {name: /9901/});
     expect(option).toHaveTextContent('示範半導體');

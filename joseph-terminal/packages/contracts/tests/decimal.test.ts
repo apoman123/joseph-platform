@@ -1,11 +1,15 @@
 /**
- * @fileoverview Unit and property tests for exact decimal arithmetic.
+ * @fileoverview Unit and property tests for exact decimal arithmetic and the
+ * instrument identity helpers.
  */
 import {describe, expect, it} from 'vitest';
 import {Decimal, stepDecimals} from '../src/decimal';
 import {
+  VENUES,
+  VENUE_NAMES,
   floorToTimeframe,
   formatInstrumentId,
+  isInstrumentId,
   parseInstrumentId,
 } from '../src/identity';
 
@@ -76,6 +80,18 @@ describe('identity helpers', () => {
     expect(parts.venue).toBe('hyperliquid');
     expect(formatInstrumentId(parts)).toBe('hyperliquid:perp:BTC');
     expect(() => parseInstrumentId('BTCUSDT')).toThrow(RangeError);
+  });
+
+  it('knows TPEx (Taipei Exchange) listings', () => {
+    expect(parseInstrumentId('tpex:etf:00679B')).toEqual({
+      venue: 'tpex',
+      marketType: 'etf',
+      venueMarketId: '00679B',
+    });
+    expect(isInstrumentId('tpex:stock:6488')).toBe(true);
+    expect(VENUES).toContain('tpex');
+    expect(VENUES.indexOf('tpex')).toBe(VENUES.indexOf('twse') + 1);
+    expect(VENUE_NAMES.tpex).toBe('Taipei Exchange (TPEx)');
   });
 
   it('aligns weekly bars to Monday UTC', () => {

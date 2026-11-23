@@ -15,6 +15,7 @@ from joseph.market_data.app import trade_recorder
 _VENUES = [
     instruments.Venue.BINANCE,
     instruments.Venue.TWSE,
+    instruments.Venue.TPEX,
     instruments.Venue.NASDAQ,
     instruments.Venue.NYSE,
     instruments.Venue.TREASURY,

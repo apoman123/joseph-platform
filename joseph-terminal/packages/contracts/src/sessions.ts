@@ -79,7 +79,7 @@ export const EXCHANGE_HOURS: Readonly<
     openMinute: 9 * 60,
     closeMinute: 13 * 60 + 30,
     closeGraceMs: 60_000,
-    market: 'TWSE',
+    market: 'TWSE / TPEx',
   },
   XNYS: {
     calendar: 'XNYS',
@@ -110,7 +110,7 @@ export function isExchangeCalendar(id: CalendarId): id is ExchangeCalendarId {
 
 /**
  * Session calendar implied by an instrument id (engine
- * `instruments.calendar_code`): TWSE → XTAI, Nasdaq/NYSE → XNYS, Treasury
+ * `instruments.calendar_code`): TWSE and TPEx → XTAI, Nasdaq/NYSE → XNYS, Treasury
  * → USBOND, DEMO stocks and ETFs → XNYS, everything else `24x7`.
  * @param instrumentId Canonical instrument id.
  * @return Calendar id (`24x7` for unparseable ids).
@@ -124,6 +124,7 @@ export function calendarIdForInstrumentId(instrumentId: string): CalendarId {
   }
   switch (parts.venue) {
     case 'twse':
+    case 'tpex':
       return 'XTAI';
     case 'nasdaq':
     case 'nyse':

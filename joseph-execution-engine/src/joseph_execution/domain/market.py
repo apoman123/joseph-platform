@@ -74,12 +74,12 @@ class InstrumentMeta:
         calendar: Session calendar id (``24x7`` for crypto).
         listing_exchange: Listing exchange of a security, e.g. ``NYSE
             Arca``; ``None`` for crypto.
-        tick_ladder: Price-dependent ticks (TWSE); empty when
+        tick_ladder: Price-dependent ticks (TWSE, TPEx); empty when
             ``tick_size`` applies at every price.
         price_limit_pct: Daily limit from the reference price in percent
-            (TWSE 10); ``None`` when unlimited.
-        board_lot: Shares per board lot (TWSE 1000); ``None`` when orders
-            are in single units.
+            (TWSE and TPEx 10); ``None`` when unlimited.
+        board_lot: Shares per board lot (TWSE/TPEx 1000); ``None`` when
+            orders are in single units.
     """
 
     instrument_id: str

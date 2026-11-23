@@ -370,6 +370,9 @@ describe('market status', () => {
 describe('instrument calendars', () => {
   it('maps venues and DEMO stocks like the engine', () => {
     expect(calendarIdForInstrumentId('twse:stock:2330')).toBe('XTAI');
+    expect(calendarIdForInstrumentId('tpex:stock:6488')).toBe('XTAI');
+    expect(calendarIdForInstrumentId('tpex:etf:00679B')).toBe('XTAI');
+    expect(EXCHANGE_HOURS.XTAI.market).toBe('TWSE / TPEx');
     expect(calendarIdForInstrumentId('nasdaq:etf:TLT')).toBe('XNYS');
     expect(calendarIdForInstrumentId('nyse:stock:IBM')).toBe('XNYS');
     expect(calendarIdForInstrumentId('treasury:rate:UST10Y')).toBe('USBOND');

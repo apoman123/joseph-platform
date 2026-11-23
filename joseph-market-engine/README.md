@@ -44,6 +44,19 @@ Seconds bars (`market_data/domain/trade_bars.py`) are folded from public trades:
 
 Order-book streams are not wired for any venue yet; capabilities say so.
 
+### Taiwan: TWSE and TPEx (verified 2026-11-23)
+
+`twse` (Taiwan Stock Exchange, `adapters/twse.py`) and `tpex` (Taipei Exchange mainboard, 上櫃, `adapters/tpex.py`) share one implementation (`twse.TaiwanExchangeAdapter`): the XTAI calendar (09:00-13:30 Asia/Taipei), daily bars from the exchange's monthly report, intraday bars recorded from TWSE's MIS snapshots (`tse_` and `otc_` channels, one shared request pace), classified delta, no seconds bars, sparse bars with coverage. Ids look like `twse:stock:2330`, `tpex:stock:6488` and `tpex:etf:00679B`.
+
+TPEx specifics:
+
+- **Listings**: OpenAPI `tpex_mainboard_quotes`, `mopsfin_t187ap03_O`, `tpex_ipo_no_limit` and `tpex_cmode`. Stocks and ETFs (codes `00…`), including the bond ETFs most Taiwan bond funds list on TPEx (sixth character `B`, or `D` for active bond funds) with asset class `BOND`. Not served: the emerging-stock board (興櫃), foreign-currency ETF counters (sixth character `K`/`C`), preferred shares, ETNs and warrants. Suspended companies are listed as `HALTED`.
+- **Rules**: TWSE's tick ladders; 10 % price limits, none where TPEx publishes limit-up 9999.95 (bond and other foreign-constituent ETFs, a listing's first five days); 1,000-share board lots; T+2.
+- **Daily history**: `/www/zh-tw/afterTrading/tradingStock` (one month per request, back to 1994). TPEx publishes volume and turnover in thousands, rounded, so daily volume is exact to 1,000 shares. Bars include odd-lot and after-hours fixed-price trades, not block trades. The listing-day mark (`106/01/17*`) stops reads of older months.
+- **Calendar**: TPEx's daily index matched the XTAI sessions in every month from 2005-01 to 2026-11, and its published 2026-2027 schedules (`/www/zh-tw/bulletin/tradingDate`) list the XTAI closures. Newly published closures are added to XTAI at runtime.
+- **Screening**: TWD thresholds with TWSE's values (`tpex_equity`, `tpex_bond` in `screening/domain/policy.py`).
+- **Pacing**: www.tpex.org.tw at one request per 2 s; MIS shares TWSE's budget.
+
 ## Configuration
 
 See `docs/OPERATIONS.md` for every variable. The key ones are `JOSEPH_DEV_TOKENS`, `JOSEPH_SERVICE_TOKEN`, `JOSEPH_ENABLED_VENUES` / `JOSEPH_DEMO_ONLY`, `JOSEPH_DATABASE_URL`, `JOSEPH_EXECUTION_URL`, `JOSEPH_PIPELINE_*` and the notification-channel credentials.
