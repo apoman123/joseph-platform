@@ -38,8 +38,16 @@ export const DEMO_SERIES_BAR_CAP = 50_000;
 /** Regression points computed in full after the end bar (DEMO cost cap). */
 const REGRESSION_POINT_CAP = 500;
 
-/** Refusal message for an anchor beyond the cap (mirrors the engine). */
-export const DEMO_ANCHOR_REFUSAL = `Anchor is more than ${DEMO_SERIES_BAR_CAP.toLocaleString('en-US')} bars back; the engine computes anchored values from at most ${DEMO_SERIES_BAR_CAP.toLocaleString('en-US')} bars.`;
+/**
+ * Refusal message for an anchor beyond the cap, worded like the engine's
+ * 422 (`indicators.service`).
+ * @param closed Closed bars between the anchor bar and now.
+ * @param timeframe Chart timeframe.
+ * @return Message.
+ */
+export function demoAnchorRefusal(closed: number, timeframe: string): string {
+  return `the anchor is ${closed} closed ${timeframe} bars back; anchored studies are computed for at most ${DEMO_SERIES_BAR_CAP} bars. Move the anchor closer or use a higher timeframe.`;
+}
 
 /** Plugins served by this module. */
 export const DEMO_DRAWING_PLUGINS: readonly string[] = [
@@ -265,15 +273,16 @@ export function demoDrawingSeries(
   const anchorMs = calendar.floor(query.timeframe, anchorRaw);
   const barsBack =
     anchorMs <= lastStart ? calendar.barsBetween(tf, anchorMs, lastStart) : 0;
-  if (barsBack >= DEMO_SERIES_BAR_CAP) {
+  // Like the engine: refuse when more than the cap of closed bars lie
+  // between the anchor bar and now (the anchor bar itself included).
+  if (barsBack + 1 > DEMO_SERIES_BAR_CAP) {
+    const message = demoAnchorRefusal(barsBack + 1, tf);
     throw new ApiError(422, {
       code: 'VALIDATION_FAILED',
-      message: DEMO_ANCHOR_REFUSAL,
+      message,
       trace_id: 'demo',
       retryable: false,
-      field_errors: [
-        {field: 'settings.anchor_ms', message: DEMO_ANCHOR_REFUSAL},
-      ],
+      field_errors: [{field: 'settings.anchor_ms', message}],
     });
   }
   const requested = calendar.floor(

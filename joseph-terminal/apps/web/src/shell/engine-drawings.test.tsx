@@ -163,11 +163,11 @@ describe('engine-backed drawings in the shell', () => {
   });
 
   it('shows the engine message only when the engine refuses the anchor', async () => {
-    const {runtime} = await mount('anchored-vwap', [barsBack(50_001)], 'error');
+    const {runtime} = await mount('anchored-vwap', [barsBack(50_000)], 'error');
     const doc = runtime.drawing.stores.get('chart-1')?.find('d1');
     if (!doc) throw new Error('no drawing');
     expect(describeDrawing(runtime, doc, 'chart-1').detail).toMatch(
-      /^Anchor is more than 50,000 bars back/
+      /^The anchor is 50001 closed 5m bars back/
     );
     expect(
       drawingDataRows(runtime, 'chart-1', barsBack(1), null, null)

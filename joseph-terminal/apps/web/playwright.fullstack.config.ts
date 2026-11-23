@@ -8,6 +8,8 @@ import {defineConfig, devices} from '@playwright/test';
 const WEB = Number(process.env.E2E_WEB_PORT ?? 3158);
 const MARKET = Number(process.env.E2E_MARKET_PORT ?? 18_000);
 const EXECUTION = Number(process.env.E2E_EXECUTION_PORT ?? 18_100);
+/** How engines are started (`uv run --no-sync` reuses an existing venv). */
+const UV_RUN = process.env.E2E_UV_RUN ?? 'uv run --frozen';
 const TOKEN = 'fullstack-token';
 const SERVICE = 'fullstack-service-token';
 const ROOT = '../../..';
@@ -45,7 +47,7 @@ export default defineConfig({
   ],
   webServer: [
     {
-      command: `cd ${ROOT}/joseph-market-engine && uv run --frozen uvicorn joseph.bootstrap:create_application --factory --host 127.0.0.1 --port ${MARKET}`,
+      command: `cd ${ROOT}/joseph-market-engine && ${UV_RUN} uvicorn joseph.bootstrap:create_application --factory --host 127.0.0.1 --port ${MARKET}`,
       url: `http://127.0.0.1:${MARKET}/health`,
       timeout: 120_000,
       reuseExistingServer: false,
@@ -57,7 +59,7 @@ export default defineConfig({
       },
     },
     {
-      command: `cd ${ROOT}/joseph-execution-engine && uv run --frozen uvicorn joseph_execution.bootstrap:create_application --factory --host 127.0.0.1 --port ${EXECUTION}`,
+      command: `cd ${ROOT}/joseph-execution-engine && ${UV_RUN} uvicorn joseph_execution.bootstrap:create_application --factory --host 127.0.0.1 --port ${EXECUTION}`,
       url: `http://127.0.0.1:${EXECUTION}/health`,
       timeout: 120_000,
       reuseExistingServer: false,
