@@ -902,7 +902,7 @@ def sinopac_notes(config: sinopac_lib.SinopacConfig) -> tuple[str, ...]:
     """
     return (
         "Bars, trades and books come from SinoPac Shioaji "
-        "(JOSEPH_TW_DATA_SOURCE=sinopac, the owner's API key; "
+        "(JOSEPH_TW_DATA_SOURCE=sinopac with a Shioaji API key; "
         f"{sinopac_lib.DOCS_URL}): 1m from Shioaji kbars (history from "
         "2020-03-02; 3m-12h aggregated on the XTAI grid), live 1m and "
         "seconds (1s-30s) bars from the tick stream, seconds history from "

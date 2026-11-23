@@ -1,4 +1,4 @@
-"""Opt-in live test of SinoPac Shioaji market data (the owner's account).
+"""Opt-in live test of SinoPac Shioaji market data (needs a SinoPac account).
 
 Run with ``JOSEPH_SINOPAC_DATA_TESTS=1 uv run --extra sinopac pytest
 tests/network/test_live_sinopac.py -m sinopac_data`` and

@@ -76,9 +76,9 @@ services:
       JOSEPH_PREVIEW_SECRET: ${JOSEPH_PREVIEW_SECRET:-}
       JOSEPH_STEP_UP_TOTP_SECRET: ${JOSEPH_STEP_UP_TOTP_SECRET:-}
       JOSEPH_LIVE_ARM_MAX_MS: ${JOSEPH_LIVE_ARM_MAX_MS:-28800000}
-      # Global LIVE gate: on by default for this deployment (owner
-      # decision 2026-11-23). Every order still needs a verified account,
-      # the Risk Gateway, preview/consent with step-up and no kill switch.
+      # Global LIVE gate: on by default in this deployment (off in code).
+      # Every order still needs a verified account, the Risk Gateway,
+      # preview/consent with step-up and no kill switch.
       JOSEPH_LIVE_TRADING_ENABLED: ${JOSEPH_LIVE_TRADING_ENABLED:-true}
       JOSEPH_EMERGENCY_HALT: ${JOSEPH_EMERGENCY_HALT:-false}
       JOSEPH_VENUE_SANDBOX: ${JOSEPH_VENUE_SANDBOX:-}

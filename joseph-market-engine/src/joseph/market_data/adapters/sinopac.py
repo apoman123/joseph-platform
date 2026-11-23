@@ -1,6 +1,6 @@
 """SinoPac Shioaji market data for TWSE and TPEx (optional, credential-gated).
 
-``JOSEPH_TW_DATA_SOURCE=sinopac`` with the owner's Shioaji API key
+``JOSEPH_TW_DATA_SOURCE=sinopac`` with a SinoPac Shioaji API key
 (``JOSEPH_SINOPAC_API_KEY[_FILE]``, ``JOSEPH_SINOPAC_SECRET_KEY[_FILE]``;
 market data needs no CA certificate) lets the TWSE and TPEx adapters
 (``twse.TaiwanExchangeAdapter``) take bars, trades and books from Shioaji.

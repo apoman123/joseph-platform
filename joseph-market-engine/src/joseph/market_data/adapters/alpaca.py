@@ -12,8 +12,8 @@ Class shares are ``BRK.B`` in both files and in Alpaca; preferreds
 (``ABR$D``), units (``.U``), warrants (``.W``) and rights (``.R``) of
 ``otherlisted`` are skipped because their Alpaca symbol form is unverified.
 
-Market data needs the owner's Alpaca key (documented, not verifiable on this
-machine without one; fixtures follow the documented shapes):
+Market data needs an Alpaca key (the free plan suffices; without a key the
+fixtures follow the documented shapes):
 
 * REST ``https://data.alpaca.markets/v2/stocks/{symbol}/bars|trades|quotes``
   and ``/v2/stocks/snapshots``, headers ``APCA-API-KEY-ID`` and

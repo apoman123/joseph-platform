@@ -15,8 +15,8 @@ _T = enums.OrderType
 _F = enums.TimeInForce
 
 CATHAY_AWAITING_SDK = (
-    "Awaiting the Cathay API SDK/spec from the owner's Cathay "
-    "representative: Cathay Securities publishes no developer API, so this "
+    "Awaiting the Cathay API SDK/spec (available only through a Cathay "
+    "representative): Cathay Securities publishes no developer API, so this "
     "broker is fail-closed and sends nothing."
 )
 
