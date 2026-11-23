@@ -1,0 +1,72 @@
+[
+ {
+  "1stTradingDate": "1151030",
+  "5thTradingDate": "1151105",
+  "AccTradingVolume": "3",
+  "BuySell": "B",
+  "Code": "11",
+  "Name": "\u798f    \u90a6",
+  "OverAllotmentShares": "1377",
+  "PriceUnderwritten": "44.06",
+  "SecurCode": "7867",
+  "SecurName": "\u7279\u529b\u5c4b",
+  "TradingPrice": "43.8500",
+  "TradingVolume": "3"
+ },
+ {
+  "1stTradingDate": "1151030",
+  "5thTradingDate": "1151105",
+  "AccTradingVolume": "17",
+  "BuySell": "B",
+  "Code": "11",
+  "Name": "\u798f    \u90a6",
+  "OverAllotmentShares": "1377",
+  "PriceUnderwritten": "44.06",
+  "SecurCode": "7867",
+  "SecurName": "\u7279\u529b\u5c4b",
+  "TradingPrice": "43.9000",
+  "TradingVolume": "17"
+ },
+ {
+  "1stTradingDate": "1151030",
+  "5thTradingDate": "1151105",
+  "AccTradingVolume": "26",
+  "BuySell": "B",
+  "Code": "11",
+  "Name": "\u798f    \u90a6",
+  "OverAllotmentShares": "1377",
+  "PriceUnderwritten": "44.06",
+  "SecurCode": "7867",
+  "SecurName": "\u7279\u529b\u5c4b",
+  "TradingPrice": "43.9500",
+  "TradingVolume": "26"
+ },
+ {
+  "1stTradingDate": "1151030",
+  "5thTradingDate": "1151105",
+  "AccTradingVolume": "34",
+  "BuySell": "B",
+  "Code": "11",
+  "Name": "\u798f    \u90a6",
+  "OverAllotmentShares": "1377",
+  "PriceUnderwritten": "44.06",
+  "SecurCode": "7867",
+  "SecurName": "\u7279\u529b\u5c4b",
+  "TradingPrice": "44.0000",
+  "TradingVolume": "34"
+ },
+ {
+  "1stTradingDate": "1151030",
+  "5thTradingDate": "1151105",
+  "AccTradingVolume": "63",
+  "BuySell": "B",
+  "Code": "11",
+  "Name": "\u798f    \u90a6",
+  "OverAllotmentShares": "1377",
+  "PriceUnderwritten": "44.06",
+  "SecurCode": "7867",
+  "SecurName": "\u7279\u529b\u5c4b",
+  "TradingPrice": "44.0500",
+  "TradingVolume": "63"
+ }
+]

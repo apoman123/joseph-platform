@@ -49,6 +49,7 @@ from joseph.domain import market
 from joseph.indicators import catalog
 from joseph.indicators import service as indicator_service
 from joseph.indicators.sdk import registry as plugin_registry
+from joseph.market_data.adapters import alpaca
 from joseph.market_data.adapters import factory
 from joseph.market_data.adapters import replay as replay_lib
 from joseph.market_data.adapters import ws
@@ -216,6 +217,12 @@ def build_container(
         timeout_s=settings.http_timeout_s,
         client=http_client,
         connect=connect,
+        alpaca_config=alpaca.AlpacaConfig(
+            key_id=settings.alpaca_key_id,
+            secret_key=settings.alpaca_secret_key,
+            feed=alpaca.Feed(settings.alpaca_feed),
+            seconds_history_ms=settings.alpaca_seconds_history_ms,
+        ),
     )
     hub = streaming.StreamHub(clock, retention=settings.stream_retention)
     event_bus = bus.EventBus()

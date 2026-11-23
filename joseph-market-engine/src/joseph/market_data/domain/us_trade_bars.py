@@ -1,0 +1,494 @@
+"""Seconds bars from US consolidated-tape trades (pure).
+
+US trades carry sale conditions that decide which parts of a bar a trade
+may update. The table below is the one Alpaca documents for its own minute
+bars (https://docs.alpaca.markets/docs/market-data-faq, "How are bars
+aggregated?", rules for bar type ``M``), derived from the CTS (tapes A/B)
+and UTP (tape C) specifications:
+
+=====  ===============================  =====  ====  =====  ======
+Cond.  Meaning                          Tape   O/C   H/L    Volume
+=====  ===============================  =====  ====  =====  ======
+" "    Regular sale                     A B    yes   yes    yes
+``@``  Regular sale                     C O    yes   yes    yes
+A      Acquisition                      C      yes   yes    yes
+B      Average price trade              A B    no    no     yes
+B      Bunched trade                    C      yes   yes    yes
+C      Cash sale                        all    no    no     yes
+D      Distribution                     C      yes   yes    yes
+E      Automatic execution              A B    yes   yes    yes
+F      Intermarket sweep                A B C  yes   yes    yes
+G      Bunched sold trade               C      no    no     yes
+H      Price variation trade            A B C  no    no     yes
+I      Odd lot trade                    all    no    no     yes
+K      Rule 127 / Rule 155              A B C  yes   yes    yes
+L      Sold last                        A B C  yes   yes    yes
+M      Market center official close     A B C  no    no     no
+N      Next day                         all    no    no     yes
+O      Market center opening trade      A B C  yes   yes    yes
+P      Prior reference price            all    no    no     yes
+Q      Market center official open      A B C  no    no     no
+R      Seller                           all    no    no     yes
+T      Extended hours trade             all    yes   yes    yes
+U      Extended trading hours (sold OOS) all   no    no     yes
+V      Contingent trade                 A B C  no    no     yes
+W      Average price trade              C O    no    no     yes
+X      Cross trade                      A B C  yes   yes    yes
+Y      Yellow flag regular trade        C      yes   yes    yes
+Z      Sold out of sequence             A B C  no    no     yes
+4      Derivatively priced              A B C  no    no     yes
+5      Market center reopening trade    A B C  yes   yes    yes
+6      Market center closing trade      A B C  yes   yes    yes
+7      Qualified contingent trade       A B C  no    no     yes
+9      Corrected consolidated close     A B C  no    no     no
+=====  ===============================  =====  ====  =====  ======
+
+A trade with several conditions gets the strictest combination; unknown
+conditions are treated as regular. Only trades inside a session of the
+instrument's calendar are folded (extended-hours trades are outside), so a
+bar exists only for an interval with at least one price-updating trade and
+never spans a session boundary; quiet intervals have no bar (the Alpaca
+minute-bar convention). Buy volume sums the volume of trades classified as
+buys (Lee-Ready, ``classification``) and is reported only when every
+volume-updating trade of the bar was classified.
+"""
+
+from __future__ import annotations
+
+import bisect
+import dataclasses
+import decimal
+from collections.abc import Iterable
+
+from joseph.domain import decimals
+from joseph.domain import instruments
+from joseph.domain import market
+from joseph.domain import quality
+from joseph.domain import sessions
+from joseph.domain import timeframes
+from joseph.market_data.domain import session_bars
+
+
+@dataclasses.dataclass(frozen=True, slots=True)
+class UpdateRule:
+    """Which bar fields a trade updates.
+
+    Attributes:
+        open_close: Open and close.
+        high_low: High and low.
+        volume: Volume (and trade count).
+    """
+
+    open_close: bool
+    high_low: bool
+    volume: bool
+
+    def strictest(self, other: UpdateRule) -> UpdateRule:
+        """Combines two rules, keeping only what both allow.
+
+        Args:
+            other: Rule of another condition.
+
+        Returns:
+            Combined rule.
+        """
+        return UpdateRule(
+            self.open_close and other.open_close,
+            self.high_low and other.high_low,
+            self.volume and other.volume,
+        )
+
+
+_ALL = UpdateRule(True, True, True)
+_VOLUME = UpdateRule(False, False, True)
+_NONE = UpdateRule(False, False, False)
+_AB = frozenset("AB")
+_C = frozenset("C")
+_RULES: dict[str, tuple[tuple[frozenset[str] | None, UpdateRule], ...]] = {
+    " ": ((None, _ALL),),
+    "@": ((None, _ALL),),
+    "A": ((None, _ALL),),
+    "B": ((_AB, _VOLUME), (None, _ALL)),
+    "C": ((None, _VOLUME),),
+    "D": ((None, _ALL),),
+    "E": ((None, _ALL),),
+    "F": ((None, _ALL),),
+    "G": ((None, _VOLUME),),
+    "H": ((None, _VOLUME),),
+    "I": ((None, _VOLUME),),
+    "K": ((None, _ALL),),
+    "L": ((None, _ALL),),
+    "M": ((None, _NONE),),
+    "N": ((None, _VOLUME),),
+    "O": ((None, _ALL),),
+    "P": ((None, _VOLUME),),
+    "Q": ((None, _NONE),),
+    "R": ((None, _VOLUME),),
+    "T": ((None, _ALL),),
+    "U": ((None, _VOLUME),),
+    "V": ((None, _VOLUME),),
+    "W": ((None, _VOLUME),),
+    "X": ((None, _ALL),),
+    "Y": ((None, _ALL),),
+    "Z": ((None, _VOLUME),),
+    "4": ((None, _VOLUME),),
+    "5": ((None, _ALL),),
+    "6": ((None, _ALL),),
+    "7": ((None, _VOLUME),),
+    "9": ((None, _NONE),),
+}
+
+
+def update_rule(conditions: Iterable[str], tape: str | None) -> UpdateRule:
+    """Returns the combined update rule of a trade's conditions.
+
+    Args:
+        conditions: Sale condition codes.
+        tape: Tape (``A``, ``B``, ``C``, ``O``).
+
+    Returns:
+        Strictest rule over the conditions (regular when none apply).
+    """
+    rule = _ALL
+    for code in conditions:
+        for tapes, candidate in _RULES.get(code, ((None, _ALL),)):
+            if tapes is None or (tape is not None and tape in tapes):
+                rule = rule.strictest(candidate)
+                break
+    return rule
+
+
+@dataclasses.dataclass(frozen=True, slots=True)
+class TapeTrade:
+    """A consolidated-tape trade with its classification.
+
+    Attributes:
+        trade_id: Unique id (exchange code and trade id).
+        ts_ms: Trade time.
+        price: Price.
+        size: Shares.
+        conditions: Sale conditions.
+        tape: Tape.
+        side: Classified side.
+    """
+
+    trade_id: str
+    ts_ms: int
+    price: decimal.Decimal
+    size: decimal.Decimal
+    conditions: tuple[str, ...]
+    tape: str | None
+    side: market.AggressorSide
+
+
+@dataclasses.dataclass(slots=True)
+class _Bucket:
+    """Running aggregate of one seconds bar.
+
+    Attributes:
+        open: Open.
+        high: High.
+        low: Low.
+        close: Close.
+        volume: Volume.
+        buy: Classified buy volume.
+        unknown: True when a volume trade was unclassified.
+        count: Volume-updating trades.
+        last_ts: Newest trade time.
+        open_key: Ordering key of the open.
+        close_key: Ordering key of the close.
+        final: True once closed.
+    """
+
+    open: decimal.Decimal | None = None
+    high: decimal.Decimal | None = None
+    low: decimal.Decimal | None = None
+    close: decimal.Decimal | None = None
+    volume: decimal.Decimal = decimals.ZERO
+    buy: decimal.Decimal = decimals.ZERO
+    unknown: bool = False
+    count: int = 0
+    last_ts: int = 0
+    open_key: tuple[int, int] = (0, 0)
+    close_key: tuple[int, int] = (0, 0)
+    final: bool = False
+
+
+class SecondsBarBuilder:
+    """Folds one instrument's tape trades into session seconds bars.
+
+    Attributes:
+        instrument_id: Instrument.
+        timeframe: Seconds resolution.
+        source: Provenance label.
+        outside_session: Trades skipped as outside every session.
+        duplicates: Trades ignored as already seen.
+    """
+
+    def __init__(
+        self,
+        instrument_id: instruments.InstrumentId,
+        timeframe: timeframes.Timeframe,
+        *,
+        source: str,
+        retention_bars: int = 600,
+        feed_state: quality.FeedState = quality.FeedState.LIVE,
+    ) -> None:
+        """Initializes an empty builder.
+
+        Args:
+            instrument_id: Instrument.
+            timeframe: Seconds resolution.
+            source: Provenance label.
+            retention_bars: Buckets kept behind the newest one.
+            feed_state: Provenance state of emitted bars.
+
+        Raises:
+            ValueError: For non-seconds timeframes.
+        """
+        if not timeframe.is_seconds:
+            raise ValueError("seconds bars need a seconds timeframe")
+        self.instrument_id = instrument_id
+        self.timeframe = timeframe
+        self.source = source
+        self.feed_state = feed_state
+        self.outside_session = 0
+        self.duplicates = 0
+        self._calendar = sessions.for_instrument(instrument_id)
+        self._retention = retention_bars
+        self._buckets: dict[int, _Bucket] = {}
+        self._starts: list[int] = []
+        self._seen: set[str] = set()
+        self._seq = 0
+        self._complete_from: int | None = None
+        self._partial: int | None = None
+
+    def start_segment(self, complete_from_ms: int | None) -> None:
+        """Starts a new coverage segment, forgetting open bars.
+
+        Args:
+            complete_from_ms: Time from which every trade will be delivered,
+                or ``None`` when unknown (the first trade's bar is then
+                partial and never emitted).
+        """
+        self._buckets = {s: b for s, b in self._buckets.items() if b.final}
+        self._starts = sorted(self._buckets)
+        self._complete_from = complete_from_ms
+        self._partial = None
+        if complete_from_ms is not None:
+            aligned = self.timeframe.floor(complete_from_ms)
+            if aligned != complete_from_ms:
+                self._partial = aligned
+
+    def _bucket_start(self, ts_ms: int) -> int | None:
+        """Returns the bar of a trade, or ``None`` outside sessions.
+
+        Args:
+            ts_ms: Trade time.
+
+        Returns:
+            Bar start.
+        """
+        if not self._calendar.is_open(ts_ms):
+            return None
+        return self._calendar.floor(self.timeframe, ts_ms)
+
+    def add(
+        self, trades: Iterable[TapeTrade], now_ms: int
+    ) -> list[market.Candle]:
+        """Folds trades in arrival order.
+
+        Args:
+            trades: Trades of the instrument.
+            now_ms: Receipt time.
+
+        Returns:
+            Bars whose values or finality changed, ascending.
+        """
+        touched: set[int] = set()
+        for trade in trades:
+            if trade.trade_id in self._seen:
+                self.duplicates += 1
+                continue
+            self._seen.add(trade.trade_id)
+            start = self._bucket_start(trade.ts_ms)
+            if start is None:
+                self.outside_session += 1
+                continue
+            if self._complete_from is None:
+                self._complete_from = trade.ts_ms
+                self._partial = start
+            if trade.ts_ms < self._complete_from:
+                continue
+            rule = update_rule(trade.conditions, trade.tape)
+            if not (rule.volume or rule.open_close or rule.high_low):
+                continue
+            self._seq += 1
+            bucket = self._buckets.get(start)
+            if bucket is None:
+                bucket = _Bucket()
+                self._buckets[start] = bucket
+                bisect.insort(self._starts, start)
+            self._fold(bucket, trade, rule)
+            touched.add(start)
+        if touched:
+            newest = self._starts[-1]
+            for start in self._starts:
+                if start < newest and not self._buckets[start].final:
+                    self._buckets[start].final = True
+                    touched.add(start)
+        out = self._emit(touched, now_ms)
+        self._evict()
+        return out
+
+    def _fold(
+        self, bucket: _Bucket, trade: TapeTrade, rule: UpdateRule
+    ) -> None:
+        """Applies one trade to a bucket.
+
+        Args:
+            bucket: Bucket.
+            trade: Trade.
+            rule: Its update rule.
+        """
+        key = (trade.ts_ms, self._seq)
+        if rule.open_close:
+            if bucket.open is None or key < bucket.open_key:
+                bucket.open, bucket.open_key = trade.price, key
+            if bucket.close is None or key >= bucket.close_key:
+                bucket.close, bucket.close_key = trade.price, key
+        if rule.high_low:
+            bucket.high = (
+                trade.price
+                if bucket.high is None
+                else max(bucket.high, trade.price)
+            )
+            bucket.low = (
+                trade.price
+                if bucket.low is None
+                else min(bucket.low, trade.price)
+            )
+        if rule.volume:
+            bucket.volume += trade.size
+            bucket.count += 1
+            if trade.side is market.AggressorSide.BUY:
+                bucket.buy += trade.size
+            elif trade.side is market.AggressorSide.UNKNOWN:
+                bucket.unknown = True
+        bucket.last_ts = max(bucket.last_ts, trade.ts_ms)
+
+    def finalize_through(
+        self, proven_ms: int, now_ms: int
+    ) -> list[market.Candle]:
+        """Finalizes bars ending at or before a proven delivery time.
+
+        Args:
+            proven_ms: Trades before this time have all been delivered.
+            now_ms: Receipt time.
+
+        Returns:
+            Newly final bars.
+        """
+        touched = set()
+        for start in self._starts:
+            bucket = self._buckets[start]
+            if not bucket.final and (
+                self._calendar.end_of(self.timeframe, start) <= proven_ms
+            ):
+                bucket.final = True
+                touched.add(start)
+        return self._emit(touched, now_ms)
+
+    def _emit(self, touched: set[int], now_ms: int) -> list[market.Candle]:
+        """Builds the candles of touched buckets.
+
+        Args:
+            touched: Bucket starts.
+            now_ms: Receipt time.
+
+        Returns:
+            Candles (buckets without a price or partial are skipped).
+        """
+        out = []
+        for start in sorted(touched):
+            bucket = self._buckets[start]
+            if start == self._partial or bucket.open is None:
+                continue
+            assert bucket.close is not None
+            high = bucket.high if bucket.high is not None else bucket.open
+            low = bucket.low if bucket.low is not None else bucket.open
+            out.append(
+                session_bars.candle(
+                    instrument_id=self.instrument_id,
+                    timeframe=self.timeframe,
+                    start_ms=start,
+                    open_=bucket.open,
+                    high=high,
+                    low=low,
+                    close=bucket.close,
+                    base_volume=bucket.volume,
+                    now_ms=now_ms,
+                    source=self.source,
+                    is_final=bucket.final,
+                    feed_state=self.feed_state,
+                    trade_count=bucket.count,
+                    event_ts_ms=bucket.last_ts,
+                    taker_buy_base_volume=None
+                    if bucket.unknown
+                    else bucket.buy,
+                    taker_buy_method=market.BuyVolumeMethod.CLASSIFIED,
+                )
+            )
+        return out
+
+    def _evict(self) -> None:
+        """Forgets buckets and ids behind the retention window."""
+        if len(self._starts) <= self._retention:
+            return
+        cut = len(self._starts) - self._retention
+        for start in self._starts[:cut]:
+            del self._buckets[start]
+        del self._starts[:cut]
+        if len(self._seen) > 50 * self._retention:
+            self._seen.clear()
+
+
+def bars_from_trades(
+    trades: Iterable[TapeTrade],
+    instrument_id: instruments.InstrumentId,
+    timeframe: timeframes.Timeframe,
+    *,
+    from_ms: int,
+    to_ms: int,
+    source: str,
+    now_ms: int,
+) -> list[market.Candle]:
+    """Builds the bars of a complete trade interval ``[from, to)``.
+
+    Bars ending by ``to_ms`` are final; a bar straddling ``to_ms`` is
+    returned non-final, and a non-aligned ``from_ms`` makes its bar partial
+    (omitted).
+
+    Args:
+        trades: Every trade of the interval, ascending.
+        instrument_id: Instrument.
+        timeframe: Seconds resolution.
+        from_ms: Inclusive start of the complete interval.
+        to_ms: Exclusive end of the complete interval.
+        source: Provenance label.
+        now_ms: Receipt time.
+
+    Returns:
+        Ascending bars.
+    """
+    builder = SecondsBarBuilder(
+        instrument_id, timeframe, source=source, retention_bars=1_000_000
+    )
+    builder.start_segment(from_ms)
+    out: dict[int, market.Candle] = {}
+    inside = [t for t in trades if from_ms <= t.ts_ms < to_ms]
+    for candle in builder.add(inside, now_ms):
+        out[candle.start_ms] = candle
+    for candle in builder.finalize_through(to_ms, now_ms):
+        out[candle.start_ms] = candle
+    return [out[s] for s in sorted(out)]

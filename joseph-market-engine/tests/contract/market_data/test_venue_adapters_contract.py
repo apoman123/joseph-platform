@@ -25,6 +25,7 @@ from joseph.domain import errors
 from joseph.domain import instruments
 from joseph.domain import quality
 from joseph.domain import timeframes
+from joseph.market_data.adapters import alpaca
 from joseph.market_data.adapters import binance
 from joseph.market_data.adapters import factory
 from joseph.market_data.app import ports
@@ -38,9 +39,18 @@ _BTC = {
     instruments.Venue.BITGET: "bitget:perp:BTCUSDT",
     instruments.Venue.MEXC: "mexc:perp:BTC_USDT",
 }
-# Crypto venues with recorded fixtures; exchange and rate venues are added
-# as their adapters land.
+# Crypto venues with recorded fixtures (BTC perpetual tests).
 _REAL = list(_BTC)
+_EXCHANGE = [
+    instruments.Venue.TWSE,
+    instruments.Venue.NASDAQ,
+    instruments.Venue.NYSE,
+    instruments.Venue.TREASURY,
+]
+"""Exchange and rate venues; venue-specific tests live in
+``test_exchange_venues_contract.py``."""
+_ALL_REAL = [*_REAL, *_EXCHANGE]
+_ALPACA_TEST_KEYS = alpaca.AlpacaConfig(key_id="test-key", secret_key="test")
 
 
 def _fixture(venue: str, name: str) -> Any:
@@ -141,10 +151,11 @@ def _adapter(
         clock,
         client=httpx.AsyncClient(),
         connect=_connector(frames or []),  # type: ignore[arg-type]
+        alpaca_config=_ALPACA_TEST_KEYS,
     )[venue]
 
 
-@pytest.mark.parametrize("venue", _REAL, ids=lambda v: v.value)
+@pytest.mark.parametrize("venue", _ALL_REAL, ids=lambda v: v.value)
 async def test_instruments_are_contract_valid(
     venue: instruments.Venue,
     venue_api: respx.Router,
@@ -216,7 +227,7 @@ async def test_snapshot_book_oi_funding_are_contract_valid(
     assert funding.interval_hours > 0
 
 
-@pytest.mark.parametrize("venue", _REAL, ids=lambda v: v.value)
+@pytest.mark.parametrize("venue", _ALL_REAL, ids=lambda v: v.value)
 async def test_bulk_snapshots_cover_listed_instruments(
     venue: instruments.Venue,
     venue_api: respx.Router,
@@ -239,7 +250,7 @@ async def test_bulk_snapshots_cover_listed_instruments(
 
 
 @pytest.mark.parametrize(
-    "venue", [*_REAL, instruments.Venue.MOCK], ids=lambda v: v.value
+    "venue", [*_ALL_REAL, instruments.Venue.MOCK], ids=lambda v: v.value
 )
 def test_capabilities_are_contract_valid(
     venue: instruments.Venue,
@@ -253,6 +264,14 @@ def test_capabilities_are_contract_valid(
     assert caps.market_data.rest_history
     assert not caps.market_data.native_ws_book
     assert set(payload["trade_built_timeframes"]) <= set(payload["timeframes"])
+    assert set(payload["aggregated_timeframes"]) <= set(payload["timeframes"])
+    if venue in _EXCHANGE:
+        assert payload["calendar"] != "24x7"
+        assert not caps.market_data.taker_volume
+        assert not caps.market_data.funding
+        assert not caps.market_data.open_interest
+        assert caps.docs_url.startswith("https://")
+        return
     assert caps.trade_built_timeframes == timeframes.SECONDS
     assert caps.market_data.native_ws_trades
 
