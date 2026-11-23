@@ -37,6 +37,7 @@ from joseph_execution.adapters.venues import live
 from joseph_execution.domain import enums
 from joseph_execution.domain import ids
 from joseph_execution.platform import clock as clock_lib
+from joseph_execution.platform import config
 from joseph_execution.ports import trading
 
 D = decimal.Decimal
@@ -290,6 +291,7 @@ async def test_testnet_place_and_cancel_far_limit(venue: str) -> None:
         clock_lib.SystemClock(),
         live.VenueOptions(live_trading_enabled=True, timeout_s=15.0),
         directory=known,
+        urls=config.parse_venue_urls(os.environ.get("JOSEPH_VENUE_URLS", "")),
     )[venue]
     caps = await adapter.capabilities("sandbox")
     assert caps.status is enums.TradingStatus.AVAILABLE, caps.notes
