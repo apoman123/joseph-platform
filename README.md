@@ -1,8 +1,8 @@
 # Joseph trading platform (V5)
 
-Multi-venue perpetual-futures research and trading: a public charting terminal, a private Python market engine (venues, screening, 7 SMC indicators, rule AST strategies, signals, alerts, backtests) and a private execution engine (risk gateway, OMS, paper/shadow trading, audit, kill switch).
+Multi-market research and trading — crypto perpetuals (Binance, Bitget, Hyperliquid, Lighter, MEXC), Taiwan stocks and ETFs (TWSE, TPEx), US stocks and ETFs (Nasdaq, NYSE) and US Treasury yields: a public charting terminal, a private Python market engine (venues, session calendars, screening, SMC indicators, rule AST strategies, signals, alerts, backtests) and a private execution engine (risk gateway, OMS, paper/shadow/live trading, brokers, audit, kill switch).
 
-> **Status:** paper and shadow trading work end to end. **Live order placement** is implemented for Binance, Bitget, Hyperliquid, Lighter and MEXC and gated by account verification, the risk gateway, preview/consent and the kill switch; it is on in the deploy config and off by default in code. Indicators are line-by-line Python ports of the Pine scripts, kept in the private `apoman123/PineScripts` repository (`python_indicators/`) and installed as a pinned dependency (`parity_status: SPEC_ONLY` until TradingView exports are compared). See `docs/SPEC_GAP_MATRIX.md`.
+> **Status:** paper and shadow trading work end to end. **Live order placement** is implemented for Binance, Bitget, Hyperliquid, Lighter and MEXC and for securities through Interactive Brokers and SinoPac Shioaji (Cathay waits for its SDK). It is gated by account verification, server-side account arming (manual) or deployment consent (AUTO_LIVE), the risk gateway, preview and the kill switch; it is on in the deploy config and off by default in code. Broker setup: `docs/BROKERS.md`. Indicators are line-by-line Python ports of the Pine scripts, kept in the private `apoman123/PineScripts` repository (`python_indicators/`) and installed as a pinned dependency (`parity_status: SPEC_ONLY` until TradingView exports are compared). See `docs/SPEC_GAP_MATRIX.md`.
 
 ## Repository layout
 
