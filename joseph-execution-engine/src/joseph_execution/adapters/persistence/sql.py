@@ -1475,6 +1475,60 @@ class SqlDeployments(_Repo):
         return [self._row(r) for r in self.conn.execute(query)]
 
 
+class SqlLiveArming(_Repo):
+    """Account LIVE arming (one current row per tenant account)."""
+
+    def get(
+        self, tenant_id: str, account_id: str
+    ) -> accounts.LiveArming | None:
+        """Loads the current arming of an account.
+
+        Args:
+            tenant_id: Tenant.
+            account_id: Account.
+
+        Returns:
+            Arming or ``None``.
+        """
+        c = schema.account_live_arming.c
+        row = self.conn.execute(
+            sa.select(schema.account_live_arming).where(
+                c.tenant_id == tenant_id, c.account_id == account_id
+            )
+        ).first()
+        if row is None:
+            return None
+        m = row._mapping
+        return accounts.LiveArming(
+            tenant_id=m["tenant_id"],
+            account_id=m["account_id"],
+            granted_at_ms=m["granted_at_ms"],
+            expires_at_ms=m["expires_at_ms"],
+            granted_by=m["granted_by"],
+            acknowledgement=m["acknowledgement"],
+            scope_hash=m["scope_hash"],
+            revoked_at_ms=m["revoked_at_ms"],
+            revoked_by=m["revoked_by"],
+        )
+
+    def put(self, arming: accounts.LiveArming) -> None:
+        """Stores an arming, replacing the previous one.
+
+        Args:
+            arming: Arming.
+        """
+        c = schema.account_live_arming.c
+        self.conn.execute(
+            schema.account_live_arming.delete().where(
+                c.tenant_id == arming.tenant_id,
+                c.account_id == arming.account_id,
+            )
+        )
+        self.conn.execute(
+            schema.account_live_arming.insert().values(arming.to_contract())
+        )
+
+
 class SqlUnitOfWork:
     """One database transaction exposing every repository.
 
@@ -1491,6 +1545,7 @@ class SqlUnitOfWork:
         kill_switches: Kill switch repository.
         risk_limits: Risk limit repository.
         deployments: Deployment repository.
+        live_arming: Account LIVE arming repository.
     """
 
     def __init__(self, engine: sa.Engine, lock: threading.RLock) -> None:
@@ -1516,6 +1571,7 @@ class SqlUnitOfWork:
         self.kill_switches = SqlKillSwitches(self)
         self.risk_limits = SqlRiskLimits(self)
         self.deployments = SqlDeployments(self)
+        self.live_arming = SqlLiveArming(self)
 
     @property
     def connection(self) -> sa.Connection:

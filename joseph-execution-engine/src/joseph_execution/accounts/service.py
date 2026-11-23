@@ -6,6 +6,13 @@ connections accept only delegated agent/API keys, never seed phrases.
 Broker connections carry only the broker account number: broker logins
 (IB Gateway, Shioaji keys and certificates) are deployment secrets read
 from the environment or secret files, never sent through the browser.
+
+Manual LIVE orders also need a server-side, time-limited LIVE arming of the
+account, granted with a step-up code (verified exactly like AUTO_LIVE
+deployment consent) and an explicit risk acknowledgement, bounded by
+``JOSEPH_LIVE_ARM_MAX_MS`` (8 hours by default, never more than 24 hours).
+Grants, denials and revocations are audited; revoking credentials or losing
+LIVE on re-verification disarms the account.
 """
 
 from __future__ import annotations
@@ -64,6 +71,10 @@ class AccountService:
         id_gen: services.IdGenerator,
         paper_starting_equity: decimal.Decimal,
         paper_twd_starting_cash: decimal.Decimal | None = None,
+        *,
+        step_up: services.StepUpVerifier,
+        live_trading_enabled: bool,
+        live_arm_max_ms: int = accounts.LIVE_ARM_DEFAULT_MS,
     ) -> None:
         """Initializes the service.
 
@@ -78,6 +89,10 @@ class AccountService:
             paper_starting_equity: Starting equity of paper accounts.
             paper_twd_starting_cash: Starting cash of the TWD paper
                 account for TWSE securities; ``None`` disables it.
+            step_up: Step-up verifier (shared with deployment consent).
+            live_trading_enabled: Global LIVE gate.
+            live_arm_max_ms: Longest (and default) LIVE arming, capped at
+                24 hours.
         """
         self._uow = uow_factory
         self._resolver = resolver
@@ -88,6 +103,9 @@ class AccountService:
         self._ids = id_gen
         self._paper_equity = paper_starting_equity
         self._paper_twd = paper_twd_starting_cash
+        self._step_up = step_up
+        self._live_enabled = live_trading_enabled
+        self._arm_max_ms = min(live_arm_max_ms, accounts.LIVE_ARM_CEILING_MS)
 
     def ensure_paper_account(self, tenant_id: str) -> accounts.Account:
         """Returns (creating once) the tenant's paper account.
@@ -252,6 +270,12 @@ class AccountService:
                 states=_OPEN,
             )
             all_positions = uow.positions.list(account_id=account.account_id)
+            arming = uow.live_arming.get(account.tenant_id, account.account_id)
+        armed_until = (
+            arming.expires_at_ms
+            if arming is not None and arming.valid_for(account, now)
+            else None
+        )
         position_rows = [
             p.to_contract(
                 val.marks.get(p.instrument_id),
@@ -282,6 +306,7 @@ class AccountService:
             "health": health.value,
             "stale": val.stale or not account.is_paper,
             "last_sync_ms": now if account.is_paper else None,
+            "live_armed_until_ms": armed_until,
         }
 
     async def _cash_snapshot(
@@ -435,6 +460,8 @@ class AccountService:
                 account_id=account_id,
                 payload={"status": status.value, "trading": caps.status.value},
             )
+            if enums.OrderMode.LIVE not in modes:
+                self._disarm(uow, updated, "system", "verification")
         return await self._summary(updated)
 
     async def revoke(
@@ -471,7 +498,206 @@ class AccountService:
                 account_id=account_id,
                 payload={"envelopes_deleted": removed},
             )
+            self._disarm(uow, updated, principal.actor, "credentials_revoked")
         return await self._summary(updated)
+
+    # ------------------------------------------------------------------
+    # LIVE arming (manual orders)
+    # ------------------------------------------------------------------
+
+    async def grant_live_consent(
+        self,
+        principal: identity.Principal,
+        account_id: str,
+        step_up_code: str,
+        acknowledge_risk: bool,
+        duration_ms: int | None = None,
+    ) -> dict[str, object]:
+        """Arms manual LIVE orders on an account for a bounded time.
+
+        Fails closed: every refusal is audited as ``live_arming.denied``.
+        The step-up code is checked by the same verifier, in the same way,
+        as AUTO_LIVE deployment consent.
+
+        Args:
+            principal: Caller.
+            account_id: Verified venue or broker account.
+            step_up_code: Step-up (MFA) code.
+            acknowledge_risk: Explicit risk acknowledgement.
+            duration_ms: Lifetime; ``None`` uses the configured maximum.
+
+        Returns:
+            Contract ``AccountSummary`` with ``live_armed_until_ms``.
+
+        Raises:
+            ExecutionError: ``NOT_FOUND``, ``TRADE_MODE_DISABLED`` (paper or
+                unverified account), ``VALIDATION_FAILED``,
+                ``STEP_UP_REQUIRED`` or ``LIVE_TRADING_DISABLED``.
+        """
+        account = self.get(principal, account_id)
+        duration = self._arm_max_ms if duration_ms is None else duration_ms
+        problem = await self._arming_problem(
+            principal, account, step_up_code, acknowledge_risk, duration
+        )
+        if problem is not None:
+            with self._uow() as uow:
+                self._audit.record(
+                    uow,
+                    tenant_id=principal.tenant_id,
+                    actor=principal.actor,
+                    action="live_arming.denied",
+                    entity_type="account",
+                    entity_id=account_id,
+                    account_id=account_id,
+                    payload={"code": problem.code, "reason": problem.message},
+                )
+            raise problem
+        now = self._clock.now_ms()
+        arming = accounts.LiveArming.grant(
+            account, principal.actor, now, duration
+        )
+        with self._uow() as uow:
+            previous = uow.live_arming.get(principal.tenant_id, account_id)
+            uow.live_arming.put(arming)
+            self._audit.record(
+                uow,
+                tenant_id=principal.tenant_id,
+                actor=principal.actor,
+                action="live_arming.granted",
+                entity_type="account",
+                entity_id=account_id,
+                account_id=account_id,
+                payload={
+                    **arming.to_contract(),
+                    "duration_ms": duration,
+                    "replaced_active": previous is not None
+                    and previous.valid_for(account, now),
+                },
+            )
+        return await self._summary(account)
+
+    async def _arming_problem(  # noqa: PLR0911
+        self,
+        principal: identity.Principal,
+        account: accounts.Account,
+        step_up_code: str,
+        acknowledge_risk: bool,
+        duration_ms: int,
+    ) -> errors.ExecutionError | None:
+        """Finds the first reason an arming must be refused.
+
+        Args:
+            principal: Caller.
+            account: Account to arm.
+            step_up_code: Step-up code.
+            acknowledge_risk: Risk acknowledgement.
+            duration_ms: Requested lifetime.
+
+        Returns:
+            The refusal, or ``None`` when the arming may be granted.
+        """
+        if account.is_paper:
+            return errors.ExecutionError(
+                "TRADE_MODE_DISABLED",
+                "paper accounts never trade LIVE; arm a verified venue or "
+                "broker account",
+            )
+        if not acknowledge_risk:
+            return errors.ExecutionError(
+                "VALIDATION_FAILED", "risk acknowledgement is required"
+            )
+        if not 0 < duration_ms <= self._arm_max_ms:
+            return errors.ExecutionError(
+                "VALIDATION_FAILED",
+                f"live arming lasts at most {_duration_text(self._arm_max_ms)}",
+            )
+        if not self._step_up.verify(principal.user_id, step_up_code):
+            return errors.ExecutionError(
+                "STEP_UP_REQUIRED", "step-up verification failed"
+            )
+        if not self._live_enabled:
+            return errors.ExecutionError(
+                "LIVE_TRADING_DISABLED",
+                "live trading is disabled on this deployment",
+            )
+        if (
+            account.status is not enums.AccountStatus.CONNECTED
+            or enums.OrderMode.LIVE not in account.modes
+        ):
+            return errors.ExecutionError(
+                "TRADE_MODE_DISABLED",
+                f"verify the account first: it is {account.status.value} "
+                "and LIVE is not enabled for it",
+            )
+        caps = await self.capabilities(account)
+        if caps.status is not enums.TradingStatus.AVAILABLE:
+            return errors.ExecutionError(
+                "LIVE_TRADING_DISABLED",
+                f"{account.venue} trading is {caps.status.value}",
+            )
+        return None
+
+    async def revoke_live_consent(
+        self, principal: identity.Principal, account_id: str
+    ) -> dict[str, object]:
+        """Disarms manual LIVE orders on an account (always allowed).
+
+        Idempotent. Cancels, risk-reducing orders, the kill switch and
+        reconciliation keep working while an account is disarmed.
+
+        Args:
+            principal: Caller.
+            account_id: Account.
+
+        Returns:
+            Contract ``AccountSummary`` (``live_armed_until_ms`` null).
+        """
+        account = self.get(principal, account_id)
+        with self._uow() as uow:
+            self._disarm(uow, account, principal.actor, "user", always=True)
+        return await self._summary(account)
+
+    def _disarm(
+        self,
+        uow: repositories.UnitOfWork,
+        account: accounts.Account,
+        actor: str,
+        reason: str,
+        *,
+        always: bool = False,
+    ) -> None:
+        """Revokes the account's arming inside a transaction and audits it.
+
+        Args:
+            uow: Active unit of work.
+            account: Account.
+            actor: Revoking actor.
+            reason: ``user``, ``verification`` or ``credentials_revoked``.
+            always: Audit even when no arming was active (user requests).
+        """
+        now = self._clock.now_ms()
+        current = uow.live_arming.get(account.tenant_id, account.account_id)
+        was_armed = current is not None and current.valid_for(account, now)
+        if current is not None and current.revoked_at_ms is None:
+            uow.live_arming.put(current.revoke(actor, now))
+        if not (was_armed or always):
+            return
+        self._audit.record(
+            uow,
+            tenant_id=account.tenant_id,
+            actor=actor,
+            action="live_arming.revoked",
+            entity_type="account",
+            entity_id=account.account_id,
+            account_id=account.account_id,
+            payload={
+                "reason": reason,
+                "was_armed": was_armed,
+                "expires_at_ms": None
+                if current is None
+                else current.expires_at_ms,
+            },
+        )
 
 
 def _validate_broker_credentials(
@@ -503,6 +729,23 @@ def _validate_broker_credentials(
             f"{venue} needs the broker account number, e.g. DU1234567 "
             "(IBKR paper) or 9A95-0000000 (SinoPac)",
         )
+
+
+def _duration_text(duration_ms: int) -> str:
+    """Formats an arming duration for messages.
+
+    Args:
+        duration_ms: Duration.
+
+    Returns:
+        ``8 hours``, ``90 minutes`` or ``1500 ms``.
+    """
+    if duration_ms % 3_600_000 == 0:
+        hours = duration_ms // 3_600_000
+        return f"{hours} hour{'s' if hours != 1 else ''}"
+    if duration_ms % 60_000 == 0:
+        return f"{duration_ms // 60_000} minutes"
+    return f"{duration_ms} ms"
 
 
 def _replace(

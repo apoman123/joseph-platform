@@ -82,6 +82,12 @@ def _result(  # noqa: PLR0917
 def mode_allowed(ctx: context.RiskContext) -> risk.RiskCheckResult:  # noqa: PLR0911
     """Checks the order mode against account, flags and consent.
 
+    LIVE needs the global gate and an AVAILABLE adapter. Strategy orders
+    also need an enabled AUTO_LIVE deployment with valid consent; manual
+    orders (ticket, chart, quick trade) need a valid account LIVE arming,
+    except risk-reducing orders, which stay allowed (WARN) while disarmed
+    like under a kill switch. Emergency flattening is never manual.
+
     Args:
         ctx: Risk context.
 
@@ -149,6 +155,30 @@ def mode_allowed(ctx: context.RiskContext) -> risk.RiskCheckResult:  # noqa: PLR
                 Outcome.FAIL,
                 "AUTO_LIVE needs an enabled deployment with valid consent.",
                 "TRADE_MODE_DISABLED",
+            )
+    if req.source.is_manual:
+        arming = ctx.live_arming
+        state = (
+            "NOT_ARMED" if arming is None else arming.state(account, ctx.now_ms)
+        )
+        if state != "ARMED":
+            if ctx.risk_reducing:
+                return _result(
+                    name,
+                    Domain.MODE,
+                    Outcome.WARN,
+                    "Live trading is not armed; risk-reducing order allowed.",
+                    observed=state,
+                )
+            return _result(
+                name,
+                Domain.MODE,
+                Outcome.FAIL,
+                "Live trading is not armed for this account; arm it with "
+                "a step-up code first.",
+                "LIVE_NOT_ARMED",
+                state,
+                "ARMED",
             )
     return _result(
         name,

@@ -96,6 +96,52 @@ def build_router() -> fastapi.APIRouter:
         """
         return await auth.api(request).accounts.revoke(principal, account_id)
 
+    @router.post("/{account_id}/live-consent")
+    async def grant_live_consent(
+        account_id: str,
+        body: schemas.AccountLiveConsentBody,
+        request: fastapi.Request,
+        principal: identity.Principal = _Principal,
+    ) -> dict[str, object]:
+        """Arms manual LIVE orders on an account (step-up required).
+
+        Args:
+            account_id: Verified venue or broker account.
+            body: Contract ``AccountLiveConsentRequest``.
+            request: Request.
+            principal: Caller.
+
+        Returns:
+            Contract ``AccountSummary`` with ``live_armed_until_ms``.
+        """
+        return await auth.api(request).accounts.grant_live_consent(
+            principal,
+            account_id,
+            body.step_up_code,
+            body.acknowledge_risk,
+            body.duration_ms,
+        )
+
+    @router.delete("/{account_id}/live-consent")
+    async def revoke_live_consent(
+        account_id: str,
+        request: fastapi.Request,
+        principal: identity.Principal = _Principal,
+    ) -> dict[str, object]:
+        """Disarms manual LIVE orders on an account.
+
+        Args:
+            account_id: Account.
+            request: Request.
+            principal: Caller.
+
+        Returns:
+            Contract ``AccountSummary``.
+        """
+        return await auth.api(request).accounts.revoke_live_consent(
+            principal, account_id
+        )
+
     @router.get("/{account_id}/summary")
     async def summary(
         account_id: str,

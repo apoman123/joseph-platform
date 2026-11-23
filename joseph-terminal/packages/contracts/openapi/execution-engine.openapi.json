@@ -1,6 +1,40 @@
 {
   "components": {
     "schemas": {
+      "AccountLiveConsentBody": {
+        "additionalProperties": false,
+        "description": "Contract ``AccountLiveConsentRequest`` (account LIVE arming).\n\nThe step-up code has the same shape as AUTO_LIVE deployment consent;\nthe service enforces the acknowledgement and the configured maximum\nduration (and audits refusals).",
+        "properties": {
+          "acknowledge_risk": {
+            "title": "Acknowledge Risk",
+            "type": "boolean"
+          },
+          "duration_ms": {
+            "anyOf": [
+              {
+                "exclusiveMinimum": 0.0,
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Duration Ms"
+          },
+          "step_up_code": {
+            "maxLength": 8,
+            "minLength": 6,
+            "title": "Step Up Code",
+            "type": "string"
+          }
+        },
+        "required": [
+          "step_up_code",
+          "acknowledge_risk"
+        ],
+        "title": "AccountLiveConsentBody",
+        "type": "object"
+      },
       "AmendBody": {
         "additionalProperties": false,
         "description": "Contract ``AmendRequest``.",
@@ -920,6 +954,104 @@
           }
         },
         "summary": "Capabilities",
+        "tags": [
+          "accounts"
+        ]
+      }
+    },
+    "/v1/accounts/{account_id}/live-consent": {
+      "delete": {
+        "description": "Disarms manual LIVE orders on an account.\n\nArgs:\n    account_id: Account.\n    request: Request.\n    principal: Caller.\n\nReturns:\n    Contract ``AccountSummary``.",
+        "operationId": "revoke_live_consent_v1_accounts__account_id__live_consent_delete",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "account_id",
+            "required": true,
+            "schema": {
+              "title": "Account Id",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "additionalProperties": true,
+                  "title": "Response Revoke Live Consent V1 Accounts  Account Id  Live Consent Delete",
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Revoke Live Consent",
+        "tags": [
+          "accounts"
+        ]
+      },
+      "post": {
+        "description": "Arms manual LIVE orders on an account (step-up required).\n\nArgs:\n    account_id: Verified venue or broker account.\n    body: Contract ``AccountLiveConsentRequest``.\n    request: Request.\n    principal: Caller.\n\nReturns:\n    Contract ``AccountSummary`` with ``live_armed_until_ms``.",
+        "operationId": "grant_live_consent_v1_accounts__account_id__live_consent_post",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "account_id",
+            "required": true,
+            "schema": {
+              "title": "Account Id",
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/AccountLiveConsentBody"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "additionalProperties": true,
+                  "title": "Response Grant Live Consent V1 Accounts  Account Id  Live Consent Post",
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Grant Live Consent",
         "tags": [
           "accounts"
         ]
