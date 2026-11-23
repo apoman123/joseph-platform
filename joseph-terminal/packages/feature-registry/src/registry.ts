@@ -7,7 +7,7 @@
  * tracked and disposed on deactivation even if the feature's own disposer
  * forgets to remove it.
  */
-import type {BackendClients} from '@joseph/contracts';
+import {SessionCalendarCache, type BackendClients} from '@joseph/contracts';
 import {createSettingsStore, type ChartLayerHost} from './registries';
 import type {KeyValueStorage} from './storage';
 import {createStore, type Disposer, type ReadableStore} from './store';
@@ -56,6 +56,11 @@ export interface FeatureHost<TView> {
   notifier: Notifier;
   /** Storage for feature settings. */
   storage: KeyValueStorage;
+  /**
+   * Session calendars shared by every feature (defaults to a cache over
+   * `clients.market.getSessions`).
+   */
+  calendars?: SessionCalendarCache;
 }
 
 /** Structural problem detected in the feature graph. */
@@ -421,6 +426,15 @@ export class FeatureRegistry<TView> {
     tracked: Disposer[]
   ): FeatureContext<TView> {
     const host = this.host;
+    if (!host.calendars) {
+      // Hosts without a market client (tests) get regular hours only.
+      const market = host.clients?.market as
+        BackendClients['market'] | undefined;
+      host.calendars = new SessionCalendarCache(
+        market?.getSessions?.bind(market) ?? null
+      );
+    }
+    const calendars = host.calendars;
     const track = (dispose: Disposer): Disposer => {
       let done = false;
       const once: Disposer = () => {
@@ -461,6 +475,7 @@ export class FeatureRegistry<TView> {
         on: (type, handler) => track(host.events.on(type, handler)),
       },
       notifier: host.notifier,
+      calendars,
       settings: createSettingsStore(
         host.storage,
         feature.manifest.id,

@@ -1,7 +1,8 @@
 /**
  * @fileoverview Tests for detachable panes: pane keys and links, saved
  * layout parsing, liveness (heartbeats, hidden budgets, crashed and
- * dormant windows), the reducer, message validation and the channel bus.
+ * dormant windows, the reload probe), window geometry, the reducer, message
+ * validation, the pop-out action queue and the channel bus.
  */
 import {describe, expect, it, vi} from 'vitest';
 import {
@@ -9,6 +10,7 @@ import {
   EMPTY_DETACH_STATE,
   HIDDEN_TIMEOUT_MS,
   LIVE_TIMEOUT_MS,
+  MAX_PENDING_ACTIONS,
   MemoryChannelHub,
   OPEN_GRACE_MS,
   PopoutBus,
@@ -16,18 +18,27 @@ import {
   detachReducer,
   detachedPanelState,
   detachedStatus,
+  dormantPanes,
   lostKeys,
   paneKey,
+  paneStatus,
   parseEnvelope,
+  parseGeometry,
   parsePaneRef,
+  parsePending,
   parsePopoutQuery,
   popoutUrl,
+  queueAction,
   readDetachedPanes,
+  rebaseWorkspace,
   samePanes,
+  unappliedActions,
   type DetachState,
   type DetachedPane,
   type PopoutMessage,
+  type SequencedAction,
 } from './detach';
+import {createDefaultWorkspace} from './workspace';
 
 const CHART: DetachedPane = {
   key: 'chart:chart-2',
@@ -263,5 +274,184 @@ describe('trailing throttle', () => {
     expect(sent).toEqual([1, null]);
     throttle.dispose();
     vi.useRealTimers();
+  });
+});
+
+describe('reload probe', () => {
+  const now = 7_000_000;
+
+  it('shows restored panes as reconnecting until the probe ends', () => {
+    expect(detachedStatus(undefined, now, true)).toBe('reconnecting');
+    let state = detachReducer(EMPTY_DETACH_STATE, {
+      type: 'restore',
+      panes: [CHART, ALERTS],
+    });
+    state = detachReducer(state, {type: 'probe', probing: true});
+    expect(paneStatus(state, CHART.key, now)).toBe('reconnecting');
+    expect(dormantPanes(state, now)).toEqual([]);
+    expect(lostKeys(state, now + 600_000)).toEqual([]);
+    expect(detachReducer(state, {type: 'probe', probing: true})).toBe(state);
+    // A surviving window claims its pane during the probe.
+    state = detachReducer(state, {
+      type: 'seen',
+      key: ALERTS.key,
+      ref: ALERTS.ref,
+      title: ALERTS.title,
+      hidden: false,
+      nowMs: now,
+    });
+    expect(paneStatus(state, ALERTS.key, now)).toBe('live');
+    state = detachReducer(state, {type: 'probe', probing: false});
+    expect(paneStatus(state, CHART.key, now)).toBe('dormant');
+    expect(dormantPanes(state, now)).toEqual([CHART]);
+  });
+});
+
+describe('window geometry', () => {
+  const geometry = {left: 40, top: 60, width: 1100, height: 720};
+
+  it('accepts plausible integer geometry only', () => {
+    expect(parseGeometry(geometry)).toEqual(geometry);
+    expect(parseGeometry({...geometry, left: 40.4})).toEqual(geometry);
+    expect(parseGeometry({...geometry, width: 20})).toBeNull();
+    expect(parseGeometry({...geometry, top: 1e9})).toBeNull();
+    expect(parseGeometry({...geometry, height: Number.NaN})).toBeNull();
+    expect(parseGeometry({left: 1, top: 2})).toBeNull();
+    expect(parseGeometry('100x100')).toBeNull();
+  });
+
+  it('remembers geometry with the layout and updates it from heartbeats', () => {
+    const panels = {
+      [DETACHED_PANEL_KEY]: {
+        panes: [
+          {...CHART, geometry},
+          {...ALERTS, geometry: {left: 'x'}},
+        ],
+      },
+    };
+    const panes = readDetachedPanes(panels);
+    expect(panes[0]?.geometry).toEqual(geometry);
+    expect(panes[1]?.geometry).toBeUndefined();
+    expect(detachedPanelState(panes).panes[0]?.geometry).toEqual(geometry);
+    const moved = {...geometry, left: 900};
+    let state = detachReducer(EMPTY_DETACH_STATE, {
+      type: 'restore',
+      panes,
+    });
+    const seen = (g: typeof geometry | null) =>
+      detachReducer(state, {
+        type: 'seen',
+        key: CHART.key,
+        ref: CHART.ref,
+        title: CHART.title,
+        hidden: false,
+        nowMs: 1,
+        geometry: g,
+      });
+    expect(seen(geometry).panes).toBe(state.panes);
+    state = seen(moved);
+    expect(state.panes[0]?.geometry).toEqual(moved);
+    expect(samePanes(state.panes, panes)).toBe(false);
+    expect(samePanes(panes, readDetachedPanes(panels))).toBe(true);
+  });
+});
+
+describe('pop-out action queue', () => {
+  const range = (chartId: string, from: number): SequencedAction['action'] => ({
+    type: 'setVisibleRange',
+    chartId,
+    range: {from_ms: from, to_ms: from + 1},
+  });
+
+  it('keeps actions in order, coalesces viewport changes and caps the queue', () => {
+    let queue: SequencedAction[] = [];
+    queue = queueAction(queue, {seq: 1, action: range('chart-1', 1)});
+    queue = queueAction(queue, {
+      seq: 2,
+      action: {type: 'setTimeframe', chartId: 'chart-1', timeframe: '1h'},
+    });
+    queue = queueAction(queue, {seq: 3, action: range('chart-2', 3)});
+    queue = queueAction(queue, {seq: 4, action: range('chart-1', 4)});
+    expect(queue.map(e => e.seq)).toEqual([2, 3, 4]);
+    for (let seq = 5; seq < MAX_PENDING_ACTIONS + 20; seq += 1) {
+      queue = queueAction(queue, {
+        seq,
+        action: {type: 'toggleVolume', chartId: 'chart-1'},
+      });
+    }
+    expect(queue).toHaveLength(MAX_PENDING_ACTIONS);
+    expect(queue.at(-1)?.seq).toBe(MAX_PENDING_ACTIONS + 19);
+    expect(unappliedActions(queue, MAX_PENDING_ACTIONS + 17)).toHaveLength(2);
+  });
+
+  it('validates pending actions from the channel', () => {
+    const ok = [
+      {seq: 1, action: {type: 'toggleVolume', chartId: 'chart-1'}},
+      {seq: 3, action: {type: 'rename', name: 'x'}},
+    ];
+    expect(parsePending(ok)).toEqual(ok);
+    expect(parsePending([...ok].reverse())).toBeNull();
+    expect(parsePending([{seq: 0, action: {type: 'rename'}}])).toBeNull();
+    expect(parsePending([{seq: 1, action: {}}])).toBeNull();
+    expect(parsePending([null])).toBeNull();
+    expect(parsePending('nope')).toBeNull();
+    expect(
+      parsePending(
+        Array.from({length: MAX_PENDING_ACTIONS + 1}, (_, i) => ({
+          seq: i + 1,
+          action: {type: 'toggleVolume', chartId: 'chart-1'},
+        }))
+      )
+    ).toBeNull();
+  });
+
+  it('re-applies unacknowledged actions on an adopted workspace', () => {
+    const doc = createDefaultWorkspace({
+      workspaceId: 'default',
+      instrumentId: 'mock:perp:BTCUSD',
+      timeframe: '5m',
+      nowMs: 1,
+    });
+    const pending: SequencedAction[] = [
+      {
+        seq: 1,
+        action: {type: 'setTimeframe', chartId: 'chart-1', timeframe: '1h'},
+      },
+      {seq: 2, action: {type: 'toggleVolume', chartId: 'chart-1'}},
+    ];
+    const rebased = rebaseWorkspace(doc, pending, 9);
+    expect(rebased.charts[0]?.timeframe).toBe('1h');
+    expect(rebased.charts[0]?.show_volume).toBe(false);
+    expect(rebaseWorkspace(doc, [], 9)).toBe(doc);
+  });
+
+  it('accepts acknowledgements and pending actions on the wire', () => {
+    const env = (msg: unknown) => ({v: 1, workspaceId: 'w', from: 'a', msg});
+    const doc = {schema_version: 1};
+    expect(parseEnvelope(env({type: 'main-bye'}))).not.toBeNull();
+    expect(
+      parseEnvelope(env({type: 'workspace', doc, applied: {'popout-1': 3}}))
+    ).not.toBeNull();
+    expect(
+      parseEnvelope(env({type: 'workspace', doc, applied: {'popout-1': -1}}))
+    ).toBeNull();
+    const pending = [{seq: 1, action: {type: 'toggleVolume', chartId: 'c'}}];
+    expect(
+      parseEnvelope(env({type: 'action', action: pending[0]?.action, pending}))
+    ).not.toBeNull();
+    expect(
+      parseEnvelope(
+        env({type: 'action', action: {type: 'rename'}, pending: [{seq: 1}]})
+      )
+    ).toBeNull();
+    const hello = {
+      type: 'popout-hello',
+      key: CHART.key,
+      ref: CHART.ref,
+      title: 'x',
+      hidden: false,
+    };
+    expect(parseEnvelope(env({...hello, pending}))).not.toBeNull();
+    expect(parseEnvelope(env({...hello, pending: 'x'}))).toBeNull();
   });
 });

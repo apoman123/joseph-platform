@@ -16,6 +16,7 @@ import {
   RiskView,
   type ActivityViewProps,
 } from './activity-views';
+import {AccountsView} from './accounts-view';
 import {OrdersView} from './orders-view';
 import {createPortfolioRuntime, type PortfolioRuntime} from './portfolio-store';
 import {PositionsView} from './positions-view';
@@ -112,6 +113,13 @@ export const PORTFOLIO_FEATURE: WebFeature = {
         order: 70,
         icon: 'octagon',
         view: bind(RiskView, runtime, {}),
+      }),
+      ctx.slots.contribute('bottom-panel', {
+        id: 'portfolio.accounts',
+        title: 'Accounts',
+        order: 80,
+        icon: 'wallet',
+        view: bind(AccountsView, runtime, {}),
       })
     );
     return () => {

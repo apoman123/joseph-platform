@@ -3,33 +3,69 @@
  * @fileoverview Order ticket: draft → preview → confirm. Every order goes to
  * the execution engine as an intent; the browser never signs or sends venue
  * orders. Submitting shows the venue-reported state, never an assumed fill.
+ *
+ * Perpetuals keep leverage, reduce-only and attached stop/target. Stocks
+ * and ETFs route to a broker account (IBKR for Nasdaq/NYSE, SinoPac or
+ * Cathay for TWSE) with cash-equity rules: whole shares or TWSE board/odd
+ * lots, tick-ladder prices inside the daily price limit, DAY/GTC, IBKR's
+ * outside-RTH flag and market-hours notices from the session calendar.
+ * LIVE needs the server's permission, an explicit arm step and a dedicated
+ * confirmation. Published rates have no ticket.
  */
 import {
+  accountInstrumentMismatch,
+  accountOrderTypes,
+  boardLotOf,
   buildIntentRequest,
   canConfirm,
   describeAction,
+  equityTimeInForce,
+  formatEquityPrice,
   formatFixed,
+  formatShares,
   formatStep,
   isBusy,
+  isCashEquityId,
+  isRateInstrumentId,
+  marketHoursNotice,
   modeAvailability,
   needsLimitPrice,
   needsTriggerPrice,
+  oddLotAvailable,
   orderStateLabel,
+  outsideRthSupport,
+  preferredAccount,
+  priceLimitBand,
   quantityFromRisk,
+  rateNotice,
   rewardToRisk,
+  tickAt,
+  TIME_IN_FORCE_NAMES,
+  tradingVenueName,
   type TicketInputs,
 } from '@joseph/chart-trading';
 import {
   Decimal,
+  instrumentCalendarId,
   type AccountSummary,
   type OrderMode,
   type OrderType,
   type RiskCheckResult,
+  type TimeInForce,
 } from '@joseph/contracts';
-import {useEffect, useId, useMemo, useState, type ReactNode} from 'react';
+import {
+  useEffect,
+  useId,
+  useMemo,
+  useRef,
+  useState,
+  type ReactNode,
+} from 'react';
 import {useStore, type WebFeatureContext} from '../../shell/react-bindings';
+import {ArmLivePanel, LiveConfirmDialog} from './live-trading';
 import styles from './trading.module.css';
 import type {TradingRuntime} from './trading-runtime';
+import {AccountStatusLine} from './ui/account-status';
 import {errorMessage, useNow, usePolling} from './ui/hooks';
 import {FeedBadge, InstrumentLabel, ModeBadge, Notice} from './ui/primitives';
 
@@ -64,6 +100,20 @@ function outcomeClass(outcome: RiskCheckResult['outcome']): string {
 }
 
 /**
+ * Re-renders when the session calendars load new sessions.
+ * @param ctx Feature context.
+ * @return Revision counter.
+ */
+function useCalendarRevision(ctx: WebFeatureContext): number {
+  const [revision, setRevision] = useState(0);
+  useEffect(
+    () => ctx.calendars.subscribe(() => setRevision(n => n + 1)),
+    [ctx.calendars]
+  );
+  return revision;
+}
+
+/**
  * Renders the order ticket.
  * @param props Props.
  * @return Ticket element.
@@ -72,41 +122,186 @@ export function OrderTicket({ctx, runtime}: OrderTicketProps): ReactNode {
   const state = useStore(runtime.controller);
   const meta = useStore(runtime.meta);
   const amend = useStore(runtime.amend);
+  const armed = useStore(runtime.liveArm);
   // Orders are never previewed or sent from a chart in bar replay.
   const replay = useStore(ctx.selection).replay === true;
   const now = useNow(1000);
   const uid = useId();
+  const calendarRevision = useCalendarRevision(ctx);
   const accounts = usePolling(
     () => ctx.clients.execution.listAccounts(),
     'accounts',
     10_000
   );
   const {inputs} = state;
+  const equity = isCashEquityId(inputs.instrumentId);
+  const rate = isRateInstrumentId(inputs.instrumentId);
+  const precision =
+    meta.instrumentId === inputs.instrumentId ? meta.precision : null;
+  const accountList = useMemo(
+    () => accounts.data?.accounts ?? [],
+    [accounts.data]
+  );
   const account: AccountSummary | null =
-    accounts.data?.accounts.find(a => a.account_id === inputs.accountId) ??
-    accounts.data?.accounts[0] ??
-    null;
+    accountList.find(a => a.account_id === inputs.accountId) ??
+    preferredAccount(accountList, inputs.instrumentId, null, precision);
+  const reference =
+    meta.instrumentId === inputs.instrumentId ? (meta.reference ?? null) : null;
+  const busy = isBusy(state);
 
+  // Route to an account that trades the instrument: on first load, and when
+  // the instrument changes (stocks wait for their registry entry, which
+  // carries the calendar).
+  const routed = useRef<string | null>(null);
+  const routeKey = equity && !precision ? null : inputs.instrumentId;
   useEffect(() => {
-    if (!inputs.accountId && account)
-      runtime.controller.edit({accountId: account.account_id});
-  }, [account, inputs.accountId, runtime.controller]);
+    if (busy || accountList.length === 0 || routeKey === null) return;
+    const changed = routed.current !== routeKey;
+    routed.current = routeKey;
+    const preferred = preferredAccount(
+      accountList,
+      inputs.instrumentId,
+      inputs.accountId,
+      precision
+    );
+    if (!preferred || preferred.account_id === inputs.accountId) return;
+    if (!inputs.accountId || changed)
+      runtime.controller.edit({accountId: preferred.account_id});
+  }, [
+    accountList,
+    routeKey,
+    busy,
+    inputs.accountId,
+    inputs.instrumentId,
+    precision,
+    runtime.controller,
+  ]);
+
+  // Keep equity-only choices valid for the instrument and account.
+  const oddAvailable = precision ? oddLotAvailable(account, precision) : false;
+  const oddLot =
+    equity && oddAvailable && inputs.lotMode === 'odd' && !!precision;
+  const tifChoice = useMemo(
+    () => equityTimeInForce(account, oddLot ? 'odd' : 'board'),
+    [account, oddLot]
+  );
+  const rth = outsideRthSupport(account);
+  const orderTypes = useMemo(() => {
+    if (!equity || !account) return TYPE_OPTIONS;
+    const offered = accountOrderTypes(
+      account,
+      TYPE_OPTIONS.map(o => o.type)
+    );
+    return TYPE_OPTIONS.filter(o => offered.includes(o.type));
+  }, [equity, account]);
+  // Securities start on DAY (when offered) each time one is selected.
+  const tifDefaulted = useRef<string | null>(null);
+  useEffect(() => {
+    if (busy) return;
+    const patch: Partial<TicketInputs> = {};
+    const fresh = equity && tifDefaulted.current !== inputs.instrumentId;
+    if (equity && account && tifChoice.options.length > 0) {
+      tifDefaulted.current = inputs.instrumentId;
+      if (fresh && tifChoice.options[0] !== inputs.timeInForce)
+        patch.timeInForce = tifChoice.options[0] ?? 'DAY';
+    }
+    if (!equity) tifDefaulted.current = null;
+    if (
+      equity &&
+      account &&
+      tifChoice.options.length > 0 &&
+      !tifChoice.options.includes(inputs.timeInForce)
+    )
+      patch.timeInForce = tifChoice.options[0] ?? 'DAY';
+    if (!equity && inputs.timeInForce === 'DAY') patch.timeInForce = 'GTC';
+    // Intraday odd lots are limit DAY (ROD) orders only.
+    if (oddLot && inputs.orderType !== 'limit') patch.orderType = 'limit';
+    if (equity && precision && inputs.lotMode === 'odd' && !oddAvailable)
+      patch.lotMode = 'board';
+    if (inputs.outsideRth && (!equity || !rth.shown)) patch.outsideRth = false;
+    if (
+      equity &&
+      !oddLot &&
+      orderTypes.length > 0 &&
+      !orderTypes.some(o => o.type === inputs.orderType)
+    )
+      patch.orderType = orderTypes[0]?.type ?? 'limit';
+    if (equity && (inputs.leverage || inputs.reduceOnly)) {
+      patch.leverage = '';
+      patch.reduceOnly = false;
+    }
+    if (Object.keys(patch).length > 0) runtime.controller.edit(patch);
+  }, [
+    busy,
+    equity,
+    account,
+    tifChoice,
+    rth.shown,
+    orderTypes,
+    oddLot,
+    oddAvailable,
+    precision,
+    inputs.instrumentId,
+    inputs.lotMode,
+    inputs.timeInForce,
+    inputs.outsideRth,
+    inputs.orderType,
+    inputs.leverage,
+    inputs.reduceOnly,
+    runtime.controller,
+  ]);
+
+  // Cash-equity rules read the account, the previous close and the session
+  // calendar (closed-market rules) when the order is previewed.
+  const calendar = useMemo(() => {
+    void calendarRevision;
+    return equity
+      ? ctx.calendars.calendar(
+          instrumentCalendarId(inputs.instrumentId, precision)
+        )
+      : null;
+  }, [calendarRevision, equity, ctx.calendars, inputs.instrumentId, precision]);
+  useEffect(() => {
+    runtime.controller.setContext({account, reference, calendar, nowMs: now});
+  }, [runtime.controller, account, reference, calendar, now]);
+
+  // An expired arm (or another account) drops the ticket back to paper.
+  const armedUntil = account ? (armed[account.account_id] ?? 0) : 0;
+  const liveArmed = armedUntil > now;
+  useEffect(() => {
+    if (inputs.mode === 'LIVE' && !liveArmed && !busy) {
+      runtime.controller.edit({mode: 'PAPER'});
+      ctx.notifier.notify(
+        'Live trading was disarmed; the ticket is back in paper mode.',
+        'info'
+      );
+    }
+  }, [inputs.mode, liveArmed, busy, runtime.controller, ctx.notifier]);
+  const [arming, setArming] = useState(false);
+  const [liveConfirm, setLiveConfirm] = useState(false);
 
   const modes = useMemo(() => modeAvailability(account), [account]);
   const built = useMemo(
     () =>
-      buildIntentRequest(
-        inputs,
-        meta.instrumentId === inputs.instrumentId ? meta.precision : null,
-        meta.mark
-      ),
-    [inputs, meta]
+      buildIntentRequest(inputs, precision, meta.mark, {
+        account,
+        reference,
+        calendar,
+        nowMs: now,
+      }),
+    [inputs, precision, meta.mark, account, reference, calendar, now]
   );
-  const precision =
-    meta.instrumentId === inputs.instrumentId ? meta.precision : null;
   const [attempted, setAttempted] = useState(false);
   const touched = (name: string): boolean => {
     if (attempted || name === 'notional' || name === 'instrumentId')
+      return true;
+    if (
+      name === 'accountId' ||
+      name === 'timeInForce' ||
+      name === 'outsideRth' ||
+      name === 'orderType' ||
+      name === 'lotMode'
+    )
       return true;
     const value = (inputs as unknown as Record<string, unknown>)[name];
     return typeof value === 'string' ? value.trim() !== '' : true;
@@ -116,14 +311,14 @@ export function OrderTicket({ctx, runtime}: OrderTicketProps): ReactNode {
       i => i.field === field && (i.severity === 'warning' || touched(field))
     );
   const edit = (patch: Partial<TicketInputs>) => runtime.controller.edit(patch);
-  const busy = isBusy(state);
   const previewCurrent =
     state.preview !== null && state.previewRevision === state.inputRevision;
   const base = precision?.key.canonical_base ?? '';
+  const currency = precision?.key.quote ?? account?.currency ?? '';
 
   const [riskPct, setRiskPct] = useState('0.5');
   const riskQty = useMemo(() => {
-    if (!account?.equity || !precision || !Decimal.isValid(riskPct))
+    if (equity || !account?.equity || !precision || !Decimal.isValid(riskPct))
       return null;
     const entry = built.limitPrice ?? built.triggerPrice ?? meta.mark;
     const stopText = inputs.stopLoss.replace(/,/g, '').trim();
@@ -136,6 +331,7 @@ export function OrderTicket({ctx, runtime}: OrderTicketProps): ReactNode {
       lotSize: Decimal.parse(precision.lot_size),
     });
   }, [
+    equity,
     account,
     precision,
     riskPct,
@@ -146,6 +342,7 @@ export function OrderTicket({ctx, runtime}: OrderTicketProps): ReactNode {
   ]);
 
   const rr = useMemo(() => {
+    if (equity) return null;
     const entry = built.limitPrice ?? built.triggerPrice ?? meta.mark;
     const sl = inputs.stopLoss.replace(/,/g, '').trim();
     const tp = inputs.takeProfit.replace(/,/g, '').trim();
@@ -157,6 +354,7 @@ export function OrderTicket({ctx, runtime}: OrderTicketProps): ReactNode {
       Decimal.parse(tp)
     );
   }, [
+    equity,
     built.limitPrice,
     built.triggerPrice,
     meta.mark,
@@ -165,12 +363,29 @@ export function OrderTicket({ctx, runtime}: OrderTicketProps): ReactNode {
     inputs.takeProfit,
   ]);
 
+  const hoursNotice = useMemo(() => {
+    if (!calendar) return null;
+    return marketHoursNotice(calendar, now, {
+      orderType: inputs.orderType,
+      timeInForce: inputs.timeInForce,
+      outsideRth: inputs.outsideRth === true,
+      queueMarket: account?.capabilities.queue_market_when_closed === true,
+    });
+  }, [
+    calendar,
+    account,
+    inputs.orderType,
+    inputs.timeInForce,
+    inputs.outsideRth,
+    now,
+  ]);
+
   const fieldId = (name: string) => `${uid}-${name}`;
   const field = (
     name: keyof TicketInputs,
     label: string,
     input: ReactNode,
-    hint?: string
+    hint?: ReactNode
   ) => {
     const issues = errorsFor(name);
     return (
@@ -221,11 +436,75 @@ export function OrderTicket({ctx, runtime}: OrderTicketProps): ReactNode {
     />
   );
 
+  if (rate) {
+    return (
+      <section
+        className={`j-panel ${styles.ticket}`}
+        aria-label="Order ticket"
+        data-testid="order-ticket"
+      >
+        <header className="j-panel__header">
+          <h2>Order ticket</h2>
+          <InstrumentLabel instrumentId={inputs.instrumentId} />
+        </header>
+        <div className={`j-panel__body ${styles.rate}`}>
+          <Notice tone="info">
+            <span data-testid="rate-no-ticket">
+              {rateNotice(inputs.instrumentId, precision?.name ?? null)}
+            </span>
+          </Notice>
+        </div>
+      </section>
+    );
+  }
+
   const remainingMs = state.preview ? state.preview.expires_at_ms - now : 0;
   const confirmLabel =
     state.preview && precision
       ? describeAction(state.preview.normalized, precision)
       : 'Confirm order';
+  const liveOrder = state.preview?.normalized.mode === 'LIVE';
+  const lot = precision ? boardLotOf(precision) : null;
+  const lotMode = oddLot ? 'odd' : 'board';
+  const sharesHint = (() => {
+    if (!equity || !precision) return undefined;
+    if (built.quantity && !built.quantity.isZero())
+      return `= ${formatShares(precision, built.quantity)}`;
+    if (lot && lotMode === 'board')
+      return `1 張 = ${groupedShares(lot)} shares`;
+    if (lot)
+      return `Odd lot: 1 to ${groupedShares(lot.sub(Decimal.parse('1')))} shares`;
+    return 'Whole shares';
+  })();
+  const priceHint = (() => {
+    if (!equity || !precision) return undefined;
+    const at = built.limitPrice ?? built.triggerPrice ?? meta.mark;
+    const parts: string[] = [];
+    if (at) {
+      const tick = tickAt(precision, at);
+      parts.push(
+        `Tick ${tick.normalize().toString()}${currency ? ` ${currency}` : ''} at this price${(precision.tick_ladder ?? []).length > 0 ? ' (TWSE ladder)' : ''}`
+      );
+    }
+    const band = priceLimitBand(precision, reference);
+    if (band)
+      parts.push(
+        `today's limit ${formatEquityPrice(precision, band.lower)} – ${formatEquityPrice(precision, band.upper)} (±${band.pct.toString()}% of ${formatEquityPrice(precision, band.reference)})`
+      );
+    return parts.length > 0 ? parts.join('; ') : undefined;
+  })();
+
+  const accountOptionLabel = (a: AccountSummary) => {
+    const mismatch = accountInstrumentMismatch(
+      a,
+      inputs.instrumentId,
+      precision
+    );
+    // The broker name is in the status line; keep the option short.
+    const venue = tradingVenueName(a.venue).split(' ')[0] ?? '';
+    const named = a.venue === 'mock' || a.label.includes(venue);
+    return `${a.label}${named ? '' : ` · ${venue}`}${mismatch ? ' (not for this instrument)' : ''}`;
+  };
 
   return (
     <section
@@ -266,15 +545,16 @@ export function OrderTicket({ctx, runtime}: OrderTicketProps): ReactNode {
             disabled={busy}
             onChange={e => edit({accountId: e.target.value || null})}
           >
-            {!accounts.data?.accounts.length && (
-              <option value="">No accounts</option>
-            )}
-            {accounts.data?.accounts.map(a => (
+            {!accountList.length && <option value="">No accounts</option>}
+            {accountList.map(a => (
               <option key={a.account_id} value={a.account_id}>
-                {a.label}
+                {accountOptionLabel(a)}
               </option>
             ))}
-          </select>
+          </select>,
+          account && account.venue !== 'mock' ? (
+            <AccountStatusLine account={account} />
+          ) : undefined
         )}
         <div className="j-field">
           <span className="j-label" id="ticket-mode-label">
@@ -292,7 +572,14 @@ export function OrderTicket({ctx, runtime}: OrderTicketProps): ReactNode {
                 aria-pressed={inputs.mode === m.mode}
                 disabled={!m.available || busy}
                 title={m.reason ?? undefined}
-                onClick={() => edit({mode: m.mode as OrderMode})}
+                onClick={() => {
+                  if (m.mode === 'LIVE' && !liveArmed) {
+                    setArming(true);
+                    return;
+                  }
+                  setArming(false);
+                  edit({mode: m.mode as OrderMode});
+                }}
               >
                 {m.mode === 'LIVE'
                   ? 'Live'
@@ -307,7 +594,49 @@ export function OrderTicket({ctx, runtime}: OrderTicketProps): ReactNode {
               {modes.find(m => m.mode === 'LIVE')?.reason}
             </span>
           )}
+          {inputs.mode === 'LIVE' && liveArmed && account && (
+            <span className={styles.armed} data-testid="live-armed">
+              <span className="j-badge j-badge--ask">Live armed</span>
+              <span className="j-field__hint">
+                {account.label} until{' '}
+                {new Date(armedUntil).toISOString().slice(11, 16)} UTC
+              </span>
+              <button
+                type="button"
+                className="j-btn j-btn--sm j-btn--ghost"
+                onClick={() => {
+                  runtime.liveArm.update(
+                    ({[account.account_id]: _gone, ...rest}) => rest
+                  );
+                  edit({mode: 'PAPER'});
+                }}
+              >
+                Disarm
+              </button>
+            </span>
+          )}
         </div>
+        {arming && account && (
+          <ArmLivePanel
+            account={account}
+            client={ctx.clients.execution}
+            now={() => Date.now()}
+            onArmed={expiresAtMs => {
+              runtime.liveArm.update(all => ({
+                ...all,
+                [account.account_id]: expiresAtMs,
+              }));
+              setArming(false);
+              edit({mode: 'LIVE'});
+            }}
+            onCancel={() => setArming(false)}
+          />
+        )}
+        {hoursNotice && (
+          <div data-testid="market-hours">
+            <Notice tone={hoursNotice.tone}>{hoursNotice.text}</Notice>
+          </div>
+        )}
         <div className={styles.sides} role="group" aria-label="Side">
           <button
             type="button"
@@ -329,71 +658,118 @@ export function OrderTicket({ctx, runtime}: OrderTicketProps): ReactNode {
           </button>
         </div>
         <div className="j-segmented" role="group" aria-label="Order type">
-          {TYPE_OPTIONS.map(option => (
+          {orderTypes.map(option => (
             <button
               key={option.type}
               type="button"
               aria-pressed={inputs.orderType === option.type}
-              disabled={busy}
+              disabled={busy || (oddLot && option.type !== 'limit')}
+              title={
+                oddLot && option.type !== 'limit'
+                  ? 'Intraday odd lots are limit orders only'
+                  : undefined
+              }
               onClick={() => edit({orderType: option.type})}
             >
               {option.label}
             </button>
           ))}
         </div>
-        {field(
-          'quantity',
-          `Quantity${base ? ` (${base})` : ''}`,
-          text('quantity', precision ? precision.lot_size : ''),
-          precision
-            ? `Lot size ${precision.lot_size}, minimum ${precision.min_qty}`
-            : undefined
-        )}
-        {needsLimitPrice(inputs.orderType) &&
-          field(
-            'limitPrice',
-            'Limit price',
-            <div className={styles.inline}>
-              {text('limitPrice', meta.mark ? meta.mark.toString() : '')}
-              <button
-                type="button"
-                className="j-btn j-btn--sm j-btn--ghost"
-                disabled={!meta.mark || busy}
-                onClick={() =>
-                  meta.mark && edit({limitPrice: meta.mark.toString()})
-                }
-              >
-                Use mark
-              </button>
-            </div>
-          )}
-        {needsTriggerPrice(inputs.orderType) && (
+        {errorsFor('orderType').map(issue => (
+          <span
+            key={issue.message}
+            className="j-field__error"
+            data-testid="order-type-error"
+          >
+            {issue.message}
+          </span>
+        ))}
+        {equity ? (
           <>
-            {field('triggerPrice', 'Trigger price', text('triggerPrice'))}
-            {field(
-              'triggerBasis',
-              'Trigger on',
-              <select
-                id={fieldId('triggerBasis')}
-                className="j-select"
-                value={inputs.triggerBasis}
-                disabled={busy}
-                onChange={e =>
-                  edit({
-                    triggerBasis: e.target
-                      .value as TicketInputs['triggerBasis'],
-                  })
-                }
-              >
-                <option value="mark">Mark price</option>
-                <option value="last">Last price</option>
-              </select>
+            {lot && (
+              <div className={styles.lots}>
+                <span className="j-label" id={fieldId('lot-label')}>
+                  Lot
+                </span>
+                <div
+                  className="j-segmented"
+                  role="group"
+                  aria-labelledby={fieldId('lot-label')}
+                  data-testid="lot-mode"
+                >
+                  <button
+                    type="button"
+                    aria-pressed={lotMode === 'board'}
+                    disabled={busy}
+                    onClick={() => edit({lotMode: 'board', quantity: ''})}
+                  >
+                    Board lot (張)
+                  </button>
+                  <button
+                    type="button"
+                    aria-pressed={lotMode === 'odd'}
+                    disabled={busy || !oddAvailable}
+                    title={
+                      oddAvailable
+                        ? undefined
+                        : 'This account cannot send intraday odd-lot orders'
+                    }
+                    onClick={() =>
+                      edit({
+                        lotMode: 'odd',
+                        quantity: '',
+                        orderType: 'limit',
+                        timeInForce: 'DAY',
+                      })
+                    }
+                  >
+                    Odd lot (零股)
+                  </button>
+                </div>
+                <span className="j-field__hint" data-testid="lot-hint">
+                  {oddLot
+                    ? 'Intraday odd lots are limit orders, DAY (ROD) only.'
+                    : oddAvailable
+                      ? 'Board lots take any order type; odd lots are limit DAY only.'
+                      : 'This account trades board lots only.'}
+                </span>
+              </div>
             )}
-          </>
-        )}
-        <div className={styles.row2}>
-          {inputs.orderType !== 'market' &&
-            field(
+            {field(
+              'quantity',
+              lot && lotMode === 'board'
+                ? `Quantity (張, ${groupedShares(lot)} shares each)`
+                : 'Quantity (shares)',
+              text('quantity', lot && lotMode === 'board' ? '1' : '100'),
+              sharesHint
+            )}
+            {needsLimitPrice(inputs.orderType) &&
+              field(
+                'limitPrice',
+                `Limit price${currency ? ` (${currency})` : ''}`,
+                <div className={styles.inline}>
+                  {text('limitPrice', meta.mark ? meta.mark.toString() : '')}
+                  <button
+                    type="button"
+                    className="j-btn j-btn--sm j-btn--ghost"
+                    disabled={!meta.mark || busy}
+                    onClick={() =>
+                      meta.mark && edit({limitPrice: meta.mark.toString()})
+                    }
+                  >
+                    Use last
+                  </button>
+                </div>,
+                priceHint
+              )}
+            {needsTriggerPrice(inputs.orderType) &&
+              field(
+                'triggerPrice',
+                `Trigger price${currency ? ` (${currency})` : ''}`,
+                text('triggerPrice'),
+                priceHint
+              )}
+            {field(
               'timeInForce',
               'Time in force',
               <select
@@ -402,64 +778,174 @@ export function OrderTicket({ctx, runtime}: OrderTicketProps): ReactNode {
                 value={inputs.timeInForce}
                 disabled={busy}
                 onChange={e =>
-                  edit({
-                    timeInForce: e.target.value as TicketInputs['timeInForce'],
-                  })
+                  edit({timeInForce: e.target.value as TimeInForce})
                 }
               >
-                <option value="GTC">Good till canceled</option>
-                <option value="IOC">Immediate or cancel</option>
-                <option value="POST_ONLY">Post only</option>
-              </select>
+                {tifChoice.options.map(tif => (
+                  <option key={tif} value={tif}>
+                    {tif} · {TIME_IN_FORCE_NAMES[tif]}
+                  </option>
+                ))}
+              </select>,
+              tifChoice.note ?? undefined
             )}
-          {field('leverage', 'Leverage', text('leverage', 'Venue default'))}
-        </div>
-        <label className="j-check">
-          <input
-            type="checkbox"
-            checked={inputs.reduceOnly}
-            disabled={busy}
-            onChange={e => edit({reduceOnly: e.target.checked})}
-          />
-          Reduce only
-        </label>
-        <div className={styles.row2}>
-          {field('stopLoss', 'Stop-loss', text('stopLoss', 'Optional'))}
-          {field('takeProfit', 'Take-profit', text('takeProfit', 'Optional'))}
-        </div>
-        {rr && (
-          <p className={styles.meta}>
-            Reward to risk {rr.toFixed(2)}R at the entry price
-          </p>
-        )}
-        <details className={styles.helper}>
-          <summary>Size from risk</summary>
-          <div className={styles.inline}>
-            <label className="j-field">
-              <span className="j-label">Risk % of equity</span>
+            {rth.shown && (
+              <div className="j-field">
+                <label className="j-check">
+                  <input
+                    type="checkbox"
+                    checked={inputs.outsideRth === true}
+                    disabled={busy || !rth.enabled}
+                    data-testid="outside-rth"
+                    onChange={e => edit({outsideRth: e.target.checked})}
+                  />
+                  Allow outside regular trading hours (IBKR)
+                </label>
+                <span className={styles.describe}>
+                  {errorsFor('outsideRth').map(issue => (
+                    <span key={issue.message} className="j-field__error">
+                      {issue.message}
+                    </span>
+                  ))}
+                  {errorsFor('outsideRth').length === 0 && (
+                    <span className="j-field__hint">
+                      {rth.reason ??
+                        'Limit orders may fill in pre-market and after-hours sessions.'}
+                    </span>
+                  )}
+                </span>
+              </div>
+            )}
+          </>
+        ) : (
+          <>
+            {field(
+              'quantity',
+              `Quantity${base ? ` (${base})` : ''}`,
+              text('quantity', precision ? precision.lot_size : ''),
+              precision
+                ? `Lot size ${precision.lot_size}, minimum ${precision.min_qty}`
+                : undefined
+            )}
+            {needsLimitPrice(inputs.orderType) &&
+              field(
+                'limitPrice',
+                'Limit price',
+                <div className={styles.inline}>
+                  {text('limitPrice', meta.mark ? meta.mark.toString() : '')}
+                  <button
+                    type="button"
+                    className="j-btn j-btn--sm j-btn--ghost"
+                    disabled={!meta.mark || busy}
+                    onClick={() =>
+                      meta.mark && edit({limitPrice: meta.mark.toString()})
+                    }
+                  >
+                    Use mark
+                  </button>
+                </div>
+              )}
+            {needsTriggerPrice(inputs.orderType) && (
+              <>
+                {field('triggerPrice', 'Trigger price', text('triggerPrice'))}
+                {field(
+                  'triggerBasis',
+                  'Trigger on',
+                  <select
+                    id={fieldId('triggerBasis')}
+                    className="j-select"
+                    value={inputs.triggerBasis}
+                    disabled={busy}
+                    onChange={e =>
+                      edit({
+                        triggerBasis: e.target
+                          .value as TicketInputs['triggerBasis'],
+                      })
+                    }
+                  >
+                    <option value="mark">Mark price</option>
+                    <option value="last">Last price</option>
+                  </select>
+                )}
+              </>
+            )}
+            <div className={styles.row2}>
+              {inputs.orderType !== 'market' &&
+                field(
+                  'timeInForce',
+                  'Time in force',
+                  <select
+                    id={fieldId('timeInForce')}
+                    className="j-select"
+                    value={inputs.timeInForce}
+                    disabled={busy}
+                    onChange={e =>
+                      edit({
+                        timeInForce: e.target.value as TimeInForce,
+                      })
+                    }
+                  >
+                    <option value="GTC">Good till canceled</option>
+                    <option value="IOC">Immediate or cancel</option>
+                    <option value="POST_ONLY">Post only</option>
+                  </select>
+                )}
+              {field('leverage', 'Leverage', text('leverage', 'Venue default'))}
+            </div>
+            <label className="j-check">
               <input
-                className="j-input j-tabular"
-                inputMode="decimal"
-                value={riskPct}
-                onChange={e => setRiskPct(e.target.value)}
+                type="checkbox"
+                checked={inputs.reduceOnly}
+                disabled={busy}
+                onChange={e => edit({reduceOnly: e.target.checked})}
               />
+              Reduce only
             </label>
-            <button
-              type="button"
-              className="j-btn j-btn--sm"
-              disabled={!riskQty || riskQty.isZero() || busy}
-              onClick={() => riskQty && edit({quantity: riskQty.toString()})}
-            >
-              {riskQty && precision
-                ? `Use ${formatStep(riskQty.toString(), precision.lot_size)} ${base}`
-                : 'Set a stop-loss first'}
-            </button>
-          </div>
-          <span className="j-field__hint">
-            Uses account equity and the stop distance; the server still checks
-            every limit.
-          </span>
-        </details>
+            <div className={styles.row2}>
+              {field('stopLoss', 'Stop-loss', text('stopLoss', 'Optional'))}
+              {field(
+                'takeProfit',
+                'Take-profit',
+                text('takeProfit', 'Optional')
+              )}
+            </div>
+            {rr && (
+              <p className={styles.meta}>
+                Reward to risk {rr.toFixed(2)}R at the entry price
+              </p>
+            )}
+            <details className={styles.helper}>
+              <summary>Size from risk</summary>
+              <div className={styles.inline}>
+                <label className="j-field">
+                  <span className="j-label">Risk % of equity</span>
+                  <input
+                    className="j-input j-tabular"
+                    inputMode="decimal"
+                    value={riskPct}
+                    onChange={e => setRiskPct(e.target.value)}
+                  />
+                </label>
+                <button
+                  type="button"
+                  className="j-btn j-btn--sm"
+                  disabled={!riskQty || riskQty.isZero() || busy}
+                  onClick={() =>
+                    riskQty && edit({quantity: riskQty.toString()})
+                  }
+                >
+                  {riskQty && precision
+                    ? `Use ${formatStep(riskQty.toString(), precision.lot_size)} ${base}`
+                    : 'Set a stop-loss first'}
+                </button>
+              </div>
+              <span className="j-field__hint">
+                Uses account equity and the stop distance; the server still
+                checks every limit.
+              </span>
+            </details>
+          </>
+        )}
         {errorsFor('notional').map(issue => (
           <span key={issue.message} className="j-field__error">
             {issue.message}
@@ -481,36 +967,52 @@ export function OrderTicket({ctx, runtime}: OrderTicketProps): ReactNode {
             <dl className={styles.facts}>
               <dt>Quantity</dt>
               <dd className="j-tabular">
-                {precision
-                  ? formatStep(
-                      state.preview.normalized.quantity_base,
-                      precision.lot_size
+                {equity && precision
+                  ? formatShares(
+                      precision,
+                      Decimal.parse(state.preview.normalized.quantity_base)
                     )
-                  : state.preview.normalized.quantity_base}{' '}
-                {base}
+                  : precision
+                    ? `${formatStep(
+                        state.preview.normalized.quantity_base,
+                        precision.lot_size
+                      )} ${base}`
+                    : `${state.preview.normalized.quantity_base} ${base}`}
               </dd>
               {state.preview.normalized.limit_price && (
                 <>
                   <dt>Limit</dt>
                   <dd className="j-tabular">
-                    {precision
-                      ? formatStep(
-                          state.preview.normalized.limit_price,
-                          precision.tick_size
+                    {equity && precision
+                      ? formatEquityPrice(
+                          precision,
+                          Decimal.parse(state.preview.normalized.limit_price)
                         )
-                      : state.preview.normalized.limit_price}
+                      : precision
+                        ? formatStep(
+                            state.preview.normalized.limit_price,
+                            precision.tick_size
+                          )
+                        : state.preview.normalized.limit_price}
                   </dd>
+                </>
+              )}
+              {equity && (
+                <>
+                  <dt>Time in force</dt>
+                  <dd>{state.preview.normalized.time_in_force}</dd>
                 </>
               )}
               <dt>Notional</dt>
               <dd className="j-tabular">
                 {formatFixed(state.preview.notional, 2)}
+                {equity && currency ? ` ${currency}` : ''}
               </dd>
               <dt>Estimated fee</dt>
               <dd className="j-tabular">
                 {formatFixed(state.preview.estimated_fee, 4)}
               </dd>
-              <dt>Margin required</dt>
+              <dt>{equity ? 'Cash required' : 'Margin required'}</dt>
               <dd className="j-tabular">
                 {formatFixed(state.preview.margin_required, 2)}
               </dd>
@@ -520,7 +1022,7 @@ export function OrderTicket({ctx, runtime}: OrderTicketProps): ReactNode {
                   ? `${state.preview.estimated_slippage_pct}%`
                   : 'None for resting orders'}
               </dd>
-              <dt>Mark</dt>
+              <dt>{equity ? 'Last' : 'Mark'}</dt>
               <dd className="j-tabular">
                 {state.preview.mark_price ?? '—'}{' '}
                 {meta.feedState && <FeedBadge state={meta.feedState} />}
@@ -641,21 +1143,52 @@ export function OrderTicket({ctx, runtime}: OrderTicketProps): ReactNode {
               data-testid="confirm-order"
               disabled={
                 replay ||
+                (liveOrder && !liveArmed) ||
                 (!canConfirm(state, now) &&
                   !(state.phase === 'FAILED' && state.idempotencyKey !== null))
               }
               aria-busy={state.phase === 'SUBMITTING'}
-              onClick={() => void runtime.controller.confirm()}
+              onClick={() => {
+                if (liveOrder && state.phase === 'PREVIEWED') {
+                  setLiveConfirm(true);
+                  return;
+                }
+                void runtime.controller.confirm();
+              }}
             >
               {state.phase === 'SUBMITTING' || state.phase === 'CONFIRMING'
                 ? 'Submitting…'
-                : confirmLabel}
+                : liveOrder
+                  ? 'Review LIVE order…'
+                  : confirmLabel}
             </button>
           </>
         )}
       </footer>
+      {liveConfirm && state.preview && account && precision && (
+        <LiveConfirmDialog
+          preview={state.preview}
+          instrument={precision}
+          account={account}
+          busy={state.phase === 'SUBMITTING' || state.phase === 'CONFIRMING'}
+          onCancel={() => setLiveConfirm(false)}
+          onConfirm={() => {
+            setLiveConfirm(false);
+            void runtime.controller.confirm();
+          }}
+        />
+      )}
     </section>
   );
+}
+
+/**
+ * Groups a share count with thousands separators.
+ * @param shares Shares.
+ * @return Text such as `1,000`.
+ */
+function groupedShares(shares: Decimal): string {
+  return formatFixed(shares.toString(), 0);
 }
 
 /**

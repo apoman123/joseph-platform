@@ -43,6 +43,7 @@ import type {
   PositionList,
   QualificationReport,
   QualificationStatus,
+  SessionList,
   SignalKind,
   SignalList,
   StrategyDefinition,
@@ -55,6 +56,7 @@ import type {
   Venue,
   VenueStatusList,
 } from '../generated/contracts';
+import type {ExchangeCalendarId} from '../sessions';
 
 /** Query for the instrument registry. */
 export interface InstrumentQuery {
@@ -64,6 +66,8 @@ export interface InstrumentQuery {
   marketType?: MarketType;
   /** Free-text search on symbol/base, e.g. `BTC`. */
   q?: string;
+  /** Maximum results (the engine serves up to 5000; default 500). */
+  limit?: number;
 }
 
 /** Query for historical candles. */
@@ -109,6 +113,16 @@ export interface IndicatorSeriesQuery {
   fromMs?: number;
   /** Optional input overrides for this plugin. */
   settings?: Readonly<Record<string, unknown>>;
+}
+
+/** Query for the trading sessions of an exchange calendar. */
+export interface SessionQuery {
+  /** Exchange calendar (never `24x7`, which has no sessions). */
+  calendar: ExchangeCalendarId;
+  /** Inclusive start (UTC ms). */
+  fromMs: number;
+  /** Exclusive end (UTC ms); the engine serves windows up to ~400 days. */
+  toMs: number;
 }
 
 /** Query for the signal history. */
@@ -192,6 +206,14 @@ export interface MarketDataClient {
    * @return Point-in-time values per closed bar.
    */
   getIndicatorSeries(query: IndicatorSeriesQuery): Promise<IndicatorSeries>;
+  /**
+   * Lists the trading sessions of an exchange calendar overlapping a window
+   * (`GET /v1/calendars/{calendar_id}/sessions`). Optional: without it the
+   * terminal uses the regular weekday hours of the calendar.
+   * @param query Calendar and window.
+   * @return Session list.
+   */
+  getSessions?(query: SessionQuery): Promise<SessionList>;
 }
 
 /** Authenticated strategy authoring, backtests and signal history. */

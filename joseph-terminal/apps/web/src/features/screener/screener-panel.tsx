@@ -131,6 +131,8 @@ export function formatGateValue(
 ): string {
   if (value === null) return 'Missing';
   if (gate.unit === 'USD') return formatCompactUsd(value);
+  // TWSE gates (turnover) are in New Taiwan dollars.
+  if (gate.unit === 'TWD') return `NT${formatCompactUsd(value)}`;
   if (gate.unit === 'pct') return `${formatFixed(value, 3)}%`;
   return formatFixed(value, 2);
 }

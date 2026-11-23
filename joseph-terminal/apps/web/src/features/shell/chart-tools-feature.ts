@@ -9,15 +9,83 @@ import {
   type ChartState,
   type FeedState,
 } from '@joseph/contracts';
+import {DrawingRepository, readImportedDrawings} from '@joseph/drawing-core';
 import {
   activeChart,
   paneKey,
-  parseWorkspace,
+  parseWorkspaceFile,
   startReplay,
+  type WorkspaceFileParseResult,
 } from '@joseph/terminal-shell';
 import type {TerminalRuntime} from '../../composition/runtime';
 import type {WebFeature} from '../../shell/react-bindings';
 import {shellManifest} from './manifest';
+
+/**
+ * Applies a parsed workspace file: restores its drawings (each instrument
+ * in the file replaces its stored drawings; other instruments keep theirs),
+ * replaces the layout, and reloads drawings on open charts whose
+ * instrument does not change (charts that switch instrument load the
+ * restored drawings themselves).
+ * @param runtime Runtime.
+ * @param result Parsed file.
+ * @return Notification text.
+ */
+export function importWorkspaceFile(
+  runtime: TerminalRuntime,
+  result: Extract<WorkspaceFileParseResult, {ok: true}>
+): string {
+  const current = runtime.workspace.get();
+  const workspaceId = current.workspace_id;
+  const repository = new DrawingRepository(
+    runtime.storage,
+    workspaceId,
+    runtime.tools
+  );
+  const imported = result.drawings
+    ? readImportedDrawings(result.drawings, {tools: runtime.tools})
+    : null;
+  if (imported) repository.restore(imported.collections);
+  const before = new Map(
+    current.charts.map(c => [c.chart_id, c.instrument_id])
+  );
+  runtime.dispatch({
+    type: 'replace',
+    workspace: {...result.workspace, workspace_id: workspaceId},
+  });
+  if (imported && imported.collections.length > 0) {
+    const restored = new Set(imported.collections.map(c => c.instrumentId));
+    const after = runtime.workspace.get();
+    for (const [chartId, store] of runtime.drawing.stores) {
+      const chart = after.charts.find(c => c.chart_id === chartId);
+      if (
+        !chart ||
+        before.get(chartId) !== chart.instrument_id ||
+        !restored.has(chart.instrument_id)
+      )
+        continue;
+      if (runtime.drawing.selection.get()?.chartId === chartId)
+        runtime.drawing.selection.set(null);
+      store.reset(repository.load(chart.instrument_id));
+    }
+    runtime.drawing.revision.update(n => n + 1);
+  }
+  const upgraded = result.migrated ? ' (upgraded from an older format)' : '';
+  if (!imported) {
+    return `Imported the workspace${upgraded}. The file has no drawings, so your drawings were not changed.`;
+  }
+  const count = imported.drawings;
+  const instruments = imported.collections.length;
+  const kept =
+    imported.opaque > 0
+      ? ` ${imported.opaque} drawing${imported.opaque === 1 ? '' : 's'} from a newer version ${imported.opaque === 1 ? 'was' : 'were'} kept as unsupported.`
+      : '';
+  const dropped =
+    imported.dropped > 0
+      ? ` ${imported.dropped} unreadable entr${imported.dropped === 1 ? 'y was' : 'ies were'} skipped.`
+      : '';
+  return `Imported the workspace${upgraded} and ${count} drawing${count === 1 ? '' : 's'} on ${instruments} instrument${instruments === 1 ? '' : 's'}; they replace the drawings saved for ${instruments === 1 ? 'that instrument' : 'those instruments'}.${kept}${dropped}`;
+}
 
 /** Height of the provenance header added to screenshots. */
 const HEADER_PX = 28;
@@ -223,7 +291,7 @@ export function chartToolsFeature(runtime: TerminalRuntime): WebFeature {
               const file = input.files?.[0];
               if (!file) return;
               void file.text().then(text => {
-                const result = parseWorkspace(text, Date.now());
+                const result = parseWorkspaceFile(text, Date.now());
                 if (!result.ok) {
                   ctx.notifier.notify(
                     `The workspace couldn’t be imported: ${result.error}`,
@@ -231,17 +299,8 @@ export function chartToolsFeature(runtime: TerminalRuntime): WebFeature {
                   );
                   return;
                 }
-                runtime.dispatch({
-                  type: 'replace',
-                  workspace: {
-                    ...result.workspace,
-                    workspace_id: runtime.workspace.get().workspace_id,
-                  },
-                });
                 ctx.notifier.notify(
-                  result.migrated
-                    ? 'Imported and upgraded the workspace.'
-                    : 'Workspace imported.',
+                  importWorkspaceFile(runtime, result),
                   'success'
                 );
               });

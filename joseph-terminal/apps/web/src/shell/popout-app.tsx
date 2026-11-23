@@ -8,7 +8,9 @@
  * LIVE stays off unless the execution engine grants it, and the order mode
  * starts at Paper (it is never copied from another window). The workspace,
  * link groups, theme and crosshair follow the main window over
- * `BroadcastChannel`; closing the window docks the pane again.
+ * `BroadcastChannel`; closing the window docks the pane again. The window
+ * keeps running while the main window reloads and reconnects to the new
+ * main window by itself; changes made here meanwhile are sent to it then.
  */
 'use client';
 import {
@@ -16,6 +18,7 @@ import {
   activeChart,
   broadcastChannelPort,
   paneKey,
+  parseGeometry,
   parsePopoutQuery,
   type PopoutTarget,
 } from '@joseph/terminal-shell';
@@ -60,6 +63,8 @@ const PANEL_TITLES: Readonly<Record<string, string>> = {
 const LINK_TEXT: Readonly<Record<MainLinkState, string>> = {
   connecting: 'Connecting to the main window…',
   linked: 'Linked to the main window',
+  reconnecting:
+    'The main window is reloading; changes made here are sent to it when it is back',
   lost: 'Main window not connected; changes stay in this window',
 };
 
@@ -151,6 +156,13 @@ function PopoutWindow({target}: {target: PopoutTarget}): ReactElement {
         hidden: () => document.visibilityState === 'hidden',
         close: () => window.close(),
         focus: () => window.focus(),
+        geometry: () =>
+          parseGeometry({
+            left: window.screenX,
+            top: window.screenY,
+            width: window.outerWidth,
+            height: window.outerHeight,
+          }),
       }
     );
     linkRef.current = next;
@@ -314,6 +326,11 @@ function PopoutBar({
   const feedStates = useStore(runtime.feedStates);
   const replayStates = useStore(runtime.replay);
   const linkState = useStore(link?.main ?? IDLE_LINK);
+  const pending = useStore(link?.pending ?? IDLE_PENDING);
+  const linkText =
+    pending > 0 && linkState !== 'linked'
+      ? `${LINK_TEXT[linkState]} (${pending} change${pending === 1 ? '' : 's'} waiting)`
+      : LINK_TEXT[linkState];
   const chart = target.ref.kind === 'chart' ? activeChart(workspace) : null;
   const run = (id: string) =>
     void runtime.commands.execute(id).catch(() => undefined);
@@ -327,11 +344,12 @@ function PopoutBar({
       <span
         className="popout__link"
         data-state={linkState}
-        title={LINK_TEXT[linkState]}
+        data-pending={pending}
+        title={linkText}
         data-testid="popout-link"
       >
         <span className="popout__link-dot" aria-hidden="true" />
-        <span className="sr-only">{LINK_TEXT[linkState]}</span>
+        <span className="sr-only">{linkText}</span>
       </span>
       {chart ? (
         <>
@@ -411,5 +429,11 @@ function PopoutBar({
 /** Link store used before the link starts. */
 const IDLE_LINK = {
   get: (): MainLinkState => 'connecting',
+  subscribe: () => () => undefined,
+};
+
+/** Pending-count store used before the link starts. */
+const IDLE_PENDING = {
+  get: (): number => 0,
   subscribe: () => () => undefined,
 };

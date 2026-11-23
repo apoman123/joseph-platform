@@ -5,9 +5,11 @@
  * `/v1/indicators/series`. Thresholds follow the plugin's
  * `min_delta_share` input, exactly as the Pine pane draws them. Each bar
  * says how its delta was obtained (`values.method`): `taker_volume` is the
- * true delta from the venue's taker buy/sell volume, anything else is the
- * candle-direction estimate. A bar is only called "true" when the engine
- * says so.
+ * true delta from the venue's taker buy/sell volume, `trade_classification`
+ * is buy/sell volume classified from trades against the prevailing quote
+ * (Lee–Ready, on stock exchanges that publish no aggressor side), anything
+ * else is the candle-direction estimate. A bar is only called "true" or
+ * "classified" when the engine says so.
  */
 import type {StudyLevel, StudyPaneSpec, StudyPoint} from '@joseph/chart-core';
 import type {IndicatorSeries} from '@joseph/contracts';
@@ -30,11 +32,24 @@ export const TRUE_DELTA_OPACITY = 0.7;
 /** Column opacity of estimated delta bars (drawn faint). */
 export const ESTIMATE_DELTA_OPACITY = 0.32;
 
+/** Column opacity of classified (Lee–Ready) delta bars. */
+export const CLASSIFIED_DELTA_OPACITY = 0.55;
+
 /** How one bar's delta was obtained. */
-export type DeltaMethod = 'true' | 'estimate';
+export type DeltaMethod = 'true' | 'classified' | 'estimate';
 
 /** Engine `values.method` of the true delta. */
 export const TRUE_DELTA_METHOD = 'taker_volume';
+
+/** Engine `values.method` of trades classified against quotes. */
+export const CLASSIFIED_DELTA_METHOD = 'trade_classification';
+
+/** Data-window wording of each delta method. */
+export const DELTA_METHOD_LABELS: Readonly<Record<DeltaMethod, string>> = {
+  true: 'True (taker volume)',
+  classified: 'Classified (Lee–Ready)',
+  estimate: 'Estimate',
+};
 
 /** One bar of the engine's order-flow series (display values only). */
 export interface DeltaBar {
@@ -42,7 +57,7 @@ export interface DeltaBar {
   timeMs: number;
   /** Delta % of the bar. */
   value: number;
-  /** True (taker volume) or estimate (candle direction). */
+  /** True (taker volume), classified (Lee–Ready) or estimate. */
   method: DeltaMethod;
   /** Taker-buy base volume (decimal string), when published. */
   buyVolume: string | null;
@@ -52,7 +67,7 @@ export interface DeltaBar {
 
 /** Legend/tooltip text explaining true versus estimated delta. */
 export const DELTA_LEGEND =
-  'Delta % per bar from the engine. True: taker buy minus sell volume published by the venue. Estimate: bar volume signed by candle direction (drawn faint).';
+  'Delta % per bar from the engine. True: taker buy minus sell volume published by the venue. Classified (Lee–Ready): trades classified as buys or sells against the prevailing quote, where the exchange publishes no aggressor side. Estimate: bar volume signed by candle direction (drawn faint).';
 
 /**
  * Reads a numeric indicator value.
@@ -70,12 +85,26 @@ export function numericValue(value: unknown): number | null {
 
 /**
  * Classifies the engine's `values.method`. Unknown or missing methods
- * count as an estimate, never as true delta.
+ * count as an estimate, never as true or classified delta.
  * @param value Published method.
  * @return Delta method.
  */
 export function deltaMethodOf(value: unknown): DeltaMethod {
-  return value === TRUE_DELTA_METHOD ? 'true' : 'estimate';
+  if (value === TRUE_DELTA_METHOD) return 'true';
+  if (value === CLASSIFIED_DELTA_METHOD) return 'classified';
+  return 'estimate';
+}
+
+/**
+ * Column opacity of a delta method.
+ * @param method Delta method.
+ * @return Opacity 0..1.
+ */
+export function deltaOpacity(method: DeltaMethod): number {
+  if (method === 'true') return TRUE_DELTA_OPACITY;
+  return method === 'classified'
+    ? CLASSIFIED_DELTA_OPACITY
+    : ESTIMATE_DELTA_OPACITY;
 }
 
 /**
@@ -120,13 +149,13 @@ export function deltaBarsFromSeries(
     const value = numericValue(point.values.delta_pct);
     if (value === null) continue;
     const method = deltaMethodOf(point.values.method);
+    const measured = method !== 'estimate';
     bars.push({
       timeMs: point.bar_start_ms,
       value,
       method,
-      buyVolume: method === 'true' ? volumeText(point.values.buy_volume) : null,
-      sellVolume:
-        method === 'true' ? volumeText(point.values.sell_volume) : null,
+      buyVolume: measured ? volumeText(point.values.buy_volume) : null,
+      sellVolume: measured ? volumeText(point.values.sell_volume) : null,
     });
   }
   return bars;
@@ -135,15 +164,23 @@ export function deltaBarsFromSeries(
 /**
  * Pane title naming the delta methods in view.
  * @param bars Delta bars.
- * @return `Delta % (true)`, `Delta % (estimate)` or the mixed legend.
+ * @return `Delta % (true)`, `Delta % (classified)`, `Delta % (estimate)`
+ *     or a mixed legend.
  */
 export function deltaStudyTitle(
   bars: readonly Pick<DeltaBar, 'method'>[]
 ): string {
   const methods = new Set(bars.map(bar => bar.method));
   if (methods.size === 0) return 'Delta %';
-  if (methods.size > 1) return 'Delta % (true; faint = estimate)';
-  return methods.has('true') ? 'Delta % (true)' : 'Delta % (estimate)';
+  if (methods.size === 1) {
+    if (methods.has('true')) return 'Delta % (true)';
+    return methods.has('classified')
+      ? 'Delta % (classified)'
+      : 'Delta % (estimate)';
+  }
+  const measured = methods.has('true') ? 'true' : 'classified';
+  if (!methods.has('estimate')) return 'Delta % (true; classified)';
+  return `Delta % (${measured}; faint = estimate)`;
 }
 
 /** Options of the Delta % pane. */
@@ -171,8 +208,7 @@ export function deltaStudyFromSeries(
     timeMs: bar.timeMs,
     value: bar.value,
     tone: bar.value >= 0 ? 'bid' : 'ask',
-    opacity:
-      bar.method === 'true' ? TRUE_DELTA_OPACITY : ESTIMATE_DELTA_OPACITY,
+    opacity: deltaOpacity(bar.method),
   }));
   const levels: StudyLevel[] = [
     {value: 0, label: '', tone: 'muted', lineStyle: 'dotted'},

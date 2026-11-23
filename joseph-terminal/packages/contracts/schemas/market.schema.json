@@ -204,6 +204,16 @@
         "board_lot": {
           "description": "Shares per board lot (TWSE 1000); null when orders are in single units.",
           "oneOf": [{"$ref": "common.schema.json#/$defs/NonNegativeDecimalString"}, {"type": "null"}]
+        },
+        "name": {
+          "description": "Issuer or series name in English, e.g. `Taiwan Semiconductor Manufacturing` or `US 10-Year Treasury par yield`; null when the venue publishes none (crypto).",
+          "type": ["string", "null"],
+          "maxLength": 200
+        },
+        "local_name": {
+          "description": "Name in the listing market's language, e.g. `台積電` on TWSE; null when none.",
+          "type": ["string", "null"],
+          "maxLength": 200
         }
       }
     },

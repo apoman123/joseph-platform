@@ -1,21 +1,33 @@
 /**
  * @fileoverview Main window and pop-out windows over an in-memory channel:
  * detaching, workspace/link-group/theme/crosshair sync, action forwarding,
- * re-docking on goodbye, closed handles and crashed windows, remembered
- * panes after a reload, and trading guards that never cross windows.
+ * re-docking on goodbye, closed handles and crashed windows, pop-outs that
+ * survive a reload of the main window (probe, re-adoption, replay of
+ * changes made meanwhile), "Restore pop-outs" after a browser restart with
+ * remembered window geometry, and trading guards that never cross windows.
  */
 import {
   DETACHED_PANEL_KEY,
   LIVE_TIMEOUT_MS,
   MemoryChannelHub,
+  PROBE_MS,
+  PopoutBus,
   activeChart,
   detachedStatus,
+  dormantPanes,
+  paneStatus,
   readDetachedPanes,
+  type ChannelPort,
   type DetachedPaneRef,
+  type PopoutMessage,
+  type WindowGeometry,
 } from '@joseph/terminal-shell';
 import {afterEach, beforeEach, describe, expect, it, vi} from 'vitest';
 import {
+  RESTORE_POPOUTS_COMMAND,
+  popoutFeatures,
   popoutWindowName,
+  restoreMessage,
   startMainDetach,
   startPopoutLink,
   type DetachController,
@@ -63,25 +75,41 @@ function advance(ms: number): void {
   vi.advanceTimersByTime(ms);
 }
 
+/** Options of a test main window. */
+interface MainOptions {
+  /** `window.open` is blocked (always, or per call). */
+  blocked?: boolean | (() => boolean);
+  /** Reuse a runtime (React StrictMode re-runs effects on one runtime). */
+  runtime?: TerminalRuntime;
+  /** Channel port (default: a new port on the hub). */
+  port?: ChannelPort;
+}
+
 /**
  * Starts a main window.
  * @param hub Channel hub.
- * @param blocked Whether `window.open` is blocked.
+ * @param options Popup policy, runtime and port.
  * @return Runtime, controller, opened windows and their URLs.
  */
-function mainWindow(hub: MemoryChannelHub, blocked = false) {
-  const runtime = createRuntime(() => [], DEMO);
-  const opened: {url: string; name: string; handle: FakeWindow}[] = [];
+function mainWindow(hub: MemoryChannelHub, options: MainOptions = {}) {
+  const runtime = options.runtime ?? createRuntime(() => [], DEMO);
+  const opened: {
+    url: string;
+    name: string;
+    features: string;
+    handle: FakeWindow;
+  }[] = [];
+  const blocked = options.blocked ?? false;
   const controller: DetachController = startMainDetach(runtime, {
-    port: hub.port(),
-    open: (url, name) => {
-      if (blocked) return null;
+    port: options.port ?? hub.port(),
+    open: (url, name, features) => {
+      if (typeof blocked === 'function' ? blocked() : blocked) return null;
       const handle: FakeWindow = {
         closed: false,
         focus: vi.fn(),
         close: vi.fn(),
       };
-      opened.push({url, name, handle});
+      opened.push({url, name, features, handle});
       return handle as unknown as Window;
     },
     now: () => clock,
@@ -96,9 +124,14 @@ function mainWindow(hub: MemoryChannelHub, blocked = false) {
  * Starts a pop-out window for a pane.
  * @param hub Channel hub.
  * @param ref Pane.
+ * @param geometry Window position and size the pop-out reports.
  * @return Runtime, link and window callbacks.
  */
-function popoutWindow(hub: MemoryChannelHub, ref: DetachedPaneRef) {
+function popoutWindow(
+  hub: MemoryChannelHub,
+  ref: DetachedPaneRef,
+  geometry: WindowGeometry | null = null
+) {
   let link: PopoutLink | null = null;
   const runtime: TerminalRuntime = createRuntime(() => [], DEMO, {
     role: 'popout',
@@ -115,7 +148,14 @@ function popoutWindow(hub: MemoryChannelHub, ref: DetachedPaneRef) {
       now: () => clock,
       windowId: `popout-${Math.random()}`,
     },
-    {ref, title: () => 'pane', hidden: () => false, close, focus}
+    {
+      ref,
+      title: () => 'pane',
+      hidden: () => false,
+      close,
+      focus,
+      geometry: () => geometry,
+    }
   );
   const started = link;
   cleanups.push(() => started.dispose());
@@ -280,15 +320,28 @@ describe('re-docking', () => {
   });
 });
 
-describe('after a reload', () => {
-  it('keeps remembered panes dormant until re-opened from a click', () => {
+const ALERTS: DetachedPaneRef = {
+  kind: 'panel',
+  slot: 'bottom-panel',
+  panelId: 'alerts',
+};
+
+/**
+ * Statuses of every detached pane of a main window.
+ * @param runtime Main runtime.
+ * @return Status per pane, in detach order.
+ */
+function statuses(runtime: TerminalRuntime): string[] {
+  const state = runtime.detached.get();
+  return state.panes.map(p => paneStatus(state, p.key, clock));
+}
+
+describe('after a browser restart', () => {
+  it('probes, then offers the remembered panes for restoring', () => {
     const hub = new MemoryChannelHub();
     const first = mainWindow(hub);
     first.actions.detach(CHART_1, 'BTCUSD 5m');
-    first.actions.detach(
-      {kind: 'panel', slot: 'bottom-panel', panelId: 'alerts'},
-      'Alerts'
-    );
+    first.actions.detach(ALERTS, 'Alerts');
     first.runtime.flush();
     first.controller.dispose();
     const reloaded = mainWindow(new MemoryChannelHub());
@@ -297,9 +350,19 @@ describe('after a reload', () => {
       'chart:chart-1',
       'panel:alerts',
     ]);
-    expect(
-      state.panes.map(p => detachedStatus(state.live[p.key], clock))
-    ).toEqual(['dormant', 'dormant']);
+    // No "restore" offer while windows that kept running may still answer.
+    expect(statuses(reloaded.runtime)).toEqual([
+      'reconnecting',
+      'reconnecting',
+    ]);
+    expect(dormantPanes(state, clock)).toEqual([]);
+    reloaded.actions.reopenAll();
+    expect(reloaded.opened).toEqual([]);
+    expect(reloaded.runtime.toasts.get().at(-1)?.message).toMatch(
+      /Still looking/
+    );
+    advance(PROBE_MS);
+    expect(statuses(reloaded.runtime)).toEqual(['dormant', 'dormant']);
     // Dormant panes are never re-docked by the liveness timer.
     advance(60_000);
     expect(reloaded.runtime.detached.get().panes).toHaveLength(2);
@@ -310,6 +373,223 @@ describe('after a reload', () => {
     ]);
   });
 
+  it('restores from one command and explains the browser limit', async () => {
+    const first = mainWindow(new MemoryChannelHub());
+    first.actions.detach(CHART_1, 'BTCUSD 5m');
+    first.actions.detach(ALERTS, 'Alerts');
+    first.runtime.flush();
+    first.controller.dispose();
+    // Without pop-up permission the browser opens one window per click.
+    let allowed = 0;
+    const restarted = mainWindow(new MemoryChannelHub(), {
+      blocked: () => {
+        allowed -= 1;
+        return allowed < 0;
+      },
+    });
+    advance(PROBE_MS);
+    const command = restarted.runtime.commands
+      .list()
+      .find(c => c.id === RESTORE_POPOUTS_COMMAND);
+    expect(command?.title).toBe('Restore pop-outs');
+    allowed = 1;
+    await restarted.runtime.commands.execute(RESTORE_POPOUTS_COMMAND);
+    expect(restarted.opened).toHaveLength(1);
+    expect(restarted.runtime.toasts.get().at(-1)?.message).toBe(
+      restoreMessage(1, 2)
+    );
+    allowed = 1;
+    await restarted.runtime.commands.execute(RESTORE_POPOUTS_COMMAND);
+    expect(restarted.opened.map(o => o.url)).toEqual([
+      '/popout?pane=chart%3Achart-1&ws=default',
+      '/popout?pane=panel%3Aalerts&ws=default&slot=bottom-panel',
+    ]);
+    await restarted.runtime.commands.execute(RESTORE_POPOUTS_COMMAND);
+    expect(restarted.runtime.toasts.get().at(-1)?.message).toMatch(
+      /already has its window/
+    );
+    expect(restoreMessage(2, 2)).toBeNull();
+    expect(restoreMessage(0, 2)).toMatch(/blocked the windows/);
+  });
+
+  it('reopens windows where they were', () => {
+    const hub = new MemoryChannelHub();
+    const first = mainWindow(hub);
+    first.actions.detach(CHART_1, 'BTCUSD 5m');
+    const geometry = {left: 30, top: 40, width: 900, height: 640};
+    const pop = popoutWindow(hub, CHART_1, geometry);
+    expect(readDetachedPanes(first.runtime.workspace.get().panels)).toEqual([
+      {key: 'chart:chart-1', ref: CHART_1, title: 'BTCUSD 5m', geometry},
+    ]);
+    first.runtime.flush();
+    first.controller.dispose();
+    pop.link.dispose();
+    const restarted = mainWindow(new MemoryChannelHub());
+    advance(PROBE_MS);
+    restarted.actions.reopenAll();
+    expect(restarted.opened[0]?.features).toBe(
+      'popup=yes,width=900,height=640,left=30,top=40'
+    );
+    expect(popoutFeatures(ALERTS)).toBe('popup=yes,width=520,height=720');
+  });
+});
+
+describe('main window reload', () => {
+  /**
+   * Detaches chart-1 into a pop-out, then "reloads" the main window: the
+   * old controller says goodbye and goes away with its saved workspace.
+   * @return Hub, pop-out and the first main window.
+   */
+  function reloadWithPopout() {
+    const hub = new MemoryChannelHub();
+    const first = mainWindow(hub);
+    first.actions.detach(CHART_1, 'BTCUSD 5m');
+    const pop = popoutWindow(hub, CHART_1);
+    first.runtime.flush();
+    first.controller.goodbye();
+    first.controller.dispose();
+    return {hub, pop, first};
+  }
+
+  it('re-adopts surviving pop-outs without a click or a restore offer', () => {
+    const {hub, pop} = reloadWithPopout();
+    expect(pop.link.main.get()).toBe('reconnecting');
+    const reloaded = mainWindow(hub);
+    expect(statuses(reloaded.runtime)).toEqual(['live']);
+    expect(dormantPanes(reloaded.runtime.detached.get(), clock)).toEqual([]);
+    expect(pop.link.main.get()).toBe('linked');
+    advance(PROBE_MS + 4_000);
+    expect(statuses(reloaded.runtime)).toEqual(['live']);
+    // The new main window keeps both windows in step again.
+    reloaded.runtime.dispatch({
+      type: 'setInstrument',
+      chartId: 'chart-1',
+      instrumentId: 'mock:perp:ETHUSD',
+    });
+    expect(activeChart(pop.runtime.workspace.get()).instrument_id).toBe(
+      'mock:perp:ETHUSD'
+    );
+    pop.runtime.dispatch({
+      type: 'setTimeframe',
+      chartId: 'chart-1',
+      timeframe: '4h',
+    });
+    expect(activeChart(reloaded.runtime.workspace.get()).timeframe).toBe('4h');
+    expect(pop.link.pending.get()).toBe(0);
+  });
+
+  it('replays changes made in a pop-out while the main window reloaded', () => {
+    const {hub, pop} = reloadWithPopout();
+    pop.runtime.dispatch({
+      type: 'setTimeframe',
+      chartId: 'chart-1',
+      timeframe: '1h',
+    });
+    pop.runtime.dispatch({type: 'toggleVolume', chartId: 'chart-1'});
+    expect(pop.link.pending.get()).toBe(2);
+    expect(activeChart(pop.runtime.workspace.get()).timeframe).toBe('1h');
+    const reloaded = mainWindow(hub);
+    const chart = activeChart(reloaded.runtime.workspace.get());
+    expect(chart.timeframe).toBe('1h');
+    expect(chart.show_volume).toBe(false);
+    // Acknowledged: nothing waits and nothing was applied twice.
+    expect(pop.link.pending.get()).toBe(0);
+    expect(activeChart(pop.runtime.workspace.get()).show_volume).toBe(false);
+    reloaded.runtime.flush();
+    const saved = JSON.parse(
+      localStorage.getItem('joseph.workspace.v1.default') ?? '{}'
+    ) as {charts?: {timeframe: string}[]};
+    expect(saved.charts?.[0]?.timeframe).toBe('1h');
+  });
+
+  it('keeps the pop-out showing its changes until they are applied', () => {
+    const {hub, pop} = reloadWithPopout();
+    pop.runtime.dispatch({
+      type: 'setChartType',
+      chartId: 'chart-1',
+      chartType: 'line',
+    });
+    // The new main window's first hello gets lost, and it broadcasts its
+    // (older) workspace before hearing from the pop-out.
+    const port = hub.port();
+    let dropped = false;
+    const lossy: ChannelPort = {
+      postMessage(data) {
+        const msg = (data as {msg?: PopoutMessage}).msg;
+        if (!dropped && msg?.type === 'main-hello') {
+          dropped = true;
+          return;
+        }
+        port.postMessage(data);
+      },
+      onMessage: handler => port.onMessage(handler),
+      close: () => port.close(),
+    };
+    const reloaded = mainWindow(hub, {port: lossy});
+    reloaded.runtime.dispatch({type: 'rename', name: 'Desk'});
+    expect(pop.runtime.workspace.get().name).toBe('Desk');
+    expect(activeChart(pop.runtime.workspace.get()).chart_type).toBe('line');
+    expect(activeChart(reloaded.runtime.workspace.get()).chart_type).toBe(
+      'candles'
+    );
+    // A later action carries the whole queue, oldest first.
+    pop.runtime.dispatch({
+      type: 'setPriceScale',
+      chartId: 'chart-1',
+      priceScale: 'log',
+    });
+    const chart = activeChart(reloaded.runtime.workspace.get());
+    expect(chart.chart_type).toBe('line');
+    expect(chart.price_scale).toBe('log');
+    expect(pop.link.pending.get()).toBe(0);
+  });
+
+  it('applies an action once even when it arrives twice', () => {
+    const hub = new MemoryChannelHub();
+    const main = mainWindow(hub);
+    const raw = new PopoutBus(hub.port(), 'default', 'popout-raw');
+    const acks: unknown[] = [];
+    raw.on(msg => {
+      if (msg.type === 'workspace') acks.push(msg.applied?.['popout-raw']);
+    });
+    const toggle = {type: 'toggleVolume' as const, chartId: 'chart-1'};
+    const pending = [{seq: 1, action: toggle}];
+    raw.send({type: 'action', action: toggle, pending});
+    raw.send({type: 'action', action: toggle, pending});
+    expect(activeChart(main.runtime.workspace.get()).show_volume).toBe(false);
+    expect(acks).toEqual([1, 1]);
+    // Actions from older pop-outs without a queue still apply.
+    raw.send({type: 'action', action: toggle});
+    expect(activeChart(main.runtime.workspace.get()).show_volume).toBe(true);
+    raw.close();
+  });
+
+  it('marks the main window lost when it does not come back', () => {
+    const {pop} = reloadWithPopout();
+    advance(16_000);
+    expect(pop.link.main.get()).toBe('lost');
+  });
+
+  it('survives StrictMode re-running the effect on one runtime', async () => {
+    const hub = new MemoryChannelHub();
+    const first = mainWindow(hub);
+    first.actions.detach(CHART_1, 'BTCUSD 5m');
+    const pop = popoutWindow(hub, CHART_1);
+    first.controller.dispose();
+    const again = mainWindow(hub, {runtime: first.runtime});
+    expect(statuses(again.runtime)).toEqual(['live']);
+    await again.runtime.commands.execute(RESTORE_POPOUTS_COMMAND);
+    expect(again.opened).toEqual([]);
+    pop.runtime.dispatch({
+      type: 'setTimeframe',
+      chartId: 'chart-1',
+      timeframe: '1d',
+    });
+    expect(activeChart(again.runtime.workspace.get()).timeframe).toBe('1d');
+  });
+});
+
+describe('after a reload', () => {
   it('lets windows that survived the reload claim their panes', () => {
     const hub = new MemoryChannelHub();
     const first = mainWindow(hub);
@@ -324,7 +604,7 @@ describe('after a reload', () => {
 
   it('explains blocked windows', () => {
     const hub = new MemoryChannelHub();
-    const main = mainWindow(hub, true);
+    const main = mainWindow(hub, {blocked: true});
     main.actions.detach(CHART_1, 'BTCUSD 5m');
     expect(main.runtime.detached.get().panes).toEqual([]);
     expect(main.runtime.toasts.get().at(-1)?.message).toMatch(/blocked/);
