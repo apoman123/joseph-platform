@@ -1,0 +1,50 @@
+{
+ "captured_at_ms": 1795427294537,
+ "url": "wss://contract.mexc.com/edge?Trans-Protocol=Protobuf",
+ "note": "MEXC futures Protobuf endpoint. Text frames are JSON acks; binary frames are base64 ContractWrapper pushes.",
+ "subscribe": [
+  {
+   "method": "sub.deal",
+   "param": {
+    "symbol": "BTC_USDT",
+    "reduce": false
+   }
+  }
+ ],
+ "frames": [
+  {
+   "text": "{\"channel\":\"rs.sub.deal\",\"data\":\"success\",\"ts\":1795427294896}"
+  },
+  {
+   "base64": "CghCVENfVVNEVBIJcHVzaC5kZWFsGInAub6gNKp9JwoHNjE0NTAuMhICMTIYASADKAEwhMC5vqA0ONPljOo/QITAub6gNA=="
+  },
+  {
+   "base64": "CghCVENfVVNEVBIJcHVzaC5kZWFsGIHFub6gNKp9JwoHNjE0NTYuNxICMTAYAiADKAIw/sS5vqA0OLrmjOo/QP7Eub6gNA=="
+  },
+  {
+   "base64": "CghCVENfVVNEVBIJcHVzaC5kZWFsGPDHub6gNKp9JwoHNjE0NTIuOBICMTAYAiADKAEw7Me5vqA0OOHmjOo/QOzHub6gNA=="
+  },
+  {
+   "base64": "CghCVENfVVNEVBIJcHVzaC5kZWFsGP/Hub6gNKp9JwoHNjE0NTIuORICNzUYASADKAIw+ce5vqA0OOTmjOo/QPnHub6gNA=="
+  }
+ ],
+ "reduced_subscribe": [
+  {
+   "method": "sub.deal",
+   "param": {
+    "symbol": "BTC_USDT"
+   }
+  }
+ ],
+ "reduced_frames": [
+  {
+   "text": "{\"channel\":\"rs.sub.deal\",\"data\":\"success\",\"ts\":1795427296799}"
+  },
+  {
+   "base64": "CghCVENfVVNEVBIJcHVzaC5kZWFsGNPPub6gNKp9IAoHNjE0NTAuMxIBOBgCIAMoATDTz7m+oDRA08+5vqA0"
+  },
+  {
+   "base64": "CghCVENfVVNEVBIJcHVzaC5kZWFsGMPRub6gNKp9IgoHNjE0NTAuNBIDOTcxGAEgAigCMMPRub6gNEDD0bm+oDQ="
+  }
+ ]
+}

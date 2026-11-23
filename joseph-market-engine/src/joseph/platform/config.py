@@ -115,6 +115,27 @@ def _alpaca_feed(value: str) -> str:
     return feed
 
 
+_MEXC_WS_FORMATS = frozenset({"protobuf", "json"})
+
+
+def _mexc_ws_format(value: str) -> str:
+    """Validates ``JOSEPH_MEXC_WS_FORMAT``.
+
+    Args:
+        value: Raw value.
+
+    Returns:
+        ``protobuf`` (default) or ``json``.
+
+    Raises:
+        ValueError: For another value.
+    """
+    fmt = value.strip().lower() or "protobuf"
+    if fmt not in _MEXC_WS_FORMATS:
+        raise ValueError("JOSEPH_MEXC_WS_FORMAT must be protobuf or json")
+    return fmt
+
+
 @dataclasses.dataclass(frozen=True)
 class Settings:
     """Market-engine settings.
@@ -171,6 +192,9 @@ class Settings:
         bitget_archive: Whether Bitget seconds history is imported from
             its public trade archive (verified against 1D klines).
         bitget_archive_dir: Cache directory of downloaded Bitget parts.
+        mexc_ws_format: MEXC futures WebSocket push format: ``protobuf``
+            (default) or ``json`` (MEXC's deadline for migrating off JSON
+            market data is 2026-12-01 10:00 UTC).
     """
 
     dev_tokens: tuple[DevToken, ...] = ()
@@ -215,6 +239,7 @@ class Settings:
     binance_archive_dir: str = "./var/binance-vision"
     bitget_archive: bool = True
     bitget_archive_dir: str = "./var/bitget-archive"
+    mexc_ws_format: str = "protobuf"
 
     def __repr__(self) -> str:
         """Returns a representation with secrets redacted."""
@@ -341,5 +366,8 @@ class Settings:
             bitget_archive=_bool(source.get("JOSEPH_BITGET_ARCHIVE"), True),
             bitget_archive_dir=source.get(
                 "JOSEPH_BITGET_ARCHIVE_DIR", "./var/bitget-archive"
+            ),
+            mexc_ws_format=_mexc_ws_format(
+                source.get("JOSEPH_MEXC_WS_FORMAT", "protobuf")
             ),
         )

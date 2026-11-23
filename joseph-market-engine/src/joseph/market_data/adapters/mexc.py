@@ -2,8 +2,11 @@
 
 REST base: ``https://contract.mexc.com/api/v1/contract`` — ``detail``,
 ``kline/{symbol}``, ``ticker``, ``funding_rate/{symbol}`` and
-``depth/{symbol}``. WebSocket: ``wss://contract.mexc.com/edge`` with
-``sub.kline`` and ``sub.deal``. Volumes and depth are quoted in contracts
+``depth/{symbol}``. WebSocket: ``sub.kline`` and ``sub.deal`` (depth and
+tickers are REST only) on ``WS_PROTOBUF_URL`` by default, or on the legacy
+JSON ``WS_URL`` (``WsFormat.JSON``). MEXC migrates futures WebSocket market
+data to Protobuf by 2026-12-01 10:00 UTC; ``mexc_protobuf`` cites the
+sources and decodes both formats. Volumes and depth are quoted in contracts
 and converted to base units with ``contractSize``. Kline frames do not flag
 closed bars, so closed bars are confirmed over REST. MEXC requires a
 ``ping`` within one minute (answered by a ``pong`` frame).
@@ -26,6 +29,7 @@ from __future__ import annotations
 
 import contextlib
 import decimal
+import enum
 import json
 from collections.abc import AsyncIterator
 from collections.abc import Mapping
@@ -40,6 +44,7 @@ from joseph.domain import quality
 from joseph.domain import timeframes
 from joseph.market_data.adapters import base
 from joseph.market_data.adapters import http
+from joseph.market_data.adapters import mexc_protobuf
 from joseph.market_data.adapters import ws
 from joseph.market_data.domain import books
 from joseph.market_data.domain import capabilities
@@ -47,6 +52,9 @@ from joseph.market_data.domain import health
 
 REST_URL = "https://contract.mexc.com"
 WS_URL = "wss://contract.mexc.com/edge"
+"""JSON pushes (legacy; MEXC migrates market data to Protobuf)."""
+WS_PROTOBUF_URL = f"{WS_URL}?Trans-Protocol=Protobuf"
+"""Protobuf pushes; requests, acks and pongs stay JSON text."""
 _PREFIX = "/api/v1/contract"
 _INTERVAL: dict[timeframes.Timeframe, str] = {
     timeframes.Timeframe.M1: "Min1",
@@ -91,6 +99,18 @@ _STATUS = {
     3: instruments.InstrumentStatus.DELISTED,
     4: instruments.InstrumentStatus.HALTED,
 }
+
+
+class WsFormat(enum.StrEnum):
+    """Push format of the futures WebSocket (chosen by URL).
+
+    Attributes:
+        PROTOBUF: Binary ``ContractWrapper`` pushes (``WS_PROTOBUF_URL``).
+        JSON: JSON text pushes (``WS_URL``), until MEXC retires them.
+    """
+
+    PROTOBUF = "protobuf"
+    JSON = "json"
 
 
 def asset_class(tags: list[str]) -> instruments.AssetClass:
@@ -159,18 +179,25 @@ def parse_deal_frame(
     contract_size: decimal.Decimal,
     now_ms: int,
 ) -> list[market.Trade]:
-    """Parses a ``push.deal`` frame (array or single-object ``data``).
+    """Parses a ``push.deal`` frame in either format.
+
+    JSON ``data`` is an array or a single object; Protobuf pushes are
+    decoded to the same layout by ``mexc_protobuf.loads``.
 
     Args:
-        raw: Frame payload.
+        raw: Frame payload (JSON text or Protobuf bytes).
         instrument_id: Instrument.
         contract_size: Base units per contract.
         now_ms: Receipt time.
 
     Returns:
         Trades ascending by time and id (empty for acks and pongs).
+
+    Raises:
+        ValueError: For a malformed frame, or for deals without a trade id
+            (Protobuf deals reduced because ``reduce`` was not disabled).
     """
-    message = json.loads(raw)
+    message = mexc_protobuf.loads(raw)
     if not isinstance(message, dict) or message.get("channel") != "push.deal":
         return []
     if message.get("symbol") not in (None, instrument_id.venue_market_id):
@@ -179,6 +206,8 @@ def parse_deal_frame(
     rows: list[Mapping[str, Any]] = (
         data if isinstance(data, list) else [data] if data else []
     )
+    if any("i" not in row for row in rows):
+        raise ValueError("push.deal without trade ids (reduced deals)")
     trades = [
         market.Trade(
             instrument_id=instrument_id,
@@ -208,6 +237,7 @@ class MexcAdapter(base.BaseVenueAdapter):
         clock: clock_lib.Clock,
         connect: ws.ConnectFn = ws.default_connect,
         verified_at_ms: int | None = None,
+        ws_format: WsFormat = WsFormat.PROTOBUF,
     ) -> None:
         """Initializes the adapter.
 
@@ -216,10 +246,15 @@ class MexcAdapter(base.BaseVenueAdapter):
             clock: Time source.
             connect: WebSocket connector.
             verified_at_ms: When capabilities were last verified live.
+            ws_format: Push format to subscribe in (both are parsed).
         """
         super().__init__(http_client, clock)
         self._connect = connect
         self._verified_at_ms = verified_at_ms
+        self._ws_format = ws_format
+        self._ws_url = (
+            WS_PROTOBUF_URL if ws_format is WsFormat.PROTOBUF else WS_URL
+        )
 
     def capabilities(self) -> capabilities.VenueCapabilities:
         """Returns verified capabilities.
@@ -253,6 +288,15 @@ class MexcAdapter(base.BaseVenueAdapter):
                 "engine recorded the stream and outages are gaps.",
                 "Klines publish no taker buy volume (taker_volume is false); "
                 "seconds bars built from trades do carry it.",
+                (
+                    "Streams use the Protobuf WebSocket pushes "
+                    "(Trans-Protocol=Protobuf)."
+                    if self._ws_format is WsFormat.PROTOBUF
+                    else "Streams use the legacy JSON WebSocket pushes "
+                    "(JOSEPH_MEXC_WS_FORMAT=json)."
+                )
+                + " MEXC migrates futures market data from JSON to "
+                "Protobuf by 2026-12-01 10:00 UTC.",
             ),
             docs_url="https://www.mexc.com/api-docs/futures/integration-guide",
             verified_at_ms=self._verified_at_ms,
@@ -569,6 +613,10 @@ class MexcAdapter(base.BaseVenueAdapter):
     ) -> ws.WsTradeSpec:
         """Describes the ``sub.deal`` stream.
 
+        ``reduce`` is disabled: Protobuf deals are otherwise reduced to one
+        record per period without trade ids (update log 2026-11-11). The
+        JSON endpoint accepts the parameter and pushes every trade anyway.
+
         Args:
             instrument: Instrument (already resolved).
 
@@ -590,12 +638,15 @@ class MexcAdapter(base.BaseVenueAdapter):
             return parse_deal_frame(raw, instrument, size, now_ms)
 
         return ws.WsTradeSpec(
-            url=WS_URL,
+            url=self._ws_url,
             subscribe=(
                 json.dumps(
                     {
                         "method": "sub.deal",
-                        "param": {"symbol": instrument.venue_market_id},
+                        "param": {
+                            "symbol": instrument.venue_market_id,
+                            "reduce": False,
+                        },
                     }
                 ),
             ),
@@ -633,7 +684,7 @@ class MexcAdapter(base.BaseVenueAdapter):
         interval = _INTERVAL[timeframe]
 
         def parse(raw: str | bytes, now_ms: int) -> list[market.Candle]:
-            """Parses one frame.
+            """Parses one frame (JSON text or Protobuf bytes).
 
             Args:
                 raw: Frame payload.
@@ -642,7 +693,9 @@ class MexcAdapter(base.BaseVenueAdapter):
             Returns:
                 Candles.
             """
-            message = json.loads(raw)
+            message = mexc_protobuf.loads(raw)
+            if not isinstance(message, dict):
+                return []
             data = message.get("data")
             if message.get("channel") != "push.kline" or not isinstance(
                 data, dict
@@ -681,7 +734,7 @@ class MexcAdapter(base.BaseVenueAdapter):
             return await self.fetch_candles(instrument, timeframe, start, end)
 
         spec = ws.WsCandleSpec(
-            url=WS_URL,
+            url=self._ws_url,
             subscribe=(
                 json.dumps(
                     {

@@ -25,7 +25,13 @@ Sources (MEXC docs, read 2026-11-23):
 
 Protocol facts this module relies on:
 
-* REST ``https://api.mexc.com``; WebSocket ``wss://contract.mexc.com/edge``.
+* REST ``https://api.mexc.com``; WebSocket ``wss://contract.mexc.com/edge``
+  (JSON pushes). MEXC migrates futures WebSocket *market data* to Protobuf
+  by 2026-12-01 10:00 UTC; nothing announced covers the private channels.
+  The stream therefore stays on the JSON endpoint but parses binary
+  Protobuf pushes as well (``mexc_protobuf``, which cites the sources).
+  Setting ``JOSEPH_VENUE_URLS=mexc.ws_url=<WS_PROTOBUF_URL>`` selects the
+  Protobuf endpoint explicitly.
 * Signature = lowercase hex HMAC-SHA256(secret, accessKey + Request-Time +
   parameterString); GET parameters sorted by key and ``&``-joined (nulls
   excluded, path parameters excluded), POST signs the raw JSON body.
@@ -61,6 +67,7 @@ from typing import Any
 from joseph_execution.adapters.venues import credentials as creds_lib
 from joseph_execution.adapters.venues import http
 from joseph_execution.adapters.venues import live
+from joseph_execution.adapters.venues import mexc_protobuf
 from joseph_execution.adapters.venues import ratelimit
 from joseph_execution.adapters.venues import signing
 from joseph_execution.adapters.venues import wire
@@ -75,6 +82,9 @@ S = enums.OrderState
 VENUE = "mexc"
 REST_URL = "https://api.mexc.com"
 WS_URL = "wss://contract.mexc.com/edge"
+"""Default stream endpoint (JSON pushes; binary pushes are parsed too)."""
+WS_PROTOBUF_URL = f"{WS_URL}?Trans-Protocol=Protobuf"
+"""Protobuf endpoint (requests, acks and errors stay JSON text)."""
 _DETAIL_TTL_S = 3600.0
 _STATUS = {1: S.ACKNOWLEDGED, 2: S.ACKNOWLEDGED, 3: S.FILLED, 4: S.CANCELED}
 _PLAN_STATUS = {
@@ -1095,7 +1105,7 @@ class MexcFuturesAdapter(live.LiveVenueAdapter[MexcSession]):
     async def parse(
         self, session: MexcSession, frame: str | bytes
     ) -> list[ws.StreamUpdate]:
-        """Parses one private frame.
+        """Parses one private frame (JSON text or Protobuf bytes).
 
         Args:
             session: Session.
@@ -1104,9 +1114,7 @@ class MexcFuturesAdapter(live.LiveVenueAdapter[MexcSession]):
         Returns:
             Updates.
         """
-        message = http.parse_json(
-            frame if isinstance(frame, str) else frame.decode()
-        )
+        message = mexc_protobuf.loads(frame)
         if not isinstance(message, Mapping):
             return []
         channel = str(message.get("channel"))
@@ -1212,8 +1220,9 @@ class MexcFuturesAdapter(live.LiveVenueAdapter[MexcSession]):
         cid = session.plans.get(plan_id)
         if cid is None:
             return []
-        if data.get("orderId"):
-            session.order_ids[str(data["orderId"])] = cid
+        oid = data.get("orderId")
+        if oid not in (None, "", 0, "0"):
+            session.order_ids[str(oid)] = cid
         status = _PLAN_STATUS.get(int(data.get("state", 1)), S.REJECTED)
         if status is S.ACKNOWLEDGED:
             return []
@@ -1267,10 +1276,9 @@ class MexcFuturesAdapter(live.LiveVenueAdapter[MexcSession]):
                 )
             )
             for _ in range(5):
-                raw = await connection.recv()
-                reply = http.parse_json(
-                    raw if isinstance(raw, str) else raw.decode()
-                )
+                reply = mexc_protobuf.loads(await connection.recv())
+                if not isinstance(reply, Mapping):
+                    continue
                 channel = reply.get("channel")
                 if channel == "rs.login":
                     return

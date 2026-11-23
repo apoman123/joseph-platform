@@ -53,6 +53,7 @@ from joseph.market_data.adapters import alpaca
 from joseph.market_data.adapters import binance_vision
 from joseph.market_data.adapters import bitget_archive
 from joseph.market_data.adapters import factory
+from joseph.market_data.adapters import mexc
 from joseph.market_data.adapters import replay as replay_lib
 from joseph.market_data.adapters import trade_archive_sql
 from joseph.market_data.adapters import ws
@@ -234,6 +235,7 @@ def build_container(
             feed=alpaca.Feed(settings.alpaca_feed),
             seconds_history_ms=settings.alpaca_seconds_history_ms,
         ),
+        mexc_ws_format=mexc.WsFormat(settings.mexc_ws_format),
     )
     engine = db.create_engine(settings.database_url)
     recorder, archive_engine = _trade_recorder(
