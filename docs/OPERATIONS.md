@@ -35,7 +35,16 @@ Production checklist: `JOSEPH_ENV=production` on the execution engine (refuses d
 |---|---|---|---|
 | `JOSEPH_DEV_TOKENS` | both | — | `token:tenant:user,…` (development only) |
 | `JOSEPH_SERVICE_TOKEN` | both | — | market → execution signal forwarding |
-| `JOSEPH_ENABLED_VENUES` / `JOSEPH_DEMO_ONLY` | market | all / false | `binance,hyperliquid,lighter,bitget,mexc,mock` |
+| `JOSEPH_ENABLED_VENUES` / `JOSEPH_DEMO_ONLY` | market | all / false | `binance,hyperliquid,lighter,bitget,mexc,twse,tpex,nasdaq,nyse,treasury,mock` |
+| `JOSEPH_ALPACA_KEY_ID` / `JOSEPH_ALPACA_SECRET_KEY` | market | — | Nasdaq/NYSE data (free Alpaca account); without them the venues list instruments but data calls fail with "configure Alpaca keys". Never logged |
+| `JOSEPH_ALPACA_FEED` | market | `iex` | `iex` real time, IEX-only volume · `sip` paid real-time consolidated · `delayed_sip` free consolidated, ≥15 min late |
+| `JOSEPH_ALPACA_SECONDS_HISTORY_MS` | market | 30 min | how far back US seconds bars are rebuilt from historical trades |
+| `JOSEPH_TRADE_RECORDING` / `_RETENTION_DAYS` | market | on / 30 | record crypto public trades (seconds bars, trade-derived true delta) and keep them |
+| `JOSEPH_TRADE_RECORD_INSTRUMENTS` / `_MAX_INSTRUMENTS` | market | — / 16 | instruments always recorded; cap on concurrent recordings |
+| `JOSEPH_TRADE_BACKFILL_MAX_CALLS` | market | 20 | REST trade-history budget per backfill |
+| `JOSEPH_TRADE_ARCHIVE_URL` | market | `JOSEPH_DATABASE_URL` | database of recorded trades |
+| `JOSEPH_BINANCE_ARCHIVE` / `_DIR`, `JOSEPH_BITGET_ARCHIVE` / `_DIR` | market | on / `./var/…` | import past days from the venues' official public trade archives |
+| `JOSEPH_MAX_ANCHORED_BARS` | market | 50000 | anchored VWAP / regression reach; refused beyond |
 | `JOSEPH_PIPELINE_ENABLED` / `_INTERVAL_S` | market | true / 10 | live signal pipeline |
 | `JOSEPH_FORWARD_SIGNALS` | market | true | forward PAPER/SHADOW entries to execution |
 | `JOSEPH_TELEGRAM_BOT_TOKEN`, `JOSEPH_LINE_CHANNEL_TOKEN`, `JOSEPH_WEBHOOK_SECRET`, `JOSEPH_SMTP_*` | market | — | enable notification channels |
@@ -44,6 +53,10 @@ Production checklist: `JOSEPH_ENV=production` on the execution engine (refuses d
 | `JOSEPH_LIVE_ARM_MAX_MS` | execution | `28800000` (8 h) | longest, and default, account LIVE arming for manual orders; startup fails above 24 h |
 | `JOSEPH_VENUE_SANDBOX` / `JOSEPH_VENUE_URLS` | execution | — | default accounts to venue testnets; endpoint overrides |
 | `JOSEPH_EMERGENCY_HALT` | execution | false | platform-wide block on new exposure |
+| `JOSEPH_IBKR_ENABLED`, `_HOST`, `_PORT`, `_PAPER`, `_CLIENT_ID`, `_READONLY`, `_SHORT_SELLING` | execution | off | Interactive Brokers through IB Gateway (paper 4002 / live 4001; the compose `ibkr` profile relays 4004 / 4003) — see `BROKERS.md` |
+| `JOSEPH_SINOPAC_ENABLED`, `_SIMULATION`, `_API_KEY[_FILE]`, `_SECRET_KEY[_FILE]`, `_CA_PATH`, `_CA_PASSWORD[_FILE]`, `_PERSON_ID[_FILE]` | execution | off, simulation | SinoPac Shioaji (TWSE/TPEx) — see `BROKERS.md` |
+| `JOSEPH_EQUITY_CLOSED_MARKET_ORDERS` | execution | `reject` | `queue`: DAY market orders wait for the next open where the broker allows it |
+| `JOSEPH_PAPER_TWD_STARTING_CASH` | execution | 3000000 | the TWD paper account (`acct-twd-paper-<tenant>`) for Taiwan listings |
 | `NEXT_PUBLIC_MARKET_API_URL`, `…_WS_URL`, `NEXT_PUBLIC_EXECUTION_API_URL`, `…_WS_URL` | terminal | empty = DEMO | baked in at build time |
 
 ## Monitoring
@@ -51,7 +64,8 @@ Production checklist: `JOSEPH_ENV=production` on the execution engine (refuses d
 - `GET /health` on each engine; `GET /metrics` (Prometheus text; execution needs the service token).
 - Watch: `joseph_feed_lag_ms`, `joseph_feed_reconnects`, `joseph_candle_revisions_total`, `joseph_http_requests_total{status=5xx}` (market); `joseph_order_unknown_total`, `joseph_risk_block_total`, `joseph_reconcile_lag_ms` (execution).
 - The terminal's *Data health* tab shows per-venue transport (native WS / REST poll), lag, reconnects and gaps.
-- Seconds charts (`1s`–`30s`) are built from each venue's public trade stream. Their history is only what the venue's trade history serves (Binance 48 h, Bitget 90 days, Lighter about 53 minutes; none on Hyperliquid and MEXC), and a reconnect that cannot be backfilled shows up as a gap rather than invented bars. `REST_POLL` of seconds bars is refused on venues without trade history.
+- Seconds charts (`1s`–`30s`) on crypto venues are built from public trades. The engine records trades while an instrument is in use (and for `JOSEPH_TRADE_RECORD_INSTRUMENTS`) and keeps them for the retention period, so history accumulates across restarts; Binance and Bitget past days also come from their official public archives, and REST trade history fills recent gaps (Binance 48 h, Bitget 90 days, Lighter about 53 minutes; none on Hyperliquid and MEXC). Time nothing recorded shows up as a gap, never as invented bars. `REST_POLL` of seconds bars is refused on venues without trade history.
+- Exchange venues (TWSE, TPEx, Nasdaq/NYSE, Treasury) follow session calendars: nights, weekends and holidays are not gaps, and on TWSE/TPEx/Alpaca a quiet interval inside fetched coverage has no bar and is not re-fetched. Refresh the calendar tables yearly or after an ad hoc closure: `uv run python scripts/generate_xtai_calendar.py` and `scripts/generate_usbond_calendar.py` (the engine also applies TWSE's published holiday schedule at runtime).
 
 ## Routine tasks
 
