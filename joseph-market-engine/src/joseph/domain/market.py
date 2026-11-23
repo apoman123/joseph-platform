@@ -13,10 +13,20 @@ import enum
 from joseph.domain import decimals
 from joseph.domain import instruments
 from joseph.domain import quality
+from joseph.domain import sessions
 from joseph.domain import timeframes
 
 _SPREAD_QUANTUM = decimal.Decimal("0.000001")
 """Spread percentages are reported to 1e-6 % (display precision)."""
+
+
+class BuyVolumeMethod(enum.StrEnum):
+    """Origin of a bar's buy volume (contract ``BuyVolumeMethod``)."""
+
+    TAKER = "taker"
+    """Venue-published aggressor side: true delta."""
+    CLASSIFIED = "classified"
+    """Trades classified against quotes (Lee-Ready / quote rule)."""
 
 
 @dataclasses.dataclass(frozen=True, slots=True)
@@ -48,6 +58,11 @@ class Candle:
             aggressor bought (venue-published or summed from the venue's
             public trades); enables true volume delta. ``None`` when the
             venue publishes neither.
+        taker_buy_method: How ``taker_buy_base_volume`` was obtained:
+            ``taker`` from the venue's aggressor flag (true delta) or
+            ``classified`` from trades against quotes (Lee-Ready / quote
+            rule) where the market publishes no aggressor side, as on
+            stock exchanges. ``None`` means ``taker`` when a volume is set.
     """
 
     instrument_id: instruments.InstrumentId
@@ -68,6 +83,7 @@ class Candle:
     trade_count: int | None = None
     event_ts_ms: int | None = None
     taker_buy_base_volume: decimal.Decimal | None = None
+    taker_buy_method: BuyVolumeMethod | None = None
 
     def __post_init__(self) -> None:
         """Validates bar invariants.
@@ -75,10 +91,11 @@ class Candle:
         Raises:
             ValueError: If boundaries or OHLC relationships are inconsistent.
         """
-        if self.end_ms != self.timeframe.end_of(self.start_ms):
-            raise ValueError("end_ms must equal start_ms + timeframe")
-        if not self.timeframe.is_aligned(self.start_ms):
+        calendar = sessions.for_instrument(self.instrument_id)
+        if not calendar.is_aligned(self.timeframe, self.start_ms):
             raise ValueError("start_ms is not aligned to the timeframe")
+        if self.end_ms != calendar.end_of(self.timeframe, self.start_ms):
+            raise ValueError("end_ms must equal the bar end of start_ms")
         if self.low > self.high:
             raise ValueError("low must be <= high")
         if not (self.low <= self.open <= self.high):
@@ -90,6 +107,15 @@ class Candle:
         taker = self.taker_buy_base_volume
         if taker is not None and not decimals.ZERO <= taker <= self.base_volume:
             raise ValueError("taker buy volume outside [0, base_volume]")
+        if taker is None and self.taker_buy_method is not None:
+            raise ValueError("taker_buy_method needs taker_buy_base_volume")
+
+    @property
+    def buy_volume_method(self) -> BuyVolumeMethod | None:
+        """Returns how the buy volume was obtained (``None`` without one)."""
+        if self.taker_buy_base_volume is None:
+            return None
+        return self.taker_buy_method or BuyVolumeMethod.TAKER
 
     @property
     def body_high(self) -> decimal.Decimal:
@@ -131,6 +157,11 @@ class Candle:
             "trade_count": self.trade_count,
             "taker_buy_base_volume": decimals.format_optional(
                 self.taker_buy_base_volume
+            ),
+            "taker_buy_method": (
+                None
+                if self.buy_volume_method is None
+                else self.buy_volume_method.value
             ),
             "is_final": self.is_final,
             "revision": self.revision,

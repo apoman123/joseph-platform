@@ -64,6 +64,11 @@ def candle_from_contract(
             taker_buy_base_volume=decimals.to_optional_decimal(
                 payload.get("taker_buy_base_volume")
             ),
+            taker_buy_method=(
+                None
+                if payload.get("taker_buy_method") is None
+                else market.BuyVolumeMethod(str(payload["taker_buy_method"]))
+            ),
         )
     except KeyError as err:
         raise ValueError(f"candle missing field {err}") from err

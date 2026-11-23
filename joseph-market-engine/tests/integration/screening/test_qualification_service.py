@@ -37,7 +37,15 @@ def _service(
 
 @pytest.mark.parametrize(
     "venue",
-    [v for v in instruments.Venue if v is not instruments.Venue.MOCK],
+    # Crypto venues with recorded fixtures; exchange venues join as their
+    # adapters land.
+    [
+        v
+        for v in instruments.Venue
+        if v is not instruments.Venue.MOCK
+        and v not in instruments.EXCHANGE_VENUES
+        and v not in instruments.RATE_VENUES
+    ],
     ids=lambda v: v.value,
 )
 async def test_each_venue_produces_contract_valid_reports(

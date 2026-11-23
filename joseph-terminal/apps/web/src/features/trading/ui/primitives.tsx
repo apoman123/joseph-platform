@@ -23,6 +23,10 @@ const VENUE_CODES: Readonly<Record<Venue, string>> = {
   lighter: 'LTR',
   bitget: 'BG',
   mexc: 'MEXC',
+  twse: 'TWSE',
+  nasdaq: 'NSDQ',
+  nyse: 'NYSE',
+  treasury: 'UST',
   mock: 'DEMO',
 };
 
