@@ -9,6 +9,7 @@ import hmac
 
 from joseph_execution.domain import decimals
 from joseph_execution.domain import enums
+from joseph_execution.domain import equities
 from joseph_execution.domain import errors
 from joseph_execution.domain import ids
 from joseph_execution.domain import intents
@@ -81,11 +82,12 @@ def normalize(
         """
         if value is None:
             return None
-        rounded = decimals.round_to_step(value, instrument.tick_size)
+        tick = instrument.tick_for(value)
+        rounded = decimals.round_to_step(value, tick)
         if rounded != value:
             warnings.append(
                 f"{label} rounded to {decimals.fmt(rounded)} (tick "
-                f"{decimals.fmt(instrument.tick_size)})."
+                f"{decimals.fmt(tick)})."
             )
         return rounded
 
@@ -161,6 +163,9 @@ def estimate(
     if request.time_in_force is enums.TimeInForce.POST_ONLY:
         rate = fees.maker_bps
     fee = notional * rate / decimals.BPS
+    venue = equities.parse_instrument_id(request.instrument_id).venue
+    if venue == enums.Venue.TWSE.value:
+        fee = equities.twse_fee(request.side, notional, instrument.market_type)
     margin = (
         decimals.ZERO
         if request.reduce_only

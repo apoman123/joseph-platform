@@ -13,6 +13,7 @@ from joseph_execution.domain import market
 from joseph_execution.domain import positions
 from joseph_execution.ports import market as market_port
 from joseph_execution.ports import repositories
+from joseph_execution.ports import trading
 
 
 @dataclasses.dataclass(frozen=True, slots=True)
@@ -61,11 +62,13 @@ async def value_account(  # noqa: PLR0917
     mode: enums.OrderMode,
     now_ms: int,
     max_quote_age_ms: int,
+    venue: trading.VenueAccountSnapshot | None = None,
 ) -> Valuation:
-    """Values a paper/shadow account from local positions and marks.
+    """Values an account from local positions and marks.
 
-    Venue accounts return unknown equity (their balances come from the
-    venue adapter, which is not available in this build).
+    Paper/shadow accounts use their starting equity. Venue accounts use the
+    venue's balance snapshot when one is given (LIVE risk checks) and are
+    otherwise unknown, which the Risk Gateway treats as a block.
 
     Args:
         uow_factory: Unit of work factory.
@@ -74,6 +77,7 @@ async def value_account(  # noqa: PLR0917
         mode: Order mode.
         now_ms: Current time.
         max_quote_age_ms: Freshness budget for marks.
+        venue: Venue balances of a venue account, if fetched.
 
     Returns:
         Valuation.
@@ -104,7 +108,9 @@ async def value_account(  # noqa: PLR0917
             stale = True
         marks[pos.instrument_id] = mark
     if account.starting_equity is None:
-        return Valuation(None, None, None, open_positions, marks, True)
+        if venue is None:
+            return Valuation(None, None, None, open_positions, marks, True)
+        return _venue_valuation(venue, reserved, open_positions, marks, stale)
     unrealized = decimals.ZERO
     gross: decimal.Decimal | None = decimals.ZERO
     for pos in open_positions:
@@ -121,3 +127,45 @@ async def value_account(  # noqa: PLR0917
     used = sum((p.margin() for p in open_positions), decimals.ZERO)
     available = equity - used - reserved
     return Valuation(equity, available, gross, open_positions, marks, stale)
+
+
+def _venue_valuation(
+    venue: trading.VenueAccountSnapshot,
+    reserved: decimal.Decimal,
+    open_positions: tuple[positions.Position, ...],
+    marks: dict[str, decimal.Decimal | None],
+    stale: bool,
+) -> Valuation:
+    """Values a venue account from the venue's own balances.
+
+    Equity and free margin come from the venue (which already accounts for
+    resting orders); local reservations of orders not yet acknowledged are
+    subtracted as well, so the estimate errs on the safe side. Gross
+    notional uses local positions at marks.
+
+    Args:
+        venue: Venue balance snapshot.
+        reserved: Active local margin reservations.
+        open_positions: Local open positions.
+        marks: Marks by instrument.
+        stale: Whether any mark is stale.
+
+    Returns:
+        Valuation.
+    """
+    gross: decimal.Decimal | None = decimals.ZERO
+    for pos in open_positions:
+        mark = marks.get(pos.instrument_id)
+        if mark is None or gross is None:
+            gross = None
+            stale = True
+            continue
+        gross += pos.quantity * mark
+    return Valuation(
+        venue.equity,
+        venue.available_margin - reserved,
+        gross,
+        open_positions,
+        marks,
+        stale,
+    )

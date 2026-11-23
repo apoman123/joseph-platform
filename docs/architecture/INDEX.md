@@ -45,4 +45,4 @@ Browser: joseph-terminal (PUBLIC, Next.js)            Private: Python services
 
 ## Data flow of a signal
 
-Closed candle (pipeline poll) → indicator engine (per timeframe, strict HTF visibility) → `BarFrame` → strategy evaluator (tri-state + reason tree) → setup FSM (dedupe/cooldown) → `Signal` → alert outbox (UI, Telegram, LINE, email, webhook) and, for PAPER/SHADOW/AUTO_LIVE, the execution forwarder → `/internal/v1/signals` → deployment sizing → `OrderIntent` → risk gateway → OMS → paper/shadow adapter (live adapters fail closed).
+Closed candle (pipeline poll) → indicator engine (per timeframe, strict HTF visibility) → `BarFrame` → strategy evaluator (tri-state + reason tree) → setup FSM (dedupe/cooldown) → `Signal` → alert outbox (UI, Telegram, LINE, email, webhook) and, for PAPER/SHADOW/AUTO_LIVE, the execution forwarder → `/internal/v1/signals` → deployment sizing → `OrderIntent` → risk gateway → OMS → paper/shadow adapter, or a live venue adapter for verified accounts (fail-closed without credentials or with the gate off).

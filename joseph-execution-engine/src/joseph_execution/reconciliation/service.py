@@ -4,6 +4,8 @@ Each pass (1) resolves due outbox items, including UNKNOWN_RECONCILING
 orders, (2) pulls recent fills so missed stream events are applied, and
 (3) compares positions; a mismatch marks the position unknown, which the
 Risk Gateway treats as a block on new exposure until it matches again.
+LIVE accounts are reconciled against their venue adapter the same way
+(an adapter without credentials refuses and the account is skipped).
 """
 
 from __future__ import annotations
@@ -97,7 +99,7 @@ class Reconciler:
             }
         for account_id, mode in sorted(scopes):
             account = accounts_by_id.get(account_id)
-            if account is None or mode is enums.OrderMode.LIVE:
+            if account is None:
                 continue
             adapter = self._resolver.resolve(account, mode)
             try:

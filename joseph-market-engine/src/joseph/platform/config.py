@@ -157,6 +157,20 @@ class Settings:
             ``delayed_sip``.
         alpaca_seconds_history_ms: Longest seconds-bar history built on
             demand from Alpaca trades and quotes.
+        trade_recording: Whether public trades are recorded (seconds
+            history across restarts, true delta on covered bars).
+        trade_bar_retention_days: Days of recorded trades kept.
+        trade_record_instruments: Instruments recorded permanently.
+        trade_record_max_instruments: Instruments recorded live at once.
+        trade_backfill_max_calls: REST trade-history calls per backfill.
+        trade_archive_url: SQLAlchemy URL of the trade archive (defaults to
+            ``database_url``).
+        binance_archive: Whether Binance seconds history older than the
+            REST window is imported from data.binance.vision.
+        binance_archive_dir: Cache directory of verified archive files.
+        bitget_archive: Whether Bitget seconds history is imported from
+            its public trade archive (verified against 1D klines).
+        bitget_archive_dir: Cache directory of downloaded Bitget parts.
     """
 
     dev_tokens: tuple[DevToken, ...] = ()
@@ -191,6 +205,16 @@ class Settings:
     alpaca_secret_key: str | None = None
     alpaca_feed: str = "iex"
     alpaca_seconds_history_ms: int = 1_800_000
+    trade_recording: bool = True
+    trade_bar_retention_days: float = 30.0
+    trade_record_instruments: tuple[str, ...] = ()
+    trade_record_max_instruments: int = 16
+    trade_backfill_max_calls: int = 20
+    trade_archive_url: str | None = None
+    binance_archive: bool = True
+    binance_archive_dir: str = "./var/binance-vision"
+    bitget_archive: bool = True
+    bitget_archive_dir: str = "./var/bitget-archive"
 
     def __repr__(self) -> str:
         """Returns a representation with secrets redacted."""
@@ -290,5 +314,32 @@ class Settings:
             alpaca_feed=_alpaca_feed(source.get("JOSEPH_ALPACA_FEED", "iex")),
             alpaca_seconds_history_ms=int(
                 source.get("JOSEPH_ALPACA_SECONDS_HISTORY_MS", "1800000")
+            ),
+            trade_recording=_bool(source.get("JOSEPH_TRADE_RECORDING"), True),
+            trade_bar_retention_days=max(
+                1.0,
+                float(source.get("JOSEPH_TRADE_BAR_RETENTION_DAYS", "30")),
+            ),
+            trade_record_instruments=tuple(
+                value.strip()
+                for value in source.get(
+                    "JOSEPH_TRADE_RECORD_INSTRUMENTS", ""
+                ).split(",")
+                if value.strip()
+            ),
+            trade_record_max_instruments=max(
+                0, int(source.get("JOSEPH_TRADE_RECORD_MAX_INSTRUMENTS", "16"))
+            ),
+            trade_backfill_max_calls=max(
+                0, int(source.get("JOSEPH_TRADE_BACKFILL_MAX_CALLS", "20"))
+            ),
+            trade_archive_url=source.get("JOSEPH_TRADE_ARCHIVE_URL") or None,
+            binance_archive=_bool(source.get("JOSEPH_BINANCE_ARCHIVE"), True),
+            binance_archive_dir=source.get(
+                "JOSEPH_BINANCE_ARCHIVE_DIR", "./var/binance-vision"
+            ),
+            bitget_archive=_bool(source.get("JOSEPH_BITGET_ARCHIVE"), True),
+            bitget_archive_dir=source.get(
+                "JOSEPH_BITGET_ARCHIVE_DIR", "./var/bitget-archive"
             ),
         )

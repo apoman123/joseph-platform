@@ -34,6 +34,8 @@ class VenueOrderRequest:
         trigger_basis: Trigger basis.
         leverage: Leverage.
         margin_mode: Margin mode.
+        outside_rth: Allow execution outside regular trading hours
+            (brokers that support it; securities only).
     """
 
     account_id: str
@@ -49,6 +51,7 @@ class VenueOrderRequest:
     trigger_basis: enums.PriceBasis | None = None
     leverage: decimal.Decimal = decimal.Decimal(1)
     margin_mode: enums.MarginMode = enums.MarginMode.ISOLATED
+    outside_rth: bool = False
 
 
 @dataclasses.dataclass(frozen=True, slots=True)
@@ -122,12 +125,19 @@ class VenueEvent:
         sequence: Venue/adapter sequence number.
         order: Order update, if any.
         fill: Fill, if any.
+        position: Position update, if any (live venue streams).
+        balance: Balance/margin update, if any (live venue streams).
+        resync: True for events replayed from a REST snapshot after a
+            (re)connect rather than pushed by the venue.
     """
 
     account_id: str
     sequence: int
     order: VenueOrderState | None = None
     fill: VenueFill | None = None
+    position: VenuePosition | None = None
+    balance: VenueAccountSnapshot | None = None
+    resync: bool = False
 
 
 @dataclasses.dataclass(frozen=True, slots=True)
@@ -151,15 +161,20 @@ class VenueAccountSnapshot:
 
     Attributes:
         equity: Total equity.
-        available_margin: Free margin.
+        available_margin: Free margin (cash accounts: cash available for
+            purchases).
         currency: Currency.
         ts_ms: Venue time.
+        settled_cash: Settled cash of a securities account, if known.
+        unsettled_cash: Net unsettled cash (negative = payable), if known.
     """
 
     equity: decimal.Decimal
     available_margin: decimal.Decimal
     currency: str
     ts_ms: int
+    settled_cash: decimal.Decimal | None = None
+    unsettled_cash: decimal.Decimal | None = None
 
 
 class TradingAdapter(Protocol):

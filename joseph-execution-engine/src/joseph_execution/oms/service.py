@@ -25,6 +25,7 @@ from joseph_execution.domain import accounts
 from joseph_execution.domain import decimals
 from joseph_execution.domain import deployments
 from joseph_execution.domain import enums
+from joseph_execution.domain import equities
 from joseph_execution.domain import errors
 from joseph_execution.domain import identity
 from joseph_execution.domain import ids
@@ -33,6 +34,7 @@ from joseph_execution.domain import market
 from joseph_execution.domain import orders
 from joseph_execution.domain import positions
 from joseph_execution.domain import risk
+from joseph_execution.oms import equity_inputs
 from joseph_execution.oms import preview as preview_lib
 from joseph_execution.oms import valuation
 from joseph_execution.ports import market as market_port
@@ -69,6 +71,9 @@ class OmsSettings:
         retry_backoff_ms: Base backoff for reconciliation retries.
         max_reconcile_attempts: Attempts before manual intervention.
         inline_dispatch: Send right after commit (else worker only).
+        queue_closed_market_orders: Let DAY market orders for securities
+            queue for the next open while the exchange is closed (where
+            the broker allows it); otherwise they are rejected.
     """
 
     live_trading_enabled: bool = False
@@ -81,6 +86,7 @@ class OmsSettings:
     retry_backoff_ms: int = 1_000
     max_reconcile_attempts: int = 8
     inline_dispatch: bool = True
+    queue_closed_market_orders: bool = False
 
 
 @dataclasses.dataclass(frozen=True, slots=True)
@@ -686,7 +692,8 @@ class OmsService:
         day_start = now - (now % _DAY_MS)
         with self._uow() as uow:
             lim = risk_limits.from_mapping(
-                uow.risk_limits.get(principal.tenant_id, account.account_id)
+                uow.risk_limits.get(principal.tenant_id, account.account_id),
+                account.currency,
             )
             position = uow.positions.get(
                 account.account_id, request.instrument_id, request.mode
@@ -753,6 +760,7 @@ class OmsService:
             request.mode,
             now,
             lim.max_quote_age_ms,
+            await _venue_balances(adapter, account, request.mode, caps),
         )
         est = preview_lib.estimate(
             request, instrument, quote, book, self.settings.fees
@@ -787,7 +795,31 @@ class OmsService:
             notional=est.notional,
             margin_required=est.margin_required,
             slippage_pct=est.slippage_pct,
+            estimated_fee=est.fee,
+            queue_closed_market_orders=(
+                self.settings.queue_closed_market_orders
+            ),
         )
+        if ctx.security:
+            inputs = await equity_inputs.gather(
+                self._market,
+                self._uow,
+                adapter,
+                account,
+                request.mode,
+                instrument,
+                val,
+                now,
+            )
+            ctx = dataclasses.replace(
+                ctx,
+                sessions=inputs.sessions,
+                previous_close=inputs.previous_close,
+                cash=inputs.cash,
+                equity=inputs.equity,
+                available_margin=inputs.available_margin,
+                gross_notional=inputs.gross_notional,
+            )
         return ctx, est
 
     @staticmethod
@@ -973,6 +1005,7 @@ class OmsService:
             trigger_basis=order.trigger_basis,
             leverage=intent.request.leverage,
             margin_mode=intent.request.margin_mode,
+            outside_rth=intent.request.outside_rth,
         )
         try:
             result = await asyncio.wait_for(
@@ -1873,9 +1906,7 @@ class OmsService:
                 "MARKET_STALE", "instrument metadata unavailable"
             )
         for price in (limit_price, trigger_price):
-            if price is not None and not decimals.is_multiple(
-                price, instrument.tick_size
-            ):
+            if price is not None and not equities.on_tick(price, instrument):
                 raise errors.ExecutionError(
                     "INVALID_TICK_SIZE", "price is not on the tick grid"
                 )
@@ -2003,14 +2034,15 @@ class OmsService:
             raise errors.ExecutionError("CONFLICT", "position is flat")
         instrument = await self._instrument(pos.instrument_id)
         qty = pos.quantity
+        security = equities.is_security(pos.instrument_id)
+        if security:
+            qty = _security_close_qty(pos.quantity, instrument, order_type)
         if fraction < decimals.ONE:
             if instrument is None:
                 raise errors.ExecutionError(
                     "MARKET_STALE", "instrument metadata unavailable"
                 )
-            qty = decimals.floor_to_step(
-                pos.quantity * fraction, instrument.lot_size
-            )
+            qty = decimals.floor_to_step(qty * fraction, instrument.lot_size)
             if qty <= 0:
                 raise errors.ExecutionError(
                     "INVALID_LOT_SIZE", "fraction rounds to zero"
@@ -2018,6 +2050,7 @@ class OmsService:
         side = (
             enums.OrderSide.SELL if pos.signed_qty > 0 else enums.OrderSide.BUY
         )
+        limit_tif = enums.TimeInForce.DAY if security else enums.TimeInForce.GTC
         return intents.OrderIntentRequest(
             account_id=pos.account_id,
             instrument_id=pos.instrument_id,
@@ -2027,7 +2060,7 @@ class OmsService:
             else enums.PositionEffect.REDUCE,
             order_type=order_type,
             quantity_base=qty,
-            time_in_force=enums.TimeInForce.GTC
+            time_in_force=limit_tif
             if order_type is enums.OrderType.LIMIT
             else enums.TimeInForce.IOC,
             reduce_only=True,
@@ -2105,6 +2138,41 @@ class OmsService:
             )
 
 
+def _security_close_qty(
+    held: decimal.Decimal,
+    instrument: market.InstrumentMeta | None,
+    order_type: enums.OrderType,
+) -> decimal.Decimal:
+    """Sizes a securities close to what one order may carry.
+
+    Board-lot markets (TWSE) cannot mix board and odd lots in one order:
+    above one board lot the close covers the whole lots (close the odd
+    remainder separately); below one lot it is an odd-lot limit order.
+
+    Args:
+        held: Shares held.
+        instrument: Instrument metadata, if known.
+        order_type: Close order type.
+
+    Returns:
+        Shares to close.
+
+    Raises:
+        ExecutionError: ``VALIDATION_FAILED`` for an odd-lot market close.
+    """
+    lot = None if instrument is None else instrument.board_lot
+    kind = equities.lot_kind(held, lot)
+    if kind is equities.LotKind.MIXED:
+        assert lot is not None
+        return decimals.floor_to_step(held, lot)
+    if kind is equities.LotKind.ODD and order_type is enums.OrderType.MARKET:
+        raise errors.ExecutionError(
+            "VALIDATION_FAILED",
+            "odd-lot positions close with a limit order (DAY)",
+        )
+    return held
+
+
 def _quantum(value: decimal.Decimal) -> decimal.Decimal:
     """Returns the smallest increment implied by a decimal's exponent.
 
@@ -2117,3 +2185,37 @@ def _quantum(value: decimal.Decimal) -> decimal.Decimal:
     exponent = value.normalize().as_tuple().exponent
     assert isinstance(exponent, int)
     return decimal.Decimal(1).scaleb(min(exponent, 0))
+
+
+async def _venue_balances(
+    adapter: trading.TradingAdapter,
+    account: accounts.Account,
+    mode: enums.OrderMode,
+    caps: accounts.TradingCapabilities | None,
+) -> trading.VenueAccountSnapshot | None:
+    """Fetches venue balances for LIVE risk checks on a venue account.
+
+    Only an ``AVAILABLE`` adapter is asked (so a closed gate or missing
+    credentials never cause network calls); failures yield ``None``, which
+    keeps the margin check UNKNOWN and the order blocked.
+
+    Args:
+        adapter: Venue adapter.
+        account: Account.
+        mode: Order mode.
+        caps: Negotiated capabilities.
+
+    Returns:
+        Snapshot or ``None``.
+    """
+    if (
+        mode is not enums.OrderMode.LIVE
+        or account.starting_equity is not None
+        or caps is None
+        or caps.status is not enums.TradingStatus.AVAILABLE
+    ):
+        return None
+    try:
+        return await adapter.account_snapshot(account.account_id)
+    except errors.ExecutionError:
+        return None

@@ -82,13 +82,13 @@ def build_router() -> fastapi.APIRouter:
             Limits document.
         """
         svc = auth.api(request)
-        svc.accounts.get(principal, account_id)
+        account = svc.accounts.get(principal, account_id)
         with svc.uow_factory() as uow:
             stored = uow.risk_limits.get(principal.tenant_id, account_id)
         return {
             "account_id": account_id,
-            "limits": limits.from_mapping(stored).to_dict(),
-            "hard_limits": limits.PLATFORM_HARD_LIMITS.to_dict(),
+            "limits": limits.from_mapping(stored, account.currency).to_dict(),
+            "hard_limits": limits.hard_limits(account.currency).to_dict(),
             "policy_version": limits.POLICY_VERSION,
         }
 
@@ -109,8 +109,8 @@ def build_router() -> fastapi.APIRouter:
             Limits document.
         """
         svc = auth.api(request)
-        svc.accounts.get(principal, body.account_id)
-        effective = limits.from_mapping(body.limits)
+        account = svc.accounts.get(principal, body.account_id)
+        effective = limits.from_mapping(body.limits, account.currency)
         with svc.uow_factory() as uow:
             uow.risk_limits.put(
                 principal.tenant_id,
@@ -131,7 +131,7 @@ def build_router() -> fastapi.APIRouter:
         return {
             "account_id": body.account_id,
             "limits": effective.to_dict(),
-            "hard_limits": limits.PLATFORM_HARD_LIMITS.to_dict(),
+            "hard_limits": limits.hard_limits(account.currency).to_dict(),
             "policy_version": limits.POLICY_VERSION,
         }
 
