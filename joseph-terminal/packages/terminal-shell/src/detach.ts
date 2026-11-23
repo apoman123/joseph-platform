@@ -11,12 +11,23 @@
  * Liveness: pop-outs say hello, send heartbeats (slower budgets while the
  * window is hidden, because browsers throttle background timers) and say
  * goodbye on `pagehide`. A pane seen in this session that goes silent is
- * re-docked (crashed window); a pane restored from the saved layout that
- * no window claims is "dormant" and offered for re-opening, because
- * browsers only open windows from a click.
+ * re-docked (crashed window).
+ *
+ * Main-window reloads: pop-outs keep running. The reloaded main window
+ * restores the remembered panes as "reconnecting" for a short probe
+ * (`PROBE_MS`) and says hello; every surviving pop-out answers and is
+ * re-adopted without a click. Only panes no window claims by the end of the
+ * probe become "dormant" and are offered for restoring (a full browser
+ * restart), because browsers only open windows from a click.
+ *
+ * Pop-out actions are numbered. A pop-out keeps every action until a
+ * workspace from the main window acknowledges it (`applied`), re-applies
+ * unacknowledged ones on top of each adopted workspace, and re-sends them
+ * with its hello and heartbeats, so changes made while the main window is
+ * reloading are replayed to the new main window instead of being lost.
  */
 import type {WorkspaceDocument} from '@joseph/contracts';
-import type {WorkspaceAction} from './workspace';
+import {workspaceReducer, type WorkspaceAction} from './workspace';
 
 /** Workspace panel key holding the detached panes. */
 export const DETACHED_PANEL_KEY = 'shell.detached';
@@ -39,6 +50,15 @@ export const HIDDEN_TIMEOUT_MS = 90_000;
 /** Time a newly opened window has to say hello. */
 export const OPEN_GRACE_MS = 20_000;
 
+/**
+ * Time a reloaded main window waits for surviving pop-outs before offering
+ * to restore the remaining panes.
+ */
+export const PROBE_MS = 2_500;
+
+/** Unacknowledged pop-out actions kept for replay (oldest dropped first). */
+export const MAX_PENDING_ACTIONS = 200;
+
 /** Dock panels that may be popped out (contribution ids). */
 export const DETACHABLE_PANELS: ReadonlySet<string> = new Set([
   'market-info',
@@ -52,6 +72,18 @@ export type DetachedPaneRef =
   | {kind: 'chart'; chartId: string}
   | {kind: 'panel'; slot: 'side-panel' | 'bottom-panel'; panelId: string};
 
+/** Screen position and size of a pop-out window (CSS pixels). */
+export interface WindowGeometry {
+  /** Left edge (`screenX`). */
+  left: number;
+  /** Top edge (`screenY`). */
+  top: number;
+  /** Outer width. */
+  width: number;
+  /** Outer height. */
+  height: number;
+}
+
 /** A pane living in another window (persisted with the layout). */
 export interface DetachedPane {
   /** Stable key, e.g. `chart:chart-2` or `panel:alerts`. */
@@ -60,6 +92,8 @@ export interface DetachedPane {
   ref: DetachedPaneRef;
   /** Human title such as `BTCUSD 5m` or `Alerts`. */
   title: string;
+  /** Last reported window position and size, used when restoring. */
+  geometry?: WindowGeometry;
 }
 
 /** Runtime liveness of one detached pane (never persisted). */
@@ -72,8 +106,12 @@ export interface PaneLiveness {
   hidden?: boolean;
 }
 
-/** Status of a detached pane as seen by the main window. */
-export type DetachedStatus = 'opening' | 'live' | 'dormant' | 'lost';
+/**
+ * Status of a detached pane as seen by the main window: `reconnecting`
+ * while a reloaded main window probes for surviving pop-outs.
+ */
+export type DetachedStatus =
+  'opening' | 'live' | 'reconnecting' | 'dormant' | 'lost';
 
 /** Main-window state of detached panes. */
 export interface DetachState {
@@ -81,6 +119,8 @@ export interface DetachState {
   panes: readonly DetachedPane[];
   /** Liveness by key. */
   live: Readonly<Record<string, PaneLiveness>>;
+  /** Whether restored panes are still waiting for surviving windows. */
+  probing?: boolean;
 }
 
 /** Empty state. */
@@ -124,6 +164,56 @@ export function parsePaneRef(value: unknown): DetachedPaneRef | null {
   return null;
 }
 
+/** Bounds accepted for a remembered window position or size. */
+const GEOMETRY_LIMITS = {
+  position: 20_000,
+  minSize: 160,
+  maxSize: 10_000,
+};
+
+/**
+ * Validates an untrusted window geometry.
+ * @param value Candidate.
+ * @return Geometry with integer pixels, or null when implausible.
+ */
+export function parseGeometry(value: unknown): WindowGeometry | null {
+  if (!value || typeof value !== 'object') return null;
+  const raw = value as Record<string, unknown>;
+  const read = (key: string, low: number, high: number): number | null => {
+    const n = raw[key];
+    return typeof n === 'number' && Number.isFinite(n) && n >= low && n <= high
+      ? Math.round(n)
+      : null;
+  };
+  const {position, minSize, maxSize} = GEOMETRY_LIMITS;
+  const left = read('left', -position, position);
+  const top = read('top', -position, position);
+  const width = read('width', minSize, maxSize);
+  const height = read('height', minSize, maxSize);
+  return left === null || top === null || width === null || height === null
+    ? null
+    : {left, top, width, height};
+}
+
+/**
+ * Whether two geometries are equal (both absent counts as equal).
+ * @param a First geometry.
+ * @param b Second geometry.
+ * @return True when equal.
+ */
+function sameGeometry(
+  a: WindowGeometry | undefined,
+  b: WindowGeometry | undefined
+): boolean {
+  if (!a || !b) return a === b;
+  return (
+    a.left === b.left &&
+    a.top === b.top &&
+    a.width === b.width &&
+    a.height === b.height
+  );
+}
+
 /**
  * Reads persisted detached panes defensively from `workspace.panels`.
  * @param panels Workspace panel state.
@@ -142,10 +232,12 @@ export function readDetachedPanes(panels: unknown): DetachedPane[] {
     const key = paneKey(ref);
     if (panes.some(p => p.key === key)) continue;
     const title = (item as {title?: unknown}).title;
+    const geometry = parseGeometry((item as {geometry?: unknown}).geometry);
     panes.push({
       key,
       ref,
       title: typeof title === 'string' ? title.slice(0, 80) : key,
+      ...(geometry ? {geometry} : {}),
     });
   }
   return panes;
@@ -159,11 +251,19 @@ export function readDetachedPanes(panels: unknown): DetachedPane[] {
 export function detachedPanelState(panes: readonly DetachedPane[]): {
   panes: DetachedPane[];
 } {
-  return {panes: panes.map(p => ({key: p.key, ref: p.ref, title: p.title}))};
+  return {
+    panes: panes.map(p => ({
+      key: p.key,
+      ref: p.ref,
+      title: p.title,
+      ...(p.geometry ? {geometry: p.geometry} : {}),
+    })),
+  };
 }
 
 /**
- * Whether two pane lists hold the same keys in the same order.
+ * Whether two pane lists hold the same keys in the same order with the same
+ * remembered window geometry.
  * @param a First list.
  * @param b Second list.
  * @return True when equal.
@@ -172,19 +272,28 @@ export function samePanes(
   a: readonly DetachedPane[],
   b: readonly DetachedPane[]
 ): boolean {
-  return a.length === b.length && a.every((p, i) => p.key === b[i]?.key);
+  return (
+    a.length === b.length &&
+    a.every(
+      (p, i) => p.key === b[i]?.key && sameGeometry(p.geometry, b[i]?.geometry)
+    )
+  );
 }
 
 /**
  * Status of a pane right now.
  * @param live Liveness (undefined for a pane restored from the layout).
  * @param nowMs Clock.
- * @return `opening` (waiting for a new window), `live`, `dormant` (restored,
- *     unclaimed) or `lost` (went silent or never came up: re-dock).
+ * @param probing Whether a reloaded main window is still probing for
+ *     surviving pop-outs.
+ * @return `opening` (waiting for a new window), `live`, `reconnecting`
+ *     (restored, probing), `dormant` (restored, unclaimed after the probe)
+ *     or `lost` (went silent or never came up: re-dock).
  */
 export function detachedStatus(
   live: PaneLiveness | undefined,
-  nowMs: number
+  nowMs: number,
+  probing = false
 ): DetachedStatus {
   if (live?.seenMs !== undefined) {
     const budget = live.hidden ? HIDDEN_TIMEOUT_MS : LIVE_TIMEOUT_MS;
@@ -193,12 +302,42 @@ export function detachedStatus(
   if (live?.openedAtMs !== undefined) {
     return nowMs - live.openedAtMs <= OPEN_GRACE_MS ? 'opening' : 'lost';
   }
-  return 'dormant';
+  return probing ? 'reconnecting' : 'dormant';
+}
+
+/**
+ * Status of one pane of a state.
+ * @param state Detach state.
+ * @param key Pane key.
+ * @param nowMs Clock.
+ * @return Status.
+ */
+export function paneStatus(
+  state: DetachState,
+  key: string,
+  nowMs: number
+): DetachedStatus {
+  return detachedStatus(state.live[key], nowMs, state.probing === true);
+}
+
+/**
+ * Panes waiting for a click to restore their windows (restored from the
+ * layout and unclaimed after the probe).
+ * @param state Detach state.
+ * @param nowMs Clock.
+ * @return Dormant panes in detach order.
+ */
+export function dormantPanes(
+  state: DetachState,
+  nowMs: number
+): DetachedPane[] {
+  return state.panes.filter(p => paneStatus(state, p.key, nowMs) === 'dormant');
 }
 
 /** Inputs of the detach reducer. */
 export type DetachEvent =
   | {type: 'restore'; panes: readonly DetachedPane[]}
+  | {type: 'probe'; probing: boolean}
   | {type: 'open'; pane: DetachedPane; nowMs: number}
   | {
       type: 'seen';
@@ -207,6 +346,7 @@ export type DetachEvent =
       title: string;
       hidden: boolean;
       nowMs: number;
+      geometry?: WindowGeometry | null;
     }
   | {type: 'close'; key: string}
   | {type: 'expire'; nowMs: number};
@@ -229,9 +369,14 @@ export function detachReducer(
         ? state
         : {...state, panes: [...state.panes, ...added]};
     }
+    case 'probe':
+      return (state.probing === true) === event.probing
+        ? state
+        : {...state, probing: event.probing};
     case 'open': {
       const exists = state.panes.some(p => p.key === event.pane.key);
       return {
+        ...state,
         panes: exists ? state.panes : [...state.panes, event.pane],
         live: {
           ...state.live,
@@ -244,14 +389,28 @@ export function detachReducer(
     }
     case 'seen': {
       // A surviving pop-out may claim a pane the main window forgot.
-      const exists = state.panes.some(p => p.key === event.key);
+      const geometry = event.geometry ?? undefined;
+      const existing = state.panes.find(p => p.key === event.key);
+      const moved =
+        existing !== undefined &&
+        geometry !== undefined &&
+        !sameGeometry(existing.geometry, geometry);
+      const panes = existing
+        ? moved
+          ? state.panes.map(p => (p === existing ? {...p, geometry} : p))
+          : state.panes
+        : [
+            ...state.panes,
+            {
+              key: event.key,
+              ref: event.ref,
+              title: event.title,
+              ...(geometry ? {geometry} : {}),
+            },
+          ];
       return {
-        panes: exists
-          ? state.panes
-          : [
-              ...state.panes,
-              {key: event.key, ref: event.ref, title: event.title},
-            ],
+        ...state,
+        panes,
         live: {
           ...state.live,
           [event.key]: {
@@ -265,7 +424,11 @@ export function detachReducer(
     case 'close': {
       if (!state.panes.some(p => p.key === event.key)) return state;
       const {[event.key]: _gone, ...live} = state.live;
-      return {panes: state.panes.filter(p => p.key !== event.key), live};
+      return {
+        ...state,
+        panes: state.panes.filter(p => p.key !== event.key),
+        live,
+      };
     }
     case 'expire': {
       const lost = lostKeys(state, event.nowMs);
@@ -287,7 +450,7 @@ export function detachReducer(
  */
 export function lostKeys(state: DetachState, nowMs: number): string[] {
   return state.panes
-    .filter(p => detachedStatus(state.live[p.key], nowMs) === 'lost')
+    .filter(p => paneStatus(state, p.key, nowMs) === 'lost')
     .map(p => p.key);
 }
 
@@ -338,31 +501,58 @@ export interface SharedCrosshair {
   point: {timeMs: number; price: number} | null;
 }
 
+/** A workspace action of a pop-out with its per-window sequence number. */
+export interface SequencedAction {
+  /** Increasing number per pop-out window (from 1). */
+  seq: number;
+  /** Action. */
+  action: WorkspaceAction;
+}
+
+/** Liveness report of a pop-out (`popout-hello` and `heartbeat`). */
+export interface PopoutReport {
+  /** Pane key. */
+  key: string;
+  /** Pane shown. */
+  ref: DetachedPaneRef;
+  /** Human title. */
+  title: string;
+  /** Whether the window is hidden (throttled timers). */
+  hidden: boolean;
+  /** Window position and size, when known. */
+  geometry?: WindowGeometry | null;
+  /** Actions the main window has not acknowledged yet, oldest first. */
+  pending?: readonly SequencedAction[];
+}
+
 /** Messages exchanged between the main window and pop-outs. */
 export type PopoutMessage =
   | {type: 'main-hello'}
   | {type: 'main-heartbeat'}
-  | {type: 'workspace'; doc: WorkspaceDocument}
+  | {type: 'main-bye'}
+  | {
+      type: 'workspace';
+      doc: WorkspaceDocument;
+      /** Last action applied per pop-out window id (acknowledgements). */
+      applied?: Readonly<Record<string, number>>;
+    }
   | {type: 'theme'; theme: 'dark' | 'light'}
   | {type: 'crosshair'; crosshair: SharedCrosshair}
   | {type: 'focus'; key: string}
   | {type: 'redock'; key: string}
-  | {
-      type: 'popout-hello';
-      key: string;
-      ref: DetachedPaneRef;
-      title: string;
-      hidden: boolean;
-    }
-  | {
-      type: 'heartbeat';
-      key: string;
-      ref: DetachedPaneRef;
-      title: string;
-      hidden: boolean;
-    }
+  | ({type: 'popout-hello'} & PopoutReport)
+  | ({type: 'heartbeat'} & PopoutReport)
   | {type: 'closed'; key: string}
-  | {type: 'action'; action: WorkspaceAction};
+  | {
+      type: 'action';
+      /** The action just applied in the pop-out. */
+      action: WorkspaceAction;
+      /**
+       * Every action the main window has not acknowledged yet, this one
+       * last, so a main window that missed earlier ones applies them first.
+       */
+      pending?: readonly SequencedAction[];
+    };
 
 /** Wire envelope. */
 export interface PopoutEnvelope {
@@ -380,6 +570,7 @@ export interface PopoutEnvelope {
 const MESSAGE_TYPES: ReadonlySet<string> = new Set([
   'main-hello',
   'main-heartbeat',
+  'main-bye',
   'workspace',
   'theme',
   'crosshair',
@@ -413,6 +604,7 @@ export function parseEnvelope(value: unknown): PopoutEnvelope | null {
   switch (msg.type) {
     case 'workspace':
       if (!msg.doc || typeof msg.doc !== 'object') return null;
+      if (msg.applied !== undefined && !isSeqMap(msg.applied)) return null;
       break;
     case 'theme':
       if (msg.theme !== 'dark' && msg.theme !== 'light') return null;
@@ -432,17 +624,137 @@ export function parseEnvelope(value: unknown): PopoutEnvelope | null {
     case 'heartbeat': {
       const ref = parsePaneRef(msg.ref);
       if (!ref || msg.key !== paneKey(ref)) return null;
+      if (msg.pending !== undefined && parsePending(msg.pending) === null)
+        return null;
       break;
     }
     case 'action': {
-      const action = msg.action as {type?: unknown} | undefined;
-      if (!action || typeof action.type !== 'string') return null;
+      if (!isAction(msg.action)) return null;
+      if (msg.pending !== undefined && parsePending(msg.pending) === null)
+        return null;
       break;
     }
     default:
       break;
   }
   return env as PopoutEnvelope;
+}
+
+/**
+ * Whether a value is a valid action sequence number.
+ * @param value Candidate.
+ * @return True for a positive safe integer.
+ */
+function isSeq(value: unknown): value is number {
+  return typeof value === 'number' && Number.isSafeInteger(value) && value > 0;
+}
+
+/**
+ * Whether a value looks like a workspace action (the reducer ignores
+ * unknown types).
+ * @param value Candidate.
+ * @return True for an object with a string `type`.
+ */
+function isAction(value: unknown): value is WorkspaceAction {
+  return (
+    !!value &&
+    typeof value === 'object' &&
+    typeof (value as {type?: unknown}).type === 'string'
+  );
+}
+
+/**
+ * Whether a value is a window-id to sequence-number map.
+ * @param value Candidate.
+ * @return True when every entry is a sequence number.
+ */
+function isSeqMap(value: unknown): value is Record<string, number> {
+  return (
+    !!value &&
+    typeof value === 'object' &&
+    !Array.isArray(value) &&
+    Object.values(value as Record<string, unknown>).every(isSeq)
+  );
+}
+
+/**
+ * Validates untrusted pending actions.
+ * @param value Candidate.
+ * @return Actions in increasing sequence order, or null when malformed.
+ */
+export function parsePending(value: unknown): SequencedAction[] | null {
+  if (!Array.isArray(value) || value.length > MAX_PENDING_ACTIONS) return null;
+  const result: SequencedAction[] = [];
+  let last = 0;
+  for (const item of value as unknown[]) {
+    const entry = item as {seq?: unknown; action?: unknown} | null;
+    if (!entry || !isSeq(entry.seq) || entry.seq <= last) return null;
+    if (!isAction(entry.action)) return null;
+    result.push({seq: entry.seq, action: entry.action});
+    last = entry.seq;
+  }
+  return result;
+}
+
+/**
+ * Actions of a pop-out that a main window has not applied yet.
+ * @param pending Pop-out's unacknowledged actions, oldest first.
+ * @param applied Last sequence number the main window applied (0 = none).
+ * @return Actions to apply, oldest first.
+ */
+export function unappliedActions(
+  pending: readonly SequencedAction[],
+  applied: number
+): SequencedAction[] {
+  return pending.filter(entry => entry.seq > applied);
+}
+
+/**
+ * Appends an action to a pop-out's unacknowledged queue. A newer viewport
+ * change of the same chart replaces the older one (scrolling while the main
+ * window is away would otherwise crowd out real changes), and the queue
+ * keeps at most `MAX_PENDING_ACTIONS` entries.
+ * @param pending Queue, oldest first.
+ * @param entry New action.
+ * @return New queue.
+ */
+export function queueAction(
+  pending: readonly SequencedAction[],
+  entry: SequencedAction
+): SequencedAction[] {
+  const {action} = entry;
+  const kept =
+    action.type === 'setVisibleRange'
+      ? pending.filter(
+          p =>
+            !(
+              p.action.type === 'setVisibleRange' &&
+              p.action.chartId === action.chartId
+            )
+        )
+      : [...pending];
+  kept.push(entry);
+  return kept.slice(-MAX_PENDING_ACTIONS);
+}
+
+/**
+ * Re-applies a pop-out's unacknowledged actions on top of the main
+ * window's workspace, so the pop-out never shows its own changes undone
+ * while they wait for the main window.
+ * @param doc Workspace adopted from the main window.
+ * @param pending Unacknowledged actions, oldest first.
+ * @param nowMs Clock for `updated_at_ms`.
+ * @return Workspace with the actions applied (`doc` when none).
+ */
+export function rebaseWorkspace(
+  doc: WorkspaceDocument,
+  pending: readonly SequencedAction[],
+  nowMs: number
+): WorkspaceDocument {
+  return pending.reduce(
+    (current, entry) => workspaceReducer(current, entry.action, nowMs),
+    doc
+  );
 }
 
 /** Minimal message port (BroadcastChannel or an in-memory test hub). */

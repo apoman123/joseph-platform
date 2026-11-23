@@ -39,6 +39,7 @@ import type {
   PositionList,
   QualificationReport,
   QualificationStatus,
+  SessionList,
   SignalList,
   StrategyDefinition,
   StrategyVersion,
@@ -55,6 +56,7 @@ import type {
   InstrumentQuery,
   MarketDataClient,
   SeriesQuery,
+  SessionQuery,
   SignalQuery,
   StrategyClient,
 } from './ports';
@@ -221,6 +223,7 @@ export class HttpMarketDataClient implements MarketDataClient {
       venue: query.venue,
       market_type: query.marketType,
       q: query.q,
+      limit: query.limit,
     });
   }
 
@@ -332,6 +335,19 @@ export class HttpMarketDataClient implements MarketDataClient {
         ? JSON.stringify({[query.pluginId]: query.settings})
         : undefined,
     });
+  }
+
+  /**
+   * Lists the trading sessions of an exchange calendar.
+   * @param query Calendar and window.
+   * @return Session list.
+   */
+  getSessions(query: SessionQuery): Promise<SessionList> {
+    return this.http.request(
+      'GET',
+      `/v1/calendars/${encodeURIComponent(query.calendar)}/sessions`,
+      {from_ms: query.fromMs, to_ms: query.toMs}
+    );
   }
 }
 

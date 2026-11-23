@@ -1,9 +1,18 @@
 /**
  * @fileoverview Market panel: snapshot (last, mark, index, bid/ask,
  * funding, open interest) and contract specs for the active instrument.
+ * Securities show their listing exchange, currency, board lot, price limit
+ * and session hours instead of perpetual fields; a Treasury yield shows
+ * the yield in percent and its publication session.
  */
 import type {Instrument, MarketSnapshot} from '@joseph/contracts';
-import {parseInstrumentId, VENUE_NAMES} from '@joseph/contracts';
+import {
+  EXCHANGE_HOURS,
+  instrumentCalendarId,
+  isExchangeCalendar,
+  parseInstrumentId,
+  VENUE_NAMES,
+} from '@joseph/contracts';
 import {useEffect, useState} from 'react';
 import type {TerminalRuntime} from '../../composition/runtime';
 import {
@@ -14,10 +23,13 @@ import {
 import {
   formatAge,
   formatDecimal,
+  formatInstrumentPrice,
   formatPct,
   formatPrice,
   formatUsdCompact,
+  formatVolume,
 } from '../../shell/format';
+import {marketTypeLabel} from '../../shell/markets';
 import {shellManifest} from '../shell/manifest';
 
 /** Snapshot refresh interval. */
@@ -55,6 +67,53 @@ function Row({
       <dd className={`${plain ? '' : 'j-tabular'} ${tone ?? ''}`}>{value}</dd>
     </div>
   );
+}
+
+/**
+ * Formats minutes after midnight as `HH:MM`.
+ * @param minutes Minutes.
+ * @return Text.
+ */
+function clock(minutes: number): string {
+  const pad = (n: number) => String(n).padStart(2, '0');
+  return `${pad(Math.floor(minutes / 60))}:${pad(minutes % 60)}`;
+}
+
+/**
+ * Formats a large amount compactly in its currency (`$106.70M`,
+ * `NT$2.31B`, or `1.20M EUR`).
+ * @param value Decimal string.
+ * @param currency Quote currency.
+ * @return Text.
+ */
+export function formatMoneyCompact(
+  value: string | null | undefined,
+  currency: string
+): string {
+  const usd = formatUsdCompact(value);
+  if (usd === '—' || currency === 'USD') return usd;
+  if (currency === 'TWD') return `NT${usd}`;
+  return `${usd.slice(1)} ${currency}`;
+}
+
+/**
+ * Describes a tick ladder, e.g. `0.01 below 10, 0.05 to 50, …`.
+ * @param instrument Instrument.
+ * @return Text, or the plain tick size without a ladder.
+ */
+export function tickDescription(instrument: Instrument): string {
+  const ladder = [...(instrument.tick_ladder ?? [])].sort(
+    (a, b) => Number(a.min_price) - Number(b.min_price)
+  );
+  if (ladder.length === 0) return instrument.tick_size;
+  return ladder
+    .map((step, i) => {
+      const next = ladder[i + 1];
+      return next
+        ? `${step.tick_size} below ${next.min_price}`
+        : `${step.tick_size} from ${step.min_price}`;
+    })
+    .join(', ');
 }
 
 /**
@@ -130,7 +189,24 @@ export function marketInfoFeature(_runtime: TerminalRuntime): WebFeature {
         }, [selection.instrumentId]);
         const {snapshot, instrument, error} = data;
         const tick = instrument?.tick_size ?? null;
-        const {venue} = parseInstrumentId(selection.instrumentId);
+        const {venue, marketType} = parseInstrumentId(selection.instrumentId);
+        const perp = marketType === 'perp';
+        const rate = marketType === 'rate';
+        const currency = instrument?.key.quote ?? 'USD';
+        const price = (value: string | null | undefined) =>
+          instrument
+            ? formatInstrumentPrice(value, instrument)
+            : formatPrice(value, tick);
+        const calendarId = instrumentCalendarId(
+          selection.instrumentId,
+          instrument
+        );
+        const hours = isExchangeCalendar(calendarId)
+          ? EXCHANGE_HOURS[calendarId]
+          : null;
+        const names = [instrument?.name, instrument?.local_name]
+          .filter(Boolean)
+          .join(' · ');
         return (
           <div className="market-panel">
             <header className="market-panel__head">
@@ -139,7 +215,15 @@ export function marketInfoFeature(_runtime: TerminalRuntime): WebFeature {
                   {instrument?.display_symbol ??
                     parseInstrumentId(selection.instrumentId).venueMarketId}
                 </h2>
-                <p className="j-muted">{VENUE_NAMES[venue]}, perpetual</p>
+                <p className="j-muted">
+                  {VENUE_NAMES[venue]},{' '}
+                  {marketTypeLabel(marketType).toLowerCase()}
+                </p>
+                {names && (
+                  <p className="market-panel__name" data-testid="market-name">
+                    {names}
+                  </p>
+                )}
               </div>
               {snapshot && (
                 <span
@@ -159,77 +243,160 @@ export function marketInfoFeature(_runtime: TerminalRuntime): WebFeature {
               </div>
             )}
             <dl className="kv">
-              <Row label="Last" value={formatPrice(snapshot?.last, tick)} />
-              <Row label="Mark" value={formatPrice(snapshot?.mark, tick)} />
-              <Row label="Index" value={formatPrice(snapshot?.index, tick)} />
               <Row
-                label="Bid"
-                value={formatPrice(snapshot?.best_bid, tick)}
-                tone="j-pos"
+                label={rate ? 'Yield' : 'Last'}
+                value={price(snapshot?.last)}
               />
+              {perp && (
+                <>
+                  <Row label="Mark" value={price(snapshot?.mark)} />
+                  <Row label="Index" value={price(snapshot?.index)} />
+                </>
+              )}
+              {!rate && (
+                <>
+                  <Row
+                    label="Bid"
+                    value={price(snapshot?.best_bid)}
+                    tone="j-pos"
+                  />
+                  <Row
+                    label="Ask"
+                    value={price(snapshot?.best_ask)}
+                    tone="j-neg"
+                  />
+                  <Row
+                    label="Spread"
+                    value={
+                      snapshot?.spread_pct
+                        ? `${formatDecimal(snapshot.spread_pct, 4)}%`
+                        : '—'
+                    }
+                  />
+                </>
+              )}
               <Row
-                label="Ask"
-                value={formatPrice(snapshot?.best_ask, tick)}
-                tone="j-neg"
-              />
-              <Row
-                label="Spread"
-                value={
-                  snapshot?.spread_pct
-                    ? `${formatDecimal(snapshot.spread_pct, 4)}%`
-                    : '—'
-                }
-              />
-              <Row
-                label="24h change"
+                label={perp ? '24h change' : 'Change'}
                 value={formatPct(snapshot?.change_24h_pct)}
                 tone={
                   snapshot?.change_24h_pct?.startsWith('-') ? 'j-neg' : 'j-pos'
                 }
               />
-              <Row
-                label="24h turnover"
-                value={formatUsdCompact(snapshot?.turnover_24h_quote)}
-              />
-              <Row
-                label="Open interest"
-                value={formatUsdCompact(snapshot?.open_interest?.notional_usd)}
-              />
-              <Row
-                label="Funding (8h)"
-                value={
-                  snapshot?.funding
-                    ? `${formatDecimal(snapshot.funding.normalized_8h_pct, 4)}%, ${snapshot.funding.kind.toLowerCase()}`
-                    : '—'
-                }
-              />
+              {!rate && (
+                <Row
+                  label={perp ? '24h turnover' : 'Turnover'}
+                  value={formatMoneyCompact(
+                    snapshot?.turnover_24h_quote,
+                    currency
+                  )}
+                />
+              )}
+              {!rate && !perp && (
+                <Row
+                  label="Volume"
+                  value={formatVolume(
+                    snapshot?.volume_24h_base == null
+                      ? null
+                      : Number(snapshot.volume_24h_base),
+                    instrument
+                  )}
+                />
+              )}
+              {perp && (
+                <>
+                  <Row
+                    label="Open interest"
+                    value={formatUsdCompact(
+                      snapshot?.open_interest?.notional_usd
+                    )}
+                  />
+                  <Row
+                    label="Funding (8h)"
+                    value={
+                      snapshot?.funding
+                        ? `${formatDecimal(snapshot.funding.normalized_8h_pct, 4)}%, ${snapshot.funding.kind.toLowerCase()}`
+                        : '—'
+                    }
+                  />
+                </>
+              )}
             </dl>
-            <h3 className="market-panel__sub">Contract</h3>
+            <h3 className="market-panel__sub">
+              {perp ? 'Contract' : rate ? 'Series' : 'Security'}
+            </h3>
             <dl className="kv">
               <Row label="Instrument id" value={selection.instrumentId} plain />
-              <Row label="Tick size" value={instrument?.tick_size ?? '—'} />
-              <Row label="Lot size" value={instrument?.lot_size ?? '—'} />
+              {instrument?.listing_exchange && (
+                <Row
+                  label="Listed on"
+                  value={instrument.listing_exchange}
+                  plain
+                />
+              )}
+              {!perp && (
+                <Row
+                  label={rate ? 'Unit' : 'Currency'}
+                  value={rate ? 'percent' : currency}
+                  plain
+                />
+              )}
+              {hours && (
+                <Row
+                  label="Session"
+                  value={`${clock(hours.openMinute)}–${clock(hours.closeMinute)} ${hours.timeZone} (${calendarId})`}
+                  plain
+                />
+              )}
               <Row
-                label="Min notional"
-                value={instrument?.min_notional ?? '—'}
+                label="Tick size"
+                value={instrument ? tickDescription(instrument) : '—'}
               />
-              <Row
-                label="Max leverage"
-                value={
-                  instrument?.max_leverage ? `${instrument.max_leverage}x` : '—'
-                }
-              />
-              <Row
-                label="Funding interval"
-                value={
-                  instrument?.funding_interval_hours
-                    ? `${instrument.funding_interval_hours} h`
-                    : '—'
-                }
-              />
+              {!rate && (
+                <Row label="Lot size" value={instrument?.lot_size ?? '—'} />
+              )}
+              {instrument?.board_lot && (
+                <Row
+                  label="Board lot"
+                  value={`${formatDecimal(instrument.board_lot, 0)} shares (1 張)`}
+                />
+              )}
+              {instrument?.price_limit_pct && (
+                <Row
+                  label="Daily price limit"
+                  value={`±${instrument.price_limit_pct}% of the reference price`}
+                />
+              )}
+              {perp && (
+                <>
+                  <Row
+                    label="Min notional"
+                    value={instrument?.min_notional ?? '—'}
+                  />
+                  <Row
+                    label="Max leverage"
+                    value={
+                      instrument?.max_leverage
+                        ? `${instrument.max_leverage}x`
+                        : '—'
+                    }
+                  />
+                  <Row
+                    label="Funding interval"
+                    value={
+                      instrument?.funding_interval_hours
+                        ? `${instrument.funding_interval_hours} h`
+                        : '—'
+                    }
+                  />
+                </>
+              )}
               <Row
                 label="Status"
-                value={instrument?.status.toLowerCase() ?? '—'}
+                value={
+                  rate
+                    ? 'published rate, not tradable'
+                    : (instrument?.status.toLowerCase() ?? '—')
+                }
               />
             </dl>
           </div>

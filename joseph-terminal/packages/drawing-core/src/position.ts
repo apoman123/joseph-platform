@@ -5,7 +5,12 @@
  * edge; the target anchor's time is the right edge. Levels are tick-rounded
  * exact decimals. The tool is a planning aid only: it never creates orders.
  */
-import {Decimal, type DrawingAnchor} from '@joseph/contracts';
+import {
+  Decimal,
+  type BarCalendar,
+  type DrawingAnchor,
+  type Timeframe,
+} from '@joseph/contracts';
 import {anchorPoints} from './document';
 import {pointInRect, rectFromPoints, type Point} from './geometry';
 import {
@@ -65,18 +70,21 @@ export function positionMetrics(
 }
 
 /**
- * Expands a single entry anchor into entry, target (+2%) and stop (-1%).
+ * Expands a single entry anchor into entry, target (+2%) and stop (-1%),
+ * 24 bars wide (session bars when a calendar is given).
  * @param side Direction.
  * @param anchors User anchors (first is entry).
  * @param durationMs Bar duration.
  * @param tickSize Tick size.
+ * @param sessions Timeframe and session calendar of the chart, if any.
  * @return `[entry, target, stop]`.
  */
 export function expandPositionAnchors(
   side: PositionSide,
   anchors: DrawingAnchor[],
   durationMs: number,
-  tickSize: string | null
+  tickSize: string | null,
+  sessions?: {timeframe?: Timeframe; calendar?: BarCalendar}
 ): DrawingAnchor[] {
   const entry = anchors[0];
   if (!entry) return anchors;
@@ -84,7 +92,11 @@ export function expandPositionAnchors(
   const price = Decimal.parse(entry.price);
   const up = side === 'long' ? '1.02' : '0.98';
   const down = side === 'long' ? '0.99' : '1.01';
-  const right = entry.time_ms + 24 * durationMs;
+  const {calendar, timeframe} = sessions ?? {};
+  const right =
+    calendar && timeframe && !calendar.continuous
+      ? calendar.shift(timeframe, calendar.floor(timeframe, entry.time_ms), 24)
+      : entry.time_ms + 24 * durationMs;
   return [
     entry,
     {
@@ -139,7 +151,7 @@ export function createPositionTool(
       show_labels: true,
     }),
     expandAnchors: (anchors, env) =>
-      expandPositionAnchors(side, anchors, env.durationMs, env.tickSize),
+      expandPositionAnchors(side, anchors, env.durationMs, env.tickSize, env),
     render(ctx, doc, transform, state) {
       const g = geometry(doc, transform);
       const [entry, target, stop] = doc.anchors;

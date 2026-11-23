@@ -14,6 +14,7 @@ import {
   LineSeries,
   LineStyle,
   PriceScaleMode,
+  TickMarkType,
   createChart,
   createSeriesMarkers,
   type IChartApi,
@@ -56,7 +57,12 @@ import type {
 import {paintOverlays} from '../../overlay-painter';
 import {DEFAULT_CHART_THEME, toneColor, withAlpha} from '../../theme';
 import {TimeIndex} from '../../time-index';
-import {timeScaleLabelsFor} from '../../time-scale';
+import {
+  timeScaleLabelsFor,
+  zonedCrosshairLabel,
+  zonedTickLabel,
+  type TickLabelKind,
+} from '../../time-scale';
 import {heikinAshiBar, toHeikinAshi} from '../../transforms/heikin-ashi';
 import {TIMEFRAME_MS, stepDecimals} from '@joseph/contracts';
 
@@ -70,6 +76,35 @@ const VOLUME_PANE_SHARE = 0.14;
 const STUDY_PANE_SHARE = 0.16;
 /** Smallest share kept for the price pane. */
 const MIN_PRICE_PANE_SHARE = 0.45;
+
+/** Tick label kinds by the chart library's tick mark type. */
+const TICK_KINDS: Readonly<Record<TickMarkType, TickLabelKind>> = {
+  [TickMarkType.Year]: 'year',
+  [TickMarkType.Month]: 'month',
+  [TickMarkType.DayOfMonth]: 'day',
+  [TickMarkType.Time]: 'time',
+  [TickMarkType.TimeWithSeconds]: 'seconds',
+};
+
+/**
+ * Builds the time index of a series configuration.
+ * @param bars Bars.
+ * @param config Series configuration (null before `setSeries`).
+ * @return Index (session-aware for exchange calendars).
+ */
+function indexFor(
+  bars: readonly ChartBar[],
+  config: SeriesConfig | null
+): TimeIndex {
+  if (!config) return new TimeIndex(bars, 60_000);
+  return new TimeIndex(
+    bars,
+    TIMEFRAME_MS[config.timeframe],
+    config.calendar
+      ? {calendar: config.calendar, timeframe: config.timeframe}
+      : null
+  );
+}
 
 /** Native objects backing one study pane. */
 interface StudyState {
@@ -352,7 +387,7 @@ export class LwcChartPort implements ChartPort {
   setSeries(config: SeriesConfig): void {
     const previous = this.config;
     this.config = config;
-    this.index = new TimeIndex(this.bars, TIMEFRAME_MS[config.timeframe]);
+    this.index = indexFor(this.bars, config);
     const switched =
       previous !== null &&
       (previous.instrumentId !== config.instrumentId ||
@@ -759,17 +794,33 @@ export class LwcChartPort implements ChartPort {
     const config = this.config;
     if (!config || !this.series || !this.chart) return;
     const precision = Math.min(10, stepDecimals(config.tickSize));
+    const unit = config.priceUnit ?? '';
     this.series.applyOptions({
       priceFormat: {type: 'price', precision, minMove: Number(config.tickSize)},
     });
+    // Exchange calendars label times in exchange time; 24x7 keeps the
+    // library's UTC labels (null restores the defaults).
+    const calendar = config.calendar;
+    const zone = calendar && !calendar.continuous ? calendar.timeZone : null;
+    const timeframe = config.timeframe;
     this.chart.applyOptions({
       localization: {
         locale: 'en-US',
         priceFormatter: (price: number) =>
-          price.toLocaleString('en-US', {
+          `${price.toLocaleString('en-US', {
             minimumFractionDigits: precision,
             maximumFractionDigits: precision,
-          }),
+          })}${unit}`,
+        timeFormatter: zone
+          ? (time: Time) =>
+              zonedCrosshairLabel(Number(time) * 1000, timeframe, zone)
+          : null,
+      },
+      timeScale: {
+        tickMarkFormatter: (time: Time, type: TickMarkType) =>
+          zone
+            ? zonedTickLabel(Number(time) * 1000, TICK_KINDS[type], zone)
+            : null,
       },
     });
     const mode =
@@ -792,10 +843,7 @@ export class LwcChartPort implements ChartPort {
     const byTime = new Map<number, ChartBar>();
     for (const bar of bars) byTime.set(bar.timeMs, bar);
     this.bars = [...byTime.values()].sort((a, b) => a.timeMs - b.timeMs);
-    this.index = new TimeIndex(
-      this.bars,
-      this.config ? TIMEFRAME_MS[this.config.timeframe] : 60_000
-    );
+    this.index = indexFor(this.bars, this.config);
     this.renderData();
     this.refreshMarkers();
   }
@@ -810,10 +858,7 @@ export class LwcChartPort implements ChartPort {
     const appended = !last || bar.timeMs > last.timeMs;
     if (appended) {
       this.bars.push(bar);
-      this.index = new TimeIndex(
-        this.bars,
-        this.config ? TIMEFRAME_MS[this.config.timeframe] : 60_000
-      );
+      this.index = indexFor(this.bars, this.config);
     } else {
       this.bars[this.bars.length - 1] = bar;
     }

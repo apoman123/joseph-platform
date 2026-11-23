@@ -1,6 +1,6 @@
 /**
  * @fileoverview Tests for the engine-backed anchored VWAP tool: request
- * building, series interpretation (incl. the 2000-bar rule), rendering,
+ * building, series interpretation (incl. engine refusals), rendering,
  * hit-testing and the data-window rows.
  */
 import {
@@ -8,7 +8,6 @@ import {
   type IndicatorSeriesPoint,
 } from '@joseph/contracts';
 import {
-  ANCHOR_TOO_FAR_MESSAGE,
   SERIES_LOADING_MESSAGE,
   type DrawingSeriesState,
 } from '@joseph/drawing-core';
@@ -169,18 +168,34 @@ describe('anchored-vwap', () => {
 
   it('replaces the drawing with a notice when values come back null', () => {
     const far = ready([point(2, null), point(3, null)]);
-    expect(vwapView(far)).toEqual({
-      kind: 'notice',
-      anchorBarMs: 120_000,
-      text: ANCHOR_TOO_FAR_MESSAGE,
-    });
-    expect(texts(render(far))).toEqual([ANCHOR_TOO_FAR_MESSAGE]);
+    const text = 'No engine values for this anchor yet';
+    expect(vwapView(far)).toEqual({kind: 'notice', anchorBarMs: 120_000, text});
+    expect(texts(render(far))).toEqual([text]);
     expect(
       tool.dataRows?.(DOC, 120_000, {series: far, tickSize: '0.1'})
-    ).toEqual([{label: 'Anchored VWAP', value: 'anchor > 2000 bars back'}]);
-    expect(tool.describe?.(DOC, {series: far, tickSize: '0.1'})).toBe(
-      ANCHOR_TOO_FAR_MESSAGE
-    );
+    ).toEqual([]);
+    expect(tool.describe?.(DOC, {series: far, tickSize: '0.1'})).toBe(text);
+  });
+
+  it('shows the engine message only when the engine refuses the anchor', () => {
+    const message =
+      'Anchor is more than 50,000 bars back; the engine computes anchored values from at most 50,000 bars.';
+    const refused: DrawingSeriesState = {
+      ...ready([]),
+      status: 'error',
+      error: `VALIDATION_FAILED: ${message}`,
+      refusal: message,
+    };
+    expect(vwapView(refused)).toMatchObject({kind: 'notice', text: message});
+    expect(texts(render(refused))).toEqual([message]);
+    expect(
+      tool.dataRows?.(DOC, 120_000, {series: refused, tickSize: '0.1'})
+    ).toEqual([{label: 'Anchored VWAP', value: 'refused by the engine'}]);
+    // A network failure is not a refusal.
+    const failed = {...refused, refusal: null, error: 'offline'};
+    expect(vwapView(failed)).toMatchObject({
+      text: 'Engine values unavailable: offline',
+    });
   });
 
   it('waits for the anchor bar to close and reports loading', () => {

@@ -12,11 +12,12 @@ import {
   DemoStrategyClient,
   DemoUserStream,
 } from '@joseph/mock-provider';
-import type {
-  BackendClients,
-  MarketDataClient,
-  QualificationReport,
-  StreamClient,
+import {
+  SessionCalendarCache,
+  type BackendClients,
+  type MarketDataClient,
+  type QualificationReport,
+  type StreamClient,
 } from '@joseph/contracts';
 import {
   createStore,
@@ -221,7 +222,43 @@ export function fakeMarketClient(): MarketDataClient {
       ),
       as_of_ms: 1,
     }),
-    getCandles: unsupported,
+    getCandles: async query => {
+      // Two closed daily bars and today's open bar at the DEMO mark, so
+      // securities get a previous-close reference for price limits.
+      const mark = DEMO_MARKS[query.instrumentId];
+      if (!mark) throw new Error('not used in this test');
+      const day = 86_400_000;
+      const candles = [-2, -1, 0].map(offset => ({
+        instrument_id: query.instrumentId,
+        timeframe: query.timeframe,
+        start_ms: 1_800_000_000_000 + offset * day,
+        end_ms: 1_800_000_000_000 + (offset + 1) * day,
+        open: mark,
+        high: mark,
+        low: mark,
+        close: mark,
+        base_volume: '1000',
+        quote_turnover: null,
+        trade_count: null,
+        is_final: offset < 0,
+        revision: 0,
+        source: 'mock',
+        feed_state: 'DEMO' as const,
+        received_at_ms: 1,
+        event_ts_ms: null,
+      }));
+      return {
+        schema_version: 1,
+        instrument_id: query.instrumentId,
+        timeframe: query.timeframe,
+        candles,
+        feed_state: 'DEMO',
+        source: 'mock',
+        as_of_ms: 1,
+        complete: true,
+        gaps: [],
+      };
+    },
     getSnapshot: async instrumentId => ({
       instrument_id: instrumentId,
       last: DEMO_MARKS[instrumentId] ?? null,
@@ -272,6 +309,8 @@ export interface FakeContextOptions {
   selection?: Partial<TerminalSelection>;
   /** DEMO broker delays (default 0 ms). */
   brokerDelayMs?: number;
+  /** DEMO broker to use (e.g. a subclass rehearsing LIVE). */
+  broker?: DemoExecutionClient;
 }
 
 /**
@@ -283,11 +322,13 @@ export function createFakeContext(
   options: FakeContextOptions = {}
 ): FakeContext {
   const delay = options.brokerDelayMs ?? 0;
-  const broker = new DemoExecutionClient({
-    ackDelayMs: delay,
-    fillDelayMs: delay,
-    partialFills: false,
-  });
+  const broker =
+    options.broker ??
+    new DemoExecutionClient({
+      ackDelayMs: delay,
+      fillDelayMs: delay,
+      partialFills: false,
+    });
   const strategy = new DemoStrategyClient({
     validate: def => toValidationResult(def),
   });
@@ -347,6 +388,9 @@ export function createFakeContext(
   const ctx: FakeContext = {
     featureId: 'test',
     clients,
+    calendars: new SessionCalendarCache(
+      clients.market.getSessions?.bind(clients.market) ?? null
+    ),
     selection: selectionStore,
     selectionStore,
     select(patch) {

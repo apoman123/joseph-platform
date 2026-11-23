@@ -10,6 +10,7 @@ import {
   floorToTimeframe,
   isCalendarTimeframe,
   timeframeEnd,
+  type BarCalendar,
   type Timeframe,
   type VenueCapabilities,
 } from '@joseph/contracts';
@@ -214,10 +215,46 @@ export function timeframeAvailability(
  * Time left until the bar containing `nowMs` closes (calendar-aware).
  * @param timeframe Chart timeframe.
  * @param nowMs Clock.
- * @return Milliseconds until the close (always > 0).
+ * @param calendar Session calendar (default UTC bars, which never pause).
+ * @return Milliseconds until the close (> 0; 0 between sessions).
  */
-export function msUntilBarClose(timeframe: Timeframe, nowMs: number): number {
-  return timeframeEnd(timeframe, floorToTimeframe(timeframe, nowMs)) - nowMs;
+export function msUntilBarClose(
+  timeframe: Timeframe,
+  nowMs: number,
+  calendar?: BarCalendar | null
+): number {
+  if (!calendar || calendar.continuous) {
+    return timeframeEnd(timeframe, floorToTimeframe(timeframe, nowMs)) - nowMs;
+  }
+  const end = calendar.endOf(timeframe, calendar.floor(timeframe, nowMs));
+  return Math.max(0, end - nowMs);
+}
+
+/** What the bar countdown chip shows. */
+export type BarCountdown =
+  {kind: 'closes'; ms: number} | {kind: 'opens'; ms: number} | {kind: 'closed'};
+
+/**
+ * Countdown of the chart's bar: time to the bar close while in session,
+ * otherwise time to the next session open.
+ * @param timeframe Chart timeframe.
+ * @param nowMs Clock.
+ * @param calendar Session calendar (default UTC bars).
+ * @return Countdown.
+ */
+export function barCountdown(
+  timeframe: Timeframe,
+  nowMs: number,
+  calendar?: BarCalendar | null
+): BarCountdown {
+  const closes = msUntilBarClose(timeframe, nowMs, calendar);
+  if (closes > 0 || !calendar) return {kind: 'closes', ms: closes};
+  try {
+    const next = calendar.shift(timeframe, nowMs, 0);
+    return {kind: 'opens', ms: Math.max(0, next - nowMs)};
+  } catch {
+    return {kind: 'closed'};
+  }
 }
 
 /**
