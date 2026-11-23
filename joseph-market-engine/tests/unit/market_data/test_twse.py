@@ -575,3 +575,25 @@ def test_closing_auction_lands_in_the_last_bar() -> None:
     last = builder.bars(_SESSION.close_ms - 60_000, _SESSION.close_ms, 0)
     assert len(last) == 1 and last[0].is_final
     assert last[0].close == _D(2030) and last[0].base_volume == _D(5_897_000)
+
+
+def test_snapshot_builder_coverage_is_the_recording() -> None:
+    """Segments are coverage, minus unpriced minutes and evicted bars."""
+    builder = snapshot_bars.SnapshotBarBuilder(
+        _ID, source="test", retention_bars=3
+    )
+    assert builder.coverage() == []
+    builder.apply(_snap(-30, 0))  # Pre-open baseline.
+    builder.apply(_snap(5, 1, z="100"))  # Minute 0, priced.
+    builder.apply(_snap(130, 2, trade=(1, "100")))  # Minute 2, unpriced.
+    builder.apply(_snap(190, 2))  # No volume: nothing provable to add.
+    assert builder.coverage() == [
+        (_OPEN - 30_000, _OPEN + 120_000),
+        (_OPEN + 180_000, _OPEN + 190_000),
+    ]
+    minute = 60_000
+    for offset, lots in ((250, 3), (310, 4), (370, 5)):
+        builder.apply(_snap(offset, lots, z="101"))
+    covered = builder.coverage()
+    assert covered[0][0] == _OPEN + 3 * minute  # Minutes 0-2 were dropped.
+    assert covered[-1][1] == _OPEN + 370_000

@@ -24,6 +24,7 @@ from collections.abc import AsyncGenerator
 from collections.abc import AsyncIterator
 from collections.abc import Awaitable
 from collections.abc import Callable
+from collections.abc import Iterable
 from collections.abc import Mapping
 from typing import Any
 
@@ -37,6 +38,7 @@ from joseph.domain import sessions
 from joseph.domain import timeframes
 from joseph.market_data.adapters import http
 from joseph.market_data.adapters import ws
+from joseph.market_data.domain import candles as candle_rules
 from joseph.market_data.domain import capabilities
 from joseph.market_data.domain import health
 from joseph.market_data.domain import trade_bars
@@ -328,6 +330,85 @@ def clip_range(
     return ordered
 
 
+def candle_coverage(
+    rows: list[market.Candle],
+    start_ms: int,
+    end_ms: int,
+    limit: int | None,
+    covered: Iterable[candle_rules.Span],
+    *,
+    complete: bool,
+) -> candle_rules.CandleCoverage:
+    """Clips fetched candles and the spans they cover to a request.
+
+    Coverage is kept only where the returned candles are: inside
+    ``[start, end)`` and, when ``limit`` dropped older bars, from the
+    oldest bar returned.
+
+    Args:
+        rows: Fetched candles in any order.
+        start_ms: Inclusive request start.
+        end_ms: Exclusive request end.
+        limit: Optional maximum bars (newest kept).
+        covered: Spans the fetch delivered completely.
+        complete: Whether no page or size cap truncated the fetch.
+
+    Returns:
+        Candles as ``clip_range`` returns them, with their coverage.
+    """
+    kept = clip_range(rows, start_ms, end_ms, limit)
+    low = start_ms
+    if limit is not None and len(clip_range(rows, start_ms, end_ms, None)) > (
+        len(kept)
+    ):
+        low = kept[0].start_ms  # Something was dropped, so kept is not empty.
+    spans = candle_rules.clip_spans(
+        candle_rules.merge_spans(covered), low, end_ms
+    )
+    return candle_rules.CandleCoverage(tuple(kept), tuple(spans), complete)
+
+
+async def candles_of(
+    updates: AsyncIterator[candle_rules.CandleCoverage],
+) -> AsyncGenerator[market.Candle, None]:
+    """Projects a coverage stream onto its candles.
+
+    Args:
+        updates: Stream of candle updates with coverage.
+
+    Yields:
+        The candles of each update.
+    """
+    try:
+        async for update in updates:
+            for candle in update.candles:
+                yield candle
+    finally:
+        close = getattr(updates, "aclose", None)
+        if close is not None:
+            await close()
+
+
+async def _without_coverage(
+    candles: AsyncIterator[market.Candle],
+) -> AsyncGenerator[candle_rules.CandleCoverage, None]:
+    """Wraps a candle stream as updates that prove no coverage.
+
+    Args:
+        candles: Candle stream.
+
+    Yields:
+        One update per candle.
+    """
+    try:
+        async for candle in candles:
+            yield candle_rules.CandleCoverage((candle,))
+    finally:
+        close = getattr(candles, "aclose", None)
+        if close is not None:
+            await close()
+
+
 class BaseVenueAdapter:
     """Common state and helpers for venue adapters.
 
@@ -339,12 +420,18 @@ class BaseVenueAdapter:
             public trades, stamped on trade-built bars: ``None`` for a
             venue taker flag, ``classified`` where trades are classified
             against quotes (stock exchanges).
+        SPARSE_BARS: True where an interval without trades has no bar
+            (stock exchanges). Such adapters implement
+            ``ports.SparseBarsPort``: their fetches and streams state the
+            spans they delivered completely, inside which a missing bar is
+            not a gap. Crypto venues publish dense bars (False).
     """
 
     VENUE: instruments.Venue = instruments.Venue.MOCK
     INSTRUMENT_TTL_MS = 300_000
     TRADE_MAX_PAGES = 5
     TRADE_BUY_VOLUME_METHOD: market.BuyVolumeMethod | None = None
+    SPARSE_BARS = False
 
     def __init__(
         self, http_client: http.VenueHttp, clock: clock_lib.Clock
@@ -507,6 +594,26 @@ class BaseVenueAdapter:
             return self._stream_trade_candles(instrument, timeframe, tracker)
         raise errors.UnsupportedError(
             f"{self.VENUE.value} has no native candle stream in Joseph"
+        )
+
+    def stream_candle_coverage(
+        self,
+        instrument: instruments.InstrumentId,
+        timeframe: timeframes.Timeframe,
+        tracker: health.FeedHealthTracker | None = None,
+    ) -> AsyncIterator[candle_rules.CandleCoverage]:
+        """Streams candles as updates without coverage (unless overridden).
+
+        Args:
+            instrument: Canonical id.
+            timeframe: Resolution.
+            tracker: Optional health tracker.
+
+        Returns:
+            Async iterator of ``stream_candles`` updates proving nothing.
+        """
+        return _without_coverage(
+            self.stream_candles(instrument, timeframe, tracker)
         )
 
     def stream_trades(

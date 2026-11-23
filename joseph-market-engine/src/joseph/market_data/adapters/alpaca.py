@@ -70,6 +70,7 @@ from joseph.domain import timeframes
 from joseph.market_data.adapters import base
 from joseph.market_data.adapters import http
 from joseph.market_data.adapters import ws
+from joseph.market_data.domain import candles as candle_rules
 from joseph.market_data.domain import capabilities
 from joseph.market_data.domain import classification
 from joseph.market_data.domain import health
@@ -526,6 +527,25 @@ def daily_bar(
         is_final=final,
         source=source,
     )
+
+
+def _proven(
+    rows: Sequence[Mapping[str, Any]], settled_ms: int, complete: bool
+) -> int:
+    """Returns how far a REST bar range is complete.
+
+    Args:
+        rows: Raw Alpaca bars, ascending.
+        settled_ms: Time before which delivered bars are final.
+        complete: Whether every page was read.
+
+    Returns:
+        ``settled_ms``, or the last bar read when the page cap cut the
+        range (bars after it were not delivered).
+    """
+    if complete or not rows:
+        return settled_ms
+    return min(settled_ms, rfc3339_ms(str(rows[-1]["t"])))
 
 
 def parse_trade(
@@ -1091,6 +1111,34 @@ class AlpacaSource:
                 ) from err
             raise
 
+    async def pages(
+        self, path: str, params: dict[str, Any], key: str
+    ) -> tuple[list[Mapping[str, Any]], bool]:
+        """Follows ``next_page_token`` up to ``MAX_PAGES``.
+
+        Args:
+            path: Path.
+            params: Query parameters.
+            key: Result array (``bars``, ``trades``, ``quotes``).
+
+        Returns:
+            Rows of every page read (oldest first with ``sort=asc``) and
+            whether the last page was reached (False when ``MAX_PAGES``
+            cut the range short).
+        """
+        rows: list[Mapping[str, Any]] = []
+        token: str | None = None
+        for _ in range(MAX_PAGES):
+            query = dict(params)
+            if token:
+                query["page_token"] = token
+            payload = await self.get(path, query)
+            rows.extend(payload.get(key) or [])
+            token = payload.get("next_page_token")
+            if not token:
+                return rows, True
+        return rows, False
+
     async def paged(
         self, path: str, params: dict[str, Any], key: str
     ) -> list[Mapping[str, Any]]:
@@ -1104,17 +1152,7 @@ class AlpacaSource:
         Returns:
             Rows of every page read.
         """
-        rows: list[Mapping[str, Any]] = []
-        token: str | None = None
-        for _ in range(MAX_PAGES):
-            query = dict(params)
-            if token:
-                query["page_token"] = token
-            payload = await self.get(path, query)
-            rows.extend(payload.get(key) or [])
-            token = payload.get("next_page_token")
-            if not token:
-                break
+        rows, _ = await self.pages(path, params, key)
         return rows
 
     async def close(self) -> None:
@@ -1126,11 +1164,32 @@ class AlpacaSource:
             await self.directory_http.close()
 
 
+@dataclasses.dataclass(frozen=True, slots=True)
+class _Fetched:
+    """Bars of one REST range and how far they are complete.
+
+    Attributes:
+        rows: Ascending session bars.
+        proven_ms: Bars starting before this time were all delivered and
+            are final (a slot without a bar there had no trades).
+        complete: False when ``MAX_PAGES`` cut the range short.
+    """
+
+    rows: list[market.Candle]
+    proven_ms: int
+    complete: bool
+
+
 class AlpacaAdapter(base.BaseVenueAdapter):
-    """``MarketDataPort`` for one venue (``nasdaq`` or ``nyse``)."""
+    """``SparseBarsPort`` for one venue (``nasdaq`` or ``nyse``).
+
+    Alpaca publishes no bar for a minute (or day) without trades, so every
+    fetch and stream states the span it delivered completely.
+    """
 
     INSTRUMENT_TTL_MS = 6 * 3_600_000
     TRADE_BUY_VOLUME_METHOD = market.BuyVolumeMethod.CLASSIFIED
+    SPARSE_BARS = True
 
     def __init__(
         self,
@@ -1207,14 +1266,19 @@ class AlpacaAdapter(base.BaseVenueAdapter):
                 "minute bars, 3m-12h aggregated from them, 1d re-stamped "
                 "from Alpaca daily bars (whose volume includes extended "
                 "hours), 1w and 1M aggregated from 1d. Bars use split "
-                "adjustment. Minutes without trades have no bar.",
+                "adjustment. Minutes without trades have no bar; inside a "
+                "fetched or streamed span they are not reported as gaps.",
                 "Live minute bars arrive after each minute closes (Alpaca "
                 "bars/updatedBars); there is no in-progress minute.",
                 "Seconds bars are built from trades with the CTA/UTP sale "
                 "condition rules (odd lots update volume only); seconds "
                 "history is built on demand from REST trades and quotes, "
-                "bounded to the configured window. Closing-auction prints "
-                "stamped after the close fall outside the session.",
+                "bounded to the configured window. The official closing "
+                "print (sale condition 6) stamped within 60 s after the "
+                "close joins the session's last seconds bar, which settles "
+                "only then; other after-close trades stay out. Minute bars "
+                "are Alpaca's and exclude it (Alpaca's 16:00 minute also "
+                "holds post-market trades).",
                 "The tape publishes no aggressor side: trades are classified "
                 "with Lee-Ready against the prevailing NBBO (quote rule, "
                 "tick test at the midpoint); taker_buy_method = classified. "
@@ -1295,7 +1359,7 @@ class AlpacaAdapter(base.BaseVenueAdapter):
 
     async def _minutes(
         self, instrument: instruments.InstrumentId, start_ms: int, end_ms: int
-    ) -> list[market.Candle]:
+    ) -> _Fetched:
         """Fetches session minute bars of a range.
 
         Args:
@@ -1304,13 +1368,14 @@ class AlpacaAdapter(base.BaseVenueAdapter):
             end_ms: Exclusive end.
 
         Returns:
-            Ascending candles.
+            Ascending candles, proven up to the settled time (or the last
+            bar read when the page cap cut the range).
         """
         now = self._clock.now_ms()
         stop = min(end_ms, now - self.config.delay_ms)
         if stop <= start_ms:
-            return []
-        rows = await self._source.paged(
+            return _Fetched([], start_ms, complete=True)
+        rows, complete = await self._source.pages(
             f"/v2/stocks/{instrument.venue_market_id}/bars",
             {
                 "timeframe": "1Min",
@@ -1335,11 +1400,13 @@ class AlpacaAdapter(base.BaseVenueAdapter):
             )
             if bar is not None and start_ms <= bar.start_ms < end_ms:
                 out.append(bar)
-        return out
+        return _Fetched(
+            out, _proven(rows, min(stop, settled), complete), complete
+        )
 
     async def _days(
         self, instrument: instruments.InstrumentId, start_ms: int, end_ms: int
-    ) -> list[market.Candle]:
+    ) -> _Fetched:
         """Fetches session daily bars of a range.
 
         Args:
@@ -1348,13 +1415,14 @@ class AlpacaAdapter(base.BaseVenueAdapter):
             end_ms: Exclusive end.
 
         Returns:
-            Ascending candles.
+            Ascending candles, proven up to the start of the New York day
+            still open (its bar is not final).
         """
         now = self._clock.now_ms()
         stop = min(end_ms, now - self.config.delay_ms)
         if stop <= start_ms:
-            return []
-        rows = await self._source.paged(
+            return _Fetched([], start_ms, complete=True)
+        rows, complete = await self._source.pages(
             f"/v2/stocks/{instrument.venue_market_id}/bars",
             {
                 "timeframe": "1Day",
@@ -1378,7 +1446,13 @@ class AlpacaAdapter(base.BaseVenueAdapter):
             )
             if bar is not None and start_ms <= bar.start_ms < end_ms:
                 out.append(bar)
-        return out
+        day_open = datetime.datetime.combine(
+            ny_date(now - self.config.delay_ms), datetime.time(0), tzinfo=_NY
+        )
+        settled = int(day_open.timestamp() * 1000)
+        return _Fetched(
+            out, _proven(rows, min(stop, settled), complete), complete
+        )
 
     @staticmethod
     def _window(
@@ -1430,10 +1504,37 @@ class AlpacaAdapter(base.BaseVenueAdapter):
         Returns:
             Ascending candles on the XNYS calendar.
         """
+        fetched = await self.fetch_candle_coverage(
+            instrument, timeframe, start_ms, end_ms, limit
+        )
+        return list(fetched.candles)
+
+    async def fetch_candle_coverage(
+        self,
+        instrument: instruments.InstrumentId,
+        timeframe: timeframes.Timeframe,
+        start_ms: int,
+        end_ms: int,
+        limit: int | None = None,
+    ) -> candle_rules.CandleCoverage:
+        """Fetches session-aligned history with the span it covers.
+
+        Args:
+            instrument: Instrument.
+            timeframe: Resolution.
+            start_ms: Inclusive start.
+            end_ms: Exclusive end.
+            limit: Optional maximum bars (newest kept).
+
+        Returns:
+            Ascending candles on the XNYS calendar and the span in which
+            every bar was delivered final (a slot there without a bar had
+            no trades).
+        """
         self._require_timeframe(timeframe)
         await self._ready(instrument)
         if end_ms <= start_ms:
-            return []
+            return candle_rules.CandleCoverage((), (), complete=True)
         if timeframe.is_seconds:
             return await self._seconds_history(
                 instrument, timeframe, start_ms, end_ms, limit
@@ -1441,7 +1542,8 @@ class AlpacaAdapter(base.BaseVenueAdapter):
         first = self._window(timeframe, start_ms, end_ms, limit)
         now = self._clock.now_ms()
         if timeframe in _INTRADAY:
-            rows = await self._minutes(instrument, first, end_ms)
+            fetched = await self._minutes(instrument, first, end_ms)
+            rows = fetched.rows
             if timeframe is not _M1:
                 rows = session_bars.aggregate(
                     rows,
@@ -1450,7 +1552,8 @@ class AlpacaAdapter(base.BaseVenueAdapter):
                     covered_to_ms=self._settled_before(),
                 )
         else:
-            rows = await self._days(instrument, first, end_ms)
+            fetched = await self._days(instrument, first, end_ms)
+            rows = fetched.rows
             if timeframe is not _D1:
                 finals = [bar.end_ms for bar in rows if bar.is_final]
                 rows = session_bars.aggregate(
@@ -1459,7 +1562,14 @@ class AlpacaAdapter(base.BaseVenueAdapter):
                     now_ms=now,
                     covered_to_ms=max(finals, default=0),
                 )
-        return base.clip_range(rows, start_ms, end_ms, limit)
+        return base.candle_coverage(
+            rows,
+            start_ms,
+            end_ms,
+            limit,
+            [(first, fetched.proven_ms)],
+            complete=fetched.complete,
+        )
 
     async def _tape(
         self, instrument: instruments.InstrumentId, start_ms: int, end_ms: int
@@ -1514,8 +1624,11 @@ class AlpacaAdapter(base.BaseVenueAdapter):
         start_ms: int,
         end_ms: int,
         limit: int | None,
-    ) -> list[market.Candle]:
+    ) -> candle_rules.CandleCoverage:
         """Builds seconds bars from REST trades and quotes.
+
+        A range ending at a session close also reads the closing window,
+        so the session's last bar gets its closing print.
 
         Args:
             instrument: Instrument.
@@ -1525,18 +1638,20 @@ class AlpacaAdapter(base.BaseVenueAdapter):
             limit: Optional maximum bars (newest kept).
 
         Returns:
-            Ascending seconds candles within the configured window.
+            Ascending seconds candles within the configured window and the
+            span their trades settle completely.
         """
         now = self._clock.now_ms()
         stop = min(
-            end_ms, now - self.config.delay_ms - base.TRADE_PUBLISH_LAG_MS
+            us_trade_bars.closing_window_end(instrument, end_ms),
+            now - self.config.delay_ms - base.TRADE_PUBLISH_LAG_MS,
         )
         first = max(
             timeframe.floor(start_ms),
             timeframe.floor(stop - self.config.seconds_history_ms),
         )
         if stop <= first:
-            return []
+            return candle_rules.CandleCoverage((), (), complete=True)
         trades, covered = await self._tape(instrument, first, stop)
         bars = us_trade_bars.bars_from_trades(
             trades,
@@ -1547,7 +1662,15 @@ class AlpacaAdapter(base.BaseVenueAdapter):
             source=f"{SOURCE}.trades.rest",
             now_ms=now,
         )
-        return base.clip_range(bars, start_ms, end_ms, limit)
+        settled = us_trade_bars.settled_until(instrument, timeframe, covered)
+        return base.candle_coverage(
+            bars,
+            start_ms,
+            end_ms,
+            limit,
+            [(first, settled)],
+            complete=covered >= stop,
+        )
 
     async def fetch_trades(
         self,
@@ -1853,6 +1976,32 @@ class AlpacaAdapter(base.BaseVenueAdapter):
         Returns:
             Async iterator of candle updates.
         """
+        return base.candles_of(
+            self.stream_candle_coverage(instrument, timeframe, tracker)
+        )
+
+    def stream_candle_coverage(
+        self,
+        instrument: instruments.InstrumentId,
+        timeframe: timeframes.Timeframe,
+        tracker: health.FeedHealthTracker | None = None,
+    ) -> AsyncIterator[candle_rules.CandleCoverage]:
+        """Streams session bars with the spans the connection proved.
+
+        Minute (and aggregated intraday) streams prove the minutes between
+        two ``b`` messages of one connection quiet; seconds streams prove
+        every second after a segment's first trade up to the delivery time
+        of the latest frame. Daily streams prove nothing (their bars are
+        not final while streamed).
+
+        Args:
+            instrument: Instrument.
+            timeframe: Resolution.
+            tracker: Optional health tracker.
+
+        Returns:
+            Async iterator of candle updates with coverage.
+        """
         self._require_timeframe(timeframe)
         if timeframe.is_seconds:
             return self._seconds_stream(instrument, timeframe, tracker)
@@ -1866,8 +2015,11 @@ class AlpacaAdapter(base.BaseVenueAdapter):
         timeframe: timeframes.Timeframe,
         tracker: health.FeedHealthTracker | None,
         grace_ms: int = 1_500,
-    ) -> AsyncGenerator[market.Candle, None]:
+    ) -> AsyncGenerator[candle_rules.CandleCoverage, None]:
         """Builds seconds bars from streamed trades and quotes.
+
+        Coverage advances only on received frames (proof the connection is
+        alive), never on idle ticks; a reconnect starts a new segment.
 
         Args:
             instrument: Instrument.
@@ -1876,7 +2028,7 @@ class AlpacaAdapter(base.BaseVenueAdapter):
             grace_ms: Delivery grace before a quiet bar is finalized.
 
         Yields:
-            Live and final seconds candles.
+            Live and final seconds candles with newly proven spans.
         """
         builder = us_trade_bars.SecondsBarBuilder(
             instrument, timeframe, source=f"{SOURCE}.trades"
@@ -1885,11 +2037,13 @@ class AlpacaAdapter(base.BaseVenueAdapter):
         quotes = QuoteBook()
         classifier = classification.LeeReadyClassifier()
         delay = self.config.delay_ms
+        proven_to = 0
         events = self._events(instrument, ("trades", "quotes"), tracker, 1.0)
         async with contextlib.aclosing(events):
             async for kind, payload in events:
                 now = self._clock.now_ms()
                 candles: list[market.Candle] = []
+                covered: tuple[candle_rules.Span, ...] = ()
                 if kind == "reset":
                     builder.start_segment(None)
                     classifier.reset()
@@ -1903,20 +2057,30 @@ class AlpacaAdapter(base.BaseVenueAdapter):
                     candles = builder.finalize_through(
                         now - delay - grace_ms, now
                     )
-                for candle in candles:
-                    yield candle
+                    span = builder.coverage(now - delay - grace_ms)
+                    if (
+                        kind == "frame"
+                        and span is not None
+                        and span[1] > proven_to
+                    ):
+                        covered, proven_to = (span,), span[1]
+                if candles or covered:
+                    yield candle_rules.CandleCoverage(tuple(candles), covered)
 
     async def _minute_stream(
         self,
         instrument: instruments.InstrumentId,
         timeframe: timeframes.Timeframe,
         tracker: health.FeedHealthTracker | None,
-    ) -> AsyncGenerator[market.Candle, None]:
+    ) -> AsyncGenerator[candle_rules.CandleCoverage, None]:
         """Streams 1m bars, or aggregates them on the XNYS grid.
 
         The current aggregate is seeded from REST minute bars; it becomes
         final once a minute at or after its end arrives or a minute after
-        its end has passed.
+        its end has passed. Alpaca sends one ``b`` message per minute with
+        trades, in order, so two ``b`` messages of one connection prove the
+        minutes between them quiet (for every intraday timeframe); a
+        reconnect starts the proof over.
 
         Args:
             instrument: Instrument.
@@ -1924,7 +2088,7 @@ class AlpacaAdapter(base.BaseVenueAdapter):
             tracker: Optional health tracker.
 
         Yields:
-            Candle updates.
+            Candle updates with newly proven spans.
         """
         calendar = sessions.XNYS
         minutes: dict[int, market.Candle] = {}
@@ -1959,15 +2123,20 @@ class AlpacaAdapter(base.BaseVenueAdapter):
         events = self._events(
             instrument, ("bars", "updatedBars", "statuses"), tracker, 15.0
         )
+        chain = candle_rules.StreamCoverage()
         async with contextlib.aclosing(events):
             seeded = False
             async for kind, payload in events:
                 now = self._clock.now_ms()
+                covered: tuple[candle_rules.Span, ...] = ()
+                if kind == "reset":
+                    chain.restart()
                 if not seeded or kind == "reset":
                     seeded = True
                     try:
                         start = calendar.floor(timeframe, now - delay)
-                        for bar in await self._minutes(instrument, start, now):
+                        seed = await self._minutes(instrument, start, now)
+                        for bar in seed.rows:
                             minutes[bar.start_ms] = bar
                     except (errors.JosephError, ValueError) as err:
                         _LOG.warning("alpaca seed failed: %s", err)
@@ -1981,8 +2150,13 @@ class AlpacaAdapter(base.BaseVenueAdapter):
                     )
                     if update is not None:
                         minutes[update.start_ms] = update
-                for bar in current(now):
-                    yield bar
+                    if payload.get("T") == "b":
+                        minute = rfc3339_ms(str(payload["t"]))
+                        span = chain.observe(minute, minute + _M1.duration_ms)
+                        covered = () if span is None else (span,)
+                changed = current(now)
+                if changed or covered:
+                    yield candle_rules.CandleCoverage(tuple(changed), covered)
                 cutoff = now - 2 * timeframe.duration_ms - _D1.duration_ms
                 for start in [s for s in minutes if s < cutoff]:
                     del minutes[start]
@@ -1994,7 +2168,7 @@ class AlpacaAdapter(base.BaseVenueAdapter):
         instrument: instruments.InstrumentId,
         timeframe: timeframes.Timeframe,
         tracker: health.FeedHealthTracker | None,
-    ) -> AsyncGenerator[market.Candle, None]:
+    ) -> AsyncGenerator[candle_rules.CandleCoverage, None]:
         """Streams the day's bar (``dailyBars``), or its week or month.
 
         Args:
@@ -2003,7 +2177,8 @@ class AlpacaAdapter(base.BaseVenueAdapter):
             tracker: Optional health tracker.
 
         Yields:
-            Candle updates (non-final until the New York day ended).
+            Candle updates (non-final until the New York day ended), with
+            no coverage.
         """
         days: dict[int, market.Candle] = {}
         last: market.Candle | None = None
@@ -2018,7 +2193,8 @@ class AlpacaAdapter(base.BaseVenueAdapter):
                     seeded = True
                     try:
                         start = sessions.XNYS.floor(timeframe, now)
-                        for bar in await self._days(instrument, start, now + 1):
+                        seed = await self._days(instrument, start, now + 1)
+                        for bar in seed.rows:
                             days[bar.start_ms] = bar
                     except (errors.JosephError, ValueError) as err:
                         _LOG.warning("alpaca seed failed: %s", err)
@@ -2048,7 +2224,7 @@ class AlpacaAdapter(base.BaseVenueAdapter):
                     )[-1]
                 if changed_candle(last, newest):
                     last = newest
-                    yield newest
+                    yield candle_rules.CandleCoverage((newest,))
 
     async def close(self) -> None:
         """Releases the shared source when both venues closed."""

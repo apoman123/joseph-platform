@@ -37,6 +37,7 @@ from joseph.market_data.adapters import treasury
 from joseph.market_data.adapters import twse
 from joseph.market_data.app import ports
 from joseph.market_data.app import registry
+from joseph.market_data.domain import candles as candle_rules
 
 Validate = Callable[[str, str, object], None]
 _D = decimal.Decimal
@@ -365,6 +366,99 @@ async def test_twse_intraday_bars_come_from_recorded_snapshots(
         sessions.XTAI.is_aligned(_TF.M5, c.start_ms) for c in fives
     )
     assert await adapter.close() is None
+
+
+async def test_twse_intraday_coverage_is_the_mis_recording(
+    venue_api: respx.Router,
+) -> None:
+    """Recorded minutes are coverage; before the recording they are gaps."""
+    del venue_api
+    responses = _load("twse", "mis_recorded")["responses"]
+    clock = clock_lib.ManualClock(responses[0]["received_ms"])
+    adapter = _adapter(instruments.Venue.TWSE, clock)
+    assert isinstance(adapter, twse.TwseAdapter)
+    assert ports.sparse_bars(adapter)
+    session = sessions.XTAI.session(datetime.date(2026, 11, 23))
+    assert session is not None
+    window = (session.open_ms, session.close_ms)
+    empty = await adapter.fetch_candle_coverage(_ETF50, _TF.M1, *window)
+    assert empty.candles == () and empty.covered == () and empty.complete
+    for item in responses:
+        clock.current_ms = item["received_ms"]
+        adapter.ingest(
+            [
+                q
+                for r in item["response"]["msgArray"]
+                if (q := twse.parse_mis_record(r, item["received_ms"]))
+                is not None
+            ]
+        )
+    fetched = await adapter.fetch_candle_coverage(_ETF50, _TF.M1, *window)
+    assert fetched.covered and fetched.complete
+    assert list(fetched.covered) == candle_rules.clip_spans(
+        adapter._builders["0050"].coverage(), *window
+    )
+    finals = [c for c in fetched.candles if c.is_final]
+    first_known = fetched.covered[0][0]
+    end = finals[-1].end_ms
+    gaps = candle_rules.find_gaps(
+        [c.start_ms for c in finals],
+        _TF.M1,
+        session.open_ms,
+        end,
+        calendar=sessions.XTAI,
+        covered=fetched.covered,
+    )
+    # Before the recording everything is a gap; inside it only the minutes
+    # that traded at an unknown price are (quiet minutes are not).
+    unpriced = {
+        start
+        for start, bar in adapter._builders["0050"]._bars.items()
+        if bar.open is None
+    }
+    assert gaps and gaps[0] == (session.open_ms, gaps[0][1])
+    assert gaps[0][1] > first_known
+    for low, high in gaps[1:]:
+        assert set(range(low, high, 60_000)) <= unpriced
+    # A limit that drops older bars drops their coverage too.
+    newest = await adapter.fetch_candle_coverage(_ETF50, _TF.M1, *window, 3)
+    assert len(newest.candles) == 3 < len(fetched.candles)
+    assert newest.covered[0][0] >= newest.candles[0].start_ms
+    assert await adapter.close() is None
+
+
+async def test_twse_daily_coverage_is_the_months_read(
+    venue_api: respx.Router,
+) -> None:
+    """STOCK_DAY months cover their days up to the day they were read."""
+    del venue_api
+    adapter = _adapter(instruments.Venue.TWSE, clock_lib.ManualClock(_TWSE_MS))
+    assert isinstance(adapter, twse.TwseAdapter)
+    start = twse.taipei_ms(datetime.date(2026, 10, 1))
+    fetched = await adapter.fetch_candle_coverage(
+        _TSMC, _TF.D1, start, _TWSE_MS
+    )
+    today = twse.taipei_ms(datetime.date(2026, 11, 23))
+    assert fetched.covered == ((start, today),) and fetched.complete
+    finals = [c.start_ms for c in fetched.candles if c.is_final]
+    assert (
+        candle_rules.find_gaps(
+            finals,
+            _TF.D1,
+            start,
+            today,
+            calendar=sessions.XTAI,
+            covered=fetched.covered,
+        )
+        == []
+    )
+    capped = await adapter.fetch_candle_coverage(
+        _TSMC, _TF.D1, start, _TWSE_MS, 3
+    )
+    assert len(capped.candles) == 3 and not capped.complete
+    assert capped.covered[0][0] == capped.candles[0].start_ms
+    weeks = await adapter.fetch_candle_coverage(_TSMC, _TF.W1, start, today)
+    assert weeks.covered == ((start, today),)
 
 
 async def test_twse_refuses_what_it_does_not_have(
