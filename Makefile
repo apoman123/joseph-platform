@@ -11,6 +11,7 @@ SERVICE_TOKEN ?= dev-service-token
 
 .PHONY: help setup dev dev-market dev-execution dev-web lint typecheck \
         test test-python test-terminal test-system test-e2e test-network \
+        test-sandbox \
         contracts openapi ci images compose-up compose-down clean
 
 help: ## Show targets
@@ -74,6 +75,9 @@ test-e2e: ## Browser system tests + accessibility (DEMO mode)
 
 test-network: ## Opt-in live venue tests against real public APIs
 	cd $(ME) && JOSEPH_NETWORK_TESTS=1 uv run pytest tests/network
+
+test-sandbox: ## Opt-in testnet order round trips (needs JOSEPH_SANDBOX_<VENUE>_* keys)
+	cd $(EE) && JOSEPH_SANDBOX_TESTS=1 uv run pytest -m sandbox tests/sandbox -s
 
 test: test-python test-terminal test-system test-e2e ## Every offline test tier
 

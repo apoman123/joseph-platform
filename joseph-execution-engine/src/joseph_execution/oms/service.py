@@ -753,6 +753,7 @@ class OmsService:
             request.mode,
             now,
             lim.max_quote_age_ms,
+            await _venue_balances(adapter, account, request.mode, caps),
         )
         est = preview_lib.estimate(
             request, instrument, quote, book, self.settings.fees
@@ -2117,3 +2118,37 @@ def _quantum(value: decimal.Decimal) -> decimal.Decimal:
     exponent = value.normalize().as_tuple().exponent
     assert isinstance(exponent, int)
     return decimal.Decimal(1).scaleb(min(exponent, 0))
+
+
+async def _venue_balances(
+    adapter: trading.TradingAdapter,
+    account: accounts.Account,
+    mode: enums.OrderMode,
+    caps: accounts.TradingCapabilities | None,
+) -> trading.VenueAccountSnapshot | None:
+    """Fetches venue balances for LIVE risk checks on a venue account.
+
+    Only an ``AVAILABLE`` adapter is asked (so a closed gate or missing
+    credentials never cause network calls); failures yield ``None``, which
+    keeps the margin check UNKNOWN and the order blocked.
+
+    Args:
+        adapter: Venue adapter.
+        account: Account.
+        mode: Order mode.
+        caps: Negotiated capabilities.
+
+    Returns:
+        Snapshot or ``None``.
+    """
+    if (
+        mode is not enums.OrderMode.LIVE
+        or account.starting_equity is not None
+        or caps is None
+        or caps.status is not enums.TradingStatus.AVAILABLE
+    ):
+        return None
+    try:
+        return await adapter.account_snapshot(account.account_id)
+    except errors.ExecutionError:
+        return None

@@ -24,6 +24,9 @@ from joseph_execution.adapters import step_up
 from joseph_execution.adapters import vault
 from joseph_execution.adapters.persistence import sql
 from joseph_execution.adapters.venues import catalog
+from joseph_execution.adapters.venues import credentials as venue_credentials
+from joseph_execution.adapters.venues import directory as venue_directory
+from joseph_execution.adapters.venues import live as venue_live
 from joseph_execution.api import app as api_app
 from joseph_execution.api import services as api_services
 from joseph_execution.audit import service as audit_service
@@ -39,6 +42,8 @@ from joseph_execution.platform import metrics as metrics_lib
 from joseph_execution.platform import streams
 from joseph_execution.ports import market as market_port
 from joseph_execution.ports import services as service_ports
+from joseph_execution.ports import trading as trading_port
+from joseph_execution.reconciliation import live_streams
 from joseph_execution.reconciliation import service as reconcile_service
 from joseph_execution.risk import gateway as risk_gateway
 
@@ -58,6 +63,7 @@ class Container:
         registry: Adapter registry.
         services: API services.
         uow_factory: Unit of work factory.
+        live_streams: Private stream supervisor of live accounts.
     """
 
     settings: config.Settings
@@ -68,6 +74,7 @@ class Container:
     registry: resolver.AdapterRegistry
     services: api_services.ApiServices
     uow_factory: sql.SqlUnitOfWorkFactory
+    live_streams: live_streams.LiveStreamSupervisor | None = None
 
 
 def build_container(
@@ -102,8 +109,13 @@ def build_container(
         gateway, the_clock, starting_equity=settings.paper_starting_equity
     )
     shadow_adapter = shadow.ShadowAdapter(gateway, the_clock)
+    credential_vault = vault.AesGcmVault(
+        settings.vault_master_key, on_secret=log_lib.SECRETS.add
+    )
     registry = resolver.AdapterRegistry(
-        paper_adapter, shadow_adapter, catalog.build_live_adapters()
+        paper_adapter,
+        shadow_adapter,
+        _live_adapters(settings, the_clock, uow_factory, credential_vault),
     )
     audit_log = audit_service.AuditLog(the_clock, id_gen)
     oms = oms_service.OmsService(
@@ -131,9 +143,7 @@ def build_container(
             uow_factory,
             registry,
             gateway,
-            vault.AesGcmVault(
-                settings.vault_master_key, on_secret=log_lib.SECRETS.add
-            ),
+            credential_vault,
             audit_log,
             the_clock,
             id_gen,
@@ -171,6 +181,45 @@ def build_container(
         registry,
         svc,
         uow_factory,
+        live_streams.LiveStreamSupervisor(uow_factory, registry, oms, metrics),
+    )
+
+
+def _live_adapters(
+    settings: config.Settings,
+    clock: service_ports.Clock,
+    uow_factory: sql.SqlUnitOfWorkFactory,
+    credential_vault: service_ports.CredentialVault,
+) -> dict[str, trading_port.TradingAdapter]:
+    """Builds the credentialed crypto venue adapters.
+
+    Credentials are read from the vault per call; the global LIVE gate is
+    passed down as a defense-in-depth check in front of every venue call.
+
+    Args:
+        settings: Settings.
+        clock: Clock.
+        uow_factory: Unit of work factory.
+        credential_vault: Credential vault.
+
+    Returns:
+        Adapters by venue.
+    """
+    venues = settings.venues
+    return catalog.build_live_adapters(
+        credentials=venue_credentials.VaultCredentialSource(
+            uow_factory, credential_vault
+        ),
+        clock=clock,
+        options=venue_live.VenueOptions(
+            live_trading_enabled=settings.live_trading_enabled,
+            timeout_s=venues.timeout_s,
+            recv_window_ms=venues.recv_window_ms,
+            market_slippage_bps=venues.market_slippage_bps,
+        ),
+        sandbox_venues=venues.sandbox_venues,
+        directory=venue_directory.RepositoryOrderDirectory(uow_factory),
+        urls=venues.urls,
     )
 
 
@@ -233,7 +282,15 @@ def background_jobs(container: Container) -> list[api_app.BackgroundTask]:
             except Exception:
                 _LOG.exception("reconciliation pass failed")
 
-    return [ticker, outbox, reconcile]
+    jobs: list[api_app.BackgroundTask] = [ticker, outbox, reconcile]
+    supervisor = container.live_streams
+    if (
+        supervisor is not None
+        and settings.live_trading_enabled
+        and settings.venues.streams
+    ):
+        jobs.append(supervisor.run_forever)
+    return jobs
 
 
 def build_app(container: Container) -> fastapi.FastAPI:

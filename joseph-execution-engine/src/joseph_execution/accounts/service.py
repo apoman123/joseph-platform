@@ -338,8 +338,9 @@ class AccountService:
             account_id: Account.
 
         Returns:
-            Updated summary. In this build live adapters report
-            TRADING_UNAVAILABLE, so the account never gains LIVE mode.
+            Updated summary. The account gains LIVE mode only when its
+            adapter negotiates AVAILABLE (credentials, healthy venue and a
+            passing permission probe).
         """
         account = self.get(principal, account_id)
         if account.is_paper:
