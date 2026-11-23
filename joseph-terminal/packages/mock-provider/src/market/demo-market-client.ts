@@ -7,12 +7,10 @@ import {
   type IndicatorSeriesQuery,
   Decimal,
   TIMEFRAMES,
-  barsBetween,
   floorToTimeframe,
   isSecondsTimeframe,
-  shiftTimeframe,
-  timeframeEnd,
   type AoiList,
+  type BarCalendar,
   type AoiRecord,
   type Candle,
   type CandleBatch,
@@ -31,6 +29,8 @@ import {
   type QualificationReport,
   type QualificationStatus,
   type SeriesQuery,
+  type SessionList,
+  type SessionQuery,
   type StreamClient,
   type StreamEnvelope,
   type StreamHandler,
@@ -42,10 +42,12 @@ import {
 import {DEMO_AOIS, DEMO_EVENTS} from './demo-indicators';
 import {demoDrawingSeries} from './demo-drawing-series';
 import {demoPluginInfos} from './demo-plugins';
+import {demoCalendar, demoSessionList} from './demo-sessions';
 import {
   DEMO_INSTRUMENT_SPECS,
   demoCandle,
   demoSeries,
+  demoTickAt,
   priceAt,
   type DemoInstrumentSpec,
 } from './prices';
@@ -70,6 +72,15 @@ export function demoSpec(instrumentId: string): DemoInstrumentSpec {
 }
 
 /**
+ * Session calendar of a DEMO instrument.
+ * @param spec Spec.
+ * @return Calendar (`24x7` for perpetuals).
+ */
+export function demoSpecCalendar(spec: DemoInstrumentSpec): BarCalendar {
+  return demoCalendar(spec.calendar ?? '24x7');
+}
+
+/**
  * Builds the contract instrument for a DEMO spec.
  * @param spec Spec.
  * @param nowMs Clock.
@@ -79,15 +90,18 @@ export function demoInstrument(
   spec: DemoInstrumentSpec,
   nowMs: number
 ): Instrument {
+  const marketType = spec.marketType ?? 'perp';
+  const perp = marketType === 'perp';
+  const quote = spec.quote ?? 'USD';
   return {
     instrument_id: spec.instrumentId,
     key: {
       venue: 'mock',
-      market_type: 'perp',
+      market_type: marketType,
       venue_market_id: spec.displaySymbol,
       canonical_base: spec.base,
-      quote: 'USD',
-      settlement: 'USD',
+      quote,
+      settlement: quote,
       instrument_version: 1,
     },
     display_symbol: spec.displaySymbol,
@@ -95,16 +109,61 @@ export function demoInstrument(
     lot_size: spec.lotSize,
     min_qty: spec.lotSize,
     max_qty: null,
-    min_notional: '5',
+    min_notional: perp ? '5' : null,
     contract_multiplier: '1',
     linear: true,
     status: 'TRADING',
-    funding_interval_hours: 8,
-    max_leverage: '20',
-    asset_class: 'CRYPTO',
+    funding_interval_hours: perp ? 8 : null,
+    max_leverage: perp ? '20' : null,
+    asset_class: spec.assetClass ?? 'CRYPTO',
     source: 'mock',
     as_of_ms: nowMs,
+    calendar: spec.calendar ?? '24x7',
+    listing_exchange: spec.listingExchange ?? null,
+    tick_ladder: [...(spec.tickLadder ?? [])],
+    price_limit_pct: spec.priceLimitPct ?? null,
+    board_lot: spec.boardLot ?? null,
+    name: spec.name ?? null,
+    local_name: spec.localName ?? null,
   };
+}
+
+/**
+ * Last traded DEMO price: the synthetic path now for 24x7 markets; for
+ * session markets the price at the last session's close while closed. Rounded
+ * to the tick (the ladder rung at that price).
+ * @param spec Spec.
+ * @param nowMs Clock.
+ * @return Price and the time it traded at.
+ */
+export function demoLastPrice(
+  spec: DemoInstrumentSpec,
+  nowMs: number
+): {price: Decimal; tradeMs: number} {
+  const calendar = demoSpecCalendar(spec);
+  const tradeMs = calendar.continuous
+    ? nowMs
+    : Math.min(nowMs, calendar.endOf('1d', calendar.floor('1d', nowMs)) - 1);
+  const raw = priceAt(spec, tradeMs);
+  const tick = Decimal.parse(demoTickAt(spec, raw));
+  return {price: Decimal.fromNumber(raw, 10).roundToStep(tick), tradeMs};
+}
+
+/**
+ * Whether a DEMO spec matches search text (symbol, base or name).
+ * @param spec Spec.
+ * @param text Search text (any case; Chinese names match as typed).
+ * @return True on a match.
+ */
+export function demoSpecMatches(
+  spec: DemoInstrumentSpec,
+  text: string
+): boolean {
+  const q = text.trim().toUpperCase();
+  if (!q) return true;
+  return [spec.displaySymbol, spec.base, spec.name ?? '', spec.localName ?? '']
+    .map(value => value.toUpperCase())
+    .some(value => value.includes(q));
 }
 
 /** Options for the DEMO client. */
@@ -138,7 +197,7 @@ export class DemoMarketDataClient implements MarketDataClient {
           capabilities: {
             venue: 'mock',
             display_name: 'Demo venue',
-            market_types: ['perp'],
+            market_types: ['perp', 'stock', 'etf', 'rate'],
             market_data: {
               rest_history: true,
               native_ws_candles: true,
@@ -149,12 +208,18 @@ export class DemoMarketDataClient implements MarketDataClient {
               funding: true,
               trades_history: false,
               taker_volume: true,
+              classified_delta: true,
             },
             timeframes: [...TIMEFRAMES],
             trade_built_timeframes: TIMEFRAMES.filter(isSecondsTimeframe),
+            calendar: '24x7',
+            data_delay_ms: null,
+            requires_credentials: false,
+            credentials_configured: true,
             notes: [
               'Synthetic data generated in the browser. Not a real market.',
               'Seconds bars stand in for bars the engine builds from public trades.',
+              'Demo stocks, the bond ETF and the Treasury yield follow their exchange session calendars (XNYS, XTAI, USBOND).',
             ],
             docs_url: '',
             verified_at_ms: null,
@@ -184,12 +249,16 @@ export class DemoMarketDataClient implements MarketDataClient {
    */
   async listInstruments(query: InstrumentQuery): Promise<InstrumentList> {
     const now = this.now();
-    const q = (query.q ?? '').trim().toUpperCase();
     const venueOk = !query.venue || query.venue === 'mock';
     const instruments = venueOk
       ? DEMO_INSTRUMENT_SPECS.filter(
-          spec => !q || spec.displaySymbol.includes(q) || spec.base.includes(q)
-        ).map(spec => demoInstrument(spec, now))
+          spec =>
+            (!query.marketType ||
+              (spec.marketType ?? 'perp') === query.marketType) &&
+            demoSpecMatches(spec, query.q ?? '')
+        )
+          .slice(0, query.limit ?? 500)
+          .map(spec => demoInstrument(spec, now))
       : [];
     return {instruments, as_of_ms: now};
   }
@@ -201,6 +270,7 @@ export class DemoMarketDataClient implements MarketDataClient {
    */
   async getCandles(query: CandleQuery): Promise<CandleBatch> {
     const spec = demoSpec(query.instrumentId);
+    const calendar = demoSpecCalendar(spec);
     const now = this.now();
     const toMs = query.toMs ?? now;
     const limit =
@@ -209,9 +279,9 @@ export class DemoMarketDataClient implements MarketDataClient {
             2000,
             Math.max(
               1,
-              barsBetween(
+              calendar.barsBetween(
                 query.timeframe,
-                floorToTimeframe(query.timeframe, query.fromMs),
+                calendar.floor(query.timeframe, query.fromMs),
                 toMs
               )
             )
@@ -221,7 +291,7 @@ export class DemoMarketDataClient implements MarketDataClient {
       schema_version: 1,
       instrument_id: spec.instrumentId,
       timeframe: query.timeframe,
-      candles: demoSeries(spec, query.timeframe, limit, now, toMs),
+      candles: demoSeries(spec, query.timeframe, limit, now, toMs, calendar),
       feed_state: 'DEMO',
       source: 'mock',
       as_of_ms: now,
@@ -238,10 +308,17 @@ export class DemoMarketDataClient implements MarketDataClient {
   async getSnapshot(instrumentId: string): Promise<MarketSnapshot> {
     const spec = demoSpec(instrumentId);
     const now = this.now();
-    const tick = Decimal.parse(spec.tickSize);
-    const last = Decimal.fromNumber(priceAt(spec, now), 10).roundToStep(tick);
-    const dayAgo = priceAt(spec, now - 86_400_000);
-    const change = ((last.toNumber() - dayAgo) / dayAgo) * 100;
+    const calendar = demoSpecCalendar(spec);
+    // Session markets keep the last price of the latest session while
+    // closed; the change is measured from the previous session's close.
+    const {price: last, tradeMs} = demoLastPrice(spec, now);
+    const tick = Decimal.parse(demoTickAt(spec, last.toNumber()));
+    const reference = calendar.continuous
+      ? priceAt(spec, now - 86_400_000)
+      : priceAt(spec, calendar.floor('1d', tradeMs) - 1);
+    const change = ((last.toNumber() - reference) / reference) * 100;
+    const perp = (spec.marketType ?? 'perp') === 'perp';
+    const volumeDay = spec.volumePerMinute * (calendar.continuous ? 1440 : 390);
     return {
       instrument_id: instrumentId,
       last: last.toString(),
@@ -251,39 +328,40 @@ export class DemoMarketDataClient implements MarketDataClient {
       best_ask: last.add(tick).toString(),
       spread_pct: tick.add(tick).div(last).mul(Decimal.parse('100')).toFixed(6),
       turnover_24h_quote: Decimal.fromNumber(
-        spec.volumePerMinute * 1440 * spec.basePrice,
+        volumeDay * spec.basePrice,
         0
       ).toString(),
-      volume_24h_base: Decimal.fromNumber(
-        spec.volumePerMinute * 1440,
-        0
-      ).toString(),
+      volume_24h_base: Decimal.fromNumber(volumeDay, 0).toString(),
       change_24h_pct: Decimal.fromNumber(change, 4).toString(),
-      funding: {
-        instrument_id: instrumentId,
-        rate: '0.0001',
-        interval_hours: 8,
-        normalized_8h_pct: '0.01',
-        kind: 'PREDICTED',
-        effective_time_ms: floorToTimeframe('1h', now),
-        next_funding_ms: floorToTimeframe('1h', now) + 3_600_000,
-        source: 'mock',
-        as_of_ms: now,
-      },
-      open_interest: {
-        instrument_id: instrumentId,
-        base_quantity: Decimal.fromNumber(
-          spec.volumePerMinute * 900,
-          0
-        ).toString(),
-        notional_usd: Decimal.fromNumber(
-          spec.volumePerMinute * 900 * spec.basePrice,
-          0
-        ).toString(),
-        mark_price: last.toString(),
-        source: 'mock',
-        as_of_ms: now,
-      },
+      funding: !perp
+        ? null
+        : {
+            instrument_id: instrumentId,
+            rate: '0.0001',
+            interval_hours: 8,
+            normalized_8h_pct: '0.01',
+            kind: 'PREDICTED',
+            effective_time_ms: floorToTimeframe('1h', now),
+            next_funding_ms: floorToTimeframe('1h', now) + 3_600_000,
+            source: 'mock',
+            as_of_ms: now,
+          },
+      open_interest: !perp
+        ? null
+        : {
+            instrument_id: instrumentId,
+            base_quantity: Decimal.fromNumber(
+              spec.volumePerMinute * 900,
+              0
+            ).toString(),
+            notional_usd: Decimal.fromNumber(
+              spec.volumePerMinute * 900 * spec.basePrice,
+              0
+            ).toString(),
+            mark_price: last.toString(),
+            source: 'mock',
+            as_of_ms: now,
+          },
       feed_state: 'DEMO',
       source: 'mock',
       as_of_ms: now,
@@ -301,7 +379,9 @@ export class DemoMarketDataClient implements MarketDataClient {
   async getOrderBook(instrumentId: string, depth = 20): Promise<OrderBook> {
     const snapshot = await this.getSnapshot(instrumentId);
     const spec = demoSpec(instrumentId);
-    const tick = Decimal.parse(spec.tickSize);
+    const tick = Decimal.parse(
+      demoTickAt(spec, Number(snapshot.last ?? spec.basePrice))
+    );
     const bid = Decimal.parse(snapshot.best_bid ?? '0');
     const ask = Decimal.parse(snapshot.best_ask ?? '0');
     const level = (i: number) =>
@@ -370,6 +450,7 @@ export class DemoMarketDataClient implements MarketDataClient {
     query: SeriesQuery
   ): Promise<IndicatorSnapshotList> {
     const list = await this.getAois(query);
+    const calendar = demoSpecCalendar(demoSpec(query.instrumentId));
     const sources = new Set([
       ...list.aois.map(a => a.source),
       ...(list.events ?? []).map(e => e.source),
@@ -384,7 +465,7 @@ export class DemoMarketDataClient implements MarketDataClient {
         indicator_version: '1.0.0',
         method: 'pine_parity',
         as_of_ms: list.as_of_ms,
-        bar_start_ms: shiftTimeframe(list.timeframe, list.as_of_ms, -1),
+        bar_start_ms: calendar.shift(list.timeframe, list.as_of_ms, -1),
         aois: list.aois.filter(a => a.source === source),
         events: (list.events ?? []).filter(e => e.source === source),
         values: {},
@@ -409,17 +490,24 @@ export class DemoMarketDataClient implements MarketDataClient {
     query: IndicatorSeriesQuery
   ): Promise<IndicatorSeries> {
     const spec = demoSpec(query.instrumentId);
+    const calendar = demoSpecCalendar(spec);
     const now = this.now();
-    const drawingSeries = demoDrawingSeries(spec, query, now);
+    const drawingSeries = demoDrawingSeries(spec, query, now, calendar);
     if (drawingSeries) return drawingSeries;
     const tf = query.timeframe;
-    const lastStart = shiftTimeframe(tf, floorToTimeframe(tf, now), -1);
+    const lastStart = calendar.lastClosedStart(tf, now) ?? 0;
     const estimate = query.settings?.delta_source === 'estimate';
     const points =
       query.pluginId === 'order_flow_pressure'
         ? Array.from({length: 200}, (_, i) =>
             demoDeltaPoint(
-              demoCandle(spec, tf, shiftTimeframe(tf, lastStart, i - 199), now),
+              demoCandle(
+                spec,
+                tf,
+                calendar.shift(tf, lastStart, i - 199),
+                now,
+                calendar
+              ),
               estimate
             )
           )
@@ -430,9 +518,19 @@ export class DemoMarketDataClient implements MarketDataClient {
       plugin_id: query.pluginId,
       indicator_version: 'demo',
       points,
-      as_of_ms: timeframeEnd(tf, lastStart),
+      as_of_ms: calendar.endOf(tf, lastStart),
       feed_state: 'DEMO',
     };
+  }
+
+  /**
+   * Lists DEMO sessions of an exchange calendar (the engine's
+   * `/v1/calendars/{calendar_id}/sessions`).
+   * @param query Calendar and window.
+   * @return Session list.
+   */
+  async getSessions(query: SessionQuery): Promise<SessionList> {
+    return demoSessionList(query);
   }
 
   /**
@@ -442,16 +540,19 @@ export class DemoMarketDataClient implements MarketDataClient {
    */
   async getAois(query: SeriesQuery): Promise<AoiList> {
     const spec = demoSpec(query.instrumentId);
+    const calendar = demoSpecCalendar(spec);
     const now = this.now();
     const tf = query.timeframe;
-    const asOf = floorToTimeframe(tf, now);
-    const lastStart = shiftTimeframe(tf, asOf, -1);
+    const lastStart = calendar.lastClosedStart(tf, now) ?? 0;
+    const asOf = calendar.continuous
+      ? floorToTimeframe(tf, now)
+      : calendar.endOf(tf, lastStart);
     const bars = (start: number, count: number) =>
-      shiftTimeframe(tf, start, count);
+      calendar.shift(tf, start, count);
     const close = Decimal.parse(
-      demoCandle(spec, query.timeframe, lastStart, now).close
+      demoCandle(spec, query.timeframe, lastStart, now, calendar).close
     );
-    const tick = Decimal.parse(spec.tickSize);
+    const tick = Decimal.parse(demoTickAt(spec, close.toNumber()));
     const at = (ratio: number) =>
       close.mul(Decimal.fromNumber(ratio, 6)).roundToStep(tick).toString();
     const wanted =
@@ -497,7 +598,7 @@ export class DemoMarketDataClient implements MarketDataClient {
         source: e.source,
         name: e.name,
         bar_start_ms: start,
-        confirmed_at_ms: timeframeEnd(tf, start),
+        confirmed_at_ms: calendar.endOf(tf, start),
         price: at(e.priceRatio),
         aoi_id: null,
         score: null,
@@ -541,8 +642,10 @@ export class DemoMarketDataClient implements MarketDataClient {
 
 /**
  * One DEMO order-flow point for a candle. True delta uses the candle's
- * taker-buy volume (buy − sell over the bar volume); the estimate signs the
- * bar volume by candle direction, as the engine's fallback does.
+ * taker-buy volume (buy − sell over the bar volume); on stock bars that
+ * volume is classified against quotes, so the method is
+ * `trade_classification`; the estimate signs the bar volume by candle
+ * direction, as the engine's fallback does.
  * @param candle DEMO candle (with `taker_buy_base_volume`).
  * @param estimate Force the candle-direction estimate.
  * @return Series point.
@@ -563,7 +666,10 @@ export function demoDeltaPoint(
         delta_pct: (share * 100).toFixed(2),
         coverage_pct: '100',
         intrabar_count: 0,
-        method: 'taker_volume',
+        method:
+          candle.taker_buy_method === 'classified'
+            ? 'trade_classification'
+            : 'taker_volume',
         buy_volume: buy.toString(),
         sell_volume: sell.toString(),
       },
@@ -734,14 +840,16 @@ export class DemoMarketStream implements StreamClient {
             continue;
           }
           const key = `${spec.instrument_id}:${spec.timeframe}`;
-          const start = floorToTimeframe(spec.timeframe, now);
+          const calendar = demoSpecCalendar(instrument);
+          // Between sessions this is the last (final) bar of the session.
+          const start = calendar.floor(spec.timeframe, now);
           const previous = lastStart.get(key);
           if (previous !== undefined && previous < start) {
             handler(
               this.envelope(
                 'candle.updated',
                 `candles:${key}`,
-                demoCandle(instrument, spec.timeframe, previous, now)
+                demoCandle(instrument, spec.timeframe, previous, now, calendar)
               )
             );
           }
@@ -750,7 +858,7 @@ export class DemoMarketStream implements StreamClient {
             this.envelope(
               'candle.updated',
               `candles:${key}`,
-              demoCandle(instrument, spec.timeframe, start, now)
+              demoCandle(instrument, spec.timeframe, start, now, calendar)
             )
           );
         } else if (spec.channel === 'feed_health') {

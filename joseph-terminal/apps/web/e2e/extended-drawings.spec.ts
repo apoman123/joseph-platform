@@ -4,7 +4,7 @@
  * regression channel. Canvas text is not in the DOM, so results are read
  * from the object list and the data window.
  */
-import {expect, test} from '@playwright/test';
+import {expect, test, type Page} from '@playwright/test';
 import {openPanel} from './trading-helpers';
 import {
   armTool,
@@ -111,49 +111,69 @@ test('draws an anchored VWAP and a regression channel from engine series', async
   await expect(objectDetail(page, 'regression-channel')).toHaveText(/^R /);
 });
 
-test('explains an anchored VWAP more than 2000 bars back', async ({page}) => {
-  await openTerminal(page);
-  await page.evaluate(key => {
-    const bar = 300_000;
-    const anchor = Math.floor(Date.now() / bar) * bar - 2400 * bar;
-    localStorage.setItem(
-      key,
-      JSON.stringify({
-        schema_version: 1,
-        workspace_id: 'default',
-        instrument_id: 'mock:perp:BTCUSD',
-        drawings: [
-          {
-            schema_version: 1,
-            drawing_id: 'far-vwap',
-            tool_id: 'anchored-vwap',
-            tool_version: 1,
-            instrument_id: 'mock:perp:BTCUSD',
-            timeframe: null,
-            anchors: [{time_ms: anchor, price: '95000'}],
-            style: {color: '#e66fd2', line_width: 2, line_style: 'solid'},
-            text: null,
-            props: {band_1: '1', band_2: '0', band_3: '0'},
-            locked: false,
-            visible: true,
-            z_index: 1,
-            created_at_ms: anchor,
-            updated_at_ms: anchor,
-          },
-        ],
-      })
-    );
-  }, BTC_DRAWINGS_KEY);
+/**
+ * Stores one anchored VWAP on BTCUSD (5m) a number of bars back and reloads.
+ * @param page Page.
+ * @param barsBack Bars between the anchor and now.
+ */
+async function seedVwap(page: Page, barsBack: number): Promise<void> {
+  await page.evaluate(
+    ({key, back}) => {
+      const bar = 300_000;
+      const anchor = Math.floor(Date.now() / bar) * bar - back * bar;
+      localStorage.setItem(
+        key,
+        JSON.stringify({
+          schema_version: 1,
+          workspace_id: 'default',
+          instrument_id: 'mock:perp:BTCUSD',
+          drawings: [
+            {
+              schema_version: 1,
+              drawing_id: 'far-vwap',
+              tool_id: 'anchored-vwap',
+              tool_version: 1,
+              instrument_id: 'mock:perp:BTCUSD',
+              timeframe: null,
+              anchors: [{time_ms: anchor, price: '95000'}],
+              style: {color: '#e66fd2', line_width: 2, line_style: 'solid'},
+              text: null,
+              props: {band_1: '1', band_2: '0', band_3: '0'},
+              locked: false,
+              visible: true,
+              z_index: 1,
+              created_at_ms: anchor,
+              updated_at_ms: anchor,
+            },
+          ],
+        })
+      );
+    },
+    {key: BTC_DRAWINGS_KEY, back: barsBack}
+  );
   await page.reload();
   await expect(page.locator('.terminal[data-ready="true"]')).toBeVisible();
+}
+
+test('draws anchors far back and shows the engine message only on refusal', async ({
+  page,
+}) => {
+  await openTerminal(page);
+  // 2 400 bars back used to be refused by the terminal; the engine now
+  // computes anchored values from up to 50 000 bars back.
+  await seedVwap(page, 2400);
+  await openPanel(page, 'Objects');
+  await expect(objectDetail(page, 'anchored-vwap')).toHaveText(/^VWAP \d/);
+  // Beyond 50 000 bars the engine refuses; its own message is shown.
+  await seedVwap(page, 50_001);
   await openPanel(page, 'Objects');
   await expect(objectDetail(page, 'anchored-vwap')).toHaveText(
-    'Anchor is more than 2000 bars back — move it closer'
+    /^The anchor is 50001 closed 5m bars back; anchored studies are computed for at most 50000 bars/
   );
   await showDataWindow(page);
   await hoverChart(page, 0.6, 0.4);
   await expect(page.getByTestId('data-window')).toContainText(
-    'anchor > 2000 bars back'
+    'refused by the engine'
   );
   await page.screenshot({path: `${SHOTS}/27-vwap-anchor-too-far.png`});
 });

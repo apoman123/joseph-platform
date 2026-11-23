@@ -2,6 +2,7 @@
  * @fileoverview Drawing tool plugin interface, registry and paint helpers.
  */
 import type {
+  BarCalendar,
   DrawingAnchor,
   DrawingDocument,
   DrawingStyle,
@@ -89,6 +90,13 @@ export interface RenderState {
   tickSize: string | null;
   /** Bar duration (for measuring tools). */
   durationMs: number;
+  /** Chart timeframe (with `calendar`, for counting session bars). */
+  timeframe?: Timeframe;
+  /**
+   * Session calendar of the instrument: measuring tools count bars with it
+   * so time between sessions is not counted.
+   */
+  calendar?: BarCalendar;
   /**
    * Engine series of this drawing for tools that declare `seriesRequest`
    * (null or absent otherwise, and while no request was made).
@@ -206,12 +214,13 @@ export interface ToolPlugin {
    * a pure function of the anchors, props and timeframe; the host fetches
    * it and re-fetches when the request changes or a bar closes.
    * @param doc Document.
-   * @param env Chart timeframe.
+   * @param env Chart timeframe and the instrument's session calendar
+   *     (bar boundaries; UTC bars when absent).
    * @return Request, or null when the drawing needs no series.
    */
   seriesRequest?(
     doc: DrawingDocument,
-    env: {timeframe: Timeframe}
+    env: {timeframe: Timeframe; calendar?: BarCalendar}
   ): DrawingSeriesRequest | null;
   /**
    * Values the host's data window shows for this drawing at a bar.
@@ -229,12 +238,18 @@ export interface ToolPlugin {
    * Expands anchors placed by the user into the tool's full anchor set
    * (e.g. one click for a long position yields entry, target and stop).
    * @param anchors Anchors placed by the user.
-   * @param env Bar duration and tick size.
+   * @param env Bar duration, tick size and (optionally) the timeframe and
+   *     session calendar for widths measured in bars.
    * @return Complete anchors.
    */
   expandAnchors?(
     anchors: DrawingAnchor[],
-    env: {durationMs: number; tickSize: string | null}
+    env: {
+      durationMs: number;
+      tickSize: string | null;
+      timeframe?: Timeframe;
+      calendar?: BarCalendar;
+    }
   ): DrawingAnchor[];
   /**
    * Upgrades documents written by older tool versions.

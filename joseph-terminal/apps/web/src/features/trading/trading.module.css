@@ -4,8 +4,15 @@
 }
 .body {
   display: grid;
+  /* Rows keep their content height and the panel body scrolls; auto rows
+     would let overflow-hidden controls (segmented buttons) collapse. */
+  grid-auto-rows: max-content;
   align-content: start;
   gap: var(--space-3);
+}
+.accountStatus {
+  display: grid;
+  gap: 2px;
 }
 .grow {
   flex: 1;
@@ -147,4 +154,37 @@
 }
 .describe:empty {
   display: none;
+}
+
+/* Live arming and LIVE confirmation. */
+.arm {
+  display: grid;
+  gap: var(--space-2);
+  padding: var(--space-3);
+  border: 1px solid var(--ask);
+  border-radius: var(--radius-control);
+  background: var(--abyss);
+}
+.live {
+  display: grid;
+  gap: var(--space-3);
+}
+.factRow {
+  display: contents;
+}
+.armed {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--space-2);
+}
+
+/* Cash equities: lot mode and the rate notice. */
+.lots {
+  display: grid;
+  gap: var(--space-1);
+}
+.rate {
+  display: grid;
+  gap: var(--space-3);
 }

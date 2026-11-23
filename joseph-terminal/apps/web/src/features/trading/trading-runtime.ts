@@ -3,16 +3,26 @@
  * controller, instrument metadata, order/position caches for chart layers,
  * the chart context menu and pending amendments. Lives for the feature's
  * activation so switching panel tabs never loses a draft.
+ *
+ * For exchange-listed securities it also loads the previous session close
+ * (the reference of daily price limits) from daily candles and prefetches
+ * the instrument's trading sessions for market-hours notices. Published
+ * rates are not tradable, so they get no chart trading menu.
  */
 import {
   TicketController,
   buildContextMenu,
   defaultTicketInputs,
+  isCashEquityId,
+  isRateInstrumentId,
+  referenceClose,
+  tickAt,
   type ContextMenuItem,
   type InstrumentPrecision,
 } from '@joseph/chart-trading';
 import {
   Decimal,
+  instrumentCalendarId,
   parseInstrumentId,
   type FeedState,
   type Order,
@@ -26,6 +36,9 @@ import {
 import type {WebFeatureContext} from '../../shell/react-bindings';
 import {errorMessage} from './ui/hooks';
 
+/** One day in milliseconds. */
+const DAY_MS = 86_400_000;
+
 /** Market metadata for the ticket's instrument. */
 export interface MarketMeta {
   /** Instrument id the metadata belongs to. */
@@ -38,6 +51,11 @@ export interface MarketMeta {
   feedState: FeedState | null;
   /** Load error, if any. */
   error: string | null;
+  /**
+   * Previous session close of a security (daily price-limit reference),
+   * or null when unknown or not applicable.
+   */
+  reference?: Decimal | null;
 }
 
 /** Open chart context menu. */
@@ -76,6 +94,11 @@ export interface TradingRuntime {
   menu: WritableStore<ContextMenuState | null>;
   /** Pending amendment. */
   amend: WritableStore<AmendDraft | null>;
+  /**
+   * Live arming per account id: when the arm expires (UTC ms). Arming is a
+   * browser-side step on top of the server's checks; it never grants LIVE.
+   */
+  liveArm: WritableStore<Readonly<Record<string, number>>>;
   /**
    * Reloads orders and positions.
    * @return Promise resolving when done.
@@ -131,10 +154,32 @@ export function createTradingRuntime(
   const positions = createStore<readonly Position[]>([]);
   const menu = createStore<ContextMenuState | null>(null);
   const amend = createStore<AmendDraft | null>(null);
+  const liveArm = createStore<Readonly<Record<string, number>>>({});
   const precisionCache = new Map<string, InstrumentPrecision>();
   const disposers: Disposer[] = [];
   let orderSeq = 0;
   let metaSeq = 0;
+
+  /**
+   * Loads the previous session close of a security with a price limit.
+   * @param instrumentId Instrument id.
+   * @return Reference close, or null.
+   */
+  const loadReference = async (
+    instrumentId: string
+  ): Promise<Decimal | null> => {
+    if (!isCashEquityId(instrumentId)) return null;
+    try {
+      const batch = await ctx.clients.market.getCandles({
+        instrumentId,
+        timeframe: '1d',
+        limit: 3,
+      });
+      return referenceClose(batch.candles);
+    } catch {
+      return null;
+    }
+  };
 
   const fetchPrecision = async (
     instrumentId: string
@@ -159,6 +204,7 @@ export function createTradingRuntime(
     positions,
     menu,
     amend,
+    liveArm,
     async refreshOrders() {
       const seq = (orderSeq += 1);
       try {
@@ -177,12 +223,42 @@ export function createTradingRuntime(
     },
     async loadMeta(instrumentId) {
       const seq = (metaSeq += 1);
+      if (isRateInstrumentId(instrumentId)) {
+        // Published rates have no ticket: only the name is needed.
+        let entry: InstrumentPrecision | null = null;
+        try {
+          entry = await fetchPrecision(instrumentId);
+        } catch {
+          entry = null;
+        }
+        if (seq !== metaSeq) return;
+        meta.set({
+          instrumentId,
+          precision: entry,
+          mark: null,
+          feedState: null,
+          error: null,
+          reference: null,
+        });
+        return;
+      }
       try {
-        const [precision, snapshot] = await Promise.all([
+        const [precision, snapshot, reference] = await Promise.all([
           fetchPrecision(instrumentId),
           ctx.clients.market.getSnapshot(instrumentId),
+          loadReference(instrumentId),
         ]);
         if (seq !== metaSeq) return;
+        if (precision && isCashEquityId(instrumentId)) {
+          const now = Date.now();
+          void ctx.calendars
+            .ensure(
+              instrumentCalendarId(instrumentId, precision),
+              now - 10 * DAY_MS,
+              now + 40 * DAY_MS
+            )
+            .catch(() => undefined);
+        }
         const markText = snapshot.mark ?? snapshot.last ?? null;
         const mark =
           markText && Decimal.isValid(markText)
@@ -198,6 +274,7 @@ export function createTradingRuntime(
           error: precision
             ? null
             : 'This instrument is not in the registry, so orders cannot be sized.',
+          reference,
         });
       } catch (err) {
         if (seq !== metaSeq) return;
@@ -212,6 +289,11 @@ export function createTradingRuntime(
     },
     precisionFor: instrumentId => precisionCache.get(instrumentId) ?? null,
     async openMenu(chartId, instrumentId, price) {
+      if (isRateInstrumentId(instrumentId)) {
+        // A published rate is not tradable: no "trade at price" items.
+        menu.set(null);
+        return;
+      }
       let precision: InstrumentPrecision | null = null;
       try {
         precision = await fetchPrecision(instrumentId);
@@ -224,10 +306,14 @@ export function createTradingRuntime(
       }
       const current = meta.get();
       const mark = current.instrumentId === instrumentId ? current.mark : null;
+      const tick =
+        isCashEquityId(instrumentId) && Number.isFinite(price) && price > 0
+          ? tickAt(precision, Decimal.fromNumber(price, 10)).toString()
+          : precision.tick_size;
       menu.set({
         chartId,
         instrumentId,
-        items: buildContextMenu(price, precision.tick_size, mark),
+        items: buildContextMenu(price, tick, mark),
       });
     },
     dispose() {

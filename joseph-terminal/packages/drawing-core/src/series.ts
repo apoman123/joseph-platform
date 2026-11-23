@@ -8,19 +8,19 @@
  * values. Mapping an anchor time to its bar is pure geometry.
  */
 import {
+  CONTINUOUS_CALENDAR,
   Decimal,
-  timeframeEnd,
-  floorToTimeframe,
+  type BarCalendar,
   type IndicatorSeriesPoint,
   type Timeframe,
 } from '@joseph/contracts';
 
-/** Most bars the engine computes in one series. */
-export const ENGINE_SERIES_BAR_CAP = 2000;
-
-/** Shown instead of a drawing when the engine returns null values. */
-export const ANCHOR_TOO_FAR_MESSAGE =
-  'Anchor is more than 2000 bars back — move it closer';
+/**
+ * Bars back the engine computes anchored values from (anchored VWAP,
+ * regression channel). Informational only: the terminal never refuses an
+ * anchor itself; when the engine refuses one, its message is shown.
+ */
+export const ENGINE_ANCHOR_BAR_CAP = 50_000;
 
 /** Shown while the first response for a request is pending. */
 export const SERIES_LOADING_MESSAGE = 'Loading engine values…';
@@ -46,26 +46,40 @@ export interface DrawingSeriesState {
   request: DrawingSeriesRequest;
   /** Chart timeframe of the request. */
   timeframe: Timeframe;
+  /** Session calendar the request was built with (UTC bars when absent). */
+  calendar?: BarCalendar;
   /** Points of the latest response, oldest first. */
   points: readonly IndicatorSeriesPoint[];
   /** Response `as_of_ms`, or null before the first response. */
   asOfMs: number | null;
   /** Error message when `status` is `error`. */
   error: string | null;
+  /**
+   * The engine's own message when it refused the request (a 4xx answer,
+   * e.g. an anchor beyond the bars it computes from); null otherwise.
+   */
+  refusal?: string | null;
 }
 
 /**
  * Start of the bar an anchor time belongs to. Anchors are placed at the
  * pointer, which may sit in either half of a bar, so the time is rounded to
- * the nearest bar centre first.
+ * the nearest bar centre first; on session calendars the second half of a
+ * session's last bar rounds to the next session's first bar.
  * @param timeMs Anchor time.
  * @param timeframe Chart timeframe.
+ * @param calendar Session calendar of the instrument (default UTC bars).
  * @return Bar start (UTC ms).
  */
-export function barStartAt(timeMs: number, timeframe: Timeframe): number {
-  const start = floorToTimeframe(timeframe, Math.max(0, timeMs));
-  const end = timeframeEnd(timeframe, start);
-  return timeMs - start >= Math.floor((end - start) / 2) ? end : start;
+export function barStartAt(
+  timeMs: number,
+  timeframe: Timeframe,
+  calendar: BarCalendar = CONTINUOUS_CALENDAR
+): number {
+  const start = calendar.floor(timeframe, Math.max(0, timeMs));
+  const end = calendar.endOf(timeframe, start);
+  if (timeMs - start < Math.floor((end - start) / 2)) return start;
+  return calendar.continuous ? end : calendar.shift(timeframe, start, 1);
 }
 
 /**
@@ -168,6 +182,9 @@ export function seriesStatusMessage(
 ): string | null {
   if (!state || state.status === 'loading') return SERIES_LOADING_MESSAGE;
   if (state.status === 'error') {
+    if (state.refusal) {
+      return state.refusal.charAt(0).toUpperCase() + state.refusal.slice(1);
+    }
     return `Engine values unavailable: ${state.error ?? 'request failed'}`;
   }
   return null;

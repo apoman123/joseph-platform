@@ -302,3 +302,18 @@
 .popout__missing {
   margin: var(--space-6) auto;
 }
+
+/* Pop-out restore (task 6) */
+.detached[data-status='reconnecting'] .detached__dot {
+  background: transparent;
+  box-shadow: inset 0 0 0 1px var(--info);
+}
+
+.detached-banner__hint {
+  color: var(--haze);
+}
+
+.popout__link[data-state='reconnecting'] .popout__link-dot {
+  background: transparent;
+  box-shadow: inset 0 0 0 1px var(--sodium);
+}

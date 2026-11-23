@@ -3,7 +3,6 @@
  */
 import {
   ApiError,
-  Decimal,
   HttpExecutionClient,
   HttpMarketDataClient,
   HttpStrategyClient,
@@ -19,7 +18,7 @@ import {
   DemoMarketStream,
   DemoStrategyClient,
   DemoUserStream,
-  priceAt,
+  demoLastPrice,
 } from '@joseph/mock-provider';
 import {toValidationResult} from '@joseph/strategy-builder';
 import type {TerminalConfig} from './env';
@@ -62,16 +61,16 @@ const NULL_STREAM: StreamClient = {
 };
 
 /**
- * Current DEMO mark for broker simulation (same path as DEMO candles).
+ * Current DEMO mark for broker simulation (same path as DEMO candles; for
+ * session markets the last session's close while closed, on the tick
+ * ladder).
  * @param instrumentId Instrument.
  * @return Mark price or null for non-DEMO instruments.
  */
-function demoMark(instrumentId: string): string | null {
+export function demoMark(instrumentId: string): string | null {
   const spec = DEMO_INSTRUMENT_SPECS.find(s => s.instrumentId === instrumentId);
   if (!spec) return null;
-  return Decimal.fromNumber(priceAt(spec, Date.now()), 10)
-    .roundToStep(Decimal.parse(spec.tickSize))
-    .toString();
+  return demoLastPrice(spec, Date.now()).price.toString();
 }
 
 /**

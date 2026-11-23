@@ -17,14 +17,23 @@
  * (the aggressor-bought share follows the bar's direction plus noise), so
  * true volume delta and turnover ranking work offline. Sub-minute bars
  * scale wicks and volume to their length; monthly bars end on the 1st.
+ *
+ * Session instruments (DEMO stocks, the bond ETF and the Treasury yield)
+ * only have bars inside their calendar's sessions, built with the same
+ * calendar arithmetic as the engine; stock bars carry a buy volume
+ * classified against quotes (`taker_buy_method: classified`), as on stock
+ * exchanges, and the yield carries no volume.
  */
 import {
+  CONTINUOUS_CALENDAR,
   Decimal,
   TIMEFRAME_MS,
-  floorToTimeframe,
-  shiftTimeframe,
-  timeframeEnd,
+  type AssetClass,
+  type BarCalendar,
+  type CalendarId,
   type Candle,
+  type MarketType,
+  type TickStep,
   type Timeframe,
 } from '@joseph/contracts';
 
@@ -44,7 +53,37 @@ export interface DemoInstrumentSpec {
   lotSize: string;
   /** Typical volume per minute. */
   volumePerMinute: number;
+  /** Product type (default `perp`). */
+  marketType?: MarketType;
+  /** Session calendar (default `24x7`). */
+  calendar?: CalendarId;
+  /** Asset class (default `CRYPTO`). */
+  assetClass?: AssetClass;
+  /** Quote currency or unit (default `USD`; `%` for yields). */
+  quote?: string;
+  /** English name. */
+  name?: string;
+  /** Name in the listing market's language. */
+  localName?: string;
+  /** Listing exchange of a security. */
+  listingExchange?: string;
+  /** Price-dependent tick ladder. */
+  tickLadder?: readonly TickStep[];
+  /** Daily price limit in percent. */
+  priceLimitPct?: string;
+  /** Shares per board lot. */
+  boardLot?: string;
 }
+
+/** TWSE price ladder (Taiwan Stock Exchange tick sizes). */
+export const TWSE_TICK_LADDER: readonly TickStep[] = [
+  {min_price: '0', tick_size: '0.01'},
+  {min_price: '10', tick_size: '0.05'},
+  {min_price: '50', tick_size: '0.1'},
+  {min_price: '100', tick_size: '0.5'},
+  {min_price: '500', tick_size: '1'},
+  {min_price: '1000', tick_size: '5'},
+];
 
 /** DEMO instruments on the `mock` venue. */
 export const DEMO_INSTRUMENT_SPECS: readonly DemoInstrumentSpec[] = [
@@ -75,7 +114,82 @@ export const DEMO_INSTRUMENT_SPECS: readonly DemoInstrumentSpec[] = [
     lotSize: '0.1',
     volumePerMinute: 9_800,
   },
+  {
+    instrumentId: 'mock:stock:ACME',
+    displaySymbol: 'ACME',
+    base: 'ACME',
+    basePrice: 182.4,
+    tickSize: '0.01',
+    lotSize: '1',
+    volumePerMinute: 1_500,
+    marketType: 'stock',
+    calendar: 'XNYS',
+    assetClass: 'EQUITY',
+    name: 'Acme Corporation (demo)',
+    listingExchange: 'NYSE',
+  },
+  {
+    instrumentId: 'mock:etf:TLTD',
+    displaySymbol: 'TLTD',
+    base: 'TLTD',
+    basePrice: 91.2,
+    tickSize: '0.01',
+    lotSize: '1',
+    volumePerMinute: 900,
+    marketType: 'etf',
+    calendar: 'XNYS',
+    assetClass: 'BOND',
+    name: 'Demo 20+ Year Treasury Bond ETF',
+    listingExchange: 'Nasdaq',
+  },
+  {
+    instrumentId: 'mock:stock:9901',
+    displaySymbol: '9901',
+    base: '9901',
+    basePrice: 585,
+    tickSize: '0.01',
+    lotSize: '1',
+    volumePerMinute: 24_000,
+    marketType: 'stock',
+    calendar: 'XTAI',
+    assetClass: 'EQUITY',
+    quote: 'TWD',
+    name: 'Demo Semiconductor (demo)',
+    localName: '示範半導體',
+    listingExchange: 'TWSE',
+    tickLadder: TWSE_TICK_LADDER,
+    priceLimitPct: '10',
+    boardLot: '1000',
+  },
+  {
+    instrumentId: 'mock:rate:UST10Y',
+    displaySymbol: 'UST10Y',
+    base: 'UST10Y',
+    basePrice: 4.25,
+    tickSize: '0.001',
+    lotSize: '1',
+    volumePerMinute: 0,
+    marketType: 'rate',
+    calendar: 'USBOND',
+    assetClass: 'BOND',
+    quote: '%',
+    name: 'US 10-Year Treasury yield (demo)',
+  },
 ];
+
+/**
+ * Tick size at a price (the ladder rung at or below it, else `tickSize`).
+ * @param spec Instrument.
+ * @param price Price.
+ * @return Tick size text.
+ */
+export function demoTickAt(spec: DemoInstrumentSpec, price: number): string {
+  let tickSize = spec.tickSize;
+  for (const step of spec.tickLadder ?? []) {
+    if (price >= Number(step.min_price)) tickSize = step.tick_size;
+  }
+  return tickSize;
+}
 
 const DAY_MS = 86_400_000;
 const HOUR_MS = 3_600_000;
@@ -150,7 +264,7 @@ export function priceAt(spec: DemoInstrumentSpec, timeMs: number): number {
  */
 function tick(spec: DemoInstrumentSpec, value: number): string {
   return Decimal.fromNumber(value, 10)
-    .roundToStep(Decimal.parse(spec.tickSize))
+    .roundToStep(Decimal.parse(demoTickAt(spec, value)))
     .toString();
 }
 
@@ -160,16 +274,18 @@ function tick(spec: DemoInstrumentSpec, value: number): string {
  * @param timeframe Timeframe.
  * @param startMs Bar start.
  * @param nowMs Current time (bars ending after it are not final).
+ * @param calendar Session calendar of the instrument (default `24x7`).
  * @return Candle with DEMO provenance.
  */
 export function demoCandle(
   spec: DemoInstrumentSpec,
   timeframe: Timeframe,
   startMs: number,
-  nowMs: number
+  nowMs: number,
+  calendar: BarCalendar = CONTINUOUS_CALENDAR
 ): Candle {
   const duration = TIMEFRAME_MS[timeframe];
-  const endMs = timeframeEnd(timeframe, startMs);
+  const endMs = calendar.endOf(timeframe, startMs);
   const final = endMs <= nowMs;
   const closeAt = final ? endMs - 1 : Math.max(startMs, nowMs);
   const samples = 6;
@@ -225,6 +341,10 @@ export function demoCandle(
     4
   ).floorToStep(lot);
   const typical = prices.reduce((sum, p) => sum + p, 0) / prices.length;
+  // A published yield has no volume; stock exchanges publish no aggressor
+  // side, so their buy volume is classified against quotes (Lee-Ready).
+  const noVolume = spec.volumePerMinute <= 0;
+  const security = spec.marketType === 'stock' || spec.marketType === 'etf';
   return {
     instrument_id: spec.instrumentId,
     timeframe,
@@ -235,12 +355,12 @@ export function demoCandle(
     low: tick(spec, Math.min(low, open, close)),
     close: tick(spec, close),
     base_volume: baseVolume.toString(),
-    quote_turnover: Decimal.fromNumber(
-      baseVolume.toNumber() * typical,
-      2
-    ).toString(),
+    quote_turnover: noVolume
+      ? null
+      : Decimal.fromNumber(baseVolume.toNumber() * typical, 2).toString(),
     trade_count: null,
-    taker_buy_base_volume: takerBuy.toString(),
+    taker_buy_base_volume: noVolume ? null : takerBuy.toString(),
+    ...(security && !noVolume ? {taker_buy_method: 'classified' as const} : {}),
     is_final: final,
     revision: 0,
     source: 'mock',
@@ -251,12 +371,14 @@ export function demoCandle(
 }
 
 /**
- * Builds a candle series ending with the bar containing `toMs`.
+ * Builds a candle series ending with the bar containing `toMs` (between
+ * sessions: the last bar before it).
  * @param spec Instrument.
  * @param timeframe Timeframe.
  * @param limit Number of bars.
  * @param nowMs Current time.
  * @param toMs Exclusive end of the requested range (defaults to now).
+ * @param calendar Session calendar of the instrument (default `24x7`).
  * @return Candles, oldest first.
  */
 export function demoSeries(
@@ -264,14 +386,15 @@ export function demoSeries(
   timeframe: Timeframe,
   limit: number,
   nowMs: number,
-  toMs = nowMs
+  toMs = nowMs,
+  calendar: BarCalendar = CONTINUOUS_CALENDAR
 ): Candle[] {
-  const last = floorToTimeframe(timeframe, Math.min(toMs, nowMs));
+  const last = calendar.floor(timeframe, Math.min(toMs, nowMs));
   const candles: Candle[] = [];
-  for (let i = limit - 1; i >= 0; i -= 1) {
-    candles.push(
-      demoCandle(spec, timeframe, shiftTimeframe(timeframe, last, -i), nowMs)
-    );
+  let start = calendar.shift(timeframe, last, -(limit - 1));
+  for (let i = 0; i < limit; i += 1) {
+    candles.push(demoCandle(spec, timeframe, start, nowMs, calendar));
+    start = calendar.shift(timeframe, start, 1);
   }
   return candles;
 }

@@ -9,13 +9,17 @@
  * and on `refresh()`, which the host calls when a bar closes. Responses
  * for superseded requests are dropped. A failed refresh keeps the last
  * good values (they stay correct as of their `as_of_ms`); a failed first
- * request is reported as an error.
+ * request is reported as an error. When the engine refuses a request (a
+ * 4xx answer, e.g. an anchor beyond the bars it computes from) its own
+ * message is kept so the drawing shows exactly what the engine said.
  */
-import type {
-  IndicatorSeries,
-  IndicatorSeriesQuery,
-  InstrumentId,
-  Timeframe,
+import {
+  ApiError,
+  type BarCalendar,
+  type IndicatorSeries,
+  type IndicatorSeriesQuery,
+  type InstrumentId,
+  type Timeframe,
 } from '@joseph/contracts';
 import {appliesToTimeframe} from './document';
 import {
@@ -34,6 +38,11 @@ export interface DrawingSeriesSyncOptions {
   instrumentId: () => InstrumentId;
   /** Timeframe shown on the chart. */
   timeframe: () => Timeframe;
+  /**
+   * Session calendar of the instrument (anchor bars on session
+   * boundaries); UTC bars when absent.
+   */
+  calendar?: () => BarCalendar;
   /** Called after any state change (repaint, re-render lists). */
   onChange: () => void;
   /** Delay before a changed request is sent (default 200 ms). */
@@ -107,7 +116,10 @@ export class DrawingSeriesSync {
       )
         continue;
       const request =
-        this.tools.get(doc.tool_id)?.seriesRequest?.(doc, {timeframe}) ?? null;
+        this.tools.get(doc.tool_id)?.seriesRequest?.(doc, {
+          timeframe,
+          calendar: this.options.calendar?.(),
+        }) ?? null;
       if (request) {
         wanted.set(doc.drawing_id, {
           request,
@@ -134,9 +146,11 @@ export class DrawingSeriesSync {
           status: 'loading',
           request,
           timeframe,
+          calendar: this.options.calendar?.(),
           points: [],
           asOfMs: null,
           error: null,
+          refusal: null,
         },
       };
       this.entries.set(id, entry);
@@ -189,15 +203,24 @@ export class DrawingSeriesSync {
           ),
           asOfMs: series.as_of_ms,
           error: null,
+          refusal: null,
         };
         this.options.onChange();
       })
       .catch((failure: unknown) => {
         if (!current() || entry.state.status === 'ready') return;
+        const refused =
+          failure instanceof ApiError &&
+          failure.status >= 400 &&
+          failure.status < 500 &&
+          failure.body.message
+            ? failure.body.message
+            : null;
         entry.state = {
           ...entry.state,
           status: 'error',
           error: failure instanceof Error ? failure.message : 'request failed',
+          refusal: refused,
         };
         this.options.onChange();
       });

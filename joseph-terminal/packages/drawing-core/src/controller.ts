@@ -8,6 +8,7 @@
  * placeholder and are never deleted implicitly.
  */
 import type {
+  BarCalendar,
   DrawingAnchor,
   DrawingDocument,
   InstrumentId,
@@ -59,6 +60,11 @@ export interface DrawingControllerOptions {
   bars: () => readonly SnapBar[];
   /** Bar duration. */
   durationMs: () => number;
+  /**
+   * Session calendar of the instrument (bar counts and widths in session
+   * bars); UTC bars when absent.
+   */
+  calendar?: () => BarCalendar;
   /** Whether magnet snapping is on. */
   magnet: () => boolean;
   /** Theme palette. */
@@ -505,6 +511,8 @@ export class DrawingController {
       tool.expandAnchors?.(anchors, {
         durationMs: this.options.durationMs(),
         tickSize: this.options.tickSize(),
+        timeframe: this.options.timeframe(),
+        calendar: this.options.calendar?.(),
       }) ?? anchors;
     const drawings = this.store.get().drawings;
     const zIndex = drawings.reduce((max, d) => Math.max(max, d.z_index), 0) + 1;
@@ -593,6 +601,8 @@ export class DrawingController {
       palette: this.options.palette(),
       tickSize: this.options.tickSize(),
       durationMs: this.options.durationMs(),
+      timeframe: this.options.timeframe(),
+      calendar: this.options.calendar?.(),
     };
     for (const doc of this.visibleDrawings()) {
       ctx.save();

@@ -49,10 +49,12 @@ const DEMO = {
 };
 
 /**
- * Creates and activates a DEMO runtime.
+ * Creates and activates a DEMO runtime on a fresh workspace (an earlier
+ * test's debounced autosave must not leak into the next test).
  * @return Runtime.
  */
 async function demoRuntime(): Promise<TerminalRuntime> {
+  window.localStorage.clear();
   const runtime = createRuntime(composeFeatures, DEMO);
   await runtime.registry.activateAll();
   return runtime;

@@ -1,14 +1,17 @@
 /**
- * @fileoverview Session separators: thin vertical lines where a new UTC
+ * @fileoverview Session separators: thin vertical lines where a new
  * session (minute, hour, day, week, month or year, depending on the
  * timeframe) begins.
  *
- * Crypto perpetuals trade around the clock, so sessions are calendar
- * boundaries in UTC rather than exchange opening hours. The layer is pure
- * presentation; it never changes bars or indicator inputs.
+ * Crypto perpetuals trade around the clock, so their sessions are calendar
+ * boundaries in UTC. Exchange-listed instruments use the exchange's local
+ * date: on intraday charts every trading session starts with a break (the
+ * chart has no bars between sessions, so the break marks where the
+ * overnight or weekend gap was taken out). The layer is pure presentation;
+ * it never changes bars or indicator inputs.
  */
 import type {Timeframe} from '@joseph/contracts';
-import {TIMEFRAME_MS, isCalendarTimeframe} from '@joseph/contracts';
+import {TIMEFRAME_MS, isCalendarTimeframe, zonedParts} from '@joseph/contracts';
 import type {CanvasLayer, CoordinateTransform} from './chart-port';
 import {withAlpha} from './theme';
 
@@ -53,9 +56,23 @@ export function sessionUnitFor(timeframe: Timeframe): SessionUnit {
  * Returns a key identifying the session that contains a time.
  * @param timeMs UTC ms.
  * @param unit Session unit.
+ * @param timeZone Time zone of the dates (`UTC` for 24x7 markets).
  * @return Key; equal keys mean the same session.
  */
-function sessionKey(timeMs: number, unit: SessionUnit): number {
+function sessionKey(
+  timeMs: number,
+  unit: SessionUnit,
+  timeZone: string
+): number {
+  if (timeZone !== 'UTC') {
+    const p = zonedParts(timeMs, timeZone);
+    const day = Date.UTC(p.year, p.month - 1, p.day) / 86_400_000;
+    if (unit === 'year') return p.year;
+    if (unit === 'month') return p.year * 12 + p.month - 1;
+    if (unit === 'minute') return day * 1440 + p.hour * 60 + p.minute;
+    if (unit === 'hour') return day * 24 + p.hour;
+    return unit === 'week' ? Math.floor((day + 3) / 7) : day;
+  }
   const date = new Date(timeMs);
   if (unit === 'year') return date.getUTCFullYear();
   if (unit === 'month') return date.getUTCFullYear() * 12 + date.getUTCMonth();
@@ -70,17 +87,19 @@ function sessionKey(timeMs: number, unit: SessionUnit): number {
  * Finds the first bar of every session after the first visible one.
  * @param times Bar start times in ascending order.
  * @param timeframe Chart timeframe.
+ * @param timeZone Exchange time zone (default `UTC`, 24x7 markets).
  * @return Bar start times where a new session begins.
  */
 export function sessionBoundaries(
   times: readonly number[],
-  timeframe: Timeframe
+  timeframe: Timeframe,
+  timeZone = 'UTC'
 ): number[] {
   const unit = sessionUnitFor(timeframe);
   const result: number[] = [];
   let previous: number | null = null;
   for (const time of times) {
-    const key = sessionKey(time, unit);
+    const key = sessionKey(time, unit, timeZone);
     if (previous !== null && key !== previous) result.push(time);
     previous = key;
   }
@@ -89,14 +108,24 @@ export function sessionBoundaries(
 
 /**
  * Formats a separator label such as `14:05`, `Tue 12`, `Mon 9 Jun`,
- * `Jun 2026` or `2026`. Minute and hour separators at UTC midnight name the
+ * `Jun 2026` or `2026`. Minute and hour separators at midnight name the
  * day instead.
  * @param timeMs Session start (UTC ms).
  * @param unit Session unit.
+ * @param timeZone Time zone of the label (default `UTC`).
  * @return Label.
  */
-export function sessionLabel(timeMs: number, unit: SessionUnit): string {
-  const date = new Date(timeMs);
+export function sessionLabel(
+  timeMs: number,
+  unit: SessionUnit,
+  timeZone = 'UTC'
+): string {
+  let shifted = timeMs;
+  if (timeZone !== 'UTC') {
+    const p = zonedParts(timeMs, timeZone);
+    shifted = Date.UTC(p.year, p.month - 1, p.day, p.hour, p.minute, p.second);
+  }
+  const date = new Date(shifted);
   const day = date.getUTCDate();
   const month = MONTHS[date.getUTCMonth()] ?? '';
   const weekday = WEEKDAYS[date.getUTCDay()] ?? '';
@@ -115,6 +144,8 @@ export interface SessionSeparatorOptions {
   times: () => readonly number[];
   /** Chart timeframe. */
   timeframe: () => Timeframe;
+  /** Exchange time zone (`UTC` for 24x7 markets; default `UTC`). */
+  timeZone?: () => string;
   /** Line and label color (CSS hex). */
   color: () => string;
   /** Font family for labels. */
@@ -129,6 +160,7 @@ export interface SessionSeparatorOptions {
  * @param unit Session unit (for labels).
  * @param color Line color.
  * @param fontFamily Label font.
+ * @param timeZone Time zone of the labels (default `UTC`).
  */
 export function paintSessionSeparators(
   ctx: CanvasRenderingContext2D,
@@ -136,7 +168,8 @@ export function paintSessionSeparators(
   boundaries: readonly number[],
   unit: SessionUnit,
   color: string,
-  fontFamily: string
+  fontFamily: string,
+  timeZone = 'UTC'
 ): void {
   ctx.save();
   ctx.strokeStyle = withAlpha(color, 0.55);
@@ -155,7 +188,11 @@ export function paintSessionSeparators(
     ctx.stroke();
     if (x - lastLabelX > 56) {
       ctx.fillStyle = withAlpha(color, 0.9);
-      ctx.fillText(sessionLabel(time, unit), px + 3, transform.height - 3);
+      ctx.fillText(
+        sessionLabel(time, unit, timeZone),
+        px + 3,
+        transform.height - 3
+      );
       lastLabelX = x;
     }
   }
@@ -175,13 +212,15 @@ export function createSessionSeparatorLayer(
     zIndex: 5,
     draw(ctx, transform) {
       const timeframe = options.timeframe();
+      const timeZone = options.timeZone?.() ?? 'UTC';
       paintSessionSeparators(
         ctx,
         transform,
-        sessionBoundaries(options.times(), timeframe),
+        sessionBoundaries(options.times(), timeframe, timeZone),
         sessionUnitFor(timeframe),
         options.color(),
-        options.fontFamily()
+        options.fontFamily(),
+        timeZone
       );
     },
   };

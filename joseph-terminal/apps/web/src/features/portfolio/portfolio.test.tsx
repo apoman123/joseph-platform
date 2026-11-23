@@ -251,7 +251,7 @@ describe('portfolio', () => {
     ).toBeInTheDocument();
   });
 
-  it('contributes six bottom-panel tabs and disposes them', async () => {
+  it('contributes seven bottom-panel tabs and disposes them', async () => {
     const ctx = createFakeContext();
     const dispose = await PORTFOLIO_FEATURE.activate(ctx);
     expect(ctx.contributions('bottom-panel').map(c => c.title)).toEqual([
@@ -261,6 +261,7 @@ describe('portfolio', () => {
       'Order history',
       'Audit',
       'Risk controls',
+      'Accounts',
     ]);
     dispose();
     expect(ctx.contributions('bottom-panel')).toHaveLength(0);
