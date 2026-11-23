@@ -26,6 +26,12 @@ from the venue's public trades:
   or older than the segment's coverage, are dropped and counted; flat runs
   are emitted only within the retention window, so the empty seconds of a
   very quiet market stay gaps instead of flooding memory.
+* Sessions: buckets follow the instrument's session calendar
+  (``sessions.for_instrument``). Exchange-listed instruments get bars only
+  inside sessions: flat runs never cross the time between sessions, a print
+  up to ``close_grace_ms`` after the close (a closing auction stamped at the
+  close) belongs to the session's last bar, and any other trade outside a
+  session is dropped and counted in ``out_of_session``.
 """
 
 from __future__ import annotations
@@ -39,6 +45,7 @@ from joseph.domain import decimals
 from joseph.domain import instruments
 from joseph.domain import market
 from joseph.domain import quality
+from joseph.domain import sessions
 from joseph.domain import timeframes
 from joseph.market_data.domain import trades as trades_lib
 
@@ -175,8 +182,12 @@ class TradeBarBuilder:
         timeframe: Seconds resolution.
         source: Provenance label of emitted bars (e.g. ``binance.trades``).
         feed_state: Provenance state of emitted bars.
+        buy_volume_method: How the trades' aggressor side was obtained
+            (``classified`` on stock exchanges), stamped on emitted bars.
+        calendar: Session calendar of the instrument.
         late_dropped: Trades dropped as older than coverage or retention.
         duplicates: Trades ignored as already seen.
+        out_of_session: Trades dropped because no session bar holds them.
     """
 
     def __init__(
@@ -188,6 +199,7 @@ class TradeBarBuilder:
         feed_state: quality.FeedState = quality.FeedState.LIVE,
         retention_bars: int = 300,
         dedupe_capacity: int = 50_000,
+        buy_volume_method: market.BuyVolumeMethod | None = None,
     ) -> None:
         """Initializes an empty builder (no coverage yet).
 
@@ -198,6 +210,8 @@ class TradeBarBuilder:
             feed_state: Provenance state of emitted bars.
             retention_bars: Bars kept for late trades behind the newest one.
             dedupe_capacity: Trade ids remembered for de-duplication.
+            buy_volume_method: Origin of the aggressor side (``None`` means
+                the venue's taker flag).
 
         Raises:
             ValueError: For non-seconds timeframes or a bad retention.
@@ -210,8 +224,11 @@ class TradeBarBuilder:
         self.timeframe = timeframe
         self.source = source
         self.feed_state = feed_state
+        self.buy_volume_method = buy_volume_method
+        self.calendar = sessions.for_instrument(instrument_id)
         self.late_dropped = 0
         self.duplicates = 0
+        self.out_of_session = 0
         self._retention = retention_bars
         self._seen = trades_lib.RecentIds(dedupe_capacity)
         self._buckets: dict[int, _Bucket] = {}
@@ -247,10 +264,49 @@ class TradeBarBuilder:
         self._complete_from = complete_from_ms
         self._partial = None
         if complete_from_ms is not None:
-            aligned = self.timeframe.floor(complete_from_ms)
-            if aligned != complete_from_ms:
+            aligned = self._bar_of(complete_from_ms)
+            if aligned is not None and aligned != complete_from_ms:
                 self._partial = aligned
         return discarded
+
+    def _bar_of(self, ts_ms: int) -> int | None:
+        """Returns the start of the bar that holds a trade time.
+
+        Args:
+            ts_ms: Venue trade time.
+
+        Returns:
+            Bar start, or ``None`` between sessions (outside the closing
+            grace).
+        """
+        if self.calendar.continuous:
+            return self.timeframe.floor(ts_ms)
+        try:
+            start = self.calendar.floor(self.timeframe, ts_ms)
+        except ValueError:
+            return None
+        end = self.calendar.end_of(self.timeframe, start)
+        if ts_ms < end:
+            return start
+        grace = self.calendar.close_grace_ms
+        if ts_ms < end + grace and not self.calendar.is_open(end):
+            return start
+        return None
+
+    def _settled_ms(self, start: int) -> int:
+        """Returns when no further trade can belong to a bar.
+
+        Args:
+            start: Bar start.
+
+        Returns:
+            The bar end, plus the closing grace for a session's last bar.
+        """
+        end = self.calendar.end_of(self.timeframe, start)
+        grace = self.calendar.close_grace_ms
+        if grace and not self.calendar.is_open(end):
+            return end + grace
+        return end
 
     def add(
         self, trades: Iterable[market.Trade], now_ms: int
@@ -275,14 +331,20 @@ class TradeBarBuilder:
                 self.duplicates += 1
                 continue
             ts = trade.venue_event_ts_ms
+            bar_start = self._bar_of(ts)
             if self._complete_from is None:
                 self._complete_from = ts
-                self._partial = self.timeframe.floor(ts)
-            start = self.timeframe.floor(ts)
+                self._partial = bar_start
+            if bar_start is None:
+                self.out_of_session += 1
+                continue
+            start = bar_start
             if ts < self._complete_from or (
                 self._starts
                 and start
-                < self.timeframe.shift(self._starts[-1], -self._retention)
+                < self.calendar.shift(
+                    self.timeframe, self._starts[-1], -self._retention
+                )
             ):
                 self.late_dropped += 1
                 continue
@@ -323,7 +385,7 @@ class TradeBarBuilder:
         touched: set[int] = set()
         for start in self._starts:
             bucket = self._buckets[start]
-            if not bucket.final and self.timeframe.end_of(start) <= proven_ms:
+            if not bucket.final and self._settled_ms(start) <= proven_ms:
                 bucket.final = True
                 touched.add(start)
         return self._emit(touched, now_ms) if touched else []
@@ -354,7 +416,9 @@ class TradeBarBuilder:
             Changed bars, ascending.
         """
         horizon = (
-            self.timeframe.shift(self._starts[-1], -self._retention)
+            self.calendar.shift(
+                self.timeframe, self._starts[-1], -self._retention
+            )
             if self._starts
             else None
         )
@@ -367,12 +431,12 @@ class TradeBarBuilder:
                 _, nxt = self._neighbors(anchor)
                 if nxt is None:
                     continue
-                cursor = self.timeframe.end_of(anchor)
+                cursor = self.calendar.shift(self.timeframe, anchor, 1)
                 if horizon is not None and cursor < horizon:
                     cursor = horizon
                 while cursor < nxt:
                     candidates.add(cursor)
-                    cursor = self.timeframe.end_of(cursor)
+                    cursor = self.calendar.shift(self.timeframe, cursor, 1)
         out: list[market.Candle] = []
         for start in sorted(candidates):
             candle = self._candle_at(start, now_ms)
@@ -395,7 +459,7 @@ class TradeBarBuilder:
         Returns:
             Candle, or ``None`` when the bar is partial or not fillable.
         """
-        end = self.timeframe.end_of(start)
+        end = self.calendar.end_of(self.timeframe, start)
         bucket = self._buckets.get(start)
         if bucket is not None:
             if start == self._partial:
@@ -420,6 +484,9 @@ class TradeBarBuilder:
                 taker_buy_base_volume=(
                     None if bucket.unknown_side else bucket.taker
                 ),
+                taker_buy_method=(
+                    None if bucket.unknown_side else self.buy_volume_method
+                ),
             )
         prev, nxt = self._neighbors(start)
         if prev is None or nxt is None:
@@ -442,13 +509,16 @@ class TradeBarBuilder:
             quote_turnover=decimals.ZERO,
             trade_count=0,
             taker_buy_base_volume=decimals.ZERO,
+            taker_buy_method=self.buy_volume_method,
         )
 
     def _evict(self) -> None:
         """Forgets buckets and emitted keys behind the retention window."""
         if not self._starts:
             return
-        horizon = self.timeframe.shift(self._starts[-1], -self._retention)
+        horizon = self.calendar.shift(
+            self.timeframe, self._starts[-1], -self._retention
+        )
         cut = bisect.bisect_left(self._starts, horizon)
         if cut > 0:
             for start in self._starts[:cut]:
@@ -467,6 +537,7 @@ def bars_from_coverage(
     source: str,
     now_ms: int,
     feed_state: quality.FeedState = quality.FeedState.LIVE,
+    buy_volume_method: market.BuyVolumeMethod | None = None,
 ) -> list[market.Candle]:
     """Builds the bars of a complete trade history interval.
 
@@ -481,13 +552,17 @@ def bars_from_coverage(
         source: Provenance label.
         now_ms: Receipt time.
         feed_state: Provenance state.
+        buy_volume_method: Origin of the trades' aggressor side.
 
     Returns:
         Ascending bars inside the coverage.
     """
-    span = timeframe.bars_between(
-        timeframe.floor(coverage.from_ms), coverage.to_ms
-    )
+    calendar = sessions.for_instrument(instrument_id)
+    try:
+        first = calendar.floor(timeframe, coverage.from_ms)
+    except ValueError:
+        first = coverage.from_ms
+    span = calendar.bars_between(timeframe, first, coverage.to_ms)
     builder = TradeBarBuilder(
         instrument_id,
         timeframe,
@@ -495,6 +570,7 @@ def bars_from_coverage(
         feed_state=feed_state,
         retention_bars=max(1, span + 1),
         dedupe_capacity=max(1, len(coverage.trades)),
+        buy_volume_method=buy_volume_method,
     )
     builder.start_segment(coverage.from_ms)
     out: dict[int, market.Candle] = {}

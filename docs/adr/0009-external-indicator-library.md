@@ -12,11 +12,11 @@ The owner's Pine scripts in `apoman123/PineScripts` are the reference for every 
 - The market engine depends on it as a git dependency **pinned to a commit** (`[tool.uv.sources]`, `uv.lock`). Upgrading indicators is an explicit, reviewable `rev` bump.
 - `joseph/indicators/packaged/` contains only adapters to the SDK: settings mirroring Pine inputs, data streams, decimal conversion at the boundary, deterministic AOI ids, ended-AOI inference, and the published-values contract. An import-linter contract keeps adapters free of infrastructure.
 - Purity and checkpoints: library objects are mutable, so the newest state mutates shared live objects (fast path) while every state can rebuild its own objects from a pickled base taken every 32 bars plus a persistent log of the bar inputs since (the library is deterministic). Checkpoints are unpickled with an allowlist that only admits classes defined in `smc_indicators` / the adapter package and inert standard types.
-- CI and images reach the private repository with a dedicated read-only deploy key (`PINESCRIPTS_DEPLOY_KEY`), an ssh-agent and BuildKit SSH forwarding. GitHub's host key is pinned.
+- CI, Dependabot and images reach the private repository over HTTPS with a fine-grained token limited to PineScripts with Contents: read-only (`PINESCRIPTS_TOKEN`, an Actions and a Dependabot secret): a URL rewrite scoped to that repository in CI, a `git` registry for Dependabot, a BuildKit secret for images. Local builds may use SSH forwarding instead. (Amended 2026-11-23: replaces the earlier deploy key and SSH forwarding; Dependabot's `git` registries accept only HTTPS credentials.)
 
 ## Consequences
 
 - One source of truth per indicator; Pine changes are ported once and every platform consumer (charts, strategies, backtests, alerts) moves together on the next `rev` bump.
-- CI fails until the deploy key secret exists (clear error message). Builds need SSH access to GitHub.
+- CI fails until the token secret exists (clear error message). The token expires and must be rotated (`docs/CI_CD.md`).
 - The LuxAlgo-derived OTE module is CC BY-NC-SA 4.0: the platform must stay non-commercial while it is enabled (see `reports/LICENSING_REPORT.md`).
 - All eight plugins together take about 1.7 ms per 5m frame (5,000 frames in under 9 s, measured by `test_performance.py`), fast enough for live frames and multi-month backtests.

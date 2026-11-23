@@ -45,11 +45,12 @@
     },
     "IndicatorMethod": {
       "title": "IndicatorMethod",
-      "description": "`pine_parity` reproduces the reference Pine semantics; `trade` uses venue trades and is never presented as parity.",
+      "description": "`pine_parity` reproduces the reference Pine semantics; `trade` uses venue trades with a published aggressor side (true delta); `trade_classification` uses trades classified against the quote (Lee-Ready / quote rule) on stock exchanges that publish no aggressor side, an estimate distinct from true delta. Neither trade method is ever presented as parity.",
       "type": "string",
       "enum": [
         "pine_parity",
-        "trade"
+        "trade",
+        "trade_classification"
       ]
     },
     "AoiRecord": {
