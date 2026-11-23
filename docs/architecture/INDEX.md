@@ -1,7 +1,7 @@
 # Architecture index
 
 ```text
-Browser: joseph-terminal (PUBLIC, Next.js)            Private: Python services
+Browser: joseph-terminal (Next.js)                    Server side: Python services
 ┌──────────────────────────────────────────┐         ┌────────────────────────────────────────────┐
 │ apps/web  composition root + React views │  HTTP   │ joseph-market-engine  :8000                │
 │   features/* (chart, drawing, watchlist, │  + WS   │   market_data → screening                  │
@@ -27,7 +27,7 @@ Browser: joseph-terminal (PUBLIC, Next.js)            Private: Python services
 | Risk gateway, OMS, vault, audit, venue and broker adapters | `joseph-execution-engine/src/joseph_execution/` |
 | Cross-service system tests | `system-tests/` |
 | Composition roots | `*/bootstrap.py`, `joseph-terminal/apps/web/src/composition/` |
-| ADRs | `docs/adr/`; the terminal carries identical copies of 0001–0003, 0007 and 0008 in `joseph-terminal/docs/adr/` for its public split (keep them in sync) |
+| ADRs | `docs/adr/`; the terminal carries identical copies of 0001–0003, 0007 and 0008 in `joseph-terminal/docs/adr/` for its public split (keep them in sync). "Private" in ADRs 0001–0002 means server side, not repository visibility |
 
 ## Dependency rules (enforced in CI)
 

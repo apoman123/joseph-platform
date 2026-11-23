@@ -18,7 +18,7 @@ RUN apt-get update \
 # market data (JOSEPH_TW_DATA_SOURCE=sinopac); none by default.
 ARG UV_EXTRAS=""
 WORKDIR /app
-COPY pyproject.toml uv.lock README.md ./
+COPY pyproject.toml uv.lock README.md LICENSE ./
 # The URL rewrite lives in GIT_CONFIG_* variables of this RUN only.
 RUN --mount=type=cache,target=/root/.cache/uv \
     --mount=type=secret,id=pinescripts_token,required=false \

@@ -4,7 +4,7 @@ version = "0.5.0"
 description = "Joseph execution engine: private trust boundary for accounts, credentials, risk gateway, OMS, reconciliation, audit and kill switch."
 readme = "README.md"
 requires-python = ">=3.12"
-license = { text = "Proprietary - private repository" }
+license = { text = "MIT" }
 dependencies = [
   "fastapi>=0.115,<1",
   "uvicorn[standard]>=0.32,<1",

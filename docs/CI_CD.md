@@ -1,6 +1,6 @@
 # CI/CD
 
-Repository: `git@github.com:apoman123/joseph-platform.git` (private); this checkout pushes with `core.sshCommand` set to the apoman123 key. Workflows live in `.github/workflows/` and run on every push, whichever project changed.
+Repository: `git@github.com:apoman123/joseph-platform.git` (public, MIT); this checkout pushes with `core.sshCommand` set to the apoman123 key. Workflows live in `.github/workflows/` and run on every push, whichever project changed.
 
 ## Pipelines
 
@@ -28,12 +28,13 @@ push ─► terminal ─► terminal-e2e ─┐
 ## One-time repository setup
 
 1. **Branch protection on `main`:** require PRs and the checks `Terminal — lint, types, unit, contracts, boundaries, build`, `Terminal — browser system tests (DEMO) + accessibility`, both `Engine — …` jobs, `Cross-service system tests`, `Full-stack browser tests (web + both engines)` and the CodeQL jobs.
-2. **Environments** `staging` and `production`, with required reviewers on `production`.
+2. **Environments** `staging` and `production`: required reviewers (you) on both and deployment branches limited to `main` (and `v*` tags for `production`).
+   **Fork pull requests:** Settings → Actions → General → require approval for all outside contributors. Forks get no secrets, so their market-engine jobs stop at the indicator step with a "Fork pull request" error; verify such changes locally (`make ci`). Forks never publish images or deploy.
 3. **Variables:** `STAGING_SSH_HOST`, `_SSH_USER`, `_DEPLOY_DIR`, `_WEB_URL`, `_HEALTH_URLS` (space-separated), and the same with `PRODUCTION_`. Deploys are skipped while the host is empty.
 4. **Secrets:** `STAGING_SSH_KEY`, `STAGING_SSH_KNOWN_HOSTS` (`ssh-keyscan -H host`) and the `PRODUCTION_` pair. No application secrets go to GitHub.
 5. **Indicator library access** (below); CI fails until done.
-6. **Packages:** set GHCR visibility after the first publish (private by default).
-7. **Private repo:** CodeQL and dependency review need GitHub Advanced Security plus the variable `CODE_SCANNING_ENABLED=true`. Artifact attestations need a public repo or Enterprise Cloud; images still carry BuildKit SBOM and provenance.
+6. **Packages:** the engine images contain the private indicator library, so `joseph-market-engine` and `joseph-execution-engine` must stay private packages; the images job refuses to publish into, and fails after creating, a package anyone can pull (`.github/actions/private-image`). `joseph-terminal` may be public.
+7. **Code scanning:** on the public repository CodeQL, dependency review and artifact attestations run automatically (a private repository needs GitHub Advanced Security plus the variable `CODE_SCANNING_ENABLED=true`).
 
 ### Indicator library access
 

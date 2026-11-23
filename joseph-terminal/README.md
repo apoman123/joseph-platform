@@ -37,7 +37,7 @@ NEXT_PUBLIC_DEV_TOKEN=dev-local-token   # development only; production uses a se
 
 ## Scripts
 
-`pnpm lint` · `pnpm typecheck` · `pnpm test` · `pnpm test:e2e` (Playwright + axe, DEMO) · `pnpm test:e2e:fullstack` (needs the private engines) · `pnpm contracts:gen|check` · `pnpm arch:check` · `pnpm secrets:scan` · `pnpm licenses:check` · `pnpm build`
+`pnpm lint` · `pnpm typecheck` · `pnpm test` · `pnpm test:e2e` (Playwright + axe, DEMO) · `pnpm test:e2e:fullstack` (needs both engines) · `pnpm contracts:gen|check` · `pnpm arch:check` · `pnpm secrets:scan` · `pnpm licenses:check` · `pnpm build`
 
 Code follows the Google TypeScript Style Guide (ESLint/Prettier). Extending: `docs/PLUGIN_AUTHORING.md`. Architecture decisions: `docs/adr/`.
 

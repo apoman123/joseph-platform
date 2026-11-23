@@ -1,7 +1,8 @@
 # Threat model (STRIDE, compact)
 
 **Assets:** venue and broker credentials, the ability to place orders, strategy IP, tenant data, audit integrity.
-**Trust zones:** browser (untrusted) → market engine (private; data keys only, no trading credentials) → execution engine (private; encrypted credentials) → venues and brokers.
+**Public source:** no control relies on secrecy of code; credentials, keys and deployment settings live outside the repository (vault, `deploy/.env`, GitHub Secrets), and the private indicator library ships only in private images.
+**Trust zones:** browser (untrusted) → market engine (server side; data keys only, no trading credentials) → execution engine (server side; encrypted credentials) → venues and brokers.
 
 | Threat | Example | Mitigation | Verified by |
 |---|---|---|---|

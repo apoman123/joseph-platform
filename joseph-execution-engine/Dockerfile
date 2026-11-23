@@ -9,7 +9,7 @@ ENV UV_COMPILE_BYTECODE=1 UV_LINK_MODE=copy UV_PYTHON_DOWNLOADS=never
 # are optional, e.g. UV_EXTRAS="--extra ibkr --extra sinopac".
 ARG UV_EXTRAS=""
 WORKDIR /app
-COPY pyproject.toml uv.lock README.md ./
+COPY pyproject.toml uv.lock README.md LICENSE ./
 RUN --mount=type=cache,target=/root/.cache/uv \
     uv sync --frozen --no-dev --extra venues --no-install-project ${UV_EXTRAS}
 COPY src ./src

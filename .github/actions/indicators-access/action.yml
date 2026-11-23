@@ -19,8 +19,13 @@ runs:
     - shell: bash
       env:
         TOKEN: ${{ inputs.token }}
+        FORK_PR: ${{ github.event.pull_request.head.repo.fork || false }}
       run: |
         set -euo pipefail
+        if [ -z "${TOKEN}" ] && [ "${FORK_PR}" = "true" ]; then
+          echo "::error title=Fork pull request::Pull requests from forks get no secrets, so the private apoman123/PineScripts indicator library cannot be fetched and the market engine cannot be built here. The terminal jobs still run; a maintainer verifies the rest locally (make ci)."
+          exit 1
+        fi
         if [ -z "${TOKEN}" ]; then
           echo "::error title=Missing PINESCRIPTS_TOKEN::The market engine depends on the private apoman123/PineScripts repository. Create a fine-grained token with Contents: read-only on PineScripts only and store it as the Actions secret PINESCRIPTS_TOKEN (and the Dependabot secret of the same name); see docs/CI_CD.md."
           exit 1

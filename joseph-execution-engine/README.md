@@ -1,4 +1,4 @@
-# Joseph Execution Engine (private)
+# Joseph Execution Engine
 
 The trust boundary that owns accounts, credentials, the Risk Gateway, the OMS, reconciliation, the audit log and kill switches. Every manual, chart, emergency and strategy order takes one path:
 

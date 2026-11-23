@@ -4,7 +4,7 @@ version = "0.5.0"
 description = "Joseph market engine: venue market data, qualification filter, indicator plugins, strategy AST evaluation, signals, alerts and backtests."
 readme = "README.md"
 requires-python = ">=3.12"
-license = { text = "Proprietary - private repository" }
+license = { text = "MIT" }
 dependencies = [
   "fastapi>=0.115,<1",
   "uvicorn[standard]>=0.32,<1",

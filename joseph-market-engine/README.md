@@ -1,4 +1,4 @@
-# Joseph Market Engine (private)
+# Joseph Market Engine
 
 Market data, perpetual qualification, indicator plugins (eight Pine ports, two native studies), the rule-AST evaluator, signals, alerts and backtests. FastAPI on :8000. Settings: [`docs/OPERATIONS.md`](../docs/OPERATIONS.md#market-engine).
 
