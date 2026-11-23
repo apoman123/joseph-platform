@@ -1,4 +1,11 @@
 version: 2
+# The market engine's git dependency on the private apoman123/PineScripts.
+registries:
+  pinescripts:
+    type: git
+    url: https://github.com
+    username: x-access-token
+    password: ${{secrets.PINESCRIPTS_TOKEN}}
 updates:
   - package-ecosystem: npm
     directory: /joseph-terminal
@@ -11,6 +18,7 @@ updates:
         patterns: ['react', 'react-dom', 'next', '@types/react*']
   - package-ecosystem: uv
     directory: /joseph-market-engine
+    registries: [pinescripts]
     schedule: {interval: weekly}
   - package-ecosystem: uv
     directory: /joseph-execution-engine
