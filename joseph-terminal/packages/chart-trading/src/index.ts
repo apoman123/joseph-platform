@@ -4,6 +4,7 @@
  * Builds order intent drafts and view models only. This package holds no
  * credentials, signs nothing and never calls a venue.
  */
+export * from './equity';
 export * from './format';
 export * from './intent-builder';
 export * from './risk';

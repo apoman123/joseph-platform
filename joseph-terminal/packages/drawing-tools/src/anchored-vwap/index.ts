@@ -17,10 +17,10 @@
  *   the anchor bar on; for each enabled band, polylines through `upper_k`
  *   and `lower_k`; optional fill between the band 1 lines.
  * - Status: while loading or after a failed request a notice replaces the
- *   lines. The engine caps a series at 2000 bars; when the anchor is older
- *   its values come back null and the notice reads "Anchor is more than
- *   2000 bars back — move it closer". A dashed vertical marker shows the
- *   anchor bar in every non-drawn state so it can be dragged.
+ *   lines. The engine computes from anchors up to 50 000 bars back; when it
+ *   refuses an anchor the notice shows the engine's own message. A dashed
+ *   vertical marker shows the anchor bar in every non-drawn state so it can
+ *   be dragged.
  * - Hit-testing: the handle first, then the VWAP and band polylines (or
  *   the vertical marker when nothing is drawn).
  * - Handles: one, at the VWAP of the anchor bar when known, otherwise at
@@ -30,12 +30,12 @@
  *   `show_labels` tags the latest value. Inputs: band 1-3 multipliers.
  */
 import {
-  timeframeEnd,
+  CONTINUOUS_CALENDAR,
+  type BarCalendar,
   type DrawingDocument,
   type Timeframe,
 } from '@joseph/contracts';
 import {
-  ANCHOR_TOO_FAR_MESSAGE,
   anchorPoints,
   applyStroke,
   barStartAt,
@@ -137,15 +137,17 @@ export type VwapView =
  * Builds the engine request for a drawing.
  * @param doc Drawing.
  * @param timeframe Chart timeframe.
+ * @param calendar Session calendar of the instrument (default UTC bars).
  * @return Request, or null without an anchor.
  */
 export function anchoredVwapRequest(
   doc: Pick<DrawingDocument, 'anchors' | 'props'>,
-  timeframe: Timeframe
+  timeframe: Timeframe,
+  calendar?: BarCalendar
 ): DrawingSeriesRequest | null {
   const anchor = doc.anchors[0];
   if (!anchor) return null;
-  const anchorMs = barStartAt(anchor.time_ms, timeframe);
+  const anchorMs = barStartAt(anchor.time_ms, timeframe, calendar);
   const bands = Object.fromEntries(
     ANCHORED_VWAP_INPUTS.map(input => [
       input.key,
@@ -208,15 +210,17 @@ export function vwapView(series: DrawingSeriesState | null): VwapView {
     const pending =
       points.length === 0 &&
       (series.asOfMs === null ||
-        series.asOfMs <= timeframeEnd(series.timeframe, anchorBarMs));
+        series.asOfMs <=
+          (series.calendar ?? CONTINUOUS_CALENDAR).endOf(
+            series.timeframe,
+            anchorBarMs
+          ));
     return {
       kind: 'notice',
       anchorBarMs,
       text: pending
         ? 'Waiting for the anchor bar to close'
-        : points.length === 0
-          ? 'No engine values for this anchor yet'
-          : ANCHOR_TOO_FAR_MESSAGE,
+        : 'No engine values for this anchor yet',
     };
   }
   const bands: VwapBand[] = [];
@@ -317,7 +321,8 @@ export const anchoredVwapTool: ToolPlugin = {
   }),
   defaultProps: () => inputDefaults(ANCHORED_VWAP_INPUTS),
   inputs: ANCHORED_VWAP_INPUTS,
-  seriesRequest: (doc, env) => anchoredVwapRequest(doc, env.timeframe),
+  seriesRequest: (doc, env) =>
+    anchoredVwapRequest(doc, env.timeframe, env.calendar),
   render(ctx, doc, transform, state) {
     const view = vwapView(state.series ?? null);
     const handle = handleOf(doc, transform, view);
@@ -413,8 +418,8 @@ export const anchoredVwapTool: ToolPlugin = {
   dataRows(_doc, barStartMs, {series, tickSize}) {
     const view = vwapView(series);
     if (view.kind === 'notice') {
-      return view.text === ANCHOR_TOO_FAR_MESSAGE
-        ? [{label: 'Anchored VWAP', value: 'anchor > 2000 bars back'}]
+      return series?.refusal
+        ? [{label: 'Anchored VWAP', value: 'refused by the engine'}]
         : [];
     }
     const point = seriesPointAt(series?.points ?? [], barStartMs);

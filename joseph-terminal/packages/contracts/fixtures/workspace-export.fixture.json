@@ -1,0 +1,471 @@
+{
+  "schema": "workspace.schema.json",
+  "definition": "WorkspaceExport",
+  "valid": [
+    {
+      "format": "joseph.workspace-export",
+      "schema_version": 2,
+      "exported_at_ms": 1795260000000,
+      "workspace": {
+        "schema_version": 1,
+        "workspace_id": "default",
+        "name": "My workspace",
+        "layout": "1",
+        "sync": {
+          "crosshair": true,
+          "instrument": false,
+          "timeframe": false,
+          "viewport": false
+        },
+        "active_chart_id": "chart-1",
+        "charts": [
+          {
+            "chart_id": "chart-1",
+            "instrument_id": "mock:perp:BTCUSD",
+            "timeframe": "5m",
+            "chart_type": "candles",
+            "price_scale": "linear",
+            "show_volume": true,
+            "indicator_layers": [
+              {
+                "plugin_id": "fvg_ifvg",
+                "visible": true
+              }
+            ],
+            "link_group": null,
+            "feed_mode": "AUTO",
+            "visible_range": null
+          }
+        ],
+        "favorites": {
+          "timeframes": [
+            "5m",
+            "1h"
+          ],
+          "instruments": []
+        },
+        "panels": {},
+        "updated_at_ms": 1795252800000
+      },
+      "drawings": [
+        {
+          "instrument_id": "mock:perp:BTCUSD",
+          "drawings": [
+            {
+              "schema_version": 1,
+              "drawing_id": "d-1",
+              "tool_id": "trendline",
+              "tool_version": 1,
+              "instrument_id": "mock:perp:BTCUSD",
+              "timeframe": null,
+              "anchors": [
+                {
+                  "time_ms": 1795252800000,
+                  "price": "94000"
+                },
+                {
+                  "time_ms": 1795260000000,
+                  "price": "95500"
+                }
+              ],
+              "style": {
+                "color": "#E66FD2",
+                "line_width": 1,
+                "line_style": "solid"
+              },
+              "text": null,
+              "props": {},
+              "locked": false,
+              "visible": true,
+              "z_index": 0,
+              "created_at_ms": 1795252800000,
+              "updated_at_ms": 1795252800000
+            },
+            {
+              "schema_version": 1,
+              "drawing_id": "d-2",
+              "tool_id": "removed-tool",
+              "tool_version": 1,
+              "instrument_id": "mock:perp:BTCUSD",
+              "timeframe": null,
+              "anchors": [
+                {
+                  "time_ms": 1795252800000,
+                  "price": "94000"
+                },
+                {
+                  "time_ms": 1795260000000,
+                  "price": "95500"
+                }
+              ],
+              "style": {
+                "color": "#E66FD2",
+                "line_width": 1,
+                "line_style": "solid"
+              },
+              "text": null,
+              "props": {},
+              "locked": false,
+              "visible": true,
+              "z_index": 0,
+              "created_at_ms": 1795252800000,
+              "updated_at_ms": 1795252800000
+            }
+          ],
+          "opaque": [
+            {
+              "schema_version": 3,
+              "drawing_id": "future",
+              "shape": "from a newer build"
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "format": "joseph.workspace-export",
+      "schema_version": 2,
+      "exported_at_ms": 1795260000000,
+      "workspace": {
+        "schema_version": 1,
+        "workspace_id": "default",
+        "name": "My workspace",
+        "layout": "1",
+        "sync": {
+          "crosshair": true,
+          "instrument": false,
+          "timeframe": false,
+          "viewport": false
+        },
+        "active_chart_id": "chart-1",
+        "charts": [
+          {
+            "chart_id": "chart-1",
+            "instrument_id": "mock:perp:BTCUSD",
+            "timeframe": "5m",
+            "chart_type": "candles",
+            "price_scale": "linear",
+            "show_volume": true,
+            "indicator_layers": [
+              {
+                "plugin_id": "fvg_ifvg",
+                "visible": true
+              }
+            ],
+            "link_group": null,
+            "feed_mode": "AUTO",
+            "visible_range": null
+          }
+        ],
+        "favorites": {
+          "timeframes": [
+            "5m",
+            "1h"
+          ],
+          "instruments": []
+        },
+        "panels": {},
+        "updated_at_ms": 1795252800000
+      },
+      "drawings": []
+    }
+  ],
+  "invalid": [
+    {
+      "format": "joseph.workspace-export",
+      "schema_version": 1,
+      "exported_at_ms": 1795260000000,
+      "workspace": {
+        "schema_version": 1,
+        "workspace_id": "default",
+        "name": "My workspace",
+        "layout": "1",
+        "sync": {
+          "crosshair": true,
+          "instrument": false,
+          "timeframe": false,
+          "viewport": false
+        },
+        "active_chart_id": "chart-1",
+        "charts": [
+          {
+            "chart_id": "chart-1",
+            "instrument_id": "mock:perp:BTCUSD",
+            "timeframe": "5m",
+            "chart_type": "candles",
+            "price_scale": "linear",
+            "show_volume": true,
+            "indicator_layers": [
+              {
+                "plugin_id": "fvg_ifvg",
+                "visible": true
+              }
+            ],
+            "link_group": null,
+            "feed_mode": "AUTO",
+            "visible_range": null
+          }
+        ],
+        "favorites": {
+          "timeframes": [
+            "5m",
+            "1h"
+          ],
+          "instruments": []
+        },
+        "panels": {},
+        "updated_at_ms": 1795252800000
+      },
+      "drawings": []
+    },
+    {
+      "format": "something-else",
+      "schema_version": 2,
+      "exported_at_ms": 1795260000000,
+      "workspace": {
+        "schema_version": 1,
+        "workspace_id": "default",
+        "name": "My workspace",
+        "layout": "1",
+        "sync": {
+          "crosshair": true,
+          "instrument": false,
+          "timeframe": false,
+          "viewport": false
+        },
+        "active_chart_id": "chart-1",
+        "charts": [
+          {
+            "chart_id": "chart-1",
+            "instrument_id": "mock:perp:BTCUSD",
+            "timeframe": "5m",
+            "chart_type": "candles",
+            "price_scale": "linear",
+            "show_volume": true,
+            "indicator_layers": [
+              {
+                "plugin_id": "fvg_ifvg",
+                "visible": true
+              }
+            ],
+            "link_group": null,
+            "feed_mode": "AUTO",
+            "visible_range": null
+          }
+        ],
+        "favorites": {
+          "timeframes": [
+            "5m",
+            "1h"
+          ],
+          "instruments": []
+        },
+        "panels": {},
+        "updated_at_ms": 1795252800000
+      },
+      "drawings": []
+    },
+    {
+      "format": "joseph.workspace-export",
+      "schema_version": 2,
+      "exported_at_ms": 1795260000000,
+      "drawings": []
+    },
+    {
+      "format": "joseph.workspace-export",
+      "schema_version": 2,
+      "exported_at_ms": 1795260000000,
+      "workspace": {
+        "schema_version": 1,
+        "workspace_id": "default",
+        "name": "My workspace",
+        "layout": "1",
+        "sync": {
+          "crosshair": true,
+          "instrument": false,
+          "timeframe": false,
+          "viewport": false
+        },
+        "active_chart_id": "chart-1",
+        "charts": [
+          {
+            "chart_id": "chart-1",
+            "instrument_id": "mock:perp:BTCUSD",
+            "timeframe": "5m",
+            "chart_type": "candles",
+            "price_scale": "linear",
+            "show_volume": true,
+            "indicator_layers": [
+              {
+                "plugin_id": "fvg_ifvg",
+                "visible": true
+              }
+            ],
+            "link_group": null,
+            "feed_mode": "AUTO",
+            "visible_range": null
+          }
+        ],
+        "favorites": {
+          "timeframes": [
+            "5m",
+            "1h"
+          ],
+          "instruments": []
+        },
+        "panels": {},
+        "updated_at_ms": 1795252800000
+      },
+      "drawings": [
+        {
+          "instrument_id": "BTCUSDT",
+          "drawings": [
+            {
+              "schema_version": 1,
+              "drawing_id": "d-1",
+              "tool_id": "trendline",
+              "tool_version": 1,
+              "instrument_id": "mock:perp:BTCUSD",
+              "timeframe": null,
+              "anchors": [
+                {
+                  "time_ms": 1795252800000,
+                  "price": "94000"
+                },
+                {
+                  "time_ms": 1795260000000,
+                  "price": "95500"
+                }
+              ],
+              "style": {
+                "color": "#E66FD2",
+                "line_width": 1,
+                "line_style": "solid"
+              },
+              "text": null,
+              "props": {},
+              "locked": false,
+              "visible": true,
+              "z_index": 0,
+              "created_at_ms": 1795252800000,
+              "updated_at_ms": 1795252800000
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "format": "joseph.workspace-export",
+      "schema_version": 2,
+      "exported_at_ms": 1795260000000,
+      "workspace": {
+        "schema_version": 1,
+        "workspace_id": "default",
+        "name": "My workspace",
+        "layout": "1",
+        "sync": {
+          "crosshair": true,
+          "instrument": false,
+          "timeframe": false,
+          "viewport": false
+        },
+        "active_chart_id": "chart-1",
+        "charts": [
+          {
+            "chart_id": "chart-1",
+            "instrument_id": "mock:perp:BTCUSD",
+            "timeframe": "5m",
+            "chart_type": "candles",
+            "price_scale": "linear",
+            "show_volume": true,
+            "indicator_layers": [
+              {
+                "plugin_id": "fvg_ifvg",
+                "visible": true
+              }
+            ],
+            "link_group": null,
+            "feed_mode": "AUTO",
+            "visible_range": null
+          }
+        ],
+        "favorites": {
+          "timeframes": [
+            "5m",
+            "1h"
+          ],
+          "instruments": []
+        },
+        "panels": {},
+        "updated_at_ms": 1795252800000
+      },
+      "drawings": [
+        {
+          "instrument_id": "mock:perp:BTCUSD",
+          "drawings": [
+            {
+              "drawing_id": "pixels",
+              "x": 1,
+              "y": 2
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "format": "joseph.workspace-export",
+      "schema_version": 2,
+      "exported_at_ms": 1795260000000,
+      "workspace": {
+        "schema_version": 1,
+        "workspace_id": "default",
+        "name": "My workspace",
+        "layout": "1",
+        "sync": {
+          "crosshair": true,
+          "instrument": false,
+          "timeframe": false,
+          "viewport": false
+        },
+        "active_chart_id": "chart-1",
+        "charts": [
+          {
+            "chart_id": "chart-1",
+            "instrument_id": "mock:perp:BTCUSD",
+            "timeframe": "5m",
+            "chart_type": "candles",
+            "price_scale": "linear",
+            "show_volume": true,
+            "indicator_layers": [
+              {
+                "plugin_id": "fvg_ifvg",
+                "visible": true
+              }
+            ],
+            "link_group": null,
+            "feed_mode": "AUTO",
+            "visible_range": null
+          }
+        ],
+        "favorites": {
+          "timeframes": [
+            "5m",
+            "1h"
+          ],
+          "instruments": []
+        },
+        "panels": {},
+        "updated_at_ms": 1795252800000
+      },
+      "drawings": [
+        {
+          "instrument_id": "mock:perp:BTCUSD",
+          "drawings": [],
+          "opaque": [
+            "not an object"
+          ]
+        }
+      ]
+    }
+  ]
+}

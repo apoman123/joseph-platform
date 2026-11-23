@@ -7,10 +7,12 @@
 import type {ChartBar, ChartPort, OverlayLayer} from '@joseph/chart-core';
 import {themeFromCss} from '@joseph/chart-core';
 import {
+  EXCHANGE_HOURS,
   TIMEFRAME_MS,
   VENUE_NAMES,
+  instrumentCalendarId,
+  isExchangeCalendar,
   parseInstrumentId,
-  shiftTimeframe,
   type Candle,
   type ChartState,
   type FeedMode,
@@ -19,9 +21,9 @@ import {
   type StreamStatus,
 } from '@joseph/contracts';
 import {
+  barCountdown,
   chooseReplayStart,
   formatCountdown,
-  msUntilBarClose,
   nextReplaySpeed,
   replayAsOfMs,
   replayAtEnd,
@@ -58,7 +60,15 @@ import {
 } from './chart-pane-hooks';
 import {ChartDataWindow} from './data-window';
 import {DrawingStyleBar} from './drawing-style-bar';
-import {formatAge, formatPrice, formatUtcTime} from './format';
+import {
+  displayTickSize,
+  formatAge,
+  formatInstrumentPrice,
+  formatUtcTime,
+} from './format';
+import {MarketStatusBadge, useBarCalendar} from './market-status';
+import {isRateInstrument, venueAccess} from './markets';
+import {useVenueCapabilities} from './venue-capabilities';
 import {ProvenanceBadge, ProvenanceRibbon} from './provenance';
 import {useStore} from './react-bindings';
 import {ReplayBar} from './replay-bar';
@@ -178,11 +188,29 @@ export function ChartPane({
   const replay: ReplayState | null = replayStates[chartId] ?? null;
   const replayRef = useRef(replay);
   replayRef.current = replay;
-  // Calendar-aware: a monthly cursor bar closes on the 1st of next month.
-  const atMs = replayAsOfMs(replay, timeframe);
+  // Session calendar of the instrument: the registry's `calendar` once
+  // loaded, else the calendar implied by the id (24x7 for crypto).
+  const calendarId = instrumentCalendarId(instrumentId, instrument);
+  const calendar = useBarCalendar(runtime, calendarId);
+  const calendarRef = useRef(calendar);
+  calendarRef.current = calendar;
+  const calendarIdRef = useRef(calendarId);
+  calendarIdRef.current = calendarId;
+  const rate = isRateInstrument(instrumentId);
+  // Calendar-aware: a monthly cursor bar closes on the 1st of next month,
+  // a session's last bar at the close.
+  const atMs = replayAsOfMs(replay, timeframe, calendar);
   const atMsRef = useRef(atMs);
   atMsRef.current = atMs;
   const tickSize = instrument?.tick_size ?? null;
+  // Ladder markets (TWSE) format the axis with the finest tick that can
+  // apply within a 10% day band around the latest price.
+  const reference = lastBar?.close ?? null;
+  const axisTick = useMemo(() => {
+    if (!instrument) return tickSize ?? '0.01';
+    if (reference === null) return instrument.tick_size;
+    return displayTickSize(instrument, reference * 0.9, reference * 1.1);
+  }, [instrument, tickSize, reference]);
 
   // Mount the chart library lazily on the client.
   useEffect(() => {
@@ -224,15 +252,17 @@ export function ChartPane({
     };
   }, [instrumentId, runtime]);
 
-  // Series presentation.
+  // Series presentation. Yields are plotted in percent without volume.
   useEffect(() => {
     port?.setSeries({
       instrumentId,
       timeframe,
       chartType: chart.chart_type,
       priceScale: chart.price_scale,
-      tickSize: tickSize ?? '0.01',
-      showVolume: chart.show_volume,
+      tickSize: axisTick,
+      showVolume: chart.show_volume && !rate,
+      calendar,
+      ...(rate ? {priceUnit: '%'} : {}),
     });
   }, [
     port,
@@ -241,8 +271,34 @@ export function ChartPane({
     chart.chart_type,
     chart.price_scale,
     chart.show_volume,
-    tickSize,
+    axisTick,
+    calendar,
+    rate,
   ]);
+
+  // A yield opens as a line chart; leaving it restores candles if the line
+  // was chosen automatically.
+  const autoLine = useRef<string | null>(null);
+  const marketType = instrument?.key.market_type ?? null;
+  useEffect(() => {
+    if (marketType === null) return;
+    const type = chartRef.current.chart_type;
+    if (marketType === 'rate' && type !== 'line' && type !== 'area') {
+      autoLine.current = instrumentId;
+      runtime.dispatch({type: 'setChartType', chartId, chartType: 'line'});
+    } else if (marketType !== 'rate' && autoLine.current !== null) {
+      autoLine.current = null;
+      if (type === 'line')
+        runtime.dispatch({type: 'setChartType', chartId, chartType: 'candles'});
+    }
+  }, [marketType, instrumentId, chartId, runtime]);
+
+  // Better session data (engine list loaded) changes bar boundaries of
+  // engine-backed drawings and the off-data axis: rebuild and repaint.
+  useEffect(() => {
+    runtime.drawing.series.get(chartId)?.reconcile();
+    port?.invalidate();
+  }, [calendar, port, runtime, chartId]);
 
   // History and stream. A backend failure never falls back to synthetic data.
   useEffect(() => {
@@ -271,12 +327,20 @@ export function ChartPane({
           const saved = chartRef.current.visible_range;
           const first = bars[Math.max(0, bars.length - INITIAL_VISIBLE_BARS)];
           const lastStart = bars.at(-1)?.timeMs;
+          // Sessions covering the loaded bars (and a margin) from the engine.
+          if (bars[0] && lastStart !== undefined) {
+            runtime.calendars.prefetch(
+              calendarIdRef.current,
+              bars[0].timeMs,
+              lastStart
+            );
+          }
           if (saved) {
             port.setVisibleRange({fromMs: saved.from_ms, toMs: saved.to_ms});
           } else if (first && lastStart !== undefined) {
             port.setVisibleRange({
               fromMs: first.timeMs,
-              toMs: shiftTimeframe(timeframe, lastStart, 6),
+              toMs: calendarRef.current.shift(timeframe, lastStart, 6),
             });
           } else {
             port.fitContent();
@@ -414,6 +478,7 @@ export function ChartPane({
       fetch: query => runtime.clients.market.getIndicatorSeries(query),
       instrumentId: () => instrumentId,
       timeframe: () => timeframe,
+      calendar: () => calendarRef.current,
       onChange: () => {
         port.invalidate();
         runtime.drawing.revision.update(n => n + 1);
@@ -425,6 +490,7 @@ export function ChartPane({
       tickSize: () => tickSize,
       bars: () => barsRef.current,
       durationMs: () => TIMEFRAME_MS[timeframe],
+      calendar: () => calendarRef.current,
       magnet: () => runtime.drawing.magnet.get(),
       palette,
       now: () => Date.now(),
@@ -588,6 +654,12 @@ export function ChartPane({
       if (rangeTimer) clearTimeout(rangeTimer);
       rangeTimer = setTimeout(() => {
         if (!range) return;
+        // Keep sessions loaded around what the user scrolls to.
+        runtime.calendars.prefetch(
+          calendarIdRef.current,
+          range.fromMs,
+          range.toMs
+        );
         const saved = chartRef.current.visible_range;
         if (
           saved &&
@@ -677,8 +749,18 @@ export function ChartPane({
     port,
     chart.session_separators === true,
     shownRef,
-    timeframe
+    timeframe,
+    calendar.continuous ? 'UTC' : calendar.timeZone
   );
+  // Between sessions the status badge shows the next open instead.
+  const countdown = barCountdown(timeframe, now, calendar);
+  const access = venueAccess(
+    useVenueCapabilities(runtime, parseInstrumentId(instrumentId).venue)
+  );
+  const market =
+    instrument?.listing_exchange ??
+    (isExchangeCalendar(calendarId) ? EXCHANGE_HOURS[calendarId].market : '');
+  const currency = rate ? null : (instrument?.key.quote ?? null);
 
   const shown = hover ?? lastBar;
   const direction = shown && shown.close >= shown.open ? 'j-pos' : 'j-neg';
@@ -707,17 +789,63 @@ export function ChartPane({
             {instrument?.display_symbol ?? venueMarketId}
           </strong>
           <span className="pane__chip">{VENUE_NAMES[venue]}</span>
+          {instrument?.listing_exchange && (
+            <span
+              className="pane__chip"
+              title={`Listed on ${instrument.listing_exchange}${currency ? `, quoted in ${currency}` : ''}`}
+              data-testid="listing-exchange"
+            >
+              {instrument.listing_exchange}
+              {currency ? ` · ${currency}` : ''}
+            </span>
+          )}
+          {access.delay && (
+            <span
+              className="pane__chip pane__chip--warning"
+              data-testid="data-delay"
+              title={`${access.delay}: this deployment receives delayed data for this venue`}
+            >
+              {access.delay}
+            </span>
+          )}
+          {access.missingCredentials && (
+            <span
+              className="pane__chip pane__chip--danger"
+              data-testid="missing-credentials"
+              title={access.missingCredentials}
+            >
+              No API key
+            </span>
+          )}
+          {rate && (
+            <span className="pane__chip" title="Published yield in percent">
+              Yield %
+            </span>
+          )}
           <span className="pane__chip" title={timeframeTitle(timeframe)}>
             {timeframe}
           </span>
-          {!replay && status.phase === 'ready' && (
-            <span
-              className="pane__chip pane__countdown j-tabular"
-              title="Time until this bar closes (UTC calendar)"
-              data-testid="bar-countdown"
-            >
-              {formatCountdown(msUntilBarClose(timeframe, now))}
-            </span>
+          {!replay &&
+            status.phase === 'ready' &&
+            countdown.kind === 'closes' && (
+              <span
+                className="pane__chip pane__countdown j-tabular"
+                title={
+                  calendar.continuous
+                    ? 'Time until this bar closes (UTC calendar)'
+                    : `Time until this bar closes (${market} session calendar)`
+                }
+                data-testid="bar-countdown"
+              >
+                {formatCountdown(countdown.ms)}
+              </span>
+            )}
+          {!calendar.continuous && (
+            <MarketStatusBadge
+              calendar={calendar}
+              market={market}
+              nowMs={now}
+            />
           )}
           <button
             type="button"
@@ -794,7 +922,9 @@ export function ChartPane({
             <div key={key}>
               <dt>{key.charAt(0).toUpperCase()}</dt>
               <dd className={key === 'close' ? direction : undefined}>
-                {shown ? formatPrice(String(shown[key]), tickSize) : '—'}
+                {shown
+                  ? formatInstrumentPrice(String(shown[key]), instrument)
+                  : '—'}
               </dd>
             </div>
           ))}
@@ -822,6 +952,8 @@ export function ChartPane({
           atMs={atMs}
           bar={shown}
           timeframe={timeframe}
+          calendar={calendar}
+          instrument={instrument}
           previousClose={previousClose}
           tickSize={tickSize}
           delta={delta.shown ? delta.bars : null}

@@ -26,6 +26,7 @@ import {layerSettings, layerStyle, layerVisible} from '@joseph/terminal-shell';
 import {useEffect, useMemo, useState, type MutableRefObject} from 'react';
 import type {TerminalRuntime} from '../composition/runtime';
 import {toChartBar} from './chart-bars';
+import {isRateInstrument} from './markets';
 
 /** Refresh interval of study and comparison data. */
 const REFRESH_MS = 30_000;
@@ -63,12 +64,14 @@ export interface DeltaPaneState {
 }
 
 /**
- * Whether a chart shows the order-flow Delta % pane.
+ * Whether a chart shows the order-flow Delta % pane. Published rates
+ * (yields) have no volume, so they never show it.
  * @param chart Chart state.
  * @return True when the layer is visible and its pane is not hidden.
  */
 export function deltaPaneShown(chart: ChartState): boolean {
   return (
+    !isRateInstrument(chart.instrument_id) &&
     layerVisible(chart, 'order_flow_pressure') &&
     layerStyle(chart, 'order_flow_pressure').pane !== false
   );
@@ -273,17 +276,21 @@ export function useCompare(
 }
 
 /**
- * Draws UTC session separators while the chart option is on.
+ * Draws session separators while the chart option is on: UTC calendar
+ * boundaries for 24x7 markets, every trading session (in exchange time)
+ * for session markets.
  * @param port Chart port.
  * @param enabled Whether separators are shown.
  * @param bars Bars currently displayed.
  * @param timeframe Chart timeframe accessor.
+ * @param timeZone Exchange time zone (`UTC` for 24x7 markets).
  */
 export function useSessionSeparators(
   port: ChartPort | null,
   enabled: boolean,
   bars: MutableRefObject<readonly ChartBar[]>,
-  timeframe: ChartState['timeframe']
+  timeframe: ChartState['timeframe'],
+  timeZone = 'UTC'
 ): void {
   useEffect(() => {
     if (!port || !enabled) return;
@@ -292,9 +299,10 @@ export function useSessionSeparators(
       createSessionSeparatorLayer({
         times: () => bars.current.map(bar => bar.timeMs),
         timeframe: () => timeframe,
+        timeZone: () => timeZone,
         color: () => theme.text,
         fontFamily: () => theme.fontFamily,
       })
     );
-  }, [port, enabled, bars, timeframe]);
+  }, [port, enabled, bars, timeframe, timeZone]);
 }

@@ -16,10 +16,12 @@ import {
   type OrderPreview,
   type SubmitIntentResponse,
 } from '@joseph/contracts';
+import {accountStatusView} from './equity';
 import {
   buildIntentRequest,
   type BuildResult,
   type InstrumentPrecision,
+  type TicketContext,
   type TicketInputs,
 } from './intent-builder';
 
@@ -266,6 +268,16 @@ export function modeAvailability(
     if (!account) {
       return {mode, available: false, reason: 'Choose an account first.'};
     }
+    const status = accountStatusView(account);
+    if (status.connection !== 'connected' && !account.modes.includes(mode)) {
+      return {
+        mode,
+        available: false,
+        reason: status.awaitingSdk
+          ? `${status.venueName} is awaiting its broker API SDK; orders cannot be placed yet.`
+          : `${status.venueName}: ${status.connectionText.toLowerCase()}. ${status.credentialsText}.`,
+      };
+    }
     if (!account.modes.includes(mode)) {
       return {
         mode,
@@ -338,6 +350,7 @@ export class TicketController {
   private readonly listeners = new Set<(state: TicketState) => void>();
   private instrument: InstrumentPrecision | null = null;
   private mark: Decimal | null = null;
+  private context: TicketContext = {};
   private readonly now: () => number;
   private readonly newKey: () => string;
 
@@ -400,11 +413,24 @@ export class TicketController {
   }
 
   /**
+   * Sets the account and previous close used by cash-equity rules.
+   * @param context Account and reference close.
+   */
+  setContext(context: TicketContext): void {
+    this.context = context;
+  }
+
+  /**
    * Validates current inputs.
    * @return Build result.
    */
   build(): BuildResult {
-    return buildIntentRequest(this.state.inputs, this.instrument, this.mark);
+    return buildIntentRequest(
+      this.state.inputs,
+      this.instrument,
+      this.mark,
+      this.context
+    );
   }
 
   /**

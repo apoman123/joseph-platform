@@ -3,10 +3,11 @@
  * command palette.
  */
 import type {LayoutId} from '@joseph/contracts';
+import {DrawingRepository} from '@joseph/drawing-core';
 import {
   DEFAULT_HOTKEYS,
   encodeShareLink,
-  exportWorkspace,
+  exportWorkspaceFile,
 } from '@joseph/terminal-shell';
 import type {TerminalRuntime} from '../../composition/runtime';
 import type {WebFeature} from '../../shell/react-bindings';
@@ -97,18 +98,35 @@ export function workspaceFeature(runtime: TerminalRuntime): WebFeature {
       }
       ctx.commands.register({
         id: 'workspace.export',
-        title: 'Export workspace as JSON',
+        title: 'Export workspace as JSON (layout and drawings)',
         run: () => {
-          const blob = new Blob([exportWorkspace(runtime.workspace.get())], {
-            type: 'application/json',
-          });
+          const workspace = runtime.workspace.get();
+          // Drawings of every instrument in this workspace, as saved.
+          const drawings = new DrawingRepository(
+            runtime.storage,
+            workspace.workspace_id,
+            runtime.tools
+          ).exportAll();
+          const text = exportWorkspaceFile(
+            workspace,
+            drawings.collections,
+            Date.now()
+          );
+          const blob = new Blob([text], {type: 'application/json'});
           const url = URL.createObjectURL(blob);
           const link = document.createElement('a');
           link.href = url;
           link.download = 'joseph-workspace.json';
           link.click();
           URL.revokeObjectURL(url);
-          ctx.notifier.notify('Workspace exported', 'success');
+          const count = drawings.drawings;
+          const instruments = drawings.collections.length;
+          ctx.notifier.notify(
+            count === 0
+              ? 'Workspace exported (no drawings to include).'
+              : `Workspace exported with ${count} drawing${count === 1 ? '' : 's'} on ${instruments} instrument${instruments === 1 ? '' : 's'}.${drawings.omitted > 0 ? ` ${drawings.omitted} beyond the file limits stayed in this browser.` : ''}`,
+            'success'
+          );
         },
       });
       ctx.commands.register({
