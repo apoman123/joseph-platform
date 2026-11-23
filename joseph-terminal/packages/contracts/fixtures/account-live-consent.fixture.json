@@ -1,0 +1,45 @@
+{
+  "schema": "execution.schema.json",
+  "definition": "AccountLiveConsentRequest",
+  "valid": [
+    {
+      "step_up_code": "123456",
+      "acknowledge_risk": true,
+      "duration_ms": 28800000
+    },
+    {
+      "step_up_code": "12345678",
+      "acknowledge_risk": true
+    }
+  ],
+  "invalid": [
+    {
+      "step_up_code": "123456",
+      "acknowledge_risk": false,
+      "duration_ms": 3600000
+    },
+    {
+      "step_up_code": "12345",
+      "acknowledge_risk": true
+    },
+    {
+      "step_up_code": "123456",
+      "acknowledge_risk": true,
+      "duration_ms": 86400001
+    },
+    {
+      "step_up_code": "123456",
+      "acknowledge_risk": true,
+      "duration_ms": 0
+    },
+    {
+      "acknowledge_risk": true,
+      "duration_ms": 3600000
+    },
+    {
+      "step_up_code": "123456",
+      "acknowledge_risk": true,
+      "scope": "all accounts"
+    }
+  ]
+}

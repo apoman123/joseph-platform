@@ -1,4 +1,4 @@
-"""Accounts and negotiated trading capabilities."""
+"""Accounts, negotiated trading capabilities and LIVE arming."""
 
 from __future__ import annotations
 
@@ -6,6 +6,19 @@ import dataclasses
 import decimal
 
 from joseph_execution.domain import enums
+from joseph_execution.domain import ids
+
+LIVE_ARM_DEFAULT_MS = 8 * 3_600_000
+"""Default (and default maximum) lifetime of an account LIVE arming."""
+
+LIVE_ARM_CEILING_MS = 24 * 3_600_000
+"""Hard ceiling of an account LIVE arming; configuration cannot exceed it."""
+
+LIVE_ARM_ACKNOWLEDGEMENT = (
+    "Manual LIVE orders on this account use real money until the arming "
+    "expires or is revoked."
+)
+"""Acknowledgement text recorded with every arming."""
 
 
 @dataclasses.dataclass(frozen=True, slots=True)
@@ -160,3 +173,161 @@ def paper_currency(account_id: str) -> str:
     if head.startswith("acct-"):
         return head.removeprefix("acct-").upper()
     return "USD"
+
+
+def live_arming_scope_hash(
+    account: Account, granted_by: str, expires_at_ms: int
+) -> str:
+    """Hashes the scope that a LIVE arming covers.
+
+    The arming is bound to one account of one tenant, its venue and stored
+    credential, the granting actor and the expiry, so a record cannot be
+    replayed onto another account or stretched in storage.
+
+    Args:
+        account: Armed account.
+        granted_by: Granting actor.
+        expires_at_ms: Expiry.
+
+    Returns:
+        ``sha256:<hex>`` scope hash.
+    """
+    scope = {
+        "tenant_id": account.tenant_id,
+        "account_id": account.account_id,
+        "venue": account.venue,
+        "credential_id": account.credential_id,
+        "granted_by": granted_by,
+        "expires_at_ms": expires_at_ms,
+    }
+    return "sha256:" + ids.sha256_hex(ids.canonical_json(scope))
+
+
+@dataclasses.dataclass(frozen=True, slots=True)
+class LiveArming:
+    """Server-side, time-limited arming of manual LIVE orders on an account.
+
+    Granted with a step-up code (the same verification as AUTO_LIVE
+    deployment consent); the Risk Gateway refuses manual LIVE orders that
+    would add exposure unless an arming is valid.
+
+    Attributes:
+        tenant_id: Owning tenant.
+        account_id: Armed account.
+        granted_at_ms: When it was granted.
+        expires_at_ms: When it lapses.
+        granted_by: Granting actor.
+        acknowledgement: Risk acknowledgement the actor accepted.
+        scope_hash: Hash binding the record to its account and expiry.
+        revoked_at_ms: When it was revoked, if it was.
+        revoked_by: Revoking actor (or ``system``), if revoked.
+    """
+
+    tenant_id: str
+    account_id: str
+    granted_at_ms: int
+    expires_at_ms: int
+    granted_by: str
+    acknowledgement: str
+    scope_hash: str
+    revoked_at_ms: int | None = None
+    revoked_by: str | None = None
+
+    @classmethod
+    def grant(
+        cls,
+        account: Account,
+        granted_by: str,
+        now_ms: int,
+        duration_ms: int,
+    ) -> LiveArming:
+        """Creates an arming for an account.
+
+        Args:
+            account: Account to arm.
+            granted_by: Granting actor.
+            now_ms: Grant time.
+            duration_ms: Lifetime (validated by the caller).
+
+        Returns:
+            New arming.
+        """
+        expires = now_ms + duration_ms
+        return cls(
+            tenant_id=account.tenant_id,
+            account_id=account.account_id,
+            granted_at_ms=now_ms,
+            expires_at_ms=expires,
+            granted_by=granted_by,
+            acknowledgement=LIVE_ARM_ACKNOWLEDGEMENT,
+            scope_hash=live_arming_scope_hash(account, granted_by, expires),
+        )
+
+    def state(self, account: Account, now_ms: int) -> str:
+        """Describes the arming at a time.
+
+        Args:
+            account: The account the arming is checked against.
+            now_ms: Current time.
+
+        Returns:
+            ``ARMED``, ``REVOKED``, ``EXPIRED`` or ``OUT_OF_SCOPE``.
+        """
+        if self.revoked_at_ms is not None:
+            return "REVOKED"
+        if now_ms >= self.expires_at_ms:
+            return "EXPIRED"
+        expected = live_arming_scope_hash(
+            account, self.granted_by, self.expires_at_ms
+        )
+        if (
+            account.tenant_id != self.tenant_id
+            or account.account_id != self.account_id
+            or expected != self.scope_hash
+        ):
+            return "OUT_OF_SCOPE"
+        return "ARMED"
+
+    def valid_for(self, account: Account, now_ms: int) -> bool:
+        """Checks that the arming is unrevoked, unexpired and in scope.
+
+        Args:
+            account: Account of the order.
+            now_ms: Current time.
+
+        Returns:
+            True only for a matching, unexpired, unrevoked arming.
+        """
+        return self.state(account, now_ms) == "ARMED"
+
+    def revoke(self, actor: str, now_ms: int) -> LiveArming:
+        """Returns a revoked copy (a revoked arming stays revoked).
+
+        Args:
+            actor: Revoking actor.
+            now_ms: Revocation time.
+
+        Returns:
+            Revoked arming.
+        """
+        if self.revoked_at_ms is not None:
+            return self
+        return dataclasses.replace(self, revoked_at_ms=now_ms, revoked_by=actor)
+
+    def to_contract(self) -> dict[str, object]:
+        """Serializes for audit payloads and storage.
+
+        Returns:
+            JSON-compatible dict.
+        """
+        return {
+            "tenant_id": self.tenant_id,
+            "account_id": self.account_id,
+            "granted_at_ms": self.granted_at_ms,
+            "expires_at_ms": self.expires_at_ms,
+            "granted_by": self.granted_by,
+            "acknowledgement": self.acknowledgement,
+            "scope_hash": self.scope_hash,
+            "revoked_at_ms": self.revoked_at_ms,
+            "revoked_by": self.revoked_by,
+        }

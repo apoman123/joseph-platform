@@ -6,6 +6,7 @@
  */
 import type {
   AccountList,
+  AccountLiveConsentRequest,
   AlertSubscription,
   AlertSubscriptionList,
   AccountSummary,
@@ -544,6 +545,36 @@ export class HttpExecutionClient implements ExecutionClient {
     return this.http.request(
       'GET',
       `/v1/accounts/${encodeURIComponent(accountId)}/summary`
+    );
+  }
+
+  /**
+   * Arms manual LIVE orders on an account (step-up verified by the engine).
+   * @param accountId Account id.
+   * @param request Step-up code, acknowledgement and lifetime.
+   * @return Summary with `live_armed_until_ms`.
+   */
+  grantAccountLiveConsent(
+    accountId: string,
+    request: AccountLiveConsentRequest
+  ): Promise<AccountSummary> {
+    return this.http.request(
+      'POST',
+      `/v1/accounts/${encodeURIComponent(accountId)}/live-consent`,
+      undefined,
+      request
+    );
+  }
+
+  /**
+   * Disarms LIVE on an account.
+   * @param accountId Account id.
+   * @return Summary with `live_armed_until_ms` null.
+   */
+  revokeAccountLiveConsent(accountId: string): Promise<AccountSummary> {
+    return this.http.request(
+      'DELETE',
+      `/v1/accounts/${encodeURIComponent(accountId)}/live-consent`
     );
   }
 

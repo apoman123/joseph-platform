@@ -464,8 +464,13 @@ def test_live_requires_flag_account_capability_and_consent() -> None:
         ),
     )
     assert checks.mode_allowed(unavailable).code == "TRADE_MODE_DISABLED"
+    unarmed = _ctx(request=req, account=live_account, live_trading_enabled=True)
+    assert checks.mode_allowed(unarmed).code == "LIVE_NOT_ARMED"
     manual_ok = _ctx(
-        request=req, account=live_account, live_trading_enabled=True
+        request=req,
+        account=live_account,
+        live_trading_enabled=True,
+        live_arming=_armed(live_account),
     )
     assert checks.mode_allowed(manual_ok).outcome is OUT.PASS
     strategy = _request(
@@ -478,6 +483,182 @@ def test_live_requires_flag_account_capability_and_consent() -> None:
         request=strategy, account=live_account, live_trading_enabled=True
     )
     assert checks.mode_allowed(no_consent).outcome is OUT.FAIL
+
+
+def _armed(
+    account: accounts.Account, granted_ms: int = NOW - 1_000
+) -> accounts.LiveArming:
+    """Builds a one-hour LIVE arming of an account.
+
+    Args:
+        account: Account.
+        granted_ms: Grant time.
+
+    Returns:
+        Arming.
+    """
+    return accounts.LiveArming.grant(account, "user:u", granted_ms, 3_600_000)
+
+
+LIVE_ACCOUNT = dataclasses.replace(
+    PAPER,
+    modes=(enums.OrderMode.LIVE,),
+    is_paper=False,
+    credential_id="cred-1",
+)
+
+
+def _live_ctx(**overrides: object) -> context.RiskContext:
+    """Builds a LIVE context on a LIVE account with the gate open.
+
+    Args:
+        **overrides: Field overrides.
+
+    Returns:
+        Context (not armed unless ``live_arming`` is given).
+    """
+    fields: dict[str, object] = {
+        "request": _request(mode=enums.OrderMode.LIVE),
+        "account": LIVE_ACCOUNT,
+        "live_trading_enabled": True,
+    }
+    fields.update(overrides)
+    return _ctx(**fields)
+
+
+@pytest.mark.parametrize(
+    ("arming", "state"),
+    [
+        (None, "NOT_ARMED"),
+        (_armed(LIVE_ACCOUNT, NOW - 3_600_000), "EXPIRED"),
+        (_armed(LIVE_ACCOUNT).revoke("user:u", NOW - 1), "REVOKED"),
+        (
+            _armed(dataclasses.replace(LIVE_ACCOUNT, account_id="other")),
+            "OUT_OF_SCOPE",
+        ),
+        (
+            dataclasses.replace(
+                _armed(LIVE_ACCOUNT), expires_at_ms=NOW + 86_400_000
+            ),
+            "OUT_OF_SCOPE",
+        ),
+        (
+            _armed(dataclasses.replace(LIVE_ACCOUNT, credential_id="cred-2")),
+            "OUT_OF_SCOPE",
+        ),
+    ],
+)
+def test_manual_live_orders_need_a_valid_arming(
+    arming: accounts.LiveArming | None, state: str
+) -> None:
+    """Missing, expired, revoked or foreign armings fail LIVE_NOT_ARMED."""
+    ctx = _live_ctx(live_arming=arming)
+    result = checks.mode_allowed(ctx)
+    assert result.outcome is OUT.FAIL
+    assert result.code == "LIVE_NOT_ARMED"
+    assert result.observed == state and result.limit == "ARMED"
+    decision = gateway.RiskGateway().evaluate(ctx)
+    assert decision.decision is enums.Decision.BLOCK
+    assert decision.primary_code() == "LIVE_NOT_ARMED"
+
+
+@pytest.mark.parametrize(
+    "source",
+    [
+        enums.IntentSource.MANUAL_TICKET,
+        enums.IntentSource.CHART,
+        enums.IntentSource.QUICK_TRADE,
+    ],
+)
+def test_every_manual_source_passes_once_armed(
+    source: enums.IntentSource,
+) -> None:
+    """Ticket, chart and quick-trade LIVE orders pass with a valid arming."""
+    ctx = _live_ctx(
+        request=_request(mode=enums.OrderMode.LIVE, source=source),
+        live_arming=_armed(LIVE_ACCOUNT),
+    )
+    assert checks.mode_allowed(ctx).outcome is OUT.PASS
+    assert gateway.RiskGateway().evaluate(ctx).allowed
+
+
+def test_risk_reducing_live_orders_pass_while_disarmed() -> None:
+    """A reduce-only close is allowed with a WARN when not armed."""
+    live_long = _long()
+    live_long.mode = enums.OrderMode.LIVE
+    ctx = _live_ctx(
+        request=dataclasses.replace(_close(), mode=enums.OrderMode.LIVE),
+        position=live_long,
+    )
+    result = checks.mode_allowed(ctx)
+    assert result.outcome is OUT.WARN and result.observed == "NOT_ARMED"
+    decision = gateway.RiskGateway().evaluate(ctx)
+    assert decision.allowed, decision.failures()
+    flip = _live_ctx(
+        request=dataclasses.replace(_close("0.05"), mode=enums.OrderMode.LIVE),
+        position=live_long,
+    )
+    assert checks.mode_allowed(flip).code == "LIVE_NOT_ARMED"
+
+
+def test_strategy_and_emergency_live_orders_do_not_use_arming() -> None:
+    """AUTO_LIVE keeps deployment consent; emergency flattening is exempt."""
+    lim = deployments.DeploymentLimits(D(10000), 3, D(500), (BTC,), D(5))
+    expires = NOW + 3_600_000
+    dep = deployments.Deployment(
+        "d",
+        "t",
+        "s:v1",
+        "acct",
+        enums.DeploymentMode.AUTO_LIVE,
+        enums.DeploymentState.ENABLED,
+        lim,
+        deployments.SizingModel("FIXED_QTY", fixed_qty=D("0.01")),
+        1,
+        1,
+        deployments.LiveConsent(
+            NOW,
+            expires,
+            deployments.consent_scope_hash(
+                "acct", "mock", "s:v1", lim, expires
+            ),
+            "user:u",
+        ),
+    )
+    strategy = _request(
+        mode=enums.OrderMode.LIVE,
+        source=enums.IntentSource.STRATEGY,
+        strategy_version_id="s:v1",
+        signal_id="sig",
+    )
+    consented = _live_ctx(request=strategy, deployment=dep)
+    assert checks.mode_allowed(consented).outcome is OUT.PASS
+    armed_only = _live_ctx(request=strategy, live_arming=_armed(LIVE_ACCOUNT))
+    assert checks.mode_allowed(armed_only).code == "TRADE_MODE_DISABLED"
+    emergency = _live_ctx(
+        request=_request(
+            mode=enums.OrderMode.LIVE, source=enums.IntentSource.EMERGENCY
+        )
+    )
+    assert checks.mode_allowed(emergency).outcome is OUT.PASS
+
+
+def test_live_arming_domain_lifecycle() -> None:
+    """Grant, state, revoke (idempotent) and serialization of an arming."""
+    arming = _armed(LIVE_ACCOUNT)
+    assert arming.expires_at_ms == NOW - 1_000 + 3_600_000
+    assert arming.acknowledgement == accounts.LIVE_ARM_ACKNOWLEDGEMENT
+    assert arming.scope_hash.startswith("sha256:")
+    assert arming.valid_for(LIVE_ACCOUNT, NOW)
+    assert arming.state(LIVE_ACCOUNT, arming.expires_at_ms) == "EXPIRED"
+    revoked = arming.revoke("user:x", NOW)
+    assert revoked.revoke("user:y", NOW + 5) is revoked
+    assert revoked.revoked_by == "user:x" and revoked.revoked_at_ms == NOW
+    assert not revoked.valid_for(LIVE_ACCOUNT, NOW)
+    body = revoked.to_contract()
+    assert body["granted_by"] == "user:u" and body["revoked_by"] == "user:x"
+    assert accounts.LIVE_ARM_DEFAULT_MS == 8 * 3_600_000
+    assert accounts.LIVE_ARM_CEILING_MS == 24 * 3_600_000
 
 
 def test_auto_live_requires_native_stop_loss() -> None:

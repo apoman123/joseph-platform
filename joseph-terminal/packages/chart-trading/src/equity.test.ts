@@ -13,6 +13,7 @@ import {
   dayNumberOf,
   zonedTimeToUtc,
   type OrderIntentRequest,
+  type RiskDecision,
 } from '@joseph/contracts';
 import {describe, expect, it} from 'vitest';
 import {
@@ -32,8 +33,14 @@ import {
   isCashEquityId,
   isOnTickLadder,
   isRateInstrumentId,
+  LIVE_ARM_DEFAULT_MS,
+  LIVE_ARM_DURATIONS,
+  liveArmDurationLabel,
+  liveArmRequest,
   liveArmText,
+  liveArmedUntil,
   liveConfirmation,
+  liveNotArmed,
   marketHoursNotice,
   oddLotAvailable,
   outsideRthSupport,
@@ -44,7 +51,6 @@ import {
   rateNotice,
   referenceClose,
   roundToTickLadder,
-  supportsLiveArming,
   tickAt,
   tradingVenueName,
   validStepUpCode,
@@ -674,18 +680,69 @@ describe('LIVE confirmation and arming', () => {
     );
   });
 
-  it('detects account-level live consent and validates step-up codes', () => {
-    expect(supportsLiveArming({})).toBe(false);
-    expect(supportsLiveArming(null)).toBe(false);
+  it('builds the arming request and validates step-up codes', () => {
+    expect(liveArmRequest(' 123456 ', LIVE_ARM_DEFAULT_MS)).toEqual({
+      step_up_code: '123456',
+      acknowledge_risk: true,
+      duration_ms: 3_600_000,
+    });
+    expect(LIVE_ARM_DURATIONS.map(x => x.label)).toEqual([
+      '15 minutes',
+      '1 hour',
+      '4 hours',
+      '8 hours',
+    ]);
     expect(
-      supportsLiveArming({grantAccountLiveConsent: () => Promise.resolve()})
+      LIVE_ARM_DURATIONS.every(x => x.ms > 0 && x.ms <= 8 * 3_600_000)
     ).toBe(true);
+    expect(liveArmDurationLabel(4 * 3_600_000)).toBe('4 hours');
+    expect(liveArmDurationLabel(2 * 3_600_000)).toBe('2 hours');
+    expect(liveArmDurationLabel(90 * 60_000)).toBe('90 minutes');
     expect(validStepUpCode('123456')).toBe(true);
     expect(validStepUpCode(' 12345678 ')).toBe(true);
     expect(validStepUpCode('12345')).toBe(false);
     expect(validStepUpCode('12a456')).toBe(false);
     expect(liveArmText(brokerAccount('ibkr'))).toMatch(
-      /^Live orders from this ticket go to Interactive Brokers account "ibkr account" with real money/
+      /^Live orders from this ticket go to Interactive Brokers account "ibkr account" with real money\. The execution engine arms this account until the time shown/
     );
+  });
+
+  it('reads the server arming and LIVE_NOT_ARMED decisions', () => {
+    const ibkr = brokerAccount('ibkr');
+    expect(liveArmedUntil(null, 0)).toBeNull();
+    expect(liveArmedUntil(ibkr, 0)).toBeNull();
+    expect(liveArmedUntil({...ibkr, live_armed_until_ms: null}, 0)).toBeNull();
+    expect(liveArmedUntil({...ibkr, live_armed_until_ms: 5_000}, 4_999)).toBe(
+      5_000
+    );
+    expect(
+      liveArmedUntil({...ibkr, live_armed_until_ms: 5_000}, 5_000)
+    ).toBeNull();
+    const decision = (
+      outcome: 'FAIL' | 'WARN' | 'UNKNOWN',
+      code: 'LIVE_NOT_ARMED' | 'KILL_SWITCH_ENGAGED'
+    ): RiskDecision => ({
+      decision: outcome === 'WARN' ? 'ALLOW' : 'BLOCK',
+      checks: [
+        {
+          check: 'mode.allowed',
+          domain: 'MODE',
+          outcome,
+          code,
+          message: 'm',
+          observed: null,
+          limit: null,
+        },
+      ],
+      policy_version: 'p',
+      evaluated_at_ms: 0,
+      reservation_id: null,
+    });
+    expect(liveNotArmed(decision('FAIL', 'LIVE_NOT_ARMED'))).toBe(true);
+    expect(liveNotArmed(decision('UNKNOWN', 'LIVE_NOT_ARMED'))).toBe(true);
+    expect(liveNotArmed(decision('WARN', 'LIVE_NOT_ARMED'))).toBe(false);
+    expect(liveNotArmed(decision('FAIL', 'KILL_SWITCH_ENGAGED'))).toBe(false);
+    expect(liveNotArmed(null)).toBe(false);
+    expect(liveNotArmed(undefined)).toBe(false);
   });
 });

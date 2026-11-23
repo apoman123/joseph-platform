@@ -9,7 +9,8 @@ from collections.abc import Mapping
 from joseph_execution.domain import decimals
 from joseph_execution.domain import errors
 
-POLICY_VERSION = "risk-policy-2026.11.0"
+POLICY_VERSION = "risk-policy-2026.11.1"
+"""Policy id recorded on every decision (2026.11.1: account LIVE arming)."""
 
 _D = decimal.Decimal
 _DEFAULT_MAX_ACCOUNT_NOTIONAL = decimal.Decimal(1_000_000)

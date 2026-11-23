@@ -271,6 +271,11 @@ def build_container(
         paper_adapter, shadow_adapter, {**crypto, **brokers}
     )
     audit_log = audit_service.AuditLog(the_clock, id_gen)
+    # One verifier for every step-up: AUTO_LIVE deployment consent and
+    # account LIVE arming check codes identically.
+    step_up_verifier = step_up.TotpStepUpVerifier(
+        settings.step_up_totp_secret, the_clock
+    )
     oms = oms_service.OmsService(
         uow_factory,
         risk_gateway.RiskGateway(),
@@ -305,6 +310,9 @@ def build_container(
             id_gen,
             settings.paper_starting_equity,
             paper_twd_starting_cash=twd_cash,
+            step_up=step_up_verifier,
+            live_trading_enabled=settings.live_trading_enabled,
+            live_arm_max_ms=settings.live_arm_max_ms,
         ),
         kill_switches=kill_switch.KillSwitchService(
             uow_factory, oms, audit_log, the_clock, hub
@@ -315,7 +323,7 @@ def build_container(
             audit_log,
             the_clock,
             id_gen,
-            step_up.TotpStepUpVerifier(settings.step_up_totp_secret, the_clock),
+            step_up_verifier,
             settings.live_trading_enabled,
         ),
         intake=signal_intake.SignalIntakeService(

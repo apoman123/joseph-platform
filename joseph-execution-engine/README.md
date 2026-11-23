@@ -32,7 +32,8 @@ The defaults are for development: dev token `dev-local-token` maps to `tenant-01
 | `JOSEPH_EMERGENCY_HALT` | `false` | Platform-wide block on new exposure |
 | `JOSEPH_VAULT_MASTER_KEY` | ephemeral in dev | Base64 32-byte key that wraps per-credential AES-GCM data keys |
 | `JOSEPH_PREVIEW_SECRET` | random | HMAC key for preview tokens |
-| `JOSEPH_STEP_UP_TOTP_SECRET` | unset (step-up always fails) | Base32 TOTP secret for live consent |
+| `JOSEPH_STEP_UP_TOTP_SECRET` | unset (step-up always fails) | Base32 TOTP secret for live consent (AUTO_LIVE deployments and account LIVE arming) |
+| `JOSEPH_LIVE_ARM_MAX_MS` | `28800000` (8 h) | Longest, and default, account LIVE arming; startup fails above 24 h |
 | `JOSEPH_CORS_ORIGINS` | `http://localhost:3000,...` | Browser origins |
 | `JOSEPH_PAPER_STARTING_EQUITY` | `100000` | Paper account equity |
 | `JOSEPH_BACKGROUND_TASKS` | `true` | Outbox worker, paper ticker, reconciler and broker event loops |
@@ -47,7 +48,7 @@ The defaults are for development: dev token `dev-local-token` maps to `tenant-01
 
 ## Live venues
 
-Every order still follows `OrderIntent -> Risk Gateway -> OMS -> adapter`: the global gate, account LIVE mode, preview tokens for manual orders, AUTO_LIVE consent with step-up and venue-native stop-loss for strategies, the kill switch, idempotent client order ids and the audit log all run first. Adapters add a last line of defense: with the gate off they negotiate nothing and refuse submits and amends; without credentials they refuse every call before sending.
+Every order still follows `OrderIntent -> Risk Gateway -> OMS -> adapter`: the global gate, account LIVE mode, preview tokens and a server-side account LIVE arming (step-up, at most `JOSEPH_LIVE_ARM_MAX_MS`) for manual orders, AUTO_LIVE consent with step-up and venue-native stop-loss for strategies, the kill switch, idempotent client order ids and the audit log all run first. Adapters add a last line of defense: with the gate off they negotiate nothing and refuse submits and amends; without credentials they refuse every call before sending.
 
 Capabilities are negotiated per account at runtime: `AVAILABLE` only when credentials are stored, the venue is healthy and a signed permission probe passes; otherwise `TRADING_UNAVAILABLE` with the reason in `notes` (for example `AUTH_SCOPE_MISSING: permission missing: …`). Joseph trades **one-way position mode** only.
 
@@ -77,7 +78,7 @@ All routes except `/health` require `Authorization: Bearer <token>`. Errors use 
 
 | Area | Endpoints |
 |---|---|
-| Accounts | `GET /v1/accounts`, `POST /v1/accounts/connect/start`, `POST /v1/accounts/{id}/verify`, `POST /v1/accounts/{id}/revoke`, `GET /v1/accounts/{id}/summary`, `GET /v1/accounts/{id}/capabilities` |
+| Accounts | `GET /v1/accounts`, `POST /v1/accounts/connect/start`, `POST /v1/accounts/{id}/verify`, `POST /v1/accounts/{id}/revoke`, `GET /v1/accounts/{id}/summary`, `GET /v1/accounts/{id}/capabilities`, `POST`/`DELETE /v1/accounts/{id}/live-consent` (arm/disarm manual LIVE: `{"step_up_code", "acknowledge_risk": true, "duration_ms"}`; the summary carries `live_armed_until_ms`) |
 | Orders | `POST /v1/orders/preview`, `POST /v1/orders/intents` (`Idempotency-Key` required), `GET /v1/orders?account_id=&state=a,b`, `POST /v1/orders/{id}/cancel`, `POST /v1/orders/{id}/amend` |
 | Positions | `GET /v1/positions`, `POST /v1/positions/{id}/close-preview`, `POST /v1/positions/{id}/close` (`Idempotency-Key`), `GET /v1/fills` |
 | Risk | `GET`/`POST /v1/risk/kill-switch`, `GET`/`PUT /v1/risk/limits?account_id=`, `GET /v1/audit/events` (includes `chain_valid`) |
@@ -89,7 +90,8 @@ All routes except `/health` require `Authorization: Bearer <token>`. Errors use 
 
 | Guarantee | Tests |
 |---|---|
-| LIVE needs the global flag, account LIVE mode, an AVAILABLE adapter, a preview token for manual orders and, for strategies, unexpired scoped consent with venue-native stop-loss | `unit/test_risk.py`, `security/test_security.py::test_live_gate_positive_control...`, `integration/test_live_venues.py` |
+| LIVE needs the global flag, account LIVE mode, an AVAILABLE adapter, a preview token and an unexpired, unrevoked account arming (`LIVE_NOT_ARMED`, 403) for manual orders and, for strategies, unexpired scoped consent with venue-native stop-loss | `unit/test_risk.py`, `security/test_security.py::test_live_gate_positive_control...`, `integration/test_live_venues.py`, `integration/test_live_arming.py` |
+| Arming needs the deployment-consent step-up check, a risk acknowledgement and a bounded duration; paper and unverified accounts are refused; grant, denial and revoke are audited; risk-reducing closes, cancels, the kill switch and reconciliation keep working while disarmed | `integration/test_live_arming.py` |
 | Gate off or no credentials: no venue request at all; kill switch or missing consent: no order request | `integration/test_live_venues.py`, `unit/venues/` |
 | Signatures match official vectors (Binance docs, Hyperliquid SDK, Lighter native signer) | `unit/venues/test_signing_vectors.py` |
 | A lost ACK never produces a second order; resubmission only after the venue confirms absence; no query capability means manual intervention | `chaos/test_fault_injection.py` |

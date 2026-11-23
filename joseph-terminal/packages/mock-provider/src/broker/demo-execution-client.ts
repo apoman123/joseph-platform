@@ -14,11 +14,20 @@
  * SDK). Orders route like the engine: IBKR trades XNYS listings, TWSE
  * brokers XTAI listings. Stock orders use whole shares (TWSE board lots
  * or odd lots), tick-ladder prices and cash, never leverage.
+ *
+ * LIVE: like the engine, manual LIVE orders need a server-side arming of
+ * the account (`grantAccountLiveConsent` with a step-up code, here
+ * `DEMO_STEP_UP_CODE`), which expires by the injected clock and can be
+ * revoked; without it the mode check fails with `LIVE_NOT_ARMED` and only
+ * risk-reducing orders pass (with a warning). No default DEMO account
+ * offers LIVE; the opt-in `liveRehearsal` option adds a simulated IBKR live
+ * account to rehearse arming. Nothing ever reaches a venue.
  */
 import {
   ApiError,
   Decimal,
   type AccountList,
+  type AccountLiveConsentRequest,
   type AccountSummary,
   type AmendRequest,
   type AuditEvent,
@@ -52,10 +61,12 @@ import {
   DEMO_ACCOUNTS,
   DEMO_ACCOUNT_ID,
   DEMO_BROKER_INSTRUMENTS,
+  DEMO_LIVE_ARM_MAX_MS,
+  DEMO_LIVE_REHEARSAL_ACCOUNT,
   DEMO_MARKS,
+  DEMO_STEP_UP_CODE,
   DEMO_TENANT_ID,
   DEMO_USER_ID,
-  demoAccount,
   demoRoutingProblem,
   type DemoAccountSpec,
 } from './instruments';
@@ -87,7 +98,26 @@ export interface DemoBrokerOptions {
   partialFills?: boolean;
   /** Starting paper equity of the crypto paper account. */
   startingEquity?: string;
+  /**
+   * Adds the simulated IBKR live account (`DEMO_LIVE_REHEARSAL_ACCOUNT`)
+   * that offers LIVE, to rehearse server-side arming. Off by default: no
+   * DEMO account offers LIVE.
+   */
+  liveRehearsal?: boolean;
 }
+
+/** Server-side LIVE arming of one DEMO account. */
+interface LiveArming {
+  /** When it was granted. */
+  grantedAtMs: number;
+  /** When it ends. */
+  expiresAtMs: number;
+}
+
+/** Sources a human submits through the UI (engine `is_manual`). */
+const MANUAL_SOURCES: ReadonlySet<OrderIntentRequest['source']> = new Set<
+  OrderIntentRequest['source']
+>(['MANUAL_TICKET', 'CHART', 'QUICK_TRADE']);
 
 /** Fee rates (DEMO). */
 const TAKER_FEE = Decimal.parse('0.0005');
@@ -143,7 +173,9 @@ export class DemoExecutionClient implements ExecutionClient {
   private readonly restingFillDelayMs: number | null;
   private readonly partialFills: boolean;
   private readonly startingEquity: Decimal;
+  private readonly accountSpecs: readonly DemoAccountSpec[];
   private readonly accountEquity = new Map<string, Decimal>();
+  private readonly liveArming = new Map<string, LiveArming>();
   private readonly instruments = new Map<string, Instrument>(
     DEMO_BROKER_INSTRUMENTS.map(i => [i.instrument_id, i])
   );
@@ -179,7 +211,10 @@ export class DemoExecutionClient implements ExecutionClient {
     this.restingFillDelayMs = options.restingFillDelayMs ?? null;
     this.partialFills = options.partialFills ?? true;
     this.startingEquity = Decimal.parse(options.startingEquity ?? '100000');
-    for (const spec of DEMO_ACCOUNTS) {
+    this.accountSpecs = options.liveRehearsal
+      ? [...DEMO_ACCOUNTS, DEMO_LIVE_REHEARSAL_ACCOUNT]
+      : DEMO_ACCOUNTS;
+    for (const spec of this.accountSpecs) {
       this.accountEquity.set(
         spec.accountId,
         spec.accountId === DEMO_ACCOUNT_ID
@@ -370,6 +405,107 @@ export class DemoExecutionClient implements ExecutionClient {
   }
 
   /**
+   * Finds one of this broker's accounts.
+   * @param accountId Account id.
+   * @return Spec or null.
+   */
+  private spec(accountId: string): DemoAccountSpec | null {
+    return this.accountSpecs.find(a => a.accountId === accountId) ?? null;
+  }
+
+  /**
+   * End of an account's unexpired, unrevoked LIVE arming.
+   * @param accountId Account id.
+   * @return End time, or null when not armed.
+   */
+  private armedUntil(accountId: string): number | null {
+    const arming = this.liveArming.get(accountId);
+    return arming && arming.expiresAtMs > this.now()
+      ? arming.expiresAtMs
+      : null;
+  }
+
+  /**
+   * Whether a reduce-only request can only shrink the current position
+   * (engine `RiskContext.risk_reducing`).
+   * @param request Request.
+   * @return True for an opposite-side order no larger than the position.
+   */
+  private riskReducing(request: OrderIntentRequest): boolean {
+    if (!request.reduce_only) return false;
+    const book = this.positions.get(request.instrument_id);
+    if (!book || book.qty.isZero()) return false;
+    const opposite = book.qty.isNegative() ? 'buy' : 'sell';
+    const qty = Decimal.isValid(request.quantity_base)
+      ? Decimal.parse(request.quantity_base)
+      : null;
+    return (
+      request.side === opposite && qty !== null && qty.cmp(book.qty.abs()) <= 0
+    );
+  }
+
+  /**
+   * Mode check of a LIVE request (engine `mode.allowed`).
+   * @param request Request.
+   * @param account Account, if known.
+   * @return Check result.
+   */
+  private liveModeCheck(
+    request: OrderIntentRequest,
+    account: DemoAccountSpec | null
+  ): RiskCheckResult {
+    const result = (
+      outcome: RiskCheckResult['outcome'],
+      message: string,
+      code: ErrorCode | null = null
+    ): RiskCheckResult => ({
+      check: 'mode.permitted',
+      domain: 'MODE',
+      outcome,
+      message,
+      code,
+      observed: null,
+      limit: null,
+    });
+    if (!account || !account.modes.includes('LIVE'))
+      return result(
+        'FAIL',
+        'Live trading is not available in DEMO mode.',
+        'LIVE_TRADING_DISABLED'
+      );
+    if (account.capabilities.status !== 'AVAILABLE')
+      return result(
+        'FAIL',
+        'The venue adapter cannot trade for this account.',
+        'TRADE_MODE_DISABLED'
+      );
+    if (request.source === 'STRATEGY')
+      return result(
+        'FAIL',
+        'AUTO_LIVE needs an enabled deployment with valid consent.',
+        'TRADE_MODE_DISABLED'
+      );
+    if (!MANUAL_SOURCES.has(request.source))
+      return result('PASS', 'Live trading is permitted for this scope.');
+    const until = this.armedUntil(account.accountId);
+    if (until !== null)
+      return result(
+        'PASS',
+        `Live is armed until ${new Date(until).toISOString().slice(11, 16)} UTC (DEMO rehearsal: simulated, nothing reaches a broker).`
+      );
+    if (this.riskReducing(request))
+      return result(
+        'WARN',
+        'Live trading is not armed; risk-reducing order allowed.'
+      );
+    return result(
+      'FAIL',
+      'Live trading is not armed for this account. Arm it with your step-up code first.',
+      'LIVE_NOT_ARMED'
+    );
+  }
+
+  /**
    * Subscribes to broker events (used by `DemoUserStream`).
    * @param listener Listener.
    * @return Unsubscribe function.
@@ -405,18 +541,20 @@ export class DemoExecutionClient implements ExecutionClient {
    * @param entityType Entity type.
    * @param entityId Entity id.
    * @param payload JSON payload.
+   * @param accountId Account the event belongs to.
    */
   private record(
     action: string,
     entityType: string,
     entityId: string,
-    payload: Record<string, unknown>
+    payload: Record<string, unknown>,
+    accountId: string = DEMO_ACCOUNT_ID
   ): void {
     const prevHash = this.audit[this.audit.length - 1]?.hash ?? 'genesis';
     const base = {
       event_id: this.nextId('demo-audit'),
       tenant_id: DEMO_TENANT_ID,
-      account_id: DEMO_ACCOUNT_ID,
+      account_id: accountId,
       actor: DEMO_USER_ID,
       action,
       entity_type: entityType,
@@ -509,14 +647,9 @@ export class DemoExecutionClient implements ExecutionClient {
       limit: string | null = null
     ) => checks.push({check, domain, outcome, message, code, observed, limit});
     const instrument = this.instrument(request.instrument_id);
+    const account = this.spec(request.account_id);
     if (request.mode === 'LIVE') {
-      add(
-        'mode.permitted',
-        'MODE',
-        'FAIL',
-        'Live trading is not available in DEMO mode.',
-        'LIVE_TRADING_DISABLED'
-      );
+      checks.push(this.liveModeCheck(request, account));
     } else {
       add(
         'mode.permitted',
@@ -525,7 +658,6 @@ export class DemoExecutionClient implements ExecutionClient {
         `${request.mode.toLowerCase()} mode is enabled for this account.`
       );
     }
-    const account = demoAccount(request.account_id);
     if (account)
       add('identity.account', 'IDENTITY', 'PASS', 'Account belongs to you.');
     else
@@ -932,7 +1064,9 @@ export class DemoExecutionClient implements ExecutionClient {
    * @return The crypto paper account first, then the broker accounts.
    */
   async listAccounts(): Promise<AccountList> {
-    return {accounts: DEMO_ACCOUNTS.map(spec => this.summary(spec.accountId))};
+    return {
+      accounts: this.accountSpecs.map(spec => this.summary(spec.accountId)),
+    };
   }
 
   /**
@@ -941,9 +1075,121 @@ export class DemoExecutionClient implements ExecutionClient {
    * @return Summary.
    */
   async getAccountSummary(accountId: string): Promise<AccountSummary> {
-    if (!demoAccount(accountId))
+    if (!this.spec(accountId))
       throw apiError(404, 'NOT_FOUND', 'Unknown account.');
     return this.summary(accountId);
+  }
+
+  /**
+   * Arms manual LIVE orders on an account (engine
+   * `POST /v1/accounts/{account_id}/live-consent`): refuses paper and
+   * unverified accounts, needs the risk acknowledgement, a lifetime of at
+   * most `DEMO_LIVE_ARM_MAX_MS` and `DEMO_STEP_UP_CODE`. Every outcome is
+   * audited.
+   * @param accountId Account id.
+   * @param request Step-up code, acknowledgement and lifetime.
+   * @return Summary with `live_armed_until_ms`.
+   */
+  async grantAccountLiveConsent(
+    accountId: string,
+    request: AccountLiveConsentRequest
+  ): Promise<AccountSummary> {
+    const spec = this.spec(accountId);
+    if (!spec) throw apiError(404, 'NOT_FOUND', 'Unknown account.');
+    const duration = request.duration_ms ?? DEMO_LIVE_ARM_MAX_MS;
+    const ack: unknown = request.acknowledge_risk;
+    let problem: ApiError | null = null;
+    if (spec.venue === 'mock')
+      problem = apiError(
+        403,
+        'TRADE_MODE_DISABLED',
+        'Paper accounts never trade LIVE; arm a verified venue or broker account.'
+      );
+    else if (!spec.modes.includes('LIVE'))
+      problem = apiError(
+        403,
+        'TRADE_MODE_DISABLED',
+        'This account is not enabled for LIVE; verify the account first.'
+      );
+    else if (ack !== true)
+      problem = apiError(
+        422,
+        'VALIDATION_FAILED',
+        'Risk acknowledgement is required.'
+      );
+    else if (
+      !Number.isInteger(duration) ||
+      duration <= 0 ||
+      duration > DEMO_LIVE_ARM_MAX_MS
+    )
+      problem = apiError(
+        422,
+        'VALIDATION_FAILED',
+        `Live arming lasts at most ${DEMO_LIVE_ARM_MAX_MS / 3_600_000} hours.`
+      );
+    else if (request.step_up_code.trim() !== DEMO_STEP_UP_CODE)
+      problem = apiError(
+        403,
+        'STEP_UP_REQUIRED',
+        'Step-up verification failed.'
+      );
+    else if (spec.capabilities.status !== 'AVAILABLE')
+      problem = apiError(
+        403,
+        'LIVE_TRADING_DISABLED',
+        `${spec.label} trading is ${spec.capabilities.status}.`
+      );
+    if (problem) {
+      this.record(
+        'live_arming.denied',
+        'account',
+        accountId,
+        {code: problem.body.code, reason: problem.body.message},
+        accountId
+      );
+      throw problem;
+    }
+    const now = this.now();
+    const arming: LiveArming = {grantedAtMs: now, expiresAtMs: now + duration};
+    this.liveArming.set(accountId, arming);
+    this.record(
+      'live_arming.granted',
+      'account',
+      accountId,
+      {
+        granted_at_ms: arming.grantedAtMs,
+        expires_at_ms: arming.expiresAtMs,
+        granted_by: DEMO_USER_ID,
+        acknowledge_risk: true,
+      },
+      accountId
+    );
+    const summary = this.summary(accountId);
+    this.emit({type: 'account.updated', payload: summary});
+    return summary;
+  }
+
+  /**
+   * Disarms LIVE on an account (engine `DELETE .../live-consent`).
+   * Idempotent; every call is audited.
+   * @param accountId Account id.
+   * @return Summary with `live_armed_until_ms` null.
+   */
+  async revokeAccountLiveConsent(accountId: string): Promise<AccountSummary> {
+    if (!this.spec(accountId))
+      throw apiError(404, 'NOT_FOUND', 'Unknown account.');
+    const until = this.armedUntil(accountId);
+    this.liveArming.delete(accountId);
+    this.record(
+      'live_arming.revoked',
+      'account',
+      accountId,
+      {was_armed_until_ms: until, revoked_by: DEMO_USER_ID},
+      accountId
+    );
+    const summary = this.summary(accountId);
+    this.emit({type: 'account.updated', payload: summary});
+    return summary;
   }
 
   /**
@@ -952,7 +1198,7 @@ export class DemoExecutionClient implements ExecutionClient {
    * @return Summary.
    */
   private summary(accountId: string = DEMO_ACCOUNT_ID): AccountSummary {
-    const spec = demoAccount(accountId) ?? DEMO_ACCOUNTS[0];
+    const spec = this.spec(accountId) ?? DEMO_ACCOUNTS[0];
     if (!spec) throw apiError(404, 'NOT_FOUND', 'Unknown account.');
     const connected = spec.status === 'CONNECTED';
     return {
@@ -981,6 +1227,7 @@ export class DemoExecutionClient implements ExecutionClient {
       health: spec.health,
       stale: false,
       last_sync_ms: connected ? this.now() : null,
+      live_armed_until_ms: this.armedUntil(spec.accountId),
     };
   }
 
@@ -1341,7 +1588,7 @@ export class DemoExecutionClient implements ExecutionClient {
       price: price.toString(),
       quantity_base: qty.toString(),
       fee: fee.toFixed(6),
-      fee_asset: demoAccount(order.account_id)?.currency ?? 'USD',
+      fee_asset: this.spec(order.account_id)?.currency ?? 'USD',
       liquidity,
       ts_ms: this.now(),
       mode: order.mode,
@@ -1537,7 +1784,9 @@ export class DemoExecutionClient implements ExecutionClient {
       margin: mark ? book.qty.abs().mul(Decimal.parse(mark)).toFixed(2) : null,
       leverage: '1',
       funding_accrued: '0',
-      mode: 'PAPER',
+      mode: this.spec(book.accountId)?.modes.includes('LIVE')
+        ? 'LIVE'
+        : 'PAPER',
       stale: false,
       as_of_ms: this.now(),
     };
@@ -1632,6 +1881,16 @@ export class DemoExecutionClient implements ExecutionClient {
         'The order changed since you last saw it. Review it and try again.'
       );
     }
+    if (
+      order.mode === 'LIVE' &&
+      !order.reduce_only &&
+      this.armedUntil(order.account_id) === null
+    )
+      throw apiError(
+        403,
+        'LIVE_NOT_ARMED',
+        'Live trading is not armed for this account. Arm it with your step-up code first.'
+      );
     const instrument = this.instrument(order.instrument_id);
     const tick = Decimal.parse(instrument?.tick_size ?? '0.01');
     const lot = Decimal.parse(instrument?.lot_size ?? '0.001');
@@ -1895,7 +2154,7 @@ export class DemoExecutionClient implements ExecutionClient {
    * @return Deployment.
    */
   async createDeployment(request: DeploymentRequest): Promise<Deployment> {
-    if (!demoAccount(request.account_id))
+    if (!this.spec(request.account_id))
       throw apiError(404, 'NOT_FOUND', 'Unknown account.');
     const now = this.now();
     const deployment: Deployment = {

@@ -710,6 +710,9 @@ class OmsService:
                 if p.unknown
             ]
             switches = uow.kill_switches.list(principal.tenant_id)
+            arming = uow.live_arming.get(
+                principal.tenant_id, account.account_id
+            )
             signal_intents = 0
             if request.signal_id is not None:
                 signal_intents = uow.intents.count_for_signal(
@@ -799,6 +802,7 @@ class OmsService:
             queue_closed_market_orders=(
                 self.settings.queue_closed_market_orders
             ),
+            live_arming=arming,
         )
         if ctx.security:
             inputs = await equity_inputs.gather(

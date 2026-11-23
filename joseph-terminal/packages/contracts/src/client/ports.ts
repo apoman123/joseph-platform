@@ -9,6 +9,7 @@
  */
 import type {
   AccountList,
+  AccountLiveConsentRequest,
   AlertSubscription,
   AlertSubscriptionList,
   AccountSummary,
@@ -312,6 +313,24 @@ export interface ExecutionClient {
    * @return Summary with positions and open orders.
    */
   getAccountSummary(accountId: string): Promise<AccountSummary>;
+  /**
+   * Arms manual LIVE orders on a verified account until a server-chosen
+   * time (`POST /v1/accounts/{id}/live-consent`). The execution engine
+   * verifies the step-up code exactly like deployment AUTO_LIVE consent.
+   * @param accountId Account id.
+   * @param request Step-up code, risk acknowledgement and lifetime.
+   * @return Summary whose `live_armed_until_ms` is the arming end.
+   */
+  grantAccountLiveConsent(
+    accountId: string,
+    request: AccountLiveConsentRequest
+  ): Promise<AccountSummary>;
+  /**
+   * Disarms LIVE on an account (`DELETE /v1/accounts/{id}/live-consent`).
+   * @param accountId Account id.
+   * @return Summary with `live_armed_until_ms` null.
+   */
+  revokeAccountLiveConsent(accountId: string): Promise<AccountSummary>;
   /**
    * Previews an order: rounding, fees, margin and the full risk verdict.
    * @param request Draft intent.
