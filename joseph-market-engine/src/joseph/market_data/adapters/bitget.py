@@ -293,8 +293,8 @@ class BitgetAdapter(base.BaseVenueAdapter):
                 "used.",
                 "RWA contracts are flagged by isRwa; equities are not "
                 "distinguished from other RWA.",
-                "Seconds bars are built from public trades; their history "
-                "reaches back 90 days.",
+                "Seconds bars are built from public trades; the REST "
+                "history reaches back 90 days.",
                 "Klines publish no taker buy volume (taker_volume is false); "
                 "seconds bars built from trades do carry it.",
             ),

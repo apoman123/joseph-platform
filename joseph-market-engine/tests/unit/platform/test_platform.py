@@ -44,6 +44,35 @@ def test_settings_from_env_parses_every_field() -> None:
     assert settings.poll_interval_s == 1.0
 
 
+def test_trade_recording_settings_parse_with_bounds() -> None:
+    """Trade recording, retention and archive variables are honored."""
+    defaults = config.Settings.from_env({})
+    assert defaults.trade_recording is True
+    assert defaults.trade_bar_retention_days == 30.0
+    assert defaults.binance_archive is True
+    assert defaults.trade_archive_url is None
+    settings = config.Settings.from_env(
+        {
+            "JOSEPH_TRADE_RECORDING": "false",
+            "JOSEPH_TRADE_BAR_RETENTION_DAYS": "0.2",
+            "JOSEPH_TRADE_RECORD_INSTRUMENTS": "bitget:perp:BTCUSDT, ",
+            "JOSEPH_TRADE_RECORD_MAX_INSTRUMENTS": "-3",
+            "JOSEPH_TRADE_BACKFILL_MAX_CALLS": "7",
+            "JOSEPH_TRADE_ARCHIVE_URL": "sqlite:///./var/trades.db",
+            "JOSEPH_BINANCE_ARCHIVE": "0",
+            "JOSEPH_BINANCE_ARCHIVE_DIR": "/data/vision",
+        }
+    )
+    assert settings.trade_recording is False
+    assert settings.trade_bar_retention_days == 1.0
+    assert settings.trade_record_instruments == ("bitget:perp:BTCUSDT",)
+    assert settings.trade_record_max_instruments == 0
+    assert settings.trade_backfill_max_calls == 7
+    assert settings.trade_archive_url == "sqlite:///./var/trades.db"
+    assert settings.binance_archive is False
+    assert settings.binance_archive_dir == "/data/vision"
+
+
 def test_demo_only_restricts_to_mock() -> None:
     """DEMO deployments never construct real venue adapters."""
     settings = config.Settings.from_env({"JOSEPH_DEMO_ONLY": "true"})
