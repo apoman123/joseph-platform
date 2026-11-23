@@ -7,7 +7,7 @@
         "properties": {
           "instruments": {
             "items": {
-              "pattern": "^(binance|hyperliquid|lighter|bitget|mexc|mock):(perp|spot|future):[A-Za-z0-9._/-]{1,64}$",
+              "pattern": "^(binance|hyperliquid|lighter|bitget|mexc|twse|nasdaq|nyse|treasury|mock):(perp|spot|future|stock|etf|rate):[A-Za-z0-9._/-]{1,64}$",
               "type": "string"
             },
             "title": "Instruments",
@@ -517,7 +517,7 @@
             "type": "integer"
           },
           "instrument_id": {
-            "pattern": "^(binance|hyperliquid|lighter|bitget|mexc|mock):(perp|spot|future):[A-Za-z0-9._/-]{1,64}$",
+            "pattern": "^(binance|hyperliquid|lighter|bitget|mexc|twse|nasdaq|nyse|treasury|mock):(perp|spot|future|stock|etf|rate):[A-Za-z0-9._/-]{1,64}$",
             "title": "Instrument Id",
             "type": "string"
           },
@@ -2138,7 +2138,7 @@
         "properties": {
           "blacklist": {
             "items": {
-              "pattern": "^(binance|hyperliquid|lighter|bitget|mexc|mock):(perp|spot|future):[A-Za-z0-9._/-]{1,64}$",
+              "pattern": "^(binance|hyperliquid|lighter|bitget|mexc|twse|nasdaq|nyse|treasury|mock):(perp|spot|future|stock|etf|rate):[A-Za-z0-9._/-]{1,64}$",
               "type": "string"
             },
             "title": "Blacklist",
@@ -2168,7 +2168,7 @@
           },
           "whitelist": {
             "items": {
-              "pattern": "^(binance|hyperliquid|lighter|bitget|mexc|mock):(perp|spot|future):[A-Za-z0-9._/-]{1,64}$",
+              "pattern": "^(binance|hyperliquid|lighter|bitget|mexc|twse|nasdaq|nyse|treasury|mock):(perp|spot|future|stock|etf|rate):[A-Za-z0-9._/-]{1,64}$",
               "type": "string"
             },
             "title": "Whitelist",
@@ -2597,6 +2597,71 @@
         "summary": "Get Aois",
         "tags": [
           "indicators"
+        ]
+      }
+    },
+    "/v1/calendars/{calendar_id}/sessions": {
+      "get": {
+        "description": "Lists the trading sessions of a calendar in a window.\n\nThe window ``[from_ms, to_ms)`` may span at most 400 days. A 24x7\ncalendar never closes and returns no sessions.\n\nArgs:\n    calendar_id: Contract ``CalendarId`` (``24x7``, ``XTAI``,\n        ``XNYS``, ``USBOND``).\n    from_ms: Inclusive window start.\n    to_ms: Exclusive window end.\n\nReturns:\n    Contract ``SessionList``.",
+        "operationId": "calendar_sessions_v1_calendars__calendar_id__sessions_get",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "calendar_id",
+            "required": true,
+            "schema": {
+              "title": "Calendar Id",
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "from_ms",
+            "required": true,
+            "schema": {
+              "minimum": 0,
+              "title": "From Ms",
+              "type": "integer"
+            }
+          },
+          {
+            "in": "query",
+            "name": "to_ms",
+            "required": true,
+            "schema": {
+              "minimum": 0,
+              "title": "To Ms",
+              "type": "integer"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "additionalProperties": true,
+                  "title": "Response Calendar Sessions V1 Calendars  Calendar Id  Sessions Get",
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Calendar Sessions",
+        "tags": [
+          "market"
         ]
       }
     },
