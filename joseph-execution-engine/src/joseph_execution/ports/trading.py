@@ -125,12 +125,19 @@ class VenueEvent:
         sequence: Venue/adapter sequence number.
         order: Order update, if any.
         fill: Fill, if any.
+        position: Position update, if any (live venue streams).
+        balance: Balance/margin update, if any (live venue streams).
+        resync: True for events replayed from a REST snapshot after a
+            (re)connect rather than pushed by the venue.
     """
 
     account_id: str
     sequence: int
     order: VenueOrderState | None = None
     fill: VenueFill | None = None
+    position: VenuePosition | None = None
+    balance: VenueAccountSnapshot | None = None
+    resync: bool = False
 
 
 @dataclasses.dataclass(frozen=True, slots=True)

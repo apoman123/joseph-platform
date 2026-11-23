@@ -22,6 +22,96 @@ _LOG = logging.getLogger(__name__)
 _TRUE = ("1", "true", "yes", "on")
 
 
+# ----------------------------------------------------------------------
+# Live venue adapters (crypto venues).
+# ----------------------------------------------------------------------
+
+CRYPTO_VENUES = ("binance", "bitget", "hyperliquid", "lighter", "mexc")
+
+
+@dataclasses.dataclass(frozen=True, slots=True)
+class VenueSettings:
+    """Live venue adapter settings (no secrets: keys live in the vault).
+
+    Attributes:
+        sandbox_venues: Venues whose accounts default to the venue's test
+            environment (an account's ``environment`` credential field
+            overrides it).
+        timeout_s: Venue HTTP timeout.
+        recv_window_ms: Signed-request validity window.
+        market_slippage_bps: Worst-price band of market orders on venues
+            that need one (Hyperliquid, Lighter).
+        urls: Endpoint overrides per venue (``rest_url``,
+            ``testnet_rest_url``, ``ws_url`` …).
+        streams: Run private account streams for live accounts.
+    """
+
+    sandbox_venues: tuple[str, ...] = ()
+    timeout_s: float = 10.0
+    recv_window_ms: int = 5_000
+    market_slippage_bps: int = 50
+    urls: Mapping[str, Mapping[str, str]] = dataclasses.field(
+        default_factory=dict
+    )
+    streams: bool = True
+
+
+def parse_venue_urls(raw: str) -> dict[str, dict[str, str]]:
+    """Parses ``venue.key=url`` overrides separated by commas.
+
+    Args:
+        raw: Configuration text, e.g.
+            ``binance.testnet_rest_url=https://testnet.binancefuture.com``.
+
+    Returns:
+        Overrides by venue.
+
+    Raises:
+        ValueError: For malformed entries or unknown venues.
+    """
+    result: dict[str, dict[str, str]] = {}
+    for entry in filter(None, (e.strip() for e in raw.split(","))):
+        name, _, url = entry.partition("=")
+        venue, _, key = name.partition(".")
+        if venue not in CRYPTO_VENUES or not key or not url:
+            raise ValueError("JOSEPH_VENUE_URLS entries are venue.key=url")
+        result.setdefault(venue, {})[key] = url
+    return result
+
+
+def venue_settings(source: Mapping[str, str]) -> VenueSettings:
+    """Reads ``JOSEPH_VENUE_*`` variables.
+
+    Args:
+        source: Environment.
+
+    Returns:
+        Venue settings.
+
+    Raises:
+        ValueError: For unknown sandbox venues or bad numbers.
+    """
+    raw = source.get("JOSEPH_VENUE_SANDBOX", "").strip().lower()
+    venues = (
+        CRYPTO_VENUES
+        if raw == "all"
+        else tuple(v.strip() for v in raw.split(",") if v.strip())
+    )
+    unknown = sorted(set(venues) - set(CRYPTO_VENUES))
+    if unknown:
+        raise ValueError(f"JOSEPH_VENUE_SANDBOX: unknown venues {unknown}")
+    return VenueSettings(
+        sandbox_venues=venues,
+        timeout_s=float(source.get("JOSEPH_VENUE_TIMEOUT_S", "10")),
+        recv_window_ms=int(source.get("JOSEPH_VENUE_RECV_WINDOW_MS", "5000")),
+        market_slippage_bps=int(
+            source.get("JOSEPH_VENUE_MARKET_SLIPPAGE_BPS", "50")
+        ),
+        urls=parse_venue_urls(source.get("JOSEPH_VENUE_URLS", "")),
+        streams=source.get("JOSEPH_LIVE_STREAMS", "true").lower() in _TRUE,
+    )
+
+
 # ---------------------------------------------------------------------------
 # Securities brokers (Interactive Brokers, SinoPac, Cathay)
 # ---------------------------------------------------------------------------
@@ -219,6 +309,7 @@ class Settings:
         stream_heartbeat_s: User stream heartbeat.
         demo_walk_bps: Random-walk step of the static DEMO gateway.
         securities: Brokers, securities paper account and session policy.
+        venues: Live crypto venue adapter settings.
     """
 
     environment: str = "development"
@@ -247,6 +338,7 @@ class Settings:
     securities: SecuritiesSettings = dataclasses.field(
         default_factory=SecuritiesSettings
     )
+    venues: VenueSettings = dataclasses.field(default_factory=VenueSettings)
 
     def __repr__(self) -> str:
         """Returns a representation without secrets."""
@@ -255,6 +347,7 @@ class Settings:
             f"database_url={self.database_url!r}, "
             f"market_gateway={self.market_gateway!r}, "
             f"live_trading_enabled={self.live_trading_enabled}, "
+            f"sandbox_venues={self.venues.sandbox_venues!r}, "
             "secrets=[REDACTED])"
         )
 
@@ -357,4 +450,5 @@ def from_env(env: Mapping[str, str] | None = None) -> Settings:
         stream_heartbeat_s=float(source.get("JOSEPH_STREAM_HEARTBEAT_S", "15")),
         demo_walk_bps=int(source.get("JOSEPH_DEMO_WALK_BPS", "3")),
         securities=securities_from_env(source),
+        venues=venue_settings(source),
     )
