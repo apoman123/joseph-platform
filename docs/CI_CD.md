@@ -51,7 +51,7 @@ The market engine installs `joseph-smc-indicators` from the private `apoman123/P
   Not environment secrets: the jobs that install the engine declare no `environment:`. Dependabot reads only Dependabot secrets, in the CI runs it triggers and for its own updates (`.github/dependabot.yml` registers a `git` registry).
 - **Use:** `.github/actions/indicators-access` masks the token and rewrites only `https://github.com/apoman123/PineScripts` to an authenticated URL. Image builds get it as the BuildKit secret `pinescripts_token`, so it never enters a layer or cache.
 - **Rotate** before expiry (GitHub emails a reminder): regenerate with the same settings and rerun both `gh secret set` commands.
-- **Retire the old deploy key** once CI is green: `gh secret delete PINESCRIPTS_DEPLOY_KEY -R apoman123/joseph-platform` (and again with `--app dependabot`), then `gh repo deploy-key list -R apoman123/PineScripts` and `gh repo deploy-key delete <id> -R apoman123/PineScripts` for `joseph-platform-ci`.
+- The SSH deploy key used before 2026-11-23 is retired: its secret and the PineScripts deploy key are deleted.
 - **Adopt new indicator ports:** bump `rev` under `[tool.uv.sources]` in `joseph-market-engine/pyproject.toml` and run `uv lock`.
 
 ## Servers
