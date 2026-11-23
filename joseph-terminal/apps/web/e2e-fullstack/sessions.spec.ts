@@ -10,8 +10,7 @@
  *      order-flow series publishing `method: "trade_classification"`.
  *   3. Anchored VWAP / regression from anchors up to 50 000 bars back, and a
  *      4xx refusal with a message beyond that.
- * Until that branch is merged these tests fail at the first request; run
- * them with `pnpm test:e2e:fullstack` after merging.
+ * Verified against main c404609 (engine side merged).
  */
 import {
   EXCHANGE_HOURS,
@@ -167,4 +166,31 @@ test('engine anchored VWAP accepts anchors beyond 2000 bars', async ({
     points: {values: Record<string, unknown>}[];
   };
   expect(body.points.some(p => typeof p.values.vwap === 'string')).toBeTruthy();
+});
+
+test('the engine refuses anchors beyond 50 000 bars with a message the terminal shows', async ({
+  request,
+}) => {
+  const latest = await request.get(`${MARKET}/v1/candles`, {
+    params: {instrument_id: 'mock:perp:BTCUSD', tf: '1m', limit: 1},
+  });
+  const [bar] = ((await latest.json()) as {candles: Candle[]}).candles;
+  if (!bar) throw new Error('no bar');
+  const anchor = bar.start_ms - 50_001 * 60_000;
+  const refused = await request.get(`${MARKET}/v1/indicators/series`, {
+    params: {
+      instrument_id: 'mock:perp:BTCUSD',
+      tf: '1m',
+      plugin: 'anchored_vwap',
+      from_ms: anchor,
+      settings: JSON.stringify({
+        anchored_vwap: {anchor: 'time', anchor_ms: anchor, source: 'hlc3'},
+      }),
+    },
+  });
+  expect(refused.status()).toBe(422);
+  const body = (await refused.json()) as {code: string; message: string};
+  expect(body.message).toMatch(
+    /closed 1m bars back; anchored studies are computed for at most 50000 bars/
+  );
 });

@@ -14,7 +14,7 @@ import {
 } from '@joseph/contracts';
 import {describe, expect, it} from 'vitest';
 import {
-  DEMO_ANCHOR_REFUSAL,
+  demoAnchorRefusal,
   DEMO_SERIES_BAR_CAP,
   anchoredVwapPoints,
   regressionValues,
@@ -153,7 +153,7 @@ describe('anchored VWAP (DEMO engine)', () => {
     await expect(refused).rejects.toBeInstanceOf(ApiError);
     await expect(refused).rejects.toMatchObject({
       status: 422,
-      body: {message: DEMO_ANCHOR_REFUSAL},
+      body: {message: demoAnchorRefusal(50_001, '5m')},
     });
   });
 

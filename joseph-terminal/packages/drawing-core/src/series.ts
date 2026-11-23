@@ -182,7 +182,9 @@ export function seriesStatusMessage(
 ): string | null {
   if (!state || state.status === 'loading') return SERIES_LOADING_MESSAGE;
   if (state.status === 'error') {
-    if (state.refusal) return state.refusal;
+    if (state.refusal) {
+      return state.refusal.charAt(0).toUpperCase() + state.refusal.slice(1);
+    }
     return `Engine values unavailable: ${state.error ?? 'request failed'}`;
   }
   return null;

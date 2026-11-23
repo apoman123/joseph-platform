@@ -168,7 +168,7 @@ test('draws anchors far back and shows the engine message only on refusal', asyn
   await seedVwap(page, 50_001);
   await openPanel(page, 'Objects');
   await expect(objectDetail(page, 'anchored-vwap')).toHaveText(
-    /^Anchor is more than 50,000 bars back/
+    /^The anchor is 50001 closed 5m bars back; anchored studies are computed for at most 50000 bars/
   );
   await showDataWindow(page);
   await hoverChart(page, 0.6, 0.4);
