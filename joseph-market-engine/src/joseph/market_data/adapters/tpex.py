@@ -43,7 +43,8 @@ exchange's matching, is not served. Sources (all public, verified live
   sessions in every month from 2005-01 to 2026-11, and its 2026 and 2027
   schedules list exactly the XTAI closures.
 
-Intraday bars, coverage and the classified delta work as on TWSE (see
+Intraday bars, coverage, the bar archive, the classified delta and the
+optional SinoPac Shioaji source (``OTC`` contracts) work as on TWSE (see
 ``twse``); bars are sparse (``SPARSE_BARS``).
 """
 
@@ -549,6 +550,7 @@ class TpexAdapter(twse.TaiwanExchangeAdapter):
     VENUE = instruments.Venue.TPEX
     MIS_MARKET = MIS_MARKET
     MIS_SOURCE_NAME = MIS_SOURCE
+    SJ_EXCHANGE = "OTC"
 
     def capabilities(self) -> capabilities.VenueCapabilities:
         """Returns verified capabilities.
@@ -556,7 +558,7 @@ class TpexAdapter(twse.TaiwanExchangeAdapter):
         Returns:
             Capabilities.
         """
-        return capabilities.VenueCapabilities(
+        caps = capabilities.VenueCapabilities(
             venue=self.VENUE,
             display_name="Taipei Exchange (TPEx)",
             market_types=(
@@ -593,6 +595,7 @@ class TpexAdapter(twse.TaiwanExchangeAdapter):
                 "They include odd-lot and after-hours fixed-price trades "
                 "but not block trades. 1w and 1M are aggregated from them.",
                 *twse.MIS_NOTES,
+                twse.MIS_SECONDS_NOTE,
                 "Price limits are 10 % of the reference price (2x domestic "
                 "leveraged ETFs 20 %); securities for which TPEx publishes "
                 "limit-up 9999.95 (foreign-constituent and bond ETFs, the "
@@ -607,6 +610,7 @@ class TpexAdapter(twse.TaiwanExchangeAdapter):
             docs_url=DOCS_URL,
             verified_at_ms=self._verified_at_ms,
         )
+        return self._with_sinopac(caps)
 
     async def _load_instruments(
         self,

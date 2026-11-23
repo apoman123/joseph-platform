@@ -17,8 +17,11 @@ from joseph.domain import errors
 from joseph.domain import instruments
 from joseph.domain import sessions
 from joseph.domain import timeframes
+from joseph.market_data.adapters import bar_archive_sql
+from joseph.market_data.adapters import tpex
 from joseph.market_data.adapters import twse
 from joseph.market_data.domain import snapshot_bars
+from joseph.platform import db
 
 _D = decimal.Decimal
 _TPE = datetime.timezone(datetime.timedelta(hours=8))
@@ -597,3 +600,196 @@ def test_snapshot_builder_coverage_is_the_recording() -> None:
     covered = builder.coverage()
     assert covered[0][0] == _OPEN + 3 * minute  # Minutes 0-2 were dropped.
     assert covered[-1][1] == _OPEN + 370_000
+
+
+def _tpe_ms(day: datetime.date, hour: int, minute: int = 0) -> int:
+    """Returns the UTC epoch ms of a Taipei time.
+
+    Args:
+        day: Date.
+        hour: Hour.
+        minute: Minute.
+
+    Returns:
+        Milliseconds.
+    """
+    moment = datetime.datetime.combine(day, datetime.time(hour, minute))
+    return int(moment.replace(tzinfo=_TPE).timestamp() * 1000)
+
+
+def test_month_is_complete_only_after_it_ended() -> None:
+    """A month read before its last day ended may still gain sessions."""
+    september = datetime.date(2026, 9, 29)
+    assert not twse.month_complete(2026, 9, _tpe_ms(september, 15))
+    last = datetime.date(2026, 9, 30)
+    assert not twse.month_complete(2026, 9, _tpe_ms(last, 23, 59))
+    october = datetime.date(2026, 10, 1)
+    assert twse.month_complete(2026, 9, _tpe_ms(october, 0))
+    assert twse.month_complete(2026, 12, _tpe_ms(datetime.date(2027, 1, 1), 0))
+    eve = datetime.date(2026, 12, 31)
+    assert not twse.month_complete(2026, 12, _tpe_ms(eve, 20))
+
+
+@pytest.mark.parametrize("venue", ["twse", "tpex"])
+async def test_month_read_on_its_29th_is_read_again_later(venue: str) -> None:
+    """A past month read on the 29th is re-read; read after its end, never."""
+    clock = clock_lib.ManualClock(_tpe_ms(datetime.date(2026, 9, 29), 15))
+    reads: list[str] = []
+
+    def answer(params: dict[str, Any]) -> dict[str, Any]:
+        """Counts reads of the monthly report.
+
+        Args:
+            params: Query.
+
+        Returns:
+            An empty month.
+        """
+        reads.append(str(params["date"]))
+        return {"stat": "OK" if venue == "twse" else "ok", "data": []}
+
+    adapter: twse.TaiwanExchangeAdapter
+    if venue == "twse":
+        adapter = _adapter(
+            clock, www={"/rwd/zh/afterTrading/STOCK_DAY": answer}
+        )
+        instrument = _ID
+    else:
+        adapter = tpex.TpexAdapter(
+            _Http({}),  # type: ignore[arg-type]
+            _Http({"/www/zh-tw/afterTrading/tradingStock": answer}),  # type: ignore[arg-type]
+            _Http({}),  # type: ignore[arg-type]
+            clock,
+        )
+        instrument = instruments.InstrumentId.parse("tpex:stock:6488")
+    await adapter._month(instrument, 2026, 9)
+    clock.advance(2 * 86_400_000)  # 1 October: September has ended.
+    await adapter._month(instrument, 2026, 9)
+    assert len(reads) == 2  # Before the fix this came from the cache.
+    clock.advance(40 * 86_400_000)
+    await adapter._month(instrument, 2026, 9)
+    assert len(reads) == 2  # Complete as of its read: cached for good.
+    await adapter.close()
+
+
+async def _parked(seconds: float) -> None:
+    """Keeps the MIS recorder idle (tests apply snapshots by hand).
+
+    Args:
+        seconds: Ignored.
+    """
+    del seconds
+    await asyncio.Event().wait()
+
+
+def _listed(clock: clock_lib.ManualClock, archive: Any) -> twse.TwseAdapter:
+    """Builds a TWSE adapter over an archive with the listings loaded.
+
+    Args:
+        clock: Clock.
+        archive: Bar archive.
+
+    Returns:
+        Adapter.
+    """
+    adapter = _adapter(
+        clock,
+        mis={
+            "/stock/api/getStockInfo.jsp": lambda params: _mis_body(
+                ["2330"], clock.now_ms(), 1
+            )
+        },
+        sleep=_parked,
+        bar_archive=archive,
+    )
+    rows, meta = twse.parse_instruments(
+        _load("stock_day_all"),
+        _load("t187ap03_L"),
+        _load("t187ap47_L"),
+        _load("twt88u"),
+        _load("twtawu"),
+        now_ms=clock.now_ms(),
+    )
+    adapter._instruments = {r.instrument_id.venue_market_id: r for r in rows}
+    adapter._loaded_at_ms = clock.now_ms()
+    adapter.listing = meta
+    return adapter
+
+
+async def test_recorded_minutes_and_coverage_survive_a_restart() -> None:
+    """MIS recordings are archived with their coverage and read back."""
+    archive = bar_archive_sql.SqlBarArchive(db.create_engine("sqlite://"))
+    clock = clock_lib.ManualClock(_OPEN + 200_000)
+    first = _listed(clock, archive)
+    first.watch("2330")
+    builder = first._builders["2330"]
+    builder.apply(_snap(-30, 0))
+    builder.apply(_snap(5, 1, z="100"))
+    builder.apply(_snap(70, 3, z="101", high="101"))
+    builder.apply(_snap(190, 3))
+    live = await first.fetch_candle_coverage(_ID, _M1, _OPEN, _OPEN + 600_000)
+    assert first.persist_recordings(clock.now_ms()) == 3
+    assert first.persist_recordings(clock.now_ms()) == 0  # Written recently.
+    await first.close()
+    stored = archive.minutes(_ID, twse.MIS_SOURCE, _OPEN, _OPEN + 600_000)
+    assert [c.start_ms for c in stored] == [
+        _OPEN,
+        _OPEN + 60_000,
+        _OPEN + 120_000,
+    ]
+    assert archive.coverage(_ID, twse.MIS_SOURCE, 0, 2**62) == [
+        (_OPEN, _OPEN + 180_000)
+    ]
+    restarted = _listed(clock, archive)  # A new process: nothing recorded.
+    again = await restarted.fetch_candle_coverage(
+        _ID, _M1, _OPEN, _OPEN + 600_000
+    )
+    assert [c.start_ms for c in again.candles] == [
+        c.start_ms for c in live.candles if c.is_final
+    ]
+    assert again.covered == ((_OPEN, _OPEN + 180_000),)
+    five = await restarted.fetch_candle_coverage(
+        _ID, timeframes.Timeframe.M5, _OPEN, _OPEN + 600_000
+    )
+    assert [(c.start_ms, c.base_volume, c.is_final) for c in five.candles] == [
+        (_OPEN, _D(3_000), False)
+    ]
+    await restarted.close()
+
+
+class _BrokenArchive:
+    """Bar archive whose every call fails."""
+
+    def put(self, *args: object) -> None:
+        """Fails.
+
+        Args:
+            *args: Ignored.
+
+        Raises:
+            RuntimeError: Always.
+        """
+        del args
+        raise RuntimeError("disk full")
+
+    minutes = coverage = prune = put
+
+
+async def test_archive_failures_never_stop_the_recorder(
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    """A broken archive is logged and the in-memory recording still serves."""
+    clock = clock_lib.ManualClock(_OPEN + 200_000)
+    adapter = _adapter(clock, bar_archive=_BrokenArchive())
+    builder = snapshot_bars.SnapshotBarBuilder(_ID, source=twse.MIS_SOURCE)
+    adapter._builders["2330"] = builder
+    builder.apply(_snap(-30, 0))
+    builder.apply(_snap(5, 1, z="100"))
+    builder.apply(_snap(70, 3, z="101"))
+    assert adapter.persist_recordings(clock.now_ms(), force=True) == 0
+    bars, covered = adapter._mis_minutes(_ID, _OPEN, _OPEN + 600_000)
+    assert [b.start_ms for b in bars] == [_OPEN, _OPEN + 60_000]
+    assert covered
+    assert "archiving recorded bars failed" in caplog.text
+    assert "bar archive prune failed" in caplog.text
+    assert "bar archive read failed" in caplog.text

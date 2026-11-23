@@ -1,18 +1,22 @@
 """Environment-driven configuration for the market engine.
 
 All settings come from ``JOSEPH_*`` environment variables so the same build
-runs in development, CI and production. Secrets (dev tokens, service token)
-are never logged; ``Settings.__repr__`` redacts them.
+runs in development, CI and production. Secrets (dev tokens, service token,
+broker keys) are never logged; ``Settings.__repr__`` redacts them, and
+broker keys may come from secret files (``NAME_FILE``, see
+``secret_value``), which are registered for log redaction.
 """
 
 from __future__ import annotations
 
 import dataclasses
 import os
+import pathlib
 from collections.abc import Mapping
 
 from joseph.domain import identity
 from joseph.domain import instruments
+from joseph.platform import redaction
 
 _DEFAULT_CORS = "http://localhost:3000,http://127.0.0.1:3000"
 _ALL_VENUES = ",".join(venue.value for venue in instruments.Venue)
@@ -92,6 +96,75 @@ def _bool(value: str | None, default: bool) -> bool:
     if value is None or value == "":
         return default
     return value.strip().lower() in {"1", "true", "yes", "on"}
+
+
+def secret_value(source: Mapping[str, str], name: str) -> str | None:
+    """Reads a secret from ``NAME`` or the file named by ``NAME_FILE``.
+
+    The value is registered for log redaction.
+
+    Args:
+        source: Environment.
+        name: Variable.
+
+    Returns:
+        Value (stripped), or ``None`` when unset.
+
+    Raises:
+        ValueError: When ``NAME_FILE`` points to an unreadable file (the
+            message names the variable, never the value).
+    """
+    value = (source.get(name) or "").strip()
+    path = source.get(f"{name}_FILE")
+    if not value and path:
+        try:
+            value = pathlib.Path(path).read_text(encoding="utf-8").strip()
+        except OSError as err:
+            raise ValueError(f"{name}_FILE is not readable") from err
+    if not value:
+        return None
+    redaction.register_secret(value)
+    return value
+
+
+TW_DATA_SOURCES = ("twse", "sinopac")
+"""Values of ``JOSEPH_TW_DATA_SOURCE``."""
+
+
+def _tw_data_source(value: str) -> str:
+    """Validates ``JOSEPH_TW_DATA_SOURCE``.
+
+    Args:
+        value: Raw value.
+
+    Returns:
+        ``twse`` or ``sinopac``.
+
+    Raises:
+        ValueError: For another value.
+    """
+    choice = value.strip().lower() or "twse"
+    if choice not in TW_DATA_SOURCES:
+        raise ValueError("JOSEPH_TW_DATA_SOURCE must be twse or sinopac")
+    return choice
+
+
+def _bounded(
+    source: Mapping[str, str], name: str, default: int, low: int, high: int
+) -> int:
+    """Reads an integer setting clamped into ``[low, high]``.
+
+    Args:
+        source: Environment.
+        name: Variable.
+        default: Value when unset.
+        low: Smallest value.
+        high: Largest value.
+
+    Returns:
+        Clamped value.
+    """
+    return min(high, max(low, int(source.get(name, str(default)))))
 
 
 _ALPACA_FEEDS = frozenset({"iex", "sip", "delayed_sip"})
@@ -198,6 +271,19 @@ class Settings:
         lighter_archive: Whether Lighter seconds history is imported from
             the AWS Public Blockchain Data trade archive (remote range
             reads, verified against 1d candles, nothing cached on disk).
+        tw_data_source: Market data of TWSE and TPEx: ``twse`` (the
+            exchanges' official sources) or ``sinopac`` (SinoPac Shioaji
+            bars, ticks and books, falling back to the official sources).
+        sinopac_api_key: Shioaji API key (secret).
+        sinopac_secret_key: Shioaji secret key (secret).
+        sinopac_max_symbols: Codes streamed from Shioaji at once (each
+            uses a tick and a bid/ask subscription; Shioaji allows 200).
+        sinopac_intraday_ticks_calls: Tick-history queries spent per day
+            during trading hours (Shioaji allows 10).
+        sinopac_intraday_kbars_calls: Kbar queries spent per day during
+            trading hours (Shioaji allows 270).
+        sinopac_seconds_history_days: Sessions of tick history read for
+            seconds bars and trades, counting back from the newest.
     """
 
     dev_tokens: tuple[DevToken, ...] = ()
@@ -244,6 +330,13 @@ class Settings:
     bitget_archive_dir: str = "./var/bitget-archive"
     mexc_ws_format: str = "protobuf"
     lighter_archive: bool = True
+    tw_data_source: str = "twse"
+    sinopac_api_key: str | None = None
+    sinopac_secret_key: str | None = None
+    sinopac_max_symbols: int = 60
+    sinopac_intraday_ticks_calls: int = 8
+    sinopac_intraday_kbars_calls: int = 200
+    sinopac_seconds_history_days: int = 5
 
     def __repr__(self) -> str:
         """Returns a representation with secrets redacted."""
@@ -254,7 +347,11 @@ class Settings:
             f"cors_origins={self.cors_origins!r}, "
             f"database_url={self.database_url!r}, "
             f"enabled_venues={[v.value for v in self.active_venues]!r}, "
-            f"demo_only={self.demo_only!r})"
+            f"demo_only={self.demo_only!r}, "
+            f"tw_data_source={self.tw_data_source!r}, "
+            f"sinopac_api_key={"'***'" if self.sinopac_api_key else None}, "
+            f"sinopac_secret_key="
+            f"{"'***'" if self.sinopac_secret_key else None})"
         )
 
     @property
@@ -375,4 +472,23 @@ class Settings:
                 source.get("JOSEPH_MEXC_WS_FORMAT", "protobuf")
             ),
             lighter_archive=_bool(source.get("JOSEPH_LIGHTER_ARCHIVE"), True),
+            tw_data_source=_tw_data_source(
+                source.get("JOSEPH_TW_DATA_SOURCE", "twse")
+            ),
+            sinopac_api_key=secret_value(source, "JOSEPH_SINOPAC_API_KEY"),
+            sinopac_secret_key=secret_value(
+                source, "JOSEPH_SINOPAC_SECRET_KEY"
+            ),
+            sinopac_max_symbols=_bounded(
+                source, "JOSEPH_SINOPAC_MAX_SYMBOLS", 60, 1, 100
+            ),
+            sinopac_intraday_ticks_calls=_bounded(
+                source, "JOSEPH_SINOPAC_INTRADAY_TICKS_CALLS", 8, 0, 10
+            ),
+            sinopac_intraday_kbars_calls=_bounded(
+                source, "JOSEPH_SINOPAC_INTRADAY_KBARS_CALLS", 200, 0, 270
+            ),
+            sinopac_seconds_history_days=_bounded(
+                source, "JOSEPH_SINOPAC_SECONDS_HISTORY_DAYS", 5, 0, 30
+            ),
         )

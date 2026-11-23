@@ -35,20 +35,35 @@ Sources (all public, verified live 2026-11-23):
   every other weekday entry is a closure added to the XTAI calendar.
 
 ``TaiwanExchangeAdapter`` holds what TWSE and TPEx share (MIS snapshots,
-recording, monthly daily-report caching, XTAI alignment); ``TwseAdapter``
-adds the TWSE listings, reports and holiday schedule.
+recording, monthly daily-report caching, XTAI alignment, the optional
+SinoPac Shioaji source); ``TwseAdapter`` adds the TWSE listings, reports
+and holiday schedule.
 
 Intraday bars are reconstructed from MIS snapshots recorded while the
-engine runs (``snapshot_bars``); there is no intraday history. Bars are
-sparse (a minute or day without trades has no bar), so fetches state their
-coverage: the recording's segments for intraday bars, the STOCK_DAY months
-read for daily bars. Missing bars there are not gaps; minutes the recorder
-did not see (before recording started, across a polling gap) still are.
+engine runs (``snapshot_bars``); there is no intraday history beyond what
+was recorded. Recorded final minutes and their coverage are kept in a
+``BarArchive`` (the trade recorder's database) so they survive restarts.
+Bars are sparse (a minute or day without trades has no bar), so fetches
+state their coverage: the recording's segments for intraday bars, the
+STOCK_DAY months read for daily bars. Missing bars there are not gaps;
+minutes the recorder did not see (before recording started, across a
+polling gap) still are.
+
+With ``JOSEPH_TW_DATA_SOURCE=sinopac`` (``adapters/sinopac.py``) intraday
+bars come from Shioaji kbars and ticks, seconds bars and trades from its
+tick history and stream, books and snapshots from its bid/ask and tick
+stream. Listings, tick ladders, limits and daily, weekly and monthly bars
+stay official. Whenever Shioaji cannot serve a request (no login, used-up
+data allowance, outage, spent query budget) the official sources serve it;
+each one-minute bar comes from one source, and an aggregate whose minutes
+come from different sources is not emitted (its slot is reported missing).
 """
 
 from __future__ import annotations
 
 import asyncio
+import bisect
+import collections
 import contextlib
 import dataclasses
 import datetime
@@ -56,6 +71,8 @@ import decimal
 import html
 import logging
 import zoneinfo
+from collections.abc import AsyncGenerator
+from collections.abc import AsyncIterator
 from collections.abc import Awaitable
 from collections.abc import Callable
 from collections.abc import Iterable
@@ -73,11 +90,16 @@ from joseph.domain import sessions
 from joseph.domain import timeframes
 from joseph.market_data.adapters import base
 from joseph.market_data.adapters import http
+from joseph.market_data.adapters import sinopac as sinopac_lib
+from joseph.market_data.app import bar_archive as bar_archive_lib
 from joseph.market_data.domain import books
 from joseph.market_data.domain import candles as candle_rules
 from joseph.market_data.domain import capabilities
+from joseph.market_data.domain import health
 from joseph.market_data.domain import session_bars
 from joseph.market_data.domain import snapshot_bars
+from joseph.market_data.domain import trade_bars
+from joseph.market_data.domain import trades as trades_lib
 
 _LOG = logging.getLogger(__name__)
 
@@ -130,6 +152,18 @@ _PRE_OPEN_MS = 5 * 60_000
 _POST_CLOSE_MS = 2 * 60_000
 POLL_INTERVAL_S = 5.0
 Sleep = Callable[[float], Awaitable[None]]
+_PERSIST_EVERY_MS = 60_000
+"""MIS recordings are written to the bar archive at most this often."""
+ARCHIVE_RETENTION_MS = 400 * 86_400_000
+"""Archived one-minute bars older than this are pruned (daily)."""
+MAX_INTRADAY_SESSIONS = 60
+"""Sessions of Shioaji minute history read per call (newest kept)."""
+_KBAR_CACHE_DAYS = 300
+_TICK_CACHE_DAYS = 20
+_TODAY_KBARS_EVERY_MS = 60_000
+_BOOK_WAIT_S = 2.0
+_STREAM_IDLE_S = 1.0
+_SEED_MS = 10_000
 
 
 def roc_date(text: str) -> datetime.date:
@@ -840,8 +874,6 @@ MIS_NOTES: tuple[str, ...] = (
     "missed (they are exact when the day high/low moves inside "
     "one bar), and volume without a known trade price leaves "
     "that bar without buy volume (or without the bar).",
-    "Seconds timeframes are not offered: 5-second snapshots "
-    "cannot make honest seconds bars.",
     "MIS publishes no trade feed or aggressor side: derived "
     "trades (volume increments) are classified with the quote "
     "rule against the previous snapshot's best bid/ask and the "
@@ -852,6 +884,287 @@ MIS_NOTES: tuple[str, ...] = (
     "funding, open interest or taker volume.",
 )
 """Capability notes shared by the venues whose live data is MIS."""
+MIS_SECONDS_NOTE = (
+    "Seconds timeframes are not offered: 5-second snapshots cannot make "
+    "honest seconds bars."
+)
+"""Seconds note of the official sources (MIS)."""
+
+
+def sinopac_notes(config: sinopac_lib.SinopacConfig) -> tuple[str, ...]:
+    """Capability notes of the SinoPac Shioaji source.
+
+    Args:
+        config: Shioaji settings (budgets).
+
+    Returns:
+        Notes.
+    """
+    return (
+        "Bars, trades and books come from SinoPac Shioaji "
+        "(JOSEPH_TW_DATA_SOURCE=sinopac, the owner's API key; "
+        f"{sinopac_lib.DOCS_URL}): 1m from Shioaji kbars (history from "
+        "2020-03-02; 3m-12h aggregated on the XTAI grid), live 1m and "
+        "seconds (1s-30s) bars from the tick stream, seconds history from "
+        f"the per-day tick history of the newest "
+        f"{config.seconds_history_days} sessions, books from the 5-level "
+        "bid/ask stream. Volumes are board lots in shares; odd lots, "
+        "after-hours fixed-price and block trades are excluded. Data is "
+        "real time (no delay). Listings, tick ladders, price limits and "
+        "names stay the official lists; 1d, 1w and 1M stay the official "
+        "daily reports.",
+        "Buy volume is Shioaji's tick_type (1 外盤 at the ask: buy, 2 內盤 "
+        "at the bid: sell, 0 undetermined). SinoPac does not document it "
+        "as the exchange's aggressor flag (code 0 '無法判定' marks a "
+        "classification, and its C# docs swap 1 and 2), so "
+        "taker_buy_method = classified; a bar with an undetermined tick "
+        "has no buy volume. Public trades carry the same classified side.",
+        "Shioaji quotas: 50 market-data queries per 10 s; in trading hours "
+        "at most 10 tick-history and 270 kbar queries a day (this engine "
+        f"spends at most {config.intraday_ticks_calls} and "
+        f"{config.intraday_kbars_calls}); a daily data allowance of 500 MB "
+        "(2 GB / 10 GB with 30-day API trading value 1-100M / over 100M "
+        "TWD), reset 08:00 Taipei, beyond which queries come back empty; "
+        "200 subscriptions (a tick and a bid/ask one per code, at most "
+        f"{config.max_symbols} codes); 5 connections per person (the "
+        "execution engine uses one) and 1,000 logins a day.",
+        "Coverage: the tick stream's cumulative day volume proves that no "
+        "trade was missed (a jump starts a new segment whose first bar is "
+        "partial); bid/ask updates prove delivery up to 2 s before their "
+        "time. Kbars are labeled by the end of their minute; Shioaji "
+        "timestamps are Taipei wall-clock time (inferred from SinoPac's "
+        "examples).",
+        "Fallback: when Shioaji cannot serve (login, data allowance, "
+        "outage, query budget, missing SDK) the official sources below "
+        "serve bars, books and snapshots (source twse.mis or tpex.mis); a "
+        "bar never mixes sources, an aggregate spanning both is not "
+        "emitted, and live sessions show feed_state POLL, transport "
+        "REST_POLL and DEGRADED health with the reason. Seconds bars and "
+        "trades need Shioaji.",
+    )
+
+
+def month_complete(year: int, month: int, read_ms: int) -> bool:
+    """Checks whether a monthly report read at a time held the whole month.
+
+    A month is complete once it has ended: a read on its own last days (or
+    the 29th-31st of a short read) may still miss the sessions after it.
+
+    Args:
+        year: Year.
+        month: Month.
+        read_ms: When the report was read.
+
+    Returns:
+        True when the read happened on or after the next month's first day
+        (Taipei), so the cached report can never change.
+    """
+    following = datetime.date(year + month // 12, month % 12 + 1, 1)
+    return taipei_date(read_ms) >= following
+
+
+def _span_end(spans: Sequence[candle_rules.Span], ts_ms: int) -> int | None:
+    """Returns the end of the span containing an instant.
+
+    Args:
+        spans: Disjoint ascending spans.
+        ts_ms: Instant.
+
+    Returns:
+        Span end, or ``None`` when no span contains it.
+    """
+    for low, high in spans:
+        if low <= ts_ms < high:
+            return high
+    return None
+
+
+def _overlaps(spans: Sequence[candle_rules.Span], low: int, high: int) -> bool:
+    """Checks whether ``[low, high)`` overlaps any span.
+
+    Args:
+        spans: Spans.
+        low: Inclusive start.
+        high: Exclusive end.
+
+    Returns:
+        True on overlap.
+    """
+    return any(a < high and b > low for a, b in spans)
+
+
+def provider(candle: market.Candle) -> str:
+    """Returns the source family of a bar (``sinopac``, ``twse``, ...).
+
+    Args:
+        candle: Candle.
+
+    Returns:
+        The part of ``source`` before the first dot.
+    """
+    return candle.source.split(".", 1)[0]
+
+
+Layer = tuple[list[market.Candle], list[candle_rules.Span]]
+"""One source's one-minute bars and the whole minutes it covers."""
+
+
+def combine_layers(layers: Sequence[Layer]) -> Layer:
+    """Combines one-minute bars of several sources, best source first.
+
+    A source's bar is kept only for a minute no better source has a bar
+    for or covers; its coverage only where no better source's coverage
+    is, so a minute is covered by exactly one source.
+
+    Args:
+        layers: ``(bars, whole-minute spans)`` per source, preferred first.
+
+    Returns:
+        Ascending bars and the merged coverage.
+    """
+    claimed: list[candle_rules.Span] = []
+    taken: dict[int, market.Candle] = {}
+    spans: list[candle_rules.Span] = []
+    for bars, covered in layers:
+        for bar in bars:
+            if bar.start_ms in taken or _overlaps(
+                claimed, bar.start_ms, bar.end_ms
+            ):
+                continue
+            taken[bar.start_ms] = bar
+        spans.extend(candle_rules.subtract_spans(covered, claimed))
+        claimed = candle_rules.merge_spans([*claimed, *covered])
+    return [taken[s] for s in sorted(taken)], candle_rules.merge_spans(spans)
+
+
+def aggregate_minutes(
+    minutes: Sequence[market.Candle],
+    timeframe: timeframes.Timeframe,
+    covered: Sequence[candle_rules.Span],
+    now_ms: int,
+    covered_to: Callable[[int], int | None] | None = None,
+) -> Layer:
+    """Aggregates one-minute bars on the XTAI grid, one source per bar.
+
+    Args:
+        minutes: One-minute bars (any order).
+        timeframe: Target intraday resolution.
+        covered: Coverage of the minutes.
+        now_ms: Receipt time.
+        covered_to: Completeness of the minutes from a bar start (``None``
+            skips the bar); defaults to the coverage span holding it.
+
+    Returns:
+        Aggregates and the coverage without the slots of bars that would
+        mix sources (they are not emitted).
+    """
+    spans = candle_rules.merge_spans(covered)
+    if timeframe is _M1:
+        return list(minutes), spans
+    calendar = sessions.XTAI
+    groups: dict[int, list[market.Candle]] = {}
+    for bar in sorted(minutes, key=lambda c: c.start_ms):
+        groups.setdefault(calendar.floor(timeframe, bar.start_ms), []).append(
+            bar
+        )
+    out: list[market.Candle] = []
+    holes: list[candle_rules.Span] = []
+    for start, group in sorted(groups.items()):
+        if len({provider(bar) for bar in group}) > 1:
+            holes.append((start, calendar.end_of(timeframe, start)))
+            continue
+        if covered_to is None:
+            through = _span_end(spans, start)
+            through = start if through is None else through
+        else:
+            found = covered_to(start)
+            if found is None:
+                continue
+            through = found
+        out.extend(
+            session_bars.aggregate(
+                group, timeframe, now_ms=now_ms, covered_to_ms=through
+            )
+        )
+    return out, candle_rules.subtract_spans(spans, holes)
+
+
+def _touched_minutes(
+    event: sinopac_lib.Event, minutes: dict[int, market.Candle]
+) -> set[int]:
+    """Returns the streamed minutes a feed event changes.
+
+    A new segment drops the open tick-built minutes (they lost trades).
+
+    Args:
+        event: Feed event.
+        minutes: Minutes held by the stream (pruned in place).
+
+    Returns:
+        Minute starts to rebuild.
+    """
+    if event.kind == "trade" and event.trade is not None:
+        return {sessions.XTAI.floor(_M1, event.trade.venue_event_ts_ms)}
+    if event.kind == "segment":
+        stale = {
+            start
+            for start, bar in minutes.items()
+            if not bar.is_final and provider(bar) == sinopac_lib.SOURCE
+        }
+        for start in stale:
+            del minutes[start]
+        return stale
+    if event.kind == "proof":
+        return {start for start, bar in minutes.items() if not bar.is_final}
+    return set()
+
+
+def _changed(before: market.Candle | None, after: market.Candle) -> bool:
+    """Checks whether a streamed bar changed in values or finality.
+
+    Args:
+        before: Last emitted observation.
+        after: New observation.
+
+    Returns:
+        True when it should be emitted.
+    """
+    if before is None:
+        return True
+    return (
+        before.open,
+        before.high,
+        before.low,
+        before.close,
+        before.base_volume,
+        before.is_final,
+        before.taker_buy_base_volume,
+    ) != (
+        after.open,
+        after.high,
+        after.low,
+        after.close,
+        after.base_volume,
+        after.is_final,
+        after.taker_buy_base_volume,
+    )
+
+
+@dataclasses.dataclass(frozen=True, slots=True)
+class _TodayKbars:
+    """Kbars of today read during the session.
+
+    Attributes:
+        day: Trading date.
+        bars: Final one-minute bars.
+        covered_to_ms: Every minute ending by this time is in ``bars``.
+        fetched_ms: When read.
+    """
+
+    day: datetime.date
+    bars: list[market.Candle]
+    covered_to_ms: int
+    fetched_ms: int
 
 
 @dataclasses.dataclass(slots=True)
@@ -884,6 +1197,8 @@ class TaiwanExchangeAdapter(base.BaseVenueAdapter):
     MIS_MARKET = MIS_MARKET
     MIS_SOURCE_NAME = MIS_SOURCE
     """Source stamped on MIS-built bars, snapshots and books."""
+    SJ_EXCHANGE = "TSE"
+    """Shioaji contract group of the venue's listings."""
 
     def __init__(
         self,
@@ -895,6 +1210,8 @@ class TaiwanExchangeAdapter(base.BaseVenueAdapter):
         *,
         sleep: Sleep = asyncio.sleep,
         poll_interval_s: float = POLL_INTERVAL_S,
+        sinopac: sinopac_lib.SinopacSource | None = None,
+        bar_archive: bar_archive_lib.BarArchive | None = None,
     ) -> None:
         """Initializes the adapter.
 
@@ -906,6 +1223,10 @@ class TaiwanExchangeAdapter(base.BaseVenueAdapter):
             verified_at_ms: When capabilities were last verified live.
             sleep: Sleep function of the recorder (injectable for tests).
             poll_interval_s: Minimum seconds between recorder passes.
+            sinopac: Shared Shioaji source (``JOSEPH_TW_DATA_SOURCE=
+                sinopac``), or ``None`` for the official sources only.
+            bar_archive: Durable store of recorded one-minute bars and
+                their coverage (``None`` keeps them in memory only).
         """
         super().__init__(openapi, clock)
         self._www = www
@@ -920,6 +1241,21 @@ class TaiwanExchangeAdapter(base.BaseVenueAdapter):
         self._poller: asyncio.Task[None] | None = None
         self._calendar_day: datetime.date | None = None
         self.listing: dict[str, ListingMeta] = {}
+        self._sinopac = sinopac
+        if sinopac is not None:
+            sinopac.acquire()
+        self._archive = bar_archive
+        self._persisted: dict[str, int] = {}
+        self._persisted_at: dict[str, int] = {}
+        self._pruned_day: datetime.date | None = None
+        self._kbar_days: collections.OrderedDict[
+            tuple[str, datetime.date], list[market.Candle]
+        ] = collections.OrderedDict()
+        self._tick_days: collections.OrderedDict[
+            tuple[str, datetime.date], sinopac_lib.DayTicks
+        ] = collections.OrderedDict()
+        self._today_kbars: dict[str, _TodayKbars] = {}
+        self._fallback_reason: str | None = None
 
     def instrument_id(self, venue_market_id: str) -> instruments.InstrumentId:
         """Builds the canonical id of a listed code.
@@ -981,12 +1317,9 @@ class TaiwanExchangeAdapter(base.BaseVenueAdapter):
         code = instrument.venue_market_id
         key = (code, year, month)
         now = self._clock.now_ms()
-        today = taipei_date(now)
         cached = self._months.get(key)
         if cached is not None:
-            if (year, month) < (today.year, today.month) and (
-                taipei_date(cached.fetched_ms) > datetime.date(year, month, 28)
-            ):
+            if month_complete(year, month, cached.fetched_ms):
                 return cached.bars
             ttl = (
                 _DUE_MONTH_TTL_MS
@@ -1118,6 +1451,11 @@ class TaiwanExchangeAdapter(base.BaseVenueAdapter):
         Returns:
             Non-final candle (regular-session volume only), or ``None``.
         """
+        feed = await self._live_feed(instrument)
+        if feed is not None:
+            live = self._feed_daily(instrument, feed)
+            if live is not None:
+                return live
         quotes = await self.mis.quotes([instrument.venue_market_id])
         quote = quotes.get(instrument.venue_market_id)
         if quote is None:
@@ -1191,7 +1529,84 @@ class TaiwanExchangeAdapter(base.BaseVenueAdapter):
         if not self._watch:
             return 0
         quotes = await self.mis.quotes(sorted(self._watch))
-        return self.ingest(quotes.values())
+        applied = self.ingest(quotes.values())
+        self.persist_recordings(now)
+        return applied
+
+    def persist_recordings(self, now_ms: int, *, force: bool = False) -> int:
+        """Writes recorded final minutes and their coverage to the archive.
+
+        Only whole minutes inside the recording's coverage are written,
+        together with every bar there, so the archive never claims a quiet
+        minute whose bar it lacks.
+
+        Args:
+            now_ms: Current time.
+            force: Write even when the last write is recent.
+
+        Returns:
+            Bars written.
+        """
+        archive = self._archive
+        if archive is None:
+            return 0
+        written = 0
+        for code, builder in self._builders.items():
+            if (
+                not force
+                and now_ms - self._persisted_at.get(code, 0) < _PERSIST_EVERY_MS
+            ):
+                continue
+            self._persisted_at[code] = now_ms
+            since = self._persisted.get(code, 0)
+            spans = [
+                aligned
+                for span in builder.coverage()
+                if (aligned := sinopac_lib.whole_minutes(span, grace=False))
+                is not None
+                and aligned[1] > since
+            ]
+            spans = candle_rules.clip_spans(spans, since, 2**63)
+            if not spans:
+                continue
+            low, high = spans[0][0], spans[-1][1]
+            bars = [
+                bar
+                for bar in builder.bars(low, high, now_ms)
+                if bar.is_final
+                and _span_end(spans, bar.start_ms) is not None
+                and bar.end_ms <= high
+            ]
+            try:
+                archive.put(
+                    builder.instrument_id, self.MIS_SOURCE_NAME, bars, spans
+                )
+            except Exception as err:
+                _LOG.warning(
+                    "%s: archiving recorded bars failed: %s",
+                    self.VENUE.value,
+                    type(err).__name__,
+                )
+                continue
+            self._persisted[code] = high
+            written += len(bars)
+        self._prune_archive(now_ms)
+        return written
+
+    def _prune_archive(self, now_ms: int) -> None:
+        """Prunes archived bars past the retention once a day.
+
+        Args:
+            now_ms: Current time.
+        """
+        today = taipei_date(now_ms)
+        if self._archive is None or self._pruned_day == today:
+            return
+        self._pruned_day = today
+        try:
+            self._archive.prune(now_ms - ARCHIVE_RETENTION_MS)
+        except Exception as err:
+            _LOG.warning("bar archive prune failed: %s", type(err).__name__)
 
     def _recording_window(self, now_ms: int) -> int:
         """Returns milliseconds until the next recording window (0 if in).
@@ -1233,7 +1648,7 @@ class TaiwanExchangeAdapter(base.BaseVenueAdapter):
         timeframe: timeframes.Timeframe,
         start_ms: int,
         end_ms: int,
-    ) -> list[market.Candle]:
+    ) -> Layer:
         """Returns recorded intraday bars.
 
         Args:
@@ -1243,7 +1658,8 @@ class TaiwanExchangeAdapter(base.BaseVenueAdapter):
             end_ms: Exclusive end.
 
         Returns:
-            Ascending candles inside coverage segments.
+            Ascending candles inside coverage segments (archived minutes
+            of earlier recordings included) and the coverage.
         """
         builder = self._builders[instrument.venue_market_id]
         now = self._clock.now_ms()
@@ -1252,25 +1668,62 @@ class TaiwanExchangeAdapter(base.BaseVenueAdapter):
             first = calendar.floor(timeframe, start_ms)
         except ValueError:
             first = start_ms
-        ones = builder.bars(first, end_ms, now)
-        if timeframe is _M1:
-            return ones
-        groups: dict[int, list[market.Candle]] = {}
-        for bar in ones:
-            groups.setdefault(
-                calendar.floor(timeframe, bar.start_ms), []
-            ).append(bar)
-        out = []
-        for start, group in sorted(groups.items()):
+        ones, covered = self._mis_minutes(instrument, first, end_ms)
+
+        def covered_to(start: int) -> int | None:
+            """Returns how far the minutes of a bar are recorded.
+
+            Args:
+                start: Bar start.
+
+            Returns:
+                Recording or archive end, or ``None`` outside both.
+            """
             segment = builder.segment_at(start)
-            if segment is None:
-                continue
-            out.extend(
-                session_bars.aggregate(
-                    group, timeframe, now_ms=now, covered_to_ms=segment[1]
-                )
+            if segment is not None:
+                return segment[1]
+            return _span_end(covered, start)
+
+        if timeframe is _M1:
+            return ones, covered
+        return aggregate_minutes(ones, timeframe, covered, now, covered_to)
+
+    def _mis_minutes(
+        self, instrument: instruments.InstrumentId, start_ms: int, end_ms: int
+    ) -> Layer:
+        """Returns recorded MIS minutes, live and archived.
+
+        Args:
+            instrument: Instrument.
+            start_ms: Inclusive start.
+            end_ms: Exclusive end.
+
+        Returns:
+            One-minute bars (the live recording wins over the archive) and
+            their coverage.
+        """
+        now = self._clock.now_ms()
+        builder = self._builders.get(instrument.venue_market_id)
+        live = [] if builder is None else builder.bars(start_ms, end_ms, now)
+        covered = [] if builder is None else builder.coverage()
+        if self._archive is None:
+            return live, candle_rules.merge_spans(covered)
+        try:
+            stored = self._archive.minutes(
+                instrument, self.MIS_SOURCE_NAME, start_ms, end_ms
             )
-        return out
+            stored_spans = self._archive.coverage(
+                instrument, self.MIS_SOURCE_NAME, start_ms, end_ms
+            )
+        except Exception as err:
+            _LOG.warning("bar archive read failed: %s", type(err).__name__)
+            return live, candle_rules.merge_spans(covered)
+        by_start = {bar.start_ms: bar for bar in stored}
+        by_start.update({bar.start_ms: bar for bar in live})
+        return (
+            [by_start[s] for s in sorted(by_start)],
+            candle_rules.merge_spans([*covered, *stored_spans]),
+        )
 
     async def fetch_candles(
         self,
@@ -1326,17 +1779,28 @@ class TaiwanExchangeAdapter(base.BaseVenueAdapter):
         await self._require(instrument)
         if end_ms <= start_ms:
             return candle_rules.CandleCoverage((), (), complete=True)
+        if timeframe.is_seconds:
+            return await self._seconds_history(
+                instrument, timeframe, start_ms, end_ms, limit
+            )
         if timeframe in _INTRADAY:
+            if self._sinopac_on:
+                minutes, covered, complete = await self._sinopac_minutes(
+                    instrument, timeframe, start_ms, end_ms, limit
+                )
+                rows, covered = aggregate_minutes(
+                    minutes, timeframe, covered, self._clock.now_ms()
+                )
+                return base.candle_coverage(
+                    rows, start_ms, end_ms, limit, covered, complete=complete
+                )
             code = instrument.venue_market_id
             self.watch(code)
-            rows = self._intraday(instrument, timeframe, start_ms, end_ms)
+            rows, covered = self._intraday(
+                instrument, timeframe, start_ms, end_ms
+            )
             return base.candle_coverage(
-                rows,
-                start_ms,
-                end_ms,
-                limit,
-                self._builders[code].coverage(),
-                complete=True,
+                rows, start_ms, end_ms, limit, covered, complete=True
             )
         calendar = sessions.XTAI
         try:
@@ -1363,6 +1827,1162 @@ class TaiwanExchangeAdapter(base.BaseVenueAdapter):
         return base.candle_coverage(
             daily, start_ms, end_ms, limit, covered, complete=complete
         )
+
+    # SinoPac Shioaji ---------------------------------------------------
+
+    @property
+    def _sinopac_on(self) -> bool:
+        """Returns True when a usable Shioaji source is configured."""
+        return self._sinopac is not None and self._sinopac.enabled
+
+    def _with_sinopac(
+        self, caps: capabilities.VenueCapabilities
+    ) -> capabilities.VenueCapabilities:
+        """Adds what the Shioaji source serves to the official capabilities.
+
+        Args:
+            caps: Capabilities of the official sources.
+
+        Returns:
+            Capabilities (unchanged without a Shioaji source).
+        """
+        source = self._sinopac
+        if source is None:
+            return caps
+        if not source.enabled:
+            return dataclasses.replace(
+                caps,
+                notes=(
+                    *caps.notes,
+                    "JOSEPH_TW_DATA_SOURCE=sinopac is set but Shioaji is "
+                    f"disabled ({source.unavailable()}): official sources "
+                    "only.",
+                ),
+            )
+        notes = tuple(
+            "Fallback: MIS snapshots cannot make honest seconds bars, so "
+            "seconds bars need Shioaji."
+            if note == MIS_SECONDS_NOTE
+            else note
+            for note in caps.notes
+        )
+        return dataclasses.replace(
+            caps,
+            display_name=f"{caps.display_name} (SinoPac Shioaji)",
+            market_data=dataclasses.replace(
+                caps.market_data,
+                native_ws_candles=True,
+                native_ws_trades=True,
+                trades_history=True,
+            ),
+            timeframes=(*timeframes.SECONDS, *caps.timeframes),
+            trade_built_timeframes=timeframes.SECONDS,
+            notes=(
+                *sinopac_notes(source.config),
+                *notes,
+                source.status_note(),
+            ),
+        )
+
+    def _fallback(self, err: errors.JosephError) -> None:
+        """Logs a switch to the official sources once per reason.
+
+        Args:
+            err: Why Shioaji could not serve.
+        """
+        if err.message != self._fallback_reason:
+            self._fallback_reason = err.message
+            _LOG.info(
+                "%s: %s; serving official data", self.VENUE.value, err.message
+            )
+
+    async def _live_feed(
+        self,
+        instrument: instruments.InstrumentId,
+        wait_s: float = 0.0,
+        *,
+        subscribe: bool = True,
+        today_only: bool = True,
+    ) -> sinopac_lib.Feed | None:
+        """Returns today's Shioaji stream of a code in trading hours.
+
+        Args:
+            instrument: Instrument.
+            wait_s: How long to wait for today's first book.
+            subscribe: Subscribe the code when it is not streamed yet
+                (snapshots only read codes already streamed).
+            today_only: Return the feed only once it has today's data.
+
+        Returns:
+            Feed, or ``None`` (no source, unavailable, outside trading
+            hours, not streamed or, with ``today_only``, nothing streamed
+            today yet).
+        """
+        source = self._sinopac
+        if source is None or source.unavailable() is not None:
+            return None
+        now = self._clock.now_ms()
+        if not sinopac_lib.in_trading_hours(now):
+            return None
+        code = instrument.venue_market_id
+        if not subscribe:
+            existing = source.feed(code)
+            today = taipei_date(now)
+            if existing is None or existing.day != today:
+                return None
+            return existing
+        try:
+            feed = await source.watch(code, self.SJ_EXCHANGE, instrument)
+        except errors.JosephError as err:
+            self._fallback(err)
+            return None
+        today = taipei_date(now)
+        if wait_s > 0 and (feed.day != today or feed.book is None):
+            queue = source.listen(feed)
+            try:
+                with contextlib.suppress(TimeoutError):
+                    async with asyncio.timeout(wait_s):
+                        while feed.day != today or feed.book is None:
+                            await queue.get()
+            finally:
+                source.unlisten(feed, queue)
+        return feed if feed.day == today or not today_only else None
+
+    def _feed_daily(
+        self, instrument: instruments.InstrumentId, feed: sinopac_lib.Feed
+    ) -> market.Candle | None:
+        """Builds today's in-progress daily bar from the tick stream.
+
+        Args:
+            instrument: Instrument.
+            feed: Feed.
+
+        Returns:
+            Non-final candle (board lots only), or ``None``.
+        """
+        quote = feed.quote
+        if quote is None:
+            return None
+        session = sessions.XTAI.session(taipei_date(quote.ts_ms))
+        if session is None:
+            return None
+        return session_bars.candle(
+            instrument_id=instrument,
+            timeframe=_D1,
+            start_ms=session.open_ms,
+            open_=quote.open,
+            high=quote.high,
+            low=quote.low,
+            close=quote.close,
+            base_volume=quote.total_volume,
+            now_ms=self._clock.now_ms(),
+            source=sinopac_lib.BOOK_SOURCE,
+            is_final=False,
+            event_ts_ms=quote.ts_ms,
+        )
+
+    async def _sinopac_minutes(
+        self,
+        instrument: instruments.InstrumentId,
+        timeframe: timeframes.Timeframe,
+        start_ms: int,
+        end_ms: int,
+        limit: int | None,
+    ) -> tuple[list[market.Candle], list[candle_rules.Span], bool]:
+        """Collects one-minute bars of a range, Shioaji first.
+
+        Closed sessions come from kbars (memory, the bar archive, then
+        Shioaji); today from the tick stream, today's kbars before it and
+        MIS when Shioaji cannot serve; closed sessions Shioaji cannot serve
+        from archived MIS recordings.
+
+        Args:
+            instrument: Instrument.
+            timeframe: Target resolution (sizes the newest-kept window).
+            start_ms: Inclusive start.
+            end_ms: Exclusive end.
+            limit: Optional maximum target bars (newest kept).
+
+        Returns:
+            One-minute bars, their whole-minute coverage and whether every
+            session of the range was read.
+        """
+        calendar = sessions.XTAI
+        now = self._clock.now_ms()
+        try:
+            first = calendar.floor(timeframe, start_ms)
+        except ValueError:
+            first = start_ms
+        stop = min(end_ms, now + 1)
+        if stop <= first:
+            return [], [], True
+        found = [s for s in calendar.sessions(first, stop) if s.open_ms <= now]
+        found.reverse()
+        wanted = MAX_INTRADAY_SESSIONS
+        if limit is not None:
+            per_bar = max(1, timeframe.duration_ms // _M1.duration_ms)
+            wanted = min(wanted, limit * per_bar // 270 + 2)
+        complete = len(found) <= wanted
+        found = found[:wanted]
+        settle = sinopac_lib.DAY_SETTLE_MS
+        closed = [s for s in found if now >= s.close_ms + settle]
+        layers: list[Layer] = []
+        bars, spans, missing = await self._kbar_history(instrument, closed)
+        layers.append((bars, spans))
+        for session in missing:
+            layers.append(
+                self._mis_session(instrument, session.open_ms, session.close_ms)
+            )
+        for session in found:
+            if now < session.close_ms + settle:
+                layers.append(
+                    await self._today_minutes(instrument, session, now)
+                )
+        minutes, covered = combine_layers(layers)
+        return minutes, covered, complete
+
+    def _mis_session(
+        self, instrument: instruments.InstrumentId, open_ms: int, close_ms: int
+    ) -> Layer:
+        """Returns recorded MIS minutes of one session as a fallback layer.
+
+        Args:
+            instrument: Instrument.
+            open_ms: Session open.
+            close_ms: Session close.
+
+        Returns:
+            Bars and whole-minute coverage inside the session.
+        """
+        end = close_ms + sessions.XTAI.close_grace_ms
+        bars, covered = self._mis_minutes(instrument, open_ms, end)
+        aligned = [
+            span
+            for raw in candle_rules.clip_spans(covered, open_ms, end)
+            if (span := sinopac_lib.whole_minutes(raw, grace=False)) is not None
+        ]
+        return bars, aligned
+
+    async def _kbar_history(
+        self,
+        instrument: instruments.InstrumentId,
+        closed: Sequence[sessions.Session],
+    ) -> tuple[
+        list[market.Candle], list[candle_rules.Span], list[sessions.Session]
+    ]:
+        """Reads closed sessions' kbars: memory, archive, then Shioaji.
+
+        Args:
+            instrument: Instrument.
+            closed: Settled sessions.
+
+        Returns:
+            Bars, the sessions covered and the sessions Shioaji could not
+            serve.
+        """
+        code = instrument.venue_market_id
+        bars: list[market.Candle] = []
+        spans: list[candle_rules.Span] = []
+        missing: list[sessions.Session] = []
+        for session in closed:
+            key = (code, taipei_date(session.open_ms))
+            cached = self._kbar_days.get(key)
+            if cached is None:
+                missing.append(session)
+                continue
+            self._kbar_days.move_to_end(key)
+            bars.extend(cached)
+            spans.append((session.open_ms, session.close_ms))
+        if missing:
+            missing = self._archived_kbars(instrument, missing, bars, spans)
+        if missing:
+            missing = await self._fetch_kbars(instrument, missing, bars, spans)
+        return bars, spans, missing
+
+    def _remember_kbars(
+        self, code: str, day: datetime.date, bars: list[market.Candle]
+    ) -> None:
+        """Caches a closed session's kbars (bounded, least recent out).
+
+        Args:
+            code: Security code.
+            day: Trading date.
+            bars: Its one-minute bars.
+        """
+        self._kbar_days[(code, day)] = bars
+        while len(self._kbar_days) > _KBAR_CACHE_DAYS:
+            self._kbar_days.popitem(last=False)
+
+    def _archived_kbars(
+        self,
+        instrument: instruments.InstrumentId,
+        missing: Sequence[sessions.Session],
+        bars: list[market.Candle],
+        spans: list[candle_rules.Span],
+    ) -> list[sessions.Session]:
+        """Serves sessions whose kbars the archive holds completely.
+
+        Args:
+            instrument: Instrument.
+            missing: Sessions not in memory.
+            bars: Collected bars (extended).
+            spans: Collected coverage (extended).
+
+        Returns:
+            Sessions the archive does not hold.
+        """
+        archive = self._archive
+        if archive is None:
+            return list(missing)
+        low = min(s.open_ms for s in missing)
+        high = max(s.close_ms for s in missing)
+        try:
+            covered = archive.coverage(
+                instrument, sinopac_lib.SOURCE, low, high
+            )
+            stored = archive.minutes(instrument, sinopac_lib.SOURCE, low, high)
+        except Exception as err:
+            _LOG.warning("bar archive read failed: %s", type(err).__name__)
+            return list(missing)
+        left = []
+        for session in missing:
+            through = _span_end(covered, session.open_ms)
+            if through is None or through < session.close_ms:
+                left.append(session)
+                continue
+            day_bars = [
+                bar
+                for bar in stored
+                if session.open_ms <= bar.start_ms < session.close_ms
+            ]
+            self._remember_kbars(
+                instrument.venue_market_id,
+                taipei_date(session.open_ms),
+                day_bars,
+            )
+            bars.extend(day_bars)
+            spans.append((session.open_ms, session.close_ms))
+        return left
+
+    async def _fetch_kbars(
+        self,
+        instrument: instruments.InstrumentId,
+        missing: Sequence[sessions.Session],
+        bars: list[market.Candle],
+        spans: list[candle_rules.Span],
+    ) -> list[sessions.Session]:
+        """Reads closed sessions from Shioaji, up to 30 days per query.
+
+        Args:
+            instrument: Instrument.
+            missing: Sessions neither in memory nor archived (newest first).
+            bars: Collected bars (extended).
+            spans: Collected coverage (extended).
+
+        Returns:
+            Sessions Shioaji could not serve.
+        """
+        source = self._sinopac
+        code = instrument.venue_market_id
+        floor = sinopac_lib.HISTORY_FLOOR
+        left = [s for s in missing if taipei_date(s.open_ms) < floor]
+        pending = [s for s in missing if taipei_date(s.open_ms) >= floor]
+        while pending:
+            last_day = taipei_date(pending[0].open_ms)
+            window = [
+                s
+                for s in pending
+                if (last_day - taipei_date(s.open_ms)).days
+                < sinopac_lib.KBARS_MAX_DAYS
+            ]
+            pending = pending[len(window) :]
+            if source is None or source.history_unavailable():
+                left.extend(window)
+                continue
+            try:
+                rows = await source.kbars(
+                    code,
+                    self.SJ_EXCHANGE,
+                    taipei_date(window[-1].open_ms),
+                    last_day,
+                )
+            except errors.JosephError as err:
+                self._fallback(err)
+                left.extend(window)
+                continue
+            parsed = sinopac_lib.parse_kbars(
+                rows, instrument, fetched_ms=self._clock.now_ms()
+            )
+            for session in window:
+                day_bars = [
+                    bar
+                    for bar in parsed
+                    if session.open_ms <= bar.start_ms < session.close_ms
+                ]
+                span = (session.open_ms, session.close_ms)
+                self._remember_kbars(
+                    code, taipei_date(session.open_ms), day_bars
+                )
+                self._archive_put(instrument, day_bars, [span])
+                bars.extend(day_bars)
+                spans.append(span)
+        return left
+
+    def _archive_put(
+        self,
+        instrument: instruments.InstrumentId,
+        bars: Sequence[market.Candle],
+        covered: Sequence[candle_rules.Span],
+    ) -> None:
+        """Archives a closed session's kbars (best effort).
+
+        Args:
+            instrument: Instrument.
+            bars: Final one-minute bars.
+            covered: Their coverage.
+        """
+        if self._archive is None:
+            return
+        try:
+            self._archive.put(instrument, sinopac_lib.SOURCE, bars, covered)
+        except Exception as err:
+            _LOG.warning("bar archive write failed: %s", type(err).__name__)
+
+    async def _today_minutes(
+        self,
+        instrument: instruments.InstrumentId,
+        session: sessions.Session,
+        now_ms: int,
+    ) -> Layer:
+        """Collects the minutes of the running session.
+
+        The tick stream serves what it covers; today's kbars the minutes
+        before it (read at most twice: at the first request and once the
+        stream's first minute has ended); MIS recording what neither can.
+
+        Args:
+            instrument: Instrument.
+            session: Today's session.
+            now_ms: Current time.
+
+        Returns:
+            Bars and whole-minute coverage.
+        """
+        source = self._sinopac
+        assert source is not None
+        code = instrument.venue_market_id
+        day = taipei_date(session.open_ms)
+        layers: list[Layer] = []
+        feed = await self._live_feed(instrument, today_only=False)
+        need_to = now_ms
+        proving = feed is not None and feed.day == day and bool(feed.segments)
+        if feed is not None and proving:
+            ticks = [
+                span
+                for raw in feed.coverage()
+                if (span := sinopac_lib.whole_minutes(raw)) is not None
+            ]
+            layers.append((feed.minute_bars(now_ms), ticks))
+            need_to = feed.segments[0].from_ms
+        needed = min(sessions.XTAI.ceil(_M1, need_to), session.close_ms)
+        known = self._today_kbars.get(code)
+        if known is not None and known.day != day:
+            known = None
+        # Until the stream proves minutes, kbars are re-read sparingly (the
+        # trading-hours budget is small) and MIS fills the live edge.
+        every = _TODAY_KBARS_EVERY_MS * (1 if proving else 5)
+        if (
+            needed > session.open_ms
+            and (known is None or known.covered_to_ms < needed)
+            and (known is None or now_ms - known.fetched_ms >= every)
+            and source.history_unavailable() is None
+        ):
+            try:
+                rows = await source.kbars(code, self.SJ_EXCHANGE, day, day)
+            except errors.JosephError as err:
+                self._fallback(err)
+            else:
+                fetched = self._clock.now_ms()
+                through = sinopac_lib.whole_minutes(
+                    (session.open_ms, fetched - sinopac_lib.KBAR_SETTLE_MS)
+                )
+                known = _TodayKbars(
+                    day,
+                    sinopac_lib.parse_kbars(
+                        rows, instrument, fetched_ms=fetched
+                    ),
+                    session.open_ms if through is None else through[1],
+                    fetched,
+                )
+                self._today_kbars[code] = known
+        if known is not None and known.covered_to_ms > session.open_ms:
+            layers.append(
+                (known.bars, [(session.open_ms, known.covered_to_ms)])
+            )
+        if not proving:
+            self.watch(code)
+            layers.append(
+                self._mis_session(instrument, session.open_ms, session.close_ms)
+            )
+        return combine_layers(layers)
+
+    def _history_from(self, now_ms: int) -> int:
+        """Returns the oldest session open served from tick history.
+
+        Args:
+            now_ms: Current time.
+
+        Returns:
+            Open of the session ``seconds_history_days`` before the latest.
+        """
+        assert self._sinopac is not None
+        calendar = sessions.XTAI
+        session = calendar.session_at_or_before(now_ms)
+        for _ in range(self._sinopac.config.seconds_history_days):
+            session = calendar.previous_session(session)
+        return session.open_ms
+
+    async def _day_ticks(
+        self, instrument: instruments.InstrumentId, session: sessions.Session
+    ) -> sinopac_lib.DayTicks | None:
+        """Reads a closed session's ticks (cached).
+
+        Args:
+            instrument: Instrument.
+            session: Settled session.
+
+        Returns:
+            Trades, or ``None`` when Shioaji cannot serve them.
+        """
+        source = self._sinopac
+        code = instrument.venue_market_id
+        day = taipei_date(session.open_ms)
+        key = (code, day)
+        cached = self._tick_days.get(key)
+        if cached is not None:
+            self._tick_days.move_to_end(key)
+            return cached
+        if (
+            source is None
+            or source.history_unavailable() is not None
+            or day < sinopac_lib.HISTORY_FLOOR
+        ):
+            return None
+        try:
+            rows = await source.ticks(code, self.SJ_EXCHANGE, day)
+        except errors.JosephError as err:
+            self._fallback(err)
+            return None
+        parsed = sinopac_lib.parse_ticks(
+            rows, instrument, day, fetched_ms=self._clock.now_ms()
+        )
+        self._tick_days[key] = parsed
+        while len(self._tick_days) > _TICK_CACHE_DAYS:
+            self._tick_days.popitem(last=False)
+        return parsed
+
+    async def _live_trades(
+        self, instrument: instruments.InstrumentId, from_ms: int
+    ) -> list[tuple[Sequence[market.Trade], int, int]]:
+        """Returns today's streamed trades per continuity segment.
+
+        When the range starts before the first segment, today's tick
+        history is merged once (it spends one trading-hours tick query).
+
+        Args:
+            instrument: Instrument.
+            from_ms: Start of the wanted range.
+
+        Returns:
+            ``(trades, complete from, complete until)`` per segment.
+        """
+        feed = await self._live_feed(instrument)
+        source = self._sinopac
+        if feed is None or source is None or feed.day is None:
+            return []
+        if (
+            feed.segments
+            and from_ms < feed.segments[0].from_ms
+            and not feed.seeded
+            and source.budget_left("ticks") > 0
+        ):
+            feed.seeded = True
+            try:
+                rows = await source.ticks(
+                    instrument.venue_market_id, self.SJ_EXCHANGE, feed.day
+                )
+            except errors.JosephError as err:
+                self._fallback(err)
+            else:
+                feed.seed(
+                    sinopac_lib.parse_ticks(
+                        rows,
+                        instrument,
+                        feed.day,
+                        fetched_ms=self._clock.now_ms(),
+                    )
+                )
+        return [
+            (feed.segment_trades(index), segment.from_ms, segment.proven_ms)
+            for index, segment in enumerate(feed.segments)
+        ]
+
+    async def _session_trades(
+        self,
+        instrument: instruments.InstrumentId,
+        session: sessions.Session,
+        from_ms: int,
+        now_ms: int,
+    ) -> list[tuple[Sequence[market.Trade], int, int]] | None:
+        """Returns a session's complete trade pieces.
+
+        Args:
+            instrument: Instrument.
+            session: Session.
+            from_ms: Start of the wanted range.
+            now_ms: Current time.
+
+        Returns:
+            ``(trades, complete from, complete until)`` pieces, or ``None``
+            when a closed session's ticks are unavailable.
+        """
+        if now_ms < session.close_ms + sinopac_lib.DAY_SETTLE_MS:
+            return await self._live_trades(instrument, from_ms)
+        day = await self._day_ticks(instrument, session)
+        if day is None:
+            return None
+        end = session.close_ms + sessions.XTAI.close_grace_ms
+        return [(day.trades, session.open_ms, end)]
+
+    async def _seconds_history(
+        self,
+        instrument: instruments.InstrumentId,
+        timeframe: timeframes.Timeframe,
+        start_ms: int,
+        end_ms: int,
+        limit: int | None,
+    ) -> candle_rules.CandleCoverage:
+        """Builds seconds bars from Shioaji ticks (history and stream).
+
+        Args:
+            instrument: Instrument.
+            timeframe: Seconds resolution.
+            start_ms: Inclusive start.
+            end_ms: Exclusive end.
+            limit: Optional maximum bars (newest kept).
+
+        Returns:
+            Ascending seconds bars and the spans their ticks cover.
+
+        Raises:
+            errors.UnsupportedError: Without a Shioaji source.
+        """
+        if not self._sinopac_on:
+            raise errors.UnsupportedError(
+                f"{self.VENUE.value} seconds bars need SinoPac Shioaji "
+                "(JOSEPH_TW_DATA_SOURCE=sinopac)"
+            )
+        calendar = sessions.XTAI
+        now = self._clock.now_ms()
+        first = calendar.ceil(timeframe, start_ms)
+        stop = min(end_ms, now)
+        if stop <= first:
+            return candle_rules.CandleCoverage((), (), complete=True)
+        wanted = (
+            base.MAX_TRADE_BARS
+            if limit is None
+            else min(limit, base.MAX_TRADE_BARS)
+        )
+        first = max(
+            first,
+            base.newest_window_start(
+                timeframe, first, stop, wanted, calendar=calendar
+            ),
+        )
+        allowed = self._history_from(now)
+        complete = first >= allowed
+        bars: list[market.Candle] = []
+        spans: list[candle_rules.Span] = []
+        grace = calendar.close_grace_ms
+        for session in calendar.sessions(max(first, allowed), stop):
+            lo = max(first, session.open_ms)
+            hi = min(stop, session.close_ms + grace)
+            pieces = await self._session_trades(instrument, session, lo, now)
+            if pieces is None:
+                complete = False
+                continue
+            for trades, cover_from, cover_to in pieces:
+                low = max(cover_from, lo - _SEED_MS)
+                high = min(cover_to, hi)
+                if high <= max(cover_from, lo):
+                    continue
+                times = [t.venue_event_ts_ms for t in trades]
+                window = trades[
+                    bisect.bisect_left(times, low) : bisect.bisect_left(
+                        times, high
+                    )
+                ]
+                built = trade_bars.bars_from_coverage(
+                    trades_lib.TradeCoverage(tuple(window), low, high),
+                    instrument,
+                    timeframe,
+                    source=sinopac_lib.TICK_SOURCE,
+                    now_ms=now,
+                    buy_volume_method=market.BuyVolumeMethod.CLASSIFIED,
+                )
+                bars.extend(b for b in built if lo <= b.start_ms < hi)
+                spans.append((max(cover_from, lo), high))
+        return base.candle_coverage(
+            bars, start_ms, end_ms, limit, spans, complete=complete
+        )
+
+    async def _trade_history(
+        self,
+        instrument: instruments.InstrumentId,
+        start_ms: int,
+        end_ms: int,
+        max_pages: int,
+    ) -> trades_lib.TradeCoverage:
+        """Collects the newest complete Shioaji trades of a range.
+
+        Sessions are walked newest first; the result stops at the first
+        session (or continuity break) it cannot serve completely.
+
+        Args:
+            instrument: Instrument.
+            start_ms: Inclusive start.
+            end_ms: Exclusive end.
+            max_pages: Unused (Shioaji reads a whole day per query).
+
+        Returns:
+            Complete trades ``[from, to)`` with ``to <= end``.
+        """
+        if not self._sinopac_on:
+            return await super()._trade_history(
+                instrument, start_ms, end_ms, max_pages
+            )
+        del max_pages
+        calendar = sessions.XTAI
+        now = self._clock.now_ms()
+        stop = min(end_ms, now)
+        start = max(start_ms, self._history_from(now))
+        collected: list[market.Trade] = []
+        cover_from = cover_to = stop
+        started = False
+        newer_open: int | None = None
+        grace = calendar.close_grace_ms
+        for session in reversed(calendar.sessions(start, stop)):
+            lo = max(start, session.open_ms)
+            hi = min(stop, session.close_ms + grace)
+            pieces = await self._session_trades(instrument, session, lo, now)
+            if not pieces:
+                break
+            for trades, piece_from, piece_to in reversed(pieces):
+                low, high = max(piece_from, lo), min(piece_to, hi)
+                if high <= low:
+                    continue
+                joins = (
+                    not started
+                    or high >= cover_from
+                    or (
+                        newer_open == cover_from
+                        and piece_to >= session.close_ms + grace
+                    )
+                )
+                if not joins:
+                    return trades_lib.TradeCoverage(
+                        tuple(collected), cover_from, cover_to
+                    )
+                if not started:
+                    cover_to, started = high, True
+                collected[:0] = [
+                    t for t in trades if low <= t.venue_event_ts_ms < high
+                ]
+                cover_from = low
+            if cover_from != max(session.open_ms, start):
+                break
+            newer_open = session.open_ms
+        return trades_lib.TradeCoverage(tuple(collected), cover_from, cover_to)
+
+    # Shioaji streams ---------------------------------------------------
+
+    def stream_candles(
+        self,
+        instrument: instruments.InstrumentId,
+        timeframe: timeframes.Timeframe,
+        tracker: health.FeedHealthTracker | None = None,
+    ) -> AsyncIterator[market.Candle]:
+        """Streams Shioaji-built bars (official sources have no stream).
+
+        Args:
+            instrument: Instrument.
+            timeframe: Resolution.
+            tracker: Optional health tracker.
+
+        Returns:
+            Async iterator of candle updates.
+        """
+        if not self._sinopac_on:
+            return super().stream_candles(instrument, timeframe, tracker)
+        return base.candles_of(
+            self.stream_candle_coverage(instrument, timeframe, tracker)
+        )
+
+    def stream_candle_coverage(
+        self,
+        instrument: instruments.InstrumentId,
+        timeframe: timeframes.Timeframe,
+        tracker: health.FeedHealthTracker | None = None,
+    ) -> AsyncIterator[candle_rules.CandleCoverage]:
+        """Streams bars from Shioaji's ticks with the spans they prove.
+
+        The stream fails (``VenueUnavailableError``) when Shioaji does, so
+        the feed router falls back to polling the official sources
+        visibly (``POLL``, ``DEGRADED``).
+
+        Args:
+            instrument: Instrument.
+            timeframe: Resolution.
+            tracker: Optional health tracker.
+
+        Returns:
+            Async iterator of candle updates with coverage.
+        """
+        if not self._sinopac_on:
+            return super().stream_candle_coverage(
+                instrument, timeframe, tracker
+            )
+        self._require_timeframe(timeframe)
+        if timeframe.is_seconds:
+            return self._seconds_stream(instrument, timeframe, tracker)
+        if timeframe in _INTRADAY:
+            return self._minute_stream(instrument, timeframe, tracker)
+        return self._daily_stream(instrument, timeframe, tracker)
+
+    def stream_trades(
+        self,
+        instrument: instruments.InstrumentId,
+        tracker: health.FeedHealthTracker | None = None,
+    ) -> AsyncIterator[market.Trade]:
+        """Streams Shioaji trades (classified side).
+
+        Args:
+            instrument: Instrument.
+            tracker: Optional health tracker.
+
+        Returns:
+            Async iterator of trades.
+        """
+        if not self._sinopac_on:
+            return super().stream_trades(instrument, tracker)
+        return self._trade_stream(instrument, tracker)
+
+    async def _open_feed(
+        self,
+        instrument: instruments.InstrumentId,
+        tracker: health.FeedHealthTracker | None,
+    ) -> tuple[
+        sinopac_lib.SinopacSource,
+        sinopac_lib.Feed,
+        asyncio.Queue[sinopac_lib.Event],
+    ]:
+        """Subscribes a code and registers a stream on its feed.
+
+        Args:
+            instrument: Instrument.
+            tracker: Optional health tracker.
+
+        Returns:
+            ``(source, feed, queue)``.
+        """
+        source = self._sinopac
+        assert source is not None
+        await self._require(instrument)
+        feed = await source.watch(
+            instrument.venue_market_id, self.SJ_EXCHANGE, instrument
+        )
+        queue = source.listen(feed)
+        if tracker is not None:
+            tracker.set_transport(
+                quality.Transport.NATIVE_WS, quality.FeedState.LIVE
+            )
+        return source, feed, queue
+
+    async def _next_event(
+        self,
+        queue: asyncio.Queue[sinopac_lib.Event],
+        tracker: health.FeedHealthTracker | None,
+    ) -> sinopac_lib.Event:
+        """Waits for a feed event (``idle`` after a quiet second).
+
+        Args:
+            queue: Feed queue.
+            tracker: Optional health tracker.
+
+        Returns:
+            Event.
+
+        Raises:
+            errors.VenueUnavailableError: When Shioaji failed.
+        """
+        try:
+            event = await asyncio.wait_for(queue.get(), timeout=_STREAM_IDLE_S)
+        except TimeoutError:
+            return sinopac_lib.Event("idle")
+        if event.kind == "down":
+            raise errors.VenueUnavailableError(
+                f"sinopac unavailable: {event.reason}"
+            )
+        if tracker is not None:
+            tracker.record_message(self._clock.now_ms())
+        return event
+
+    async def _seconds_stream(
+        self,
+        instrument: instruments.InstrumentId,
+        timeframe: timeframes.Timeframe,
+        tracker: health.FeedHealthTracker | None,
+    ) -> AsyncGenerator[candle_rules.CandleCoverage, None]:
+        """Builds seconds bars from the tick stream.
+
+        Coverage follows the feed's proofs within its newest segment; a
+        new segment (missed trade) restarts the builder.
+
+        Args:
+            instrument: Instrument.
+            timeframe: Seconds resolution.
+            tracker: Optional health tracker.
+
+        Yields:
+            Candle updates with newly proven spans.
+        """
+        source, feed, queue = await self._open_feed(instrument, tracker)
+        builder = trade_bars.TradeBarBuilder(
+            instrument,
+            timeframe,
+            source=sinopac_lib.TICK_SOURCE,
+            buy_volume_method=market.BuyVolumeMethod.CLASSIFIED,
+        )
+        cover_from: int | None = None
+        proven = 0
+
+        def restart(now: int) -> list[market.Candle]:
+            """Restarts the builder on the feed's newest segment.
+
+            Args:
+                now: Current time.
+
+            Returns:
+                Bars of the segment's retained trades.
+            """
+            nonlocal cover_from, proven
+            if not feed.segments:
+                builder.start_segment(None)
+                cover_from = None
+                return []
+            segment = feed.segments[-1]
+            horizon = now - 300 * timeframe.duration_ms
+            cover_from = max(segment.from_ms, horizon)
+            proven = 0
+            builder.start_segment(cover_from)
+            kept = [
+                t
+                for t in feed.segment_trades(len(feed.segments) - 1)
+                if t.venue_event_ts_ms >= cover_from
+            ]
+            return [
+                *builder.add(kept, now),
+                *builder.finalize_through(segment.proven_ms, now),
+            ]
+
+        try:
+            first = restart(self._clock.now_ms())
+            if first:
+                yield candle_rules.CandleCoverage(tuple(first))
+            while True:
+                event = await self._next_event(queue, tracker)
+                now = self._clock.now_ms()
+                candles: list[market.Candle] = []
+                covered: tuple[candle_rules.Span, ...] = ()
+                if event.kind == "segment":
+                    candles = restart(now)
+                elif event.kind == "trade" and event.trade is not None:
+                    candles = builder.add([event.trade], now)
+                elif event.kind == "proof" and event.proven_ms is not None:
+                    candles = builder.finalize_through(event.proven_ms, now)
+                    if cover_from is not None and event.proven_ms > max(
+                        proven, cover_from
+                    ):
+                        proven = event.proven_ms
+                        covered = ((cover_from, proven),)
+                if candles or covered:
+                    yield candle_rules.CandleCoverage(tuple(candles), covered)
+        finally:
+            source.unlisten(feed, queue)
+
+    async def _minute_stream(
+        self,
+        instrument: instruments.InstrumentId,
+        timeframe: timeframes.Timeframe,
+        tracker: health.FeedHealthTracker | None,
+    ) -> AsyncGenerator[candle_rules.CandleCoverage, None]:
+        """Streams 1m bars from ticks, or aggregates them on the XTAI grid.
+
+        The current bar's earlier minutes are seeded from the history path
+        (kbars, or MIS when Shioaji could not serve them); an aggregate
+        mixing sources is not emitted.
+
+        Args:
+            instrument: Instrument.
+            timeframe: Intraday resolution.
+            tracker: Optional health tracker.
+
+        Yields:
+            Candle updates with the stream's newly proven minutes.
+        """
+        source, feed, queue = await self._open_feed(instrument, tracker)
+        calendar = sessions.XTAI
+        emitted: dict[int, market.Candle] = {}
+        try:
+            now = self._clock.now_ms()
+            group_from = calendar.floor(timeframe, now)
+            seed, seed_spans, _ = await self._sinopac_minutes(
+                instrument, _M1, group_from, now + 1, None
+            )
+            minutes = {bar.start_ms: bar for bar in seed}
+
+            def spans_now() -> list[candle_rules.Span]:
+                """Returns the seed's and the stream's whole minutes.
+
+                Returns:
+                    Merged coverage.
+                """
+                ticks = [
+                    span
+                    for raw in feed.coverage()
+                    if (span := sinopac_lib.whole_minutes(raw)) is not None
+                ]
+                return candle_rules.merge_spans([*seed_spans, *ticks])
+
+            def changed(starts: Iterable[int], at: int) -> list[market.Candle]:
+                """Re-aggregates the bars holding some minutes.
+
+                Args:
+                    starts: Minute starts that changed.
+                    at: Receipt time.
+
+                Returns:
+                    Aggregates whose values or finality changed.
+                """
+                spans = spans_now()
+                out = []
+                for group in sorted(
+                    {calendar.floor(timeframe, s) for s in starts}
+                ):
+                    members = [
+                        bar
+                        for bar in minutes.values()
+                        if calendar.floor(timeframe, bar.start_ms) == group
+                    ]
+                    rows, _ = aggregate_minutes(members, timeframe, spans, at)
+                    for row in rows:
+                        if _changed(emitted.get(row.start_ms), row):
+                            emitted[row.start_ms] = row
+                            out.append(row)
+                return out
+
+            first = changed(list(minutes), now)
+            yield candle_rules.CandleCoverage(tuple(first), tuple(spans_now()))
+            while True:
+                event = await self._next_event(queue, tracker)
+                now = self._clock.now_ms()
+                touched = _touched_minutes(event, minutes)
+                for start in touched:
+                    bar = feed.minute_bar(start, now)
+                    if bar is not None:
+                        minutes[start] = bar
+                rows = changed(touched, now) if touched else []
+                covered = tuple(spans_now()) if event.kind == "proof" else ()
+                if rows or covered:
+                    yield candle_rules.CandleCoverage(tuple(rows), covered)
+                cutoff = now - 2 * timeframe.duration_ms - _D1.duration_ms
+                for kept in (minutes, emitted):
+                    for start in [s for s in kept if s < cutoff]:
+                        del kept[start]
+        finally:
+            source.unlisten(feed, queue)
+
+    async def _daily_stream(
+        self,
+        instrument: instruments.InstrumentId,
+        timeframe: timeframes.Timeframe,
+        tracker: health.FeedHealthTracker | None,
+    ) -> AsyncGenerator[candle_rules.CandleCoverage, None]:
+        """Streams today's bar from the tick stream (or its week, month).
+
+        Args:
+            instrument: Instrument.
+            timeframe: ``1d``, ``1w`` or ``1M``.
+            tracker: Optional health tracker.
+
+        Yields:
+            Candle updates (today's bar is not final), without coverage.
+        """
+        source, feed, queue = await self._open_feed(instrument, tracker)
+        calendar = sessions.XTAI
+        last: market.Candle | None = None
+        try:
+            now = self._clock.now_ms()
+            period = calendar.floor(timeframe, now)
+            seeded = await self.fetch_candle_coverage(
+                instrument, _D1, period, now + 1
+            )
+            days = {bar.start_ms: bar for bar in seeded.candles}
+            while True:
+                live = self._feed_daily(instrument, feed)
+                if live is not None:
+                    days[live.start_ms] = live
+                if days:
+                    if timeframe is _D1:
+                        newest = days[max(days)]
+                    else:
+                        finals = [b.end_ms for b in days.values() if b.is_final]
+                        newest = session_bars.aggregate(
+                            days.values(),
+                            timeframe,
+                            now_ms=self._clock.now_ms(),
+                            covered_to_ms=max(finals, default=0),
+                        )[-1]
+                    if _changed(last, newest):
+                        last = newest
+                        yield candle_rules.CandleCoverage((newest,))
+                while (await self._next_event(queue, tracker)).kind != "quote":
+                    pass
+        finally:
+            source.unlisten(feed, queue)
+
+    async def _trade_stream(
+        self,
+        instrument: instruments.InstrumentId,
+        tracker: health.FeedHealthTracker | None,
+    ) -> AsyncGenerator[market.Trade, None]:
+        """Yields streamed trades.
+
+        Args:
+            instrument: Instrument.
+            tracker: Optional health tracker.
+
+        Yields:
+            Trades (classified side from ``tick_type``).
+        """
+        source, feed, queue = await self._open_feed(instrument, tracker)
+        try:
+            while True:
+                event = await self._next_event(queue, tracker)
+                if event.kind == "trade" and event.trade is not None:
+                    yield event.trade
+        finally:
+            source.unlisten(feed, queue)
 
     # Snapshots and books -------------------------------------------------
 
@@ -1400,8 +3020,14 @@ class TaiwanExchangeAdapter(base.BaseVenueAdapter):
             instrument: Instrument.
 
         Returns:
-            Snapshot.
+            Snapshot (Shioaji's tick and bid/ask stream while it streams the
+            code today, else MIS).
         """
+        feed = await self._live_feed(instrument, subscribe=False)
+        if feed is not None and self._sinopac is not None:
+            live = self._sinopac.live_snapshot(feed)
+            if live is not None:
+                return live
         quote = await self._quote(instrument)
         last = quote.last
         change = None
@@ -1433,8 +3059,17 @@ class TaiwanExchangeAdapter(base.BaseVenueAdapter):
             depth: Levels per side (MIS publishes at most 5).
 
         Returns:
-            Order book.
+            Order book (Shioaji's bid/ask stream while it streams the code
+            today, else MIS).
         """
+        feed = await self._live_feed(instrument, wait_s=_BOOK_WAIT_S)
+        if feed is not None and feed.book is not None:
+            book = feed.book
+            return dataclasses.replace(
+                book,
+                bids=book.bids[: max(depth, 0)],
+                asks=book.asks[: max(depth, 0)],
+            )
         quote = await self._quote(instrument)
         return books.snapshot_book(
             instrument,
@@ -1478,12 +3113,15 @@ class TaiwanExchangeAdapter(base.BaseVenueAdapter):
         )
 
     async def close(self) -> None:
-        """Stops the recorder and closes the HTTP clients."""
+        """Stops the recorder, archives it and closes the clients."""
         self._watch.clear()
         if self._poller is not None:
             self._poller.cancel()
             with contextlib.suppress(asyncio.CancelledError, Exception):
                 await self._poller
+        self.persist_recordings(self._clock.now_ms(), force=True)
+        if self._sinopac is not None:
+            await self._sinopac.close()
         await self._http.close()
         await self._www.close()
         await self._mis_http.close()
@@ -1500,39 +3138,42 @@ class TwseAdapter(TaiwanExchangeAdapter):
         Returns:
             Capabilities.
         """
-        return capabilities.VenueCapabilities(
-            venue=self.VENUE,
-            display_name="Taiwan Stock Exchange",
-            market_types=(
-                instruments.MarketType.STOCK,
-                instruments.MarketType.ETF,
-            ),
-            market_data=capabilities.MarketDataCapabilities(
-                rest_history=True,
-                book_snapshot=True,
-                classified_delta=True,
-            ),
-            timeframes=_TF,
-            aggregated_timeframes=(
-                *(tf for tf in _INTRADAY if tf is not _M1),
-                *_PERIODIC,
-            ),
-            notes=(
-                "Daily bars come from STOCK_DAY (one month per request, "
-                "volume in shares, raw prices: not adjusted for dividends "
-                "or splits); they include odd-lot, after-hours fixed-price "
-                "and block trades. 1w and 1M are aggregated from them.",
-                *MIS_NOTES,
-                "Bulk snapshots for screening are the last session's "
-                "official values (STOCK_DAY_ALL); turnover is in TWD.",
-                "Bond ETFs listed on TPEx (e.g. 00679B, 00937B) are served "
-                "by the tpex venue; TWSE-listed bond ETFs (e.g. 00865B) are "
-                "served here, with asset class BOND.",
-                "Requests are paced at one per 2 s per host (TWSE blocks "
-                "clients above roughly 3 requests per 5 s).",
-            ),
-            docs_url=DOCS_URL,
-            verified_at_ms=self._verified_at_ms,
+        return self._with_sinopac(
+            capabilities.VenueCapabilities(
+                venue=self.VENUE,
+                display_name="Taiwan Stock Exchange",
+                market_types=(
+                    instruments.MarketType.STOCK,
+                    instruments.MarketType.ETF,
+                ),
+                market_data=capabilities.MarketDataCapabilities(
+                    rest_history=True,
+                    book_snapshot=True,
+                    classified_delta=True,
+                ),
+                timeframes=_TF,
+                aggregated_timeframes=(
+                    *(tf for tf in _INTRADAY if tf is not _M1),
+                    *_PERIODIC,
+                ),
+                notes=(
+                    "Daily bars come from STOCK_DAY (one month per request, "
+                    "volume in shares, raw prices: not adjusted for dividends "
+                    "or splits); they include odd-lot, after-hours fixed-price "
+                    "and block trades. 1w and 1M are aggregated from them.",
+                    *MIS_NOTES,
+                    MIS_SECONDS_NOTE,
+                    "Bulk snapshots for screening are the last session's "
+                    "official values (STOCK_DAY_ALL); turnover is in TWD.",
+                    "Bond ETFs listed on TPEx (e.g. 00679B, 00937B) are "
+                    "served by the tpex venue; TWSE-listed bond ETFs (e.g. "
+                    "00865B) are served here, with asset class BOND.",
+                    "Requests are paced at one per 2 s per host (TWSE blocks "
+                    "clients above roughly 3 requests per 5 s).",
+                ),
+                docs_url=DOCS_URL,
+                verified_at_ms=self._verified_at_ms,
+            )
         )
 
     async def _load_instruments(
