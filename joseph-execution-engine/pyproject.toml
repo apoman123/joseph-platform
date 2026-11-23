@@ -15,6 +15,12 @@ dependencies = [
   "cryptography>=49.0.0,<51",
 ]
 
+[project.optional-dependencies]
+# Interactive Brokers through IB Gateway/TWS (BSD-2-Clause).
+ibkr = ["ib_async>=2.1,<3"]
+# SinoPac Shioaji (SinoPac's proprietary SDK; binary abi3 wheels).
+sinopac = ["shioaji>=1.7.11,<2"]
+
 [dependency-groups]
 dev = [
   "pytest>=8,<10",
@@ -43,6 +49,8 @@ asyncio_default_fixture_loop_scope = "function"
 markers = [
   "network: hits real public venue APIs (opt-in with JOSEPH_NETWORK_TESTS=1)",
   "slow: long-running replay or property tests",
+  "ibkr_paper: places orders on an IB Gateway paper account (opt-in with JOSEPH_IBKR_PAPER_TESTS=1)",
+  "sinopac_sim: places orders in Shioaji simulation (opt-in with JOSEPH_SINOPAC_SIM_TESTS=1)",
 ]
 addopts = "-q --strict-markers --import-mode=importlib"
 
