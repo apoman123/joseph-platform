@@ -441,3 +441,54 @@ async def test_mexc_contract_flags_and_cancel_edge_cases() -> None:
     assert "disallows API trading" in result.state.reason
     done = await adapter.cancel_order("acct", CID)
     assert done.status is S.FILLED
+
+
+_VALID_FIELDS = {
+    "binance": {"api_key": "k", "api_secret": "secret-value"},
+    "bitget": {"api_key": "k", "api_secret": "secret-value", "passphrase": "p"},
+    "mexc": {"api_key": "k", "api_secret": "secret-value"},
+    "hyperliquid": {
+        "agent_private_key": "0x" + "11" * 32,
+        "account_address": "0x" + "ab" * 20,
+    },
+    "lighter": {
+        "api_private_key": "ab" * 40,
+        "account_index": "21",
+        "api_key_index": "4",
+    },
+}
+
+
+@pytest.mark.parametrize(
+    ("venue", "tif"),
+    [
+        *((v, enums.TimeInForce.DAY) for v in sorted(_VALID_FIELDS)),
+        ("hyperliquid", enums.TimeInForce.FOK),
+        ("lighter", enums.TimeInForce.FOK),
+    ],
+)
+async def test_undocumented_time_in_force_is_refused_before_sending(
+    venue: str, tif: enums.TimeInForce
+) -> None:
+    """Securities-only DAY (or an unsupported FOK) never reaches a venue."""
+    adapters = catalog.build_live_adapters(
+        credentials.StaticCredentials({"acct": _VALID_FIELDS[venue]}),
+        clock_lib.ManualClock(1_795_000_000_000),
+        live.VenueOptions(live_trading_enabled=True),
+    )
+    request = trading.VenueOrderRequest(
+        account_id="acct",
+        instrument_id=f"{venue}:perp:BTC",
+        client_order_id=CID,
+        side=enums.OrderSide.BUY,
+        order_type=enums.OrderType.LIMIT,
+        quantity_base=D(1),
+        time_in_force=tif,
+        reduce_only=False,
+        limit_price=D(1),
+    )
+    with respx.mock(assert_all_called=False) as router:
+        with pytest.raises(errors.AdapterUnavailableError) as info:
+            await adapters[venue].submit_order(request)
+        assert router.calls.call_count == 0
+    assert info.value.code == "UNSUPPORTED_ORDER_TYPE"

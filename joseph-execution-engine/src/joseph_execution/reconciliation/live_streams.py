@@ -17,6 +17,7 @@ from __future__ import annotations
 import asyncio
 import contextlib
 import logging
+from collections.abc import Collection
 
 from joseph_execution.domain import accounts
 from joseph_execution.domain import enums
@@ -45,6 +46,7 @@ class LiveStreamSupervisor:
         *,
         poll_s: float = 10.0,
         restart_s: float = 15.0,
+        venues: Collection[str] | None = None,
     ) -> None:
         """Initializes the supervisor.
 
@@ -55,6 +57,8 @@ class LiveStreamSupervisor:
             metrics: Metrics sink.
             poll_s: Interval between scope refreshes.
             restart_s: Delay before restarting a failed stream.
+            venues: Venues whose accounts get a stream (``None`` = all).
+                Brokers have their own event pump and are left out.
         """
         self._uow = uow_factory
         self._resolver = resolver
@@ -62,6 +66,7 @@ class LiveStreamSupervisor:
         self._metrics = metrics
         self._poll_s = poll_s
         self._restart_s = restart_s
+        self._venues = None if venues is None else frozenset(venues)
         self._tasks: dict[str, asyncio.Task[None]] = {}
         self.applied = 0
 
@@ -89,6 +94,7 @@ class LiveStreamSupervisor:
             if a is not None
             and not a.is_paper
             and a.status is not enums.AccountStatus.DISCONNECTED
+            and (self._venues is None or a.venue in self._venues)
         ]
 
     def running(self) -> list[str]:

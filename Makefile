@@ -92,8 +92,13 @@ ci: lint typecheck test ## Everything CI runs
 	cd $(ME) && uv run python scripts/export_openapi.py --check
 	cd $(EE) && uv run python scripts/export_openapi.py --check
 
+# PineScripts access for the market-engine build: the token in
+# PINESCRIPTS_TOKEN if set, else the local ssh-agent.
+comma := ,
+PINESCRIPTS_ACCESS = $(if $(PINESCRIPTS_TOKEN),--secret id=pinescripts_token$(comma)env=PINESCRIPTS_TOKEN,--ssh default)
+
 images: ## Build the three production container images locally
-	docker build --ssh default -t joseph-market-engine:local $(ME)
+	docker build $(PINESCRIPTS_ACCESS) -t joseph-market-engine:local $(ME)
 	docker build -t joseph-execution-engine:local $(EE)
 	docker build -t joseph-terminal:local $(TERM_DIR)
 

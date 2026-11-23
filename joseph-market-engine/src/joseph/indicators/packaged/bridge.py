@@ -34,6 +34,7 @@ from smc_indicators import types as smc_types
 from joseph.domain import errors
 from joseph.domain import ids
 from joseph.domain import market
+from joseph.domain import sessions
 from joseph.domain import structures
 from joseph.domain import timeframes as tfs
 from joseph.indicators.packaged import codec
@@ -259,6 +260,8 @@ class PackagedPlugin(base.BasePlugin[PackagedState]):
 
     Subclasses declare metadata and settings and implement ``_build`` and
     ``_advance``; optional hooks customize kinds, identities and events.
+    ``_build_series`` lets a plugin build objects that depend on the
+    instrument (its session calendar), e.g. an anchor bar start.
     """
 
     VERSION: ClassVar[str] = library_version()
@@ -319,6 +322,24 @@ class PackagedPlugin(base.BasePlugin[PackagedState]):
         Returns:
             Library outputs and published values.
         """
+
+    def _build_series(
+        self,
+        header: protocol.SeriesHeader,
+        settings: Mapping[str, settings_lib.SettingValue],
+        tick: decimal.Decimal,
+    ) -> dict[str, object]:
+        """Creates the library objects of a new series of one instrument.
+
+        Args:
+            header: Series header (instrument and timeframe).
+            settings: Resolved settings.
+            tick: Tick size.
+
+        Returns:
+            Library objects by role (``_build`` by default).
+        """
+        return self._build(settings, tick, header.timeframe)
 
     def _kind(self, zone: smc_types.Zone) -> structures.AoiKind | None:
         """Maps a library zone kind to an AOI kind.
@@ -410,10 +431,10 @@ class PackagedPlugin(base.BasePlugin[PackagedState]):
         """
         tick = settings_lib.get_decimal(settings, TICK_SETTING)
         try:
-            self._build(
+            self._build_series(
+                header,
                 settings,
                 tick if tick > 0 else decimal.Decimal("0.01"),
-                header.timeframe,
             )
         except ValueError as err:
             raise errors.ValidationFailedError(
@@ -447,7 +468,7 @@ class PackagedPlugin(base.BasePlugin[PackagedState]):
             tick = infer_tick(candle)
         return Payload(
             tick=tick,
-            objects=self._build(settings, tick, header.timeframe),
+            objects=self._build_series(header, settings, tick),
         )
 
     def _materialize(self, state: PackagedState) -> Payload | None:
@@ -682,12 +703,15 @@ class PackagedPlugin(base.BasePlugin[PackagedState]):
             range_id=str(range_id) if range_id is not None else None,
             meta=meta,
         )
-        confirmed = min(
-            header.timeframe.end_of(
-                header.timeframe.floor(zone.confirmed_time_ms)
-            ),
-            header.as_of_ms,
-        )
+        calendar = sessions.for_instrument(header.instrument_id)
+        try:
+            confirmed_end = calendar.end_of(
+                header.timeframe,
+                calendar.floor(header.timeframe, zone.confirmed_time_ms),
+            )
+        except ValueError:
+            confirmed_end = header.as_of_ms
+        confirmed = min(confirmed_end, header.as_of_ms)
         return dataclasses.replace(aoi, confirmed_at_ms=confirmed)
 
     def _events(

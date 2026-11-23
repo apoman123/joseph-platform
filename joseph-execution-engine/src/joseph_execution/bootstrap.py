@@ -11,6 +11,8 @@ import asyncio
 import contextlib
 import dataclasses
 import logging
+import time
+from collections.abc import Callable
 
 import fastapi
 
@@ -22,6 +24,10 @@ from joseph_execution.adapters import resolver
 from joseph_execution.adapters import shadow
 from joseph_execution.adapters import step_up
 from joseph_execution.adapters import vault
+from joseph_execution.adapters.brokers import base as broker_base
+from joseph_execution.adapters.brokers import catalog as broker_catalog
+from joseph_execution.adapters.brokers import ibkr
+from joseph_execution.adapters.brokers import sinopac
 from joseph_execution.adapters.persistence import sql
 from joseph_execution.adapters.venues import catalog
 from joseph_execution.adapters.venues import credentials as venue_credentials
@@ -30,6 +36,8 @@ from joseph_execution.adapters.venues import live as venue_live
 from joseph_execution.api import app as api_app
 from joseph_execution.api import services as api_services
 from joseph_execution.audit import service as audit_service
+from joseph_execution.domain import enums
+from joseph_execution.domain import errors
 from joseph_execution.oms import deployments
 from joseph_execution.oms import kill_switch
 from joseph_execution.oms import preview
@@ -63,7 +71,8 @@ class Container:
         registry: Adapter registry.
         services: API services.
         uow_factory: Unit of work factory.
-        live_streams: Private stream supervisor of live accounts.
+        brokers: Securities broker adapters by broker code.
+        live_streams: Private stream supervisor of crypto venue accounts.
     """
 
     settings: config.Settings
@@ -74,7 +83,142 @@ class Container:
     registry: resolver.AdapterRegistry
     services: api_services.ApiServices
     uow_factory: sql.SqlUnitOfWorkFactory
+    brokers: dict[str, broker_base.BrokerAdapter] = dataclasses.field(
+        default_factory=dict
+    )
     live_streams: live_streams.LiveStreamSupervisor | None = None
+
+
+# ---------------------------------------------------------------------------
+# Securities brokers
+# ---------------------------------------------------------------------------
+
+
+def broker_account_lookup(
+    uow_factory: sql.SqlUnitOfWorkFactory, credential_vault: vault.AesGcmVault
+) -> Callable[[str], str | None]:
+    """Builds the Joseph account -> broker account number lookup.
+
+    Args:
+        uow_factory: Unit of work factory.
+        credential_vault: Vault holding the sealed connection fields.
+
+    Returns:
+        Lookup returning ``None`` for unknown or revoked accounts.
+    """
+
+    def lookup(account_id: str) -> str | None:
+        """Reads the sealed broker account number of an account.
+
+        Args:
+            account_id: Joseph account.
+
+        Returns:
+            Broker account number or ``None``.
+        """
+        with uow_factory() as uow:
+            account = uow.accounts.get(account_id)
+            if account is None or account.credential_id is None:
+                return None
+            envelope = uow.credentials.get(account.credential_id)
+        if envelope is None:
+            return None
+        try:
+            fields = credential_vault.open(envelope)
+        except errors.ExecutionError:
+            return None
+        number = fields.get(account_service.BROKER_ACCOUNT_FIELD, "").strip()
+        return number or None
+
+    return lookup
+
+
+def build_brokers(
+    settings: config.Settings,
+    market: market_port.MarketDataGateway,
+    clock: service_ports.Clock,
+    lookup: Callable[[str], str | None],
+) -> dict[str, broker_base.BrokerAdapter]:
+    """Creates the broker adapters with the deployment's gates.
+
+    Args:
+        settings: Settings.
+        market: Market gateway.
+        clock: Clock.
+        lookup: Joseph account -> broker account number.
+
+    Returns:
+        Adapters by broker code.
+    """
+    sec = settings.securities
+    sinopac_config = None
+    if sec.sinopac_configured:
+        assert sec.sinopac_api_key is not None
+        assert sec.sinopac_secret_key is not None
+        sinopac_config = sinopac.SinopacConfig(
+            api_key=sec.sinopac_api_key,
+            secret_key=sec.sinopac_secret_key,
+            ca_path=sec.sinopac_ca_path,
+            ca_password=sec.sinopac_ca_password,
+            person_id=sec.sinopac_person_id,
+            simulation=sec.sinopac_simulation,
+        )
+    return broker_catalog.build(
+        live_trading_enabled=settings.live_trading_enabled,
+        ibkr_config=ibkr.IbkrConfig(
+            host=sec.ibkr_host,
+            port=sec.ibkr_port,
+            client_id=sec.ibkr_client_id,
+            simulation=sec.ibkr_paper,
+            short_selling=sec.ibkr_short_selling,
+            readonly=sec.ibkr_readonly,
+        ),
+        ibkr_enabled=sec.ibkr_enabled,
+        sinopac_config=sinopac_config,
+        sinopac_enabled=sec.sinopac_enabled,
+        market_data=market,
+        clock=clock,
+        account_lookup=lookup,
+    )
+
+
+_LIVE_OPEN = (
+    enums.OrderState.SUBMITTING,
+    enums.OrderState.ACKNOWLEDGED,
+    enums.OrderState.PARTIALLY_FILLED,
+    enums.OrderState.CANCEL_PENDING,
+    enums.OrderState.UNKNOWN_RECONCILING,
+)
+
+
+async def pump_brokers(container: Container) -> int:
+    """Binds accounts with working LIVE orders and applies broker events.
+
+    Args:
+        container: Container.
+
+    Returns:
+        Events that changed OMS state.
+    """
+    brokers = container.brokers
+    if not brokers:
+        return 0
+    with container.uow_factory() as uow:
+        working = uow.orders.list(states=_LIVE_OPEN, limit=2000)
+        ids = {o.account_id for o in working if o.mode is enums.OrderMode.LIVE}
+        found = [uow.accounts.get(account_id) for account_id in sorted(ids)]
+    for account in found:
+        if account is not None and account.venue in brokers:
+            brokers[account.venue].bind(account.account_id)
+    applied = 0
+    for adapter in brokers.values():
+        for account_id in adapter.event_accounts():
+            events = adapter.drain_events(account_id)
+            if events:
+                applied += await container.services.oms.apply_venue_events(
+                    account_id, events
+                )
+    return applied
 
 
 def build_container(
@@ -105,17 +249,26 @@ def build_container(
         gateway = market_http.HttpMarketDataGateway(settings.market_url)
     else:
         gateway = market_static.StaticMarketDataGateway(the_clock)
+    twd_cash = settings.securities.paper_twd_starting_cash
     paper_adapter = paper.PaperTradingAdapter(
-        gateway, the_clock, starting_equity=settings.paper_starting_equity
+        gateway,
+        the_clock,
+        starting_equity=settings.paper_starting_equity,
+        starting_cash={} if twd_cash is None else {"TWD": twd_cash},
     )
     shadow_adapter = shadow.ShadowAdapter(gateway, the_clock)
     credential_vault = vault.AesGcmVault(
         settings.vault_master_key, on_secret=log_lib.SECRETS.add
     )
+    brokers = build_brokers(
+        settings,
+        gateway,
+        the_clock,
+        broker_account_lookup(uow_factory, credential_vault),
+    )
+    crypto = _live_adapters(settings, the_clock, uow_factory, credential_vault)
     registry = resolver.AdapterRegistry(
-        paper_adapter,
-        shadow_adapter,
-        _live_adapters(settings, the_clock, uow_factory, credential_vault),
+        paper_adapter, shadow_adapter, {**crypto, **brokers}
     )
     audit_log = audit_service.AuditLog(the_clock, id_gen)
     oms = oms_service.OmsService(
@@ -132,6 +285,9 @@ def build_container(
         oms_service.OmsSettings(
             live_trading_enabled=settings.live_trading_enabled,
             emergency_halt=settings.emergency_halt,
+            queue_closed_market_orders=(
+                settings.securities.closed_market_orders == "queue"
+            ),
         ),
     )
     svc = api_services.ApiServices(
@@ -148,6 +304,7 @@ def build_container(
             the_clock,
             id_gen,
             settings.paper_starting_equity,
+            paper_twd_starting_cash=twd_cash,
         ),
         kill_switches=kill_switch.KillSwitchService(
             uow_factory, oms, audit_log, the_clock, hub
@@ -181,7 +338,10 @@ def build_container(
         registry,
         svc,
         uow_factory,
-        live_streams.LiveStreamSupervisor(uow_factory, registry, oms, metrics),
+        brokers=brokers,
+        live_streams=live_streams.LiveStreamSupervisor(
+            uow_factory, registry, oms, metrics, venues=tuple(crypto)
+        ),
     )
 
 
@@ -282,7 +442,27 @@ def background_jobs(container: Container) -> list[api_app.BackgroundTask]:
             except Exception:
                 _LOG.exception("reconciliation pass failed")
 
-    jobs: list[api_app.BackgroundTask] = [ticker, outbox, reconcile]
+    async def broker_events() -> None:
+        """Applies broker events; resyncs brokers periodically."""
+        interval = settings.securities.broker_resync_interval_ms / 1000
+        last = time.monotonic()
+        while True:
+            await asyncio.sleep(settings.tick_interval_ms / 1000)
+            try:
+                if time.monotonic() - last >= interval:
+                    last = time.monotonic()
+                    for adapter in container.brokers.values():
+                        await adapter.resync()
+                await pump_brokers(container)
+            except Exception:
+                _LOG.exception("broker event pump failed")
+
+    jobs: list[api_app.BackgroundTask] = [
+        ticker,
+        outbox,
+        reconcile,
+        broker_events,
+    ]
     supervisor = container.live_streams
     if (
         supervisor is not None
