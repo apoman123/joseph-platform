@@ -17,6 +17,7 @@ import secrets
 from collections.abc import Mapping
 
 from joseph_execution.domain import accounts
+from joseph_execution.domain import risk
 from joseph_execution.platform import logging as log_lib
 
 _LOG = logging.getLogger(__name__)
@@ -135,6 +136,10 @@ class SecuritiesSettings:
             where the broker allows it.
         paper_twd_starting_cash: Starting cash of the TWD paper account
             (TWSE and TPEx); ``None`` disables it.
+        twd_limit_factor: Multiplier of the USD-sized money risk limits
+            (defaults and hard caps) for TWD accounts
+            (``JOSEPH_TWD_LIMIT_FACTOR``, default 30); a sizing
+            convention, not an exchange rate.
         ibkr_enabled: Connect to IB Gateway/TWS.
         ibkr_host: Gateway host.
         ibkr_port: Gateway API port (paper 4002 / live 4001; the container
@@ -155,6 +160,7 @@ class SecuritiesSettings:
 
     closed_market_orders: str = "reject"
     paper_twd_starting_cash: decimal.Decimal | None = None
+    twd_limit_factor: decimal.Decimal = risk.DEFAULT_TWD_LIMIT_FACTOR
     ibkr_enabled: bool = False
     ibkr_host: str = "127.0.0.1"
     ibkr_port: int = 4002
@@ -231,6 +237,32 @@ def secret_value(source: Mapping[str, str], name: str) -> str | None:
     return value
 
 
+def twd_limit_factor(source: Mapping[str, str]) -> decimal.Decimal:
+    """Reads ``JOSEPH_TWD_LIMIT_FACTOR`` (fail closed on bad values).
+
+    Args:
+        source: Environment.
+
+    Returns:
+        Multiplier of USD-sized money limits for TWD accounts (default
+        ``risk.DEFAULT_TWD_LIMIT_FACTOR``, 30).
+
+    Raises:
+        ValueError: Unless the value is a positive, finite number.
+    """
+    raw = source.get("JOSEPH_TWD_LIMIT_FACTOR", "").strip()
+    if not raw:
+        return risk.DEFAULT_TWD_LIMIT_FACTOR
+    message = "JOSEPH_TWD_LIMIT_FACTOR must be a positive number"
+    try:
+        value = decimal.Decimal(raw)
+    except decimal.InvalidOperation as err:
+        raise ValueError(message) from err
+    if not value.is_finite() or value <= 0:
+        raise ValueError(message)
+    return value
+
+
 def securities_from_env(source: Mapping[str, str]) -> SecuritiesSettings:
     """Loads the securities settings.
 
@@ -266,6 +298,7 @@ def securities_from_env(source: Mapping[str, str]) -> SecuritiesSettings:
     return SecuritiesSettings(
         closed_market_orders=policy,
         paper_twd_starting_cash=twd,
+        twd_limit_factor=twd_limit_factor(source),
         ibkr_enabled=_flag(source, "JOSEPH_IBKR_ENABLED", False),
         ibkr_host=source.get("JOSEPH_IBKR_HOST", "127.0.0.1"),
         ibkr_port=port,

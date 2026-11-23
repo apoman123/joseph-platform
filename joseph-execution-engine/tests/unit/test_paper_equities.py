@@ -152,6 +152,34 @@ async def test_cash_settles_t_plus_two() -> None:
     assert after.unsettled_cash == D(599_000 - 853 - 1797)
 
 
+async def test_bond_etf_sales_follow_the_tax_suspension() -> None:
+    """Bond ETF sales pay no tax on 2026-12-31 and 0.1% on 2027-01-01."""
+    last_day = datetime.date(2026, 12, 31)
+    adapter, gateway, clock = _setup(fixtures.taipei(last_day, 10))
+    gateway.set_sessions("XTAI", fixtures.xtai_sessions(last_day, 7))
+    bought = await adapter.submit_order(
+        _req(
+            "bond-buy",
+            instrument_id=fixtures.YUANTA_US20,
+            limit_price=D("26.2"),
+        )
+    )
+    assert bought.fills[0].fee == D(37)
+    sale: dict[str, object] = {
+        "instrument_id": fixtures.YUANTA_US20,
+        "side": enums.OrderSide.SELL,
+        "quantity_base": D(500),
+        "limit_price": D("25.8"),
+    }
+    suspended = await adapter.submit_order(_req("bond-sell-1", **sale))
+    assert suspended.fills[0].fee == D(18)
+    clock.current_ms = fixtures.taipei(
+        last_day + datetime.timedelta(days=1), 10
+    )
+    taxed = await adapter.submit_order(_req("bond-sell-2", **sale))
+    assert taxed.fills[0].fee == D(18 + 12)
+
+
 async def test_us_equities_settle_t_plus_one() -> None:
     """US purchases settle at the next session open (T+1)."""
     adapter, _, clock = _setup(fixtures.new_york(MONDAY, 10))

@@ -293,6 +293,7 @@ def build_container(
             queue_closed_market_orders=(
                 settings.securities.closed_market_orders == "queue"
             ),
+            twd_limit_factor=settings.securities.twd_limit_factor,
         ),
     )
     svc = api_services.ApiServices(

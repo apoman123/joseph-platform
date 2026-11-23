@@ -591,7 +591,12 @@ class FakeShioaji:
     # -- test drivers --------------------------------------------------------
 
     def deal(
-        self, trade: FakeSjTrade, quantity: int, price: float, seq: str
+        self,
+        trade: FakeSjTrade,
+        quantity: int,
+        price: float,
+        seq: str,
+        ts: float = 1_795_400_000.5,
     ) -> None:
         """Reports a deal (quantity in the order's units).
 
@@ -600,6 +605,8 @@ class FakeShioaji:
             quantity: Lots (Common) or shares (IntradayOdd).
             price: Price.
             seq: Exchange sequence.
+            ts: Deal time in epoch seconds (default 2026-11-23 10:13
+                Taipei).
         """
         trade.status.deal_quantity += quantity
         trade.status.status = (
@@ -617,7 +624,7 @@ class FakeShioaji:
                 "quantity": quantity,
                 "price": price,
                 "custom_field": trade.order.custom_field,
-                "ts": 1_795_400_000.5,
+                "ts": ts,
             },
         )
 

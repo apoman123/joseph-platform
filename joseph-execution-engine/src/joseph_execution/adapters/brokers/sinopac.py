@@ -23,7 +23,10 @@ against Shioaji 1.7.11:
   per-exchange ``ContractGroup``s (``api.Contracts.Stocks.TSE["2890"]``
   in the docs; ``Contracts(Stocks=(OES, OTC, TSE))``). TWSE codes are
   looked up in ``TSE`` and TPEx (OTC) codes in ``OTC``; the emerging
-  board (``OES``, 興櫃) is never routed. ``sj.StockOrder`` has no exchange
+  board (``OES``, 興櫃) is never routed. Held codes (positions carry no
+  exchange) take the exchange of their contract; emerging-board codes and
+  codes missing from the contract list are reported as unmanaged
+  holdings, never as TWSE listings. ``sj.StockOrder`` has no exchange
   field: ``place_order(contract, order)`` sends the order to the
   contract's ``exchange`` (``Exchange.TSE`` or ``Exchange.OTC``). Checked
   in the Shioaji 1.7.11 type stubs (``shioaji/_core.pyi``: ``Contracts``,
@@ -69,6 +72,7 @@ from joseph_execution.domain import decimals
 from joseph_execution.domain import enums
 from joseph_execution.domain import equities
 from joseph_execution.domain import errors
+from joseph_execution.ports import market as market_port
 from joseph_execution.ports import services
 from joseph_execution.ports import trading
 
@@ -89,6 +93,7 @@ _EXCHANGE_ALIASES = {
     enums.Venue.TWSE.value: frozenset({"TSE", "TWSE"}),
     enums.Venue.TPEX.value: frozenset({"OTC"}),
 }
+_EMERGING = "OES"
 _WORKING = frozenset({"PendingSubmit", "PreSubmitted", "Submitted"})
 _REFUSED = frozenset(
     {
@@ -617,19 +622,54 @@ def venue_of(exchange: str) -> str | None:
     return None
 
 
-def instrument_id(code: str, exchange: str) -> str:
+def instrument_id(code: str, exchange: str) -> str | None:
     """Builds the Joseph instrument id of a Shioaji stock code.
 
     Args:
         code: Security code.
-        exchange: Contract exchange; unknown exchanges keep the TWSE
-            prefix (positions of codes the contract tree cannot resolve).
+        exchange: Contract exchange (``TSE`` or ``OTC``).
 
     Returns:
-        ``twse:...`` or ``tpex:...`` id.
+        ``twse:...`` or ``tpex:...`` id; ``None`` for any other exchange,
+        e.g. the emerging board ``OES`` or an unknown (empty) exchange.
     """
-    venue = venue_of(exchange) or enums.Venue.TWSE.value
+    venue = venue_of(exchange)
+    if venue is None:
+        return None
     return f"{venue}:{market_type(code)}:{code}"
+
+
+def unmanaged_holding(code: str, exchange: str) -> tuple[str, str]:
+    """Describes a holding outside TWSE and TPEx (not managed by Joseph).
+
+    Args:
+        code: Security code.
+        exchange: Contract exchange; empty when Shioaji's contract list
+            does not know the code.
+
+    Returns:
+        ``(instrument id, note)``; the id is namespaced by the Shioaji
+        exchange (``oes:stock:7777``) or ``unknown``, never by a Joseph
+        venue, so it cannot be mistaken for a routable listing.
+    """
+    where = exchange.lower() or "unknown"
+    held = f"{where}:{market_type(code)}:{code}"
+    if exchange == _EMERGING:
+        note = (
+            f"{code} is an emerging-board (興櫃) holding; Joseph routes TWSE "
+            "and TPEx listings only and does not manage it."
+        )
+    elif exchange:
+        note = (
+            f"{code} is listed on Shioaji exchange {exchange}, not TWSE or "
+            "TPEx; Joseph does not manage it."
+        )
+    else:
+        note = (
+            f"{code} is not in Shioaji's contract list, so its exchange is "
+            "unknown; Joseph does not manage it."
+        )
+    return held, note
 
 
 # ---------------------------------------------------------------------------
@@ -678,6 +718,7 @@ class _Tracked:
         side: Order side.
         unit: Shares per lot.
         lot: Order lot.
+        tax_class: Transaction tax class of the listing (fill fees).
     """
 
     account_id: str
@@ -686,6 +727,7 @@ class _Tracked:
     side: enums.OrderSide
     unit: int
     lot: str
+    tax_class: equities.TaiwanTaxClass
 
 
 class SinopacAdapter:
@@ -703,6 +745,7 @@ class SinopacAdapter:
         account_lookup: base.AccountLookup,
         gate_reason: str | None = None,
         runner: Runner = _thread_runner,
+        market_data: market_port.MarketDataGateway | None = None,
     ) -> None:
         """Initializes the adapter.
 
@@ -714,8 +757,13 @@ class SinopacAdapter:
             gate_reason: When set, nothing logs in and every call is
                 refused with this reason.
             runner: Runs blocking SDK calls.
+            market_data: Market gateway (asset class of a listing, which
+                selects the transaction tax of fill fees); without it bond
+                ETFs are charged the ETF rate.
         """
         self._config = config
+        self._market = market_data
+        self._tax_classes: dict[str, equities.TaiwanTaxClass] = {}
         self._factory_fn = factory
         self._factory: SjFactory | None = None
         self._clock = clock
@@ -746,7 +794,7 @@ class SinopacAdapter:
         self._cancel_requested: dict[str, int] = {}
         self._failures: dict[str, str] = {}
         self._snapshots: dict[str, trading.VenueAccountSnapshot] = {}
-        self._position_ids: dict[str, str] = {}
+        self._position_ids: dict[str, tuple[str, str | None]] = {}
         self._events = base.EventBuffer()
         self._tasks: set[asyncio.Task[Any]] = set()
         self.calls: list[str] = []
@@ -767,6 +815,34 @@ class SinopacAdapter:
         """
         async with self._sdk_lock:
             return await self._runner(fn)
+
+    async def _tax_class(self, instrument: str) -> equities.TaiwanTaxClass:
+        """Classifies a listing for the transaction tax (cached).
+
+        The market engine's asset class marks bond ETFs; without market
+        data the listing is charged as a stock or plain ETF.
+
+        Args:
+            instrument: Joseph instrument id.
+
+        Returns:
+            Tax class.
+        """
+        cached = self._tax_classes.get(instrument)
+        if cached is not None:
+            return cached
+        meta = None
+        if self._market is not None:
+            try:
+                meta = await self._market.instrument(instrument)
+            except errors.ExecutionError:
+                meta = None
+        found = equities.taiwan_tax_class(
+            instrument, None if meta is None else meta.asset_class
+        )
+        if meta is not None:
+            self._tax_classes[instrument] = found
+        return found
 
     # -- session -----------------------------------------------------------
 
@@ -1065,17 +1141,20 @@ class SinopacAdapter:
         qty = shares(event.get("quantity"), lot, tracked.unit)
         price = base.exact_decimal(float(event.get("price") or 0.0))
         seq = event.get("exchange_seq") or event.get("seqno")
-        ref = equities.parse_instrument_id(tracked.instrument_id)
+        ts_ms = (
+            base.to_ms(float(event.get("ts") or 0.0)) or self._clock.now_ms()
+        )
         fill = trading.VenueFill(
             exchange_fill_id=fill_key(trade_id, seq),
             client_order_id=cid,
             price=price,
             quantity_base=qty,
-            fee=equities.taiwan_fee(tracked.side, qty * price, ref.market_type),
+            fee=equities.taiwan_fee(
+                tracked.side, qty * price, tracked.tax_class, ts_ms
+            ),
             fee_asset="TWD",
             liquidity="taker",
-            ts_ms=base.to_ms(float(event.get("ts") or 0.0))
-            or self._clock.now_ms(),
+            ts_ms=ts_ms,
         )
         if not self._events.fill(tracked.account_id, fill):
             return
@@ -1297,19 +1376,22 @@ class SinopacAdapter:
         unit = self._factory.share_unit()
         await self._query_pacer.acquire()
         rows = await self._run(lambda: api.list_positions(account, unit=unit))
-        known = {
-            equities.parse_instrument_id(
-                t.instrument_id
-            ).symbol: t.instrument_id
-            for t in self._tracked.values()
-        }
+        known: dict[str, str] = {}
+        for tracked in self._tracked.values():
+            ref = equities.parse_instrument_id(tracked.instrument_id)
+            if equities.is_taiwan(ref.venue):
+                known[ref.symbol] = tracked.instrument_id
         result = []
         for row in rows:
             code = str(row.code)
             qty = decimal.Decimal(int(str(row.quantity or 0)))
             if text(row.direction) == "Sell":
                 qty = -qty
-            held = known.get(code) or await self._position_id(api, code)
+            held, note = (
+                (known[code], None)
+                if code in known
+                else await self._holding(api, code)
+            )
             last = base.exact_decimal(
                 float(getattr(row, "last_price", 0.0) or 0.0)
             )
@@ -1319,24 +1401,32 @@ class SinopacAdapter:
                         instrument_id=held,
                         signed_qty=qty,
                         entry_price=base.exact_decimal(float(row.price)),
+                        unmanaged_note=note,
                     ),
                     qty * last,
                 )
             )
         return result
 
-    async def _position_id(self, api: SjClient, code: str) -> str:
-        """Resolves the instrument id of a held code (cached per code).
+    async def _holding(
+        self, api: SjClient, code: str
+    ) -> tuple[str, str | None]:
+        """Resolves the listing of a held code.
 
-        Positions carry no exchange, so the contract tree decides between
-        TWSE and TPEx; unresolvable codes keep the TWSE prefix.
+        Positions carry no exchange, so the exchange field of the code's
+        Shioaji contract decides: ``TSE`` is TWSE and ``OTC`` is TPEx.
+        Anything else (the emerging board ``OES``, or a code missing from
+        the contract list) is reported as unmanaged rather than guessed.
+        Codes with a contract are cached; missing ones are looked up again
+        next time (the contract list may still be downloading).
 
         Args:
             api: Client.
             code: Security code.
 
         Returns:
-            Instrument id.
+            ``(instrument id, unmanaged note)``; the note is ``None`` for
+            TWSE and TPEx listings.
         """
         cached = self._position_ids.get(code)
         if cached is not None:
@@ -1345,14 +1435,25 @@ class SinopacAdapter:
             contract = await self._run(lambda: api.contracts.stocks[code])
         except (KeyError, IndexError):
             contract = None
-        resolved = instrument_id(code, exchange_of(contract))
-        self._position_ids[code] = resolved
+        exchange = exchange_of(contract)
+        listed = instrument_id(code, exchange)
+        resolved: tuple[str, str | None] = (
+            (listed, None)
+            if listed is not None
+            else unmanaged_holding(code, exchange)
+        )
+        if exchange:
+            self._position_ids[code] = resolved
         return resolved
 
     async def list_positions(
         self, account_id: str
     ) -> Sequence[trading.VenuePosition]:
-        """Lists TWSE and TPEx positions in shares.
+        """Lists the account's holdings in shares.
+
+        TWSE and TPEx listings carry their instrument id; other holdings
+        (emerging board, codes Shioaji cannot resolve) are listed with an
+        ``unmanaged_note`` so reconciliation leaves them alone.
 
         Args:
             account_id: Joseph account.
@@ -1464,6 +1565,8 @@ class SinopacAdapter:
             )
         unit = int(float(getattr(contract, "unit", 1000) or 1000))
         fields = order_fields(request, unit, account)
+        # The OMS read this metadata for its risk checks, so it is cached.
+        tax_class = await self._tax_class(request.instrument_id)
         assert self._factory is not None
         order = self._factory.stock_order(fields)
         timeout = (
@@ -1489,6 +1592,7 @@ class SinopacAdapter:
             request.side,
             unit,
             str(fields["order_lot"]),
+            tax_class,
         )
         self._by_trade[str(trade.order.id)] = cid
         state = venue_state(cid, trade, unit, self._clock.now_ms())
@@ -1653,13 +1757,17 @@ class SinopacAdapter:
                 else enums.OrderSide.BUY
             )
             code = str(getattr(trade.contract, "code", ""))
+            found = instrument_id(code, exchange_of(trade.contract))
+            if found is None:
+                found, _ = await self._holding(api, code)
             self._tracked[client_order_id] = _Tracked(
                 account_id,
                 trade,
-                instrument_id(code, exchange_of(trade.contract)),
+                found,
                 side,
                 unit,
                 lot,
+                await self._tax_class(found),
             )
             self._by_trade[str(trade.order.id)] = client_order_id
         else:

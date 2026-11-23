@@ -11,6 +11,7 @@ from typing import Any
 
 import pytest
 
+from joseph_execution.adapters import market_static
 from joseph_execution.adapters.brokers import sinopac
 from joseph_execution.domain import enums
 from joseph_execution.domain import errors
@@ -41,22 +42,28 @@ class _Rig:
         api: Fake SDK client.
         factory: Fake factory.
         clock: Clock.
+        market: Static market data (given to the adapter on request).
     """
 
     def __init__(
         self,
         config: sinopac.SinopacConfig | None = CONFIG,
         gate: str | None = None,
+        market: bool = False,
     ) -> None:
         """Builds the rig.
 
         Args:
             config: Adapter settings.
             gate: Gate reason.
+            market: Give the adapter market data (TWSE/TPEx fixtures with
+                00679B as a BOND ETF).
         """
         self.clock = clock_lib.ManualClock(fixtures.taipei(MONDAY, 10))
         self.api = fake_shioaji.FakeShioaji()
         self.factory = fake_shioaji.FakeSjFactory(self.api)
+        self.market = market_static.StaticMarketDataGateway(self.clock)
+        fixtures.install(self.market, MONDAY - datetime.timedelta(days=7))
         self.adapter = sinopac.SinopacAdapter(
             config,
             lambda: self.factory,
@@ -64,6 +71,7 @@ class _Rig:
             {ACCOUNT: NUMBER}.get,
             gate,
             runner=fake_shioaji.run_inline,
+            market_data=self.market if market else None,
         )
 
     def cid(self, n: int, age_ms: int = 0) -> str:
@@ -383,10 +391,88 @@ def test_exchange_mapping_helpers() -> None:
     assert sinopac.venue_of("OTC") == "tpex"
     assert sinopac.venue_of("OES") is None
     assert sinopac.instrument_id("00679B", "OTC") == fixtures.YUANTA_US20
-    assert sinopac.instrument_id("2330", "") == fixtures.TSMC
+    assert sinopac.instrument_id("2330", "TSE") == fixtures.TSMC
+    assert sinopac.instrument_id("2330", "") is None
+    assert sinopac.instrument_id("7777", "OES") is None
     info = types.SimpleNamespace(base=types.SimpleNamespace(exchange="OTC"))
     assert sinopac.exchange_of(info) == "OTC"
     assert sinopac.exchange_of(None) == ""
+    emerging, note = sinopac.unmanaged_holding("7777", "OES")
+    assert emerging == "oes:stock:7777" and "興櫃" in note
+    unknown, note = sinopac.unmanaged_holding("9999", "")
+    assert unknown == "unknown:stock:9999"
+    assert "not in Shioaji's contract list" in note
+    other, note = sinopac.unmanaged_holding("01234T", "XYZ")
+    assert other == "xyz:stock:01234T" and "exchange XYZ" in note
+
+
+async def test_unresolved_holdings_are_reported_unmanaged() -> None:
+    """Emerging-board and unknown codes are unmanaged, never ``twse``."""
+    rig = _Rig()
+    rig.api.position_rows = [
+        fake_shioaji.FakeStockPosition("2330", "Buy", 1000, 590.0, 600.0),
+        fake_shioaji.FakeStockPosition("00679B", "Buy", 2000, 26.0, 26.1),
+        fake_shioaji.FakeStockPosition("7777", "Buy", 3000, 35.0, 36.0),
+        fake_shioaji.FakeStockPosition("9999", "Buy", 500, 10.0, 10.0),
+    ]
+    positions = {
+        p.instrument_id: p for p in await rig.adapter.list_positions(ACCOUNT)
+    }
+    assert sorted(positions) == [
+        "oes:stock:7777",
+        fixtures.YUANTA_US20,
+        fixtures.TSMC,
+        "unknown:stock:9999",
+    ]
+    assert positions[fixtures.TSMC].managed
+    assert positions[fixtures.YUANTA_US20].managed
+    emerging = positions["oes:stock:7777"]
+    assert not emerging.managed and emerging.signed_qty == D(3000)
+    assert "emerging-board (興櫃)" in (emerging.unmanaged_note or "")
+    missing = positions["unknown:stock:9999"]
+    assert not missing.managed
+    assert "exchange is unknown" in (missing.unmanaged_note or "")
+    snap = await rig.adapter.account_snapshot(ACCOUNT)
+    held = 600_000 + 52_200 + 108_000 + 5_000
+    assert snap.equity == D(1_000_000 - 90_000 + held)
+
+
+async def test_bond_etf_fills_follow_the_tax_window() -> None:
+    """Fill fees skip the sale tax on BOND ETFs only through 2026-12-31."""
+    rig = _Rig(market=True)
+    cid = rig.cid(1)
+    await rig.adapter.submit_order(
+        _req(
+            cid,
+            instrument_id=fixtures.YUANTA_US20,
+            side=enums.OrderSide.SELL,
+            limit_price=D(26),
+        )
+    )
+    trade = rig.api.trades[0]
+    last_day = fixtures.taipei(datetime.date(2026, 12, 31), 13) / 1000
+    first_taxed = fixtures.taipei(datetime.date(2027, 1, 1), 9, 30) / 1000
+    rig.api.deal(trade, 1, 26.0, "1", ts=last_day)
+    rig.api.deal(trade, 1, 26.0, "2", ts=first_taxed)
+    await _settle()
+    fees = [e.fill.fee for e in rig.adapter.drain_events(ACCOUNT) if e.fill]
+    assert fees == [D(37), D(37 + 26)]
+    blind = _Rig()
+    other = blind.cid(1)
+    await blind.adapter.submit_order(
+        _req(
+            other,
+            instrument_id=fixtures.YUANTA_US20,
+            side=enums.OrderSide.SELL,
+            limit_price=D(26),
+        )
+    )
+    blind.api.deal(blind.api.trades[0], 1, 26.0, "1", ts=last_day)
+    await _settle()
+    unclassified = next(
+        e.fill for e in blind.adapter.drain_events(ACCOUNT) if e.fill
+    )
+    assert unclassified.fee == D(37 + 26)
 
 
 async def test_cancel_paths() -> None:
