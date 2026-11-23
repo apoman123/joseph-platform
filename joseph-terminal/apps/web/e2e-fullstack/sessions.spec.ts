@@ -38,7 +38,7 @@ async function loadAcme(page: Page): Promise<void> {
   await page.getByRole('option', {name: /ACME/}).first().click();
   await expect(
     page.getByTestId('chart-pane-chart-1').locator('.pane__symbol')
-  ).toHaveText('ACME');
+  ).toHaveText(/^ACME\b/);
   await expect(page.getByText('Loading candles…')).toHaveCount(0);
 }
 
