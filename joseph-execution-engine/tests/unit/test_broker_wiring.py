@@ -94,11 +94,12 @@ def _request(account_id: str, instrument_id: str) -> trading.VenueOrderRequest:
 
 
 async def test_cathay_is_fail_closed_awaiting_the_sdk() -> None:
-    """Cathay declares TWSE but refuses everything until its SDK arrives."""
+    """Cathay declares TWSE/TPEx but refuses everything until its SDK."""
     adapter = cathay.build()
     caps = await adapter.capabilities("acct")
     assert caps.status is enums.TradingStatus.TRADING_UNAVAILABLE
-    assert caps.tradable_venues == ("twse",) and caps.currencies == ("TWD",)
+    assert caps.tradable_venues == ("twse", "tpex")
+    assert caps.currencies == ("TWD",)
     assert "Awaiting the Cathay API SDK" in caps.notes[-1]
     assert await adapter.health() is enums.HealthState.UNAVAILABLE
     for call in (

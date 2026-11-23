@@ -1,7 +1,8 @@
 /**
  * @fileoverview Instrument picker: asset-class groups (Crypto, Taiwan
  * stocks, US stocks, Bonds & rates), venue filter and search by symbol or
- * name — including Chinese names on TWSE — over exact venue instruments.
+ * name — including Chinese names on TWSE and TPEx — over exact venue
+ * instruments.
  *
  * Results always show the canonical venue-scoped id, so `BTCUSDT` on
  * Binance is never confused with `BTC` on Hyperliquid. Rows carry the venue
@@ -40,6 +41,7 @@ const MAX_RESULTS = 60;
 /** Venues whose listings are searched by name in the browser. */
 const NAMED_VENUES: ReadonlySet<Venue> = new Set<Venue>([
   'twse',
+  'tpex',
   'nasdaq',
   'nyse',
   'treasury',
@@ -54,6 +56,7 @@ const VENUE_BADGES: Readonly<Record<Venue, string>> = {
   bitget: 'BG',
   mexc: 'MEXC',
   twse: 'TWSE',
+  tpex: 'TPEx',
   nasdaq: 'NSDQ',
   nyse: 'NYSE',
   treasury: 'UST',
@@ -462,8 +465,9 @@ function InstrumentSearch({
       {demo && (
         <p className="j-field__hint">
           Demo mode lists synthetic instruments on the demo venue: crypto
-          perpetuals, a US stock, a bond ETF, a Taiwan stock and the 10-year
-          Treasury yield. Connect a market engine for real venues.
+          perpetuals, a US stock, a US bond ETF, a TWSE stock, a TPEx bond ETF
+          and the 10-year Treasury yield. Connect a market engine for real
+          venues.
         </p>
       )}
       {error && (

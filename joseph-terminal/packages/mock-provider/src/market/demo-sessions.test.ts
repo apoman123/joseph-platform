@@ -1,8 +1,10 @@
 /**
  * @fileoverview DEMO session lists match the engine's calendars (NYSE
- * holidays and early closes, Treasury market days, TWSE closures), and DEMO
+ * holidays and early closes, Treasury market days observed through the
+ * engine's table and by rule afterwards, TWSE/TPEx closures), and DEMO
  * session instruments only have bars inside sessions: ACME on XNYS, the
- * TWSE stock with its ladder, the bond ETF and the 10-year yield.
+ * TWSE stock with its ladder, the TPEx bond ETF, the US bond ETF and the
+ * 10-year yield.
  */
 import {
   SessionCalendar,
@@ -13,6 +15,8 @@ import {
 import {describe, expect, it} from 'vitest';
 import {DemoMarketDataClient, demoSpecMatches} from './demo-market-client';
 import {
+  DEMO_USBOND_EXTRA_CLOSURES,
+  DEMO_USBOND_OBSERVED_THROUGH,
   DEMO_XTAI_CLOSURES,
   bondHolidays,
   demoCalendar,
@@ -97,6 +101,26 @@ describe('USBOND and XTAI rules', () => {
     );
   });
 
+  it('follows the observed Treasury table, then the rule', () => {
+    // Past Good Fridays follow Treasury's publications.
+    expect(demoSessionOn('USBOND', day('2025-04-18'))).toBeNull();
+    expect(demoSessionOn('USBOND', day('2024-03-29'))).toBeNull();
+    expect(demoSessionOn('USBOND', day('2023-04-07'))).not.toBeNull();
+    expect(demoSessionOn('USBOND', day('2021-04-02'))).not.toBeNull();
+    // Future Good Fridays are sessions (known only from SIFMA's notice).
+    expect(demoSessionOn('USBOND', day('2027-03-26'))).not.toBeNull();
+    expect(demoSessionOn('USBOND', day('2028-04-14'))).not.toBeNull();
+    // MLK Day before 1998 and NYSE special closures Treasury observed.
+    expect(demoSessionOn('USBOND', day('1995-01-16'))).toBeNull();
+    expect(demoSessionOn('USBOND', day('2018-12-05'))).toBeNull();
+    expect(demoSessionOn('USBOND', day('2012-10-29'))).not.toBeNull();
+    expect(demoSessionOn('USBOND', day('2012-10-30'))).toBeNull();
+    expect(DEMO_USBOND_OBSERVED_THROUGH).toBe('2026-11-20');
+    expect(
+      DEMO_USBOND_EXTRA_CLOSURES.every(d => d <= DEMO_USBOND_OBSERVED_THROUGH)
+    ).toBe(true);
+  });
+
   it('uses the TWSE closures (typhoon day, lunar new year)', () => {
     expect(demoSessionOn('XTAI', day('2024-10-31'))).toBeNull();
     expect(demoSessionOn('XTAI', day('2024-10-30'))).not.toBeNull();
@@ -165,7 +189,7 @@ describe('DEMO session instruments', () => {
   });
 
   it('publishes metadata, classified delta and no volume for the yield', async () => {
-    const {instruments} = await client.listInstruments({q: '示範'});
+    const {instruments} = await client.listInstruments({q: '半導體'});
     expect(instruments.map(i => i.instrument_id)).toEqual(['mock:stock:9901']);
     expect(instruments[0]).toMatchObject({
       calendar: 'XTAI',
@@ -208,6 +232,43 @@ describe('DEMO session instruments', () => {
       s => s.instrumentId === 'mock:stock:9901'
     );
     expect(tw && demoTickAt(tw, 45)).toBe('0.05');
+  });
+
+  it('serves the TPEx bond ETF on XTAI with the ETF ladder and no limit', async () => {
+    const {instruments} = await client.listInstruments({q: '美債'});
+    expect(instruments.map(i => i.instrument_id)).toEqual(['mock:etf:00999B']);
+    expect(instruments[0]).toMatchObject({
+      calendar: 'XTAI',
+      asset_class: 'BOND',
+      listing_exchange: 'TPEx',
+      price_limit_pct: null,
+      board_lot: '1000',
+      local_name: '示範美債20年',
+      key: {quote: 'TWD', market_type: 'etf'},
+      tick_ladder: [
+        {min_price: '0', tick_size: '0.01'},
+        {min_price: '50', tick_size: '0.05'},
+      ],
+    });
+    const batch = await client.getCandles({
+      instrumentId: 'mock:etf:00999B',
+      timeframe: '1h',
+      limit: 10,
+    });
+    expect(batch.candles.length).toBeGreaterThan(0);
+    for (const candle of batch.candles) {
+      expect(demoCalendar('XTAI').isOpen(candle.start_ms)).toBe(true);
+      expect(Number(candle.close)).toBeLessThan(50);
+      expect(Math.round(Number(candle.close) * 100)).toBeCloseTo(
+        Number(candle.close) * 100,
+        6
+      );
+    }
+    const spec = DEMO_INSTRUMENT_SPECS.find(
+      s => s.instrumentId === 'mock:etf:00999B'
+    );
+    expect(spec && demoTickAt(spec, 26.2)).toBe('0.01');
+    expect(spec && demoTickAt(spec, 50.5)).toBe('0.05');
   });
 
   it('streams the last session bar while the market is closed', async () => {

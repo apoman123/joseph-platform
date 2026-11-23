@@ -29,14 +29,20 @@ MONDAY = datetime.date(2026, 11, 23)
         ("ibkr", False, "USD", "nyse:etf:SPY", True),
         ("ibkr", False, "USD", "twse:stock:2330", False),
         ("sinopac", False, "TWD", "twse:stock:2330", True),
+        ("sinopac", False, "TWD", "tpex:stock:6488", True),
+        ("sinopac", False, "TWD", "tpex:etf:00679B", True),
         ("sinopac", False, "TWD", "nasdaq:stock:AAPL", False),
         ("cathay", False, "TWD", "twse:etf:0050", True),
+        ("cathay", False, "TWD", "tpex:etf:00937B", True),
         ("cathay", False, "TWD", "nyse:stock:IBM", False),
+        ("ibkr", False, "USD", "tpex:stock:6488", False),
         ("mock", True, "USD", "mock:perp:BTCUSD", True),
         ("mock", True, "USD", "binance:perp:BTCUSDT", True),
         ("mock", True, "USD", "nasdaq:stock:AAPL", True),
         ("mock", True, "USD", "twse:stock:2330", False),
         ("mock", True, "TWD", "twse:stock:2330", True),
+        ("mock", True, "TWD", "tpex:etf:00679B", True),
+        ("mock", True, "USD", "tpex:stock:6488", False),
         ("mock", True, "TWD", "mock:perp:BTCUSD", False),
         ("mock", True, "TWD", "nasdaq:stock:AAPL", False),
         ("ibkr", False, "USD", "treasury:rate:UST10Y", False),
@@ -60,6 +66,10 @@ def test_route_messages_name_the_rule() -> None:
     assert "rate series" in rate.message
     paper = equities.route("mock", True, "USD", fixtures.TSMC)
     assert "TWD paper account" in paper.message
+    sinopac = equities.route("sinopac", False, "TWD", fixtures.AAPL)
+    assert "TWSE and TPEx listings" in sinopac.message
+    tpex = equities.route("cathay", False, "TWD", fixtures.GLOBALWAFERS)
+    assert tpex.allowed and "TPEx via Cathay Securities" in tpex.message
 
 
 def test_instrument_helpers() -> None:
@@ -94,6 +104,16 @@ def test_instrument_helpers() -> None:
 def test_twse_tick_ladder(price: str, tick: str) -> None:
     """The tick at each price comes from the TWSE ladder."""
     assert fixtures.twse().tick_for(D(price)) == D(tick)
+    assert fixtures.tpex().tick_for(D(price)) == D(tick)
+
+
+@pytest.mark.parametrize(
+    ("price", "tick"),
+    [("49.99", "0.01"), ("50", "0.05"), ("57.75", "0.05")],
+)
+def test_tpex_etf_tick_ladder(price: str, tick: str) -> None:
+    """TPEx ETFs tick 0.01 below 50 TWD and 0.05 from 50 (as on TWSE)."""
+    assert fixtures.tpex("00791B", etf=True).tick_for(D(price)) == D(tick)
 
 
 def test_ticks_and_rounding() -> None:
@@ -139,6 +159,23 @@ def test_twse_price_limits(reference: str, low: str, high: str) -> None:
     assert limits.contains(D(reference))
     assert limits.clamp(D(high) + 10) == D(high)
     assert limits.clamp(D(0)) == D(low)
+
+
+def test_tpex_price_limits_match_published_limit_prices() -> None:
+    """TPEx limits equal TPEx's published next-session limit prices."""
+    # tpex_mainboard_quotes 2026-11-20: 6488 close 441.50 -> 397.50-485.50,
+    # 3105 381.00 -> 343.00-419.00; ETF 00888 24.31 -> 21.88-26.74.
+    for code, ref, low, high in (
+        ("6488", "441.5", "397.5", "485.5"),
+        ("3105", "381", "343", "419"),
+    ):
+        limits = equities.price_limits(D(ref), fixtures.tpex(code))
+        assert limits is not None
+        assert (limits.low, limits.high) == (D(low), D(high))
+    etf = equities.price_limits(D("24.31"), fixtures.tpex("00888", etf=True))
+    assert etf is not None and (etf.low, etf.high) == (D("21.88"), D("26.74"))
+    bond = fixtures.tpex("00679B", etf=True, limited=False)
+    assert equities.price_limits(D("26.15"), bond) is None
 
 
 def test_no_limits_without_percentage() -> None:
@@ -202,13 +239,15 @@ def test_settlement_counts_trading_days() -> None:
     assert fallback == monday_noon
 
 
-def test_twse_fees() -> None:
+def test_taiwan_fees() -> None:
     """Brokerage applies to every fill; the sale tax to sells only."""
-    buy = equities.twse_fee(enums.OrderSide.BUY, D(600_000), "stock")
+    assert equities.is_taiwan("twse") and equities.is_taiwan("tpex")
+    assert not equities.is_taiwan("nasdaq")
+    buy = equities.taiwan_fee(enums.OrderSide.BUY, D(600_000), "stock")
     assert buy == D(855)
-    sell = equities.twse_fee(enums.OrderSide.SELL, D(600_000), "stock")
+    sell = equities.taiwan_fee(enums.OrderSide.SELL, D(600_000), "stock")
     assert sell == D(855 + 1800)
-    etf = equities.twse_fee(enums.OrderSide.SELL, D(150_000), "etf")
+    etf = equities.taiwan_fee(enums.OrderSide.SELL, D(150_000), "etf")
     assert etf == D(213 + 150)
 
 

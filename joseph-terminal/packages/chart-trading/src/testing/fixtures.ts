@@ -148,7 +148,7 @@ export function preview(
   };
 }
 
-/** TWSE ladder used by the equity fixtures. */
+/** TWSE and TPEx stock ladder used by the equity fixtures. */
 const TWSE_LADDER = [
   {min_price: '0', tick_size: '0.01'},
   {min_price: '10', tick_size: '0.05'},
@@ -177,6 +177,33 @@ export const TWSE_STOCK: InstrumentPrecision = {
   listing_exchange: 'TWSE',
   name: 'Demo Semiconductor (demo)',
   local_name: '示範半導體',
+};
+
+/**
+ * TPEx bond ETF with foreign constituents (board lot 1000, ETF ladder: 0.01
+ * below 50 and 0.05 from 50, no daily price limit).
+ */
+export const TPEX_BOND_ETF: InstrumentPrecision = {
+  instrument_id: 'tpex:etf:00679B',
+  display_symbol: '00679B',
+  tick_size: '0.01',
+  lot_size: '1',
+  min_qty: '1',
+  max_qty: null,
+  min_notional: null,
+  max_leverage: null,
+  status: 'TRADING',
+  key: {canonical_base: '00679B', quote: 'TWD'},
+  calendar: 'XTAI',
+  tick_ladder: [
+    {min_price: '0', tick_size: '0.01'},
+    {min_price: '50', tick_size: '0.05'},
+  ],
+  price_limit_pct: null,
+  board_lot: '1000',
+  listing_exchange: 'TPEx',
+  name: null,
+  local_name: '元大美債20年',
 };
 
 /** US stock on the NYSE calendar. */
@@ -228,7 +255,7 @@ export function brokerAccount(
         : ['market', 'limit'],
       time_in_force: ibkr ? ['DAY', 'GTC', 'IOC'] : ['DAY', 'IOC', 'FOK'],
       margin_modes: [],
-      tradable_venues: ibkr ? ['nasdaq', 'nyse'] : ['twse'],
+      tradable_venues: ibkr ? ['nasdaq', 'nyse'] : ['twse', 'tpex'],
       cash_account: true,
       short_selling: false,
       outside_rth: ibkr,
@@ -244,7 +271,7 @@ export function brokerAccount(
 
 /**
  * Builds an engine paper account: `acct-paper-*` (USD: crypto, Nasdaq,
- * NYSE) or `acct-twd-paper-*` (TWD: TWSE).
+ * NYSE) or `acct-twd-paper-*` (TWD: TWSE, TPEx).
  * @param currency Account currency.
  * @return Account summary.
  */
@@ -260,7 +287,8 @@ export function paperAccount(currency: 'USD' | 'TWD'): AccountSummary {
       ...base.capabilities,
       order_types: ['market', 'limit', 'stop_market', 'stop_limit'],
       time_in_force: ['GTC', 'IOC', 'FOK', 'POST_ONLY', 'DAY'],
-      tradable_venues: currency === 'USD' ? ['nasdaq', 'nyse'] : ['twse'],
+      tradable_venues:
+        currency === 'USD' ? ['nasdaq', 'nyse'] : ['twse', 'tpex'],
       cash_account: true,
       short_selling: false,
       outside_rth: false,

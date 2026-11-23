@@ -13,8 +13,8 @@ Every bar boundary (history windows, the live edge, gap repair) follows the
 instrument's session calendar (``sessions.for_instrument``): exchange bars
 start at the session open, and the time between sessions is never a gap.
 
-On venues with sparse bars (``ports.sparse_bars``: TWSE, Nasdaq, NYSE) a
-quiet interval has no bar. Their fetches report the spans they delivered
+On venues with sparse bars (``ports.sparse_bars``: TWSE, TPEx, Nasdaq,
+NYSE) a quiet interval has no bar. Their fetches report the spans they delivered
 completely, which the store keeps as coverage: a missing bar inside it is
 neither a reported gap nor re-fetched, while an interval no fetch or live
 session covered (an outage) still is both.

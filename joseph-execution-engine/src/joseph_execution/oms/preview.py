@@ -164,8 +164,10 @@ def estimate(
         rate = fees.maker_bps
     fee = notional * rate / decimals.BPS
     venue = equities.parse_instrument_id(request.instrument_id).venue
-    if venue == enums.Venue.TWSE.value:
-        fee = equities.twse_fee(request.side, notional, instrument.market_type)
+    if equities.is_taiwan(venue):
+        fee = equities.taiwan_fee(
+            request.side, notional, instrument.market_type
+        )
     margin = (
         decimals.ZERO
         if request.reduce_only

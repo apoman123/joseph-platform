@@ -14,20 +14,27 @@ Best bid/ask spread       < 0.10 %             < 0.10 %          ``<``
 USD 50K worst-side slip   < 0.25 %             < 0.25 %          ``<``
 ========================  ===================  ===============  ======
 
-Exchange-listed securities (stocks and ETFs on ``twse``, ``nasdaq``,
-``nyse``, and the DEMO stock). They have no funding, open interest or
-liquidations, so those gates and the funding assessment do not apply
-(``FundingRisk.NOT_APPLICABLE``) and never block qualification. Turnover is
-the latest session's, in the listing currency; slippage walks the book for
-about USD 50K (TWD 1.5M on TWSE, where one tick can be 0.5 % of the price):
+Exchange-listed securities (stocks and ETFs on ``twse``, ``tpex``,
+``nasdaq``, ``nyse``, and the DEMO stock). They have no funding, open
+interest or liquidations, so those gates and the funding assessment do not
+apply (``FundingRisk.NOT_APPLICABLE``) and never block qualification.
+Turnover is the latest session's, in the listing currency; slippage walks
+the book for about USD 50K (TWD 1.5M on TWSE and TPEx, where one tick can
+be 0.5 % of the price):
 
-========================  ==============  ============  =================
-Gate                      US equity       US bond ETF   TWSE equity/bond
-========================  ==============  ============  =================
-Session turnover          > USD 20M       > USD 10M     > TWD 300M / 100M
-Best bid/ask spread       < 0.10 %        < 0.10 %      < 0.60 %
-Worst-side slippage       < 0.25 %        < 0.25 %      < 1.00 %
-========================  ==============  ============  =================
+====================  ==========  ===========  ========================
+Gate                  US equity   US bond ETF  TWSE/TPEx equity, bond
+====================  ==========  ===========  ========================
+Session turnover      > USD 20M   > USD 10M    > TWD 300M, > TWD 100M
+Best bid/ask spread   < 0.10 %    < 0.10 %     < 0.60 %
+Worst-side slippage   < 0.25 %    < 0.25 %     < 1.00 %
+====================  ==========  ===========  ========================
+
+TPEx has its own threshold sets with TWSE's values: the gates bound the
+liquidity a TWD 1.5M order needs, which does not depend on the board, and
+TPEx's tick ladders and price limits are TWSE's. On 2026-11-20 they passed
+43 of 895 TPEx stocks and 19 of 99 TPEx bond ETFs on turnover (194 of
+1,099 TWSE stocks).
 
 Rate series (``treasury:rate:*``) are not tradable and are never screened.
 
@@ -56,8 +63,8 @@ import math
 from joseph.domain import decimals
 from joseph.domain import instruments
 
-POLICY_VERSION = "joseph-qualification/2026-11-v2"
-"""v2: thresholds for exchange-listed equities and bond ETFs."""
+POLICY_VERSION = "joseph-qualification/2026-11-v3"
+"""v2: thresholds for exchange-listed equities and bond ETFs; v3: TPEx."""
 
 
 class Status(enum.StrEnum):
@@ -168,6 +175,10 @@ TW_BOND_THRESHOLDS = dataclasses.replace(
     TW_EQUITY_THRESHOLDS, turnover_24h=_D(100_000_000)
 )
 """Bond ETFs on TWSE (amounts in TWD)."""
+TPEX_EQUITY_THRESHOLDS = TW_EQUITY_THRESHOLDS
+"""Stocks and equity ETFs on TPEx (amounts in TWD, TWSE's values)."""
+TPEX_BOND_THRESHOLDS = TW_BOND_THRESHOLDS
+"""Bond ETFs on TPEx (amounts in TWD, TWSE's values)."""
 
 
 def is_listed(instrument_id: instruments.InstrumentId) -> bool:
@@ -212,6 +223,8 @@ class QualificationPolicy:
         us_bond: Thresholds for US-listed bond ETFs.
         tw_equity: Thresholds for TWSE stocks and equity ETFs.
         tw_bond: Thresholds for TWSE bond ETFs.
+        tpex_equity: Thresholds for TPEx stocks and equity ETFs.
+        tpex_bond: Thresholds for TPEx bond ETFs.
         funding_watch_pct: ``|8h funding|`` at or above which is WATCH.
         funding_high_risk_pct: ``|8h funding|`` at or above which is
             HIGH_RISK.
@@ -227,6 +240,8 @@ class QualificationPolicy:
     us_bond: Thresholds = US_BOND_THRESHOLDS
     tw_equity: Thresholds = TW_EQUITY_THRESHOLDS
     tw_bond: Thresholds = TW_BOND_THRESHOLDS
+    tpex_equity: Thresholds = TPEX_EQUITY_THRESHOLDS
+    tpex_bond: Thresholds = TPEX_BOND_THRESHOLDS
     funding_watch_pct: decimal.Decimal = _FUNDING_WATCH_PCT
     funding_high_risk_pct: decimal.Decimal = _FUNDING_HIGH_RISK_PCT
     reject_high_funding_risk: bool = True
@@ -253,6 +268,8 @@ class QualificationPolicy:
             bond = asset_class is instruments.AssetClass.BOND
             if instrument_id.venue is instruments.Venue.TWSE:
                 return self.tw_bond if bond else self.tw_equity
+            if instrument_id.venue is instruments.Venue.TPEX:
+                return self.tpex_bond if bond else self.tpex_equity
             return self.us_bond if bond else self.us_equity
         if asset_class is instruments.AssetClass.EQUITY:
             return self.equity
@@ -294,8 +311,8 @@ class QualificationInput:
         display_symbol: Display symbol.
         asset_class: Asset class.
         turnover_24h_usd: 24h quote turnover in the thresholds' currency
-            (USD, or TWD for TWSE listings; the latest session for listed
-            securities).
+            (USD, or TWD for TWSE and TPEx listings; the latest session
+            for listed securities).
         open_interest_usd: Open interest notional.
         spread_pct: Best bid/ask spread in percent.
         slippage_pct: Worst-side 50K slippage in percent.

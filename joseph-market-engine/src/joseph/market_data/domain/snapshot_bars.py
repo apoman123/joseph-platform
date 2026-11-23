@@ -1,8 +1,9 @@
 """One-minute bars built from periodic exchange snapshots (pure).
 
-Some exchanges (TWSE's MIS) publish no trade feed, only snapshots of the
-day's cumulative volume, last price, day high/low and the best quotes. Bars
-are reconstructed from consecutive snapshots of one trading day:
+Some exchanges (TWSE's MIS, which also serves TPEx) publish no trade feed,
+only snapshots of the day's cumulative volume, last price, day high/low and
+the best quotes. Bars are reconstructed from consecutive snapshots of one
+trading day:
 
 * **Derived trades.** The increase of cumulative volume between two
   snapshots is one derived trade. It is *priced* when the newer snapshot

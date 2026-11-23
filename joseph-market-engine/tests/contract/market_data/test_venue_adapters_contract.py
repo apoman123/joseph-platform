@@ -43,6 +43,7 @@ _BTC = {
 _REAL = list(_BTC)
 _EXCHANGE = [
     instruments.Venue.TWSE,
+    instruments.Venue.TPEX,
     instruments.Venue.NASDAQ,
     instruments.Venue.NYSE,
     instruments.Venue.TREASURY,

@@ -1434,7 +1434,7 @@ def market_session(ctx: context.RiskContext) -> risk.RiskCheckResult:  # noqa: P
 
 
 def size_board_lot(ctx: context.RiskContext) -> risk.RiskCheckResult:  # noqa: PLR0911
-    """Checks board lots and intraday odd-lot rules (TWSE).
+    """Checks board lots and intraday odd-lot rules (TWSE, TPEx).
 
     Common orders are whole board lots (1000 shares); intraday odd-lot
     orders are 1-999 shares, limit and ROD (DAY) only.
@@ -1524,7 +1524,7 @@ def size_board_lot(ctx: context.RiskContext) -> risk.RiskCheckResult:  # noqa: P
 
 
 def size_price_limit(ctx: context.RiskContext) -> risk.RiskCheckResult:
-    """Checks limit prices against the daily limits (TWSE +-10%).
+    """Checks limit prices against the daily limits (TWSE/TPEx +-10%).
 
     Args:
         ctx: Risk context.

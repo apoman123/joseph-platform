@@ -65,7 +65,11 @@ test('groups the market picker by asset class and finds Chinese names', async ({
     listbox.getByRole('group', {name: 'US stocks'}).getByRole('option')
   ).toContainText(['ACME']);
   await page.getByTestId('market-group-bonds').click();
-  await expect(listbox.getByRole('option')).toHaveCount(2);
+  await expect(listbox.getByRole('option')).toHaveCount(3);
+  // A TPEx bond ETF (Taiwan hours, TWD) sits with the other bond ETFs.
+  await expect(listbox.getByRole('option', {name: /00999B/})).toContainText(
+    'TPEx'
+  );
   await expect(listbox.getByRole('option', {name: /UST10Y/})).toContainText(
     'Yield, %'
   );

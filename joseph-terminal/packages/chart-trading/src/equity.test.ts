@@ -59,6 +59,7 @@ import {
   zoneCity,
 } from './equity';
 import {
+  TPEX_BOND_ETF,
   TWSE_STOCK,
   US_STOCK,
   account,
@@ -155,6 +156,38 @@ describe('TWSE tick ladder and price limits', () => {
     expect(referenceClose(candles)?.toString()).toBe('585');
     expect(referenceClose(candles.slice(0, 2))?.toString()).toBe('585');
     expect(referenceClose([])).toBeNull();
+  });
+});
+
+describe('TPEx ETF ladder, limits and lots', () => {
+  it('uses the ETF ladder (0.01 below 50, 0.05 from 50)', () => {
+    expect(tickAt(TPEX_BOND_ETF, d('26.15')).toString()).toBe('0.01');
+    expect(tickAt(TPEX_BOND_ETF, d('50')).toString()).toBe('0.05');
+    expect(isOnTickLadder(TPEX_BOND_ETF, d('26.33'))).toBe(true);
+    expect(isOnTickLadder(TPEX_BOND_ETF, d('57.72'))).toBe(false);
+    expect(roundToTickLadder(TPEX_BOND_ETF, d('57.72')).toString()).toBe(
+      '57.7'
+    );
+    expect(formatEquityPrice(TPEX_BOND_ETF, d('26.15'))).toBe('26.15 TWD');
+  });
+
+  it('has no daily limit for foreign-constituent funds', () => {
+    expect(priceLimitBand(TPEX_BOND_ETF, d('26.15'))).toBeNull();
+    const domestic = {...TPEX_BOND_ETF, price_limit_pct: '10'};
+    expect(priceLimitBand(domestic, d('26.35'))?.upper.toString()).toBe(
+      '28.98'
+    );
+    expect(priceLimitBand(domestic, d('26.35'))?.lower.toString()).toBe(
+      '23.72'
+    );
+  });
+
+  it('trades board lots of 1,000 units and odd lots', () => {
+    expect(boardLotOf(TPEX_BOND_ETF)?.toString()).toBe('1000');
+    expect(formatShares(TPEX_BOND_ETF, d('3000'))).toBe('3 張 (3,000 shares)');
+    expect(
+      parseEquityQuantity(TPEX_BOND_ETF, 'odd', '250').shares?.toString()
+    ).toBe('250');
   });
 });
 
@@ -287,15 +320,20 @@ describe('routing by tradable venues', () => {
       accountExchanges(
         brokerAccount('sinopac', {}, {tradable_venues: undefined})
       )
-    ).toEqual(['twse']);
+    ).toEqual(['twse', 'tpex']);
+    expect(
+      accountExchanges(
+        brokerAccount('cathay', {}, {tradable_venues: undefined})
+      )
+    ).toEqual(['twse', 'tpex']);
     const twdPaper = paperAccount('TWD');
-    expect(accountExchanges(twdPaper)).toEqual(['twse']);
+    expect(accountExchanges(twdPaper)).toEqual(['twse', 'tpex']);
     expect(
       accountExchanges({
         ...twdPaper,
         capabilities: {...twdPaper.capabilities, tradable_venues: []},
       })
-    ).toEqual(['twse']);
+    ).toEqual(['twse', 'tpex']);
     expect(accountExchanges(account())).toEqual(['nasdaq', 'nyse']);
     expect(accountExchanges(account({venue: 'binance'}))).toEqual([]);
   });
@@ -309,6 +347,20 @@ describe('routing by tradable venues', () => {
     expect(accountInstrumentMismatch(ibkr, 'mock:stock:ACME')).toBeNull();
     expect(accountInstrumentMismatch(usd, 'mock:stock:ACME')).toBeNull();
     expect(accountInstrumentMismatch(sinopac, 'twse:stock:2330')).toBeNull();
+    expect(accountInstrumentMismatch(sinopac, 'tpex:stock:6488')).toBeNull();
+    expect(accountInstrumentMismatch(twd, 'tpex:etf:00679B')).toBeNull();
+    expect(
+      accountInstrumentMismatch(brokerAccount('cathay'), 'tpex:etf:00937B')
+    ).toBeNull();
+    expect(
+      accountInstrumentMismatch(
+        brokerAccount('sinopac', {}, {tradable_venues: ['twse']}),
+        'tpex:stock:6488'
+      )
+    ).toBe('SinoPac Securities (Shioaji) accounts route TWSE listings only.');
+    expect(accountInstrumentMismatch(ibkr, 'tpex:etf:00679B')).toBe(
+      'Interactive Brokers accounts route Nasdaq and NYSE listings only.'
+    );
     expect(
       accountInstrumentMismatch(twd, 'mock:stock:9901', {calendar: 'XTAI'})
     ).toBeNull();
@@ -332,7 +384,7 @@ describe('routing by tradable venues', () => {
     ).toBeNull();
     expect(
       accountInstrumentMismatch(paperAccount('TWD'), 'mock:perp:BTCUSD')
-    ).toBe('The TWD paper account trades TWSE securities only.');
+    ).toBe('The TWD paper account trades TWSE and TPEx securities only.');
     expect(
       accountInstrumentMismatch(brokerAccount('ibkr'), 'mock:perp:BTCUSD')
     ).toMatch(/exchange-listed securities only/);
@@ -591,6 +643,18 @@ describe('closed markets and notices', () => {
     expect(
       marketHoursNotice(weekend, saturday, {...order, timeInForce: 'GTC'})?.text
     ).toMatch(/waits for the next session\.$/);
+  });
+
+  it('names the listing exchange of a Taiwan security', () => {
+    const xtai = createBarCalendar('XTAI');
+    // Saturday 2026-11-28 12:00 Taipei.
+    const closed = Date.UTC(2026, 10, 28, 4);
+    expect(marketHoursNotice(xtai, closed, order)?.text).toMatch(
+      /^TWSE \/ TPEx is closed now\. The next session opens Mon 30 Nov 09:00 Taipei\./
+    );
+    expect(
+      marketHoursNotice(xtai, closed, {...order, market: 'TPEx'})?.text
+    ).toMatch(/^TPEx is closed now\./);
   });
 
   it('formats exchange times with the city', () => {

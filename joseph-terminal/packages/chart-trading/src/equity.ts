@@ -3,12 +3,12 @@
  *
  * Exchange-listed stocks and ETFs trade through securities brokers
  * (Interactive Brokers for Nasdaq/NYSE, SinoPac Shioaji and Cathay for
- * TWSE) or the engine's paper accounts (USD: crypto, Nasdaq, NYSE; TWD:
- * TWSE). This module holds the pure rules the ticket applies before the
- * execution engine re-checks everything, read from the account's
- * `TradingCapabilities`: routing by `tradable_venues`, time in force
- * (DAY only for exchange sessions), TWSE tick ladders and daily price
- * limits, board lots (張) and intraday odd lots (零股, limit DAY only, when
+ * TWSE and TPEx) or the engine's paper accounts (USD: crypto, Nasdaq,
+ * NYSE; TWD: TWSE, TPEx). This module holds the pure rules the ticket
+ * applies before the execution engine re-checks everything, read from the
+ * account's `TradingCapabilities`: routing by `tradable_venues`, time in
+ * force (DAY only for exchange sessions), TWSE/TPEx tick ladders and daily
+ * price limits, board lots (張) and intraday odd lots (零股, limit DAY only, when
  * `odd_lot`), IBKR's `outside_rth`, market orders while the exchange is
  * closed (`queue_market_when_closed`), long-only cash accounts, settled
  * cash, broker account status, the wording of LIVE confirmations and the
@@ -41,7 +41,10 @@ import {
 } from '@joseph/contracts';
 import {groupThousands} from './format';
 
-/** Board lots (whole 張 on TWSE) or odd lots (fewer shares than a lot). */
+/**
+ * Board lots (whole 張 on TWSE and TPEx) or odd lots (fewer shares than a
+ * lot).
+ */
 export type EquityLotMode = 'board' | 'odd';
 
 /** Brokers that execute exchange-listed securities. */
@@ -55,7 +58,20 @@ export const BROKER_NAMES: Readonly<Record<Broker, string>> = {
 };
 
 /** Exchange venues of listed securities. */
-export const EXCHANGE_VENUES: readonly Venue[] = ['twse', 'nasdaq', 'nyse'];
+export const EXCHANGE_VENUES: readonly Venue[] = [
+  'twse',
+  'tpex',
+  'nasdaq',
+  'nyse',
+];
+
+/** Short names of exchange venues for routing messages. */
+const EXCHANGE_NAMES: Readonly<Partial<Record<Venue, string>>> = {
+  twse: 'TWSE',
+  tpex: 'TPEx',
+  nasdaq: 'Nasdaq',
+  nyse: 'NYSE',
+};
 
 /**
  * Exchanges each broker routes to when the engine does not list
@@ -63,14 +79,14 @@ export const EXCHANGE_VENUES: readonly Venue[] = ['twse', 'nasdaq', 'nyse'];
  */
 export const BROKER_EXCHANGES: Readonly<Record<Broker, readonly Venue[]>> = {
   ibkr: ['nasdaq', 'nyse'],
-  sinopac: ['twse'],
-  cathay: ['twse'],
+  sinopac: ['twse', 'tpex'],
+  cathay: ['twse', 'tpex'],
 };
 
 /** Exchanges whose listings trade in each currency (paper accounts). */
 const CURRENCY_EXCHANGES: Readonly<Record<string, readonly Venue[]>> = {
   USD: ['nasdaq', 'nyse'],
-  TWD: ['twse'],
+  TWD: ['twse', 'tpex'],
 };
 
 /** Time in force offered for securities, in display order. */
@@ -294,7 +310,7 @@ export interface PriceLimitBand {
 
 /**
  * Daily price limits: the reference ± `price_limit_pct`, limit up rounded
- * down and limit down rounded up to the ladder (TWSE).
+ * down and limit down rounded up to the ladder (TWSE, TPEx).
  * @param instrument Instrument.
  * @param reference Previous session close.
  * @return Band, or null when the instrument has no limit.
@@ -371,7 +387,7 @@ export interface EquityQuantity {
 
 /**
  * Parses the ticket quantity: whole board lots (張) or odd-lot shares on
- * TWSE, whole shares elsewhere.
+ * TWSE and TPEx, whole shares elsewhere.
  * @param instrument Instrument.
  * @param mode Board or odd lot (ignored without a board lot).
  * @param text User text.
@@ -455,7 +471,7 @@ export function tradingVenueName(venue: TradingVenue): string {
  * @return Short name such as `TWSE`.
  */
 function exchangeName(venue: Venue): string {
-  return venue === 'twse' ? 'TWSE' : venue === 'nasdaq' ? 'Nasdaq' : 'NYSE';
+  return EXCHANGE_NAMES[venue] ?? VENUE_NAMES[venue];
 }
 
 /**
@@ -611,7 +627,7 @@ export function accountExchanges(account: AccountSummary): readonly Venue[] {
  */
 function securityExchanges(venue: Venue, calendar: string): readonly Venue[] {
   if (EXCHANGE_VENUES.includes(venue)) return [venue];
-  if (calendar === 'XTAI') return ['twse'];
+  if (calendar === 'XTAI') return ['twse', 'tpex'];
   if (calendar === 'XNYS') return ['nasdaq', 'nyse'];
   return [];
 }
@@ -708,7 +724,7 @@ export interface TimeInForceChoice {
  * Time in force for a security order: DAY, GTC, IOC and FOK as the
  * account's capabilities list them (DAY applies to exchange sessions only,
  * so it is never offered for 24x7 instruments). Intraday odd lots are DAY
- * (TWSE ROD) only.
+ * (TWSE/TPEx ROD) only.
  * @param account Account, or null.
  * @param lotMode Board or odd lot.
  * @return Choices.
@@ -906,6 +922,11 @@ export interface MarketHoursOrder {
   outsideRth: boolean;
   /** The account queues DAY market orders placed while closed. */
   queueMarket?: boolean;
+  /**
+   * Listing exchange named in the notice (e.g. `TPEx`); defaults to the
+   * calendar's markets (`TWSE / TPEx`, `NYSE / Nasdaq`).
+   */
+  market?: string | null;
 }
 
 /**
@@ -968,22 +989,22 @@ export function marketHoursNotice(
   order: MarketHoursOrder
 ): MarketHoursNotice | null {
   if (calendar.continuous || !isExchangeCalendar(calendar.id)) return null;
-  const hours = EXCHANGE_HOURS[calendar.id];
+  const market = order.market ?? EXCHANGE_HOURS[calendar.id].market;
   const status = marketStatus(calendar, nowMs);
   const zone = calendar.timeZone;
   if (status.open && status.session) {
     if (!status.earlyClose) return null;
     return {
       tone: 'warning',
-      text: `Early close today: ${hours.market} closes at ${formatExchangeTime(status.session.close_ms, zone)}.`,
+      text: `Early close today: ${market} closes at ${formatExchangeTime(status.session.close_ms, zone)}.`,
     };
   }
   const opens = status.next
     ? ` The next session opens ${formatExchangeTime(status.next.open_ms, zone)}.`
     : '';
   const why = status.holiday
-    ? `${hours.market} is closed today for a holiday.`
-    : `${hours.market} is closed now.`;
+    ? `${market} is closed today for a holiday.`
+    : `${market} is closed now.`;
   let effect: string;
   if (order.outsideRth && order.orderType !== 'market') {
     effect =

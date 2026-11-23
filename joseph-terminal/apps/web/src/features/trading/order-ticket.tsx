@@ -6,9 +6,10 @@
  *
  * Perpetuals keep leverage, reduce-only and attached stop/target. Stocks
  * and ETFs route to a broker account (IBKR for Nasdaq/NYSE, SinoPac or
- * Cathay for TWSE) with cash-equity rules: whole shares or TWSE board/odd
- * lots, tick-ladder prices inside the daily price limit, DAY/GTC, IBKR's
- * outside-RTH flag and market-hours notices from the session calendar.
+ * Cathay for TWSE and TPEx) with cash-equity rules: whole shares or
+ * Taiwan board/odd lots, tick-ladder prices inside the daily price limit,
+ * DAY/GTC, IBKR's outside-RTH flag and market-hours notices from the
+ * session calendar.
  * LIVE needs the server's permission, a server-side arming of the account
  * (step-up code verified by the execution engine; the ticket shows the
  * armed-until time from `live_armed_until_ms` and can disarm) and a
@@ -440,10 +441,12 @@ export function OrderTicket({ctx, runtime}: OrderTicketProps): ReactNode {
       timeInForce: inputs.timeInForce,
       outsideRth: inputs.outsideRth === true,
       queueMarket: account?.capabilities.queue_market_when_closed === true,
+      market: precision?.listing_exchange ?? null,
     });
   }, [
     calendar,
     account,
+    precision,
     inputs.orderType,
     inputs.timeInForce,
     inputs.outsideRth,
@@ -553,7 +556,7 @@ export function OrderTicket({ctx, runtime}: OrderTicketProps): ReactNode {
     if (at) {
       const tick = tickAt(precision, at);
       parts.push(
-        `Tick ${tick.normalize().toString()}${currency ? ` ${currency}` : ''} at this price${(precision.tick_ladder ?? []).length > 0 ? ' (TWSE ladder)' : ''}`
+        `Tick ${tick.normalize().toString()}${currency ? ` ${currency}` : ''} at this price${(precision.tick_ladder ?? []).length > 0 ? ` (${precision.listing_exchange ?? 'exchange'} ladder)` : ''}`
       );
     }
     const band = priceLimitBand(precision, reference);

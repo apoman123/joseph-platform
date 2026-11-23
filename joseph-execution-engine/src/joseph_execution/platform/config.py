@@ -134,7 +134,7 @@ class SecuritiesSettings:
             is closed, or ``queue`` them as DAY orders for the next open
             where the broker allows it.
         paper_twd_starting_cash: Starting cash of the TWD paper account
-            (TWSE); ``None`` disables it.
+            (TWSE and TPEx); ``None`` disables it.
         ibkr_enabled: Connect to IB Gateway/TWS.
         ibkr_host: Gateway host.
         ibkr_port: Gateway API port (paper 4002 / live 4001; the container
