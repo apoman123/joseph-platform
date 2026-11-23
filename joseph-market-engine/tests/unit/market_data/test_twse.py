@@ -557,3 +557,21 @@ def test_snapshot_builder_on_recorded_mis_data() -> None:
     assert builder.ignored > 0  # Cached and stale responses repeat data.
     bars = builder.bars(_OPEN, _SESSION.close_ms, latest.data_ms)
     assert sum(b.base_volume for b in bars) <= sum(t.quantity for t in trades)
+
+
+def test_closing_auction_lands_in_the_last_bar() -> None:
+    """The 13:30 auction print belongs to the session's last 1m bar."""
+    builder = snapshot_bars.SnapshotBarBuilder(_ID, source="test")
+    trades = []
+    for item in _load("mis_close")["responses"]:
+        for record in item["response"]["msgArray"]:
+            quote = twse.parse_mis_record(record, 0)
+            if quote is not None and quote.code == "2330":
+                trades += builder.apply(quote.snapshot)
+    auction = trades[-1]
+    assert auction.data_ms == _SESSION.close_ms
+    assert auction.quantity == _D(5897) * 1000  # tv: one print, in lots.
+    assert auction.price == _D(2030)
+    last = builder.bars(_SESSION.close_ms - 60_000, _SESSION.close_ms, 0)
+    assert len(last) == 1 and last[0].is_final
+    assert last[0].close == _D(2030) and last[0].base_volume == _D(5_897_000)
