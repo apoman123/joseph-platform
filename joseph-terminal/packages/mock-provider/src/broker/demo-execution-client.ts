@@ -57,7 +57,9 @@ import {
   DEMO_USER_ID,
   demoAccount,
   demoRoutingProblem,
+  type DemoAccountSpec,
 } from './instruments';
+import {demoCalendar} from '../market/demo-sessions';
 
 /** Events published by the DEMO broker. */
 export type DemoBrokerEvent =
@@ -203,6 +205,158 @@ export class DemoExecutionClient implements ExecutionClient {
         tick = Decimal.parse(step.tick_size);
     }
     return tick;
+  }
+
+  /**
+   * Engine order rules for an account and instrument: order types the
+   * account lists, DAY only for exchange sessions, intraday odd lots
+   * (limit DAY, when `odd_lot`), outside RTH (when `outside_rth`), orders
+   * while the exchange is closed (market orders queue as DAY only when
+   * `queue_market_when_closed`; IOC/FOK need a session) and long-only cash
+   * accounts.
+   * @param request Normalized request.
+   * @param account Account.
+   * @param instrument Instrument.
+   * @return Failing or warning checks (empty when everything passes).
+   */
+  private securityChecks(
+    request: OrderIntentRequest,
+    account: DemoAccountSpec,
+    instrument: Instrument
+  ): RiskCheckResult[] {
+    const results: RiskCheckResult[] = [];
+    const fail = (
+      check: string,
+      domain: RiskCheckResult['domain'],
+      message: string,
+      code: ErrorCode,
+      outcome: RiskCheckResult['outcome'] = 'FAIL'
+    ) =>
+      results.push({
+        check,
+        domain,
+        outcome,
+        message,
+        code: outcome === 'FAIL' ? code : null,
+        observed: null,
+        limit: null,
+      });
+    const caps = account.capabilities;
+    if (!caps.order_types.includes(request.order_type))
+      fail(
+        'size.order_type',
+        'SIZE',
+        `${account.label} does not offer ${request.order_type.replace('_', '-')} orders.`,
+        'UNSUPPORTED_ORDER_TYPE'
+      );
+    const calendar = demoCalendar(instrument.calendar ?? '24x7');
+    if (calendar.continuous) {
+      if (request.time_in_force === 'DAY')
+        fail(
+          'market.time_in_force',
+          'MARKET_STATUS',
+          'DAY applies to exchange sessions; 24x7 markets use GTC, IOC or FOK.',
+          'UNSUPPORTED_ORDER_TYPE'
+        );
+      return results;
+    }
+    if (!this.isSecurity(instrument)) return results;
+    const lot =
+      instrument.board_lot && Decimal.isValid(instrument.board_lot)
+        ? Decimal.parse(instrument.board_lot)
+        : null;
+    const qty = Decimal.isValid(request.quantity_base)
+      ? Decimal.parse(request.quantity_base)
+      : Decimal.zero();
+    if (lot && !qty.isZero() && qty.cmp(lot) < 0) {
+      if (!caps.odd_lot)
+        fail(
+          'size.board_lot',
+          'SIZE',
+          'This account cannot send intraday odd-lot orders.',
+          'INVALID_LOT_SIZE'
+        );
+      else if (request.order_type !== 'limit')
+        fail(
+          'size.board_lot',
+          'SIZE',
+          'Intraday odd-lot orders must be limit orders.',
+          'UNSUPPORTED_ORDER_TYPE'
+        );
+      else if (request.time_in_force !== 'DAY')
+        fail(
+          'size.board_lot',
+          'SIZE',
+          'Intraday odd-lot orders are ROD (DAY) only.',
+          'UNSUPPORTED_ORDER_TYPE'
+        );
+    }
+    if (request.outside_rth && !caps.outside_rth)
+      fail(
+        'market.outside_rth',
+        'MARKET_STATUS',
+        'This account does not accept outside-RTH orders.',
+        'UNSUPPORTED_ORDER_TYPE'
+      );
+    if (request.side === 'sell' && caps.short_selling === false) {
+      const held =
+        this.positions.get(request.instrument_id)?.qty ?? Decimal.zero();
+      if (qty.cmp(held) > 0)
+        fail(
+          'exposure.short_selling',
+          'EXPOSURE',
+          `Long-only cash account: sells are limited to the ${held.toString()} shares held.`,
+          'RISK_LIMIT'
+        );
+    }
+    const now = this.now();
+    if (!calendar.isOpen(now)) {
+      if (request.order_type === 'market') {
+        if (!caps.queue_market_when_closed)
+          fail(
+            'market.session',
+            'MARKET_STATUS',
+            'Market closed; market orders are rejected until the next open.',
+            'VENUE_UNAVAILABLE'
+          );
+        else if (request.time_in_force !== 'DAY')
+          fail(
+            'market.session',
+            'MARKET_STATUS',
+            'Market closed; submit the market order as DAY to queue it for the next open.',
+            'UNSUPPORTED_ORDER_TYPE'
+          );
+        else
+          fail(
+            'market.session',
+            'MARKET_STATUS',
+            'Market closed; the market order queues as DAY for the next open.',
+            'UNSUPPORTED_ORDER_TYPE',
+            'WARN'
+          );
+      } else if (
+        request.time_in_force === 'IOC' ||
+        request.time_in_force === 'FOK'
+      ) {
+        fail(
+          'market.session',
+          'MARKET_STATUS',
+          `Market closed; ${request.time_in_force} orders need an open session.`,
+          'UNSUPPORTED_ORDER_TYPE'
+        );
+      } else {
+        fail(
+          'market.session',
+          'MARKET_STATUS',
+          request.outside_rth
+            ? 'Outside regular hours; the order may fill in extended hours.'
+            : 'Market closed; the order rests until the next open.',
+          'UNSUPPORTED_ORDER_TYPE',
+          'WARN'
+        );
+      }
+    }
+    return results;
   }
 
   /**
@@ -410,19 +564,20 @@ export class DemoExecutionClient implements ExecutionClient {
           'PASS',
           `${account.label} is connected (simulated).`
         );
-      const routed = this.instrument(request.instrument_id);
-      const problem = routed ? demoRoutingProblem(account, routed) : null;
+    }
+    if (account && instrument) {
+      const problem = demoRoutingProblem(account, instrument);
       if (problem)
         add('account.routing', 'ACCOUNT', 'FAIL', problem, 'UNSUPPORTED');
-    } else if (account) {
-      const routed = this.instrument(request.instrument_id);
-      if (routed && this.isSecurity(routed))
+      for (const check of this.securityChecks(request, account, instrument))
         add(
-          'account.routing',
-          'ACCOUNT',
-          'FAIL',
-          'Stocks and ETFs trade through a broker account (IBKR, SinoPac or Cathay).',
-          'UNSUPPORTED'
+          check.check,
+          check.domain,
+          check.outcome,
+          check.message,
+          check.code,
+          check.observed,
+          check.limit
         );
     }
     if (instrument && instrument.status === 'TRADING')
@@ -812,6 +967,10 @@ export class DemoExecutionClient implements ExecutionClient {
         ? this.availableMargin(spec.accountId).toFixed(2)
         : null,
       currency: spec.currency,
+      settled_cash: connected
+        ? this.availableMargin(spec.accountId).toFixed(2)
+        : null,
+      unsettled_cash: connected ? '0.00' : null,
       positions: this.positionList().filter(
         p => p.account_id === spec.accountId
       ),

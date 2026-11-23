@@ -200,16 +200,16 @@ export const US_STOCK: InstrumentPrecision = {
 };
 
 /**
- * Builds a broker account summary.
+ * Builds a broker account summary with the engine's broker capabilities.
  * @param venue Broker.
  * @param patch Field overrides.
- * @param extra Forward-compatible capability fields.
+ * @param caps Capability overrides.
  * @return Account summary.
  */
 export function brokerAccount(
   venue: 'ibkr' | 'sinopac' | 'cathay',
   patch: Partial<AccountSummary> = {},
-  extra: Readonly<Record<string, unknown>> = {}
+  caps: Partial<AccountSummary['capabilities']> = {}
 ): AccountSummary {
   const base = account({
     account_id: `acct-${venue}`,
@@ -217,18 +217,57 @@ export function brokerAccount(
     label: `${venue} account`,
     currency: venue === 'ibkr' ? 'USD' : 'TWD',
   });
+  const ibkr = venue === 'ibkr';
   return {
     ...base,
     capabilities: {
       ...base.capabilities,
       venue,
-      order_types: ['market', 'limit'],
-      time_in_force: (venue === 'ibkr'
-        ? ['DAY', 'GTC']
-        : ['DAY']) as AccountSummary['capabilities']['time_in_force'],
+      order_types: ibkr
+        ? ['market', 'limit', 'stop_market', 'stop_limit']
+        : ['market', 'limit'],
+      time_in_force: ibkr ? ['DAY', 'GTC', 'IOC'] : ['DAY', 'IOC', 'FOK'],
       margin_modes: [],
-      ...extra,
+      tradable_venues: ibkr ? ['nasdaq', 'nyse'] : ['twse'],
+      cash_account: true,
+      short_selling: false,
+      outside_rth: ibkr,
+      odd_lot: venue === 'sinopac',
+      queue_market_when_closed: ibkr,
+      simulation: true,
+      currencies: [ibkr ? 'USD' : 'TWD'],
+      ...caps,
     },
     ...patch,
+  };
+}
+
+/**
+ * Builds an engine paper account: `acct-paper-*` (USD: crypto, Nasdaq,
+ * NYSE) or `acct-twd-paper-*` (TWD: TWSE).
+ * @param currency Account currency.
+ * @return Account summary.
+ */
+export function paperAccount(currency: 'USD' | 'TWD'): AccountSummary {
+  const base = account({
+    account_id: currency === 'USD' ? 'acct-paper-demo' : 'acct-twd-paper-demo',
+    label: `Paper ${currency}`,
+    currency,
+  });
+  return {
+    ...base,
+    capabilities: {
+      ...base.capabilities,
+      order_types: ['market', 'limit', 'stop_market', 'stop_limit'],
+      time_in_force: ['GTC', 'IOC', 'FOK', 'POST_ONLY', 'DAY'],
+      tradable_venues: currency === 'USD' ? ['nasdaq', 'nyse'] : ['twse'],
+      cash_account: true,
+      short_selling: false,
+      outside_rth: false,
+      odd_lot: true,
+      queue_market_when_closed: true,
+      simulation: true,
+      currencies: [currency],
+    },
   };
 }

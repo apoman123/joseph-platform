@@ -3,19 +3,15 @@
  *
  * Exchange-listed stocks and ETFs trade through securities brokers
  * (Interactive Brokers for Nasdaq/NYSE, SinoPac Shioaji and Cathay for
+ * TWSE) or the engine's paper accounts (USD: crypto, Nasdaq, NYSE; TWD:
  * TWSE). This module holds the pure rules the ticket applies before the
- * execution engine re-checks everything: TWSE tick ladders and daily price
- * limits, board lots (張) versus odd lots (零股), time in force per broker,
- * IBKR's outside-regular-trading-hours flag, market-hours notices from the
- * instrument's session calendar, broker account status and the wording of
- * LIVE confirmations.
- *
- * Forward compatibility: the execution schema does not yet carry `DAY`
- * time in force, an outside-RTH flag, an odd-lot flag or broker credential
- * status. Values the engine may add are read defensively
- * (`capabilityExtensions`, `accountExtensions`) and extra request fields
- * are only sent when the account's capabilities say the engine accepts
- * them (`equityIntentExtensions`), so nothing unknown reaches the API.
+ * execution engine re-checks everything, read from the account's
+ * `TradingCapabilities`: routing by `tradable_venues`, time in force
+ * (DAY only for exchange sessions), TWSE tick ladders and daily price
+ * limits, board lots (張) and intraday odd lots (零股, limit DAY only, when
+ * `odd_lot`), IBKR's `outside_rth`, market orders while the exchange is
+ * closed (`queue_market_when_closed`), long-only cash accounts, settled
+ * cash, broker account status and the wording of LIVE confirmations.
  */
 import {
   Decimal,
@@ -33,14 +29,13 @@ import {
   type InstrumentId,
   type MarketType,
   type OrderIntentRequest,
+  type OrderType,
   type TickStep,
   type TimeInForce,
   type TradingVenue,
+  type Venue,
 } from '@joseph/contracts';
 import {groupThousands} from './format';
-
-/** Time in force offered by the ticket (`DAY` is not in the schema yet). */
-export type TicketTimeInForce = TimeInForce | 'DAY';
 
 /** Board lots (whole 張 on TWSE) or odd lots (fewer shares than a lot). */
 export type EquityLotMode = 'board' | 'odd';
@@ -55,27 +50,41 @@ export const BROKER_NAMES: Readonly<Record<Broker, string>> = {
   cathay: 'Cathay Securities',
 };
 
+/** Exchange venues of listed securities. */
+export const EXCHANGE_VENUES: readonly Venue[] = ['twse', 'nasdaq', 'nyse'];
+
 /**
- * Time in force each broker supports for cash equities: IBKR DAY and GTC;
- * TWSE brokers ROD (rest of day, shown as DAY) only.
+ * Exchanges each broker routes to when the engine does not list
+ * `tradable_venues` (engine `BROKER_EXCHANGES`).
  */
-export const BROKER_TIME_IN_FORCE: Readonly<
-  Record<Broker, readonly TicketTimeInForce[]>
-> = {
-  ibkr: ['DAY', 'GTC'],
-  sinopac: ['DAY'],
-  cathay: ['DAY'],
+export const BROKER_EXCHANGES: Readonly<Record<Broker, readonly Venue[]>> = {
+  ibkr: ['nasdaq', 'nyse'],
+  sinopac: ['twse'],
+  cathay: ['twse'],
 };
 
+/** Exchanges whose listings trade in each currency (paper accounts). */
+const CURRENCY_EXCHANGES: Readonly<Record<string, readonly Venue[]>> = {
+  USD: ['nasdaq', 'nyse'],
+  TWD: ['twse'],
+};
+
+/** Time in force offered for securities, in display order. */
+export const EQUITY_TIME_IN_FORCE: readonly TimeInForce[] = [
+  'DAY',
+  'GTC',
+  'IOC',
+  'FOK',
+];
+
 /** Plain-language names of time-in-force values. */
-export const TIME_IN_FORCE_NAMES: Readonly<Record<TicketTimeInForce, string>> =
-  {
-    DAY: 'Day (this session)',
-    GTC: 'Good till canceled',
-    IOC: 'Immediate or cancel',
-    FOK: 'Fill or kill',
-    POST_ONLY: 'Post only',
-  };
+export const TIME_IN_FORCE_NAMES: Readonly<Record<TimeInForce, string>> = {
+  DAY: 'Day (this session)',
+  GTC: 'Good till canceled',
+  IOC: 'Immediate or cancel',
+  FOK: 'Fill or kill',
+  POST_ONLY: 'Post only',
+};
 
 /** Instrument fields the equity rules read (all optional while loading). */
 export type EquityInstrument = Pick<Instrument, 'instrument_id' | 'tick_size'> &
@@ -427,46 +436,6 @@ export function formatShares(
 
 // Accounts and brokers ------------------------------------------------------
 
-/** Optional capability fields the brokers engineer may add. */
-export interface CapabilityExtensions {
-  /** The engine accepts `outside_rth` on intents (IBKR). */
-  outsideRth: boolean;
-  /** The engine accepts an explicit odd-lot flag on intents (TWSE). */
-  oddLot: boolean;
-}
-
-/**
- * Reads optional capability fields defensively (unknown today).
- * @param account Account summary.
- * @return Extensions (false when absent).
- */
-export function capabilityExtensions(
-  account: AccountSummary | null
-): CapabilityExtensions {
-  const caps = (account?.capabilities ?? {}) as unknown as Record<
-    string,
-    unknown
-  >;
-  return {outsideRth: caps.outside_rth === true, oddLot: caps.odd_lot === true};
-}
-
-/** Optional account fields the brokers engineer may add. */
-export interface AccountExtensions {
-  /** Whether broker credentials are configured, when reported. */
-  credentialsConfigured: boolean | null;
-}
-
-/**
- * Reads optional account fields defensively.
- * @param account Account summary.
- * @return Extensions (null when absent).
- */
-export function accountExtensions(account: AccountSummary): AccountExtensions {
-  const raw = account as unknown as Record<string, unknown>;
-  const flag = raw.credentials_configured;
-  return {credentialsConfigured: typeof flag === 'boolean' ? flag : null};
-}
-
 /**
  * Human name of an account's venue or broker.
  * @param venue Trading venue.
@@ -474,6 +443,24 @@ export function accountExtensions(account: AccountSummary): AccountExtensions {
  */
 export function tradingVenueName(venue: TradingVenue): string {
   return isBroker(venue) ? BROKER_NAMES[venue] : VENUE_NAMES[venue];
+}
+
+/**
+ * Human name of an exchange venue.
+ * @param venue Exchange venue.
+ * @return Short name such as `TWSE`.
+ */
+function exchangeName(venue: Venue): string {
+  return venue === 'twse' ? 'TWSE' : venue === 'nasdaq' ? 'Nasdaq' : 'NYSE';
+}
+
+/**
+ * Joins exchange names, e.g. `Nasdaq and NYSE`.
+ * @param venues Exchange venues.
+ * @return Text.
+ */
+function exchangeList(venues: readonly Venue[]): string {
+  return venues.map(exchangeName).join(' and ');
 }
 
 /** Connection state shown for an account. */
@@ -490,7 +477,7 @@ export interface AccountStatusView {
   connection: AccountConnection;
   /** Connection text such as `Connected` or `Awaiting API SDK`. */
   connectionText: string;
-  /** Credentials: configured, missing or unknown. */
+  /** Credentials (held on the server): configured, missing or unknown. */
   credentials: 'configured' | 'missing' | 'unknown';
   /** Credentials text. */
   credentialsText: string;
@@ -498,6 +485,8 @@ export interface AccountStatusView {
   awaitingSdk: boolean;
   /** Whether the account can take orders now (any mode). */
   canTrade: boolean;
+  /** Paper or broker simulation environment. */
+  simulation: boolean;
   /** Badge tone. */
   tone: 'live' | 'sodium' | 'stale' | 'muted';
   /** Engine notes. */
@@ -506,6 +495,8 @@ export interface AccountStatusView {
 
 /**
  * Display status of an account from what the execution engine reports.
+ * Broker credentials live on the execution server (secret files); the
+ * terminal only says whether the server reports them configured.
  * @param account Account summary.
  * @return Status view.
  */
@@ -518,13 +509,11 @@ export function accountStatusView(account: AccountSummary): AccountStatusView {
     broker === 'cathay'
       ? !available || account.status !== 'CONNECTED'
       : /\bsdk\b/.test(noteText) && !available;
-  const reported = accountExtensions(account).credentialsConfigured;
   const mentionsMissing =
-    /credential|api key|certificate/.test(noteText) &&
+    /credential|api key|certificate|secret/.test(noteText) &&
     account.status === 'DISCONNECTED';
   let credentials: AccountStatusView['credentials'] = 'unknown';
-  if (reported !== null) credentials = reported ? 'configured' : 'missing';
-  else if (mentionsMissing) credentials = 'missing';
+  if (mentionsMissing) credentials = 'missing';
   else if (
     account.status === 'CONNECTED' ||
     account.status === 'READ_ONLY' ||
@@ -561,12 +550,13 @@ export function accountStatusView(account: AccountSummary): AccountStatusView {
     credentials,
     credentialsText:
       credentials === 'configured'
-        ? 'Credentials configured'
+        ? 'Credentials configured on the server'
         : credentials === 'missing'
-          ? 'Credentials missing on the execution engine'
+          ? 'Credentials not configured on the server'
           : 'Credentials not reported',
     awaitingSdk,
     canTrade,
+    simulation: account.capabilities.simulation === true,
     tone:
       connection === 'connected'
         ? 'live'
@@ -580,7 +570,51 @@ export function accountStatusView(account: AccountSummary): AccountStatusView {
 }
 
 /**
- * Why an account cannot trade an instrument.
+ * Settlement currencies of an account.
+ * @param account Account.
+ * @return Currencies (the account currency when none are listed).
+ */
+function currenciesOf(account: AccountSummary): readonly string[] {
+  const listed = account.capabilities.currencies ?? [];
+  return listed.length > 0 ? listed : [account.currency];
+}
+
+/**
+ * Exchange venues an account routes securities to: the engine's
+ * `tradable_venues`, else the broker's exchanges, else (paper accounts)
+ * the exchanges of its currency.
+ * @param account Account.
+ * @return Exchange venues (empty for crypto venue accounts).
+ */
+export function accountExchanges(account: AccountSummary): readonly Venue[] {
+  const listed = account.capabilities.tradable_venues ?? [];
+  if (listed.length > 0) return listed;
+  if (isBroker(account.venue)) return BROKER_EXCHANGES[account.venue];
+  if (account.venue === 'mock') {
+    return currenciesOf(account).flatMap(
+      currency => CURRENCY_EXCHANGES[currency] ?? []
+    );
+  }
+  return [];
+}
+
+/**
+ * Exchanges a security belongs to: its venue for exchange listings, or the
+ * exchanges of its session calendar for DEMO securities (`mock:stock:*`).
+ * @param venue Instrument venue.
+ * @param calendar Instrument calendar.
+ * @return Exchange venues (empty when unknown).
+ */
+function securityExchanges(venue: Venue, calendar: string): readonly Venue[] {
+  if (EXCHANGE_VENUES.includes(venue)) return [venue];
+  if (calendar === 'XTAI') return ['twse'];
+  if (calendar === 'XNYS') return ['nasdaq', 'nyse'];
+  return [];
+}
+
+/**
+ * Why an account cannot trade an instrument (engine `equities.route` plus
+ * the `tradable_venues` check).
  * @param account Account.
  * @param instrumentId Instrument id.
  * @param instrument Registry entry (calendar), when loaded.
@@ -601,25 +635,29 @@ export function accountInstrumentMismatch(
     return 'Rates are published values and cannot be traded.';
   }
   const equity = parts.marketType === 'stock' || parts.marketType === 'etf';
-  const calendar = instrumentCalendarId(instrumentId, instrument ?? null);
   const venue = account.venue;
-  if (venue === 'ibkr') {
-    return equity && calendar === 'XNYS'
-      ? null
-      : 'Interactive Brokers accounts trade Nasdaq and NYSE listings.';
-  }
-  if (venue === 'sinopac' || venue === 'cathay') {
-    return equity && calendar === 'XTAI'
-      ? null
-      : `${BROKER_NAMES[venue]} accounts trade TWSE listings.`;
-  }
+  const served = accountExchanges(account);
   if (equity) {
-    return 'Stocks and ETFs trade through a broker account (IBKR, SinoPac or Cathay).';
+    const listing = securityExchanges(
+      parts.venue,
+      instrumentCalendarId(instrumentId, instrument ?? null)
+    );
+    if (listing.length > 0 && listing.some(v => served.includes(v))) {
+      return null;
+    }
+    if (served.length === 0) {
+      return 'Stocks and ETFs trade through a broker or securities paper account.';
+    }
+    const name = isBroker(venue) ? BROKER_NAMES[venue] : account.label;
+    return `${name} ${isBroker(venue) ? 'accounts route' : 'routes'} ${exchangeList(served)} listings only.`;
+  }
+  if (isBroker(venue)) {
+    return `${BROKER_NAMES[venue]} accounts trade exchange-listed securities only.`;
   }
   if (venue === 'mock') {
-    return parts.venue === 'mock'
+    return currenciesOf(account).includes('USD')
       ? null
-      : 'The demo account trades demo instruments only.';
+      : `The ${currenciesOf(account).join('/')} paper account trades ${exchangeList(served)} securities only.`;
   }
   return parts.venue === venue
     ? null
@@ -657,107 +695,162 @@ export function preferredAccount(
 /** Time-in-force choices for an account. */
 export interface TimeInForceChoice {
   /** Values offered, in order. */
-  options: TicketTimeInForce[];
-  /** Explanation when DAY is missing. */
+  options: TimeInForce[];
+  /** Explanation when the choice is limited. */
   note: string | null;
 }
 
 /**
- * Time in force for a cash-equity order: the broker's supported values
- * that the account's capabilities list (compared as strings, because the
- * generated `TimeInForce` lacks `DAY` today).
+ * Time in force for a security order: DAY, GTC, IOC and FOK as the
+ * account's capabilities list them (DAY applies to exchange sessions only,
+ * so it is never offered for 24x7 instruments). Intraday odd lots are DAY
+ * (TWSE ROD) only.
  * @param account Account, or null.
+ * @param lotMode Board or odd lot.
  * @return Choices.
  */
 export function equityTimeInForce(
-  account: AccountSummary | null
+  account: AccountSummary | null,
+  lotMode: EquityLotMode = 'board'
 ): TimeInForceChoice {
-  if (!account) return {options: ['GTC'], note: null};
-  const listed = new Set<string>(account.capabilities.time_in_force);
-  const broker = isBroker(account.venue) ? account.venue : null;
-  const wanted: readonly TicketTimeInForce[] = broker
-    ? BROKER_TIME_IN_FORCE[broker]
-    : ['DAY', 'GTC'];
-  const options = wanted.filter(tif => listed.has(tif));
-  if (options.length > 0) {
+  if (!account) return {options: ['DAY'], note: null};
+  const listed = new Set(account.capabilities.time_in_force);
+  const options = EQUITY_TIME_IN_FORCE.filter(tif => listed.has(tif));
+  if (lotMode === 'odd') {
+    return listed.has('DAY')
+      ? {options: ['DAY'], note: 'Odd-lot orders are DAY (ROD) only.'}
+      : {options: [], note: 'This account lists no DAY time in force.'};
+  }
+  if (options.length === 0) {
     return {
-      options,
-      note: options.includes('DAY')
-        ? null
-        : 'DAY orders are not offered by this account yet.',
+      options: [],
+      note: 'This account lists no time in force for stocks and ETFs.',
     };
   }
-  const fallback = (['GTC', 'IOC'] as const).filter(tif => listed.has(tif));
   return {
-    options: fallback.length > 0 ? [...fallback] : ['GTC'],
-    note: 'This execution engine does not list DAY time in force for this account yet, so orders stay open until canceled.',
+    options,
+    note: listed.has('DAY')
+      ? null
+      : 'DAY orders are not offered by this account.',
   };
 }
 
 /**
- * Whether the account offers IBKR's outside-RTH flag.
+ * Order types the account offers (stop orders only where listed; SinoPac
+ * has none).
+ * @param account Account, or null.
+ * @param offered Types the ticket shows.
+ * @return Types the account accepts, in the ticket's order.
+ */
+export function accountOrderTypes(
+  account: AccountSummary | null,
+  offered: readonly OrderType[]
+): OrderType[] {
+  if (!account) return [...offered];
+  const listed = new Set(account.capabilities.order_types);
+  return offered.filter(type => listed.has(type));
+}
+
+/**
+ * Whether the account offers the outside-RTH flag.
  * @param account Account.
- * @return `shown` for IBKR accounts; `enabled` when the engine accepts it.
+ * @return `shown` for accounts listing it (and IBKR accounts); `enabled`
+ *     when the capabilities set `outside_rth`.
  */
 export function outsideRthSupport(account: AccountSummary | null): {
   shown: boolean;
   enabled: boolean;
   reason: string | null;
 } {
-  if (!account || account.venue !== 'ibkr') {
+  const enabled = account?.capabilities.outside_rth === true;
+  if (!account || (!enabled && account.venue !== 'ibkr')) {
     return {shown: false, enabled: false, reason: null};
   }
-  const enabled = capabilityExtensions(account).outsideRth;
   return {
     shown: true,
     enabled,
-    reason: enabled
-      ? null
-      : 'The execution engine does not accept outside-RTH orders for this account yet.',
+    reason: enabled ? null : 'This account does not accept outside-RTH orders.',
   };
 }
 
-/** Request fields the brokers engineer is adding (sent only when listed). */
-export interface EquityIntentExtensions {
-  /** IBKR: may fill outside regular trading hours. */
-  outside_rth?: boolean;
-  /** TWSE: board or odd lot. */
-  lot_type?: EquityLotMode;
+/**
+ * Whether intraday odd-lot orders are available.
+ * @param account Account.
+ * @param instrument Instrument.
+ * @return True when the instrument has a board lot and the account's
+ *     capabilities set `odd_lot`.
+ */
+export function oddLotAvailable(
+  account: AccountSummary | null,
+  instrument: EquityInstrument
+): boolean {
+  return (
+    boardLotOf(instrument) !== null && account?.capabilities.odd_lot === true
+  );
 }
 
 /**
- * Adds forward-compatible fields to an intent, only those the account's
- * engine accepts; everything else stays implied by the quantity (an odd
- * lot is fewer shares than a board lot).
+ * Shares of an instrument the account holds long.
+ * @param account Account.
+ * @param instrumentId Instrument id.
+ * @return Shares (zero when none).
+ */
+export function heldShares(
+  account: AccountSummary,
+  instrumentId: string
+): Decimal {
+  let held = Decimal.zero();
+  for (const position of account.positions) {
+    if (
+      position.instrument_id === instrumentId &&
+      position.side === 'long' &&
+      Decimal.isValid(position.quantity_base)
+    )
+      held = held.add(Decimal.parse(position.quantity_base));
+  }
+  return held;
+}
+
+/**
+ * Cash line of a cash account: settled and unsettled cash.
+ * @param account Account.
+ * @return Text such as `Settled cash 5,000,000.00 TWD · unsettled
+ *     −120,000.00 TWD`, or null when the engine reports none.
+ */
+export function cashSummary(account: AccountSummary): string | null {
+  const money = (value: string) =>
+    `${groupThousands(Decimal.parse(value).toFixed(2)).replace('-', '−')} ${account.currency}`;
+  const settled =
+    account.settled_cash && Decimal.isValid(account.settled_cash)
+      ? `Settled cash ${money(account.settled_cash)}`
+      : null;
+  const unsettled =
+    account.unsettled_cash &&
+    Decimal.isValid(account.unsettled_cash) &&
+    !Decimal.parse(account.unsettled_cash).isZero()
+      ? `unsettled ${money(account.unsettled_cash)}`
+      : null;
+  if (!settled && !unsettled) return null;
+  return [settled, unsettled].filter(Boolean).join(' · ');
+}
+
+/**
+ * Adds the outside-RTH flag to a security intent when it applies: only
+ * when true and the account accepts it (omitted otherwise, as the schema
+ * expects).
  * @param request Intent.
  * @param account Account.
- * @param options Ticket choices.
- * @return Intent with supported extensions.
+ * @param outsideRth Whether the user asked for it.
+ * @return Intent.
  */
-export function equityIntentExtensions(
+export function withOutsideRth(
   request: OrderIntentRequest,
   account: AccountSummary | null,
-  options: {outsideRth: boolean; lotMode: EquityLotMode; hasBoardLot: boolean}
+  outsideRth: boolean
 ): OrderIntentRequest {
-  const support = capabilityExtensions(account);
-  const extra: EquityIntentExtensions = {};
-  if (support.outsideRth && account?.venue === 'ibkr' && options.outsideRth)
-    extra.outside_rth = true;
-  if (support.oddLot && options.hasBoardLot) extra.lot_type = options.lotMode;
-  return Object.keys(extra).length > 0
-    ? ({...request, ...extra} as OrderIntentRequest)
+  return outsideRth && account?.capabilities.outside_rth === true
+    ? {...request, outside_rth: true}
     : request;
-}
-
-/**
- * Maps a ticket time in force to the contract value. `DAY` passes through
- * only when the account's capabilities list it (the engine then accepts
- * it); the cast is the single place the generated type is widened.
- * @param value Ticket value.
- * @return Contract value.
- */
-export function toContractTimeInForce(value: TicketTimeInForce): TimeInForce {
-  return value as TimeInForce;
 }
 
 // Market hours -------------------------------------------------------------
@@ -802,11 +895,59 @@ export interface MarketHoursNotice {
 /** Order details that change the notice. */
 export interface MarketHoursOrder {
   /** Order type. */
-  orderType: OrderIntentRequest['order_type'];
+  orderType: OrderType;
   /** Time in force. */
-  timeInForce: TicketTimeInForce;
-  /** IBKR outside-RTH flag. */
+  timeInForce: TimeInForce;
+  /** Outside-RTH flag. */
   outsideRth: boolean;
+  /** The account queues DAY market orders placed while closed. */
+  queueMarket?: boolean;
+}
+
+/**
+ * When the next session of a closed market opens, as text.
+ * @param calendar Exchange calendar.
+ * @param nowMs Clock.
+ * @return ` (Mon 30 Nov 09:30 New York)` or an empty string.
+ */
+function nextOpenText(calendar: BarCalendar, nowMs: number): string {
+  const next = marketStatus(calendar, nowMs).next;
+  return next
+    ? ` (${formatExchangeTime(next.open_ms, calendar.timeZone)})`
+    : '';
+}
+
+/**
+ * Engine rules for orders while the exchange is closed (engine
+ * `market_session`): market orders are rejected unless the account queues
+ * them (`queue_market_when_closed`) as DAY orders; IOC and FOK need an
+ * open session.
+ * @param calendar Instrument calendar.
+ * @param nowMs Clock.
+ * @param account Account.
+ * @param order Order type and time in force.
+ * @return Blocking message, or null when the order may be sent.
+ */
+export function closedMarketProblem(
+  calendar: BarCalendar,
+  nowMs: number,
+  account: AccountSummary | null,
+  order: {orderType: OrderType; timeInForce: TimeInForce}
+): string | null {
+  if (calendar.continuous || calendar.isOpen(nowMs)) return null;
+  const when = `the next open${nextOpenText(calendar, nowMs)}`;
+  if (order.orderType === 'market') {
+    if (account?.capabilities.queue_market_when_closed !== true) {
+      return `The market is closed: market orders are rejected until ${when}. Use a limit order.`;
+    }
+    return order.timeInForce === 'DAY'
+      ? null
+      : `The market is closed: send the market order as DAY to queue it for ${when}.`;
+  }
+  if (order.timeInForce === 'IOC' || order.timeInForce === 'FOK') {
+    return `The market is closed: ${order.timeInForce} orders need an open session (${when}).`;
+  }
+  return null;
 }
 
 /**
@@ -842,9 +983,11 @@ export function marketHoursNotice(
   let effect: string;
   if (order.outsideRth && order.orderType !== 'market') {
     effect =
-      ' Outside RTH is on: Interactive Brokers may fill this limit order in extended hours.';
+      ' Outside RTH is on: the broker may fill this order in extended hours.';
   } else if (order.orderType === 'market') {
-    effect = ' A market order placed now waits and executes at the next open.';
+    effect = order.queueMarket
+      ? ' A DAY market order placed now queues for the next open.'
+      : ' Market orders are rejected until the open; use a limit order.';
   } else if (order.timeInForce === 'DAY') {
     effect = ' A DAY order placed now is good for the next session only.';
   } else {

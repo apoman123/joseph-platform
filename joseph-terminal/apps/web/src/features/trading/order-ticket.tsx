@@ -14,6 +14,7 @@
  */
 import {
   accountInstrumentMismatch,
+  accountOrderTypes,
   boardLotOf,
   buildIntentRequest,
   canConfirm,
@@ -30,6 +31,7 @@ import {
   modeAvailability,
   needsLimitPrice,
   needsTriggerPrice,
+  oddLotAvailable,
   orderStateLabel,
   outsideRthSupport,
   preferredAccount,
@@ -41,7 +43,6 @@ import {
   TIME_IN_FORCE_NAMES,
   tradingVenueName,
   type TicketInputs,
-  type TicketTimeInForce,
 } from '@joseph/chart-trading';
 import {
   Decimal,
@@ -50,6 +51,7 @@ import {
   type OrderMode,
   type OrderType,
   type RiskCheckResult,
+  type TimeInForce,
 } from '@joseph/contracts';
 import {
   useEffect,
@@ -176,26 +178,50 @@ export function OrderTicket({ctx, runtime}: OrderTicketProps): ReactNode {
   ]);
 
   // Keep equity-only choices valid for the instrument and account.
-  const tifChoice = useMemo(() => equityTimeInForce(account), [account]);
-  const rth = outsideRthSupport(account);
-  const orderTypes = useMemo(
-    () =>
-      equity && account
-        ? TYPE_OPTIONS.filter(o =>
-            account.capabilities.order_types.includes(o.type)
-          )
-        : TYPE_OPTIONS,
-    [equity, account]
+  const oddAvailable = precision ? oddLotAvailable(account, precision) : false;
+  const oddLot =
+    equity && oddAvailable && inputs.lotMode === 'odd' && !!precision;
+  const tifChoice = useMemo(
+    () => equityTimeInForce(account, oddLot ? 'odd' : 'board'),
+    [account, oddLot]
   );
+  const rth = outsideRthSupport(account);
+  const orderTypes = useMemo(() => {
+    if (!equity || !account) return TYPE_OPTIONS;
+    const offered = accountOrderTypes(
+      account,
+      TYPE_OPTIONS.map(o => o.type)
+    );
+    return TYPE_OPTIONS.filter(o => offered.includes(o.type));
+  }, [equity, account]);
+  // Securities start on DAY (when offered) each time one is selected.
+  const tifDefaulted = useRef<string | null>(null);
   useEffect(() => {
     if (busy) return;
     const patch: Partial<TicketInputs> = {};
-    if (equity && account && !tifChoice.options.includes(inputs.timeInForce))
-      patch.timeInForce = tifChoice.options[0] ?? 'GTC';
+    const fresh = equity && tifDefaulted.current !== inputs.instrumentId;
+    if (equity && account && tifChoice.options.length > 0) {
+      tifDefaulted.current = inputs.instrumentId;
+      if (fresh && tifChoice.options[0] !== inputs.timeInForce)
+        patch.timeInForce = tifChoice.options[0] ?? 'DAY';
+    }
+    if (!equity) tifDefaulted.current = null;
+    if (
+      equity &&
+      account &&
+      tifChoice.options.length > 0 &&
+      !tifChoice.options.includes(inputs.timeInForce)
+    )
+      patch.timeInForce = tifChoice.options[0] ?? 'DAY';
     if (!equity && inputs.timeInForce === 'DAY') patch.timeInForce = 'GTC';
+    // Intraday odd lots are limit DAY (ROD) orders only.
+    if (oddLot && inputs.orderType !== 'limit') patch.orderType = 'limit';
+    if (equity && precision && inputs.lotMode === 'odd' && !oddAvailable)
+      patch.lotMode = 'board';
     if (inputs.outsideRth && (!equity || !rth.shown)) patch.outsideRth = false;
     if (
       equity &&
+      !oddLot &&
       orderTypes.length > 0 &&
       !orderTypes.some(o => o.type === inputs.orderType)
     )
@@ -212,6 +238,11 @@ export function OrderTicket({ctx, runtime}: OrderTicketProps): ReactNode {
     tifChoice,
     rth.shown,
     orderTypes,
+    oddLot,
+    oddAvailable,
+    precision,
+    inputs.instrumentId,
+    inputs.lotMode,
     inputs.timeInForce,
     inputs.outsideRth,
     inputs.orderType,
@@ -220,10 +251,19 @@ export function OrderTicket({ctx, runtime}: OrderTicketProps): ReactNode {
     runtime.controller,
   ]);
 
-  // Cash-equity rules read the account and the previous close at preview.
+  // Cash-equity rules read the account, the previous close and the session
+  // calendar (closed-market rules) when the order is previewed.
+  const calendar = useMemo(() => {
+    void calendarRevision;
+    return equity
+      ? ctx.calendars.calendar(
+          instrumentCalendarId(inputs.instrumentId, precision)
+        )
+      : null;
+  }, [calendarRevision, equity, ctx.calendars, inputs.instrumentId, precision]);
   useEffect(() => {
-    runtime.controller.setContext({account, reference});
-  }, [runtime.controller, account, reference]);
+    runtime.controller.setContext({account, reference, calendar, nowMs: now});
+  }, [runtime.controller, account, reference, calendar, now]);
 
   // An expired arm (or another account) drops the ticket back to paper.
   const armedUntil = account ? (armed[account.account_id] ?? 0) : 0;
@@ -243,14 +283,25 @@ export function OrderTicket({ctx, runtime}: OrderTicketProps): ReactNode {
   const modes = useMemo(() => modeAvailability(account), [account]);
   const built = useMemo(
     () =>
-      buildIntentRequest(inputs, precision, meta.mark, {account, reference}),
-    [inputs, precision, meta.mark, account, reference]
+      buildIntentRequest(inputs, precision, meta.mark, {
+        account,
+        reference,
+        calendar,
+        nowMs: now,
+      }),
+    [inputs, precision, meta.mark, account, reference, calendar, now]
   );
   const [attempted, setAttempted] = useState(false);
   const touched = (name: string): boolean => {
     if (attempted || name === 'notional' || name === 'instrumentId')
       return true;
-    if (name === 'accountId' || name === 'timeInForce' || name === 'outsideRth')
+    if (
+      name === 'accountId' ||
+      name === 'timeInForce' ||
+      name === 'outsideRth' ||
+      name === 'orderType' ||
+      name === 'lotMode'
+    )
       return true;
     const value = (inputs as unknown as Record<string, unknown>)[name];
     return typeof value === 'string' ? value.trim() !== '' : true;
@@ -313,25 +364,19 @@ export function OrderTicket({ctx, runtime}: OrderTicketProps): ReactNode {
   ]);
 
   const hoursNotice = useMemo(() => {
-    void calendarRevision;
-    if (!equity) return null;
-    const calendar = ctx.calendars.calendar(
-      instrumentCalendarId(inputs.instrumentId, precision)
-    );
+    if (!calendar) return null;
     return marketHoursNotice(calendar, now, {
       orderType: inputs.orderType,
       timeInForce: inputs.timeInForce,
       outsideRth: inputs.outsideRth === true,
+      queueMarket: account?.capabilities.queue_market_when_closed === true,
     });
   }, [
-    calendarRevision,
-    equity,
-    ctx.calendars,
-    inputs.instrumentId,
+    calendar,
+    account,
     inputs.orderType,
     inputs.timeInForce,
     inputs.outsideRth,
-    precision,
     now,
   ]);
 
@@ -420,7 +465,7 @@ export function OrderTicket({ctx, runtime}: OrderTicketProps): ReactNode {
       : 'Confirm order';
   const liveOrder = state.preview?.normalized.mode === 'LIVE';
   const lot = precision ? boardLotOf(precision) : null;
-  const lotMode = lot ? (inputs.lotMode ?? 'board') : 'odd';
+  const lotMode = oddLot ? 'odd' : 'board';
   const sharesHint = (() => {
     if (!equity || !precision) return undefined;
     if (built.quantity && !built.quantity.isZero())
@@ -618,13 +663,27 @@ export function OrderTicket({ctx, runtime}: OrderTicketProps): ReactNode {
               key={option.type}
               type="button"
               aria-pressed={inputs.orderType === option.type}
-              disabled={busy}
+              disabled={busy || (oddLot && option.type !== 'limit')}
+              title={
+                oddLot && option.type !== 'limit'
+                  ? 'Intraday odd lots are limit orders only'
+                  : undefined
+              }
               onClick={() => edit({orderType: option.type})}
             >
               {option.label}
             </button>
           ))}
         </div>
+        {errorsFor('orderType').map(issue => (
+          <span
+            key={issue.message}
+            className="j-field__error"
+            data-testid="order-type-error"
+          >
+            {issue.message}
+          </span>
+        ))}
         {equity ? (
           <>
             {lot && (
@@ -649,12 +708,31 @@ export function OrderTicket({ctx, runtime}: OrderTicketProps): ReactNode {
                   <button
                     type="button"
                     aria-pressed={lotMode === 'odd'}
-                    disabled={busy}
-                    onClick={() => edit({lotMode: 'odd', quantity: ''})}
+                    disabled={busy || !oddAvailable}
+                    title={
+                      oddAvailable
+                        ? undefined
+                        : 'This account cannot send intraday odd-lot orders'
+                    }
+                    onClick={() =>
+                      edit({
+                        lotMode: 'odd',
+                        quantity: '',
+                        orderType: 'limit',
+                        timeInForce: 'DAY',
+                      })
+                    }
                   >
                     Odd lot (零股)
                   </button>
                 </div>
+                <span className="j-field__hint" data-testid="lot-hint">
+                  {oddLot
+                    ? 'Intraday odd lots are limit orders, DAY (ROD) only.'
+                    : oddAvailable
+                      ? 'Board lots take any order type; odd lots are limit DAY only.'
+                      : 'This account trades board lots only.'}
+                </span>
               </div>
             )}
             {field(
@@ -700,7 +778,7 @@ export function OrderTicket({ctx, runtime}: OrderTicketProps): ReactNode {
                 value={inputs.timeInForce}
                 disabled={busy}
                 onChange={e =>
-                  edit({timeInForce: e.target.value as TicketTimeInForce})
+                  edit({timeInForce: e.target.value as TimeInForce})
                 }
               >
                 {tifChoice.options.map(tif => (
@@ -803,7 +881,7 @@ export function OrderTicket({ctx, runtime}: OrderTicketProps): ReactNode {
                     disabled={busy}
                     onChange={e =>
                       edit({
-                        timeInForce: e.target.value as TicketTimeInForce,
+                        timeInForce: e.target.value as TimeInForce,
                       })
                     }
                   >

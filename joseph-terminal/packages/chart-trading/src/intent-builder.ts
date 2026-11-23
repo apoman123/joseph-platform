@@ -24,12 +24,15 @@ import {
   type PositionEffect,
   type PriceBasis,
   type TakeProfitSpec,
+  type TimeInForce,
+  type BarCalendar,
 } from '@joseph/contracts';
 import {
   accountInstrumentMismatch,
   boardLotOf,
-  equityIntentExtensions,
+  closedMarketProblem,
   equityTimeInForce,
+  heldShares,
   formatEquityPrice,
   formatShares,
   isCashEquityId,
@@ -40,10 +43,8 @@ import {
   priceLimitBand,
   roundToTickLadder,
   tickAt,
-  toContractTimeInForce,
+  withOutsideRth,
   withinPriceLimit,
-  type EquityLotMode,
-  type TicketTimeInForce,
 } from './equity';
 import {formatStep} from './format';
 
@@ -65,8 +66,8 @@ export interface TicketInputs {
   triggerPrice: string;
   /** Price used to trigger stop orders. */
   triggerBasis: PriceBasis;
-  /** Time in force (`DAY` for cash equities when the account lists it). */
-  timeInForce: TicketTimeInForce;
+  /** Time in force (`DAY` only for exchange-session securities). */
+  timeInForce: TimeInForce;
   /** Reduce-only flag. */
   reduceOnly: boolean;
   /** Leverage text, empty for venue default. */
@@ -84,7 +85,7 @@ export interface TicketInputs {
   /** Origin of the intent. */
   source: IntentSource;
   /** Cash equities with a board lot: whole lots (張) or odd-lot shares. */
-  lotMode?: EquityLotMode;
+  lotMode?: 'board' | 'odd';
   /** IBKR: allow fills outside regular trading hours. */
   outsideRth?: boolean;
 }
@@ -148,6 +149,10 @@ export interface TicketContext {
   account?: AccountSummary | null;
   /** Previous session close, the reference of daily price limits. */
   reference?: Decimal | null;
+  /** Session calendar of the instrument (closed-market rules). */
+  calendar?: BarCalendar | null;
+  /** Clock for the closed-market rules (UTC ms). */
+  nowMs?: number;
 }
 
 /**
@@ -422,10 +427,7 @@ export function buildIntentRequest(
     limit_price: limitPrice ? limitPrice.toString() : null,
     trigger_price: triggerPrice ? triggerPrice.toString() : null,
     trigger_basis: triggerPrice ? inputs.triggerBasis : null,
-    time_in_force:
-      inputs.orderType === 'market'
-        ? 'IOC'
-        : toContractTimeInForce(inputs.timeInForce),
+    time_in_force: inputs.orderType === 'market' ? 'IOC' : inputs.timeInForce,
     reduce_only: inputs.reduceOnly,
     margin_mode: inputs.marginMode,
     leverage: leverage ? leverage.toString() : null,
@@ -490,10 +492,12 @@ export function buildEquityIntentRequest(
     if (mismatch) error('accountId', mismatch);
   }
   const hasBoardLot = boardLotOf(instrument) !== null;
-  const lotMode: EquityLotMode = hasBoardLot
-    ? (inputs.lotMode ?? 'board')
-    : 'odd';
-  const parsed = parseEquityQuantity(instrument, lotMode, inputs.quantity);
+  const oddLot = hasBoardLot && inputs.lotMode === 'odd';
+  const parsed = parseEquityQuantity(
+    instrument,
+    oddLot ? 'odd' : 'board',
+    inputs.quantity
+  );
   const quantity = parsed.shares;
   if (parsed.error) error('quantity', parsed.error);
   if (quantity) {
@@ -506,6 +510,33 @@ export function buildEquityIntentRequest(
     ) {
       error('quantity', `Maximum quantity is ${instrument.max_qty} shares.`);
     }
+    if (
+      account &&
+      inputs.side === 'sell' &&
+      account.capabilities.short_selling === false
+    ) {
+      const held = heldShares(account, instrument.instrument_id);
+      if (quantity.cmp(held) > 0) {
+        error(
+          'quantity',
+          `This cash account cannot sell short: it holds ${held.isZero() ? 'no shares' : formatShares(instrument, held)}.`
+        );
+      }
+    }
+  }
+  if (oddLot) {
+    if (account && account.capabilities.odd_lot !== true) {
+      error('lotMode', 'This account cannot send intraday odd-lot orders.');
+    }
+    if (inputs.orderType !== 'limit') {
+      error('orderType', 'Intraday odd-lot orders are limit orders only.');
+    }
+  }
+  if (account && !account.capabilities.order_types.includes(inputs.orderType)) {
+    error(
+      'orderType',
+      `This account does not offer ${ORDER_TYPE_NAMES[inputs.orderType]} orders.`
+    );
   }
   const band = priceLimitBand(instrument, context.reference ?? null);
   const price = (
@@ -547,22 +578,39 @@ export function buildEquityIntentRequest(
     ? price(inputs.triggerPrice, 'triggerPrice', 'trigger price')
     : null;
 
-  const tif = equityTimeInForce(account);
-  if (account && !tif.options.includes(inputs.timeInForce)) {
+  const tif = equityTimeInForce(account, oddLot ? 'odd' : 'board');
+  if (oddLot && inputs.timeInForce !== 'DAY') {
+    error('timeInForce', 'Intraday odd-lot orders are DAY (ROD) only.');
+  } else if (account && !tif.options.includes(inputs.timeInForce)) {
     error(
       'timeInForce',
-      `This account accepts ${tif.options.join(' or ')} for stocks and ETFs.`
+      tif.options.length > 0
+        ? `This account accepts ${tif.options.join(', ')} for stocks and ETFs.`
+        : (tif.note ?? 'This account lists no time in force.')
     );
   }
   const rth = outsideRthSupport(account);
   if (inputs.outsideRth && rth.shown && !rth.enabled && rth.reason) {
     error('outsideRth', rth.reason);
   }
-  if (inputs.outsideRth && rth.shown && inputs.orderType === 'market') {
+  if (
+    inputs.outsideRth &&
+    rth.shown &&
+    (inputs.orderType === 'market' || inputs.orderType === 'stop_market')
+  ) {
     error(
       'outsideRth',
-      'Interactive Brokers fills outside regular hours only for limit orders.'
+      'Outside regular hours applies to limit and stop-limit orders.'
     );
+  }
+  if (context.calendar) {
+    const closed = closedMarketProblem(
+      context.calendar,
+      context.nowMs ?? Date.now(),
+      account,
+      {orderType: inputs.orderType, timeInForce: inputs.timeInForce}
+    );
+    if (closed) error('orderType', closed);
   }
 
   const reference = limitPrice ?? triggerPrice ?? markPrice;
@@ -579,7 +627,7 @@ export function buildEquityIntentRequest(
   if (issues.some(issue => issue.severity === 'error') || !quantity) {
     return {...empty, quantity, limitPrice, triggerPrice};
   }
-  const request: OrderIntentRequest = equityIntentExtensions(
+  const request = withOutsideRth(
     {
       account_id: inputs.accountId ?? '',
       instrument_id: instrument.instrument_id,
@@ -590,7 +638,7 @@ export function buildEquityIntentRequest(
       limit_price: limitPrice ? limitPrice.toString() : null,
       trigger_price: triggerPrice ? triggerPrice.toString() : null,
       trigger_basis: triggerPrice ? 'last' : null,
-      time_in_force: toContractTimeInForce(inputs.timeInForce),
+      time_in_force: inputs.timeInForce,
       reduce_only: false,
       leverage: null,
       bracket: null,
@@ -602,7 +650,7 @@ export function buildEquityIntentRequest(
       preview_token: null,
     },
     account,
-    {outsideRth: inputs.outsideRth === true, lotMode, hasBoardLot}
+    inputs.outsideRth === true
   );
   return {request, issues, quantity, limitPrice, triggerPrice};
 }

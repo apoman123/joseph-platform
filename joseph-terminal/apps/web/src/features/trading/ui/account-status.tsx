@@ -1,12 +1,14 @@
 'use client';
 /**
  * @fileoverview Broker and venue account status: connection, credentials
- * and the "awaiting API SDK" state, as reported by the execution engine.
+ * (held on the execution server, never entered here), the "awaiting API
+ * SDK" state and settled cash, as reported by the execution engine.
  * Shared by the order ticket and the Accounts tab.
  */
-import {accountStatusView} from '@joseph/chart-trading';
+import {accountStatusView, cashSummary} from '@joseph/chart-trading';
 import type {AccountSummary} from '@joseph/contracts';
 import type {ReactNode} from 'react';
+import styles from '../trading.module.css';
 
 /** Props of `AccountStatusBadge`. */
 export interface AccountStatusBadgeProps {
@@ -45,10 +47,20 @@ export function AccountStatusLine({
   account,
 }: AccountStatusBadgeProps): ReactNode {
   const view = accountStatusView(account);
+  const cash = account.capabilities.cash_account ? cashSummary(account) : null;
   return (
-    <span className="j-field__hint" data-testid="account-status">
-      {view.venueName} · <AccountStatusBadge account={account} /> ·{' '}
-      {view.awaitingSdk ? 'No trading API yet' : view.credentialsText}
+    <span className={styles.accountStatus}>
+      <span className="j-field__hint" data-testid="account-status">
+        {view.venueName}
+        {view.simulation ? ' (simulation)' : ''} ·{' '}
+        <AccountStatusBadge account={account} /> ·{' '}
+        {view.awaitingSdk ? 'No trading API yet' : view.credentialsText}
+      </span>
+      {cash && (
+        <span className="j-field__hint j-tabular" data-testid="account-cash">
+          {cash}
+        </span>
+      )}
     </span>
   );
 }
