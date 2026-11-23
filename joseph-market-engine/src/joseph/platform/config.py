@@ -195,6 +195,9 @@ class Settings:
         mexc_ws_format: MEXC futures WebSocket push format: ``protobuf``
             (default) or ``json`` (MEXC's deadline for migrating off JSON
             market data is 2026-12-01 10:00 UTC).
+        lighter_archive: Whether Lighter seconds history is imported from
+            the AWS Public Blockchain Data trade archive (remote range
+            reads, verified against 1d candles, nothing cached on disk).
     """
 
     dev_tokens: tuple[DevToken, ...] = ()
@@ -240,6 +243,7 @@ class Settings:
     bitget_archive: bool = True
     bitget_archive_dir: str = "./var/bitget-archive"
     mexc_ws_format: str = "protobuf"
+    lighter_archive: bool = True
 
     def __repr__(self) -> str:
         """Returns a representation with secrets redacted."""
@@ -370,4 +374,5 @@ class Settings:
             mexc_ws_format=_mexc_ws_format(
                 source.get("JOSEPH_MEXC_WS_FORMAT", "protobuf")
             ),
+            lighter_archive=_bool(source.get("JOSEPH_LIGHTER_ARCHIVE"), True),
         )

@@ -634,6 +634,57 @@ async def test_day_archive_backfill_and_on_demand_imports() -> None:
     assert days.closed
 
 
+class SlowDays(FakeDays):
+    """Day archive double whose imports yield to the event loop first."""
+
+    async def import_day(
+        self,
+        instrument: instruments.InstrumentId,
+        day: datetime.date,
+        sink: trade_recorder.Sink,
+        received_ms: int,
+    ) -> bool:
+        """Yields a few times, then imports the scripted day.
+
+        Args:
+            instrument: Instrument.
+            day: Date.
+            sink: Archive writer.
+            received_ms: Receipt time.
+
+        Returns:
+            Whether the day was published.
+        """
+        for _ in range(5):
+            await asyncio.sleep(0)
+        return await super().import_day(instrument, day, sink, received_ms)
+
+
+async def test_concurrent_requests_import_a_day_once() -> None:
+    """A day being imported is awaited, then found covered, not refetched."""
+    now = _T0
+    yesterday = FakeDays.day_of(now) - datetime.timedelta(days=1)
+    days = SlowDays({yesterday: True})
+    port = FakePort(instruments.Venue.BINANCE, taker=True)
+    recorder = trade_recorder.TradeRecorder(
+        {port.venue: port},  # type: ignore[dict-item]
+        trade_archive.MemoryTradeArchive(),
+        clock_lib.ManualClock(now),
+        trade_recorder.RecorderSettings(archive_request_days=1),
+        day_archives=[days],
+        sleep=_fast_sleep,
+    )
+    start, end = FakeDays.day_bounds(yesterday)
+    await asyncio.gather(
+        *(recorder.seconds_bars(_BN, _TF.S1, start, end) for _ in range(3))
+    )
+    assert days.requests == [yesterday]
+    assert recorder.archive.coverage(_BN, start, end) == [(start, end)]
+    assert recorder._day_locks
+    recorder.prune_now()
+    assert recorder._day_locks == {}
+
+
 async def test_startup_backfills_archived_instruments_and_always_on(
     tmp_path: pathlib.Path,
 ) -> None:
