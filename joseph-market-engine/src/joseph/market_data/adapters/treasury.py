@@ -267,6 +267,7 @@ def parse_instrument(tenor: Tenor, now_ms: int) -> instruments.Instrument:
         asset_class=instruments.AssetClass.BOND,
         source=SOURCE,
         as_of_ms=now_ms,
+        name=f"US Treasury {tenor.name}",
     )
 
 

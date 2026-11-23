@@ -337,6 +337,7 @@ def _instrument(
         as_of_ms=now_ms,
         listing_exchange=exchange,
         tick_ladder=TICK_LADDER,
+        name=name.strip() or None,
     )
 
 
