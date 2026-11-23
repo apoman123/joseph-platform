@@ -10,7 +10,7 @@
  *      order-flow series publishing `method: "trade_classification"`.
  *   3. Anchored VWAP / regression from anchors up to 50 000 bars back, and a
  *      4xx refusal with a message beyond that.
- * Verified against main c404609 (engine side merged).
+ * Verified against main e5e72f7 (engine side merged).
  */
 import {
   EXCHANGE_HOURS,
