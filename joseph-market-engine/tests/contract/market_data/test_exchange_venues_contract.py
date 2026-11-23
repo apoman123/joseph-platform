@@ -802,7 +802,13 @@ async def test_directory_maps_listings_to_venues(
             instruments.Venue.NYSE, clock
         ).list_instruments()
     }
-    for row in [*nasdaq.values(), *nyse.values()]:
+    cboe = {
+        r.instrument_id.venue_market_id: r
+        for r in await _adapter(
+            instruments.Venue.CBOE, clock
+        ).list_instruments()
+    }
+    for row in [*nasdaq.values(), *nyse.values(), *cboe.values()]:
         contract_validate("market.schema.json", "Instrument", row.to_contract())
         assert row.calendar == "XNYS"
         assert row.tick_for(_D("0.5")) == _D("0.0001")
@@ -820,6 +826,16 @@ async def test_directory_maps_listings_to_venues(
     assert nyse["AGG"].asset_class is instruments.AssetClass.BOND
     assert nyse["SPY"].asset_class is instruments.AssetClass.EQUITY
     assert nyse["SGOV"].asset_class is instruments.AssetClass.BOND
+    assert set(cboe) == {"AAAU", "BBAG", "CBOE", "GOVT", "VXX"}
+    govt = cboe["GOVT"]
+    assert str(govt.instrument_id) == "cboe:etf:GOVT"
+    assert govt.listing_exchange == "Cboe BZX"
+    assert govt.asset_class is instruments.AssetClass.BOND
+    assert govt.name == "iShares U.S. Treasury Bond ETF"
+    assert cboe["BBAG"].asset_class is instruments.AssetClass.BOND
+    assert cboe["AAAU"].asset_class is instruments.AssetClass.EQUITY
+    assert str(cboe["CBOE"].instrument_id) == "cboe:stock:CBOE"
+    assert str(cboe["VXX"].instrument_id) == "cboe:stock:VXX"
     for skipped in (
         "GOVT",
         "ABR$D",
@@ -828,8 +844,11 @@ async def test_directory_maps_listings_to_venues(
         "AIIA.R",
         "ZEXIT",
         "MTEST",
+        "ZZZTX",
+        "CECO",
+        "ZBZX",
     ):
-        assert skipped not in nyse
+        assert skipped not in nyse and skipped not in nasdaq
 
 
 async def test_alpaca_without_keys_asks_for_them(
@@ -964,6 +983,13 @@ async def test_alpaca_snapshots_and_unsupported_parts(
     assert {
         s.instrument_id.venue_market_id for s in await nyse.fetch_snapshots()
     } == {"BRK.B", "SPY"}
+    cboe = _adapter(instruments.Venue.CBOE, clock)
+    (govt,) = await cboe.fetch_snapshots()
+    assert str(govt.instrument_id) == "cboe:etf:GOVT"
+    assert govt.last == _D("23.05") and govt.best_bid == _D("23.05")
+    caps = cboe.capabilities()
+    assert caps.display_name == "Cboe BZX (Alpaca iex)"
+    assert caps.calendar == "XNYS"
     for call in (
         adapter.fetch_order_book(_AAPL, 5),
         adapter.fetch_open_interest(_AAPL),

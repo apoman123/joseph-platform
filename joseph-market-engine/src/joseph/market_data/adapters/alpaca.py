@@ -1,11 +1,13 @@
-"""US stocks and ETFs listed on Nasdaq and NYSE, via Alpaca market data.
+"""US stocks and ETFs listed on Nasdaq, NYSE and Cboe BZX, via Alpaca.
 
 Instruments come from the official Nasdaq Trader symbol directory (free, no
 key; ``nasdaqlisted.txt`` and ``otherlisted.txt``, verified 2026-11-23):
 pipe-separated with a ``File Creation Time`` footer, a ``Test Issue`` flag
 and an ``ETF`` flag. ``otherlisted`` exchange codes: ``N`` NYSE, ``P`` NYSE
-Arca, ``A`` NYSE American (all venue ``nyse``); ``Z`` Cboe BZX, ``V`` IEX and
-others are skipped (so e.g. GOVT, listed on Cboe BZX, is not served).
+Arca, ``A`` NYSE American (all venue ``nyse``) and ``Z`` Cboe BZX (venue
+``cboe``, e.g. GOVT and many other ETFs). ``V`` IEX, ``M`` NYSE Texas and
+``F`` TXSE listings are skipped (on 2026-11-23 IEX and NYSE Texas listed
+only test issues).
 Class shares are ``BRK.B`` in both files and in Alpaca; preferreds
 (``ABR$D``), units (``.U``), warrants (``.W``) and rights (``.R``) of
 ``otherlisted`` are skipped because their Alpaca symbol form is unverified.
@@ -32,11 +34,30 @@ machine without one; fixtures follow the documented shapes):
   re-stamped from New York midnight to the XNYS session.
 * Quote sizes are in shares (round lots before 2025-11-03, per the REST
   reference).
+
+Closing prints. The closing cross is stamped just after the close, so
+Alpaca puts it in the minute after the session (16:00, or 13:00 on an
+early close), together with post-market trades. On the consolidated feeds
+(``sip``, ``delayed_sip``) each session's closing window ``[close,
+close + 60 s)`` is read once per symbol from the historical trades endpoint
+(one request of up to 10,000 trades, ``sort=asc``; the cross prints at the
+start of the window) and its condition-``6`` prints fold into the session's
+last minute bar (``us_trade_bars.with_closing_prints``), for history, polls
+and the live stream alike; 1h/4h bars aggregate the folded minute. The
+prints are cached per symbol and session (``AlpacaSource.closing_prints``).
+A history fetch sends at most ``CLOSING_REQUESTS_PER_FETCH`` such requests
+(newest sessions first) and all fetches and streams together at most
+``CLOSING_REQUESTS_PER_MINUTE`` per rolling minute, inside Alpaca's 200
+requests per minute. A session whose prints are not known yet (its window
+has not passed, or the budget is spent) keeps its last minute bar open and
+that minute out of coverage, so a later fetch completes it. The ``iex``
+feed carries no closing cross for these listings and reads nothing.
 """
 
 from __future__ import annotations
 
 import asyncio
+import collections
 import contextlib
 import dataclasses
 import datetime
@@ -100,7 +121,32 @@ MAX_PAGES = 20
 _BAR_SETTLE_MS = 60_000
 """Late trades revise a minute bar for about 30 s; older bars are final."""
 _DELAY_MS = 900_000
-_EXCHANGES = {"N": "NYSE", "P": "NYSE Arca", "A": "NYSE American"}
+CLOSING_REQUESTS_PER_FETCH = 20
+"""Closing-window requests one history fetch may send (newest first)."""
+CLOSING_REQUESTS_PER_MINUTE = 60
+"""Closing-window requests per rolling minute, all symbols (of 200/min)."""
+_CLOSING_CACHE_SESSIONS = 100_000
+"""Symbol sessions whose closing prints are kept (oldest dropped)."""
+_CLOSING_RETRY_MS = 15_000
+"""A stream retries an unanswered closing window after this long."""
+VENUES = (
+    instruments.Venue.NASDAQ,
+    instruments.Venue.NYSE,
+    instruments.Venue.CBOE,
+)
+"""US exchange venues served from the directory and Alpaca."""
+_EXCHANGES: dict[str, tuple[instruments.Venue, str]] = {
+    "N": (instruments.Venue.NYSE, "NYSE"),
+    "P": (instruments.Venue.NYSE, "NYSE Arca"),
+    "A": (instruments.Venue.NYSE, "NYSE American"),
+    "Z": (instruments.Venue.CBOE, "Cboe BZX"),
+}
+"""``otherlisted.txt`` exchange codes served: venue and listing exchange."""
+_DISPLAY_NAMES = {
+    instruments.Venue.NASDAQ: "Nasdaq",
+    instruments.Venue.NYSE: "NYSE",
+    instruments.Venue.CBOE: "Cboe BZX",
+}
 _SYMBOL = re.compile(r"^[A-Z]{1,5}(\.[A-Z])?$")
 _SKIPPED_CLASSES = frozenset("UWR")
 BOND_ETFS = frozenset(
@@ -193,6 +239,15 @@ class AlpacaConfig:
     def delay_ms(self) -> int:
         """Returns how far behind real time the entitled data is."""
         return _DELAY_MS if self.feed is Feed.DELAYED_SIP else 0
+
+    @property
+    def closing_prints(self) -> bool:
+        """Returns whether minute bars get the closing prints folded in.
+
+        Only the consolidated feeds carry the listing exchange's closing
+        cross; IEX runs none for Nasdaq, NYSE or Cboe listings.
+        """
+        return self.feed is not Feed.IEX
 
     def headers(self) -> dict[str, str]:
         """Returns the authentication headers.
@@ -306,7 +361,7 @@ def _instrument(
     """Builds one US listing.
 
     Args:
-        venue: ``nasdaq`` or ``nyse``.
+        venue: ``nasdaq``, ``nyse`` or ``cboe``.
         symbol: Joseph/Alpaca symbol.
         name: Security name.
         etf: ETF flag.
@@ -365,7 +420,7 @@ def _rows(text: str) -> list[dict[str, str]]:
 def parse_directory(
     nasdaq_text: str, other_text: str, now_ms: int
 ) -> dict[instruments.Venue, list[instruments.Instrument]]:
-    """Builds Nasdaq and NYSE-group listings from the symbol directory.
+    """Builds Nasdaq, NYSE-group and Cboe BZX listings from the directory.
 
     Args:
         nasdaq_text: ``nasdaqlisted.txt``.
@@ -376,8 +431,7 @@ def parse_directory(
         Instruments per venue (test issues and other exchanges skipped).
     """
     out: dict[instruments.Venue, list[instruments.Instrument]] = {
-        instruments.Venue.NASDAQ: [],
-        instruments.Venue.NYSE: [],
+        venue: [] for venue in VENUES
     }
     for row in _rows(nasdaq_text):
         symbol = alpaca_symbol(row.get("Symbol", ""))
@@ -394,13 +448,14 @@ def parse_directory(
             )
         )
     for row in _rows(other_text):
-        exchange = _EXCHANGES.get(row.get("Exchange", ""))
+        listing = _EXCHANGES.get(row.get("Exchange", ""))
         symbol = alpaca_symbol(row.get("ACT Symbol", ""))
-        if exchange is None or symbol is None or row.get("Test Issue") != "N":
+        if listing is None or symbol is None or row.get("Test Issue") != "N":
             continue
-        out[instruments.Venue.NYSE].append(
+        venue, exchange = listing
+        out[venue].append(
             _instrument(
-                instruments.Venue.NYSE,
+                venue,
                 symbol=symbol,
                 name=row.get("Security Name", ""),
                 etf=row.get("ETF") == "Y",
@@ -1006,8 +1061,71 @@ class AlpacaStream:
                 await task
 
 
+class RequestBudget:
+    """Requests allowed per rolling minute (a hard cap, never a wait).
+
+    Attributes:
+        per_minute: Requests allowed in any 60 s.
+    """
+
+    def __init__(self, clock: clock_lib.Clock, per_minute: int) -> None:
+        """Initializes an unused budget.
+
+        Args:
+            clock: Time source.
+            per_minute: Requests allowed in any 60 s.
+        """
+        self.per_minute = per_minute
+        self._clock = clock
+        self._sent: collections.deque[int] = collections.deque()
+
+    def take(self) -> bool:
+        """Spends one request if the last minute leaves room.
+
+        Returns:
+            True when the request may be sent.
+        """
+        now = self._clock.now_ms()
+        while self._sent and self._sent[0] <= now - 60_000:
+            self._sent.popleft()
+        if len(self._sent) >= self.per_minute:
+            return False
+        self._sent.append(now)
+        return True
+
+
+def unsettled(
+    rows: Iterable[market.Candle], holes: Sequence[candle_rules.Span]
+) -> list[market.Candle]:
+    """Reopens bars overlapping a slot whose data is still incomplete.
+
+    Args:
+        rows: Bars.
+        holes: Slots still awaiting data (e.g. a pending closing print).
+
+    Returns:
+        The bars, those overlapping a hole made non-final.
+    """
+    return [
+        dataclasses.replace(bar, is_final=False)
+        if bar.is_final
+        and any(low < bar.end_ms and bar.start_ms < high for low, high in holes)
+        else bar
+        for bar in rows
+    ]
+
+
 class AlpacaSource:
-    """State shared by the Nasdaq and NYSE adapters (one key, one budget)."""
+    """State shared by the US exchange adapters (one key, one budget).
+
+    Attributes:
+        config: Credentials and feed.
+        data: Client for ``DATA_URL``.
+        directory_http: Client for ``SYMDIR_URL``.
+        clock: Time source.
+        stream: The shared stream connection.
+        closing_budget: Budget of closing-window requests.
+    """
 
     def __init__(
         self,
@@ -1031,6 +1149,10 @@ class AlpacaSource:
         self.directory_http = directory_http
         self.clock = clock
         self.stream = AlpacaStream(config, clock, connect)
+        self.closing_budget = RequestBudget(clock, CLOSING_REQUESTS_PER_MINUTE)
+        self._closing: dict[
+            tuple[str, int], tuple[us_trade_bars.TapeTrade, ...]
+        ] = {}
         self._directory: dict[
             instruments.Venue, list[instruments.Instrument]
         ] = {}
@@ -1048,7 +1170,7 @@ class AlpacaSource:
         """Returns the directory listings of a venue (cached 6 hours).
 
         Args:
-            venue: ``nasdaq`` or ``nyse``.
+            venue: ``nasdaq``, ``nyse`` or ``cboe``.
 
         Returns:
             Instruments.
@@ -1155,8 +1277,71 @@ class AlpacaSource:
         rows, _ = await self.pages(path, params, key)
         return rows
 
+    async def closing_prints(
+        self, symbol: str, closes: Iterable[int], max_requests: int
+    ) -> dict[int, tuple[us_trade_bars.TapeTrade, ...]]:
+        """Returns the closing prints of sessions, read once and cached.
+
+        Each uncached session costs one request for the trades of its
+        closing window (``[close, close + 60 s)``, up to 10,000 trades,
+        oldest first). Sessions are served newest first while
+        ``max_requests`` and the shared per-minute budget allow; a failed
+        request stops the reading (the session stays unknown).
+
+        Args:
+            symbol: Alpaca symbol.
+            closes: Closes of sessions whose closing window has passed.
+            max_requests: Requests this call may send.
+
+        Returns:
+            Prints per known close (empty when the session printed none);
+            closes left unread are absent.
+        """
+        known: dict[int, tuple[us_trade_bars.TapeTrade, ...]] = {}
+        sent = 0
+        for close in sorted(set(closes), reverse=True):
+            cached = self._closing.get((symbol, close))
+            if cached is not None:
+                known[close] = cached
+                continue
+            if sent >= max_requests or not self.closing_budget.take():
+                continue
+            sent += 1
+            try:
+                payload = await self.get(
+                    f"/v2/stocks/{symbol}/trades",
+                    {
+                        "feed": self.config.rest_feed,
+                        "limit": _PAGE_LIMIT,
+                        "sort": "asc",
+                        "start": rfc3339(close),
+                        "end": rfc3339(
+                            close + us_trade_bars.CLOSING_WINDOW_MS - 1
+                        ),
+                    },
+                )
+            except errors.JosephError as err:
+                _LOG.warning(
+                    "alpaca closing prints of %s unavailable: %s",
+                    symbol,
+                    err.message,
+                )
+                max_requests = sent
+                continue
+            trades = [
+                parse_trade(row, market.AggressorSide.UNKNOWN)
+                for row in payload.get("trades") or ()
+                if not row.get("u")
+            ]
+            prints = us_trade_bars.closing_prints(trades, close)
+            if len(self._closing) >= _CLOSING_CACHE_SESSIONS:
+                del self._closing[next(iter(self._closing))]
+            self._closing[(symbol, close)] = prints
+            known[close] = prints
+        return known
+
     async def close(self) -> None:
-        """Closes shared resources once both adapters closed."""
+        """Closes shared resources once every adapter closed."""
         self._users -= 1
         if self._users <= 0:
             await self.stream.close()
@@ -1169,19 +1354,220 @@ class _Fetched:
     """Bars of one REST range and how far they are complete.
 
     Attributes:
-        rows: Ascending session bars.
+        rows: Ascending session bars (minute bars without closing prints).
         proven_ms: Bars starting before this time were all delivered and
             are final (a slot without a bar there had no trades).
         complete: False when ``MAX_PAGES`` cut the range short.
+        prints: Closing prints per close of the sessions ending in the
+            range (minute fetches on a consolidated feed).
+        pending: Closes of sessions ending in the range whose closing
+            prints are not known yet.
     """
 
     rows: list[market.Candle]
     proven_ms: int
     complete: bool
+    prints: Mapping[int, tuple[us_trade_bars.TapeTrade, ...]] = (
+        dataclasses.field(default_factory=dict)
+    )
+    pending: tuple[int, ...] = ()
+
+    def holes(
+        self, instrument: instruments.InstrumentId
+    ) -> list[candle_rules.Span]:
+        """Returns the last minutes of the pending sessions.
+
+        Args:
+            instrument: Instrument.
+
+        Returns:
+            Slots kept out of coverage until their prints are known.
+        """
+        return [us_trade_bars.closing_slot(instrument, c) for c in self.pending]
+
+    def minutes(
+        self, instrument: instruments.InstrumentId, now_ms: int, settled: int
+    ) -> list[market.Candle]:
+        """Returns the minute bars with the known closing prints folded in.
+
+        Args:
+            instrument: Instrument.
+            now_ms: Receipt time.
+            settled: Bars ending by then are final.
+
+        Returns:
+            Ascending minute bars (pending sessions' last minutes open).
+        """
+        return us_trade_bars.with_closing_prints(
+            self.rows,
+            instrument,
+            prints=self.prints,
+            pending=self.pending,
+            now_ms=now_ms,
+            settled_before_ms=settled,
+            source=f"{SOURCE}.rest",
+        )
+
+
+class _LiveCloses:
+    """Closing prints of the sessions a live minute stream holds.
+
+    On a consolidated feed every session with a streamed or seeded minute
+    is tracked: its last minute stays open, and out of the proven spans,
+    until its closing window has passed and its prints were read (shared
+    cache and budget; an unanswered window is retried). The IEX feed tracks
+    nothing.
+    """
+
+    def __init__(
+        self, instrument: instruments.InstrumentId, source: AlpacaSource
+    ) -> None:
+        """Initializes an empty tracker.
+
+        Args:
+            instrument: Streamed instrument.
+            source: Shared Alpaca source.
+        """
+        self._instrument = instrument
+        self._source = source
+        self._enabled = source.config.closing_prints
+        self._delay = source.config.delay_ms
+        self._closes: set[int] = set()
+        self._prints: dict[int, tuple[us_trade_bars.TapeTrade, ...]] = {}
+        self._retry_at: dict[int, int] = {}
+        self._withheld: set[int] = set()
+
+    def note(self, start_ms: int) -> None:
+        """Tracks the session of a stored session minute.
+
+        Args:
+            start_ms: Minute start.
+        """
+        if self._enabled:
+            self._closes.add(
+                sessions.XNYS.session_at_or_before(start_ms).close_ms
+            )
+
+    def seed(self, fetched: _Fetched) -> None:
+        """Takes over the sessions and prints of a REST seed.
+
+        Args:
+            fetched: Seed fetch.
+        """
+        for bar in fetched.rows:
+            self.note(bar.start_ms)
+        if self._enabled:
+            self._prints.update(fetched.prints)
+            self._closes.update(fetched.prints.keys(), fetched.pending)
+
+    def pending(self) -> set[int]:
+        """Returns the tracked closes whose prints are not known yet."""
+        return self._closes - self._prints.keys()
+
+    def holes(self) -> list[candle_rules.Span]:
+        """Returns the last minutes of sessions awaiting their prints.
+
+        Returns:
+            Slots kept open.
+        """
+        return [
+            us_trade_bars.closing_slot(self._instrument, close)
+            for close in sorted(self.pending())
+        ]
+
+    def prove(
+        self, span: candle_rules.Span | None
+    ) -> tuple[candle_rules.Span, ...]:
+        """Removes the open slots from a span the connection proved.
+
+        Args:
+            span: Proven span, if any.
+
+        Returns:
+            The span minus the slots awaiting prints (those are proven once
+            their prints are read).
+        """
+        if span is None:
+            return ()
+        holes = self.holes()
+        self._withheld.update(
+            close for low, close in holes if low < span[1] and span[0] < close
+        )
+        return tuple(candle_rules.subtract_spans([span], holes))
+
+    async def learn(self, now_ms: int) -> tuple[candle_rules.Span, ...]:
+        """Reads the closing prints of sessions whose window has passed.
+
+        Args:
+            now_ms: Receipt time.
+
+        Returns:
+            Withheld slots now complete.
+        """
+        horizon = (
+            now_ms
+            - self._delay
+            - us_trade_bars.CLOSING_WINDOW_MS
+            - base.TRADE_PUBLISH_LAG_MS
+        )
+        due = [
+            close
+            for close in self.pending()
+            if close <= horizon and self._retry_at.get(close, 0) <= now_ms
+        ]
+        if not due:
+            return ()
+        known = await self._source.closing_prints(
+            self._instrument.venue_market_id, due, CLOSING_REQUESTS_PER_FETCH
+        )
+        self._prints.update(known)
+        for close in due:
+            if close not in known:
+                self._retry_at[close] = now_ms + _CLOSING_RETRY_MS
+        proven = sorted(self._withheld & known.keys())
+        self._withheld.difference_update(proven)
+        return tuple(
+            us_trade_bars.closing_slot(self._instrument, close)
+            for close in proven
+        )
+
+    def fold(
+        self, bars: Iterable[market.Candle], now_ms: int
+    ) -> list[market.Candle]:
+        """Folds the known prints into the streamed minutes.
+
+        Args:
+            bars: Streamed minute bars.
+            now_ms: Receipt time.
+
+        Returns:
+            Ascending minute bars (pending last minutes not final).
+        """
+        return us_trade_bars.with_closing_prints(
+            bars,
+            self._instrument,
+            prints=self._prints,
+            pending=self.pending(),
+            now_ms=now_ms,
+            settled_before_ms=now_ms - self._delay,
+            source=f"{SOURCE}.ws",
+        )
+
+    def prune(self, cutoff_ms: int) -> None:
+        """Forgets sessions that closed before a time.
+
+        Args:
+            cutoff_ms: Oldest close kept.
+        """
+        for close in [c for c in self._closes if c < cutoff_ms]:
+            self._closes.discard(close)
+            self._prints.pop(close, None)
+            self._retry_at.pop(close, None)
+            self._withheld.discard(close)
 
 
 class AlpacaAdapter(base.BaseVenueAdapter):
-    """``SparseBarsPort`` for one venue (``nasdaq`` or ``nyse``).
+    """``SparseBarsPort`` for one venue (``nasdaq``, ``nyse`` or ``cboe``).
 
     Alpaca publishes no bar for a minute (or day) without trades, so every
     fetch and stream states the span it delivered completely.
@@ -1201,7 +1587,7 @@ class AlpacaAdapter(base.BaseVenueAdapter):
         """Initializes the adapter.
 
         Args:
-            venue: ``nasdaq`` or ``nyse``.
+            venue: ``nasdaq``, ``nyse`` or ``cboe``.
             source: Shared Alpaca source.
             clock: Time source.
             verified_at_ms: When the public parts were verified live.
@@ -1224,7 +1610,7 @@ class AlpacaAdapter(base.BaseVenueAdapter):
             Capabilities.
         """
         config = self.config
-        name = "Nasdaq" if self.VENUE is instruments.Venue.NASDAQ else "NYSE"
+        name = _DISPLAY_NAMES[self.VENUE]
         return capabilities.VenueCapabilities(
             venue=self.VENUE,
             display_name=f"{name} (Alpaca {config.feed.value})",
@@ -1276,9 +1662,26 @@ class AlpacaAdapter(base.BaseVenueAdapter):
                 "bounded to the configured window. The official closing "
                 "print (sale condition 6) stamped within 60 s after the "
                 "close joins the session's last seconds bar, which settles "
-                "only then; other after-close trades stay out. Minute bars "
-                "are Alpaca's and exclude it (Alpaca's 16:00 minute also "
-                "holds post-market trades).",
+                "only then; other after-close trades stay out.",
+                "Closing prints in minute bars: "
+                + (
+                    "Alpaca's minute after the close (16:00, 13:00 on early "
+                    "closes) also holds post-market trades, so each "
+                    "session's closing window is read once per symbol from "
+                    "REST trades (one request, cached) and its condition-6 "
+                    "prints fold into the session's last minute bar, hence "
+                    "into 1h/4h bars: their close is the official close, "
+                    "like the 1d bar's. At most "
+                    f"{CLOSING_REQUESTS_PER_FETCH} such requests per fetch "
+                    f"(newest sessions first) and {CLOSING_REQUESTS_PER_MINUTE}"
+                    " per minute overall; until its prints are read a "
+                    "session's last minute stays open and is fetched again."
+                    if config.closing_prints
+                    else "the IEX feed has no closing cross for these "
+                    "listings, so the last minute of a session holds IEX "
+                    "trades only (sip and delayed_sip fold the official "
+                    "closing print in)."
+                ),
                 "The tape publishes no aggressor side: trades are classified "
                 "with Lee-Ready against the prevailing NBBO (quote rule, "
                 "tick test at the midpoint); taker_buy_method = classified. "
@@ -1290,8 +1693,9 @@ class AlpacaAdapter(base.BaseVenueAdapter):
                 "30 streamed symbols; history from 2016. No order book, "
                 "funding or open interest.",
                 "Class shares (BRK.B) are served; preferreds, units, warrants "
-                "and rights from otherlisted.txt, and listings on other "
-                "exchanges (e.g. GOVT on Cboe BZX), are not.",
+                "and rights from otherlisted.txt, and listings on IEX, NYSE "
+                "Texas and TXSE, are not. Cboe BZX listings (e.g. GOVT) are "
+                "venue cboe.",
             ),
             docs_url=DOCS_URL,
             verified_at_ms=self._verified_at_ms,
@@ -1357,10 +1761,60 @@ class AlpacaAdapter(base.BaseVenueAdapter):
         """Returns the time before which REST minute bars are final."""
         return self._clock.now_ms() - self.config.delay_ms - _BAR_SETTLE_MS
 
+    async def _closes(
+        self,
+        instrument: instruments.InstrumentId,
+        start_ms: int,
+        end_ms: int,
+        max_requests: int,
+    ) -> tuple[dict[int, tuple[us_trade_bars.TapeTrade, ...]], tuple[int, ...]]:
+        """Reads the closing prints of the sessions ending in a range.
+
+        Args:
+            instrument: Instrument.
+            start_ms: Inclusive start (sessions whose last minute starts
+                earlier are left out).
+            end_ms: Exclusive end (bars before it were delivered).
+            max_requests: Closing-window requests allowed.
+
+        Returns:
+            Prints per known close and the pending closes (window not
+            passed yet, or unread within the budget); nothing on the IEX
+            feed.
+        """
+        if not self.config.closing_prints or end_ms <= start_ms:
+            return {}, ()
+        closes = [
+            session.close_ms
+            for session in sessions.XNYS.sessions(start_ms, end_ms)
+            if start_ms
+            <= us_trade_bars.closing_slot(instrument, session.close_ms)[0]
+            < end_ms
+        ]
+        horizon = (
+            self._clock.now_ms()
+            - self.config.delay_ms
+            - us_trade_bars.CLOSING_WINDOW_MS
+            - base.TRADE_PUBLISH_LAG_MS
+        )
+        due = [close for close in closes if close <= horizon]
+        known = (
+            await self._source.closing_prints(
+                instrument.venue_market_id, due, max_requests
+            )
+            if due
+            else {}
+        )
+        return known, tuple(close for close in closes if close not in known)
+
     async def _minutes(
         self, instrument: instruments.InstrumentId, start_ms: int, end_ms: int
     ) -> _Fetched:
-        """Fetches session minute bars of a range.
+        """Fetches session minute bars of a range and their closing prints.
+
+        Up to ``CLOSING_REQUESTS_PER_FETCH`` closing windows are read.
+        Sessions ending before the first bar Alpaca returned read none
+        (they had no trade in the range).
 
         Args:
             instrument: Instrument.
@@ -1368,8 +1822,10 @@ class AlpacaAdapter(base.BaseVenueAdapter):
             end_ms: Exclusive end.
 
         Returns:
-            Ascending candles, proven up to the settled time (or the last
-            bar read when the page cap cut the range).
+            Ascending candles without closing prints, proven up to the
+            settled time (or the last bar read when the page cap cut the
+            range), with the closing prints of the sessions ending in the
+            proven part.
         """
         now = self._clock.now_ms()
         stop = min(end_ms, now - self.config.delay_ms)
@@ -1400,9 +1856,14 @@ class AlpacaAdapter(base.BaseVenueAdapter):
             )
             if bar is not None and start_ms <= bar.start_ms < end_ms:
                 out.append(bar)
-        return _Fetched(
-            out, _proven(rows, min(stop, settled), complete), complete
+        proven = _proven(rows, min(stop, settled), complete)
+        prints, pending = await self._closes(
+            instrument,
+            max(start_ms, rfc3339_ms(str(rows[0]["t"]))) if rows else proven,
+            min(end_ms, proven),
+            CLOSING_REQUESTS_PER_FETCH,
         )
+        return _Fetched(out, proven, complete, prints, pending)
 
     async def _days(
         self, instrument: instruments.InstrumentId, start_ms: int, end_ms: int
@@ -1529,7 +1990,9 @@ class AlpacaAdapter(base.BaseVenueAdapter):
         Returns:
             Ascending candles on the XNYS calendar and the span in which
             every bar was delivered final (a slot there without a bar had
-            no trades).
+            no trades). Intraday bars carry the sessions' closing prints;
+            the last minute of a session whose prints are pending is left
+            out of the span and the bars over it are not final.
         """
         self._require_timeframe(timeframe)
         await self._ready(instrument)
@@ -1541,15 +2004,18 @@ class AlpacaAdapter(base.BaseVenueAdapter):
             )
         first = self._window(timeframe, start_ms, end_ms, limit)
         now = self._clock.now_ms()
+        holes: list[candle_rules.Span] = []
         if timeframe in _INTRADAY:
             fetched = await self._minutes(instrument, first, end_ms)
-            rows = fetched.rows
+            settled = self._settled_before()
+            rows = fetched.minutes(instrument, now, settled)
+            holes = fetched.holes(instrument)
             if timeframe is not _M1:
-                rows = session_bars.aggregate(
-                    rows,
-                    timeframe,
-                    now_ms=now,
-                    covered_to_ms=self._settled_before(),
+                rows = unsettled(
+                    session_bars.aggregate(
+                        rows, timeframe, now_ms=now, covered_to_ms=settled
+                    ),
+                    holes,
                 )
         else:
             fetched = await self._days(instrument, first, end_ms)
@@ -1567,7 +2033,7 @@ class AlpacaAdapter(base.BaseVenueAdapter):
             start_ms,
             end_ms,
             limit,
-            [(first, fetched.proven_ms)],
+            candle_rules.subtract_spans([(first, fetched.proven_ms)], holes),
             complete=fetched.complete,
         )
 
@@ -2082,6 +2548,12 @@ class AlpacaAdapter(base.BaseVenueAdapter):
         minutes between them quiet (for every intraday timeframe); a
         reconnect starts the proof over.
 
+        On a consolidated feed a session's last minute (and the aggregate
+        over it) stays open until its closing window has passed and its
+        closing prints were read over REST (once per session, within the
+        shared budget, retried while unanswered); the prints then fold into
+        it and its slot is proven.
+
         Args:
             instrument: Instrument.
             timeframe: Intraday resolution.
@@ -2094,6 +2566,7 @@ class AlpacaAdapter(base.BaseVenueAdapter):
         minutes: dict[int, market.Candle] = {}
         emitted: dict[int, market.Candle] = {}
         delay = self.config.delay_ms
+        closes = _LiveCloses(instrument, self._source)
 
         def current(now_ms: int) -> list[market.Candle]:
             """Recomputes the aggregates touched by stored minutes.
@@ -2104,14 +2577,16 @@ class AlpacaAdapter(base.BaseVenueAdapter):
             Returns:
                 Changed aggregates.
             """
-            if timeframe is _M1:
-                rows = list(minutes.values())
-            else:
-                rows = session_bars.aggregate(
-                    minutes.values(),
-                    timeframe,
-                    now_ms=now_ms,
-                    covered_to_ms=now_ms - delay - _BAR_SETTLE_MS,
+            rows = closes.fold(minutes.values(), now_ms)
+            if timeframe is not _M1:
+                rows = unsettled(
+                    session_bars.aggregate(
+                        rows,
+                        timeframe,
+                        now_ms=now_ms,
+                        covered_to_ms=now_ms - delay - _BAR_SETTLE_MS,
+                    ),
+                    closes.holes(),
                 )
             changed = []
             for bar in rows:
@@ -2138,6 +2613,7 @@ class AlpacaAdapter(base.BaseVenueAdapter):
                         seed = await self._minutes(instrument, start, now)
                         for bar in seed.rows:
                             minutes[bar.start_ms] = bar
+                        closes.seed(seed)
                     except (errors.JosephError, ValueError) as err:
                         _LOG.warning("alpaca seed failed: %s", err)
                 if kind == "msg" and payload.get("T") in ("b", "u"):
@@ -2150,10 +2626,12 @@ class AlpacaAdapter(base.BaseVenueAdapter):
                     )
                     if update is not None:
                         minutes[update.start_ms] = update
+                        closes.note(update.start_ms)
                     if payload.get("T") == "b":
                         minute = rfc3339_ms(str(payload["t"]))
                         span = chain.observe(minute, minute + _M1.duration_ms)
-                        covered = () if span is None else (span,)
+                        covered = closes.prove(span)
+                covered += await closes.learn(now)
                 changed = current(now)
                 if changed or covered:
                     yield candle_rules.CandleCoverage(tuple(changed), covered)
@@ -2162,6 +2640,7 @@ class AlpacaAdapter(base.BaseVenueAdapter):
                     del minutes[start]
                 for start in [s for s in emitted if s < cutoff]:
                     del emitted[start]
+                closes.prune(cutoff)
 
     async def _daily_stream(
         self,
@@ -2227,5 +2706,5 @@ class AlpacaAdapter(base.BaseVenueAdapter):
                     yield candle_rules.CandleCoverage((newest,))
 
     async def close(self) -> None:
-        """Releases the shared source when both venues closed."""
+        """Releases the shared source when every venue closed."""
         await self._source.close()

@@ -56,7 +56,11 @@ def ibkr(
             "Outside-RTH applies to limit and stop-limit orders; IBKR "
             "queues DAY market orders placed while closed for the open.",
         ),
-        tradable_venues=(enums.Venue.NASDAQ.value, enums.Venue.NYSE.value),
+        tradable_venues=(
+            enums.Venue.NASDAQ.value,
+            enums.Venue.NYSE.value,
+            enums.Venue.CBOE.value,
+        ),
         cash_account=not short_selling,
         short_selling=short_selling,
         outside_rth=True,

@@ -148,9 +148,10 @@ async def test_live_tpex_schedule_matches_xtai() -> None:
 async def test_live_nasdaq_trader_directory(
     contract_validate: Validate,
 ) -> None:
-    """The symbol directory lists Nasdaq and NYSE-group securities."""
+    """The symbol directory lists Nasdaq, NYSE-group and Cboe BZX listings."""
     nasdaq, _ = _live(instruments.Venue.NASDAQ)
     nyse, _ = _live(instruments.Venue.NYSE)
+    cboe, _ = _live(instruments.Venue.CBOE)
     nasdaq_rows = {
         r.instrument_id.venue_market_id: r
         for r in await nasdaq.list_instruments()
@@ -159,18 +160,28 @@ async def test_live_nasdaq_trader_directory(
         r.instrument_id.venue_market_id: r
         for r in await nyse.list_instruments()
     }
+    cboe_rows = {
+        r.instrument_id.venue_market_id: r
+        for r in await cboe.list_instruments()
+    }
     assert len(nasdaq_rows) > 3_000 and len(nyse_rows) > 3_000
+    assert len(cboe_rows) > 1_000
     assert nasdaq_rows["TLT"].asset_class is instruments.AssetClass.BOND
     assert nyse_rows["BRK.B"].listing_exchange == "NYSE"
     assert nyse_rows["SPY"].listing_exchange == "NYSE Arca"
-    contract_validate(
-        "market.schema.json", "Instrument", nyse_rows["BRK.B"].to_contract()
-    )
+    govt = cboe_rows["GOVT"]
+    assert str(govt.instrument_id) == "cboe:etf:GOVT"
+    assert govt.listing_exchange == "Cboe BZX"
+    assert govt.asset_class is instruments.AssetClass.BOND
+    assert "GOVT" not in nyse_rows and "GOVT" not in nasdaq_rows
+    for row in (nyse_rows["BRK.B"], govt):
+        contract_validate("market.schema.json", "Instrument", row.to_contract())
     assert not nasdaq.capabilities().credentials_configured or (
         os.environ.get("JOSEPH_ALPACA_KEY_ID")
     )
     await nasdaq.close()
     await nyse.close()
+    await cboe.close()
 
 
 async def test_live_treasury_yields(contract_validate: Validate) -> None:

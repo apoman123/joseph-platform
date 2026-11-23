@@ -60,6 +60,15 @@ late reports, ...) stays out. The XNYS calendar itself keeps no close
 grace because Alpaca's 16:00 minute bar also holds post-market trades. The
 session's last seconds bar therefore settles (becomes final) only once its
 closing window has been delivered.
+
+Minute bars come from Alpaca, whose minute holding the closing print (16:00,
+or 13:00 on an early close) also holds post-market trades and lies outside
+the session. ``with_closing_prints`` folds the condition-``6`` prints of
+each session's closing window into the session's last minute bar with the
+same update rules (``fold_closing_prints``), so that bar, and every
+intraday aggregate of it, closes at the official close; a session whose
+prints are not known yet keeps its last minute bar open and its slot out of
+coverage (``closing_slot``).
 """
 
 from __future__ import annotations
@@ -68,6 +77,8 @@ import bisect
 import dataclasses
 import decimal
 from collections.abc import Iterable
+from collections.abc import Mapping
+from collections.abc import Sequence
 
 from joseph.domain import decimals
 from joseph.domain import instruments
@@ -627,3 +638,188 @@ def bars_from_trades(
     for candle in builder.finalize_through(to_ms, now_ms):
         out[candle.start_ms] = candle
     return [out[s] for s in sorted(out)]
+
+
+# Closing prints of minute bars ---------------------------------------------
+
+
+def closing_prints(
+    trades: Iterable[TapeTrade], close_ms: int
+) -> tuple[TapeTrade, ...]:
+    """Keeps the closing prints of one session's closing window.
+
+    Args:
+        trades: Trades read around the close.
+        close_ms: Session close.
+
+    Returns:
+        Trades with condition ``6`` stamped in
+        ``[close, close + CLOSING_WINDOW_MS)``, in time order (ties keep
+        their input order).
+    """
+    return tuple(
+        sorted(
+            (
+                trade
+                for trade in trades
+                if CLOSING_TRADE in trade.conditions
+                and close_ms <= trade.ts_ms < close_ms + CLOSING_WINDOW_MS
+            ),
+            key=lambda trade: trade.ts_ms,
+        )
+    )
+
+
+def closing_slot(
+    instrument_id: instruments.InstrumentId, close_ms: int
+) -> candle_rules.Span:
+    """Returns the last minute of the session closing at ``close_ms``.
+
+    Args:
+        instrument_id: Instrument.
+        close_ms: Session close.
+
+    Returns:
+        ``(start, close)`` of the session's last minute bar.
+    """
+    calendar = sessions.for_instrument(instrument_id)
+    return (calendar.floor(timeframes.Timeframe.M1, close_ms - 1), close_ms)
+
+
+def fold_closing_prints(
+    bar: market.Candle | None,
+    prints: Sequence[TapeTrade],
+    *,
+    instrument_id: instruments.InstrumentId,
+    timeframe: timeframes.Timeframe,
+    start_ms: int,
+    now_ms: int,
+    source: str,
+    is_final: bool,
+) -> market.Candle | None:
+    """Folds a session's closing prints into its last bar.
+
+    The prints are stamped at or after the close, after every trade of the
+    bar, so a price-updating print moves the close (and sets the open of a
+    bar that had no trades); each print updates only what its conditions
+    allow (``update_rule``). Quote turnover and buy volume are dropped when
+    prints add volume (the prints carry neither).
+
+    Args:
+        bar: The session's last bar, or ``None`` when it had no trades.
+        prints: Closing prints in time order (``closing_prints``).
+        instrument_id: Instrument.
+        timeframe: Bar resolution.
+        start_ms: Bar start.
+        now_ms: Receipt time.
+        source: Provenance label of a bar created from prints alone.
+        is_final: Finality of the result.
+
+    Returns:
+        The folded bar (``bar`` with the given finality when no print
+        applies), or ``None`` when there is neither a bar nor a
+        price-updating print.
+    """
+    open_ = bar.open if bar is not None else None
+    high = bar.high if bar is not None else None
+    low = bar.low if bar is not None else None
+    close = bar.close if bar is not None else None
+    count = bar.trade_count if bar is not None else 0
+    event_ts = bar.event_ts_ms if bar is not None else None
+    added = decimals.ZERO
+    folded = False
+    for trade in prints:
+        rule = update_rule(trade.conditions, trade.tape)
+        if rule.open_close:
+            open_ = trade.price if open_ is None else open_
+            close = trade.price
+        if rule.high_low:
+            high = trade.price if high is None else max(high, trade.price)
+            low = trade.price if low is None else min(low, trade.price)
+        if rule.volume:
+            added += trade.size
+            count = None if count is None else count + 1
+        if rule.open_close or rule.high_low or rule.volume:
+            folded = True
+            event_ts = (
+                trade.ts_ms if event_ts is None else max(event_ts, trade.ts_ms)
+            )
+    if open_ is None or close is None:
+        return None
+    if bar is not None and not folded:
+        return dataclasses.replace(bar, is_final=is_final)
+    kept = bar if bar is not None and not added else None
+    return session_bars.candle(
+        instrument_id=instrument_id,
+        timeframe=timeframe,
+        start_ms=start_ms,
+        open_=open_,
+        high=open_ if high is None else high,
+        low=open_ if low is None else low,
+        close=close,
+        base_volume=(decimals.ZERO if bar is None else bar.base_volume) + added,
+        now_ms=now_ms,
+        source=source if bar is None else bar.source,
+        is_final=is_final,
+        feed_state=quality.FeedState.LIVE if bar is None else bar.feed_state,
+        quote_turnover=None if kept is None else kept.quote_turnover,
+        trade_count=count,
+        event_ts_ms=event_ts,
+        taker_buy_base_volume=None
+        if kept is None
+        else kept.taker_buy_base_volume,
+        taker_buy_method=None if kept is None else kept.taker_buy_method,
+    )
+
+
+def with_closing_prints(
+    bars: Iterable[market.Candle],
+    instrument_id: instruments.InstrumentId,
+    *,
+    prints: Mapping[int, Sequence[TapeTrade]],
+    pending: Iterable[int],
+    now_ms: int,
+    settled_before_ms: int,
+    source: str,
+) -> list[market.Candle]:
+    """Folds closing prints into the sessions' last minute bars.
+
+    Args:
+        bars: Minute bars of one instrument, without closing prints.
+        instrument_id: Instrument.
+        prints: Closing prints per session close (empty when the session
+            printed none); each folds into that session's last minute.
+        pending: Closes whose prints are not known yet: their sessions'
+            last minute bars are not final.
+        now_ms: Receipt time.
+        settled_before_ms: A last minute bar created from prints alone is
+            final when it ends by then.
+        source: Provenance label of bars created from prints alone.
+
+    Returns:
+        Ascending minute bars.
+    """
+    by_start = {bar.start_ms: bar for bar in bars}
+    for close_ms, trades in prints.items():
+        start, _ = closing_slot(instrument_id, close_ms)
+        bar = by_start.get(start)
+        folded = fold_closing_prints(
+            bar,
+            trades,
+            instrument_id=instrument_id,
+            timeframe=timeframes.Timeframe.M1,
+            start_ms=start,
+            now_ms=now_ms,
+            source=source,
+            is_final=bar.is_final
+            if bar is not None
+            else close_ms <= settled_before_ms,
+        )
+        if folded is not None:
+            by_start[start] = folded
+    for close_ms in pending:
+        start, _ = closing_slot(instrument_id, close_ms)
+        bar = by_start.get(start)
+        if bar is not None and bar.is_final:
+            by_start[start] = dataclasses.replace(bar, is_final=False)
+    return [by_start[start] for start in sorted(by_start)]

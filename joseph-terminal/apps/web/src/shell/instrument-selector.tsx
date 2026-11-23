@@ -44,6 +44,7 @@ const NAMED_VENUES: ReadonlySet<Venue> = new Set<Venue>([
   'tpex',
   'nasdaq',
   'nyse',
+  'cboe',
   'treasury',
   'mock',
 ]);
@@ -59,6 +60,7 @@ const VENUE_BADGES: Readonly<Record<Venue, string>> = {
   tpex: 'TPEx',
   nasdaq: 'NSDQ',
   nyse: 'NYSE',
+  cboe: 'CBOE',
   treasury: 'UST',
   mock: 'DEMO',
 };

@@ -244,7 +244,7 @@ def test_tpex_orders_follow_taiwan_rules() -> None:
         (
             dataclasses.replace(SINOPAC, venue="ibkr", currency="USD"),
             fixtures.TSMC,
-            "Nasdaq and NYSE",
+            "Nasdaq, NYSE and Cboe BZX",
         ),
         (SINOPAC, fixtures.UST10Y, "rate series"),
         (

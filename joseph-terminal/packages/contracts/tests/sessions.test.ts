@@ -375,6 +375,7 @@ describe('instrument calendars', () => {
     expect(EXCHANGE_HOURS.XTAI.market).toBe('TWSE / TPEx');
     expect(calendarIdForInstrumentId('nasdaq:etf:TLT')).toBe('XNYS');
     expect(calendarIdForInstrumentId('nyse:stock:IBM')).toBe('XNYS');
+    expect(calendarIdForInstrumentId('cboe:etf:GOVT')).toBe('XNYS');
     expect(calendarIdForInstrumentId('treasury:rate:UST10Y')).toBe('USBOND');
     expect(calendarIdForInstrumentId('binance:perp:BTCUSDT')).toBe('24x7');
     expect(calendarIdForInstrumentId('mock:stock:ACME')).toBe('XNYS');

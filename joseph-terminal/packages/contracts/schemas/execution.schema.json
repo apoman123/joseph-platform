@@ -1056,7 +1056,7 @@
           }
         },
         "tradable_venues": {
-          "description": "Exchange venues this broker (or paper account) routes securities to, e.g. ibkr -> nasdaq, nyse; sinopac and cathay -> twse, tpex. Empty for crypto venues, which trade their own instruments.",
+          "description": "Exchange venues this broker (or paper account) routes securities to, e.g. ibkr -> nasdaq, nyse, cboe; sinopac and cathay -> twse, tpex. Empty for crypto venues, which trade their own instruments.",
           "type": "array",
           "items": {
             "$ref": "common.schema.json#/$defs/Venue"

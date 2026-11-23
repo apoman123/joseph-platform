@@ -9,9 +9,9 @@ class Venue(enum.StrEnum):
     """Venue identifiers (contract ``Venue``).
 
     Crypto venues trade their own instruments; ``twse`` (Taiwan Stock
-    Exchange), ``tpex`` (Taipei Exchange mainboard), ``nasdaq`` and ``nyse``
-    are securities exchanges reached through a broker; ``treasury``
-    publishes rates that are never tradable.
+    Exchange), ``tpex`` (Taipei Exchange mainboard), ``nasdaq``, ``nyse``
+    and ``cboe`` (Cboe BZX) are securities exchanges reached through a
+    broker; ``treasury`` publishes rates that are never tradable.
     """
 
     BINANCE = "binance"
@@ -23,6 +23,7 @@ class Venue(enum.StrEnum):
     TPEX = "tpex"
     NASDAQ = "nasdaq"
     NYSE = "nyse"
+    CBOE = "cboe"
     TREASURY = "treasury"
     MOCK = "mock"
 

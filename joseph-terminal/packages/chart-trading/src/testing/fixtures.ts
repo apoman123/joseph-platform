@@ -255,7 +255,7 @@ export function brokerAccount(
         : ['market', 'limit'],
       time_in_force: ibkr ? ['DAY', 'GTC', 'IOC'] : ['DAY', 'IOC', 'FOK'],
       margin_modes: [],
-      tradable_venues: ibkr ? ['nasdaq', 'nyse'] : ['twse', 'tpex'],
+      tradable_venues: ibkr ? ['nasdaq', 'nyse', 'cboe'] : ['twse', 'tpex'],
       cash_account: true,
       short_selling: false,
       outside_rth: ibkr,
@@ -271,7 +271,7 @@ export function brokerAccount(
 
 /**
  * Builds an engine paper account: `acct-paper-*` (USD: crypto, Nasdaq,
- * NYSE) or `acct-twd-paper-*` (TWD: TWSE, TPEx).
+ * NYSE, Cboe BZX) or `acct-twd-paper-*` (TWD: TWSE, TPEx).
  * @param currency Account currency.
  * @return Account summary.
  */
@@ -288,7 +288,7 @@ export function paperAccount(currency: 'USD' | 'TWD'): AccountSummary {
       order_types: ['market', 'limit', 'stop_market', 'stop_limit'],
       time_in_force: ['GTC', 'IOC', 'FOK', 'POST_ONLY', 'DAY'],
       tradable_venues:
-        currency === 'USD' ? ['nasdaq', 'nyse'] : ['twse', 'tpex'],
+        currency === 'USD' ? ['nasdaq', 'nyse', 'cboe'] : ['twse', 'tpex'],
       cash_account: true,
       short_selling: false,
       outside_rth: false,

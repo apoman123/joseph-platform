@@ -110,8 +110,8 @@ export function isExchangeCalendar(id: CalendarId): id is ExchangeCalendarId {
 
 /**
  * Session calendar implied by an instrument id (engine
- * `instruments.calendar_code`): TWSE and TPEx → XTAI, Nasdaq/NYSE → XNYS, Treasury
- * → USBOND, DEMO stocks and ETFs → XNYS, everything else `24x7`.
+ * `instruments.calendar_code`): TWSE and TPEx → XTAI, Nasdaq/NYSE/Cboe → XNYS,
+ * Treasury → USBOND, DEMO stocks and ETFs → XNYS, everything else `24x7`.
  * @param instrumentId Canonical instrument id.
  * @return Calendar id (`24x7` for unparseable ids).
  */
@@ -128,6 +128,7 @@ export function calendarIdForInstrumentId(instrumentId: string): CalendarId {
       return 'XTAI';
     case 'nasdaq':
     case 'nyse':
+    case 'cboe':
       return 'XNYS';
     case 'treasury':
       return 'USBOND';

@@ -249,9 +249,9 @@ def test_funding_operands_are_refused_for_exchange_universes(
 def test_stock_universe_compiles_with_session_calendars(
     make_definition: Make,
 ) -> None:
-    """Long A on nasdaq/nyse compiles; the DEMO venue spans two calendars."""
+    """Long A on nasdaq/nyse/cboe compiles; DEMO spans two calendars."""
     result = compiler.compile_strategy(
-        make_definition(universe=_universe(["nasdaq", "nyse"]))
+        make_definition(universe=_universe(["nasdaq", "nyse", "cboe"]))
     )
     assert result.validation.valid, result.validation.errors
     assert compiler.venue_calendars(instruments.Venue.MOCK) == frozenset(

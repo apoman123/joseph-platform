@@ -138,7 +138,7 @@ async def test_capabilities_negotiate_with_the_gateway() -> None:
     rig = _Rig(host="ib-gateway", port=4004, client_id=9)
     caps = await rig.adapter.capabilities(ACCOUNT)
     assert caps.status is enums.TradingStatus.AVAILABLE
-    assert caps.tradable_venues == ("nasdaq", "nyse")
+    assert caps.tradable_venues == ("nasdaq", "nyse", "cboe")
     assert caps.outside_rth and caps.cash_account and caps.simulation
     assert rig.ib.connects == [
         {"host": "ib-gateway", "port": 4004, "client_id": 9}
@@ -236,6 +236,8 @@ def test_contract_naming() -> None:
     assert ibkr.primary_exchange("NYSE American", "nyse") == "AMEX"
     assert ibkr.primary_exchange(None, "nyse") == "NYSE"
     assert ibkr.primary_exchange("Cboe", "nasdaq") == "NASDAQ"
+    assert ibkr.primary_exchange("Cboe BZX", "cboe") == "BATS"
+    assert ibkr.primary_exchange(None, "cboe") == "BATS"
     with pytest.raises(errors.AdapterUnavailableError):
         ibkr.primary_exchange(None, "twse")
     assert ibkr.ib_symbol("BRK.B") == "BRK B"
@@ -262,6 +264,18 @@ async def test_submit_acknowledges_and_is_idempotent() -> None:
     events = rig.adapter.drain_events(ACCOUNT)
     assert [e.order.status for e in events if e.order] == [S.ACKNOWLEDGED]
     assert rig.adapter.event_accounts() == []
+
+
+async def test_cboe_listings_qualify_on_bats() -> None:
+    """A Cboe BZX ETF is SMART-routed with primaryExchange BATS."""
+    rig = _Rig()
+    result = await rig.adapter.submit_order(
+        _req(rig.cid(1), instrument_id=fixtures.GOVT, limit_price=D(23))
+    )
+    assert result.accepted
+    contract = rig.ib.trades()[0].contract
+    assert (contract.symbol, contract.exchange) == ("GOVT", "SMART")
+    assert contract.primaryExchange == "BATS"
 
 
 async def test_rejections_and_unknown_outcomes() -> None:
@@ -483,6 +497,9 @@ async def test_account_summary_and_positions() -> None:
         fake_ib.FakePosition(
             NUMBER, fake_ib.FakeContract("XYZ", "BATS", conId=3), 1, 1.0
         ),
+        fake_ib.FakePosition(
+            NUMBER, fake_ib.FakeContract("OTC", "PINK", conId=4), 1, 1.0
+        ),
     ]
     rows = {
         p.instrument_id: p.signed_qty
@@ -492,6 +509,7 @@ async def test_account_summary_and_positions() -> None:
         fixtures.SPY: D(5),
         "nyse:stock:BRK.B": D(2),
         "nasdaq:stock:QQQ": D(-3),
+        "cboe:stock:XYZ": D(1),
     }
 
 

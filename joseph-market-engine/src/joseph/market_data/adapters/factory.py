@@ -75,9 +75,9 @@ def build_adapters(
         timeout_s: HTTP timeout.
         client: Optional shared HTTP client (tests inject respx-backed ones).
         connect: WebSocket connector.
-        alpaca_config: Alpaca credentials and feed for ``nasdaq``/``nyse``
-            (unconfigured when omitted: the venues list instruments but
-            data requests ask for keys).
+        alpaca_config: Alpaca credentials and feed for ``nasdaq``,
+            ``nyse`` and ``cboe`` (unconfigured when omitted: the venues
+            list instruments but data requests ask for keys).
 
     Returns:
         Adapter per venue, in the requested order.
@@ -134,7 +134,7 @@ def build_adapters(
     alpaca_source: alpaca.AlpacaSource | None = None
 
     def shared_alpaca() -> alpaca.AlpacaSource:
-        """Returns the Alpaca source shared by ``nasdaq`` and ``nyse``.
+        """Returns the Alpaca source shared by the US exchange venues.
 
         Returns:
             Source.
@@ -226,7 +226,7 @@ def build_adapters(
                 clock,
                 TPEX_VERIFIED_AT_MS,
             )
-        elif venue in (instruments.Venue.NASDAQ, instruments.Venue.NYSE):
+        elif venue in alpaca.VENUES:
             adapters[venue] = alpaca.AlpacaAdapter(
                 venue, shared_alpaca(), clock
             )

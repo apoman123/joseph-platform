@@ -4,9 +4,10 @@ Pure functions shared by the Risk Gateway, the OMS and the paper
 simulator:
 
 * Routing: crypto accounts trade their own venue; broker accounts trade
-  the exchanges their broker serves (``ibkr`` -> Nasdaq/NYSE, ``sinopac``
-  and ``cathay`` -> TWSE and TPEx); paper accounts trade in their own
-  currency. Treasury rates are published series and are never tradable.
+  the exchanges their broker serves (``ibkr`` -> Nasdaq/NYSE/Cboe BZX,
+  ``sinopac`` and ``cathay`` -> TWSE and TPEx); paper accounts trade in
+  their own currency. Treasury rates are published series and are never
+  tradable.
 * Sessions from exchange calendars, DAY-order expiry and settlement days.
 * Price-dependent tick ladders and daily price limits (TWSE and TPEx +-10%
   from the reference price), board lots and intraday odd lots.
@@ -54,6 +55,7 @@ EXCHANGE_VENUES = frozenset(
         enums.Venue.TPEX.value,
         enums.Venue.NASDAQ.value,
         enums.Venue.NYSE.value,
+        enums.Venue.CBOE.value,
     }
 )
 """Securities exchanges reached through a broker."""
@@ -68,7 +70,11 @@ SECURITY_TYPES = frozenset({"stock", "etf"})
 """Market types of exchange-listed cash securities."""
 
 BROKER_EXCHANGES: Mapping[str, tuple[str, ...]] = {
-    enums.Broker.IBKR.value: (enums.Venue.NASDAQ.value, enums.Venue.NYSE.value),
+    enums.Broker.IBKR.value: (
+        enums.Venue.NASDAQ.value,
+        enums.Venue.NYSE.value,
+        enums.Venue.CBOE.value,
+    ),
     enums.Broker.SINOPAC.value: (
         enums.Venue.TWSE.value,
         enums.Venue.TPEX.value,
@@ -92,6 +98,7 @@ EXCHANGE_CURRENCY: Mapping[str, str] = {
     enums.Venue.TPEX.value: "TWD",
     enums.Venue.NASDAQ.value: "USD",
     enums.Venue.NYSE.value: "USD",
+    enums.Venue.CBOE.value: "USD",
 }
 """Trading currency of each exchange's listings."""
 
@@ -110,6 +117,7 @@ DISPLAY_NAMES: Mapping[str, str] = {
     enums.Venue.TPEX.value: "TPEx",
     enums.Venue.NASDAQ.value: "Nasdaq",
     enums.Venue.NYSE.value: "NYSE",
+    enums.Venue.CBOE.value: "Cboe BZX",
     enums.Venue.TREASURY.value: "US Treasury",
 }
 """Human-facing names used in risk messages."""
@@ -130,6 +138,20 @@ def _name(code: str) -> str:
         Display name, else the code.
     """
     return DISPLAY_NAMES.get(code, code)
+
+
+def _listing(names: Sequence[str]) -> str:
+    """Joins names as plain English (``A, B and C``).
+
+    Args:
+        names: Names in order.
+
+    Returns:
+        The joined names.
+    """
+    if len(names) <= 1:
+        return "".join(names)
+    return f"{', '.join(names[:-1])} and {names[-1]}"
 
 
 @dataclasses.dataclass(frozen=True, slots=True)
@@ -272,7 +294,7 @@ def route(  # noqa: PLR0911
     if is_broker(account_venue):
         served = BROKER_EXCHANGES[account_venue]
         if ref.venue not in served:
-            names = " and ".join(_name(v) for v in served)
+            names = _listing([_name(v) for v in served])
             return Route(
                 False,
                 f"{_name(account_venue)} accounts route {names} listings; "
