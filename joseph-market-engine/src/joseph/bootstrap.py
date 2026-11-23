@@ -50,14 +50,19 @@ from joseph.indicators import catalog
 from joseph.indicators import service as indicator_service
 from joseph.indicators.sdk import registry as plugin_registry
 from joseph.market_data.adapters import alpaca
+from joseph.market_data.adapters import binance_vision
+from joseph.market_data.adapters import bitget_archive
 from joseph.market_data.adapters import factory
 from joseph.market_data.adapters import replay as replay_lib
+from joseph.market_data.adapters import trade_archive_sql
 from joseph.market_data.adapters import ws
 from joseph.market_data.app import candle_store
+from joseph.market_data.app import derived_bars
 from joseph.market_data.app import feed_router
 from joseph.market_data.app import ports
 from joseph.market_data.app import registry
 from joseph.market_data.app import service as market_service
+from joseph.market_data.app import trade_recorder
 from joseph.market_data.domain import candles as candle_rules
 from joseph.market_data.domain import health
 from joseph.pipeline import frames as pipeline_frames
@@ -141,6 +146,7 @@ class Container:
         replay: Optional replay source.
         signal_stack: Indicator/strategy/signal/alert services.
         closers: Extra async close hooks registered by integrators.
+        recorder: Optional public-trade recorder.
     """
 
     settings: config.Settings
@@ -163,9 +169,12 @@ class Container:
     closers: list[Callable[[], object]] = dataclasses.field(
         default_factory=list
     )
+    recorder: trade_recorder.TradeRecorder | None = None
 
     async def astart(self) -> None:
         """Starts background workers (pipeline, alert outbox)."""
+        if self.recorder is not None:
+            self.recorder.start()
         stack = self.signal_stack
         if stack is None:
             return
@@ -181,6 +190,8 @@ class Container:
             await stack.outbox_worker.stop()
             await stack.http_client.aclose()
         await self.router.close()
+        if self.recorder is not None:
+            await self.recorder.stop()
         for adapter in self.adapters.values():
             await adapter.close()
         for closer in self.closers:
@@ -211,7 +222,7 @@ def build_container(
     settings = settings or config.Settings.from_env()
     clock = clock or clock_lib.SystemClock()
     metrics = metrics_lib.standard_registry()
-    adapters = factory.build_adapters(
+    raw_adapters = factory.build_adapters(
         settings.active_venues,
         clock,
         timeout_s=settings.http_timeout_s,
@@ -224,6 +235,11 @@ def build_container(
             seconds_history_ms=settings.alpaca_seconds_history_ms,
         ),
     )
+    engine = db.create_engine(settings.database_url)
+    recorder, archive_engine = _trade_recorder(
+        settings, raw_adapters, clock, engine
+    )
+    adapters = derived_bars.wrap(raw_adapters, clock, recorder=recorder)
     hub = streaming.StreamHub(clock, retention=settings.stream_retention)
     event_bus = bus.EventBus()
     # A series must hold an anchored study's whole window (anchor to now).
@@ -255,6 +271,8 @@ def build_container(
             candle: Stored candle.
             action: Merge outcome.
         """
+        if recorder is not None:
+            recorder.touch(candle.instrument_id)
         hub.publish(
             streaming.candle_channel(
                 str(candle.instrument_id),
@@ -309,6 +327,7 @@ def build_container(
         replay=replay,
         stale_after_ms=settings.snapshot_stale_after_ms,
         max_refresh_bars=settings.max_anchored_bars + 10_000,
+        recorded=recorder,
     )
     trending = (
         coingecko.CoinGeckoTrending() if settings.coingecko_enabled else None
@@ -319,7 +338,6 @@ def build_container(
         top_n=settings.top_n,
         trending=trending,
     )
-    engine = db.create_engine(settings.database_url)
     container = Container(
         settings=settings,
         clock=clock,
@@ -337,11 +355,68 @@ def build_container(
         authenticator=auth.TokenAuthenticator(settings.dev_tokens),
         metrics=metrics,
         replay=replay,
+        recorder=recorder,
     )
+    if archive_engine is not None:
+        container.closers.append(archive_engine.dispose)
     if trending is not None:
         container.closers.append(trending.close)
     container.signal_stack = build_signal_stack(container)
     return container
+
+
+def _trade_recorder(
+    settings: config.Settings,
+    adapters: Mapping[instruments.Venue, ports.MarketDataPort],
+    clock: clock_lib.Clock,
+    engine: sa.Engine,
+) -> tuple[trade_recorder.TradeRecorder | None, sa.Engine | None]:
+    """Builds the public-trade recorder and its archive.
+
+    Args:
+        settings: Settings.
+        adapters: Raw venue adapters.
+        clock: Time source.
+        engine: Engine of ``database_url``.
+
+    Returns:
+        ``(recorder, dedicated archive engine)``; the recorder is ``None``
+        when recording is disabled or no real venue is enabled, and the
+        engine is ``None`` when the archive shares ``database_url``.
+    """
+    real = [v for v in adapters if v is not instruments.Venue.MOCK]
+    if not settings.trade_recording or not real:
+        return None, None
+    dedicated = (
+        db.create_engine(settings.trade_archive_url)
+        if settings.trade_archive_url
+        else None
+    )
+    day_archives: list[trade_recorder.DayArchive] = []
+    if settings.binance_archive and instruments.Venue.BINANCE in adapters:
+        day_archives.append(
+            binance_vision.BinanceVision(settings.binance_archive_dir)
+        )
+    if settings.bitget_archive and instruments.Venue.BITGET in adapters:
+        day_archives.append(
+            bitget_archive.BitgetArchive(settings.bitget_archive_dir)
+        )
+    recorder = trade_recorder.TradeRecorder(
+        adapters,
+        trade_archive_sql.SqlTradeArchive(dedicated or engine),
+        clock,
+        trade_recorder.RecorderSettings(
+            retention_ms=int(settings.trade_bar_retention_days * 86_400_000),
+            max_instruments=settings.trade_record_max_instruments,
+            backfill_max_calls=settings.trade_backfill_max_calls,
+            always=tuple(
+                instruments.InstrumentId.parse(value)
+                for value in settings.trade_record_instruments
+            ),
+        ),
+        day_archives=day_archives,
+    )
+    return recorder, dedicated
 
 
 def _channel_policy(

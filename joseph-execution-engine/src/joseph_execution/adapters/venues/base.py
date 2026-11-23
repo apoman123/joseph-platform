@@ -1,8 +1,10 @@
-"""Fail-closed live venue adapter base.
+"""Fail-closed venue adapter.
 
-Live signing and private streams are not implemented or sandbox-verified in
-this build, so every adapter reports ``TRADING_UNAVAILABLE`` and refuses all
-account and trading calls before anything is sent.
+Used wherever no trading adapter can serve an account: venues without
+credentials when no credential source is wired, venues or brokers that
+have no live adapter (for example Cathay), and the resolver fallback for
+unknown venues. It reports ``TRADING_UNAVAILABLE`` and refuses every
+account and trading call before anything is sent.
 """
 
 from __future__ import annotations
@@ -25,13 +27,22 @@ class FailClosedVenueAdapter:
         calls: Names of methods invoked (used by safety tests).
     """
 
-    def __init__(self, documented: accounts.TradingCapabilities) -> None:
+    def __init__(
+        self,
+        documented: accounts.TradingCapabilities,
+        reason: str = (
+            "No live trading adapter or credentials are configured for "
+            "this venue; trading is disabled."
+        ),
+    ) -> None:
         """Initializes the adapter.
 
         Args:
             documented: Capabilities documented by the venue's official API.
+            reason: Why the venue cannot trade (shown in capability notes).
         """
         self._documented = documented
+        self._reason = reason
         self.calls: list[str] = []
 
     @property
@@ -50,7 +61,7 @@ class FailClosedVenueAdapter:
         """
         self.calls.append(method)
         return errors.AdapterUnavailableError(
-            f"{self.name} live trading is not available in this build",
+            f"{self.name} live trading is not available: {self._reason}",
             code="LIVE_TRADING_DISABLED",
         )
 
@@ -69,11 +80,7 @@ class FailClosedVenueAdapter:
         return dataclasses.replace(
             self._documented,
             status=enums.TradingStatus.TRADING_UNAVAILABLE,
-            notes=(
-                *self._documented.notes,
-                "Live order signing and private streams are not implemented "
-                "or sandbox-verified in this build; trading is disabled.",
-            ),
+            notes=(*self._documented.notes, self._reason),
         )
 
     async def health(self) -> enums.HealthState:

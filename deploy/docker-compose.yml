@@ -1,6 +1,7 @@
 # Joseph platform: market engine, execution engine and terminal.
 #   Local:   docker compose -f deploy/docker-compose.yml --env-file deploy/.env up --build
 #   Server:  IMAGE_TAG=sha-<commit> docker compose -f deploy/docker-compose.yml --env-file deploy/.env pull && ... up -d
+#   IBKR:    add --profile ibkr to also run IB Gateway (docs/BROKERS.md)
 # Images default to GHCR; `--build` builds them from this checkout instead.
 name: joseph
 
@@ -38,7 +39,11 @@ services:
 
   execution:
     image: ${IMAGE_REGISTRY:-ghcr.io/joseph}/joseph-execution-engine:${IMAGE_TAG:-latest}
-    build: ../joseph-execution-engine
+    build:
+      context: ../joseph-execution-engine
+      args:
+        # e.g. "--extra ibkr --extra sinopac" to include the broker SDKs.
+        UV_EXTRAS: ${EXECUTION_UV_EXTRAS:-}
     restart: unless-stopped
     depends_on:
       market: {condition: service_healthy}
@@ -50,9 +55,35 @@ services:
       JOSEPH_VAULT_MASTER_KEY: ${JOSEPH_VAULT_MASTER_KEY:-}
       JOSEPH_PREVIEW_SECRET: ${JOSEPH_PREVIEW_SECRET:-}
       JOSEPH_STEP_UP_TOTP_SECRET: ${JOSEPH_STEP_UP_TOTP_SECRET:-}
-      JOSEPH_LIVE_TRADING_ENABLED: "false"
+      # Global LIVE gate: on by default for this deployment (owner
+      # decision 2026-11-23). Every order still needs a verified account,
+      # the Risk Gateway, preview/consent with step-up and no kill switch.
+      JOSEPH_LIVE_TRADING_ENABLED: ${JOSEPH_LIVE_TRADING_ENABLED:-true}
       JOSEPH_EMERGENCY_HALT: ${JOSEPH_EMERGENCY_HALT:-false}
-    volumes: [execution-data:/app/var]
+      JOSEPH_VENUE_SANDBOX: ${JOSEPH_VENUE_SANDBOX:-}
+      JOSEPH_VENUE_URLS: ${JOSEPH_VENUE_URLS:-}
+      JOSEPH_VENUE_TIMEOUT_S: ${JOSEPH_VENUE_TIMEOUT_S:-10}
+      JOSEPH_VENUE_MARKET_SLIPPAGE_BPS: ${JOSEPH_VENUE_MARKET_SLIPPAGE_BPS:-50}
+      JOSEPH_LIVE_STREAMS: ${JOSEPH_LIVE_STREAMS:-true}
+      # Securities brokers (docs/BROKERS.md). Secrets only via *_FILE paths
+      # under /run/joseph-secrets (the JOSEPH_SECRETS_DIR mount).
+      JOSEPH_EQUITY_CLOSED_MARKET_ORDERS: ${JOSEPH_EQUITY_CLOSED_MARKET_ORDERS:-reject}
+      JOSEPH_PAPER_TWD_STARTING_CASH: ${JOSEPH_PAPER_TWD_STARTING_CASH:-3000000}
+      JOSEPH_IBKR_ENABLED: ${JOSEPH_IBKR_ENABLED:-false}
+      JOSEPH_IBKR_HOST: ${JOSEPH_IBKR_HOST:-ib-gateway}
+      JOSEPH_IBKR_PORT: ${JOSEPH_IBKR_PORT:-4004}
+      JOSEPH_IBKR_PAPER: ${JOSEPH_IBKR_PAPER:-true}
+      JOSEPH_IBKR_CLIENT_ID: ${JOSEPH_IBKR_CLIENT_ID:-17}
+      JOSEPH_SINOPAC_ENABLED: ${JOSEPH_SINOPAC_ENABLED:-false}
+      JOSEPH_SINOPAC_SIMULATION: ${JOSEPH_SINOPAC_SIMULATION:-true}
+      JOSEPH_SINOPAC_API_KEY_FILE: ${JOSEPH_SINOPAC_API_KEY_FILE:-}
+      JOSEPH_SINOPAC_SECRET_KEY_FILE: ${JOSEPH_SINOPAC_SECRET_KEY_FILE:-}
+      JOSEPH_SINOPAC_CA_PATH: ${JOSEPH_SINOPAC_CA_PATH:-}
+      JOSEPH_SINOPAC_CA_PASSWORD_FILE: ${JOSEPH_SINOPAC_CA_PASSWORD_FILE:-}
+      JOSEPH_SINOPAC_PERSON_ID_FILE: ${JOSEPH_SINOPAC_PERSON_ID_FILE:-}
+    volumes:
+      - execution-data:/app/var
+      - ${JOSEPH_SECRETS_DIR:-./secrets}:/run/joseph-secrets:ro
     ports: ["${EXECUTION_PORT:-8100}:8100"]
 
   web:
@@ -71,6 +102,31 @@ services:
       execution: {condition: service_healthy}
     ports: ["${WEB_PORT:-3000}:3000"]
 
+  # Optional (--profile ibkr): IB Gateway with IBC, image gnzsnz/ib-gateway
+  # (MIT; IBC is GPL-3.0 and runs unmodified in its own container). The
+  # IBKR login comes only from deploy/.env and a password file; the
+  # gateway's API is reachable only on the compose network (paper 4004,
+  # live 4003, relayed to the gateway's 4002/4001).
+  ib-gateway:
+    profiles: [ibkr]
+    image: ${IB_GATEWAY_IMAGE:-ghcr.io/gnzsnz/ib-gateway:10.50.1h}
+    restart: unless-stopped
+    environment:
+      TWS_USERID: ${IBKR_USERNAME:-}
+      TWS_PASSWORD_FILE: /run/secrets/ibkr_password
+      TRADING_MODE: ${IBKR_TRADING_MODE:-paper}
+      READ_ONLY_API: ${IBKR_READ_ONLY_API:-no}
+      TWOFA_TIMEOUT_ACTION: restart
+      RELOGIN_AFTER_TWOFA_TIMEOUT: "yes"
+      AUTO_RESTART_TIME: ${IBKR_AUTO_RESTART_TIME:-11:45 PM}
+      EXISTING_SESSION_DETECTED_ACTION: primary
+      TIME_ZONE: America/New_York
+      TZ: America/New_York
+      VNC_SERVER_PASSWORD_FILE: ${IBKR_VNC_PASSWORD_FILE:-}
+    secrets: [ibkr_password]
+    # VNC (only when a VNC password file is set) for the first 2FA login.
+    ports: ["127.0.0.1:${IBKR_VNC_PORT:-5900}:5900"]
+
 volumes:
   market-data:
   execution-data:
@@ -78,3 +134,5 @@ volumes:
 secrets:
   pinescripts_token:
     environment: PINESCRIPTS_TOKEN
+  ibkr_password:
+    file: ${IBKR_PASSWORD_FILE:-./secrets/ibkr_password}

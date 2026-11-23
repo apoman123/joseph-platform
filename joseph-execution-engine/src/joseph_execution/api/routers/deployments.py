@@ -95,7 +95,7 @@ def build_router() -> fastapi.APIRouter:
         request: fastapi.Request,
         principal: identity.Principal = _Principal,
     ) -> dict[str, object]:
-        """Grants AUTO_LIVE consent (fails closed in this build).
+        """Grants scoped AUTO_LIVE consent (step-up required).
 
         Args:
             deployment_id: Deployment.

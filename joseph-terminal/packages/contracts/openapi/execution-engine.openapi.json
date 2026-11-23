@@ -160,7 +160,10 @@
               "hyperliquid",
               "lighter",
               "bitget",
-              "mexc"
+              "mexc",
+              "ibkr",
+              "sinopac",
+              "cathay"
             ],
             "title": "Venue",
             "type": "string"
@@ -224,7 +227,7 @@
         "properties": {
           "allowed_instruments": {
             "items": {
-              "pattern": "^(binance|hyperliquid|lighter|bitget|mexc|mock):(perp|spot|future):[A-Za-z0-9._/-]{1,64}$",
+              "pattern": "^(binance|hyperliquid|lighter|bitget|mexc|twse|nasdaq|nyse|treasury|mock):(perp|spot|future|stock|etf|rate):[A-Za-z0-9._/-]{1,64}$",
               "type": "string"
             },
             "title": "Allowed Instruments",
@@ -309,7 +312,7 @@
             "title": "Expires At Ms"
           },
           "instrument_id": {
-            "pattern": "^(binance|hyperliquid|lighter|bitget|mexc|mock):(perp|spot|future):[A-Za-z0-9._/-]{1,64}$",
+            "pattern": "^(binance|hyperliquid|lighter|bitget|mexc|twse|nasdaq|nyse|treasury|mock):(perp|spot|future|stock|etf|rate):[A-Za-z0-9._/-]{1,64}$",
             "title": "Instrument Id",
             "type": "string"
           },
@@ -366,6 +369,11 @@
             ],
             "title": "Order Type",
             "type": "string"
+          },
+          "outside_rth": {
+            "default": false,
+            "title": "Outside Rth",
+            "type": "boolean"
           },
           "position_effect": {
             "enum": [
@@ -442,7 +450,8 @@
               "GTC",
               "IOC",
               "FOK",
-              "POST_ONLY"
+              "POST_ONLY",
+              "DAY"
             ],
             "title": "Time In Force",
             "type": "string"
@@ -1224,7 +1233,7 @@
     },
     "/v1/deployments/{deployment_id}/live-consent": {
       "post": {
-        "description": "Grants AUTO_LIVE consent (fails closed in this build).\n\nArgs:\n    deployment_id: Deployment.\n    body: Consent request.\n    request: Request.\n    principal: Caller.\n\nReturns:\n    Contract ``Deployment``.",
+        "description": "Grants scoped AUTO_LIVE consent (step-up required).\n\nArgs:\n    deployment_id: Deployment.\n    body: Consent request.\n    request: Request.\n    principal: Caller.\n\nReturns:\n    Contract ``Deployment``.",
         "operationId": "live_consent_v1_deployments__deployment_id__live_consent_post",
         "parameters": [
           {

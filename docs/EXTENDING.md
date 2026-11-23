@@ -8,7 +8,7 @@ Every extension is a local change: new files, one registration line, tests. CI f
 2. Create `joseph/market_data/adapters/<venue>.py` implementing `MarketDataPort` (`joseph/market_data/app/ports.py`). Report only verified features in `capabilities()`; raise `UnsupportedError` for the rest.
 3. Register it in `market_data/adapters/factory.py` (`build_adapters` + a rate budget in `_RATES`).
 4. Capture small sanitized API responses in `fixtures/venues/<venue>/` and add respx contract tests; add an opt-in `tests/network` test.
-5. Trading support is separate: add a `TradingAdapter` in `joseph_execution/adapters/venues/` and its capabilities in `venues/catalog.py`. It must fail closed until signing is implemented and sandbox-verified.
+5. Trading support is separate: add a `TradingAdapter` in `joseph_execution/adapters/venues/` and its capabilities in `venues/catalog.py`. Subclass `venues/live.py`'s `LiveVenueAdapter` so the gate, credential and permission guards apply; it must report `TRADING_UNAVAILABLE` until a signed permission probe passes and cite the venue's docs for every endpoint.
 
 Forbidden: changing indicators, strategies or the risk gateway for a venue.
 

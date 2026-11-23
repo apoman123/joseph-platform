@@ -5,13 +5,16 @@ ARG PYTHON_VERSION=3.13
 FROM python:${PYTHON_VERSION}-slim-bookworm AS build
 COPY --from=ghcr.io/astral-sh/uv:0.12.15 /uv /bin/uv
 ENV UV_COMPILE_BYTECODE=1 UV_LINK_MODE=copy UV_PYTHON_DOWNLOADS=never
+# Crypto venue signers (extra "venues") are always installed; broker SDKs
+# are optional, e.g. UV_EXTRAS="--extra ibkr --extra sinopac".
+ARG UV_EXTRAS=""
 WORKDIR /app
 COPY pyproject.toml uv.lock README.md ./
 RUN --mount=type=cache,target=/root/.cache/uv \
-    uv sync --frozen --no-dev --no-install-project
+    uv sync --frozen --no-dev --extra venues --no-install-project ${UV_EXTRAS}
 COPY src ./src
 RUN --mount=type=cache,target=/root/.cache/uv \
-    uv sync --frozen --no-dev --no-editable
+    uv sync --frozen --no-dev --extra venues --no-editable ${UV_EXTRAS}
 
 FROM python:${PYTHON_VERSION}-slim-bookworm
 LABEL org.opencontainers.image.title="joseph-execution-engine" \
