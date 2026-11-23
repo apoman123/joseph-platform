@@ -51,6 +51,15 @@ never spans a session boundary; quiet intervals have no bar (the Alpaca
 minute-bar convention). Buy volume sums the volume of trades classified as
 buys (Lee-Ready, ``classification``) and is reported only when every
 volume-updating trade of the bar was classified.
+
+The one exception is the official closing print: the closing cross is
+stamped just after the close, so a trade with condition ``6`` (market
+center closing trade) stamped in ``[close, close + CLOSING_WINDOW_MS)``
+joins the session's last bar. Every other after-close trade (Form T ``T``,
+late reports, ...) stays out. The XNYS calendar itself keeps no close
+grace because Alpaca's 16:00 minute bar also holds post-market trades. The
+session's last seconds bar therefore settles (becomes final) only once its
+closing window has been delivered.
 """
 
 from __future__ import annotations
@@ -66,6 +75,7 @@ from joseph.domain import market
 from joseph.domain import quality
 from joseph.domain import sessions
 from joseph.domain import timeframes
+from joseph.market_data.domain import candles as candle_rules
 from joseph.market_data.domain import session_bars
 
 
@@ -137,6 +147,82 @@ _RULES: dict[str, tuple[tuple[frozenset[str] | None, UpdateRule], ...]] = {
     "7": ((None, _VOLUME),),
     "9": ((None, _NONE),),
 }
+
+
+CLOSING_TRADE = "6"
+"""Sale condition of the market center closing trade (table above)."""
+CLOSING_WINDOW_MS = 60_000
+"""A closing trade stamped this soon after the close joins the last bar."""
+
+
+def _closing_session(
+    calendar: sessions.BarCalendar, ts_ms: int
+) -> sessions.Session | None:
+    """Returns the session whose closing window contains an instant.
+
+    Args:
+        calendar: Instrument calendar.
+        ts_ms: Instant.
+
+    Returns:
+        The session when ``close <= ts_ms < close + CLOSING_WINDOW_MS``,
+        else ``None`` (always on a continuous calendar).
+    """
+    if not isinstance(calendar, sessions.ExchangeCalendar):
+        return None
+    try:
+        found = calendar.session_at_or_before(ts_ms)
+    except ValueError:
+        return None
+    if found.close_ms <= ts_ms < found.close_ms + CLOSING_WINDOW_MS:
+        return found
+    return None
+
+
+def closing_window_end(
+    instrument_id: instruments.InstrumentId, end_ms: int
+) -> int:
+    """Extends a trade window that ends inside a closing window.
+
+    A window ending at a session close must also read the closing window,
+    or the session's last bar would miss its closing print.
+
+    Args:
+        instrument_id: Instrument.
+        end_ms: Exclusive end of a trade window.
+
+    Returns:
+        The end of the closing window containing ``end_ms``, else
+        ``end_ms``.
+    """
+    found = _closing_session(sessions.for_instrument(instrument_id), end_ms)
+    return end_ms if found is None else found.close_ms + CLOSING_WINDOW_MS
+
+
+def settled_until(
+    instrument_id: instruments.InstrumentId,
+    timeframe: timeframes.Timeframe,
+    delivered_ms: int,
+) -> int:
+    """Returns the time before which bars are settled by delivered trades.
+
+    Trades are delivered completely before ``delivered_ms``. Inside a
+    closing window the session's last bar can still receive the closing
+    print, so the settled time stops at that bar's start.
+
+    Args:
+        instrument_id: Instrument.
+        timeframe: Seconds resolution.
+        delivered_ms: Exclusive end of the complete trades.
+
+    Returns:
+        Settled time (bars ending by it are final).
+    """
+    calendar = sessions.for_instrument(instrument_id)
+    found = _closing_session(calendar, delivered_ms)
+    if found is None:
+        return delivered_ms
+    return calendar.floor(timeframe, found.close_ms - 1)
 
 
 def update_rule(conditions: Iterable[str], tape: str | None) -> UpdateRule:
@@ -280,18 +366,40 @@ class SecondsBarBuilder:
             if aligned != complete_from_ms:
                 self._partial = aligned
 
-    def _bucket_start(self, ts_ms: int) -> int | None:
+    def _bucket_start(self, trade: TapeTrade) -> int | None:
         """Returns the bar of a trade, or ``None`` outside sessions.
 
         Args:
-            ts_ms: Trade time.
+            trade: Trade.
 
         Returns:
-            Bar start.
+            Bar start: the bar containing the trade, or the session's last
+            bar for a closing trade stamped in the closing window.
         """
-        if not self._calendar.is_open(ts_ms):
+        calendar = self._calendar
+        if calendar.is_open(trade.ts_ms):
+            return calendar.floor(self.timeframe, trade.ts_ms)
+        if CLOSING_TRADE not in trade.conditions:
             return None
-        return self._calendar.floor(self.timeframe, ts_ms)
+        found = _closing_session(calendar, trade.ts_ms)
+        if found is None:
+            return None
+        return calendar.floor(self.timeframe, found.close_ms - 1)
+
+    def _settles_at(self, start: int) -> int:
+        """Returns the time after which no trade can join a bar.
+
+        Args:
+            start: Bar start.
+
+        Returns:
+            The bar end, or for a session's last bar the end of its
+            closing window.
+        """
+        end = self._calendar.end_of(self.timeframe, start)
+        if self._calendar.is_open(end):
+            return end
+        return end + CLOSING_WINDOW_MS
 
     def add(
         self, trades: Iterable[TapeTrade], now_ms: int
@@ -311,7 +419,7 @@ class SecondsBarBuilder:
                 self.duplicates += 1
                 continue
             self._seen.add(trade.trade_id)
-            start = self._bucket_start(trade.ts_ms)
+            start = self._bucket_start(trade)
             if start is None:
                 self.outside_session += 1
                 continue
@@ -377,10 +485,37 @@ class SecondsBarBuilder:
                 bucket.unknown = True
         bucket.last_ts = max(bucket.last_ts, trade.ts_ms)
 
+    def coverage(self, delivered_ms: int) -> candle_rules.Span | None:
+        """Returns the span whose every bar the current segment delivered.
+
+        Every trade from the segment's start up to ``delivered_ms`` has
+        been folded, so a slot there without a bar had no trades. The bar
+        of the segment's first trade is partial and not covered, and a
+        session's last bar only once its closing window was delivered.
+
+        Args:
+            delivered_ms: Trades before this time have all been delivered.
+
+        Returns:
+            ``(from, to)``, or ``None`` before the segment's first trade.
+        """
+        if self._complete_from is None:
+            return None
+        start = self._complete_from
+        if self._partial is not None:
+            start = max(
+                start, self._calendar.end_of(self.timeframe, self._partial)
+            )
+        end = settled_until(self.instrument_id, self.timeframe, delivered_ms)
+        return (start, end) if end > start else None
+
     def finalize_through(
         self, proven_ms: int, now_ms: int
     ) -> list[market.Candle]:
-        """Finalizes bars ending at or before a proven delivery time.
+        """Finalizes bars that no undelivered trade can join any more.
+
+        A bar settles at its end; a session's last bar at the end of its
+        closing window (the closing print is stamped after the close).
 
         Args:
             proven_ms: Trades before this time have all been delivered.
@@ -392,9 +527,7 @@ class SecondsBarBuilder:
         touched = set()
         for start in self._starts:
             bucket = self._buckets[start]
-            if not bucket.final and (
-                self._calendar.end_of(self.timeframe, start) <= proven_ms
-            ):
+            if not bucket.final and self._settles_at(start) <= proven_ms:
                 bucket.final = True
                 touched.add(start)
         return self._emit(touched, now_ms)
@@ -465,8 +598,10 @@ def bars_from_trades(
 ) -> list[market.Candle]:
     """Builds the bars of a complete trade interval ``[from, to)``.
 
-    Bars ending by ``to_ms`` are final; a bar straddling ``to_ms`` is
-    returned non-final, and a non-aligned ``from_ms`` makes its bar partial
+    Bars ending by ``to_ms`` are final, except a session's last bar, which
+    is final only once ``to_ms`` passed its closing window (read the window
+    with ``closing_window_end``); a bar straddling ``to_ms`` is returned
+    non-final, and a non-aligned ``from_ms`` makes its bar partial
     (omitted).
 
     Args:

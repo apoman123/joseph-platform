@@ -314,3 +314,165 @@ def test_seconds_builder_segments_sessions_and_duplicates() -> None:
     assert builder.add([_tape("x", 61_000, "11", 1)], _OPEN) == []
     with pytest.raises(ValueError, match="seconds"):
         us_trade_bars.SecondsBarBuilder(_AAPL, _TF.M1, source="test")
+
+
+# Closing print -------------------------------------------------------------
+
+_CLOSE = _SESSION.close_ms
+_EARLY = sessions.XNYS.session(datetime.date(2026, 11, 27))
+assert _EARLY is not None
+_BTC = instruments.InstrumentId.parse("binance:perp:BTCUSDT")
+
+
+def _print(
+    trade_id: str,
+    ts_ms: int,
+    price: str,
+    size: int,
+    conditions: tuple[str, ...],
+) -> us_trade_bars.TapeTrade:
+    """Builds a tape-C trade at an absolute time.
+
+    Args:
+        trade_id: Id.
+        ts_ms: Trade time.
+        price: Price.
+        size: Shares.
+        conditions: Sale conditions.
+
+    Returns:
+        Trade.
+    """
+    return us_trade_bars.TapeTrade(
+        trade_id=trade_id,
+        ts_ms=ts_ms,
+        price=_D(price),
+        size=_D(size),
+        conditions=conditions,
+        tape="C",
+        side=_BUY,
+    )
+
+
+def test_closing_print_condition_is_the_tables_closing_trade() -> None:
+    """Condition 6 is the market center closing trade, updating everything."""
+    assert us_trade_bars.CLOSING_TRADE == "6"
+    rule = us_trade_bars.update_rule((us_trade_bars.CLOSING_TRADE,), "A")
+    assert (rule.open_close, rule.high_low, rule.volume) == (True, True, True)
+    assert us_trade_bars.CLOSING_WINDOW_MS == 60_000
+
+
+def test_closing_print_joins_the_last_seconds_bar() -> None:
+    """The closing cross after 16:00 sets the last bar; Form T does not."""
+    builder = us_trade_bars.SecondsBarBuilder(_AAPL, _TF.S1, source="test")
+    builder.start_segment(_CLOSE - 5_000)
+    last = _CLOSE - 1_000
+    out = builder.add(
+        [
+            _print("r", _CLOSE - 500, "10.00", 100, ("@",)),
+            _print("x", _CLOSE + 400, "10.05", 5_000, ("@", "6")),
+            _print("t", _CLOSE + 5_000, "10.20", 50, ("@", "T")),
+            _print("late", _CLOSE + 61_000, "10.30", 70, ("6",)),
+        ],
+        _CLOSE + 61_000,
+    )
+    assert builder.outside_session == 2  # Form T and the late print.
+    bar = out[-1]
+    assert bar.start_ms == last and bar.end_ms == _CLOSE
+    assert (bar.open, bar.high, bar.low, bar.close) == (
+        _D("10.00"),
+        _D("10.05"),
+        _D("10.00"),
+        _D("10.05"),
+    )
+    assert bar.base_volume == _D(5_100) and bar.trade_count == 2
+    assert not bar.is_final
+    # The last bar settles only once its closing window was delivered.
+    assert builder.finalize_through(_CLOSE + 59_999, _CLOSE + 60_000) == []
+    final = builder.finalize_through(_CLOSE + 60_000, _CLOSE + 60_000)
+    assert [b.start_ms for b in final] == [last] and final[0].is_final
+    assert builder.coverage(_CLOSE + 30_000) == (_CLOSE - 5_000, last)
+    assert builder.coverage(_CLOSE + 60_000) == (
+        _CLOSE - 5_000,
+        _CLOSE + 60_000,
+    )
+
+
+def test_closing_print_on_an_early_close_day() -> None:
+    """On a 13:00 close the window is 13:00-13:01 and joins the 12:59 bar."""
+    builder = us_trade_bars.SecondsBarBuilder(_AAPL, _TF.S5, source="test")
+    close = _EARLY.close_ms
+    builder.start_segment(close - 10_000)
+    bars = builder.add(
+        [
+            _print("r", close - 3_000, "20.00", 10, ("@",)),
+            _print("x", close + 300, "20.40", 900, ("6",)),
+            _print("t", close + 1_000, "21.00", 10, ("T",)),
+        ],
+        close + 2_000,
+    )
+    assert [b.start_ms for b in bars] == [close - 5_000]
+    assert bars[0].close == _D("20.40") and bars[0].base_volume == _D(910)
+    assert us_trade_bars.closing_window_end(_AAPL, close) == close + 60_000
+    assert (
+        us_trade_bars.settled_until(_AAPL, _TF.S5, close + 1) == close - 5_000
+    )
+
+
+def test_bars_from_trades_fold_the_closing_print_when_read() -> None:
+    """A REST window read through the closing window gets the print."""
+    trades = [
+        _print("r", _CLOSE - 1_500, "10.00", 100, ("@",)),
+        _print("x", _CLOSE + 800, "10.10", 4_000, ("@", "6")),
+        _print("t", _CLOSE + 2_000, "10.50", 10, ("@", "T")),
+    ]
+    to_ms = us_trade_bars.closing_window_end(_AAPL, _CLOSE)
+    bars = us_trade_bars.bars_from_trades(
+        trades,
+        _AAPL,
+        _TF.S1,
+        from_ms=_CLOSE - 2_000,
+        to_ms=to_ms,
+        source="test",
+        now_ms=to_ms,
+    )
+    assert [b.start_ms for b in bars] == [_CLOSE - 2_000, _CLOSE - 1_000]
+    assert bars[-1].close == _D("10.10") and bars[-1].is_final
+    assert bars[-1].base_volume == _D(4_000)
+    # Read only up to the close, the print is missing and nothing settles.
+    early = us_trade_bars.bars_from_trades(
+        trades,
+        _AAPL,
+        _TF.S1,
+        from_ms=_CLOSE - 2_000,
+        to_ms=_CLOSE,
+        source="test",
+        now_ms=_CLOSE,
+    )
+    assert early[-1].start_ms == _CLOSE - 2_000 and early[-1].is_final
+
+
+def test_closing_window_helpers_leave_other_times_alone() -> None:
+    """Outside closing windows and on 24x7 venues nothing moves."""
+    window = us_trade_bars.closing_window_end
+    settled = us_trade_bars.settled_until
+    assert window(_AAPL, _CLOSE - 1) == _CLOSE - 1
+    assert window(_AAPL, _CLOSE + 60_000) == _CLOSE + 60_000
+    assert window(_AAPL, _CLOSE + 59_999) == _CLOSE + 60_000
+    assert window(_BTC, _CLOSE) == _CLOSE
+    assert window(_AAPL, 0) == 0  # Before the calendar's first session.
+    assert settled(_AAPL, _TF.S1, _CLOSE + 10_000) == _CLOSE - 1_000
+    assert settled(_AAPL, _TF.S1, _CLOSE + 60_000) == _CLOSE + 60_000
+    assert settled(_BTC, _TF.S1, _CLOSE + 10_000) == _CLOSE + 10_000
+
+
+def test_seconds_builder_coverage_starts_after_the_partial_bar() -> None:
+    """Nothing is covered before the first trade, nor its partial bar."""
+    builder = us_trade_bars.SecondsBarBuilder(_AAPL, _TF.S1, source="test")
+    builder.start_segment(None)
+    assert builder.coverage(_OPEN + 10_000) is None
+    builder.add([_tape("1", 2_500, "10", 1)], _OPEN + 3_000)
+    assert builder.coverage(_OPEN + 10_000) == (_OPEN + 3_000, _OPEN + 10_000)
+    assert builder.coverage(_OPEN + 3_000) is None
+    builder.start_segment(_OPEN + 20_000)
+    assert builder.coverage(_OPEN + 25_000) == (_OPEN + 20_000, _OPEN + 25_000)

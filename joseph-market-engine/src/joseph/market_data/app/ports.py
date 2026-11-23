@@ -7,6 +7,12 @@ implemented raises ``errors.UnsupportedError``; nothing is ever fabricated.
 Seconds candles are built from public trades (``stream_trades`` and
 ``fetch_trades``) because no perpetual venue publishes them as klines.
 ``CandleSource`` is the narrow read port consumed by the indicator engine.
+
+Venues with *sparse bars* (stock exchanges: an interval without trades has
+no bar) declare ``SPARSE_BARS = True`` and implement ``SparseBarsPort``,
+whose fetches and streams also state the spans they delivered completely
+(``candle_rules.CandleCoverage``); missing bars there had no trades and are
+not gaps. Every other venue's bars are dense: a missing bar is a gap.
 """
 
 from __future__ import annotations
@@ -14,10 +20,12 @@ from __future__ import annotations
 from collections.abc import AsyncIterator
 from collections.abc import Sequence
 from typing import Protocol
+from typing import TypeGuard
 
 from joseph.domain import instruments
 from joseph.domain import market
 from joseph.domain import timeframes
+from joseph.market_data.domain import candles as candle_rules
 from joseph.market_data.domain import capabilities
 from joseph.market_data.domain import health
 
@@ -196,6 +204,64 @@ class MarketDataPort(Protocol):
     async def close(self) -> None:
         """Releases network resources."""
         ...
+
+
+class SparseBarsPort(MarketDataPort, Protocol):
+    """Adapter of a venue where an interval without trades has no bar."""
+
+    async def fetch_candle_coverage(
+        self,
+        instrument: instruments.InstrumentId,
+        timeframe: timeframes.Timeframe,
+        start_ms: int,
+        end_ms: int,
+        limit: int | None = None,
+    ) -> candle_rules.CandleCoverage:
+        """Fetches candles like ``fetch_candles``, with their coverage.
+
+        Args:
+            instrument: Exact venue instrument.
+            timeframe: Resolution.
+            start_ms: Inclusive start.
+            end_ms: Exclusive end.
+            limit: Optional maximum number of most recent bars.
+
+        Returns:
+            The candles, the spans of ``[start, end)`` whose every bar was
+            delivered final, and whether the call was complete.
+        """
+        ...
+
+    def stream_candle_coverage(
+        self,
+        instrument: instruments.InstrumentId,
+        timeframe: timeframes.Timeframe,
+        tracker: health.FeedHealthTracker | None = None,
+    ) -> AsyncIterator[candle_rules.CandleCoverage]:
+        """Streams candle updates like ``stream_candles``, with coverage.
+
+        Args:
+            instrument: Exact venue instrument.
+            timeframe: Resolution.
+            tracker: Optional health tracker updated by the stream.
+
+        Returns:
+            Async iterator of updates, each with the spans the live
+            connection proved complete since the previous one.
+        """
+        ...
+
+
+def sparse_bars(adapter: MarketDataPort) -> TypeGuard[SparseBarsPort]:
+    """Checks whether an adapter declares sparse bars.
+
+    Args:
+        adapter: Venue adapter (wrappers and test doubles count as dense).
+
+    Returns:
+        True when the adapter's class sets ``SPARSE_BARS = True``.
+    """
+    return getattr(adapter, "SPARSE_BARS", False) is True
 
 
 class CandleSource(Protocol):

@@ -812,15 +812,19 @@ def _nyse_early_close(day: datetime.date) -> datetime.time | None:
     return None
 
 
-# US bond market (SIFMA recommendation) -----------------------------------
+# US bond market ----------------------------------------------------------
 
 
 @functools.cache
 def _bond_holidays(year: int) -> frozenset[datetime.date]:
-    """Returns US Treasury market closures of a year.
+    """Returns rule-based US Treasury market closures of a year.
 
-    Follows the NYSE holidays (without Good Friday, which SIFMA usually
-    shortens instead of closing) plus Columbus Day and Veterans Day.
+    Used only after the observed publication table (``usbond.json``).
+    Follows the NYSE holidays plus Columbus Day and Veterans Day (the SIFMA
+    recommendation), without Good Friday: Treasury published on some Good
+    Fridays (2015, 2021, 2026) and not on others, and whether it will is
+    known only from SIFMA's yearly announcement, so a future Good Friday is
+    a session. The NYSE special closures are not bond holidays.
 
     Args:
         year: Year.
@@ -837,7 +841,7 @@ def _bond_holidays(year: int) -> frozenset[datetime.date]:
     return frozenset(days)
 
 
-# Taiwan Stock Exchange ---------------------------------------------------
+# Generated calendar tables (TWSE, US Treasury) ---------------------------
 
 
 @dataclasses.dataclass(frozen=True, slots=True)
@@ -893,6 +897,46 @@ def _build_xtai() -> ExchangeCalendar:
     )
 
 
+def _build_usbond() -> ExchangeCalendar:
+    """Builds the US Treasury market calendar from its publication table.
+
+    ``usbond.json`` (``scripts/generate_usbond_calendar.py``) lists every
+    weekday on which Treasury published no par yield curve, so through its
+    ``observed_through`` date the sessions are exactly the publication
+    days (Good Friday in some years only, Martin Luther King Jr. Day closed
+    before 1998, NYSE special closures only where Treasury did not
+    publish).
+
+    Returns:
+        The calendar. Later dates follow ``_bond_holidays``, under which
+        Good Friday is a session.
+    """
+    table = _load_table("usbond")
+
+    def closed(day: datetime.date) -> bool:
+        """Checks a weekday closure.
+
+        Args:
+            day: Weekday.
+
+        Returns:
+            True when the bond market is (or was observed) closed.
+        """
+        if day <= table.covered_through:
+            return day in table.closures
+        return day in _bond_holidays(day.year)
+
+    return ExchangeCalendar(
+        CalendarId.USBOND,
+        "America/New_York",
+        datetime.time(8, 0),
+        datetime.time(17, 0),
+        is_closed=closed,
+        weekend_sessions=table.weekend_sessions,
+        first_day=table.first_day,
+    )
+
+
 CONTINUOUS: BarCalendar = ContinuousCalendar()
 """Calendar of crypto venues and DEMO."""
 
@@ -907,15 +951,8 @@ XNYS = ExchangeCalendar(
 )
 """NYSE and Nasdaq regular trading hours."""
 
-USBOND = ExchangeCalendar(
-    CalendarId.USBOND,
-    "America/New_York",
-    datetime.time(8, 0),
-    datetime.time(17, 0),
-    is_closed=lambda day: day in _bond_holidays(day.year),
-    first_day=datetime.date(1990, 1, 2),
-)
-"""US Treasury market business days."""
+USBOND = _build_usbond()
+"""US Treasury market: the days Treasury publishes its par yield curve."""
 
 XTAI = _build_xtai()
 """Taiwan Stock Exchange regular session."""

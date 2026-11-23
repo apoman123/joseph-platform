@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import dataclasses
+import datetime
 import decimal
 import itertools
 
@@ -13,6 +14,7 @@ from hypothesis import strategies
 from joseph.domain import instruments
 from joseph.domain import market
 from joseph.domain import quality
+from joseph.domain import sessions
 from joseph.domain import timeframes
 from joseph.market_data.domain import candles
 
@@ -212,4 +214,148 @@ def test_revision_of_replaced_dataclass_keeps_identity() -> None:
         _ID,
         _TF,
         _T0,
+    )
+
+
+# Coverage (sparse-bar venues) -------------------------------------------
+
+_XNYS = sessions.XNYS
+_M30 = timeframes.Timeframe.M30
+_FRIDAY = _XNYS.session(datetime.date(2026, 11, 20))
+_MONDAY = _XNYS.session(datetime.date(2026, 11, 23))
+assert _FRIDAY is not None and _MONDAY is not None
+
+
+def _xnys_starts(first: int, end: int) -> list[int]:
+    """Lists XNYS 30m bar starts in ``[first, end)``.
+
+    Args:
+        first: Inclusive start.
+        end: Exclusive end.
+
+    Returns:
+        Ascending bar starts.
+    """
+    out = []
+    cursor = _XNYS.ceil(_M30, first)
+    while cursor < end:
+        out.append(cursor)
+        cursor = _XNYS.shift(_M30, cursor, 1)
+    return out
+
+
+def test_span_helpers_merge_clip_and_subtract() -> None:
+    """Spans unite when touching, clip to a window and lose holes."""
+    assert candles.merge_spans([(5, 9), (0, 3), (3, 4), (7, 12), (2, 2)]) == [
+        (0, 4),
+        (5, 12),
+    ]
+    assert candles.clip_spans([(0, 4), (5, 12)], 2, 6) == [(2, 4), (5, 6)]
+    assert candles.clip_spans([(0, 4)], 4, 9) == []
+    assert candles.subtract_spans([(0, 10), (20, 30)], [(2, 4), (8, 22)]) == [
+        (0, 2),
+        (4, 8),
+        (22, 30),
+    ]
+    assert candles.subtract_spans([(0, 10)], []) == [(0, 10)]
+
+
+def test_find_gaps_skips_quiet_bars_inside_coverage() -> None:
+    """A missing bar wholly inside coverage is quiet; outside it is a gap."""
+    step = _TF.duration_ms
+    starts = [_T0, _T0 + 4 * step]
+    end = _T0 + 8 * step
+    assert candles.find_gaps(starts, _TF, _T0, end) == [
+        (_T0 + step, _T0 + 4 * step),
+        (_T0 + 5 * step, end),
+    ]
+    covered = [(_T0, _T0 + 6 * step + 1)]
+    assert candles.find_gaps(starts, _TF, _T0, end, covered=covered) == [
+        (_T0 + 6 * step, end)
+    ]
+    # A slot only partly covered (from mid-bar) is still missing.
+    partly = [(_T0 + step + 1, _T0 + 3 * step)]
+    assert candles.find_gaps(starts, _TF, _T0, end, covered=partly) == [
+        (_T0 + step, _T0 + 2 * step),
+        (_T0 + 3 * step, _T0 + 4 * step),
+        (_T0 + 5 * step, end),
+    ]
+
+
+def test_find_gaps_coverage_across_sessions() -> None:
+    """Coverage of two sessions leaves no gap; the night belongs to none."""
+    starts = [_FRIDAY.open_ms, _MONDAY.close_ms - 1_800_000]
+    covered = [
+        (_FRIDAY.open_ms, _FRIDAY.close_ms),
+        (_MONDAY.open_ms, _MONDAY.close_ms),
+    ]
+    window = (_FRIDAY.open_ms, _MONDAY.close_ms)
+    assert (
+        candles.find_gaps(
+            starts, _M30, *window, calendar=_XNYS, covered=covered
+        )
+        == []
+    )
+    # Monday morning was not covered: its bars are the only gap, and it
+    # starts at Monday's open, not in the weekend.
+    late = [covered[0], (_MONDAY.open_ms + 3_600_000, _MONDAY.close_ms)]
+    assert candles.find_gaps(
+        starts, _M30, *window, calendar=_XNYS, covered=late
+    ) == [(_MONDAY.open_ms, _MONDAY.open_ms + 3_600_000)]
+
+
+@hypothesis.settings(max_examples=200, deadline=None)
+@hypothesis.given(
+    strategies.lists(strategies.booleans(), min_size=26, max_size=26),
+    strategies.lists(
+        strategies.tuples(
+            strategies.integers(0, 26 * 1_800_000),
+            strategies.integers(0, 6 * 1_800_000),
+        ),
+        max_size=4,
+    ),
+)
+def test_coverage_gaps_match_brute_force(
+    mask: list[bool], raw_spans: list[tuple[int, int]]
+) -> None:
+    """Reported gaps hold exactly the missing, not wholly covered bars."""
+    window = (_FRIDAY.open_ms, _MONDAY.close_ms)
+    slots = _xnys_starts(*window)
+    assert len(slots) == 26
+    present = [s for s, keep in zip(slots, mask, strict=True) if keep]
+    base = _FRIDAY.open_ms + 3 * 3_600_000
+    covered = [(base + a, base + a + b) for a, b in raw_spans]
+    merged = candles.merge_spans(covered)
+    gaps = candles.find_gaps(
+        present, _M30, *window, calendar=_XNYS, covered=covered
+    )
+    reported = {s for low, high in gaps for s in _xnys_starts(low, high)}
+    expected = {
+        s
+        for s in slots
+        if s not in present
+        and not any(
+            low <= s and _XNYS.end_of(_M30, s) <= high for low, high in merged
+        )
+    }
+    assert reported == expected
+    for low, high in gaps:
+        assert _XNYS.is_aligned(_M30, low) and low < high
+
+
+def test_stream_coverage_chains_consecutive_bars() -> None:
+    """Bars of one connection prove the slots between them; restart forgets."""
+    step = _TF.duration_ms
+    chain = candles.StreamCoverage()
+    assert chain.observe(_T0, _T0 + step) is None
+    assert chain.observe(_T0 + 3 * step, _T0 + 4 * step) == (
+        _T0 + step,
+        _T0 + 4 * step,
+    )
+    assert chain.observe(_T0 + step, _T0 + 2 * step) is None  # A revision.
+    chain.restart()
+    assert chain.observe(_T0 + 9 * step, _T0 + 10 * step) is None
+    assert chain.observe(_T0 + 10 * step, _T0 + 11 * step) == (
+        _T0 + 10 * step,
+        _T0 + 11 * step,
     )
