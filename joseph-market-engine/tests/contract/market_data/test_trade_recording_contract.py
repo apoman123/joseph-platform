@@ -336,3 +336,26 @@ async def test_primed_trade_events_start_coverage_at_the_prime_point(
     await events.aclose()  # type: ignore[attr-defined]
     await adapter.close()
     assert first == ws.CoverageStart(clock.now_ms() - 1_000)
+
+
+async def test_bitget_widens_trade_windows_within_one_second(
+    venue_api: respx.Router,
+) -> None:
+    """Bitget returns nothing for bounds in one second, so asks wider."""
+    clock = clock_lib.ManualClock(1_795_349_300_000)
+    adapter = factory.build_adapters(
+        [instruments.Venue.BITGET], clock, client=httpx.AsyncClient()
+    )[instruments.Venue.BITGET]
+    assert isinstance(adapter, base.BaseVenueAdapter)
+    instrument = instruments.InstrumentId.parse(_BTC[instruments.Venue.BITGET])
+    now = clock.now_ms()
+    coverage = await adapter.fetch_trade_coverage(instrument, now - 500, now)
+    await adapter.close()
+    request = next(
+        call.request
+        for call in reversed(venue_api.calls)
+        if call.request.url.path.endswith("/fills-history")
+    )
+    assert int(request.url.params["startTime"]) == now - 2_000
+    assert int(request.url.params["endTime"]) == now - 1
+    assert (coverage.from_ms, coverage.to_ms) == (now - 500, now)

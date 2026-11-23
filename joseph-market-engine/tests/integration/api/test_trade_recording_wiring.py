@@ -34,11 +34,13 @@ def _settings(tmp_path: pathlib.Path, **overrides: object) -> config.Settings:
         database_url="sqlite://",
         enabled_venues=(
             instruments.Venue.BINANCE,
+            instruments.Venue.BITGET,
             instruments.Venue.HYPERLIQUID,
             instruments.Venue.MOCK,
         ),
         pipeline_enabled=False,
         binance_archive_dir=str(tmp_path / "vision"),
+        bitget_archive_dir=str(tmp_path / "bitget"),
     )
     return dataclasses.replace(base, **overrides)  # type: ignore[arg-type]
 
@@ -65,7 +67,15 @@ async def test_container_records_trades_and_wraps_real_venues(
         container.adapters[instruments.Venue.MOCK],
         derived_bars.DerivedBarsAdapter,
     )
-    assert recorder.delta_venues == frozenset({instruments.Venue.HYPERLIQUID})
+    assert recorder.delta_venues == frozenset(
+        {instruments.Venue.HYPERLIQUID, instruments.Venue.BITGET}
+    )
+    for venue, site in (
+        (instruments.Venue.BINANCE, "data.binance.vision"),
+        (instruments.Venue.BITGET, "bitget.com/data-download"),
+    ):
+        notes = container.adapters[venue].capabilities().notes
+        assert any(site in note for note in notes), venue
     caps = container.adapters[instruments.Venue.HYPERLIQUID].capabilities()
     assert timeframes.Timeframe.MN1 in caps.aggregated_timeframes
     await container.astart()

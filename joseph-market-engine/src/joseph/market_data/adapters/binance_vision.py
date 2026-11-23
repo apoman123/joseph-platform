@@ -270,10 +270,17 @@ class BinanceVision:
 
     Attributes:
         venue: Venue whose trades the archive holds.
+        note: Capability note describing the archive.
         cache_dir: Directory of verified zips (``{SYMBOL}/{file}``).
     """
 
     venue = instruments.Venue.BINANCE
+    note = (
+        "Older seconds history is imported from the official "
+        "data.binance.vision daily aggTrades archive (sha256 verified); a "
+        "day's file appears the next day, so the newest day comes from the "
+        "REST window and live recording."
+    )
 
     def __init__(
         self,
@@ -309,6 +316,31 @@ class BinanceVision:
     def _now_s(self) -> float:
         """Returns the monotonic clock in seconds."""
         return self._monotonic()
+
+    @staticmethod
+    def day_of(ts_ms: int) -> datetime.date:
+        """Returns the archive (UTC) day containing a time.
+
+        Args:
+            ts_ms: Epoch milliseconds.
+
+        Returns:
+            UTC date.
+        """
+        return utc_day(ts_ms)
+
+    @staticmethod
+    def day_bounds(day: datetime.date) -> recorded_trades.Interval:
+        """Returns the ``[start, end)`` of an archive (UTC) day.
+
+        Args:
+            day: UTC date.
+
+        Returns:
+            Epoch milliseconds.
+        """
+        start = day_start_ms(day)
+        return start, start + DAY_MS
 
     def url(self, symbol: str, day: datetime.date) -> str:
         """Returns the download URL of a daily file.

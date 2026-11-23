@@ -23,6 +23,7 @@ from joseph.domain import sessions
 from joseph.domain import timeframes
 from joseph.market_data.adapters import base
 from joseph.market_data.adapters import binance_vision
+from joseph.market_data.adapters import bitget_archive
 from joseph.market_data.adapters import factory
 from joseph.market_data.app import derived_bars
 from joseph.market_data.app import ports
@@ -152,6 +153,49 @@ async def test_live_binance_archive_rows_equal_rest_agg_trades(
     for row, trade in zip(rows, tail, strict=True):
         assert int(row["T"]) == trade.venue_event_ts_ms
         assert (trade.aggressor_side is market.AggressorSide.SELL) is row["m"]
+
+
+async def test_live_bitget_archive_day_is_verified_and_matches_rest(
+    tmp_path: pathlib.Path,
+) -> None:
+    """A Bitget archive day folds to its 1D kline and equals fills-history."""
+    quiet = instruments.InstrumentId.parse("bitget:perp:XTZUSDT")
+    archive = bitget_archive.BitgetArchive(tmp_path)
+    now = clock_lib.SystemClock().now_ms()
+    today = bitget_archive.day_of(now)
+    store = trade_archive.MemoryTradeArchive()
+
+    def sink(
+        rows: list[market.Candle], covered: list[recorded_trades.Interval]
+    ) -> None:
+        """Writes into the memory archive.
+
+        Args:
+            rows: Aggregates.
+            covered: Coverage.
+        """
+        store.put(quiet, rows, covered)
+
+    day = today - datetime.timedelta(days=2)
+    assert await archive.import_day(quiet, day, sink, now)
+    start, end = bitget_archive.day_bounds(day)
+    assert store.coverage(quiet, 0, end + _DAY) == [(start, end)]
+    paths = await archive.day_files("XTZUSDT", day)
+    assert paths is not None
+    first = next(bitget_archive.BitgetArchive._trades(paths[:1], quiet, 0))
+    raw = _adapter(instruments.Venue.BITGET)
+    assert isinstance(raw, base.BaseVenueAdapter)
+    coverage = await raw.fetch_trade_coverage(
+        quiet, first.venue_event_ts_ms, first.venue_event_ts_ms + 1_000
+    )
+    await raw.close()
+    await archive.close()
+    rest = {t.trade_id: t for t in coverage.trades}
+    match = rest[first.trade_id]
+    assert match.aggressor_side is first.aggressor_side
+    assert match.base_quantity == first.base_quantity
+    assert match.price == first.price
+    assert match.venue_event_ts_ms // 1000 * 1000 == first.venue_event_ts_ms
 
 
 async def test_live_binance_aggregated_month_equals_native() -> None:

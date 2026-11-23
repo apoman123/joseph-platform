@@ -486,9 +486,40 @@ async def test_backfill_stops_on_no_progress_and_failures() -> None:
 
 
 class FakeDays:
-    """Day-archive double: scripted outcome per day."""
+    """Day-archive double (UTC days): scripted outcome per day."""
 
     venue = instruments.Venue.BINANCE
+    note = "fake day archive"
+
+    @staticmethod
+    def day_of(ts_ms: int) -> datetime.date:
+        """Returns the UTC date of a time.
+
+        Args:
+            ts_ms: Epoch milliseconds.
+
+        Returns:
+            Date.
+        """
+        return datetime.datetime.fromtimestamp(
+            ts_ms / 1000, datetime.UTC
+        ).date()
+
+    @staticmethod
+    def day_bounds(day: datetime.date) -> recorded_trades.Interval:
+        """Returns the UTC bounds of a date.
+
+        Args:
+            day: Date.
+
+        Returns:
+            ``(start, end)``.
+        """
+        moment = datetime.datetime(
+            day.year, day.month, day.day, tzinfo=datetime.UTC
+        )
+        start = int(moment.timestamp()) * 1000
+        return start, start + _DAY
 
     def __init__(self, outcomes: dict[datetime.date, bool | Exception]) -> None:
         """Initializes the double.
@@ -527,7 +558,7 @@ class FakeDays:
         if isinstance(outcome, Exception):
             raise outcome
         if outcome:
-            start = trade_recorder._day_start(day)
+            start = FakeDays.day_bounds(day)[0]
             sink([], [(start, start + _DAY)])
         del instrument, received_ms
         return outcome
@@ -552,7 +583,7 @@ class FakeDays:
 async def test_day_archive_backfill_and_on_demand_imports() -> None:
     """Newest published days first; unpublished yesterday is skipped."""
     now = _T0
-    today = trade_recorder._utc_day(now)
+    today = FakeDays.day_of(now)
     one = datetime.timedelta(days=1)
     days = FakeDays(
         {
@@ -571,7 +602,7 @@ async def test_day_archive_backfill_and_on_demand_imports() -> None:
         trade_recorder.RecorderSettings(
             archive_backfill_days=1, archive_request_days=2
         ),
-        day_archive=days,
+        day_archives=[days],
         sleep=_fast_sleep,
     )
     assert recorder.delta_venues == frozenset()
@@ -579,9 +610,9 @@ async def test_day_archive_backfill_and_on_demand_imports() -> None:
     assert days.requests == []
     assert await recorder.backfill(_BN) is None
     assert days.requests == [today - one, today - 2 * one]
-    start = trade_recorder._day_start(today - 4 * one)
+    start = FakeDays.day_bounds(today - 4 * one)[0]
     bars = await recorder.seconds_bars(
-        _BN, _TF.S1, start, trade_recorder._day_start(today - one)
+        _BN, _TF.S1, start, FakeDays.day_bounds(today - one)[0]
     )
     assert bars == []
     assert days.requests[2:] == [today - 3 * one, today - 4 * one]
@@ -595,7 +626,7 @@ async def test_day_archive_backfill_and_on_demand_imports() -> None:
     assert today - 3 * one not in days.requests[4:]
     assert days.requests[-1] == today - 5 * one
     notes = recorder.history_notes(instruments.Venue.BINANCE)
-    assert any("data.binance.vision" in note for note in notes)
+    assert "fake day archive" in notes
     assert recorder.history_notes(instruments.Venue.MEXC) == ()
     recorder.prune_now()
     assert days.pruned
