@@ -70,8 +70,26 @@
         "CRYPTO",
         "RWA",
         "EQUITY",
+        "BOND",
         "UNKNOWN"
       ]
+    },
+    "TickStep": {
+      "title": "TickStep",
+      "description": "One rung of a price-dependent tick ladder: prices at or above min_price move in tick_size steps.",
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["min_price", "tick_size"],
+      "properties": {
+        "min_price": {"$ref": "common.schema.json#/$defs/NonNegativeDecimalString"},
+        "tick_size": {"$ref": "common.schema.json#/$defs/NonNegativeDecimalString"}
+      }
+    },
+    "BuyVolumeMethod": {
+      "title": "BuyVolumeMethod",
+      "description": "Origin of a bar's buy volume. `taker`: the venue's aggressor flag (true delta). `classified`: trades classified against the prevailing quote (Lee-Ready / quote rule) on markets that publish no aggressor side, such as stock exchanges.",
+      "type": "string",
+      "enum": ["taker", "classified"]
     },
     "Instrument": {
       "title": "Instrument",
@@ -165,7 +183,41 @@
         },
         "as_of_ms": {
           "$ref": "common.schema.json#/$defs/TimestampMs"
+        },
+        "calendar": {
+          "description": "Session calendar that defines bar boundaries and market hours (default 24x7).",
+          "$ref": "common.schema.json#/$defs/CalendarId"
+        },
+        "listing_exchange": {
+          "description": "Exchange that lists a security, e.g. `Nasdaq`, `NYSE Arca`, `TWSE`; null for crypto.",
+          "type": ["string", "null"]
+        },
+        "tick_ladder": {
+          "description": "Price-dependent ticks (TWSE). Empty when tick_size applies at every price.",
+          "type": "array",
+          "items": {"$ref": "#/$defs/TickStep"}
+        },
+        "price_limit_pct": {
+          "description": "Daily price limit from the reference price in percent (TWSE 10); null when unlimited.",
+          "oneOf": [{"$ref": "common.schema.json#/$defs/NonNegativeDecimalString"}, {"type": "null"}]
+        },
+        "board_lot": {
+          "description": "Shares per board lot (TWSE 1000); null when orders are in single units.",
+          "oneOf": [{"$ref": "common.schema.json#/$defs/NonNegativeDecimalString"}, {"type": "null"}]
         }
+      }
+    },
+    "SessionList": {
+      "title": "SessionList",
+      "description": "Trading sessions of a calendar overlapping [from_ms, to_ms). Empty for 24x7 markets, which never close.",
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["calendar", "sessions", "from_ms", "to_ms"],
+      "properties": {
+        "calendar": {"$ref": "common.schema.json#/$defs/CalendarId"},
+        "sessions": {"type": "array", "items": {"$ref": "common.schema.json#/$defs/TradingSession"}},
+        "from_ms": {"$ref": "common.schema.json#/$defs/TimestampMs"},
+        "to_ms": {"$ref": "common.schema.json#/$defs/TimestampMs"}
       }
     },
     "InstrumentList": {
@@ -264,6 +316,10 @@
               "type": "null"
             }
           ]
+        },
+        "taker_buy_method": {
+          "description": "How taker_buy_base_volume was obtained; null when it is null.",
+          "oneOf": [{"$ref": "#/$defs/BuyVolumeMethod"}, {"type": "null"}]
         },
         "is_final": {
           "type": "boolean"
@@ -862,6 +918,14 @@
         "taker_volume": {
           "description": "The venue's klines (1m and above) carry taker_buy_base_volume, so true delta is available on every timeframe. Seconds bars built from trades (trade_built_timeframes) carry it on every venue regardless of this flag.",
           "type": "boolean"
+        },
+        "trade_delta": {
+          "description": "1m-and-above bars fully covered by recorded public trades carry a true delta summed from the trades' aggressor side, although the venue's klines carry none.",
+          "type": "boolean"
+        },
+        "classified_delta": {
+          "description": "The market publishes no aggressor side (stock exchanges); buy volume is classified from trades against the prevailing quote (taker_buy_method = classified).",
+          "type": "boolean"
         }
       }
     },
@@ -906,6 +970,28 @@
           "items": {
             "$ref": "common.schema.json#/$defs/Timeframe"
           }
+        },
+        "aggregated_timeframes": {
+          "description": "Subset of timeframes the engine aggregates from a shorter native timeframe that tiles it exactly (e.g. 1M from 1d where the venue publishes no monthly bars).",
+          "type": "array",
+          "items": {"$ref": "common.schema.json#/$defs/Timeframe"}
+        },
+        "calendar": {
+          "description": "Session calendar of the venue's instruments.",
+          "$ref": "common.schema.json#/$defs/CalendarId"
+        },
+        "data_delay_ms": {
+          "description": "Delay of the data this deployment is entitled to (e.g. 900000 on a free consolidated feed); null when real time.",
+          "type": ["integer", "null"],
+          "minimum": 0
+        },
+        "requires_credentials": {
+          "description": "The data source needs an API key (e.g. Alpaca for Nasdaq/NYSE).",
+          "type": "boolean"
+        },
+        "credentials_configured": {
+          "description": "Whether that key is configured on this deployment (true when none is required).",
+          "type": "boolean"
         },
         "notes": {
           "type": "array",

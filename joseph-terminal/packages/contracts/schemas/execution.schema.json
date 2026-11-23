@@ -985,7 +985,7 @@
       ],
       "properties": {
         "venue": {
-          "$ref": "common.schema.json#/$defs/Venue"
+          "$ref": "common.schema.json#/$defs/TradingVenue"
         },
         "status": {
           "$ref": "#/$defs/TradingStatus"
@@ -1088,7 +1088,7 @@
           "type": "string"
         },
         "venue": {
-          "$ref": "common.schema.json#/$defs/Venue"
+          "$ref": "common.schema.json#/$defs/TradingVenue"
         },
         "label": {
           "type": "string"

@@ -27,6 +27,12 @@ class MarketDataCapabilities:
         funding: Funding-rate endpoint.
         trades_history: Historical trades over REST for a time range.
         taker_volume: Candles carry ``taker_buy_base_volume`` (true delta).
+        trade_delta: 1m-and-above bars fully covered by recorded public
+            trades carry a true delta summed from the trades' aggressor
+            side, even though the venue's klines carry none.
+        classified_delta: The market publishes no aggressor side (stock
+            exchanges); buy volume is classified from trades against the
+            prevailing quote (``taker_buy_method = classified``).
     """
 
     rest_history: bool = False
@@ -38,6 +44,8 @@ class MarketDataCapabilities:
     funding: bool = False
     trades_history: bool = False
     taker_volume: bool = False
+    trade_delta: bool = False
+    classified_delta: bool = False
 
     def to_contract(self) -> dict[str, bool]:
         """Serializes to the contract object.
@@ -65,6 +73,14 @@ class VenueCapabilities:
         trade_built_timeframes: Subset of ``timeframes`` that the engine
             builds from the venue's public trade stream (seconds bars),
             because the venue publishes no such klines.
+        aggregated_timeframes: Subset of ``timeframes`` the engine
+            aggregates from a shorter native timeframe that tiles it exactly
+            (e.g. ``1M`` from ``1d`` where the venue has no monthly bars).
+        data_delay_ms: Delay of the data the feed is entitled to (e.g. 15
+            minutes on a free consolidated feed); ``None`` when real time.
+        requires_credentials: The data source needs an API key.
+        credentials_configured: Whether that key is configured on this
+            deployment (always True when none is required).
     """
 
     venue: instruments.Venue
@@ -76,18 +92,26 @@ class VenueCapabilities:
     docs_url: str
     verified_at_ms: int | None = None
     trade_built_timeframes: tuple[timeframes_lib.Timeframe, ...] = ()
+    aggregated_timeframes: tuple[timeframes_lib.Timeframe, ...] = ()
+    data_delay_ms: int | None = None
+    requires_credentials: bool = False
+    credentials_configured: bool = True
 
     def __post_init__(self) -> None:
-        """Validates that trade-built timeframes are declared timeframes.
+        """Validates that derived timeframes are declared timeframes.
 
         Raises:
-            ValueError: If a trade-built timeframe is not in ``timeframes``.
+            ValueError: If a trade-built or aggregated timeframe is not in
+                ``timeframes``.
         """
-        extra = set(self.trade_built_timeframes) - set(self.timeframes)
-        if extra:
-            raise ValueError(
-                "trade_built_timeframes must be a subset of timeframes"
-            )
+        for name in ("trade_built_timeframes", "aggregated_timeframes"):
+            if set(getattr(self, name)) - set(self.timeframes):
+                raise ValueError(f"{name} must be a subset of timeframes")
+
+    @property
+    def calendar(self) -> str:
+        """Returns the venue's session calendar id."""
+        return instruments.calendar_code(self.venue)
 
     def supports_timeframe(self, timeframe: timeframes_lib.Timeframe) -> bool:
         """Checks timeframe support.
@@ -126,6 +150,13 @@ class VenueCapabilities:
             "trade_built_timeframes": [
                 tf.value for tf in self.trade_built_timeframes
             ],
+            "aggregated_timeframes": [
+                tf.value for tf in self.aggregated_timeframes
+            ],
+            "calendar": self.calendar,
+            "data_delay_ms": self.data_delay_ms,
+            "requires_credentials": self.requires_credentials,
+            "credentials_configured": self.credentials_configured,
             "notes": list(self.notes),
             "docs_url": self.docs_url,
             "verified_at_ms": self.verified_at_ms,

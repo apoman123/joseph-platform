@@ -26,21 +26,51 @@
     },
     "Venue": {
       "title": "Venue",
-      "description": "Execution venue identifier. `mock` is the synthetic DEMO venue and is never tradable live.",
+      "description": "Market venue identifier: a crypto venue, a securities exchange (`twse`, `nasdaq`, `nyse`; `nyse` also covers NYSE Arca and NYSE American listings) or a rate publisher (`treasury`, US Treasury yield curves). `mock` is the synthetic DEMO venue and is never tradable live.",
       "type": "string",
-      "enum": ["binance", "hyperliquid", "lighter", "bitget", "mexc", "mock"]
+      "enum": ["binance", "hyperliquid", "lighter", "bitget", "mexc", "twse", "nasdaq", "nyse", "treasury", "mock"]
+    },
+    "Broker": {
+      "title": "Broker",
+      "description": "Securities broker that executes orders on exchange venues: `ibkr` (Interactive Brokers: nasdaq, nyse), `sinopac` (SinoPac Shioaji: twse), `cathay` (Cathay Securities: twse).",
+      "type": "string",
+      "enum": ["ibkr", "sinopac", "cathay"]
+    },
+    "TradingVenue": {
+      "title": "TradingVenue",
+      "description": "Where an account trades: a crypto venue (orders go to the venue itself) or a securities broker.",
+      "type": "string",
+      "enum": ["binance", "hyperliquid", "lighter", "bitget", "mexc", "ibkr", "sinopac", "cathay", "mock"]
+    },
+    "CalendarId": {
+      "title": "CalendarId",
+      "description": "Session calendar. `24x7` markets never close and use UTC-aligned bars. Exchange calendars align intraday bars to the session open (the last bar of a session is cut at the close), make a daily bar one session and weekly/monthly bars the sessions of an ISO week/calendar month in exchange time. XTAI: TWSE 09:00-13:30 Asia/Taipei. XNYS: NYSE/Nasdaq 09:30-16:00 America/New_York with early closes. USBOND: US Treasury market business days 08:00-17:00 America/New_York.",
+      "type": "string",
+      "enum": ["24x7", "XTAI", "XNYS", "USBOND"]
+    },
+    "TradingSession": {
+      "title": "TradingSession",
+      "description": "One trading session [open_ms, close_ms).",
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["day", "open_ms", "close_ms"],
+      "properties": {
+        "day": {"type": "string", "format": "date", "description": "Exchange-local trading date."},
+        "open_ms": {"$ref": "#/$defs/TimestampMs"},
+        "close_ms": {"$ref": "#/$defs/TimestampMs"}
+      }
     },
     "MarketType": {
       "title": "MarketType",
-      "description": "Product type at the venue.",
+      "description": "Product type at the venue. `stock` and `etf` are exchange-listed cash securities; `rate` is a published, non-tradable rate series (Treasury par and real yields, in percent).",
       "type": "string",
-      "enum": ["perp", "spot", "future"]
+      "enum": ["perp", "spot", "future", "stock", "etf", "rate"]
     },
     "InstrumentId": {
       "title": "InstrumentId",
-      "description": "Canonical venue-scoped instrument id `{venue}:{market_type}:{venue_market_id}`, e.g. `binance:perp:BTCUSDT` or `hyperliquid:perp:BTC`. The same base asset on two venues is two instruments.",
+      "description": "Canonical venue-scoped instrument id `{venue}:{market_type}:{venue_market_id}`, e.g. `binance:perp:BTCUSDT`, `hyperliquid:perp:BTC`, `twse:stock:2330`, `nasdaq:etf:TLT` or `treasury:rate:UST10Y`. The same base asset on two venues is two instruments.",
       "type": "string",
-      "pattern": "^(binance|hyperliquid|lighter|bitget|mexc|mock):(perp|spot|future):[A-Za-z0-9._/-]{1,64}$"
+      "pattern": "^(binance|hyperliquid|lighter|bitget|mexc|twse|nasdaq|nyse|treasury|mock):(perp|spot|future|stock|etf|rate):[A-Za-z0-9._/-]{1,64}$"
     },
     "Timeframe": {
       "title": "Timeframe",

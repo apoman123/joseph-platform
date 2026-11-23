@@ -23,15 +23,26 @@ class Venue(enum.StrEnum):
     LIGHTER = "lighter"
     BITGET = "bitget"
     MEXC = "mexc"
+    TWSE = "twse"
+    NASDAQ = "nasdaq"
+    NYSE = "nyse"
+    TREASURY = "treasury"
     MOCK = "mock"
 
 
 class MarketType(enum.StrEnum):
-    """Product type at a venue (contract ``MarketType``)."""
+    """Product type at a venue (contract ``MarketType``).
+
+    ``stock`` and ``etf`` are exchange-listed cash securities; ``rate`` is a
+    published, non-tradable rate series such as a Treasury par yield.
+    """
 
     PERP = "perp"
     SPOT = "spot"
     FUTURE = "future"
+    STOCK = "stock"
+    ETF = "etf"
+    RATE = "rate"
 
 
 class InstrumentStatus(enum.StrEnum):
@@ -50,13 +61,72 @@ class AssetClass(enum.StrEnum):
     CRYPTO = "CRYPTO"
     RWA = "RWA"
     EQUITY = "EQUITY"
+    BOND = "BOND"
     UNKNOWN = "UNKNOWN"
 
 
 _ID_PATTERN = re.compile(
-    r"^(binance|hyperliquid|lighter|bitget|mexc|mock):(perp|spot|future):"
-    r"([A-Za-z0-9._/-]{1,64})$"
+    r"^(binance|hyperliquid|lighter|bitget|mexc|twse|nasdaq|nyse|treasury"
+    r"|mock):(perp|spot|future|stock|etf|rate):([A-Za-z0-9._/-]{1,64})$"
 )
+
+EXCHANGE_VENUES = frozenset({Venue.TWSE, Venue.NASDAQ, Venue.NYSE})
+"""Venues that are securities exchanges (session calendars, brokers)."""
+
+RATE_VENUES = frozenset({Venue.TREASURY})
+"""Venues that publish non-tradable rate series."""
+
+_CALENDAR_BY_VENUE: dict[Venue, str] = {
+    Venue.TWSE: "XTAI",
+    Venue.NASDAQ: "XNYS",
+    Venue.NYSE: "XNYS",
+    Venue.TREASURY: "USBOND",
+}
+
+
+def calendar_code(venue: Venue, market_type: MarketType | None = None) -> str:
+    """Returns the session calendar id of a venue's instruments.
+
+    DEMO stocks and ETFs (``mock:stock:*``) follow the NYSE calendar so the
+    session-aware paths can be exercised without network access.
+
+    Args:
+        venue: Venue.
+        market_type: Product type, when known.
+
+    Returns:
+        Contract ``CalendarId`` (``24x7`` for crypto venues).
+    """
+    if venue is Venue.MOCK and market_type in (
+        MarketType.STOCK,
+        MarketType.ETF,
+    ):
+        return "XNYS"
+    return _CALENDAR_BY_VENUE.get(venue, "24x7")
+
+
+@dataclasses.dataclass(frozen=True, slots=True, order=True)
+class TickStep:
+    """One rung of a price-dependent tick ladder.
+
+    Attributes:
+        min_price: Prices at or above this use ``tick_size``.
+        tick_size: Price increment.
+    """
+
+    min_price: decimal.Decimal
+    tick_size: decimal.Decimal
+
+    def to_contract(self) -> dict[str, str]:
+        """Serializes to the contract ``TickStep`` object.
+
+        Returns:
+            JSON-compatible dict.
+        """
+        return {
+            "min_price": decimals.format_decimal(self.min_price),
+            "tick_size": decimals.format_decimal(self.tick_size),
+        }
 
 
 @dataclasses.dataclass(frozen=True, slots=True, order=True)
@@ -158,6 +228,14 @@ class Instrument:
         min_notional: Optional minimum order notional in quote currency.
         funding_interval_hours: Funding interval, ``None`` when unknown.
         max_leverage: Optional maximum leverage.
+        listing_exchange: Exchange that lists a security (e.g. ``NYSE
+            Arca``), ``None`` for crypto.
+        tick_ladder: Price-dependent ticks (TWSE); empty when ``tick_size``
+            applies at every price.
+        price_limit_pct: Daily price limit from the reference price in
+            percent (TWSE 10), ``None`` when unlimited.
+        board_lot: Shares per board lot (TWSE 1000), ``None`` when orders
+            are in single units.
     """
 
     key: InstrumentKey
@@ -175,6 +253,32 @@ class Instrument:
     min_notional: decimal.Decimal | None = None
     funding_interval_hours: float | None = None
     max_leverage: decimal.Decimal | None = None
+    listing_exchange: str | None = None
+    tick_ladder: tuple[TickStep, ...] = ()
+    price_limit_pct: decimal.Decimal | None = None
+    board_lot: decimal.Decimal | None = None
+
+    @property
+    def calendar(self) -> str:
+        """Returns the session calendar id."""
+        return calendar_code(
+            self.instrument_id.venue, self.instrument_id.market_type
+        )
+
+    def tick_for(self, price: decimal.Decimal) -> decimal.Decimal:
+        """Returns the tick size that applies at a price.
+
+        Args:
+            price: Price.
+
+        Returns:
+            The ladder tick at ``price``, else ``tick_size``.
+        """
+        tick = self.tick_size
+        for step in sorted(self.tick_ladder):
+            if price >= step.min_price:
+                tick = step.tick_size
+        return tick
 
     @property
     def instrument_id(self) -> InstrumentId:
@@ -206,4 +310,9 @@ class Instrument:
             "asset_class": self.asset_class.value,
             "source": self.source,
             "as_of_ms": self.as_of_ms,
+            "calendar": self.calendar,
+            "listing_exchange": self.listing_exchange,
+            "tick_ladder": [step.to_contract() for step in self.tick_ladder],
+            "price_limit_pct": decimals.format_optional(self.price_limit_pct),
+            "board_lot": decimals.format_optional(self.board_lot),
         }

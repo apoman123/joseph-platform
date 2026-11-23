@@ -38,7 +38,9 @@ _BTC = {
     instruments.Venue.BITGET: "bitget:perp:BTCUSDT",
     instruments.Venue.MEXC: "mexc:perp:BTC_USDT",
 }
-_REAL = [v for v in instruments.Venue if v is not instruments.Venue.MOCK]
+# Crypto venues with recorded fixtures; exchange and rate venues are added
+# as their adapters land.
+_REAL = list(_BTC)
 
 
 def _fixture(venue: str, name: str) -> Any:

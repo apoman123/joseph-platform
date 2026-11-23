@@ -27,22 +27,61 @@ export type NonNegativeDecimalString = string;
  */
 export type TimestampMs = number;
 /**
- * Execution venue identifier. `mock` is the synthetic DEMO venue and is never tradable live.
+ * Market venue identifier: a crypto venue, a securities exchange (`twse`, `nasdaq`, `nyse`; `nyse` also covers NYSE Arca and NYSE American listings) or a rate publisher (`treasury`, US Treasury yield curves). `mock` is the synthetic DEMO venue and is never tradable live.
  *
  * This interface was referenced by `JosephContracts`'s JSON-Schema
  * via the `definition` "Venue".
  */
 export type Venue =
-  'binance' | 'hyperliquid' | 'lighter' | 'bitget' | 'mexc' | 'mock';
+  | 'binance'
+  | 'hyperliquid'
+  | 'lighter'
+  | 'bitget'
+  | 'mexc'
+  | 'twse'
+  | 'nasdaq'
+  | 'nyse'
+  | 'treasury'
+  | 'mock';
 /**
- * Product type at the venue.
+ * Securities broker that executes orders on exchange venues: `ibkr` (Interactive Brokers: nasdaq, nyse), `sinopac` (SinoPac Shioaji: twse), `cathay` (Cathay Securities: twse).
+ *
+ * This interface was referenced by `JosephContracts`'s JSON-Schema
+ * via the `definition` "Broker".
+ */
+export type Broker = 'ibkr' | 'sinopac' | 'cathay';
+/**
+ * Where an account trades: a crypto venue (orders go to the venue itself) or a securities broker.
+ *
+ * This interface was referenced by `JosephContracts`'s JSON-Schema
+ * via the `definition` "TradingVenue".
+ */
+export type TradingVenue =
+  | 'binance'
+  | 'hyperliquid'
+  | 'lighter'
+  | 'bitget'
+  | 'mexc'
+  | 'ibkr'
+  | 'sinopac'
+  | 'cathay'
+  | 'mock';
+/**
+ * Session calendar. `24x7` markets never close and use UTC-aligned bars. Exchange calendars align intraday bars to the session open (the last bar of a session is cut at the close), make a daily bar one session and weekly/monthly bars the sessions of an ISO week/calendar month in exchange time. XTAI: TWSE 09:00-13:30 Asia/Taipei. XNYS: NYSE/Nasdaq 09:30-16:00 America/New_York with early closes. USBOND: US Treasury market business days 08:00-17:00 America/New_York.
+ *
+ * This interface was referenced by `JosephContracts`'s JSON-Schema
+ * via the `definition` "CalendarId".
+ */
+export type CalendarId = '24x7' | 'XTAI' | 'XNYS' | 'USBOND';
+/**
+ * Product type at the venue. `stock` and `etf` are exchange-listed cash securities; `rate` is a published, non-tradable rate series (Treasury par and real yields, in percent).
  *
  * This interface was referenced by `JosephContracts`'s JSON-Schema
  * via the `definition` "MarketType".
  */
-export type MarketType = 'perp' | 'spot' | 'future';
+export type MarketType = 'perp' | 'spot' | 'future' | 'stock' | 'etf' | 'rate';
 /**
- * Canonical venue-scoped instrument id `{venue}:{market_type}:{venue_market_id}`, e.g. `binance:perp:BTCUSDT` or `hyperliquid:perp:BTC`. The same base asset on two venues is two instruments.
+ * Canonical venue-scoped instrument id `{venue}:{market_type}:{venue_market_id}`, e.g. `binance:perp:BTCUSDT`, `hyperliquid:perp:BTC`, `twse:stock:2330`, `nasdaq:etf:TLT` or `treasury:rate:UST10Y`. The same base asset on two venues is two instruments.
  *
  * This interface was referenced by `JosephContracts`'s JSON-Schema
  * via the `definition` "InstrumentId".
@@ -357,7 +396,14 @@ export type InstrumentStatus =
  * This interface was referenced by `JosephContracts`'s JSON-Schema
  * via the `definition` "AssetClass".
  */
-export type AssetClass = 'CRYPTO' | 'RWA' | 'EQUITY' | 'UNKNOWN';
+export type AssetClass = 'CRYPTO' | 'RWA' | 'EQUITY' | 'BOND' | 'UNKNOWN';
+/**
+ * Origin of a bar's buy volume. `taker`: the venue's aggressor flag (true delta). `classified`: trades classified against the prevailing quote (Lee-Ready / quote rule) on markets that publish no aggressor side, such as stock exchanges.
+ *
+ * This interface was referenced by `JosephContracts`'s JSON-Schema
+ * via the `definition` "BuyVolumeMethod".
+ */
+export type BuyVolumeMethod = 'taker' | 'classified';
 /**
  * [price, base_quantity] pair.
  *
@@ -529,6 +575,20 @@ export type PriceScaleMode = 'linear' | 'log' | 'percent';
  */
 export type LayoutId = '1' | '2h' | '2v' | '4' | '8';
 
+/**
+ * One trading session [open_ms, close_ms).
+ *
+ * This interface was referenced by `JosephContracts`'s JSON-Schema
+ * via the `definition` "TradingSession".
+ */
+export interface TradingSession {
+  /**
+   * Exchange-local trading date.
+   */
+  day: string;
+  open_ms: TimestampMs;
+  close_ms: TimestampMs;
+}
 /**
  * Validation failure for one request field.
  *
@@ -793,7 +853,7 @@ export interface Position {
  * via the `definition` "TradingCapabilities".
  */
 export interface TradingCapabilities {
-  venue: Venue;
+  venue: TradingVenue;
   status: TradingStatus;
   order_types: OrderType[];
   time_in_force: TimeInForce[];
@@ -816,7 +876,7 @@ export interface TradingCapabilities {
 export interface AccountSummary {
   account_id: string;
   tenant_id: string;
-  venue: Venue;
+  venue: TradingVenue;
   label: string;
   status: AccountStatus;
   /**
@@ -1174,6 +1234,16 @@ export interface InstrumentKey {
   instrument_version: number;
 }
 /**
+ * One rung of a price-dependent tick ladder: prices at or above min_price move in tick_size steps.
+ *
+ * This interface was referenced by `JosephContracts`'s JSON-Schema
+ * via the `definition` "TickStep".
+ */
+export interface TickStep {
+  min_price: NonNegativeDecimalString;
+  tick_size: NonNegativeDecimalString;
+}
+/**
  * Venue instrument with precision and contract metadata.
  *
  * This interface was referenced by `JosephContracts`'s JSON-Schema
@@ -1196,6 +1266,35 @@ export interface Instrument {
   asset_class: AssetClass;
   source: string;
   as_of_ms: TimestampMs;
+  calendar?: CalendarId;
+  /**
+   * Exchange that lists a security, e.g. `Nasdaq`, `NYSE Arca`, `TWSE`; null for crypto.
+   */
+  listing_exchange?: string | null;
+  /**
+   * Price-dependent ticks (TWSE). Empty when tick_size applies at every price.
+   */
+  tick_ladder?: TickStep[];
+  /**
+   * Daily price limit from the reference price in percent (TWSE 10); null when unlimited.
+   */
+  price_limit_pct?: NonNegativeDecimalString | null;
+  /**
+   * Shares per board lot (TWSE 1000); null when orders are in single units.
+   */
+  board_lot?: NonNegativeDecimalString | null;
+}
+/**
+ * Trading sessions of a calendar overlapping [from_ms, to_ms). Empty for 24x7 markets, which never close.
+ *
+ * This interface was referenced by `JosephContracts`'s JSON-Schema
+ * via the `definition` "SessionList".
+ */
+export interface SessionList {
+  calendar: CalendarId;
+  sessions: TradingSession[];
+  from_ms: TimestampMs;
+  to_ms: TimestampMs;
 }
 /**
  * This interface was referenced by `JosephContracts`'s JSON-Schema
@@ -1227,6 +1326,10 @@ export interface Candle {
    * Base volume of trades whose aggressor bought (venue-published or summed from the venue's public trades). Enables true volume delta; null when the venue publishes neither.
    */
   taker_buy_base_volume?: NonNegativeDecimalString | null;
+  /**
+   * How taker_buy_base_volume was obtained; null when it is null.
+   */
+  taker_buy_method?: BuyVolumeMethod | null;
   is_final: boolean;
   revision: number;
   /**
@@ -1387,6 +1490,14 @@ export interface MarketDataCapabilities {
    * The venue's klines (1m and above) carry taker_buy_base_volume, so true delta is available on every timeframe. Seconds bars built from trades (trade_built_timeframes) carry it on every venue regardless of this flag.
    */
   taker_volume?: boolean;
+  /**
+   * 1m-and-above bars fully covered by recorded public trades carry a true delta summed from the trades' aggressor side, although the venue's klines carry none.
+   */
+  trade_delta?: boolean;
+  /**
+   * The market publishes no aggressor side (stock exchanges); buy volume is classified from trades against the prevailing quote (taker_buy_method = classified).
+   */
+  classified_delta?: boolean;
 }
 /**
  * This interface was referenced by `JosephContracts`'s JSON-Schema
@@ -1402,6 +1513,23 @@ export interface VenueCapabilities {
    * Subset of timeframes the engine builds from the venue's public trade stream (seconds bars), because the venue publishes no such klines. History is limited to what the venue's trade history endpoint returns.
    */
   trade_built_timeframes?: Timeframe[];
+  /**
+   * Subset of timeframes the engine aggregates from a shorter native timeframe that tiles it exactly (e.g. 1M from 1d where the venue publishes no monthly bars).
+   */
+  aggregated_timeframes?: Timeframe[];
+  calendar?: CalendarId;
+  /**
+   * Delay of the data this deployment is entitled to (e.g. 900000 on a free consolidated feed); null when real time.
+   */
+  data_delay_ms?: number | null;
+  /**
+   * The data source needs an API key (e.g. Alpaca for Nasdaq/NYSE).
+   */
+  requires_credentials?: boolean;
+  /**
+   * Whether that key is configured on this deployment (true when none is required).
+   */
+  credentials_configured?: boolean;
   notes: string[];
   docs_url: string;
   verified_at_ms?: TimestampMs | null;

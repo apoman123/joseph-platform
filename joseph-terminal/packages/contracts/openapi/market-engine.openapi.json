@@ -2230,6 +2230,10 @@
           "lighter",
           "bitget",
           "mexc",
+          "twse",
+          "nasdaq",
+          "nyse",
+          "treasury",
           "mock"
         ],
         "title": "Venue",
