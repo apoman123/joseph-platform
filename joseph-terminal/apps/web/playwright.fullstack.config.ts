@@ -5,9 +5,9 @@
  */
 import {defineConfig, devices} from '@playwright/test';
 
-const WEB = 3158;
-const MARKET = 18_000;
-const EXECUTION = 18_100;
+const WEB = Number(process.env.E2E_WEB_PORT ?? 3158);
+const MARKET = Number(process.env.E2E_MARKET_PORT ?? 18_000);
+const EXECUTION = Number(process.env.E2E_EXECUTION_PORT ?? 18_100);
 const TOKEN = 'fullstack-token';
 const SERVICE = 'fullstack-service-token';
 const ROOT = '../../..';
@@ -73,7 +73,10 @@ export default defineConfig({
       url: `http://127.0.0.1:${WEB}`,
       timeout: 300_000,
       reuseExistingServer: false,
-      env: {...API, NEXT_DIST_DIR: '.next/fullstack'},
+      env: {
+        ...API,
+        NEXT_DIST_DIR: process.env.E2E_DIST_DIR ?? '.next/fullstack',
+      },
     },
   ],
 });

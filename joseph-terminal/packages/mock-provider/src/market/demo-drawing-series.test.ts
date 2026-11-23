@@ -6,9 +6,19 @@ import {readFileSync, readdirSync} from 'node:fs';
 import {join} from 'node:path';
 import Ajv2020 from 'ajv/dist/2020';
 import addFormats from 'ajv-formats';
-import {TIMEFRAME_MS, floorToTimeframe, type Candle} from '@joseph/contracts';
+import {
+  ApiError,
+  TIMEFRAME_MS,
+  floorToTimeframe,
+  type Candle,
+} from '@joseph/contracts';
 import {describe, expect, it} from 'vitest';
-import {anchoredVwapPoints, regressionValues} from './demo-drawing-series';
+import {
+  DEMO_ANCHOR_REFUSAL,
+  DEMO_SERIES_BAR_CAP,
+  anchoredVwapPoints,
+  regressionValues,
+} from './demo-drawing-series';
 import {DemoMarketDataClient} from './demo-market-client';
 
 const SCHEMA_DIR = join(__dirname, '..', '..', '..', 'contracts', 'schemas');
@@ -116,7 +126,7 @@ describe('anchored VWAP (DEMO engine)', () => {
     expect(series.points.at(-1)?.values.upper_3).toBeNull();
   });
 
-  it('returns null values when the anchor is more than 2000 bars back', async () => {
+  it('computes from anchors far back (more than the old 2000 bars)', async () => {
     const anchor = LAST - 2500 * DURATION;
     const series = await client.getIndicatorSeries({
       instrumentId: 'mock:perp:BTCUSD',
@@ -126,9 +136,25 @@ describe('anchored VWAP (DEMO engine)', () => {
       settings: {anchor: 'time', anchor_ms: anchor, band_1: '1'},
     });
     expect(validSeries(series)).toBe(true);
-    expect(series.points).toHaveLength(2000);
-    expect(series.points.every(p => p.values.vwap === null)).toBe(true);
-    expect(series.points[0]?.values.anchor_ms).toBeNull();
+    expect(series.points).toHaveLength(2501);
+    expect(series.points[0]?.values.anchor_ms).toBe(anchor);
+    expect(series.points.at(-1)?.values.vwap).toMatch(/^\d+(\.\d+)?$/);
+  });
+
+  it('refuses anchors more than 50 000 bars back like the engine', async () => {
+    const anchor = LAST - DEMO_SERIES_BAR_CAP * DURATION;
+    const refused = client.getIndicatorSeries({
+      instrumentId: 'mock:perp:BTCUSD',
+      timeframe: '5m',
+      pluginId: 'anchored_vwap',
+      fromMs: anchor,
+      settings: {anchor: 'time', anchor_ms: anchor, band_1: '1'},
+    });
+    await expect(refused).rejects.toBeInstanceOf(ApiError);
+    await expect(refused).rejects.toMatchObject({
+      status: 422,
+      body: {message: DEMO_ANCHOR_REFUSAL},
+    });
   });
 
   it('rejects malformed settings like the engine', async () => {
@@ -186,7 +212,7 @@ describe('regression channel (DEMO engine)', () => {
     });
   });
 
-  it('publishes the channel at the t2 bar, null when t1 is too old', async () => {
+  it('publishes the channel at the t2 bar, also for a t1 far back', async () => {
     const t1 = LAST - 50 * DURATION;
     const t2 = LAST - 10 * DURATION;
     const query = {
@@ -205,12 +231,12 @@ describe('regression channel (DEMO engine)', () => {
     expect(Number(point?.values.upper_end)).toBeGreaterThan(
       Number(point?.values.end)
     );
-    const tooOld = await client.getIndicatorSeries({
+    const farBack = LAST - 2400 * DURATION;
+    const long = await client.getIndicatorSeries({
       ...query,
-      settings: {anchor_ms: LAST - 2400 * DURATION, deviations: '2'},
+      settings: {anchor_ms: farBack, deviations: '2'},
     });
-    const nulls = tooOld.points.find(p => p.bar_start_ms === t2);
-    expect(nulls?.values.start).toBeNull();
-    expect(nulls?.values.start_ms).toBeNull();
+    const atEnd = long.points.find(p => p.bar_start_ms === t2);
+    expect(atEnd?.values).toMatchObject({start_ms: farBack, bars: 2391});
   });
 });

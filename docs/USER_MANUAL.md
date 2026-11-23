@@ -1,6 +1,6 @@
 # Joseph Terminal — user manual
 
-Joseph is a multi-venue perpetual-futures terminal: charts with your drawings, backend-computed SMC zones, a qualification screener, rule-based strategies with alerts, and paper/shadow trading. **Live order placement is not enabled in this release.**
+Joseph is a multi-venue terminal for crypto perpetuals, Taiwan stocks (TWSE), US stocks (Nasdaq/NYSE) and US bonds and rates (Treasury yields and bond ETFs): charts with your drawings, backend-computed SMC zones, a qualification screener, rule-based strategies with alerts, and paper, shadow and live trading. Live orders go through crypto venues, Interactive Brokers (US) and SinoPac Shioaji (TWSE), only when the execution engine enables them; Cathay is listed as *awaiting API SDK*. Futures and options are not offered.
 
 ## 1. Screen layout
 
@@ -32,10 +32,10 @@ Magenta marks are **yours** (drawings, draft orders, rule cards). Green/red are 
 
 ## 3. Charts
 
-- **Instrument**: click the symbol → pick a venue (or *All venues*) → search `BTC`. Results are exact venue instruments: `binance:perp:BTCUSDT` and `hyperliquid:perp:BTC` are different contracts.
+- **Instrument**: click the symbol to open the market picker. Tabs group instruments by asset class — **Crypto**, **Taiwan stocks**, **US stocks**, **Bonds & rates** (Treasury yields and bond ETFs) — and *All* lists every group in sections. Search by symbol (`BTC`, `AAPL`, `2330`) or by name, including Chinese names on TWSE (`台積電`); narrow to one venue with the venue menu. Results are exact venue instruments: `binance:perp:BTCUSDT` and `hyperliquid:perp:BTC` are different contracts. Each row shows the venue badge, the listing exchange (e.g. *NYSE Arca* for an ETF listed there), the type and the quote currency or *Yield, %*. An amber *Delayed 15 min* badge means this deployment only receives delayed data for that venue; a red *No API key* badge means the venue's data source (Alpaca for Nasdaq/NYSE) has no key configured, so its charts stay empty until the operator adds one.
 - **Timeframe**: favorite buttons; *More* for every timeframe from `1s` to `1M`, ★ to pin favorites, or type a resolution (see *Timeframes* below). **Chart type**: candles, bars, line, area, Heikin Ashi (display only — never used for signals). **Scale**: linear, log, percent.
 - **Pane header**: feed mode (Auto, WebSocket, REST polling) and link group (*Unlinked*, *Link A–D*: linked charts follow each other when sync is on).
-- **Layouts**: *Layout* → 1, 2, 4 or 8 charts; toggle sync of crosshair, instrument, timeframe and viewport. Workspaces autosave; *⌘K → Export workspace* saves JSON, *Copy workspace share link* shares it.
+- **Layouts**: *Layout* → 1, 2, 4 or 8 charts; toggle sync of crosshair, instrument, timeframe and viewport. Workspaces autosave; *⌘K → Export workspace* saves JSON (with your drawings), *Copy workspace share link* shares the layout.
 - **Layers**: show/hide each indicator; ⚙ opens its settings for this chart — engine **inputs** (validated against the plugin's schema and sent with every query), which **zone kinds** to draw, per-kind and per-marker **colors**, event markers and, for order flow, the **Delta % pane**. *Market structure* draws HH/HL/LH/LL/EQH/EQL, BOS/MSS/initial-break markers with break lines, and dashed rays for the unbroken swing high/low. *Session breaks* draws UTC separators (minute/hour on seconds, day below 1d, week/month/year on 1d/1w/1M); *Data window* shows OHLC, change, volume, Delta % and compared closes under the crosshair. *Show or hide ended zones* reveals invalidated/swept history. By default the 4 most recent zones per kind and side are drawn.
 - **Panes**: volume and the order-flow **Delta %** pane (see *True delta* below) sit below the price pane (drag the separator to resize). The Delta pane shows ±threshold lines from `min_delta_share`; if the engine can't serve the series it says *unavailable* instead of drawing anything.
 - **Compare**: add up to 3 instruments; they share a percentage axis on the left, measured from the first visible bar. Remove with × on the chip.
@@ -51,10 +51,21 @@ Magenta marks are **yours** (drawings, draft orders, rule cards). Green/red are 
 - Timeframes the chart's venue doesn't publish are dimmed with the reason. Seconds marked *trades* are built by the engine from the venue's public trades, so their history is short.
 - Seconds charts show seconds on the time axis; session breaks become minutes (`1s`) or hours (`5s`–`30s`), and years on `1M`. The chip next to the timeframe counts down to the bar close; monthly bars close on the 1st, and the data window shows each bar's close (*Closes*).
 
+### Session markets (stocks, ETFs, Treasury yields)
+
+- Exchange-listed instruments trade in **sessions**: TWSE 09:00–13:30 Taipei, NYSE/Nasdaq 09:30–16:00 New York (13:00 on early-close days), Treasury yields on bond-market days 08:00–17:00 New York. Bars follow the exchange calendar exactly as the engine builds them: intraday bars start at the open and repeat every timeframe, and the last bar is cut at the close (NYSE `1h`: 09:30, 10:30 … 15:30–16:00); a daily bar is one session; weekly and monthly bars hold the sessions of a week or calendar month. TWSE's 13:30 closing auction belongs to the last bar.
+- The chart has **no empty time between sessions**: every bar takes one slot, so Friday's last bar sits right next to Monday's first and nights, weekends and holidays don't stretch the axis. Drawings anchored in the future or further back than the loaded bars are placed by counting session bars too. *Layers → Session breaks* draws a dotted line at each new session (week on `1d`, month on `1w`).
+- Times on the axis, the crosshair, the data window (*Closes*) and the status badge are **exchange time** (`ET`, `TPE`); crypto charts stay in UTC.
+- The **market status badge** in the chart header says *Open · closes 16:00 ET* or *Closed · opens Mon 09:30 ET* (with a countdown within 12 hours), *Holiday* on exchange holidays and *Early close today at 13:00 ET*. The bar countdown chip runs while the market is open. Calendars come from the market engine (`/v1/calendars/…/sessions`, loaded around what you look at); until they arrive, regular weekday hours are assumed.
+- **Prices** use the instrument's tick: TWSE prices follow the exchange's tick ladder (e.g. `48.55` below 50, `585` between 500 and 1000), US stocks two decimals. The header shows the listing exchange and currency (*NYSE · USD*, *TWSE · TWD*).
+- **Volume**: TWSE volume in the data window and Market panel is in **board lots (張, 1 張 = 1,000 shares)** — what Taiwanese quote screens and brokers show; hover the row for the unit. The volume pane keeps shares in compact form (e.g. `25.3M`), as on TradingView. US stocks and ETFs show shares (`52,300 sh`).
+- **Yields** (e.g. *US 10-Year Treasury yield*) open as a **line chart** in percent (`4.253%`), with no volume and no Delta pane. Yields are published rates, not tradable instruments: the order ticket says so instead of showing a form, and right-click trading is off.
+- In DEMO mode, `mock:stock:ACME` (NYSE hours), `mock:etf:TLTD` (a bond ETF), `mock:stock:9901` (示範半導體, TWSE hours, tick ladder, ±10% limit, 1,000-share lots) and `mock:rate:UST10Y` exercise these paths offline.
+
 ### True delta
 
-- The **Delta %** pane draws the engine's value per bar. **True** bars (solid) come from the venue's taker buy/sell volume; **estimate** bars (faint) sign the bar volume by candle direction when the venue publishes no taker volume. The pane title says which you see: *Delta % (true)*, *(estimate)* or *(true; faint = estimate)*.
-- The data window adds *Delta source* (True or Estimate) and, for true bars, *Buy volume* and *Sell volume*.
+- The **Delta %** pane draws the engine's value per bar. **True** bars (solid) come from the venue's taker buy/sell volume; **classified** bars come from stock exchanges, which publish no aggressor side: the engine classifies each trade as a buy or sell against the prevailing quote (Lee–Ready); **estimate** bars (faint) sign the bar volume by candle direction when neither is available. The pane title says which you see: *Delta % (true)*, *(classified)*, *(estimate)* or a mix such as *(true; faint = estimate)*.
+- The data window adds *Delta source* — *True (taker volume)*, *Classified (Lee–Ready)* or *Estimate* — and, for true and classified bars, *Buy volume* and *Sell volume*.
 - Layers → ⚙ Order flow → **Delta source**: *auto* (true when available) or *estimate* (always the estimate).
 
 ### Detachable panes
@@ -62,7 +73,9 @@ Magenta marks are **yours** (drawings, draft orders, rule cards). Green/red are 
 - Open a chart (window button in its header) or the Market, Watchlist, Screener or Alerts panel (window button beside the panel tabs) **in another window**. The slot shows *Open in another window* with **Focus window** and **Bring back**.
 - The window follows the main one: link groups and sync (symbol, timeframe), crosshair, theme and workspace changes. Changes made there (symbol, timeframe, drawings, layers) come back to the main window.
 - Closing the window, or *Bring back* in either window, docks the pane again; a window that stops responding is docked automatically.
-- Detached panes are saved with the layout. After a reload, click **Re-open detached windows** (browsers only open windows from a click; Chrome allows one per click) or *Keep here*.
+- Reloading the terminal doesn't close detached windows: they keep running, show *Reconnecting to the window that kept running…* for a moment and link up again by themselves — no click needed. While the main window reloads, a pop-out's link dot shows an amber ring; changes you make there (symbol, timeframe, drawings, layers) are kept and sent to the main window when it is back.
+- After a full browser restart the windows are gone, but the layout remembers them: click **Restore pop-outs** in the banner (or *⌘K → Restore pop-outs*) to open them again where they were, or *Keep here* to dock them.
+- Browsers only open windows from a click: Chrome, Edge, Firefox and Safari open one window per click unless pop-ups are allowed for the site. Allow pop-ups for this site (the blocked-pop-up icon in the address bar) and one click restores every window; otherwise click *Restore pop-outs* once per window — the terminal says how many it could open.
 - Each window has its own data connection (DEMO or engine) and the same trading guards: Paper by default, nothing from a replaying chart, Live only when the execution engine allows it. In DEMO each window simulates its own paper broker.
 
 ### Drawing tools (left toolbar)
@@ -88,9 +101,9 @@ Pattern ratios come from your own anchor prices; the Objects tab lists them (for
 - **Anchored VWAP**: click one bar. The engine's VWAP (hlc3) runs from that bar to the latest closed bar. *Band 1–3* in the style bar add ±0.5σ to ±3σ bands; *Fill* shades band 1.
 - **Regression channel**: click (or drag from) the first bar, then the last bar. The engine fits the closes between them. *Deviations* sets the channel width (1σ–3σ), *Pearson's R* shows the fit label and *Fill* shades the channel.
 
-Both re-request their values when you move an anchor or a bar closes, follow bar replay, and show their values in the data window (*Anchored VWAP*, *VWAP ±1σ*, *Regression end*, *Channel upper/lower*, *Pearson's R*) and the Objects tab. The engine covers the latest 2000 bars: an older anchor shows *Anchor is more than 2000 bars back — move it closer* instead of a line; drag it closer. If the engine can't answer, the drawing reads *Engine values unavailable* and draws nothing.
+Both re-request their values when you move an anchor or a bar closes, follow bar replay, and show their values in the data window (*Anchored VWAP*, *VWAP ±1σ*, *Regression end*, *Channel upper/lower*, *Pearson's R*) and the Objects tab. The engine computes from anchors up to 50,000 bars back. Only when the engine refuses an anchor does the drawing show the engine's own message (and the data window says *refused by the engine*); drag the anchor closer. If the engine can't be reached, the drawing reads *Engine values unavailable* and draws nothing. On session markets anchors snap to session bars.
 
-Drawings are saved per instrument in this browser; *Export workspace* saves layout and chart settings, not drawings.
+Drawings are saved per instrument in this browser. *⌘K → Export workspace* saves a JSON file with the layout, chart settings **and the drawings of every instrument** in the workspace (format 2; drawings from tools that were removed or from a newer version are included unchanged). *⌘K → Import a workspace* accepts that file (up to 2 MB) as well as older exports without drawings: the layout is replaced, and each instrument in the file replaces that instrument's saved drawings — instruments not in the file keep theirs. Open charts show the imported drawings at once; unreadable entries are skipped and counted in the message. Share links still carry only the layout, never drawings.
 
 ## 4. Watchlist and screener
 
@@ -117,9 +130,15 @@ Signals fire only on **closed bars**, never on history that closed before activa
 
 *Sort → Bar volume* ranks signals by the signal bar's **quote turnover** (the *Bar vol.* column, compact, e.g. `1.2M`; hover for the exact value). It is the venue-published turnover of the evaluated bar, comparable across instruments, and never estimated: *—* means the venue publishes none, and those signals sort last.
 
-## 7. Trading (paper and shadow)
+## 7. Trading (paper, shadow and live)
 
-1. *Order ticket*: choose account and mode (**Paper**; **Shadow** records what would be sent; **Live** is disabled with the reason shown).
+- **Accounts**: the *Accounts* tab (bottom dock) lists every account the execution engine reports — crypto venues, Interactive Brokers (Nasdaq/NYSE), SinoPac Shioaji and Cathay (TWSE) — with connection (*Connected*, *Disconnected*, *Verifying permissions*, *Read only*), whether credentials are configured, the permitted modes, equity and the engine's notes. Cathay shows *Awaiting API SDK*: it can't take orders until Cathay releases a trading API.
+- **Routing**: the ticket picks an account that trades the instrument: IBKR for US stocks and ETFs, SinoPac or Cathay for TWSE, the venue's own account for crypto. Choosing another account shows why it can't be used.
+- **Stock orders**: quantities are whole shares. On TWSE, choose *Board lot (張)* (1 張 = 1,000 shares) or *Odd lot (零股)* (1–999 shares); the hint shows the share count. Prices snap to the TWSE tick ladder, and a price outside today's ±10% limit around the previous close is refused before preview. Time in force is DAY or GTC on IBKR and DAY on TWSE brokers (as the account's capabilities allow). IBKR limit orders can *Allow outside regular trading hours*. When the exchange is closed, or closes early, the ticket says when the next session opens and what that means for your order. Stocks have no leverage, reduce-only or attached stop/target; prices and the preview's *Cash required* are in the instrument's currency (USD, TWD).
+- **Live trading**: *Live* is available only when the execution engine enables it for the account (LIVE among its modes and the adapter available). Clicking it asks you to **arm** live trading for that account: confirm that you understand it is real money and, if the engine asks for one, enter your step-up code. Live stays armed for 15 minutes, or until you click *Disarm* or switch account. Each LIVE order then opens a confirmation listing **LIVE money**, broker, account, action, quantity (shares and 張), price, currency and estimated value; tick *Send this order with real money* to send it. Nothing in the browser can enable LIVE; the engine re-checks every order.
+- **Rates**: Treasury yields such as UST10Y are published rates, not tradable instruments, so they have no order ticket and no chart trading menu. Trade a bond ETF to take a position on rates.
+
+1. *Order ticket*: choose account and mode (**Paper**; **Shadow** records what would be sent; **Live** only as described above, otherwise disabled with the reason shown).
 2. Pick Buy/Sell, type (market, limit, stop), quantity (*Size from risk* computes it from a stop and % of equity), leverage, reduce-only, stop-loss/take-profit.
 3. **Preview** shows normalized (tick/lot-rounded) values, notional, fee, margin, slippage, whether protection is venue-native or software-managed, and every risk check.
 4. The confirm button names the exact action ("Place paper limit buy 0.010 BTC at 95,000.0"). Any edit invalidates the preview. Double-clicking sends one order.
@@ -144,7 +163,11 @@ After submission the ticket shows the venue-reported state (*Submitting*, *Ackno
 | Message | What to do |
 |---|---|
 | *Candles didn't load: venue … is not enabled* | The market engine doesn't serve that venue; pick another or ask the operator to enable it |
+| *No API key* badge in the market picker | The venue's data source (Alpaca for Nasdaq/NYSE) has no key on this deployment; ask the operator to configure it |
+| *Delayed 15 min* badge | This deployment is entitled to delayed data only for that venue; prices and bars lag by that much |
+| Chart header says *Closed · opens …* | The exchange is between sessions; bars resume at the next open and nothing is drawn for the night or weekend |
 | *Stale* ribbon | Feed lagging; new orders are blocked until it recovers |
 | *Price is too far from the mark* | Limit prices must be within the account's band (default 10%) |
 | *Preview expired* | Click *Preview again* |
-| *Live trading is not enabled for this account* | Expected: live trading requires approvals not present in this release |
+| *Live trading is not enabled for this account* | The execution engine has not enabled LIVE for that account (venue permissions, consent or broker connection missing); ask the operator |
+| Account shows *Awaiting API SDK* | Cathay has no trading API yet; use SinoPac for TWSE orders |

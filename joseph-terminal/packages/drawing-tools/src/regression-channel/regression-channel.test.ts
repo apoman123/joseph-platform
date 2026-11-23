@@ -1,16 +1,13 @@
 /**
  * @fileoverview Tests for the engine-backed regression channel tool:
- * request building, point selection at the t2 bar, the 2000-bar rule,
+ * request building, point selection at the t2 bar, engine refusals,
  * rendering, hit-testing and the data-window rows.
  */
 import {
   HttpMarketDataClient,
   type IndicatorSeriesPoint,
 } from '@joseph/contracts';
-import {
-  ANCHOR_TOO_FAR_MESSAGE,
-  type DrawingSeriesState,
-} from '@joseph/drawing-core';
+import {type DrawingSeriesState} from '@joseph/drawing-core';
 import {describe, expect, it} from 'vitest';
 import {
   STATE,
@@ -162,26 +159,33 @@ describe('regression-channel', () => {
     expect(ops).toEqual([]);
   });
 
-  it('shows the 2000-bar notice for null values or a t2 before the window', () => {
+  it('shows a notice for null values or a missing t2 point, not a bar cap', () => {
+    const text = 'No engine values for these anchors yet';
     const nulls = ready([
       {
         bar_start_ms: 600_000,
         values: {...CHANNEL.values, start_ms: null, start: null, end: null},
       },
     ]);
-    expect(channelView(DOC, nulls)).toEqual({
-      kind: 'notice',
-      text: ANCHOR_TOO_FAR_MESSAGE,
-    });
+    expect(channelView(DOC, nulls)).toEqual({kind: 'notice', text});
     const clipped = ready([{...CHANNEL, bar_start_ms: 660_000}]);
-    expect(channelView(DOC, clipped)).toEqual({
-      kind: 'notice',
-      text: ANCHOR_TOO_FAR_MESSAGE,
-    });
-    expect(drawnTexts(clipped)).toEqual([ANCHOR_TOO_FAR_MESSAGE]);
-    expect(tool.describe?.(DOC, {series: clipped, tickSize: null})).toBe(
-      ANCHOR_TOO_FAR_MESSAGE
-    );
+    expect(channelView(DOC, clipped)).toEqual({kind: 'notice', text});
+    expect(drawnTexts(clipped)).toEqual([text]);
+    expect(tool.describe?.(DOC, {series: clipped, tickSize: null})).toBe(text);
+  });
+
+  it('shows the engine message when the engine refuses the anchors', () => {
+    const message = 'Anchor is more than 50,000 bars back.';
+    const refused = {
+      ...ready([]),
+      status: 'error' as const,
+      error: `VALIDATION_FAILED: ${message}`,
+      refusal: message,
+    };
+    expect(channelView(DOC, refused)).toEqual({kind: 'notice', text: message});
+    expect(
+      tool.dataRows?.(DOC, 600_000, {series: refused, tickSize: null})
+    ).toEqual([{label: 'Regression', value: 'refused by the engine'}]);
   });
 
   it('asks for anchors on different bars and waits for t2 to close', () => {

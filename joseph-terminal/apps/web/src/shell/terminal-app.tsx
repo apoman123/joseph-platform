@@ -94,7 +94,8 @@ export function TerminalApp(): ReactElement {
     document.documentElement.dataset.theme = theme;
   }, [theme]);
 
-  // Detachable panes: pop-out windows linked over BroadcastChannel.
+  // Detachable panes: pop-out windows linked over BroadcastChannel. They
+  // keep running across a reload of this window and reconnect by themselves.
   useEffect(() => {
     const controller = startMainDetach(runtime, {
       port: broadcastChannelPort(POPOUT_CHANNEL),
@@ -103,7 +104,12 @@ export function TerminalApp(): ReactElement {
       windowId: `main-${ids.next()}`,
     });
     runtime.windows.set(controller.actions);
+    // Tell pop-outs the main window is going (a reload usually), so they
+    // keep their changes for the next main window.
+    const onHide = () => controller.goodbye();
+    window.addEventListener('pagehide', onHide);
     return () => {
+      window.removeEventListener('pagehide', onHide);
       runtime.windows.set(null);
       controller.dispose();
     };

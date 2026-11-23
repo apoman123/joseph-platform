@@ -148,3 +148,36 @@
 .describe:empty {
   display: none;
 }
+
+/* Live arming and LIVE confirmation. */
+.arm {
+  display: grid;
+  gap: var(--space-2);
+  padding: var(--space-3);
+  border: 1px solid var(--ask);
+  border-radius: var(--radius-control);
+  background: var(--abyss);
+}
+.live {
+  display: grid;
+  gap: var(--space-3);
+}
+.factRow {
+  display: contents;
+}
+.armed {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--space-2);
+}
+
+/* Cash equities: lot mode and the rate notice. */
+.lots {
+  display: grid;
+  gap: var(--space-1);
+}
+.rate {
+  display: grid;
+  gap: var(--space-3);
+}

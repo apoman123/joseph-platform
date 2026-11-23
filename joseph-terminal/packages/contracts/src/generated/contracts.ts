@@ -1283,6 +1283,14 @@ export interface Instrument {
    * Shares per board lot (TWSE 1000); null when orders are in single units.
    */
   board_lot?: NonNegativeDecimalString | null;
+  /**
+   * Issuer or series name in English, e.g. `Taiwan Semiconductor Manufacturing` or `US 10-Year Treasury par yield`; null when the venue publishes none (crypto).
+   */
+  name?: string | null;
+  /**
+   * Name in the listing market's language, e.g. `台積電` on TWSE; null when none.
+   */
+  local_name?: string | null;
 }
 /**
  * Trading sessions of a calendar overlapping [from_ms, to_ms). Empty for 24x7 markets, which never close.
@@ -2516,4 +2524,39 @@ export interface WorkspaceDocument {
    */
   panels?: {};
   updated_at_ms: TimestampMs;
+}
+/**
+ * Drawings of one exact instrument inside a workspace export.
+ *
+ * This interface was referenced by `JosephContracts`'s JSON-Schema
+ * via the `definition` "WorkspaceExportDrawings".
+ */
+export interface WorkspaceExportDrawings {
+  instrument_id: InstrumentId;
+  /**
+   * @maxItems 2000
+   */
+  drawings: DrawingDocument[];
+  /**
+   * Stored drawing payloads this build cannot read (for example a newer drawing schema). Exported and restored verbatim, never deleted (ADR 0007).
+   *
+   * @maxItems 500
+   */
+  opaque?: {}[];
+}
+/**
+ * Workspace export file, format version 2: the workspace document (schema v1, unchanged) plus the drawings of its instruments. Import also accepts a plain v1 WorkspaceDocument (export format 1, no drawings) and the V4 starter shape (format 0), migrated step by step; drawings of unknown tools are kept.
+ *
+ * This interface was referenced by `JosephContracts`'s JSON-Schema
+ * via the `definition` "WorkspaceExport".
+ */
+export interface WorkspaceExport {
+  format: 'joseph.workspace-export';
+  schema_version: 2;
+  exported_at_ms: TimestampMs;
+  workspace: WorkspaceDocument;
+  /**
+   * @maxItems 500
+   */
+  drawings: WorkspaceExportDrawings[];
 }

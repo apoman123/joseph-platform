@@ -1,7 +1,7 @@
 /**
  * @fileoverview Price/time measurement between two anchors.
  */
-import {Decimal} from '@joseph/contracts';
+import {Decimal, type BarCalendar, type Timeframe} from '@joseph/contracts';
 import {
   anchorPoints,
   applyStroke,
@@ -27,16 +27,19 @@ export interface Measurement {
 }
 
 /**
- * Measures the span between two anchors.
+ * Measures the span between two anchors. With a session calendar the bar
+ * count only counts session bars (no overnight or weekend bars).
  * @param from Start anchor.
  * @param to End anchor.
  * @param durationMs Bar duration.
+ * @param sessions Chart timeframe and session calendar, if any.
  * @return Measurement.
  */
 export function measure(
   from: {time_ms: number; price: string},
   to: {time_ms: number; price: string},
-  durationMs: number
+  durationMs: number,
+  sessions?: {timeframe?: Timeframe; calendar?: BarCalendar}
 ): Measurement {
   const start = Decimal.parse(from.price);
   const delta = Decimal.parse(to.price).sub(start);
@@ -49,12 +52,21 @@ export function measure(
   const hours = Math.floor((minutes % 1440) / 60);
   const mins = minutes % 60;
   const duration = days > 0 ? `${days}d ${hours}h` : `${hours}h ${mins}m`;
-  return {
-    delta: delta.toString(),
-    pct,
-    bars: Math.round(spanMs / Math.max(1, durationMs)),
-    duration,
-  };
+  const {calendar, timeframe} = sessions ?? {};
+  let bars = Math.round(spanMs / Math.max(1, durationMs));
+  if (calendar && timeframe && !calendar.continuous) {
+    try {
+      const [early, late] = [from.time_ms, to.time_ms].sort((x, y) => x - y);
+      bars = calendar.barsBetween(
+        timeframe,
+        calendar.floor(timeframe, early ?? 0),
+        calendar.floor(timeframe, late ?? 0)
+      );
+    } catch {
+      // Keep the duration-based count outside the calendar's range.
+    }
+  }
+  return {delta: delta.toString(), pct, bars, duration};
 }
 
 /** Price range (ruler) tool. */
@@ -78,7 +90,7 @@ export const priceRangeTool: ToolPlugin = {
     const [from, to] = doc.anchors;
     if (!a || !b || !from || !to) return;
     const rect = rectFromPoints(a, b);
-    const m = measure(from, to, state.durationMs);
+    const m = measure(from, to, state.durationMs, state);
     const up = !m.delta.startsWith('-');
     const tone = up ? state.palette.bid : state.palette.ask;
     ctx.fillStyle = `${tone}22`;

@@ -6,10 +6,13 @@
 import type {IndicatorSeries} from '@joseph/contracts';
 import {describe, expect, it} from 'vitest';
 import {
+  CLASSIFIED_DELTA_OPACITY,
+  DELTA_METHOD_LABELS,
   ESTIMATE_DELTA_OPACITY,
   TRUE_DELTA_OPACITY,
   deltaBarsFromSeries,
   deltaMethodOf,
+  deltaOpacity,
   deltaStudyFromSeries,
   deltaStudyTitle,
 } from './study';
@@ -87,5 +90,47 @@ describe('delta method per bar', () => {
     expect(deltaStudyFromSeries(MIXED, {atMs: T0 + BAR}).title).toBe(
       'Delta % (true)'
     );
+  });
+});
+
+describe('classified (Lee–Ready) delta', () => {
+  const STOCK = seriesOf([
+    {
+      delta_pct: '8',
+      method: 'trade_classification',
+      buy_volume: '540',
+      sell_volume: '460',
+    },
+    {delta_pct: '-4', method: 'candle_direction'},
+  ]);
+
+  it('labels trade classification separately from true and estimate', () => {
+    expect(deltaMethodOf('trade_classification')).toBe('classified');
+    expect(DELTA_METHOD_LABELS.classified).toBe('Classified (Lee–Ready)');
+    expect(DELTA_METHOD_LABELS.true).toBe('True (taker volume)');
+    expect(DELTA_METHOD_LABELS.estimate).toBe('Estimate');
+    const [classified, estimate] = deltaBarsFromSeries(STOCK);
+    expect(classified).toMatchObject({
+      method: 'classified',
+      buyVolume: '540',
+      sellVolume: '460',
+    });
+    expect(estimate).toMatchObject({method: 'estimate', buyVolume: null});
+  });
+
+  it('draws classified columns between true and estimate opacity', () => {
+    const study = deltaStudyFromSeries(STOCK);
+    expect(study.points.map(p => p.opacity)).toEqual([
+      CLASSIFIED_DELTA_OPACITY,
+      ESTIMATE_DELTA_OPACITY,
+    ]);
+    expect(study.title).toBe('Delta % (classified; faint = estimate)');
+    expect(deltaStudyTitle([{method: 'classified'}])).toBe(
+      'Delta % (classified)'
+    );
+    expect(deltaStudyTitle([{method: 'true'}, {method: 'classified'}])).toBe(
+      'Delta % (true; classified)'
+    );
+    expect(deltaOpacity('true')).toBe(TRUE_DELTA_OPACITY);
   });
 });

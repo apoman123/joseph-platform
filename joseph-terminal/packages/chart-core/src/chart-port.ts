@@ -5,7 +5,12 @@
  * (features, drawing tools, indicator visualization) talks to this port, so
  * the renderer can be replaced without touching strategy logic or contracts.
  */
-import type {ChartType, PriceScaleMode, Timeframe} from '@joseph/contracts';
+import type {
+  BarCalendar,
+  ChartType,
+  PriceScaleMode,
+  Timeframe,
+} from '@joseph/contracts';
 import type {
   OverlayLayer,
   OverlayLineStyle,
@@ -50,6 +55,15 @@ export interface SeriesConfig {
   tickSize: string;
   /** Whether the volume pane is shown. */
   showVolume: boolean;
+  /**
+   * Session calendar of the instrument. Exchange calendars label the time
+   * axis in exchange time and count off-chart time (future anchors, the
+   * right margin) in session bars; `24x7` (the default) keeps UTC bars and
+   * labels.
+   */
+  calendar?: BarCalendar;
+  /** Unit appended to axis prices, e.g. `%` for yields (none by default). */
+  priceUnit?: string;
 }
 
 /** Theme colors resolved from CSS design tokens. */

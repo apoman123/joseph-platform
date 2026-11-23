@@ -6,8 +6,9 @@
  */
 'use client';
 import type {ChartBar} from '@joseph/chart-core';
-import type {Timeframe} from '@joseph/contracts';
+import type {BarCalendar, Instrument, Timeframe} from '@joseph/contracts';
 import {seriesAsOf} from '@joseph/drawing-core';
+import {DELTA_METHOD_LABELS} from '@joseph/indicator-viz';
 import type {ReactElement} from 'react';
 import type {TerminalRuntime} from '../composition/runtime';
 import type {CompareEntry, DeltaByTime} from './chart-pane-hooks';
@@ -15,8 +16,11 @@ import {
   formatBarClose,
   formatBarTime,
   formatDecimal,
+  formatInstrumentPrice,
   formatNumber,
   formatPrice,
+  formatVolume,
+  lotSizeForVolume,
 } from './format';
 import {useStore} from './react-bindings';
 
@@ -36,6 +40,10 @@ export interface DataWindowProps {
   bar: ChartBar | null;
   /** Chart timeframe (bar time format and calendar-aware close). */
   timeframe: Timeframe;
+  /** Session calendar (exchange time and session bar ends; UTC default). */
+  calendar?: BarCalendar | null;
+  /** Instrument (ladder precision, yields in %, share and lot volumes). */
+  instrument?: Instrument | null;
   /** Previous bar's close (for the change). */
   previousClose: number | null;
   /** Tick size for price precision. */
@@ -58,6 +66,8 @@ export interface DataWindowProps {
 export function DataWindow({
   bar,
   timeframe,
+  calendar = null,
+  instrument = null,
   previousClose,
   tickSize,
   delta,
@@ -66,14 +76,22 @@ export function DataWindow({
   drawingRows = [],
 }: DataWindowProps): ReactElement {
   const price = (value: number | undefined) =>
-    value === undefined ? '—' : formatPrice(String(value), tickSize);
+    value === undefined
+      ? '—'
+      : instrument
+        ? formatInstrumentPrice(String(value), instrument)
+        : formatPrice(String(value), tickSize);
+  const lot = lotSizeForVolume(instrument);
+  const unitTitle = lot
+    ? `Volume in board lots (張, 1 張 = ${lot.toLocaleString('en-US')} shares)`
+    : undefined;
   const change =
     bar && previousClose
       ? ((bar.close - previousClose) / previousClose) * 100
       : null;
   const deltaBar = bar ? delta?.get(bar.timeMs) : undefined;
   const deltaValue = deltaBar?.value;
-  const rows: [string, string, string?, string?][] = bar
+  const rows: [string, string, string?, string?, string?][] = bar
     ? [
         ['Open', price(bar.open)],
         ['High', price(bar.high)],
@@ -86,8 +104,16 @@ export function DataWindow({
             : `${change >= 0 ? '+' : ''}${formatNumber(change, 2)}%`,
           change === null ? undefined : change >= 0 ? 'j-pos' : 'j-neg',
         ],
-        ['Volume', formatNumber(bar.volume, 2)],
-        ['Closes', formatBarClose(timeframe, bar.timeMs)],
+        [
+          instrument?.key.market_type === 'rate' ? '' : 'Volume',
+          instrument
+            ? formatVolume(bar.volume, instrument)
+            : formatNumber(bar.volume, 2),
+          undefined,
+          undefined,
+          unitTitle,
+        ],
+        ['Closes', formatBarClose(timeframe, bar.timeMs, calendar)],
       ]
     : [];
   if (bar && delta) {
@@ -103,23 +129,22 @@ export function DataWindow({
     if (deltaBar) {
       rows.push([
         'Delta source',
-        deltaBar.method === 'true' ? 'True (taker volume)' : 'Estimate',
-        deltaBar.method === 'true' ? undefined : 'j-muted',
+        DELTA_METHOD_LABELS[deltaBar.method],
+        deltaBar.method === 'estimate' ? 'j-muted' : undefined,
       ]);
       if (deltaBar.buyVolume !== null && deltaBar.sellVolume !== null) {
-        rows.push([
-          'Buy volume',
-          formatDecimal(deltaBar.buyVolume, 2),
-          'j-pos',
-        ]);
-        rows.push([
-          'Sell volume',
-          formatDecimal(deltaBar.sellVolume, 2),
-          'j-neg',
-        ]);
+        const volume = (value: string) =>
+          instrument
+            ? formatVolume(Number(value), instrument)
+            : formatDecimal(value, 2);
+        rows.push(['Buy volume', volume(deltaBar.buyVolume), 'j-pos']);
+        rows.push(['Sell volume', volume(deltaBar.sellVolume), 'j-neg']);
       }
     }
   }
+  // Yields have no volume.
+  const visible = rows.filter(([name]) => name !== '');
+  rows.splice(0, rows.length, ...visible);
   for (const entry of compare) {
     const value = bar ? entry.values.get(bar.timeMs) : undefined;
     rows.push([
@@ -141,11 +166,11 @@ export function DataWindow({
       data-testid="data-window"
     >
       <p className="data-window__time">
-        {bar ? formatBarTime(timeframe, bar.timeMs) : 'No bar'}
+        {bar ? formatBarTime(timeframe, bar.timeMs, calendar) : 'No bar'}
       </p>
       <dl>
-        {rows.map(([name, value, tone, key]) => (
-          <div key={key ?? name}>
+        {rows.map(([name, value, tone, key, title]) => (
+          <div key={key ?? name} title={title}>
             <dt>{name}</dt>
             <dd className={tone}>{value}</dd>
           </div>

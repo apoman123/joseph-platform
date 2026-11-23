@@ -5,12 +5,13 @@
  * them into the feature registry. Shell features receive this runtime;
  * third-party features only ever see their scoped `FeatureContext`.
  */
-import type {
-  BackendClients,
-  FeedState,
-  InstrumentId,
-  OrderMode,
-  WorkspaceDocument,
+import {
+  SessionCalendarCache,
+  type BackendClients,
+  type FeedState,
+  type InstrumentId,
+  type OrderMode,
+  type WorkspaceDocument,
 } from '@joseph/contracts';
 import type {ChartPort} from '@joseph/chart-core';
 import type {
@@ -206,6 +207,11 @@ export interface TerminalRuntime {
   config: TerminalConfig;
   /** Backend clients. */
   clients: BackendClients;
+  /**
+   * Exchange session calendars (engine `GET /v1/calendars/…/sessions`, or
+   * generated in DEMO), shared by charts, replay, drawings and features.
+   */
+  calendars: SessionCalendarCache;
   /** Capabilities. */
   capabilities: WritableStore<CapabilitySet>;
   /** Browser storage (safe when blocked). */
@@ -336,6 +342,10 @@ export function createRuntime(
       : doc;
   const storage = createStorage();
   const bundle = buildClients(config);
+  const market = bundle.clients.market;
+  const calendars = new SessionCalendarCache(
+    market.getSessions?.bind(market) ?? null
+  );
   const repository = new WorkspaceRepository(storage);
   const autosaver = createAutosaver(repository, 400);
   const defaultInstrument: InstrumentId = config.demo
@@ -419,6 +429,7 @@ export function createRuntime(
     role,
     config,
     clients: bundle.clients,
+    calendars,
     capabilities,
     storage,
     workspace,
@@ -493,6 +504,7 @@ export function createRuntime(
       events,
       notifier,
       storage,
+      calendars,
     },
     {contractVersion: CONTRACT_VERSION}
   );

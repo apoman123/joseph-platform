@@ -1,13 +1,16 @@
 /**
  * @fileoverview Main-window UI of detachable panes: the button that opens a
  * pane in another window, the placeholder left in its slot (focus or bring
- * back the window) and the banner that offers to re-open windows after a
- * reload (browsers only open windows from a click).
+ * back the window) and the banner that offers "Restore pop-outs" when the
+ * windows are gone (after a browser restart; browsers only open windows
+ * from a click). After a reload of this window, pop-outs that kept running
+ * reconnect on their own, so the banner waits for the short probe first.
  */
 'use client';
 import {
-  detachedStatus,
+  dormantPanes,
   paneKey,
+  paneStatus,
   type DetachedPane,
   type DetachedPaneRef,
   type DetachedStatus,
@@ -21,7 +24,8 @@ import {useRuntime} from './runtime-context';
 const STATUS_TEXT: Readonly<Record<DetachedStatus, string>> = {
   opening: 'Opening the window…',
   live: 'Linked: follows link groups, theme and workspace changes.',
-  dormant: 'This pane was in another window before the reload.',
+  reconnecting: 'Reconnecting to the window that kept running…',
+  dormant: 'This pane was in another window that is no longer open.',
   lost: 'The window stopped responding.',
 };
 
@@ -38,7 +42,7 @@ export function useDetached(
   const key = paneKey(ref);
   const pane = state.panes.find(p => p.key === key);
   if (!pane) return null;
-  return {pane, status: detachedStatus(state.live[key], Date.now())};
+  return {pane, status: paneStatus(state, key, Date.now())};
 }
 
 /**
@@ -95,6 +99,7 @@ export function DetachedPlaceholder({
       data-status={status}
       data-testid={`detached-${pane.key}`}
       aria-label={`${pane.title} is in another window`}
+      aria-busy={status === 'reconnecting' || status === 'opening'}
     >
       <div className="detached__card">
         <span className="detached__glyph" aria-hidden="true">
@@ -119,14 +124,16 @@ export function DetachedPlaceholder({
               Re-open window
             </button>
           ) : (
-            <button
-              type="button"
-              className="j-btn j-btn--sm"
-              data-testid="detached-focus"
-              onClick={() => windows?.focus(pane.key)}
-            >
-              Focus window
-            </button>
+            status !== 'reconnecting' && (
+              <button
+                type="button"
+                className="j-btn j-btn--sm"
+                data-testid="detached-focus"
+                onClick={() => windows?.focus(pane.key)}
+              >
+                Focus window
+              </button>
+            )
           )}
           <button
             type="button"
@@ -143,16 +150,15 @@ export function DetachedPlaceholder({
 }
 
 /**
- * Banner offering to re-open windows remembered from the saved layout.
+ * Banner offering to restore windows remembered from the saved layout (a
+ * browser restart closed them). Hidden while a reloaded main window waits
+ * for windows that kept running.
  * @return Banner, or nothing when every detached pane has a window.
  */
 export function DetachedBanner(): ReactElement | null {
   const runtime = useRuntime();
   const state = useStore(runtime.detached);
-  const now = Date.now();
-  const dormant = state.panes.filter(
-    p => detachedStatus(state.live[p.key], now) === 'dormant'
-  );
+  const dormant = dormantPanes(state, Date.now());
   const windows = useStore(runtime.windows);
   if (dormant.length === 0 || !windows) return null;
   const names = dormant.map(p => p.title).join(', ');
@@ -168,14 +174,22 @@ export function DetachedBanner(): ReactElement | null {
         {dormant.length === 1
           ? `${names} was open in another window.`
           : `${dormant.length} panes were open in other windows: ${names}.`}
+        {dormant.length > 1 && (
+          <span className="detached-banner__hint">
+            {' '}
+            Browsers open one window per click unless pop-ups are allowed for
+            this site.
+          </span>
+        )}
       </p>
       <button
         type="button"
         className="j-btn j-btn--sm j-btn--primary"
         data-testid="reopen-detached"
+        title="Open the remembered windows again (allow pop-ups for this site to restore all with one click)"
         onClick={() => windows.reopenAll()}
       >
-        Re-open detached windows
+        Restore pop-outs
       </button>
       <button
         type="button"

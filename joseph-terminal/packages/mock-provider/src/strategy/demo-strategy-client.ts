@@ -21,6 +21,8 @@ import {
   type StrategyVersionList,
   type ValidationResult,
 } from '@joseph/contracts';
+import {demoCalendar} from '../market/demo-sessions';
+import {DEMO_INSTRUMENT_SPECS} from '../market/prices';
 import {createDemoSignals} from './demo-signals';
 import {canonicalJson, sha256Hex} from './sha256';
 
@@ -359,13 +361,22 @@ export class DemoStrategyClient implements StrategyClient {
         'The end must be after the start.'
       );
     this.backtests += 1;
-    const bar = TIMEFRAME_MS[version.definition.signal_timeframe];
+    const timeframe = version.definition.signal_timeframe;
+    const bar = TIMEFRAME_MS[timeframe];
+    // Session instruments (DEMO stocks) align entries and exits to their
+    // exchange calendar; perpetuals keep UTC bars.
+    const spec = DEMO_INSTRUMENT_SPECS.find(
+      s => s.instrumentId === request.instrument_id
+    );
+    const calendar = demoCalendar(spec?.calendar ?? '24x7');
     const direction = version.definition.direction;
     const span = request.to_ms - request.from_ms;
     const rs = ['2.1', '-1', '1.4', '-1', '2.6'];
     const trades = rs.map((r, i) => {
-      const entry =
-        Math.floor((request.from_ms + (span * (i + 1)) / 6) / bar) * bar;
+      const at = request.from_ms + (span * (i + 1)) / 6;
+      const entry = calendar.continuous
+        ? Math.floor(at / bar) * bar
+        : calendar.floor(timeframe, at);
       return {
         signal_id: `demo-bt-${this.backtests}-${i}`,
         direction,
@@ -373,7 +384,9 @@ export class DemoStrategyClient implements StrategyClient {
         entry_price: '100',
         stop_price: direction === 'LONG' ? '99' : '101',
         target_price: direction === 'LONG' ? '102' : '98',
-        exit_ms: entry + 6 * bar,
+        exit_ms: calendar.continuous
+          ? entry + 6 * bar
+          : calendar.shift(timeframe, entry, 6),
         exit_price:
           direction === 'LONG'
             ? String(100 + Number(r))
@@ -392,7 +405,9 @@ export class DemoStrategyClient implements StrategyClient {
       instrument_id: request.instrument_id,
       from_ms: request.from_ms,
       to_ms: request.to_ms,
-      bars_evaluated: Math.floor(span / bar),
+      bars_evaluated: calendar.continuous
+        ? Math.floor(span / bar)
+        : calendar.barsBetween(timeframe, request.from_ms, request.to_ms),
       signals: [],
       trades,
       metrics: {

@@ -6,7 +6,6 @@
 import {FakeChartPort} from '@joseph/chart-core';
 import {TIMEFRAME_MS, floorToTimeframe} from '@joseph/contracts';
 import {
-  ANCHOR_TOO_FAR_MESSAGE,
   DrawingController,
   DrawingSeriesSync,
   DrawingStore,
@@ -59,9 +58,14 @@ function barsBack(n: number): number {
  * Mounts one engine-backed drawing on chart-1 of a DEMO runtime.
  * @param toolId Tool id.
  * @param times Anchor times.
+ * @param settled Series status to wait for.
  * @return Runtime, store, drawing id and series sync.
  */
-async function mount(toolId: string, times: number[]) {
+async function mount(
+  toolId: string,
+  times: number[],
+  settled: 'ready' | 'error' = 'ready'
+) {
   const runtime: TerminalRuntime = createRuntime(composeFeatures, DEMO);
   await runtime.registry.activateAll();
   const tool = runtime.tools.get(toolId);
@@ -107,7 +111,7 @@ async function mount(toolId: string, times: number[]) {
   runtime.drawing.stores.set('chart-1', store);
   runtime.drawing.controllers.set('chart-1', controller);
   runtime.drawing.series.set('chart-1', series);
-  await waitFor(() => expect(series.get('d1')?.status).toBe('ready'));
+  await waitFor(() => expect(series.get('d1')?.status).toBe(settled));
   return {runtime, store, series, id: doc.drawing_id};
 }
 
@@ -148,21 +152,27 @@ describe('engine-backed drawings in the shell', () => {
     );
   });
 
-  it('says the anchor is too far back instead of drawing', async () => {
+  it('draws anchors 2400 bars back (the engine computes up to 50 000)', async () => {
     const {runtime} = await mount('anchored-vwap', [barsBack(2400)]);
     const doc = runtime.drawing.stores.get('chart-1')?.find('d1');
     if (!doc) throw new Error('no drawing');
-    expect(describeDrawing(runtime, doc, 'chart-1').detail).toBe(
-      ANCHOR_TOO_FAR_MESSAGE
+    expect(describeDrawing(runtime, doc, 'chart-1').detail).toMatch(/^VWAP \d/);
+    expect(
+      drawingDataRows(runtime, 'chart-1', barsBack(1), null, null)[0]
+    ).toMatchObject({key: 'd1:0', label: 'Anchored VWAP'});
+  });
+
+  it('shows the engine message only when the engine refuses the anchor', async () => {
+    const {runtime} = await mount('anchored-vwap', [barsBack(50_001)], 'error');
+    const doc = runtime.drawing.stores.get('chart-1')?.find('d1');
+    if (!doc) throw new Error('no drawing');
+    expect(describeDrawing(runtime, doc, 'chart-1').detail).toMatch(
+      /^Anchor is more than 50,000 bars back/
     );
     expect(
       drawingDataRows(runtime, 'chart-1', barsBack(1), null, null)
     ).toEqual([
-      {
-        key: 'd1:0',
-        label: 'Anchored VWAP',
-        value: 'anchor > 2000 bars back',
-      },
+      {key: 'd1:0', label: 'Anchored VWAP', value: 'refused by the engine'},
     ]);
   });
 

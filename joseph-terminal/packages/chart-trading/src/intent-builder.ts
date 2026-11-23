@@ -5,9 +5,15 @@
  * exposure) and prices are rounded to the tick size, all with exact
  * `Decimal` arithmetic. The server re-validates everything; these checks
  * exist so the user sees problems before previewing.
+ *
+ * Exchange-listed stocks and ETFs follow the cash-equity rules of
+ * `equity.ts` (whole shares or TWSE board/odd lots, tick ladders, daily
+ * price limits, DAY/GTC, no leverage); published rates cannot be traded.
  */
 import {
   Decimal,
+  parseInstrumentId,
+  type AccountSummary,
   type Instrument,
   type IntentSource,
   type MarginMode,
@@ -18,8 +24,27 @@ import {
   type PositionEffect,
   type PriceBasis,
   type TakeProfitSpec,
-  type TimeInForce,
 } from '@joseph/contracts';
+import {
+  accountInstrumentMismatch,
+  boardLotOf,
+  equityIntentExtensions,
+  equityTimeInForce,
+  formatEquityPrice,
+  formatShares,
+  isCashEquityId,
+  isOnTickLadder,
+  isRateInstrumentId,
+  outsideRthSupport,
+  parseEquityQuantity,
+  priceLimitBand,
+  roundToTickLadder,
+  tickAt,
+  toContractTimeInForce,
+  withinPriceLimit,
+  type EquityLotMode,
+  type TicketTimeInForce,
+} from './equity';
 import {formatStep} from './format';
 
 /** Raw ticket inputs as typed by the user (strings keep exactness). */
@@ -40,8 +65,8 @@ export interface TicketInputs {
   triggerPrice: string;
   /** Price used to trigger stop orders. */
   triggerBasis: PriceBasis;
-  /** Time in force. */
-  timeInForce: TimeInForce;
+  /** Time in force (`DAY` for cash equities when the account lists it). */
+  timeInForce: TicketTimeInForce;
   /** Reduce-only flag. */
   reduceOnly: boolean;
   /** Leverage text, empty for venue default. */
@@ -58,6 +83,10 @@ export interface TicketInputs {
   positionEffect: PositionEffect;
   /** Origin of the intent. */
   source: IntentSource;
+  /** Cash equities with a board lot: whole lots (張) or odd-lot shares. */
+  lotMode?: EquityLotMode;
+  /** IBKR: allow fills outside regular trading hours. */
+  outsideRth?: boolean;
 }
 
 /** Severity of a ticket issue. */
@@ -99,7 +128,27 @@ export type InstrumentPrecision = Pick<
   | 'max_leverage'
   | 'display_symbol'
   | 'status'
-> & {key: Pick<Instrument['key'], 'canonical_base' | 'quote'>};
+> &
+  Partial<
+    Pick<
+      Instrument,
+      | 'tick_ladder'
+      | 'price_limit_pct'
+      | 'board_lot'
+      | 'calendar'
+      | 'listing_exchange'
+      | 'name'
+      | 'local_name'
+    >
+  > & {key: Pick<Instrument['key'], 'canonical_base' | 'quote'>};
+
+/** Account and market context of cash-equity orders. */
+export interface TicketContext {
+  /** Selected account (broker rules: time in force, outside RTH). */
+  account?: AccountSummary | null;
+  /** Previous session close, the reference of daily price limits. */
+  reference?: Decimal | null;
+}
 
 /**
  * Creates default ticket inputs.
@@ -166,13 +215,33 @@ export function needsTriggerPrice(type: OrderType): boolean {
  * @param inputs Raw inputs.
  * @param instrument Instrument precision, or null while loading.
  * @param markPrice Reference mark price for notional checks, if known.
+ * @param context Account and previous close (cash equities).
  * @return Request (or null) and issues.
  */
 export function buildIntentRequest(
   inputs: TicketInputs,
   instrument: InstrumentPrecision | null,
-  markPrice: Decimal | null
+  markPrice: Decimal | null,
+  context: TicketContext = {}
 ): BuildResult {
+  if (isRateInstrumentId(inputs.instrumentId)) {
+    return {
+      request: null,
+      issues: [
+        {
+          field: 'instrumentId',
+          severity: 'error',
+          message: 'Rates are published values and cannot be traded.',
+        },
+      ],
+      quantity: null,
+      limitPrice: null,
+      triggerPrice: null,
+    };
+  }
+  if (isCashEquityId(inputs.instrumentId)) {
+    return buildEquityIntentRequest(inputs, instrument, markPrice, context);
+  }
   const issues: TicketIssue[] = [];
   const error = (field: TicketIssue['field'], message: string) =>
     issues.push({field, severity: 'error', message});
@@ -353,7 +422,10 @@ export function buildIntentRequest(
     limit_price: limitPrice ? limitPrice.toString() : null,
     trigger_price: triggerPrice ? triggerPrice.toString() : null,
     trigger_basis: triggerPrice ? inputs.triggerBasis : null,
-    time_in_force: inputs.orderType === 'market' ? 'IOC' : inputs.timeInForce,
+    time_in_force:
+      inputs.orderType === 'market'
+        ? 'IOC'
+        : toContractTimeInForce(inputs.timeInForce),
     reduce_only: inputs.reduceOnly,
     margin_mode: inputs.marginMode,
     leverage: leverage ? leverage.toString() : null,
@@ -365,6 +437,173 @@ export function buildIntentRequest(
     expires_at_ms: null,
     preview_token: null,
   };
+  return {request, issues, quantity, limitPrice, triggerPrice};
+}
+
+/**
+ * Validates and normalizes a cash-equity order (stock or ETF): whole
+ * shares or TWSE board/odd lots, tick-ladder prices inside the daily price
+ * limit, broker time in force and IBKR's outside-RTH flag. No leverage,
+ * reduce-only, margin or attached stop/target.
+ * @param inputs Raw inputs.
+ * @param instrument Instrument (with ladder, limit and board lot), or null.
+ * @param markPrice Reference mark/last price, if known.
+ * @param context Account and previous close.
+ * @return Request (or null) and issues.
+ */
+export function buildEquityIntentRequest(
+  inputs: TicketInputs,
+  instrument: InstrumentPrecision | null,
+  markPrice: Decimal | null,
+  context: TicketContext = {}
+): BuildResult {
+  const issues: TicketIssue[] = [];
+  const error = (field: TicketIssue['field'], message: string) =>
+    issues.push({field, severity: 'error', message});
+  const warn = (field: TicketIssue['field'], message: string) =>
+    issues.push({field, severity: 'warning', message});
+  const empty: BuildResult = {
+    request: null,
+    issues,
+    quantity: null,
+    limitPrice: null,
+    triggerPrice: null,
+  };
+  if (!instrument) {
+    error('instrumentId', 'Instrument details are still loading.');
+    return empty;
+  }
+  if (instrument.status !== 'TRADING') {
+    error(
+      'instrumentId',
+      `This instrument is ${instrument.status.toLowerCase()} at the exchange; new orders are blocked.`
+    );
+  }
+  const account = context.account ?? null;
+  if (!inputs.accountId) error('accountId', 'Choose a broker account.');
+  if (account) {
+    const mismatch = accountInstrumentMismatch(
+      account,
+      instrument.instrument_id,
+      instrument
+    );
+    if (mismatch) error('accountId', mismatch);
+  }
+  const hasBoardLot = boardLotOf(instrument) !== null;
+  const lotMode: EquityLotMode = hasBoardLot
+    ? (inputs.lotMode ?? 'board')
+    : 'odd';
+  const parsed = parseEquityQuantity(instrument, lotMode, inputs.quantity);
+  const quantity = parsed.shares;
+  if (parsed.error) error('quantity', parsed.error);
+  if (quantity) {
+    if (quantity.cmp(Decimal.parse(instrument.min_qty)) < 0) {
+      error('quantity', `Minimum quantity is ${instrument.min_qty} shares.`);
+    }
+    if (
+      instrument.max_qty &&
+      quantity.cmp(Decimal.parse(instrument.max_qty)) > 0
+    ) {
+      error('quantity', `Maximum quantity is ${instrument.max_qty} shares.`);
+    }
+  }
+  const band = priceLimitBand(instrument, context.reference ?? null);
+  const price = (
+    text: string,
+    field: 'limitPrice' | 'triggerPrice',
+    label: string
+  ): Decimal | null => {
+    const raw = text.trim().replace(/,/g, '');
+    if (raw === '') {
+      error(field, `Enter a ${label}.`);
+      return null;
+    }
+    if (!Decimal.isValid(raw) || Decimal.parse(raw).cmp(Decimal.zero()) <= 0) {
+      error(field, `${capitalize(label)} must be a positive number.`);
+      return null;
+    }
+    const parsedPrice = Decimal.parse(raw);
+    let rounded = parsedPrice;
+    if (!isOnTickLadder(instrument, parsedPrice)) {
+      rounded = roundToTickLadder(instrument, parsedPrice);
+      const ladder = (instrument.tick_ladder ?? []).length > 0;
+      warn(
+        field,
+        `Rounded to the ${ladder ? 'tick ladder' : 'tick size'} (${tickAt(instrument, rounded).toString()} at this price): ${formatEquityPrice(instrument, rounded)}.`
+      );
+    }
+    if (band && !withinPriceLimit(band, rounded)) {
+      error(
+        field,
+        `${capitalize(label)} ${formatEquityPrice(instrument, rounded)} is outside today's price limit ${formatEquityPrice(instrument, band.lower)} – ${formatEquityPrice(instrument, band.upper)} (±${band.pct.toString()}% of the ${formatEquityPrice(instrument, band.reference)} reference close).`
+      );
+    }
+    return rounded;
+  };
+  const limitPrice = needsLimitPrice(inputs.orderType)
+    ? price(inputs.limitPrice, 'limitPrice', 'limit price')
+    : null;
+  const triggerPrice = needsTriggerPrice(inputs.orderType)
+    ? price(inputs.triggerPrice, 'triggerPrice', 'trigger price')
+    : null;
+
+  const tif = equityTimeInForce(account);
+  if (account && !tif.options.includes(inputs.timeInForce)) {
+    error(
+      'timeInForce',
+      `This account accepts ${tif.options.join(' or ')} for stocks and ETFs.`
+    );
+  }
+  const rth = outsideRthSupport(account);
+  if (inputs.outsideRth && rth.shown && !rth.enabled && rth.reason) {
+    error('outsideRth', rth.reason);
+  }
+  if (inputs.outsideRth && rth.shown && inputs.orderType === 'market') {
+    error(
+      'outsideRth',
+      'Interactive Brokers fills outside regular hours only for limit orders.'
+    );
+  }
+
+  const reference = limitPrice ?? triggerPrice ?? markPrice;
+  if (quantity && reference && instrument.min_notional) {
+    const notional = quantity.mul(reference);
+    if (notional.cmp(Decimal.parse(instrument.min_notional)) < 0) {
+      error(
+        'notional',
+        `Order value ${notional.toFixed(2)} is below the minimum of ${instrument.min_notional} ${instrument.key.quote}.`
+      );
+    }
+  }
+
+  if (issues.some(issue => issue.severity === 'error') || !quantity) {
+    return {...empty, quantity, limitPrice, triggerPrice};
+  }
+  const request: OrderIntentRequest = equityIntentExtensions(
+    {
+      account_id: inputs.accountId ?? '',
+      instrument_id: instrument.instrument_id,
+      side: inputs.side,
+      position_effect: inputs.positionEffect,
+      order_type: inputs.orderType,
+      quantity_base: quantity.toString(),
+      limit_price: limitPrice ? limitPrice.toString() : null,
+      trigger_price: triggerPrice ? triggerPrice.toString() : null,
+      trigger_basis: triggerPrice ? 'last' : null,
+      time_in_force: toContractTimeInForce(inputs.timeInForce),
+      reduce_only: false,
+      leverage: null,
+      bracket: null,
+      mode: inputs.mode,
+      source: inputs.source,
+      strategy_version_id: null,
+      signal_id: null,
+      expires_at_ms: null,
+      preview_token: null,
+    },
+    account,
+    {outsideRth: inputs.outsideRth === true, lotMode, hasBoardLot}
+  );
   return {request, issues, quantity, limitPrice, triggerPrice};
 }
 
@@ -404,6 +643,9 @@ export function describeAction(
   request: OrderIntentRequest,
   instrument: InstrumentPrecision
 ): string {
+  if (isCashEquityId(request.instrument_id)) {
+    return describeEquityAction(request, instrument);
+  }
   const mode = request.mode.toLowerCase();
   const qty = formatStep(request.quantity_base, instrument.lot_size);
   const base = instrument.key.canonical_base;
@@ -414,6 +656,32 @@ export function describeAction(
   }
   if (request.limit_price) {
     text += ` at ${formatStep(request.limit_price, instrument.tick_size)}`;
+  }
+  return text;
+}
+
+/**
+ * Confirm label of a cash-equity order, e.g. `Place paper limit buy
+ * 2 張 (2,000 shares) 9901 at 585 TWD`.
+ * @param request Normalized request.
+ * @param instrument Instrument.
+ * @return Text.
+ */
+export function describeEquityAction(
+  request: OrderIntentRequest,
+  instrument: InstrumentPrecision
+): string {
+  const mode = request.mode.toLowerCase();
+  const symbol =
+    instrument.display_symbol ||
+    parseInstrumentId(request.instrument_id).venueMarketId;
+  const qty = formatShares(instrument, Decimal.parse(request.quantity_base));
+  let text = `Place ${mode} ${ORDER_TYPE_NAMES[request.order_type]} ${request.side} ${qty} ${symbol}`;
+  if (request.trigger_price) {
+    text += ` triggered at ${formatEquityPrice(instrument, Decimal.parse(request.trigger_price))}`;
+  }
+  if (request.limit_price) {
+    text += ` at ${formatEquityPrice(instrument, Decimal.parse(request.limit_price))}`;
   }
   return text;
 }
