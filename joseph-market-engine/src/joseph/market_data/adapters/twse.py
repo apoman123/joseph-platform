@@ -729,23 +729,30 @@ class MisClient:
         }
 
     async def _flush(self) -> None:
-        """Sends the pending symbols in batches and wakes the callers."""
-        await asyncio.sleep(self._coalesce_s)
-        codes = sorted(self._pending)
-        waiters = self._waiters
-        self._pending = set()
-        self._waiters = []
-        try:
-            for i in range(0, len(codes), self._batch):
-                await self._fetch(codes[i : i + self._batch])
-        except errors.JosephError as err:
+        """Sends pending symbols in batches until none are left.
+
+        Callers that arrive while a batch is in flight are served by the
+        next round.
+        """
+        while self._pending:
+            await asyncio.sleep(self._coalesce_s)
+            codes = sorted(self._pending)
+            waiters = self._waiters
+            self._pending = set()
+            self._waiters = []
+            failure: errors.JosephError | None = None
+            try:
+                for i in range(0, len(codes), self._batch):
+                    await self._fetch(codes[i : i + self._batch])
+            except errors.JosephError as err:
+                failure = err
             for waiter in waiters:
-                if not waiter.done():
-                    waiter.set_exception(err)
-            return
-        for waiter in waiters:
-            if not waiter.done():
-                waiter.set_result(None)
+                if waiter.done():
+                    continue
+                if failure is None:
+                    waiter.set_result(None)
+                else:
+                    waiter.set_exception(failure)
 
     async def _fetch(self, codes: Sequence[str]) -> None:
         """Requests one batch.
