@@ -744,6 +744,15 @@ class LiveVenueAdapter[SessionT: Session](abc.ABC):
         session = await self._guard(
             request.account_id, "submit_order", trading_call=True
         )
+        if (
+            request.order_type not in self._documented.order_types
+            or request.time_in_force not in self._documented.time_in_force
+        ):
+            raise errors.AdapterUnavailableError(
+                f"{self.name} does not support {request.order_type.value} "
+                f"{request.time_in_force.value} orders; nothing was sent",
+                code="UNSUPPORTED_ORDER_TYPE",
+            )
         try:
             return await self._submit(session, request)
         except errors.VenueRejectedError as err:

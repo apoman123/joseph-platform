@@ -3,17 +3,22 @@
 Credentials are sealed by the vault before persistence and are never
 returned, logged or audited. Withdrawal-capable keys are refused, and DEX
 connections accept only delegated agent/API keys, never seed phrases.
+Broker connections carry only the broker account number: broker logins
+(IB Gateway, Shioaji keys and certificates) are deployment secrets read
+from the environment or secret files, never sent through the browser.
 """
 
 from __future__ import annotations
 
 import dataclasses
 import decimal
+import re
 from collections.abc import Mapping
 
 from joseph_execution.audit import service as audit_service
 from joseph_execution.domain import accounts
 from joseph_execution.domain import enums
+from joseph_execution.domain import equities
 from joseph_execution.domain import errors
 from joseph_execution.domain import identity
 from joseph_execution.oms import valuation
@@ -31,6 +36,10 @@ _FORBIDDEN_FIELDS = (
     "master_key",
     "wallet_private_key",
 )
+BROKER_ACCOUNT_FIELD = "account"
+"""The only credential field of a broker connection (account number)."""
+
+_BROKER_ACCOUNT = re.compile(r"^[A-Za-z0-9][A-Za-z0-9-]{2,31}$")
 _OPEN = (
     enums.OrderState.RESERVED,
     enums.OrderState.SUBMITTING,
@@ -54,6 +63,7 @@ class AccountService:
         clock: services.Clock,
         id_gen: services.IdGenerator,
         paper_starting_equity: decimal.Decimal,
+        paper_twd_starting_cash: decimal.Decimal | None = None,
     ) -> None:
         """Initializes the service.
 
@@ -66,6 +76,8 @@ class AccountService:
             clock: Time source.
             id_gen: Id generator.
             paper_starting_equity: Starting equity of paper accounts.
+            paper_twd_starting_cash: Starting cash of the TWD paper
+                account for TWSE securities; ``None`` disables it.
         """
         self._uow = uow_factory
         self._resolver = resolver
@@ -75,17 +87,38 @@ class AccountService:
         self._clock = clock
         self._ids = id_gen
         self._paper_equity = paper_starting_equity
+        self._paper_twd = paper_twd_starting_cash
 
     def ensure_paper_account(self, tenant_id: str) -> accounts.Account:
         """Returns (creating once) the tenant's paper account.
+
+        Also provisions the TWD paper account (TWSE securities) when one is
+        configured.
 
         Args:
             tenant_id: Tenant.
 
         Returns:
+            The USD paper account.
+        """
+        if self._paper_twd is not None:
+            self._ensure_paper(tenant_id, "TWD", self._paper_twd)
+        return self._ensure_paper(tenant_id, "USD", self._paper_equity)
+
+    def _ensure_paper(
+        self, tenant_id: str, currency: str, starting: decimal.Decimal
+    ) -> accounts.Account:
+        """Returns (creating once) one paper account of a tenant.
+
+        Args:
+            tenant_id: Tenant.
+            currency: Account currency.
+            starting: Starting cash/equity.
+
+        Returns:
             Paper account.
         """
-        account_id = accounts.paper_account_id(tenant_id)
+        account_id = accounts.paper_account_id(tenant_id, currency)
         with self._uow() as uow:
             existing = uow.accounts.get(account_id)
             if existing is not None:
@@ -94,12 +127,14 @@ class AccountService:
                 account_id=account_id,
                 tenant_id=tenant_id,
                 venue="mock",
-                label="Paper trading",
+                label="Paper trading"
+                if currency == "USD"
+                else f"Paper trading ({currency}, TWSE)",
                 status=enums.AccountStatus.CONNECTED,
                 modes=(enums.OrderMode.PAPER, enums.OrderMode.SHADOW),
-                currency="USD",
+                currency=currency,
                 created_at_ms=self._clock.now_ms(),
-                starting_equity=self._paper_equity,
+                starting_equity=starting,
                 is_paper=True,
             )
             uow.accounts.add(account)
@@ -111,7 +146,7 @@ class AccountService:
                 entity_type="account",
                 entity_id=account_id,
                 account_id=account_id,
-                payload={"starting_equity": str(self._paper_equity)},
+                payload={"starting_equity": str(starting)},
             )
         return account
 
@@ -205,6 +240,11 @@ class AccountService:
         val = await valuation.value_account(
             self._uow, self._market, account, mode, now, 15_000
         )
+        snapshot = await self._cash_snapshot(account, adapter)
+        equity = val.equity
+        available = val.available_margin
+        if snapshot is not None and not account.is_paper:
+            equity, available = snapshot.equity, snapshot.available_margin
         with self._uow() as uow:
             open_orders = uow.orders.list(
                 tenant_id=account.tenant_id,
@@ -227,10 +267,14 @@ class AccountService:
             "label": account.label,
             "status": account.status.value,
             "modes": [m.value for m in account.modes],
-            "equity": None if val.equity is None else str(val.equity),
-            "available_margin": None
-            if val.available_margin is None
-            else str(val.available_margin),
+            "equity": None if equity is None else str(equity),
+            "available_margin": None if available is None else str(available),
+            "settled_cash": None
+            if snapshot is None or snapshot.settled_cash is None
+            else str(snapshot.settled_cash),
+            "unsettled_cash": None
+            if snapshot is None or snapshot.unsettled_cash is None
+            else str(snapshot.unsettled_cash),
             "currency": account.currency,
             "positions": position_rows,
             "open_orders": [o.to_contract() for o in open_orders],
@@ -239,6 +283,25 @@ class AccountService:
             "stale": val.stale or not account.is_paper,
             "last_sync_ms": now if account.is_paper else None,
         }
+
+    async def _cash_snapshot(
+        self, account: accounts.Account, adapter: trading.TradingAdapter
+    ) -> trading.VenueAccountSnapshot | None:
+        """Reads balances of paper and broker accounts (else ``None``).
+
+        Args:
+            account: Account.
+            adapter: Its adapter.
+
+        Returns:
+            Snapshot, or ``None`` for crypto venues and on failure.
+        """
+        if not account.is_paper and not equities.is_broker(account.venue):
+            return None
+        try:
+            return await adapter.account_snapshot(account.account_id)
+        except errors.ExecutionError:
+            return None
 
     async def connect_start(
         self,
@@ -263,7 +326,8 @@ class AccountService:
         Raises:
             ExecutionError: ``VALIDATION_FAILED`` for unsafe credentials.
         """
-        if venue not in LIVE_VENUES:
+        broker = equities.is_broker(venue)
+        if venue not in LIVE_VENUES and not broker:
             raise errors.ExecutionError(
                 "VALIDATION_FAILED", f"unsupported venue {venue!r}"
             )
@@ -283,6 +347,8 @@ class AccountService:
                     "never provide seed phrases or main wallet keys; use a "
                     "delegated agent/API key",
                 )
+        if broker:
+            _validate_broker_credentials(venue, credentials)
         if venue in DEX_VENUES and not any(
             n in credentials for n in ("agent_private_key", "api_private_key")
         ):
@@ -302,7 +368,7 @@ class AccountService:
             label=label[:120] or venue,
             status=enums.AccountStatus.PENDING_VERIFICATION,
             modes=(),
-            currency="USD",
+            currency=equities.BROKER_CURRENCY.get(venue, "USD"),
             created_at_ms=now,
             credential_id=credential_id,
             withdrawal_disabled=True,
@@ -406,6 +472,37 @@ class AccountService:
                 payload={"envelopes_deleted": removed},
             )
         return await self._summary(updated)
+
+
+def _validate_broker_credentials(
+    venue: str, credentials: Mapping[str, str]
+) -> None:
+    """Accepts only the broker account number for broker connections.
+
+    Args:
+        venue: Broker code.
+        credentials: Submitted fields.
+
+    Raises:
+        ExecutionError: ``VALIDATION_FAILED`` for any other field or a
+            malformed account number.
+    """
+    extra = sorted(set(credentials) - {BROKER_ACCOUNT_FIELD})
+    if extra:
+        raise errors.ExecutionError(
+            "VALIDATION_FAILED",
+            f"{venue} connections take only the broker account number "
+            f"({BROKER_ACCOUNT_FIELD!r}); broker logins, API keys and "
+            "certificates are deployment secrets (env or secret files)",
+            details={"fields": extra},
+        )
+    number = credentials.get(BROKER_ACCOUNT_FIELD, "").strip()
+    if not _BROKER_ACCOUNT.match(number):
+        raise errors.ExecutionError(
+            "VALIDATION_FAILED",
+            f"{venue} needs the broker account number, e.g. DU1234567 "
+            "(IBKR paper) or 9A95-0000000 (SinoPac)",
+        )
 
 
 def _replace(

@@ -89,13 +89,62 @@ PLATFORM_HARD_LIMITS = RiskLimits(
 )
 
 
-def from_mapping(values: Mapping[str, str] | None) -> RiskLimits:
+CURRENCY_SCALE: Mapping[str, decimal.Decimal] = {"TWD": _D(30)}
+"""Approximate units per USD of non-USD account currencies.
+
+Notional and loss limits are expressed in the account's own currency; the
+USD-sized defaults and platform hard caps are scaled by this factor for
+TWD accounts (TWSE), so one board lot of a large-cap is not blocked by a
+USD-sized cap. It is a sizing convention, not an exchange rate.
+"""
+
+_MONEY_FIELDS = (
+    "max_account_notional",
+    "max_position_notional",
+    "max_daily_loss",
+)
+
+
+def in_currency(base: RiskLimits, currency: str) -> RiskLimits:
+    """Expresses USD-sized money limits in an account currency.
+
+    Args:
+        base: Limits sized in USD.
+        currency: Account currency.
+
+    Returns:
+        Limits with notional and loss limits scaled.
+    """
+    scale = CURRENCY_SCALE.get(currency)
+    if scale is None:
+        return base
+    scaled = {name: getattr(base, name) * scale for name in _MONEY_FIELDS}
+    return dataclasses.replace(base, **scaled)
+
+
+def hard_limits(currency: str = "USD") -> RiskLimits:
+    """Returns the platform hard caps in an account currency.
+
+    Args:
+        currency: Account currency.
+
+    Returns:
+        Hard caps.
+    """
+    return in_currency(PLATFORM_HARD_LIMITS, currency)
+
+
+def from_mapping(
+    values: Mapping[str, str] | None, currency: str = "USD"
+) -> RiskLimits:
     """Builds limits from stored values, clamped to platform hard caps.
 
     Unknown keys are rejected so typos cannot silently disable a limit.
 
     Args:
         values: Stored or user-supplied values; ``None`` for defaults.
+        currency: Account currency of money limits (defaults and hard caps
+            scale with ``CURRENCY_SCALE``).
 
     Returns:
         Effective limits.
@@ -103,7 +152,8 @@ def from_mapping(values: Mapping[str, str] | None) -> RiskLimits:
     Raises:
         ExecutionError: ``VALIDATION_FAILED`` for unknown keys or bad values.
     """
-    base = RiskLimits()
+    base = in_currency(RiskLimits(), currency)
+    caps = hard_limits(currency)
     if not values:
         return base
     known = {f.name: f for f in dataclasses.fields(RiskLimits)}
@@ -114,7 +164,7 @@ def from_mapping(values: Mapping[str, str] | None) -> RiskLimits:
                 "VALIDATION_FAILED", f"unknown risk limit {key!r}"
             )
         default = getattr(base, key)
-        hard = getattr(PLATFORM_HARD_LIMITS, key)
+        hard = getattr(caps, key)
         try:
             if isinstance(default, int):
                 value: object = min(int(raw), hard)

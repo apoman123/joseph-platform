@@ -86,6 +86,8 @@ class OrderIntentRequest:
         signal_id: Originating signal for STRATEGY intents.
         expires_at_ms: Optional intent expiry.
         preview_token: Token from a preview binding these parameters.
+        outside_rth: Allow execution outside regular trading hours
+            (Interactive Brokers ``outsideRth``; securities only).
     """
 
     account_id: str
@@ -108,6 +110,7 @@ class OrderIntentRequest:
     signal_id: str | None = None
     expires_at_ms: int | None = None
     preview_token: str | None = None
+    outside_rth: bool = False
 
     def __post_init__(self) -> None:
         """Validates structural invariants.
@@ -208,7 +211,7 @@ class OrderIntentRequest:
                     for leg in self.bracket.take_profit
                 ],
             }
-        return {
+        body: dict[str, object] = {
             "account_id": self.account_id,
             "instrument_id": self.instrument_id,
             "side": self.side.value,
@@ -232,6 +235,11 @@ class OrderIntentRequest:
             "expires_at_ms": self.expires_at_ms,
             "preview_token": self.preview_token,
         }
+        if self.outside_rth:
+            # Emitted only when set so body hashes and preview tokens of
+            # requests without the flag are unchanged.
+            body["outside_rth"] = True
+        return body
 
     @classmethod
     def from_contract(cls, body: Mapping[str, object]) -> OrderIntentRequest:
@@ -306,6 +314,7 @@ class OrderIntentRequest:
                 if expires is not None
                 else None,
                 preview_token=_opt_str(body.get("preview_token")),
+                outside_rth=bool(body.get("outside_rth", False)),
             )
         except (KeyError, ValueError, TypeError) as err:
             raise errors.ExecutionError(

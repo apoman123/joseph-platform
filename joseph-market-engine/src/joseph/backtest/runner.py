@@ -1,4 +1,9 @@
-"""Backtest runner using the production compiler, evaluator and FSM."""
+"""Backtest runner using the production compiler, evaluator and FSM.
+
+Bars are counted on the instrument's session calendar: an exchange backtest
+evaluates session bars only, and nights, weekends and holidays are never
+missing bars.
+"""
 
 from __future__ import annotations
 
@@ -14,6 +19,7 @@ from joseph.domain import errors
 from joseph.domain import ids
 from joseph.domain import instruments
 from joseph.domain import quality
+from joseph.domain import sessions
 from joseph.domain import structures
 from joseph.signals.domain import signal as signal_domain
 from joseph.strategy.app import ports as strategy_ports
@@ -152,15 +158,16 @@ def count_missing(frames: Sequence[structures.BarFrame]) -> int:
     """Counts missing bars between consecutive frames.
 
     Args:
-        frames: Frames, oldest first.
+        frames: Frames of one series, oldest first.
 
     Returns:
-        Number of missing bars.
+        Number of missing bars (on the instrument's session calendar).
     """
     missing = 0
     for previous, frame in itertools.pairwise(frames):
-        missing += frame.timeframe.bars_between(
-            previous.candle.end_ms, frame.candle.start_ms
+        calendar = sessions.for_instrument(frame.instrument_id)
+        missing += calendar.bars_between(
+            frame.timeframe, previous.candle.end_ms, frame.candle.start_ms
         )
     return missing
 
@@ -232,6 +239,9 @@ class BacktestRunner:
             instrument = instruments.InstrumentId.parse(request.instrument_id)
         except ValueError as err:
             raise errors.ValidationFailedError(str(err)) from err
+        reason = compiler.untradable_reason(request.instrument_id)
+        if reason is not None:
+            raise errors.ValidationFailedError(reason)
         definition = version.definition
         venues = {v.value for v in definition.universe.venues}
         if instrument.venue.value not in venues:
@@ -247,6 +257,14 @@ class BacktestRunner:
                 [issue.to_contract() for issue in result.validation.errors],
             )
         plan = result.plan
+        calendar = sessions.for_instrument(instrument)
+        try:
+            calendar.floor(definition.signal_timeframe, request.from_ms)
+        except ValueError as err:
+            raise errors.ValidationFailedError(
+                f"from_ms precedes the {calendar.calendar_id.value} calendar: "
+                f"{err}"
+            ) from err
         raw = await self.provider.frames(
             instrument,
             definition.signal_timeframe,

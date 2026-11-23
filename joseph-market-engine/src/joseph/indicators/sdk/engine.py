@@ -7,13 +7,19 @@ Scheduling is event-time based and watermark gated:
 
 * Each plugin series has its own FIFO of closed bars. A bar ending at ``E``
   on timeframe ``X`` runs once every dependency timeframe ``D`` (intrabar or
-  aux stream) has delivered data up to ``D.floor(E)``: lower-timeframe
+  aux stream) has delivered data up to the end of the newest ``D`` bar
+  closed at ``E`` (``D.floor(E)`` on a 24x7 market): lower-timeframe
   intrabars are complete and higher-timeframe bars are visible only once
   closed. Series are independent, so one stalled series never blocks the
   others (their intrabars are consumed promptly).
 * A frame for the signal bar ending at ``E`` is a barrier: it is built only
-  after every series ``T`` has received and processed its bars through
-  ``T.floor(E)``.
+  after every series ``T`` has received and processed its bars through the
+  newest ``T`` bar closed at ``E``.
+* Bar boundaries follow the instrument's session calendar
+  (``sessions.for_instrument``). On an exchange a daily bar closing with
+  the session is visible to the last intraday bar of that session, the
+  time between sessions is never a missing bar, and nesting is checked on
+  the session grid.
 * Events inside a frame are ordered canonically by ``(confirmed_at_ms,
   timeframe, series order, sequence)``, independent of arrival order.
 
@@ -36,6 +42,7 @@ from joseph.domain import errors
 from joseph.domain import instruments
 from joseph.domain import market
 from joseph.domain import quality
+from joseph.domain import sessions
 from joseph.domain import structures
 from joseph.domain import timeframes
 from joseph.indicators.sdk import protocol
@@ -44,6 +51,8 @@ from joseph.indicators.sdk import state_codec
 
 _MIN_STORE = 64
 _NO_LIMIT = 2**62
+_VISIBLE_CACHE = 4_096
+"""Memoized visibility watermarks per engine (exchange calendars only)."""
 
 _SNAPSHOT_TYPES: tuple[type, ...] = (
     structures.IndicatorSnapshot,
@@ -208,6 +217,8 @@ class IndicatorEngine:
         """
         self._config = config
         self._instrument_id = instrument_id
+        self._calendar = sessions.for_instrument(instrument_id)
+        self._visible: dict[tuple[timeframes.Timeframe, int], int] = {}
         self._series: dict[str, _Series] = {}
         self._store: dict[
             timeframes.Timeframe, collections.deque[market.Candle]
@@ -267,10 +278,11 @@ class IndicatorEngine:
         for stream in sorted(streams):
             kind, tf = protocol.parse_stream(stream)
             if kind == "intrabars" and tf is not None:
-                if not timeframe.contains(tf):
+                if not self._calendar.contains(timeframe, tf):
                     raise errors.ValidationFailedError(
                         f"{plugin.plugin_id}: {tf} intrabars do not nest in "
-                        f"{timeframe}"
+                        f"{timeframe} on the "
+                        f"{self._calendar.calendar_id.value} calendar"
                     )
                 intrabar_tfs.append(tf)
                 per_bar = timeframe.duration_ms // tf.duration_ms
@@ -297,6 +309,38 @@ class IndicatorEngine:
     def instrument_id(self) -> instruments.InstrumentId:
         """Returns the engine's instrument."""
         return self._instrument_id
+
+    @property
+    def calendar(self) -> sessions.BarCalendar:
+        """Returns the instrument's session calendar."""
+        return self._calendar
+
+    def _visible_through(self, tf: timeframes.Timeframe, end_ms: int) -> int:
+        """Returns the watermark ``tf`` must reach before ``end_ms`` runs.
+
+        That is the end of the newest ``tf`` bar closed at ``end_ms``, so a
+        higher-timeframe bar closing exactly at ``end_ms`` (a daily bar at
+        the session close) is waited for, and one still open is not.
+
+        Args:
+            tf: Dependency timeframe.
+            end_ms: Close of the bar or frame that waits.
+
+        Returns:
+            Required watermark (``-1`` when no ``tf`` bar has closed yet).
+        """
+        if self._calendar.continuous:
+            return tf.floor(end_ms)
+        key = (tf, end_ms)
+        cached = self._visible.get(key)
+        if cached is not None:
+            return cached
+        last = self._calendar.last_closed_start(tf, end_ms)
+        value = -1 if last is None else self._calendar.end_of(tf, last)
+        if len(self._visible) >= _VISIBLE_CACHE:
+            self._visible.clear()
+        self._visible[key] = value
+        return value
 
     def on_candle(self, candle: market.Candle) -> list[structures.BarFrame]:
         """Feeds one candle and returns frames that became complete.
@@ -329,14 +373,8 @@ class IndicatorEngine:
             else:
                 self.stats.out_of_order += 1
             return []
-        if (
-            tf is self._config.signal_timeframe
-            and last is not None
-            and candle.start_ms > tf.end_of(last)
-        ):
-            self._signal_missing += tf.bars_between(
-                tf.end_of(last), candle.start_ms
-            )
+        if tf is self._config.signal_timeframe and last is not None:
+            self._signal_missing += self._missing_between(tf, last, candle)
         self._last_start[tf] = candle.start_ms
         self._store[tf].append(candle)
         self._watermark[tf] = max(self._watermark[tf], candle.end_ms)
@@ -347,6 +385,24 @@ class IndicatorEngine:
         if tf is self._config.signal_timeframe:
             self._frames.append(candle)
         return self._drain(force_until=None)
+
+    def _missing_between(
+        self, tf: timeframes.Timeframe, last: int, candle: market.Candle
+    ) -> int:
+        """Counts session bars skipped between two accepted bars.
+
+        Args:
+            tf: Timeframe.
+            last: Start of the previous accepted bar.
+            candle: Newly accepted bar.
+
+        Returns:
+            Missing bars (the time between sessions is never missing).
+        """
+        expected = self._calendar.shift(tf, last, 1)
+        if candle.start_ms <= expected:
+            return 0
+        return self._calendar.bars_between(tf, expected, candle.start_ms)
 
     def run(
         self,
@@ -432,7 +488,8 @@ class IndicatorEngine:
             if self._watermark[tf] < candle.end_ms:
                 return False
         return all(
-            self._watermark[tf] >= tf.floor(candle.end_ms) for tf in series.aux
+            self._watermark[tf] >= self._visible_through(tf, candle.end_ms)
+            for tf in series.aux
         )
 
     def _series_blocking(self, end_ms: int) -> bool:
@@ -462,7 +519,8 @@ class IndicatorEngine:
         if self._series_blocking(end):
             return False
         return all(
-            self._watermark[s.timeframe] >= s.timeframe.floor(end)
+            self._watermark[s.timeframe]
+            >= self._visible_through(s.timeframe, end)
             for s in self._series.values()
         )
 

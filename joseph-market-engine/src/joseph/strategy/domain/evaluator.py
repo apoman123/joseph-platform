@@ -23,6 +23,7 @@ from typing import Any
 from joseph.domain import decimals
 from joseph.domain import market as market_domain
 from joseph.domain import quality
+from joseph.domain import sessions
 from joseph.domain import structures
 from joseph.domain import timeframes
 from joseph.strategy.domain import ast
@@ -32,8 +33,12 @@ from joseph.strategy.domain import reasons
 from joseph.strategy.domain import risk
 from joseph.strategy.domain import tristate
 
-EVALUATOR_VERSION = "1.0.0"
-"""Semantic version of the evaluation semantics."""
+EVALUATOR_VERSION = "1.1.0"
+"""Semantic version of the evaluation semantics.
+
+1.1.0: lookback windows are contiguous across exchange session breaks (the
+time between sessions is not a gap); 24x7 evaluation is unchanged.
+"""
 
 T = tristate.TriState
 _NEW_YORK = "America/New_York"
@@ -189,6 +194,7 @@ class _Run:
         plan: Compiled strategy.
         frames: Evaluation window.
         current: Index of the evaluated frame.
+        calendar: Session calendar of the frames' instrument.
     """
 
     def __init__(
@@ -211,6 +217,11 @@ class _Run:
         self.signal_tf = plan.definition.signal_timeframe
         self.frames = tuple(frames)
         self.current = len(self.frames) - 1
+        self.calendar = (
+            sessions.for_instrument(self.frames[0].instrument_id)
+            if self.frames
+            else sessions.CONTINUOUS
+        )
         self.market = market
         self.evaluated_at_ms = evaluated_at_ms
         self.flags: set[str] = set()
@@ -266,6 +277,10 @@ class _Run:
     def window(self, pos: int, bars: int) -> _Window:
         """Returns positions ``[pos - bars, pos]`` with completeness.
 
+        Consecutive frames are contiguous when the later one starts at the
+        first bar start after the earlier one's end on the instrument's
+        calendar, so an exchange session break is not a gap.
+
         Args:
             pos: Last position.
             bars: Bars to look back.
@@ -277,9 +292,10 @@ class _Run:
         complete = start >= 0
         positions: list[int] = [pos]
         for p in range(pos - 1, max(start, 0) - 1, -1):
-            if (
-                self.frames[p].candle.end_ms
-                != self.frames[p + 1].candle.start_ms
+            end = self.frames[p].candle.end_ms
+            following = self.frames[p + 1].candle.start_ms
+            if end != following and (
+                self.calendar.ceil(self.signal_tf, end) != following
             ):
                 complete = False
                 self.flags.add("GAP_IN_WINDOW")
