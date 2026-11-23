@@ -27,7 +27,7 @@ jobs:
       - name: Indicator library access (private PineScripts)
         uses: ./.github/actions/indicators-access
         with:
-          deploy-key: ${{ secrets.PINESCRIPTS_DEPLOY_KEY }}
+          token: ${{ secrets.PINESCRIPTS_TOKEN }}
       - run: uv sync --frozen
       - name: Network tests (Binance, Hyperliquid, Lighter, Bitget, MEXC)
         env:
