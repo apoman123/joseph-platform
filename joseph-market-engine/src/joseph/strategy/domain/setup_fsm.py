@@ -28,6 +28,11 @@ State mapping (``gates`` are the top-level conjuncts of the root ``ALL``):
 Idempotency: a bar close at or before the last processed close never emits
 again. A higher candle revision for the last processed close yields a
 ``RevisionNotice`` audit record and never rewrites a fired signal.
+
+Expiry and cooldown are counted in signal bars of the instrument's session
+calendar (``LifecyclePolicy.calendar``): on an exchange a setup opened at the
+last bar of a session that expires after 2 bars lives through the first two
+bars of the next session, not two wall-clock bar lengths.
 """
 
 from __future__ import annotations
@@ -38,6 +43,7 @@ import enum
 from collections.abc import Mapping
 
 from joseph.domain import ids
+from joseph.domain import sessions
 from joseph.domain import timeframes
 from joseph.strategy.domain import compiler
 from joseph.strategy.domain import errors
@@ -300,13 +306,15 @@ class LifecyclePolicy:
     """Policy inputs of the state machine, derived from a plan.
 
     Attributes:
-        timeframe: Signal timeframe (bars are counted on its calendar).
+        timeframe: Signal timeframe.
         expire_after_bars: Lifetime of an unfired setup.
         cooldown_bars: Bars of blocked entries after a fire.
         once_per_aoi: Fire at most once per AOI.
         emit: Signal kinds the user receives.
         min_rr: Strategy-level net reward/risk floor.
         has_aoi_touch: Whether setups are anchored by AOI touches.
+        calendar: Session calendar of the instance's instrument; expiry
+            and cooldown count ``timeframe`` bars on it.
     """
 
     timeframe: timeframes.Timeframe
@@ -316,13 +324,20 @@ class LifecyclePolicy:
     emit: frozenset[str]
     min_rr: decimal.Decimal
     has_aoi_touch: bool
+    calendar: sessions.BarCalendar = sessions.CONTINUOUS
 
     @classmethod
-    def from_plan(cls, plan: compiler.CompiledStrategy) -> LifecyclePolicy:
+    def from_plan(
+        cls,
+        plan: compiler.CompiledStrategy,
+        calendar: sessions.BarCalendar = sessions.CONTINUOUS,
+    ) -> LifecyclePolicy:
         """Builds the policy from a compiled strategy.
 
         Args:
             plan: Compiled strategy.
+            calendar: Session calendar of the instance's instrument
+                (``sessions.for_instrument``).
 
         Returns:
             The policy.
@@ -336,6 +351,28 @@ class LifecyclePolicy:
             emit=frozenset(definition.notification.emit),
             min_rr=definition.risk.min_rr,
             has_aoi_touch=plan.has_aoi_touch,
+            calendar=calendar,
+        )
+
+    def bars_after(self, close_ms: int, bars: int) -> int:
+        """Returns the close of the signal bar ``bars`` bars after a close.
+
+        On an exchange the close of a session's last bar is not the next
+        bar's start, so the count restarts at the next session's open.
+
+        Args:
+            close_ms: Close of a signal bar.
+            bars: Bars to count on the calendar (0 returns ``close_ms``).
+
+        Returns:
+            Time at which ``bars`` more signal bars have closed.
+        """
+        if bars <= 0:
+            return close_ms
+        tf = self.timeframe
+        following = self.calendar.ceil(tf, close_ms)
+        return self.calendar.end_of(
+            tf, self.calendar.shift(tf, following, bars - 1)
         )
 
 
@@ -610,7 +647,7 @@ def _close_setup(
     if setup is None:
         return
     policy = work.policy
-    expires_at_ms = policy.timeframe.shift(
+    expires_at_ms = policy.bars_after(
         setup.started_at_ms, policy.expire_after_bars
     )
     if setup.anchor_aoi_id and _anchor_invalidated(
@@ -778,7 +815,7 @@ def _advance(
     policy = work.policy
     cooldown = None
     if policy.cooldown_bars > 0:
-        cooldown = policy.timeframe.shift(work.close_ms, policy.cooldown_bars)
+        cooldown = policy.bars_after(work.close_ms, policy.cooldown_bars)
     return dataclasses.replace(
         base,
         fired_aoi_ids=state.fired_aoi_ids | frozenset(evaluation.aoi_ids),

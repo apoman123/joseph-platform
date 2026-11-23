@@ -18,6 +18,14 @@ that minute's 1m bar: the first trade opens it at ``:00.000``, interior
 trades touch its high and low, quantities sum to its volume and buyer-
 aggressor quantities to its taker buy volume. Seconds bars are folded from
 these trades with the same builder (and rules) as real venues.
+
+``mock:stock:ACME`` is a DEMO stock on the NYSE calendar (``XNYS``): its bars
+start at the 09:30 New York open, stop at the close (early closes
+included), skip weekends and holidays, and aggregate in-session minutes
+only; daily bars are sessions and weekly/monthly bars their sessions. Its
+trades exist only in session and its buy volume is labelled ``classified``
+like a stock exchange's. It has no funding and no open interest, and its
+24h snapshot fields describe the latest completed session.
 """
 
 from __future__ import annotations
@@ -38,6 +46,7 @@ from joseph.domain import errors
 from joseph.domain import instruments
 from joseph.domain import market
 from joseph.domain import quality
+from joseph.domain import sessions
 from joseph.domain import timeframes
 from joseph.market_data.domain import books
 from joseph.market_data.domain import capabilities
@@ -69,6 +78,8 @@ class MockSpec:
         funding_rate: Funding rate per 8h interval.
         open_interest_base: Open interest in base units.
         book_depth_base: Base quantity at the best level.
+        market_type: Product type (``perp`` or ``stock``).
+        asset_class: Asset class.
     """
 
     symbol: str
@@ -81,6 +92,19 @@ class MockSpec:
     funding_rate: decimal.Decimal
     open_interest_base: decimal.Decimal
     book_depth_base: decimal.Decimal
+    market_type: instruments.MarketType = instruments.MarketType.PERP
+    asset_class: instruments.AssetClass = instruments.AssetClass.CRYPTO
+
+    @property
+    def is_stock(self) -> bool:
+        """Returns True for the exchange-listed DEMO stock."""
+        return self.market_type is instruments.MarketType.STOCK
+
+    def instrument_id(self) -> instruments.InstrumentId:
+        """Returns the canonical id (``mock:{market_type}:{symbol}``)."""
+        return instruments.InstrumentId(
+            instruments.Venue.MOCK, self.market_type, self.symbol
+        )
 
 
 SPECS: tuple[MockSpec, ...] = (
@@ -119,6 +143,20 @@ SPECS: tuple[MockSpec, ...] = (
         decimal.Decimal("0.00005"),
         decimal.Decimal(2_000_000),
         decimal.Decimal("60"),
+    ),
+    MockSpec(
+        "ACME",
+        "ACME",
+        decimal.Decimal(150),
+        decimal.Decimal("0.01"),
+        decimal.Decimal(1),
+        6000.0,
+        decimal.Decimal("2"),
+        decimal.Decimal(0),
+        decimal.Decimal(0),
+        decimal.Decimal(1500),
+        market_type=instruments.MarketType.STOCK,
+        asset_class=instruments.AssetClass.EQUITY,
     ),
 )
 
@@ -308,7 +346,10 @@ class MockAdapter:
         return capabilities.VenueCapabilities(
             venue=instruments.Venue.MOCK,
             display_name="Demo venue",
-            market_types=(instruments.MarketType.PERP,),
+            market_types=(
+                instruments.MarketType.PERP,
+                instruments.MarketType.STOCK,
+            ),
             market_data=capabilities.MarketDataCapabilities(
                 rest_history=True,
                 native_ws_candles=True,
@@ -318,6 +359,7 @@ class MockAdapter:
                 funding=True,
                 trades_history=True,
                 taker_volume=True,
+                classified_delta=True,
             ),
             timeframes=tuple(timeframes.Timeframe),
             trade_built_timeframes=timeframes.SECONDS,
@@ -326,6 +368,8 @@ class MockAdapter:
                 "Deterministic: identical requests return identical bars.",
                 "Synthetic trades aggregate exactly to the 1m bars; seconds "
                 "bars are built from them like on real venues.",
+                "mock:stock:ACME follows the XNYS session calendar; it has "
+                "no funding or open interest and classified buy volume.",
             ),
             docs_url="https://example.invalid/joseph/demo-venue",
             verified_at_ms=None,
@@ -344,12 +388,16 @@ class MockAdapter:
             errors.NotFoundError: If not a mock instrument.
         """
         spec = self._specs.get(instrument.venue_market_id)
-        if instrument.venue is not instruments.Venue.MOCK or spec is None:
+        if (
+            instrument.venue is not instruments.Venue.MOCK
+            or spec is None
+            or instrument.market_type is not spec.market_type
+        ):
             raise errors.NotFoundError(f"unknown instrument {instrument}")
         return spec
 
     async def list_instruments(self) -> list[instruments.Instrument]:
-        """Lists the three DEMO perpetuals.
+        """Lists the three DEMO perpetuals and the DEMO stock.
 
         Returns:
             Instruments.
@@ -358,30 +406,53 @@ class MockAdapter:
         return [
             instruments.Instrument(
                 key=instruments.InstrumentKey(
-                    instrument_id=instruments.InstrumentId(
-                        instruments.Venue.MOCK,
-                        instruments.MarketType.PERP,
-                        spec.symbol,
-                    ),
+                    instrument_id=spec.instrument_id(),
                     canonical_base=spec.base,
                     quote="USD",
                     settlement="USD",
                 ),
-                display_symbol=f"{spec.base}-USD DEMO",
+                display_symbol=(
+                    f"{spec.base} DEMO"
+                    if spec.is_stock
+                    else f"{spec.base}-USD DEMO"
+                ),
                 tick_size=spec.tick,
                 lot_size=spec.lot,
                 min_qty=spec.lot,
-                min_notional=decimal.Decimal(5),
+                min_notional=None if spec.is_stock else decimal.Decimal(5),
                 contract_multiplier=decimals.ONE,
                 linear=True,
                 status=instruments.InstrumentStatus.TRADING,
-                asset_class=instruments.AssetClass.CRYPTO,
+                asset_class=spec.asset_class,
                 source=_SOURCE,
                 as_of_ms=now,
-                funding_interval_hours=8.0,
-                max_leverage=decimal.Decimal(20),
+                funding_interval_hours=None if spec.is_stock else 8.0,
+                max_leverage=None if spec.is_stock else decimal.Decimal(20),
+                listing_exchange="DEMO" if spec.is_stock else None,
             )
             for spec in SPECS
+        ]
+
+    def _segments(
+        self, instrument: instruments.InstrumentId, start_ms: int, end_ms: int
+    ) -> list[tuple[int, int]]:
+        """Returns the in-session parts of ``[start_ms, end_ms)``.
+
+        Args:
+            instrument: Mock instrument.
+            start_ms: Inclusive start.
+            end_ms: Exclusive end.
+
+        Returns:
+            Ascending ``(start, end)`` intervals (the whole range for a
+            continuous market).
+        """
+        calendar = sessions.for_instrument(instrument)
+        if calendar.continuous:
+            return [(start_ms, end_ms)]
+        return [
+            (max(s.open_ms, start_ms), min(s.close_ms, end_ms))
+            for s in calendar.sessions(start_ms, end_ms)
         ]
 
     def _round_price(self, spec: MockSpec, value: float) -> decimal.Decimal:
@@ -420,8 +491,13 @@ class MockAdapter:
         if start_ms > now:
             return None
         if timeframe.is_seconds:
+            calendar = sessions.for_instrument(instrument)
             bars = self._seconds_bars(
-                instrument, timeframe, start_ms, timeframe.end_of(start_ms), now
+                instrument,
+                timeframe,
+                start_ms,
+                calendar.end_of(timeframe, start_ms),
+                now,
             )
             return bars[0] if bars else None
         return self._kline(spec, instrument, timeframe, start_ms, now)
@@ -436,6 +512,9 @@ class MockAdapter:
     ) -> market.Candle:
         """Builds a minute-or-longer bar from 60 sub-steps of the path.
 
+        Only in-session minutes are sampled, so an exchange bar spanning
+        several sessions (``1d`` and above) never sees overnight prices.
+
         Args:
             spec: Instrument parameters.
             instrument: Mock instrument.
@@ -447,18 +526,80 @@ class MockAdapter:
             Candle with a taker buy volume.
         """
         seed = self._seeds[spec.symbol]
-        end_ms = timeframe.end_of(start_ms)
-        minutes = (end_ms - start_ms) // _MINUTE_MS
+        end_ms = sessions.for_instrument(instrument).end_of(timeframe, start_ms)
+        segments = self._segments(instrument, start_ms, end_ms)
+        minutes = sum(b - a for a, b in segments) // _MINUTE_MS
         step = max(1, minutes // 60)
-        first = start_ms / _MINUTE_MS
-        open_ = _price(spec, seed, first)
+        open_ = _price(spec, seed, segments[0][0] / _MINUTE_MS)
         high = low = open_
         close = open_
         volume = 0.0
         taker = 0.0
-        position = first
-        stop = min(end_ms, now) / _MINUTE_MS
         wick = 0.0004 * math.sqrt(step)
+        for segment_start, segment_end in segments:
+            volume, taker, high, low, close = self._sample(
+                spec,
+                seed,
+                (
+                    segment_start / _MINUTE_MS,
+                    min(segment_end, now) / _MINUTE_MS,
+                ),
+                step=step,
+                wick=wick,
+                totals=(volume, taker, high, low, close),
+            )
+        final = end_ms <= now
+        open_d = self._round_price(spec, open_)
+        close_d = self._round_price(spec, close)
+        return market.Candle(
+            instrument_id=instrument,
+            timeframe=timeframe,
+            start_ms=start_ms,
+            end_ms=end_ms,
+            open=open_d,
+            high=max(self._round_price(spec, high), open_d, close_d),
+            low=min(self._round_price(spec, low), open_d, close_d),
+            close=close_d,
+            base_volume=decimals.floor_to_step(
+                decimals.to_decimal(round(volume, 6)), spec.lot
+            ),
+            is_final=final,
+            source=_SOURCE,
+            feed_state=quality.FeedState.DEMO,
+            received_at_ms=now,
+            taker_buy_base_volume=decimals.floor_to_step(
+                decimals.to_decimal(round(taker, 6)), spec.lot
+            ),
+            taker_buy_method=(
+                market.BuyVolumeMethod.CLASSIFIED if spec.is_stock else None
+            ),
+        )
+
+    @staticmethod
+    def _sample(
+        spec: MockSpec,
+        seed: int,
+        span: tuple[float, float],
+        *,
+        step: int,
+        wick: float,
+        totals: tuple[float, float, float, float, float],
+    ) -> tuple[float, float, float, float, float]:
+        """Folds the sub-steps of one in-session span into running totals.
+
+        Args:
+            spec: Instrument parameters.
+            seed: Instrument seed.
+            span: ``(first, stop)`` minute positions.
+            step: Minutes per sub-step.
+            wick: Wick size per sub-step.
+            totals: ``(volume, taker, high, low, close)`` so far.
+
+        Returns:
+            Updated ``(volume, taker, high, low, close)``.
+        """
+        volume, taker, high, low, close = totals
+        position, stop = span
         while position < stop:
             nxt = min(position + step, stop)
             p0 = _price(spec, seed, position)
@@ -482,29 +623,7 @@ class MockAdapter:
             taker += step_volume * min(0.95, max(0.05, share))
             close = p1
             position = nxt
-        final = end_ms <= now
-        open_d = self._round_price(spec, open_)
-        close_d = self._round_price(spec, close)
-        return market.Candle(
-            instrument_id=instrument,
-            timeframe=timeframe,
-            start_ms=start_ms,
-            end_ms=end_ms,
-            open=open_d,
-            high=max(self._round_price(spec, high), open_d, close_d),
-            low=min(self._round_price(spec, low), open_d, close_d),
-            close=close_d,
-            base_volume=decimals.floor_to_step(
-                decimals.to_decimal(round(volume, 6)), spec.lot
-            ),
-            is_final=final,
-            source=_SOURCE,
-            feed_state=quality.FeedState.DEMO,
-            received_at_ms=now,
-            taker_buy_base_volume=decimals.floor_to_step(
-                decimals.to_decimal(round(taker, 6)), spec.lot
-            ),
-        )
+        return volume, taker, high, low, close
 
     def _minute_trades(
         self, instrument: instruments.InstrumentId, minute: int
@@ -623,9 +742,17 @@ class MockAdapter:
             return []
         last = (end_ms - 1) // _MINUTE_MS
         first = max(start_ms // _MINUTE_MS, last - _MAX_TRADE_MINUTES + 1)
+        # Exchange instruments trade only in session minutes.
+        minutes = [
+            minute
+            for a, b in self._segments(
+                instrument, first * _MINUTE_MS, (last + 1) * _MINUTE_MS
+            )
+            for minute in range(a // _MINUTE_MS, -(-b // _MINUTE_MS))
+        ]
         return [
             trade
-            for minute in range(first, last + 1)
+            for minute in minutes
             for trade in self._minute_trades(instrument, minute)
             if start_ms <= trade.venue_event_ts_ms < end_ms
         ]
@@ -665,13 +792,15 @@ class MockAdapter:
         if cutoff <= origin:
             return []
         trades = self._trades_between(instrument, origin, cutoff)
+        calendar = sessions.for_instrument(instrument)
         builder = trade_bars.TradeBarBuilder(
             instrument,
             timeframe,
             source=_TRADE_SOURCE,
             feed_state=quality.FeedState.DEMO,
-            retention_bars=timeframe.bars_between(origin, cutoff) + 1,
+            retention_bars=calendar.bars_between(timeframe, origin, cutoff) + 1,
             dedupe_capacity=len(trades) + 1,
+            buy_volume_method=self._buy_method(instrument),
         )
         builder.start_segment(origin)
         out = {c.start_ms: c for c in builder.add(trades, now)}
@@ -701,15 +830,20 @@ class MockAdapter:
         """
         self._spec(instrument)
         now = self._clock.now_ms()
-        last = timeframe.floor(min(end_ms - 1, now))
-        first = timeframe.floor(start_ms)
-        if first < start_ms:
-            first = timeframe.end_of(first)
+        calendar = sessions.for_instrument(instrument)
+        first = calendar.ceil(timeframe, start_ms)
+        if first >= end_ms or first > now:
+            return []
+        last = calendar.floor(timeframe, min(end_ms - 1, now))
         if limit is not None:
-            first = max(first, timeframe.shift(last, -(limit - 1)))
+            first = max(first, calendar.shift(timeframe, last, -(limit - 1)))
         if timeframe.is_seconds:
             rows = self._seconds_bars(
-                instrument, timeframe, first, timeframe.end_of(last), now
+                instrument,
+                timeframe,
+                first,
+                calendar.end_of(timeframe, last),
+                now,
             )
             return rows if limit is None else rows[-limit:]
         rows = []
@@ -718,7 +852,7 @@ class MockAdapter:
             candle = self.bar(instrument, timeframe, cursor, now)
             if candle is not None:
                 rows.append(candle)
-            cursor = timeframe.end_of(cursor)
+            cursor = calendar.shift(timeframe, cursor, 1)
         return rows
 
     async def fetch_trades(
@@ -814,6 +948,8 @@ class MockAdapter:
         spec = self._spec(instrument)
         now = self._clock.now_ms()
         last = self._last_price(spec, now)
+        if spec.is_stock:
+            return await self._stock_snapshot(instrument, spec, now)
         hours = await self.fetch_candles(
             instrument, timeframes.Timeframe.H1, now - 86_400_000, now + 1
         )
@@ -850,6 +986,87 @@ class MockAdapter:
             ),
         )
 
+    def _quotes(
+        self, spec: MockSpec, last: decimal.Decimal
+    ) -> tuple[decimal.Decimal, decimal.Decimal]:
+        """Returns the DEMO best bid and ask around a price.
+
+        Args:
+            spec: Instrument parameters.
+            last: Reference price.
+
+        Returns:
+            ``(bid, ask)``.
+        """
+        half = last * spec.spread_bps / decimal.Decimal(20000)
+        bid = decimals.floor_to_step(last - half, spec.tick)
+        ask = bid + max(spec.tick, decimals.round_to_step(half * 2, spec.tick))
+        return bid, ask
+
+    async def _stock_snapshot(
+        self,
+        instrument: instruments.InstrumentId,
+        spec: MockSpec,
+        now: int,
+    ) -> market.MarketSnapshot:
+        """Builds the DEMO stock snapshot (no funding, no open interest).
+
+        The 24h fields describe the latest completed session; between
+        sessions the last price is that session's close.
+
+        Args:
+            instrument: Mock stock.
+            spec: Instrument parameters.
+            now: Current time.
+
+        Returns:
+            Snapshot.
+        """
+        calendar = sessions.for_instrument(instrument)
+        day = timeframes.Timeframe.D1
+        closed = calendar.last_closed_start(day, now)
+        rows = (
+            []
+            if closed is None
+            else await self.fetch_candles(
+                instrument, day, closed, calendar.end_of(day, closed)
+            )
+        )
+        session = rows[-1] if rows else None
+        if calendar.is_open(now):
+            last = self._last_price(spec, now)
+        elif session is not None:
+            last = session.close
+        else:
+            last = self._last_price(spec, now)
+        bid, ask = self._quotes(spec, last)
+        return market.MarketSnapshot(
+            instrument_id=instrument,
+            feed_state=quality.FeedState.DEMO,
+            source=_SOURCE,
+            as_of_ms=now,
+            last=last,
+            mark=last,
+            best_bid=bid,
+            best_ask=ask,
+            turnover_24h_quote=(
+                None
+                if session is None
+                else decimals.round_to_step(
+                    session.base_volume * session.close,
+                    decimal.Decimal("0.01"),
+                )
+            ),
+            volume_24h_base=None if session is None else session.base_volume,
+            change_24h_pct=(
+                None
+                if session is None
+                else (session.close - session.open)
+                / session.open
+                * decimals.HUNDRED
+            ),
+        )
+
     async def fetch_snapshots(self) -> list[market.MarketSnapshot]:
         """Builds snapshots for all DEMO instruments.
 
@@ -858,15 +1075,7 @@ class MockAdapter:
         """
         rows = []
         for spec in SPECS:
-            rows.append(
-                await self.fetch_snapshot(
-                    instruments.InstrumentId(
-                        instruments.Venue.MOCK,
-                        instruments.MarketType.PERP,
-                        spec.symbol,
-                    )
-                )
-            )
+            rows.append(await self.fetch_snapshot(spec.instrument_id()))
         return rows
 
     def _funding(
@@ -949,6 +1158,11 @@ class MockAdapter:
         Returns:
             Open interest.
         """
+        spec = self._spec(instrument)
+        if spec.is_stock:
+            raise errors.UnsupportedError(
+                f"{instrument} is a stock: stocks have no open interest"
+            )
         snapshot = await self.fetch_snapshot(instrument)
         assert snapshot.open_interest is not None
         return snapshot.open_interest
@@ -965,6 +1179,10 @@ class MockAdapter:
             Funding.
         """
         spec = self._spec(instrument)
+        if spec.is_stock:
+            raise errors.UnsupportedError(
+                f"{instrument} is a stock: stocks have no funding rate"
+            )
         return self._funding(instrument, spec, self._clock.now_ms())
 
     async def stream_candles(
@@ -990,15 +1208,16 @@ class MockAdapter:
             ):
                 yield candle
             return
-        current = timeframe.floor(self._clock.now_ms())
+        calendar = sessions.for_instrument(instrument)
+        current = calendar.floor(timeframe, self._clock.now_ms())
         while True:
             now = self._clock.now_ms()
-            boundary = timeframe.floor(now)
+            boundary = calendar.floor(timeframe, now)
             while current < boundary:
                 closed = self.bar(instrument, timeframe, current, now)
                 if closed is not None:
                     yield closed
-                current = timeframe.end_of(current)
+                current = calendar.shift(timeframe, current, 1)
             live = self.bar(instrument, timeframe, current, now)
             if tracker is not None:
                 tracker.record_message(now)
@@ -1029,6 +1248,7 @@ class MockAdapter:
             timeframe,
             source=_TRADE_SOURCE,
             feed_state=quality.FeedState.DEMO,
+            buy_volume_method=self._buy_method(instrument),
         )
         builder.start_segment(cursor)
         while True:
@@ -1042,6 +1262,21 @@ class MockAdapter:
             if tracker is not None:
                 tracker.record_message(now)
             await self._sleep(self._interval)
+
+    def _buy_method(
+        self, instrument: instruments.InstrumentId
+    ) -> market.BuyVolumeMethod | None:
+        """Returns the buy-volume label of an instrument's bars.
+
+        Args:
+            instrument: Mock instrument.
+
+        Returns:
+            ``classified`` for the DEMO stock, else ``None`` (taker flag).
+        """
+        if self._spec(instrument).is_stock:
+            return market.BuyVolumeMethod.CLASSIFIED
+        return None
 
     async def close(self) -> None:
         """No resources to release."""

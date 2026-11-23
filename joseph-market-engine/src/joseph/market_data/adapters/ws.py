@@ -18,6 +18,10 @@ recent trades that overlaps the last trade seen; otherwise the stream
 reports a coverage break (and a gap on the health tracker) so seconds bars
 are never bridged across the outage. Every received frame (including
 pongs) is a delivery proof that lets quiet seconds bars finalize.
+
+Backfill and confirmation windows follow the instrument's session calendar
+(taken from the candles themselves, else ``WsCandleSpec.calendar``), so the
+time between exchange sessions is never confirmed or counted as a gap.
 """
 
 from __future__ import annotations
@@ -38,6 +42,7 @@ import websockets
 from joseph.domain import clock as clock_lib
 from joseph.domain import errors
 from joseph.domain import market
+from joseph.domain import sessions
 from joseph.domain import timeframes
 from joseph.market_data.domain import candles as candle_rules
 from joseph.market_data.domain import health as health_lib
@@ -108,6 +113,8 @@ class WsCandleSpec:
         ping_message: Optional application-level ping frame.
         ping_interval_s: Interval between application pings.
         idle_timeout_s: Reconnect when no frame arrives for this long.
+        calendar: Session calendar of the streamed instrument, used before
+            the first candle arrives (UTC-aligned bars by default).
     """
 
     url: str
@@ -118,6 +125,7 @@ class WsCandleSpec:
     ping_message: str | None = None
     ping_interval_s: float = 20.0
     idle_timeout_s: float = 60.0
+    calendar: sessions.BarCalendar = sessions.CONTINUOUS
 
 
 class _Guard:
@@ -157,6 +165,20 @@ class _Guard:
         """Returns the newest non-final bar start, if any."""
         opens = [s for s, c in self._bars.items() if not c.is_final]
         return max(opens) if opens else None
+
+    def calendar(self, default: sessions.BarCalendar) -> sessions.BarCalendar:
+        """Returns the session calendar of the guarded series.
+
+        Args:
+            default: Calendar used before any candle was accepted.
+
+        Returns:
+            The calendar of the stored candles' instrument, else ``default``.
+        """
+        if not self._bars:
+            return default
+        candle = next(iter(self._bars.values()))
+        return sessions.for_instrument(candle.instrument_id)
 
 
 async def stream_with_recovery(  # noqa: PLR0912 - recovery loop.
@@ -200,16 +222,18 @@ async def stream_with_recovery(  # noqa: PLR0912 - recovery loop.
                 for frame in spec.subscribe:
                     await connection.send(frame)
                 if connected_before:
+                    calendar = guard.calendar(spec.calendar)
                     resume_from = guard.last_final_start()
+                    current = calendar.floor(tf, clock.now_ms())
                     start = (
-                        tf.end_of(resume_from)
+                        calendar.end_of(tf, resume_from)
                         if resume_from is not None
-                        else tf.shift(tf.floor(clock.now_ms()), -1)
+                        else calendar.shift(tf, current, -1)
                     )
                     for candle in await _safe_backfill(
                         backfill,
                         start,
-                        tf.end_of(tf.floor(clock.now_ms())),
+                        calendar.end_of(tf, current),
                         tracker,
                         clock,
                     ):
@@ -299,13 +323,16 @@ async def _apply(
         and open_start is not None
         and update.start_ms > open_start
     ):
+        calendar = sessions.for_instrument(update.instrument_id)
         last_final = guard.last_final_start()
         confirm_from = (
             open_start
             if last_final is None
-            else min(open_start, spec.timeframe.end_of(last_final))
+            else min(open_start, calendar.end_of(spec.timeframe, last_final))
         )
-        expected = spec.timeframe.bars_between(confirm_from, update.start_ms)
+        expected = calendar.bars_between(
+            spec.timeframe, confirm_from, update.start_ms
+        )
         confirmed = await _safe_backfill(
             backfill, confirm_from, update.start_ms, tracker, clock
         )
@@ -687,6 +714,7 @@ async def stream_trade_candles(
         Live and finalized seconds candles.
     """
     tf = builder.timeframe
+    calendar = builder.calendar
 
     def prime(now_ms: int) -> int:
         """Returns the aligned start of the bar before the current one.
@@ -695,9 +723,9 @@ async def stream_trade_candles(
             now_ms: Current time.
 
         Returns:
-            Bar start.
+            Bar start (on the instrument's session grid).
         """
-        return tf.shift(tf.floor(now_ms), -1)
+        return calendar.shift(tf, calendar.floor(tf, now_ms), -1)
 
     events = trade_stream_events(
         spec,

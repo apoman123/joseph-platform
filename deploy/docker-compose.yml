@@ -16,8 +16,10 @@ services:
     image: ${IMAGE_REGISTRY:-ghcr.io/joseph}/joseph-market-engine:${IMAGE_TAG:-latest}
     build:
       context: ../joseph-market-engine
-      # Forwards the local ssh-agent (PineScripts access) to the build.
+      # PineScripts access for the build: the PINESCRIPTS_TOKEN secret if
+      # set, else the forwarded local ssh-agent.
       ssh: [default]
+      secrets: [pinescripts_token]
     restart: unless-stopped
     environment:
       <<: *engine-env
@@ -124,3 +126,7 @@ secrets:
 volumes:
   market-data:
   execution-data:
+
+secrets:
+  pinescripts_token:
+    environment: PINESCRIPTS_TOKEN

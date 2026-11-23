@@ -2,7 +2,7 @@
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "$id": "https://schemas.joseph.local/v1/qualification.schema.json",
   "title": "JosephQualification",
-  "description": "Perpetual qualification filter results. Strict comparators: a value equal to the threshold fails. Missing data is INSUFFICIENT_DATA, never qualified.",
+  "description": "Qualification filter results for perpetual futures and exchange-listed securities (stocks, ETFs). Strict comparators: a value equal to the threshold fails. Missing data is INSUFFICIENT_DATA, never qualified. Listed securities have no open interest or funding: those gates are omitted and funding risk is NOT_APPLICABLE. Rate series (treasury:rate:*) are never screened.",
   "$defs": {
     "QualificationStatus": {
       "title": "QualificationStatus",
@@ -16,8 +16,9 @@
     },
     "FundingRisk": {
       "title": "FundingRisk",
+      "description": "UNKNOWN: funding applies but is unavailable. NOT_APPLICABLE: the instrument has no funding (exchange-listed securities).",
       "type": "string",
-      "enum": ["NORMAL", "WATCH", "HIGH_RISK", "UNKNOWN"]
+      "enum": ["NORMAL", "WATCH", "HIGH_RISK", "UNKNOWN", "NOT_APPLICABLE"]
     },
     "GateName": {
       "title": "GateName",
@@ -36,7 +37,7 @@
         "threshold": {"$ref": "common.schema.json#/$defs/DecimalString"},
         "comparator": {"type": "string", "enum": ["gt", "lt"]},
         "passed": {"type": ["boolean", "null"]},
-        "unit": {"type": "string", "enum": ["USD", "ratio", "pct"]},
+        "unit": {"type": "string", "enum": ["USD", "TWD", "ratio", "pct"], "description": "Currency of turnover thresholds is the listing currency (TWD on TWSE)."},
         "as_of_ms": {"oneOf": [{"$ref": "common.schema.json#/$defs/TimestampMs"}, {"type": "null"}]},
         "reason": {"type": "string"}
       }
