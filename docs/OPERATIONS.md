@@ -26,7 +26,7 @@ make setup && make dev   # market :8000, execution :8100, terminal :3000 (dev to
 
 - `make images` uses `PINESCRIPTS_TOKEN` as a BuildKit secret when set, else the ssh-agent; `make compose-up` needs a running agent. Neither enters an image.
 - To develop an indicator: `cd joseph-market-engine && uv pip install -e ../../PineScripts/python_indicators` (undo: `uv sync`).
-- **Containers:** `deploy/docker-compose.yml` (CI deploys the same file, [CI_CD](CI_CD.md)). It passes only the variables it lists, so add any other setting below to its `environment:`. Optional SDKs are build args: `UV_EXTRAS="--extra sinopac"` (market, SinoPac data); `EXECUTION_UV_EXTRAS="--extra ibkr --extra sinopac"` in `deploy/.env` (execution).
+- **Containers:** `deploy/docker-compose.yml` (CI deploys the same file, [CI_CD](CI_CD.md)). It passes only the variables it lists, so add any other setting below to its `environment:`. Optional SDKs are build args in `deploy/.env`: `MARKET_UV_EXTRAS=--extra sinopac` (SinoPac data), `EXECUTION_UV_EXTRAS="--extra ibkr --extra sinopac"`.
 - **Production:** `JOSEPH_ENV=production` on the execution engine (refuses dev tokens, requires `JOSEPH_VAULT_MASTER_KEY`); set `JOSEPH_PREVIEW_SECRET` and `JOSEPH_STEP_UP_TOTP_SECRET`; the same `JOSEPH_SERVICE_TOKEN` on both engines; empty `JOSEPH_DEV_TOKENS`; restricted `JOSEPH_CORS_ORIGINS`; TLS in front of every service; a BFF or identity provider in front of the browser (dev tokens are not production auth).
 
 ## Settings

@@ -6,11 +6,12 @@ Final build on Linux: Python 3.13 (uv), Node 24, pnpm 10.34, Chromium 1243 via P
 
 | Tier | Project | Result |
 |---|---|---|
-| Unit, integration, contract, architecture, property, replay, in-process system | Market engine | **1,715 passed**, 42 skipped (41 opt-in network, 1 Pine parity awaiting TradingView exports) · 96% line coverage |
+| Unit, integration, contract, architecture, property, replay, in-process system | Market engine | **1,879 passed**, 47 skipped (45 opt-in network, 1 SinoPac data with keys, 1 Pine parity awaiting TradingView exports) · 96% line coverage |
 | Unit, scenario, property, code standards | `smc_indicators` 1.1.0 | **393 passed** · ruff, `mypy --strict` clean |
-| Live venue (opt-in, public APIs) | Market engine | **40 passed**, 1 skipped (no Alpaca key): five crypto venues, TWSE, TPEx, Nasdaq Trader, Treasury. One Binance assertion failed once at a minute boundary; the test now allows 10 s of venue lag and passed 8/8 on reruns |
-| Unit, integration, contract, architecture, security, chaos, property, in-process system | Execution engine | **970 passed**, 7 skipped (5 venue testnets, IBKR paper, SinoPac simulation: need the owner's credentials) · 96% line coverage. Venues run against mocks and official signature vectors; IBKR and Shioaji against fake clients |
-| Unit, component, contract, architecture (Vitest) | Terminal | **902 passed** (106 files) · 83% line coverage (the canvas adapter is covered by browser tiers) |
+| Live venue (opt-in, public APIs) | Market engine | **44 passed**, 1 skipped (no Alpaca key), 1 deselected (SinoPac data, needs keys): five crypto venues incl. MEXC Protobuf and the Lighter archive, TWSE, TPEx, Nasdaq Trader, Treasury. One Binance assertion failed once at a minute boundary; the test now allows 10 s of venue lag and passed 8/8 on reruns |
+| Unit, integration, contract, architecture, security, chaos, property, in-process system | Execution engine | **1,028 passed**, 9 skipped (5 venue testnets, IBKR paper, SinoPac simulation: need the owner's credentials; 2 opt-in network) · 97% line coverage. Venues run against mocks and official signature vectors; IBKR and Shioaji against fake clients |
+| Live venue (opt-in) | Execution engine | **2 passed**: MEXC private-stream Protobuf decoding against the live public stream |
+| Unit, component, contract, architecture (Vitest) | Terminal | **903 passed** (106 files) · 83% line coverage (the canvas adapter is covered by browser tiers) |
 | Browser system, DEMO (Playwright + axe) | Terminal | **47 passed** |
 | Full-stack browser: production build + both engines | All three | **12 passed** |
 | Cross-service system (real processes, HTTP + WebSocket) | Both engines | **70 passed** |
@@ -20,7 +21,7 @@ Final build on Linux: Python 3.13 (uv), Node 24, pnpm 10.34, Chromium 1243 via P
 | Check | Result |
 |---|---|
 | ruff format + ruff (Google docstrings) | Clean in both engines and system-tests |
-| `mypy --strict` | 161 files (market), 103 (execution), 15 (`smc_indicators`): no issues |
+| `mypy --strict` | 169 files (market), 105 (execution), 15 (`smc_indicators`): no issues |
 | Google style tests | Pass |
 | import-linter | Market 8/8 contracts; execution 7/7 |
 | ESLint (Google TS, JSDoc), Prettier, `tsc` | 0 problems |
