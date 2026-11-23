@@ -1,0 +1,29 @@
+MEXC futures WebSocket Protocol Buffers definitions (vendored)
+
+Origin:   https://github.com/mexcdevelop/websocket-future-proto
+Commit:   033825833318b4bc3add4481997e9f76005c6483 (2026-10-22, "[pb] 初始化pb 文件目录 (#1)")
+Fetched:  2026-11-23
+License:  Apache License 2.0 (LICENSE in this directory, copied unmodified
+          from the repository root). The upstream LICENSE names no
+          copyright holder; the repository belongs to the mexcdevelop
+          (MEXC) GitHub organization.
+Docs:     https://www.mexc.com/api-docs/futures/websocket-api/protocol-buffers-integration
+
+Files (byte-for-byte copies of proto/<name> at the commit above):
+
+  ContractWrapper.proto    eca565de5c01e6354314b3e612fa0d9a2a54a4a895a92fdbce79cbd04f4ab2f1
+  OrderChange.proto        bb1c924a4a7d7f8101d436b6b4e1853707212b695f133da02c53e6df71cb2bbe
+  OrderDealDetail.proto    81a555c45f7c22f40bbb05e344961403ebe05caa77abc5722c2e38fd88f36180
+  PositionChange.proto     a5a267cd1b6ac68c981b560c85e1a01a20ca4ae8a939a26c1573c0c13f40a98b
+  PositionDeductFee.proto  b28556e226df980e3423d8f226408930b1ffd4b4650a868f91c216d922b3d48b
+  AssetChange.proto        d72573705948f20f0a888aa2e88f53c8ce41a526aed38a1d391cb8fa228dd3dd
+  ContractPlanOrder.proto  8b68dc6f7c13f39ddd845bbe2dca1a7ac1e20e8a6fec88ace64e18270181346a
+  LICENSE                  c71d239df91726fc519c6eb72d318ec65820627232b2f796219e87dcf35d0ab4
+
+(SHA-256.) Only the messages the private stream decodes are vendored:
+ContractWrapper.proto imports ~60 other upstream files that are not copied.
+No code is generated from these files. joseph_execution.adapters.venues.
+mexc_protobuf transcribes the fields it needs into protobuf descriptors,
+and tests/unit/venues/test_mexc_protobuf.py checks that transcription
+against these files. To update: copy the new upstream files here, record
+the commit and hashes above, and run that test.

@@ -66,6 +66,7 @@ def build_adapters(
     client: httpx.AsyncClient | None = None,
     connect: ws.ConnectFn = ws.default_connect,
     alpaca_config: alpaca.AlpacaConfig | None = None,
+    mexc_ws_format: mexc.WsFormat = mexc.WsFormat.PROTOBUF,
 ) -> dict[instruments.Venue, ports.MarketDataPort]:
     """Constructs one adapter per requested venue.
 
@@ -78,6 +79,7 @@ def build_adapters(
         alpaca_config: Alpaca credentials and feed for ``nasdaq``,
             ``nyse`` and ``cboe`` (unconfigured when omitted: the venues
             list instruments but data requests ask for keys).
+        mexc_ws_format: Push format of the MEXC futures WebSocket.
 
     Returns:
         Adapter per venue, in the requested order.
@@ -198,6 +200,7 @@ def build_adapters(
                 clock,
                 connect,
                 VERIFIED_AT_MS,
+                mexc_ws_format,
             )
         elif venue is instruments.Venue.TWSE:
             adapters[venue] = twse.TwseAdapter(
