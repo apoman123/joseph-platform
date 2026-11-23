@@ -1,12 +1,16 @@
-# Securities brokers: Interactive Brokers, SinoPac, Cathay
+# Live trading: brokers and crypto venues
 
-Stocks and ETFs follow the crypto path (`OrderIntent → Risk Gateway → OMS → adapter`) and need every [LIVE gate](OPERATIONS.md#live-enablement), plus `JOSEPH_IBKR_ENABLED` / `JOSEPH_SINOPAC_ENABLED` (no client is created otherwise). Settings: [OPERATIONS](OPERATIONS.md#execution-engine).
+For operators preparing real orders: Interactive Brokers, SinoPac Shioaji and Cathay for stocks and ETFs, and the crypto venues' prerequisites. Live adapters are verified only against mocks and fakes: start on paper, simulation or testnet. See also the [LIVE gates](OPERATIONS.md#live-enablement) and [settings](OPERATIONS.md#execution-engine).
+
+## Securities brokers
+
+Stocks and ETFs follow the crypto path (`OrderIntent → Risk Gateway → OMS → adapter`). A broker client exists only with `JOSEPH_IBKR_ENABLED` / `JOSEPH_SINOPAC_ENABLED`.
 
 | Broker | Routes | Currency | Adapter (`adapters/brokers/`) | Status |
 |---|---|---|---|---|
 | `ibkr` Interactive Brokers | `nasdaq`, `nyse` (incl. Arca, American), `cboe` (BZX) | USD | `ibkr.py` (`ib_async` → IB Gateway/TWS) | Implemented |
 | `sinopac` SinoPac Shioaji | `twse`, `tpex` | TWD | `sinopac.py` (`shioaji`) | Implemented |
-| `cathay` Cathay Securities | `twse`, `tpex` | TWD | `cathay.py` | Fail-closed until Cathay's SDK/spec arrives |
+| `cathay` Cathay Securities | `twse`, `tpex` | TWD | `cathay.py` | Refuses every order until Cathay's SDK is available |
 
 - Paper accounts: `acct-paper-<tenant>` (USD: crypto, Nasdaq, NYSE, Cboe) and `acct-twd-paper-<tenant>` (TWSE, TPEx). Crypto accounts trade only their venue; `treasury:rate:*` never trades.
 - `tpex` is the Taipei Exchange (櫃買中心) mainboard: most Taiwan bond ETFs (`tpex:etf:00679B`) and many stocks. Its rules match TWSE's for everything below ([TPEx rules](https://www.tpex.org.tw/zh-tw/mainboard/trading/rules/system.html)). The 興櫃 emerging board is not offered.
@@ -27,7 +31,7 @@ Stocks and ETFs follow the crypto path (`OrderIntent → Risk Gateway → OMS �
 
 - **Limits** are in the account currency. TWD accounts multiply the USD-sized defaults and hard caps by `JOSEPH_TWD_LIMIT_FACTOR` (default 30; a sizing convention, not an FX rate). Saved limits stay but are clamped to the new caps.
 - **Paper fills** happen only in session, clamp market fills into the daily limits, and settle as unsettled cash until the T+2 (Taiwan) or T+1 (US) session opens; unsettled proceeds count as buying power. The ledger is in memory.
-- **Taiwan fees** (paper and estimates): brokerage at the statutory maximum 0.1425% (no discounts or minimums) plus the transaction tax on sales by Taipei trade date: stocks 0.3% (the 0.15% day-trade rate is never applied, since it depends on the broker agreement and the whole day's trades); ETFs 0.1%; index bond ETFs 0 through 2026-12-31 (證券交易稅條例 §2-1), then 0.1%. Leveraged, inverse, futures and active bond ETFs pay 0.1%. A bill extending the bond-ETF suspension to 2036 passed committee on 2026-11-11 but is not law; once it is, update `BOND_ETF_TAX_SUSPENSION` in `joseph_execution/domain/equities.py`. The broker statement decides.
+- **Taiwan fees** (paper and estimates): brokerage at the statutory maximum 0.1425% (no discounts or minimums) plus the transaction tax on sales by Taipei trade date: stocks 0.3% (the 0.15% day-trade rate is never applied, since it depends on the broker agreement and the whole day's trades); ETFs 0.1%; index bond ETFs 0 through 2026-12-31 (證券交易稅條例 §2-1), then 0.1% unless extended ([Maintenance](OPERATIONS.md#maintenance)). Leveraged, inverse, futures and active bond ETFs pay 0.1%. The broker statement decides.
 
 ## Credentials
 
@@ -41,7 +45,7 @@ Broker secrets come only from the environment or `*_FILE` files, are redacted fr
 4. **2FA:** each full login needs an IBKR Mobile approval within about three minutes (IBC retries). Daily restarts at `AUTO_RESTART_TIME` (11:45 PM New York) skip 2FA, but IBKR requires one 2FA login a week, after 01:00 ET Sunday. First login: set `IBKR_VNC_PASSWORD_FILE` and use VNC on `127.0.0.1:5900`.
 5. **Enable:** `JOSEPH_IBKR_ENABLED=true`, `JOSEPH_IBKR_PORT=4004`, `JOSEPH_IBKR_PAPER=true` (startup fails if it mismatches the port); restart.
 6. **Connect:** `POST /v1/accounts/connect/start` `{"venue": "ibkr", "credentials": {"account": "DU1234567"}, "withdrawal_permission_disabled": true}`, then `POST /v1/accounts/{id}/verify`; LIVE appears only if the gateway manages that account and the gate is on. Arm with `POST /v1/accounts/{id}/live-consent` `{"step_up_code": "<TOTP>", "acknowledge_risk": true, "duration_ms": 3600000}`.
-7. **Check:** `JOSEPH_IBKR_PAPER_TESTS=1 JOSEPH_IBKR_PAPER_ACCOUNT=DU1234567 uv run --extra ibkr pytest -m ibkr_paper tests/brokers` places and cancels a far 1-share limit order. Also try a `cboe:` listing to confirm `BATS`.
+7. **Check:** `JOSEPH_IBKR_PAPER_TESTS=1 JOSEPH_IBKR_PAPER_ACCOUNT=DU1234567 uv run --extra ibkr pytest -m ibkr_paper tests/brokers` (in `joseph-execution-engine/`) places and cancels a far 1-share limit order. Also try a `cboe:` listing to confirm `BATS`.
 8. **Live:** `IBKR_TRADING_MODE=live`, `JOSEPH_IBKR_PORT=4003`, `JOSEPH_IBKR_PAPER=false`; connect the `U…` account, verify, arm.
 
 ## SinoPac (Shioaji)
@@ -54,11 +58,20 @@ Broker secrets come only from the environment or `*_FILE` files, are redacted fr
 6. **Signing:** in production the stock account must report `signed=True`; until then it stays `TRADING_UNAVAILABLE`.
 7. **Production:** `JOSEPH_SINOPAC_SIMULATION=false`, `JOSEPH_SINOPAC_ENABLED=true`; connect `{"venue": "sinopac", "credentials": {"account": "9A95-0000000"}}`, verify, arm. One account trades `twse:*` and `tpex:*`.
 
-Orders: LMT/MKT; ROD (DAY), IOC, FOK; Common (1,000-share lots) or IntradayOdd (shares); Cash. No stop orders, so no brackets or AUTO_LIVE. Limits: 250 order calls per 10 s, 25 account queries per 5 s (Joseph stays below). TWSE codes resolve in `Stocks.TSE`, TPEx in `Stocks.OTC`; a wrong venue is refused before sending. SinoPac allows 5 connections per person, shared with the market engine's optional data login.
+Orders: LMT/MKT; ROD (DAY), IOC, FOK; Common (1,000-share lots) or IntradayOdd (shares); Cash. No stop orders, so no brackets or AUTO_LIVE. Limits: 250 order calls per 10 s, 25 account queries per 5 s (Joseph stays below). TWSE codes resolve in `Stocks.TSE`, TPEx in `Stocks.OTC`; a wrong venue is refused before sending. SinoPac allows 5 connections per person, shared with the market engine's optional [data login](OPERATIONS.md#market-data-setup).
 
 ## Cathay Securities
 
-No public API: `cathay` declares TWSE/TPEx, TWD and cash, and refuses every call. When the SDK arrives, implement `TradingAdapter` in `cathay.py` like `sinopac.py` (client protocol, fake, pure order mappings), keep `cathay.build()` and update `capabilities.cathay()`. Routing, risk and the OMS already handle it; the SDK must be told the exchange of TPEx codes.
+Cathay has no public API; trading needs Cathay's SDK and specification. Until then `cathay` declares TWSE/TPEx, TWD and cash, and refuses every call. With the SDK, implement `TradingAdapter` in `cathay.py` like `sinopac.py` (client protocol, fake, pure order mappings), keep `cathay.build()` and update `capabilities.cathay()`. Routing, risk and the OMS already handle it; the SDK must be told the exchange of TPEx codes.
+
+## Crypto venues
+
+Credential fields, probes and test environments per venue: [execution engine README](../joseph-execution-engine/README.md#live-venues).
+
+- **Testnet first:** `make test-sandbox` with `JOSEPH_SANDBOX_<VENUE>_*` keys places and cancels a far order on each testnet (MEXC has none).
+- **A dedicated account or subaccount:** positions Joseph did not open block new exposure.
+- **Keys without withdrawal permission** and **one-way position mode** (hedge mode fails verification).
+- **Bitget:** a Unified Trading Account (UTA). **MEXC:** KYC and the "Order Placing" key permission.
 
 ## Reconciliation and holdings
 
