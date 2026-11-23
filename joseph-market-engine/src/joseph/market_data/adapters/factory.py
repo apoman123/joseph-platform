@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from collections.abc import Callable
 from collections.abc import Iterable
 
 import httpx
@@ -16,10 +17,12 @@ from joseph.market_data.adapters import hyperliquid
 from joseph.market_data.adapters import lighter
 from joseph.market_data.adapters import mexc
 from joseph.market_data.adapters import mock
+from joseph.market_data.adapters import sinopac
 from joseph.market_data.adapters import tpex
 from joseph.market_data.adapters import treasury
 from joseph.market_data.adapters import twse
 from joseph.market_data.adapters import ws
+from joseph.market_data.app import bar_archive as bar_archive_lib
 from joseph.market_data.app import ports
 
 # Live verification of every endpoint and stream used by the adapters
@@ -67,6 +70,11 @@ def build_adapters(
     connect: ws.ConnectFn = ws.default_connect,
     alpaca_config: alpaca.AlpacaConfig | None = None,
     mexc_ws_format: mexc.WsFormat = mexc.WsFormat.PROTOBUF,
+    sinopac_config: sinopac.SinopacConfig | None = None,
+    sinopac_factory: Callable[[], sinopac.SjDataFactory] = (
+        sinopac.ShioajiDataFactory
+    ),
+    bar_archive: bar_archive_lib.BarArchive | None = None,
 ) -> dict[instruments.Venue, ports.MarketDataPort]:
     """Constructs one adapter per requested venue.
 
@@ -80,6 +88,12 @@ def build_adapters(
             ``nyse`` and ``cboe`` (unconfigured when omitted: the venues
             list instruments but data requests ask for keys).
         mexc_ws_format: Push format of the MEXC futures WebSocket.
+        sinopac_config: Shioaji settings for ``twse``/``tpex`` market data
+            (``JOSEPH_TW_DATA_SOURCE=sinopac``); ``None`` keeps the
+            official sources only.
+        sinopac_factory: Creates the Shioaji SDK factory (tests inject a
+            fake).
+        bar_archive: Durable store of the TWSE/TPEx recorded minutes.
 
     Returns:
         Adapter per venue, in the requested order.
@@ -162,6 +176,24 @@ def build_adapters(
             )
         return alpaca_source
 
+    sinopac_source: sinopac.SinopacSource | None = None
+
+    def shared_sinopac() -> sinopac.SinopacSource | None:
+        """Returns the Shioaji source shared by ``twse`` and ``tpex``.
+
+        Returns:
+            Source, or ``None`` when not configured.
+        """
+        nonlocal sinopac_source
+        if sinopac_config is None:
+            return None
+        if sinopac_source is None:
+            sinopac_source = sinopac.SinopacSource(
+                sinopac_config, clock, factory=sinopac_factory
+            )
+            sinopac_source.check_sdk()
+        return sinopac_source
+
     adapters: dict[instruments.Venue, ports.MarketDataPort] = {}
     for venue in venues:
         if venue is instruments.Venue.MOCK:
@@ -214,6 +246,8 @@ def build_adapters(
                 ),
                 clock,
                 EXCHANGE_VERIFIED_AT_MS,
+                sinopac=shared_sinopac(),
+                bar_archive=bar_archive,
             )
         elif venue is instruments.Venue.TPEX:
             tpex_limiter = http.RateLimiter(*_TPEX_RATE)
@@ -228,6 +262,8 @@ def build_adapters(
                 ),
                 clock,
                 TPEX_VERIFIED_AT_MS,
+                sinopac=shared_sinopac(),
+                bar_archive=bar_archive,
             )
         elif venue in alpaca.VENUES:
             adapters[venue] = alpaca.AlpacaAdapter(

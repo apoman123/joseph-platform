@@ -14,6 +14,9 @@ RUN apt-get update \
  && rm -rf /var/lib/apt/lists/* \
  && install -m 700 -d /root/.ssh \
  && echo 'github.com ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIOMqqnkVzrm0SdG6UOoqKLsabgH5C9okWi0dh2l9GKJl' > /root/.ssh/known_hosts
+# Optional extras, e.g. UV_EXTRAS="--extra sinopac" for SinoPac Shioaji
+# market data (JOSEPH_TW_DATA_SOURCE=sinopac); none by default.
+ARG UV_EXTRAS=""
 WORKDIR /app
 COPY pyproject.toml uv.lock README.md ./
 # The URL rewrite lives in GIT_CONFIG_* variables of this RUN only.
@@ -33,10 +36,10 @@ RUN --mount=type=cache,target=/root/.cache/uv \
       echo "error: no access to the private ${repo}. Build with --secret id=pinescripts_token,env=PINESCRIPTS_TOKEN or --ssh default (docs/CI_CD.md)." >&2; \
       exit 1; \
     fi; \
-    uv sync --frozen --no-dev --no-install-project
+    uv sync --frozen --no-dev --no-install-project ${UV_EXTRAS}
 COPY src ./src
 RUN --mount=type=cache,target=/root/.cache/uv \
-    uv sync --frozen --no-dev --no-editable
+    uv sync --frozen --no-dev --no-editable ${UV_EXTRAS}
 
 FROM python:${PYTHON_VERSION}-slim-bookworm
 LABEL org.opencontainers.image.title="joseph-market-engine" \

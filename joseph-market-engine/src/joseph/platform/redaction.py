@@ -3,6 +3,8 @@
 A ``logging.Filter`` scrubs bearer tokens, API keys, secrets, signatures and
 long hex/base64 blobs from every record before handlers format it, so a
 mistaken ``logger.info("%s", request.headers)`` cannot leak credentials.
+Secrets read from the environment or secret files (``register_secret``) are
+also replaced wherever they appear, whatever their shape.
 """
 
 from __future__ import annotations
@@ -23,6 +25,19 @@ _PATTERNS: tuple[tuple[re.Pattern[str], str], ...] = (
     (re.compile(r"\b0x[0-9a-fA-F]{40,}\b"), "0x***"),
     (re.compile(r"\b[0-9a-fA-F]{48,}\b"), "***"),
 )
+_MIN_SECRET_LENGTH = 4
+_SECRETS: set[str] = set()
+
+
+def register_secret(value: str | None) -> None:
+    """Registers a configured secret so ``redact`` removes it verbatim.
+
+    Args:
+        value: Secret (``None`` and very short values are ignored, so
+            redaction cannot mangle ordinary text).
+    """
+    if value and len(value) >= _MIN_SECRET_LENGTH:
+        _SECRETS.add(value)
 
 
 def redact(text: str) -> str:
@@ -34,6 +49,8 @@ def redact(text: str) -> str:
     Returns:
         Text with secret values replaced by ``***``.
     """
+    for secret in sorted(_SECRETS, key=len, reverse=True):
+        text = text.replace(secret, "***")
     for pattern, replacement in _PATTERNS:
         text = pattern.sub(replacement, text)
     return text
