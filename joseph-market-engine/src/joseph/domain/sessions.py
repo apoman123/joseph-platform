@@ -86,14 +86,34 @@ class Session:
 
 
 class BarCalendar(abc.ABC):
-    """Bar-boundary arithmetic for one session calendar."""
+    """Bar-boundary arithmetic for one session calendar.
+
+    Attributes:
+        calendar_id: Identifier.
+        close_grace_ms: Prints up to this long after a session close belong
+            to the session's last bar (0 for continuous markets).
+    """
 
     calendar_id: CalendarId
+    close_grace_ms: int = 0
 
     @property
     def continuous(self) -> bool:
         """Returns True when the market never closes."""
         return self.calendar_id is CalendarId.CONTINUOUS
+
+    def ceil(self, tf: Timeframe, ts_ms: int) -> int:
+        """Returns the first bar start at or after ``ts_ms``.
+
+        Args:
+            tf: Timeframe.
+            ts_ms: UTC epoch milliseconds (any time, also before the
+                calendar's first session).
+
+        Returns:
+            Bar start.
+        """
+        return self.shift(tf, ts_ms, 0)
 
     @abc.abstractmethod
     def floor(self, tf: Timeframe, ts_ms: int) -> int:
@@ -240,6 +260,11 @@ class ContinuousCalendar(BarCalendar):
     def bars_between(self, tf: Timeframe, start_ms: int, end_ms: int) -> int:
         """See base class."""
         return tf.bars_between(start_ms, end_ms)
+
+    def ceil(self, tf: Timeframe, ts_ms: int) -> int:
+        """See base class."""
+        start = tf.floor(ts_ms)
+        return start if start == ts_ms else tf.end_of(start)
 
     def is_open(self, ts_ms: int) -> bool:
         """See base class."""

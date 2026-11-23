@@ -7,6 +7,12 @@ history for a time range, newest trades kept when a page cap truncates).
 Seconds bars are then built from trades (``fetch_candles`` from the REST
 history, ``stream_candles`` from the stream) and never fabricated: only the
 fully covered part of a range is returned.
+
+Bar boundaries follow the instrument's session calendar
+(``sessions.for_instrument``): exchange-listed bars start at the session
+open and the last bar of a session is cut at the close. ``first_start`` and
+``newest_window_start`` take the calendar explicitly (UTC-aligned bars by
+default, as on every crypto venue).
 """
 
 from __future__ import annotations
@@ -27,6 +33,7 @@ from joseph.domain import errors
 from joseph.domain import instruments
 from joseph.domain import market
 from joseph.domain import quality
+from joseph.domain import sessions
 from joseph.domain import timeframes
 from joseph.market_data.adapters import http
 from joseph.market_data.adapters import ws
@@ -112,6 +119,7 @@ def make_candle(
     event_ts_ms: int | None = None,
     is_final: bool | None = None,
     taker_buy_base_volume: decimal.Decimal | None = None,
+    taker_buy_method: market.BuyVolumeMethod | None = None,
 ) -> market.Candle:
     """Builds a canonical candle from venue values.
 
@@ -137,18 +145,27 @@ def make_candle(
         event_ts_ms: Optional venue event time.
         is_final: Explicit finality (e.g. Binance ``x``); derived if None.
         taker_buy_base_volume: Optional venue-published taker buy volume.
+        taker_buy_method: How that buy volume was obtained (``classified``
+            for stock exchanges, which publish no aggressor side).
 
     Returns:
         Candle.
 
     Raises:
-        errors.UnsupportedError: If the venue bar is not UTC aligned.
+        errors.UnsupportedError: If the venue bar is not aligned to the
+            instrument's session grid (UTC for crypto venues).
     """
-    if not timeframe.is_aligned(start_ms):
-        raise errors.UnsupportedError(
-            f"{source} {timeframe.value} bars are not UTC aligned"
+    calendar = sessions.for_instrument(instrument_id)
+    if not calendar.is_aligned(timeframe, start_ms):
+        grid = (
+            "UTC aligned"
+            if calendar.continuous
+            else f"aligned to the {calendar.calendar_id.value} sessions"
         )
-    end_ms = timeframe.end_of(start_ms)
+        raise errors.UnsupportedError(
+            f"{source} {timeframe.value} bars are not {grid}"
+        )
+    end_ms = calendar.end_of(timeframe, start_ms)
     final = (
         end_ms <= now_ms
         if is_final is None
@@ -178,25 +195,36 @@ def make_candle(
         trade_count=trade_count,
         event_ts_ms=event_ts_ms,
         taker_buy_base_volume=taker,
+        taker_buy_method=None if taker is None else taker_buy_method,
     )
 
 
-def first_start(timeframe: timeframes.Timeframe, start_ms: int) -> int:
+def first_start(
+    timeframe: timeframes.Timeframe,
+    start_ms: int,
+    *,
+    calendar: sessions.BarCalendar = sessions.CONTINUOUS,
+) -> int:
     """Returns the first bar start at or after ``start_ms``.
 
     Args:
         timeframe: Resolution.
         start_ms: Any time.
+        calendar: Session calendar of the instrument.
 
     Returns:
         Aligned bar start.
     """
-    floor = timeframe.floor(start_ms)
-    return floor if floor == start_ms else timeframe.end_of(floor)
+    return calendar.ceil(timeframe, start_ms)
 
 
 def newest_window_start(
-    timeframe: timeframes.Timeframe, start_ms: int, end_ms: int, limit: int
+    timeframe: timeframes.Timeframe,
+    start_ms: int,
+    end_ms: int,
+    limit: int,
+    *,
+    calendar: sessions.BarCalendar = sessions.CONTINUOUS,
 ) -> int:
     """Returns the paging start that still yields the newest ``limit`` bars.
 
@@ -205,12 +233,21 @@ def newest_window_start(
         start_ms: Requested inclusive start.
         end_ms: Requested exclusive end.
         limit: Maximum bars wanted.
+        calendar: Session calendar of the instrument.
 
     Returns:
         Aligned start no earlier than ``floor(start_ms)``.
     """
-    newest = timeframe.floor(end_ms - 1)
-    return max(timeframe.floor(start_ms), timeframe.shift(newest, -(limit - 1)))
+    if calendar.continuous:
+        newest = timeframe.floor(end_ms - 1)
+        return max(
+            timeframe.floor(start_ms), timeframe.shift(newest, -(limit - 1))
+        )
+    first = calendar.ceil(timeframe, start_ms)
+    if first >= end_ms:
+        return first
+    newest = calendar.floor(timeframe, end_ms - 1)
+    return max(first, calendar.shift(timeframe, newest, -(limit - 1)))
 
 
 async def suffix_by_chunks(
@@ -296,11 +333,18 @@ class BaseVenueAdapter:
 
     Subclasses implement the ``MarketDataPort`` methods; unsupported ones
     inherit implementations that raise ``UnsupportedError``.
+
+    Attributes:
+        TRADE_BUY_VOLUME_METHOD: Origin of the aggressor side of the venue's
+            public trades, stamped on trade-built bars: ``None`` for a
+            venue taker flag, ``classified`` where trades are classified
+            against quotes (stock exchanges).
     """
 
     VENUE: instruments.Venue = instruments.Venue.MOCK
     INSTRUMENT_TTL_MS = 300_000
     TRADE_MAX_PAGES = 5
+    TRADE_BUY_VOLUME_METHOD: market.BuyVolumeMethod | None = None
 
     def __init__(
         self, http_client: http.VenueHttp, clock: clock_lib.Clock
@@ -785,17 +829,26 @@ class BaseVenueAdapter:
             )
         await self._require(instrument)
         now = self._clock.now_ms()
-        first = first_start(timeframe, start_ms)
-        stop = min(end_ms, timeframe.end_of(timeframe.floor(now)))
+        calendar = sessions.for_instrument(instrument)
+        first = first_start(timeframe, start_ms, calendar=calendar)
+        stop = min(
+            end_ms, calendar.end_of(timeframe, calendar.floor(timeframe, now))
+        )
         if stop > first:
             wanted = (
                 MAX_TRADE_BARS if limit is None else min(limit, MAX_TRADE_BARS)
             )
             first = max(
-                first, newest_window_start(timeframe, first, stop, wanted)
+                first,
+                newest_window_start(
+                    timeframe, first, stop, wanted, calendar=calendar
+                ),
             )
         cover_to = min(stop, now - TRADE_PUBLISH_LAG_MS)
-        seed_from = timeframe.floor(first - _SEED_MS)
+        try:
+            seed_from = calendar.floor(timeframe, first - _SEED_MS)
+        except ValueError:
+            seed_from = first
         if cover_to <= first:
             return []
         coverage = await self._trade_history(
@@ -807,6 +860,7 @@ class BaseVenueAdapter:
             timeframe,
             source=f"{self._trade_source()}.rest",
             now_ms=now,
+            buy_volume_method=self.TRADE_BUY_VOLUME_METHOD,
         )
         return clip_range(bars, first, stop, limit)
 
@@ -829,7 +883,10 @@ class BaseVenueAdapter:
         self._require_trade_built(timeframe)
         await self._require(instrument)
         builder = trade_bars.TradeBarBuilder(
-            instrument, timeframe, source=self._trade_source()
+            instrument,
+            timeframe,
+            source=self._trade_source(),
+            buy_volume_method=self.TRADE_BUY_VOLUME_METHOD,
         )
         candles = ws.stream_trade_candles(
             self._trade_spec(instrument),

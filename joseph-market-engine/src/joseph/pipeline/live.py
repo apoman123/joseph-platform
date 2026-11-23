@@ -9,6 +9,8 @@ signal is ever fired for a bar that closed before the pipeline saw it live.
 
 Polling keeps one code path for every venue (native-WS and REST-polled
 alike); signal latency is bounded by ``interval_s`` after a bar closes.
+History windows count bars of the instrument's session calendar, so an
+exchange series warms up over sessions, not over nights and weekends.
 """
 
 from __future__ import annotations
@@ -159,8 +161,11 @@ class LiveSignalPipeline:
         parsed = instruments.InstrumentId.parse(instrument_id)
         tf = requirements.signal_timeframe
         engine = await self._provider.engine_for(parsed, requirements)
+        calendar = engine.calendar
         now = self._clock.now_ms()
-        start = tf.shift(tf.floor(now), -max(requirements.history_bars, 1))
+        start = calendar.shift(
+            tf, calendar.floor(tf, now), -max(requirements.history_bars, 1)
+        )
         candles = await self._provider.candles(engine, parsed, tf, start, now)
         warm = engine.run(candles)
         self._runtime.warm_up(instrument_id, warm)
@@ -182,9 +187,12 @@ class LiveSignalPipeline:
             stats: Pass counters.
         """
         now = self._clock.now_ms()
+        calendar = state.engine.calendar
         fresh: list[market.Candle] = []
         for tf in state.engine.required_timeframes:
-            since = state.last_end_ms.get(tf, tf.shift(tf.floor(now), -3))
+            since = state.last_end_ms.get(
+                tf, calendar.shift(tf, calendar.floor(tf, now), -3)
+            )
             rows = await self._market.get_candles(instrument_id, tf, since, now)
             fresh.extend(
                 c
@@ -199,6 +207,8 @@ class LiveSignalPipeline:
                 candle.end_ms, state.last_end_ms.get(candle.timeframe, 0)
             )
         signal_tf = state.requirements.signal_timeframe
+        # A wall-clock grace (nominal bar lengths), not a bar boundary: work
+        # stalled on a missing input this long after its close is forced.
         delivered.extend(
             state.engine.flush(now - _FLUSH_GRACE_BARS * signal_tf.duration_ms)
         )

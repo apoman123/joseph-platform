@@ -7,6 +7,7 @@ import threading
 
 from joseph.domain import instruments
 from joseph.domain import market
+from joseph.domain import sessions
 from joseph.domain import timeframes
 from joseph.market_data.domain import candles as candle_rules
 
@@ -151,6 +152,9 @@ class CandleStore:
     ) -> list[tuple[int, int]]:
         """Finds closed-bar slots in range that hold no final bar.
 
+        Slots follow the instrument's session calendar, so the time between
+        sessions is never reported missing.
+
         Args:
             instrument: Instrument.
             timeframe: Resolution.
@@ -165,4 +169,10 @@ class CandleStore:
             for c in self.range(instrument, timeframe, start_ms, end_ms)
             if c.is_final
         ]
-        return candle_rules.find_gaps(finals, timeframe, start_ms, end_ms)
+        return candle_rules.find_gaps(
+            finals,
+            timeframe,
+            start_ms,
+            end_ms,
+            calendar=sessions.for_instrument(instrument),
+        )

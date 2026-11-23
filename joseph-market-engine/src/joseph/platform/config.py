@@ -120,6 +120,8 @@ class Settings:
         forward_signals: Whether entry signals of PAPER/SHADOW/AUTO_LIVE
             strategies are forwarded to the execution engine.
         alert_interval_s: Seconds between alert outbox passes.
+        max_anchored_bars: Hard cap of chart bars an anchored study (anchored
+            VWAP, anchored regression) computes from its anchor to now.
         telegram_bot_token: Telegram bot token (secret).
         line_channel_token: LINE Messaging API channel token (secret).
         webhook_secret: HMAC secret for outbound webhooks (secret).
@@ -160,6 +162,7 @@ class Settings:
     pipeline_max_instruments: int = 10
     forward_signals: bool = True
     alert_interval_s: float = 2.0
+    max_anchored_bars: int = 50_000
     telegram_bot_token: str | None = None
     line_channel_token: str | None = None
     webhook_secret: str | None = None
@@ -258,6 +261,9 @@ class Settings:
             forward_signals=_bool(source.get("JOSEPH_FORWARD_SIGNALS"), True),
             alert_interval_s=max(
                 0.5, float(source.get("JOSEPH_ALERT_INTERVAL_S", "2"))
+            ),
+            max_anchored_bars=max(
+                2_000, int(source.get("JOSEPH_MAX_ANCHORED_BARS", "50000"))
             ),
             telegram_bot_token=source.get("JOSEPH_TELEGRAM_BOT_TOKEN") or None,
             line_channel_token=source.get("JOSEPH_LINE_CHANNEL_TOKEN") or None,
