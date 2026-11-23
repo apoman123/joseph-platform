@@ -36,6 +36,7 @@ from joseph.market_data.adapters import factory
 from joseph.market_data.adapters import treasury
 from joseph.market_data.adapters import twse
 from joseph.market_data.app import ports
+from joseph.market_data.app import registry
 
 Validate = Callable[[str, str, object], None]
 _D = decimal.Decimal
@@ -193,6 +194,12 @@ async def test_twse_instruments_follow_listing_rules(
         assert row.board_lot == _D(1000) and row.lot_size == _D(1)
         assert row.key.quote == "TWD" and row.listing_exchange == "TWSE"
     tsmc = by_id["twse:stock:2330"]
+    assert (tsmc.display_symbol, tsmc.local_name, tsmc.name) == (
+        "2330",
+        "台積電",
+        "TSMC",
+    )
+    assert by_id["twse:etf:00646"].name == "Yuanta S&P 500 ETF"
     assert tsmc.tick_ladder == twse.STOCK_TICKS
     assert tsmc.tick_for(_D(2030)) == _D(5)
     assert tsmc.tick_for(_D(209)) == _D("0.5")
@@ -213,6 +220,19 @@ async def test_twse_instruments_follow_listing_rules(
         assert not any(
             r.instrument_id.venue_market_id == excluded for r in rows
         )
+
+
+async def test_registry_search_matches_local_and_english_names(
+    venue_api: respx.Router,
+) -> None:
+    """Chinese and English names find TWSE listings."""
+    del venue_api
+    adapter = _adapter(instruments.Venue.TWSE, clock_lib.ManualClock(_TWSE_MS))
+    lookup = registry.InstrumentRegistry({instruments.Venue.TWSE: adapter})
+    by_chinese = await lookup.search("台積")
+    assert [str(r.instrument_id) for r in by_chinese] == ["twse:stock:2330"]
+    by_english = await lookup.search("hon hai")
+    assert [str(r.instrument_id) for r in by_english] == ["twse:stock:2317"]
 
 
 async def test_twse_daily_history_is_session_aligned(
@@ -399,6 +419,8 @@ async def test_directory_maps_listings_to_venues(
         assert row.tick_for(_D("0.5")) == _D("0.0001")
         assert row.tick_for(_D(5)) == _D("0.01")
     assert str(nasdaq["AAPL"].instrument_id) == "nasdaq:stock:AAPL"
+    assert nasdaq["AAPL"].name == "Apple Inc. - Common Stock"
+    assert nasdaq["AAPL"].local_name is None
     assert str(nasdaq["QQQ"].instrument_id) == "nasdaq:etf:QQQ"
     assert nasdaq["TLT"].asset_class is instruments.AssetClass.BOND
     assert nasdaq["QQQ"].asset_class is instruments.AssetClass.EQUITY
@@ -670,6 +692,9 @@ async def test_treasury_lists_nominal_and_real_series(
         assert row.calendar == "USBOND"
     ids = {str(r.instrument_id) for r in rows}
     assert {"treasury:rate:UST1.5M", "treasury:rate:TIPS30Y"} <= ids
+    names = {r.instrument_id.venue_market_id: r.name for r in rows}
+    assert names["UST10Y"] == "US Treasury 10-year par yield"
+    assert names["TIPS5Y"] == "US Treasury 5-year par real yield"
 
 
 async def test_treasury_daily_weekly_monthly_bars(

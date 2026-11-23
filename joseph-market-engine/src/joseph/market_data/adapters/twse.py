@@ -44,6 +44,7 @@ import contextlib
 import dataclasses
 import datetime
 import decimal
+import html
 import logging
 import zoneinfo
 from collections.abc import Awaitable
@@ -347,7 +348,9 @@ def parse_instruments(
         name = str(record.get("Name", "")).strip()
         company = by_company.get(code)
         fund = by_fund.get(code)
+        english = ""
         if company is not None:
+            english = str(company.get("英文簡稱") or "")
             market_type = instruments.MarketType.STOCK
             ladder = STOCK_TICKS
             asset = instruments.AssetClass.EQUITY
@@ -356,6 +359,7 @@ def parse_instruments(
         elif fund is not None and not (
             len(code) == 6 and code[5] in _FOREIGN_CURRENCY
         ):
+            english = str(fund.get("基金英文名稱") or "")
             market_type = instruments.MarketType.ETF
             ladder = ETF_TICKS
             asset = etf_asset_class(code, fund)
@@ -380,7 +384,7 @@ def parse_instruments(
                     quote="TWD",
                     settlement="TWD",
                 ),
-                display_symbol=f"{code} {name}".strip(),
+                display_symbol=code,
                 tick_size=_ZERO_TICK,
                 lot_size=decimals.ONE,
                 min_qty=decimals.ONE,
@@ -398,6 +402,8 @@ def parse_instruments(
                 tick_ladder=ladder,
                 price_limit_pct=limit,
                 board_lot=BOARD_LOT,
+                name=html.unescape(english).strip() or None,
+                local_name=html.unescape(name) or None,
             )
         )
         meta[code] = ListingMeta(

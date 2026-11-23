@@ -106,7 +106,7 @@ class InstrumentRegistry:
         market_type: instruments.MarketType | None = None,
         limit: int = 200,
     ) -> list[instruments.Instrument]:
-        """Searches by base asset, native id or display symbol.
+        """Searches by base asset, native id, display symbol or name.
 
         Args:
             query: Case-insensitive text such as ``btc``.
@@ -127,11 +127,12 @@ class InstrumentRegistry:
                 continue
             base = row.key.canonical_base.upper()
             native = row.instrument_id.venue_market_id.upper()
+            names = (row.display_symbol, row.name or "", row.local_name or "")
             if (
                 needle
                 and needle not in base
                 and needle not in native
-                and (needle not in row.display_symbol.upper())
+                and not any(needle in text.upper() for text in names)
             ):
                 continue
             exact = 0 if needle in (base, native) else 1
