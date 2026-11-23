@@ -5,9 +5,10 @@ ARG PYTHON_VERSION=3.13
 FROM python:${PYTHON_VERSION}-slim-bookworm AS build
 COPY --from=ghcr.io/astral-sh/uv:0.12.15 /uv /bin/uv
 ENV UV_COMPILE_BYTECODE=1 UV_LINK_MODE=copy UV_PYTHON_DOWNLOADS=never
-# git + ssh fetch the private indicator library (apoman123/PineScripts).
-# Build with an agent holding its deploy key:  docker build --ssh default .
-# The key is only forwarded to RUN --mount=type=ssh, never stored in a layer.
+# git fetches the private indicator library (apoman123/PineScripts) with one
+# of two build-time credentials; neither ends up in a layer or a remote URL:
+#   docker build --secret id=pinescripts_token,env=PINESCRIPTS_TOKEN .  (CI)
+#   docker build --ssh default .  (local agent with access to PineScripts)
 RUN apt-get update \
  && apt-get install -y --no-install-recommends git openssh-client \
  && rm -rf /var/lib/apt/lists/* \
@@ -15,10 +16,26 @@ RUN apt-get update \
  && echo 'github.com ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIOMqqnkVzrm0SdG6UOoqKLsabgH5C9okWi0dh2l9GKJl' > /root/.ssh/known_hosts
 WORKDIR /app
 COPY pyproject.toml uv.lock README.md ./
-RUN --mount=type=cache,target=/root/.cache/uv --mount=type=ssh,required=true \
+# The URL rewrite lives in GIT_CONFIG_* variables of this RUN only.
+RUN --mount=type=cache,target=/root/.cache/uv \
+    --mount=type=secret,id=pinescripts_token,required=false \
+    --mount=type=ssh,required=false \
+    set -eu; \
+    repo=https://github.com/apoman123/PineScripts; \
+    token_file=/run/secrets/pinescripts_token; \
+    if [ -s "${token_file}" ]; then \
+      export GIT_CONFIG_COUNT=1 GIT_CONFIG_VALUE_0="${repo}" \
+        GIT_CONFIG_KEY_0="url.https://x-access-token:$(cat "${token_file}")@github.com/apoman123/PineScripts.insteadOf"; \
+    elif [ -S "${SSH_AUTH_SOCK:-}" ]; then \
+      export GIT_CONFIG_COUNT=1 GIT_CONFIG_VALUE_0="${repo}" \
+        GIT_CONFIG_KEY_0="url.ssh://git@github.com/apoman123/PineScripts.insteadOf"; \
+    else \
+      echo "error: no access to the private ${repo}. Build with --secret id=pinescripts_token,env=PINESCRIPTS_TOKEN or --ssh default (docs/CI_CD.md)." >&2; \
+      exit 1; \
+    fi; \
     uv sync --frozen --no-dev --no-install-project
 COPY src ./src
-RUN --mount=type=cache,target=/root/.cache/uv --mount=type=ssh,required=true \
+RUN --mount=type=cache,target=/root/.cache/uv \
     uv sync --frozen --no-dev --no-editable
 
 FROM python:${PYTHON_VERSION}-slim-bookworm
