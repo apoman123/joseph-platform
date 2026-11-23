@@ -6,6 +6,11 @@ job; applied to every venue to bound API usage), then fetch order books and
 any missing open interest / funding per candidate and evaluate. Every
 candidate yields a record; failed data fetches become missing inputs and
 therefore ``INSUFFICIENT_DATA``, never a pass.
+
+Exchange-listed securities (stocks, ETFs) have no open interest or funding:
+neither is requested nor required for them. Rate series (``treasury:rate:*``)
+are not tradable and are excluded from screening; asking for the
+``treasury`` venue explicitly is an ``UnsupportedError``.
 """
 
 from __future__ import annotations
@@ -138,6 +143,7 @@ class QualificationService:
             Qualification input.
         """
         instrument = listed.instrument_id
+        limits = self.policy.thresholds(listed.asset_class, instrument)
         async with self._semaphore:
             book: market.OrderBook | None
             try:
@@ -147,7 +153,7 @@ class QualificationService:
             except errors.JosephError:
                 book = None
             open_interest = snapshot.open_interest
-            if open_interest is None:
+            if open_interest is None and limits.open_interest_usd is not None:
                 try:
                     open_interest = await adapter.fetch_open_interest(
                         instrument
@@ -155,7 +161,7 @@ class QualificationService:
                 except errors.JosephError:
                     open_interest = None
             funding = snapshot.funding
-            if funding is None:
+            if funding is None and limits.funding:
                 try:
                     funding = await adapter.fetch_funding(instrument)
                 except errors.JosephError:
@@ -171,7 +177,7 @@ class QualificationService:
                 )
             slippage = policy_lib.Observation(
                 books.worst_side_slippage_pct(
-                    book, self.policy.slippage_notional_usd
+                    book, self.policy.slippage_notional(limits)
                 ),
                 book.received_at_ms,
             )
@@ -217,12 +223,20 @@ class QualificationService:
 
         Raises:
             errors.NotFoundError: If the venue is not enabled.
+            errors.UnsupportedError: For a venue of rate series.
         """
         adapter = self._adapters.get(venue)
         if adapter is None:
             raise errors.NotFoundError(f"venue {venue.value} is not enabled")
+        if venue in instruments.RATE_VENUES:
+            raise errors.UnsupportedError(
+                f"{venue.value} publishes non-tradable rate series; they are "
+                "never screened"
+            )
         listed = {
-            row.instrument_id: row for row in await adapter.list_instruments()
+            row.instrument_id: row
+            for row in await adapter.list_instruments()
+            if policy_lib.is_screened(row.instrument_id)
         }
         snapshots = await adapter.fetch_snapshots()
         eligible = [
@@ -293,7 +307,11 @@ class QualificationService:
         Returns:
             Report.
         """
-        venues = [venue] if venue is not None else list(self._adapters)
+        venues = (
+            [venue]
+            if venue is not None
+            else [v for v in self._adapters if v not in instruments.RATE_VENUES]
+        )
         records: list[policy_lib.QualificationRecord] = []
         for target in venues:
             try:

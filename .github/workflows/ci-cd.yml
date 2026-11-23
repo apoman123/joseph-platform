@@ -118,7 +118,7 @@ jobs:
         if: matrix.project == 'joseph-market-engine'
         uses: ./.github/actions/indicators-access
         with:
-          deploy-key: ${{ secrets.PINESCRIPTS_DEPLOY_KEY }}
+          token: ${{ secrets.PINESCRIPTS_TOKEN }}
       - run: uv sync --frozen
       - name: Google Python style (ruff format + ruff + docstrings)
         run: |
@@ -158,7 +158,7 @@ jobs:
       - name: Indicator library access (private PineScripts)
         uses: ./.github/actions/indicators-access
         with:
-          deploy-key: ${{ secrets.PINESCRIPTS_DEPLOY_KEY }}
+          token: ${{ secrets.PINESCRIPTS_TOKEN }}
       - run: |
           (cd joseph-market-engine && uv sync --frozen)
           (cd joseph-execution-engine && uv sync --frozen)
@@ -189,7 +189,7 @@ jobs:
       - name: Indicator library access (private PineScripts)
         uses: ./.github/actions/indicators-access
         with:
-          deploy-key: ${{ secrets.PINESCRIPTS_DEPLOY_KEY }}
+          token: ${{ secrets.PINESCRIPTS_TOKEN }}
       - run: |
           (cd joseph-market-engine && uv sync --frozen)
           (cd joseph-execution-engine && uv sync --frozen)
@@ -228,12 +228,12 @@ jobs:
             context: joseph-terminal
     steps:
       - uses: actions/checkout@v4
+      # Fails early with a clear message when PINESCRIPTS_TOKEN is missing.
       - name: Indicator library access (private PineScripts)
-        id: indicators
         if: matrix.image == 'joseph-market-engine'
         uses: ./.github/actions/indicators-access
         with:
-          deploy-key: ${{ secrets.PINESCRIPTS_DEPLOY_KEY }}
+          token: ${{ secrets.PINESCRIPTS_TOKEN }}
       - id: owner
         run: echo "name=${GITHUB_REPOSITORY_OWNER,,}" >> "$GITHUB_OUTPUT"
       - uses: docker/setup-buildx-action@v3
@@ -263,9 +263,9 @@ jobs:
           cache-to: type=gha,mode=max,scope=${{ matrix.image }}
           provenance: mode=max
           sbom: true
-          # Forwards the deploy-key agent to `RUN --mount=type=ssh`; the key
-          # never enters an image layer.
-          ssh: ${{ matrix.image == 'joseph-market-engine' && format('default={0}', steps.indicators.outputs.socket) || '' }}
+          # The token reaches only `RUN --mount=type=secret`; it never enters
+          # an image layer or the build cache.
+          secrets: ${{ matrix.image == 'joseph-market-engine' && format('pinescripts_token={0}', secrets.PINESCRIPTS_TOKEN) || '' }}
           build-args: |
             NEXT_PUBLIC_MARKET_API_URL=${{ vars.PUBLIC_MARKET_API_URL }}
             NEXT_PUBLIC_MARKET_WS_URL=${{ vars.PUBLIC_MARKET_WS_URL }}

@@ -1,4 +1,10 @@
-"""Deterministic builders for candles, AOIs, events, snapshots and frames."""
+"""Deterministic builders for candles, AOIs, events, snapshots and frames.
+
+Bar ``index`` counts bars of the instrument's session calendar: for an
+exchange instrument (e.g. ``mock:stock:ACME``) bar 0 starts at the first
+session open at or after ``base_ms``, the last bar of a session ends at the
+close, and nights, weekends and holidays are skipped.
+"""
 
 from __future__ import annotations
 
@@ -11,6 +17,7 @@ from joseph.domain import ids
 from joseph.domain import instruments
 from joseph.domain import market
 from joseph.domain import quality
+from joseph.domain import sessions
 from joseph.domain import structures
 from joseph.domain import timeframes
 
@@ -76,6 +83,7 @@ class FrameFactory:
         instrument_id: Instrument of every built object.
         timeframe: Signal timeframe.
         base_ms: Start of bar index 0.
+        calendar: Session calendar of the instrument.
     """
 
     def __init__(
@@ -93,7 +101,9 @@ class FrameFactory:
         """
         self.instrument_id = instruments.InstrumentId.parse(instrument_id)
         self.timeframe = timeframe
-        self.base_ms = base_ms
+        self.calendar = sessions.for_instrument(self.instrument_id)
+        self.base_ms = self.calendar.ceil(timeframe, base_ms)
+        self._starts: list[int] = [self.base_ms]
 
     def start(self, index: int) -> int:
         """Returns the start of signal bar ``index``.
@@ -104,7 +114,13 @@ class FrameFactory:
         Returns:
             Start time (UTC ms).
         """
-        return self.timeframe.shift(self.base_ms, index)
+        if index < 0:
+            return self.calendar.shift(self.timeframe, self.base_ms, index)
+        while len(self._starts) <= index:
+            self._starts.append(
+                self.calendar.shift(self.timeframe, self._starts[-1], 1)
+            )
+        return self._starts[index]
 
     def close(self, index: int) -> int:
         """Returns the close (exclusive end) of signal bar ``index``.
@@ -113,9 +129,22 @@ class FrameFactory:
             index: Bar index.
 
         Returns:
-            Close time (UTC ms).
+            Close time (UTC ms); a session's last bar closes at the close.
         """
-        return self.start(index + 1)
+        return self.calendar.end_of(self.timeframe, self.start(index))
+
+    def last_closed_start(self, tf: timeframes.Timeframe, as_of_ms: int) -> int:
+        """Returns the start of the newest ``tf`` bar closed at a time.
+
+        Args:
+            tf: Timeframe.
+            as_of_ms: Visibility time.
+
+        Returns:
+            Bar start on the instrument's calendar.
+        """
+        start = self.calendar.last_closed_start(tf, as_of_ms)
+        return self.calendar.floor(tf, as_of_ms) if start is None else start
 
     def candle(
         self,
@@ -248,7 +277,7 @@ class FrameFactory:
             timeframe=event_tf,
             source=source or _PLUGIN_BY_EVENT.get(name_enum, "test"),
             name=name_enum,
-            bar_start_ms=event_tf.shift(event_tf.floor(confirmed), -1),
+            bar_start_ms=self.last_closed_start(event_tf, confirmed),
             confirmed_at_ms=confirmed,
             price=None if price is None else dec(price),
             aoi_id=aoi_id,
@@ -288,7 +317,7 @@ class FrameFactory:
             plugin_id=plugin_id,
             indicator_version="1.0.0",
             method=structures.IndicatorMethod.PINE_PARITY,
-            bar_start_ms=tf.shift(tf.floor(as_of), -1),
+            bar_start_ms=self.last_closed_start(tf, as_of),
             as_of_ms=as_of,
             aois=tuple(aois),
             events=(),

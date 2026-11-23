@@ -219,7 +219,10 @@ def build_container(
     )
     hub = streaming.StreamHub(clock, retention=settings.stream_retention)
     event_bus = bus.EventBus()
-    store = candle_store.CandleStore()
+    # A series must hold an anchored study's whole window (anchor to now).
+    store = candle_store.CandleStore(
+        max_bars_per_series=max(20_000, settings.max_anchored_bars + 1_000)
+    )
     replay = (
         replay_lib.ReplaySource(settings.replay_dir)
         if settings.replay_dir
@@ -298,6 +301,7 @@ def build_container(
         clock,
         replay=replay,
         stale_after_ms=settings.snapshot_stale_after_ms,
+        max_refresh_bars=settings.max_anchored_bars + 10_000,
     )
     trending = (
         coingecko.CoinGeckoTrending() if settings.coingecko_enabled else None
@@ -518,7 +522,13 @@ def build_signal_stack(container: Container) -> SignalStack:
     return SignalStack(
         plugins=plugins,
         indicator_queries=indicator_service.IndicatorQueryService(
-            container.market_data, plugins, clock, tick_sizes=tick_sizes
+            container.market_data,
+            plugins,
+            clock,
+            indicator_service.QueryConfig(
+                max_anchored_bars=settings.max_anchored_bars
+            ),
+            tick_sizes=tick_sizes,
         ),
         versions=versions,
         signals=signals,
