@@ -147,3 +147,88 @@ export function preview(
     ...patch,
   };
 }
+
+/** TWSE ladder used by the equity fixtures. */
+const TWSE_LADDER = [
+  {min_price: '0', tick_size: '0.01'},
+  {min_price: '10', tick_size: '0.05'},
+  {min_price: '50', tick_size: '0.1'},
+  {min_price: '100', tick_size: '0.5'},
+  {min_price: '500', tick_size: '1'},
+  {min_price: '1000', tick_size: '5'},
+];
+
+/** TWSE stock (board lot 1000, ±10% limit, tick ladder). */
+export const TWSE_STOCK: InstrumentPrecision = {
+  instrument_id: 'mock:stock:9901',
+  display_symbol: '9901',
+  tick_size: '0.01',
+  lot_size: '1',
+  min_qty: '1',
+  max_qty: '1000000',
+  min_notional: null,
+  max_leverage: null,
+  status: 'TRADING',
+  key: {canonical_base: '9901', quote: 'TWD'},
+  calendar: 'XTAI',
+  tick_ladder: TWSE_LADDER,
+  price_limit_pct: '10',
+  board_lot: '1000',
+  listing_exchange: 'TWSE',
+  name: 'Demo Semiconductor (demo)',
+  local_name: '示範半導體',
+};
+
+/** US stock on the NYSE calendar. */
+export const US_STOCK: InstrumentPrecision = {
+  instrument_id: 'mock:stock:ACME',
+  display_symbol: 'ACME',
+  tick_size: '0.01',
+  lot_size: '1',
+  min_qty: '1',
+  max_qty: '1000000',
+  min_notional: null,
+  max_leverage: null,
+  status: 'TRADING',
+  key: {canonical_base: 'ACME', quote: 'USD'},
+  calendar: 'XNYS',
+  tick_ladder: [],
+  price_limit_pct: null,
+  board_lot: null,
+  listing_exchange: 'NYSE',
+  name: 'Acme Corporation (demo)',
+};
+
+/**
+ * Builds a broker account summary.
+ * @param venue Broker.
+ * @param patch Field overrides.
+ * @param extra Forward-compatible capability fields.
+ * @return Account summary.
+ */
+export function brokerAccount(
+  venue: 'ibkr' | 'sinopac' | 'cathay',
+  patch: Partial<AccountSummary> = {},
+  extra: Readonly<Record<string, unknown>> = {}
+): AccountSummary {
+  const base = account({
+    account_id: `acct-${venue}`,
+    venue,
+    label: `${venue} account`,
+    currency: venue === 'ibkr' ? 'USD' : 'TWD',
+  });
+  return {
+    ...base,
+    capabilities: {
+      ...base.capabilities,
+      venue,
+      order_types: ['market', 'limit'],
+      time_in_force: (venue === 'ibkr'
+        ? ['DAY', 'GTC']
+        : ['DAY']) as AccountSummary['capabilities']['time_in_force'],
+      margin_modes: [],
+      ...extra,
+    },
+    ...patch,
+  };
+}

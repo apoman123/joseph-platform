@@ -5,4 +5,5 @@
  */
 export * from './demo-indicators';
 export * from './demo-market-client';
+export * from './demo-sessions';
 export * from './prices';

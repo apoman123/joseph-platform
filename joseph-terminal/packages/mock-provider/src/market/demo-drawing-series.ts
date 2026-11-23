@@ -14,25 +14,32 @@
  *   Pearson's R of price against bar index; `max_up`/`max_down` are the
  *   largest residuals above/below the line.
  *
- * Like the engine, a series covers at most the latest 2000 closed bars.
- * An anchor older than that window yields null values.
+ * Like the engine, anchors may lie up to 50 000 closed bars back; an older
+ * anchor is refused with a validation error (the engine answers 422) whose
+ * message the terminal shows as is. Bar boundaries follow the instrument's
+ * session calendar.
  */
 import {
-  barsBetween,
+  ApiError,
+  CONTINUOUS_CALENDAR,
+  type BarCalendar,
   type Candle,
   Decimal,
-  floorToTimeframe,
   type IndicatorSeries,
   type IndicatorSeriesPoint,
   type IndicatorSeriesQuery,
   type IndicatorValue,
-  shiftTimeframe,
-  timeframeEnd,
 } from '@joseph/contracts';
 import {demoCandle, type DemoInstrumentSpec} from './prices';
 
-/** Bars the engine computes at most. */
-export const DEMO_SERIES_BAR_CAP = 2000;
+/** Bars back the engine computes anchored values from at most. */
+export const DEMO_SERIES_BAR_CAP = 50_000;
+
+/** Regression points computed in full after the end bar (DEMO cost cap). */
+const REGRESSION_POINT_CAP = 500;
+
+/** Refusal message for an anchor beyond the cap (mirrors the engine). */
+export const DEMO_ANCHOR_REFUSAL = `Anchor is more than ${DEMO_SERIES_BAR_CAP.toLocaleString('en-US')} bars back; the engine computes anchored values from at most ${DEMO_SERIES_BAR_CAP.toLocaleString('en-US')} bars.`;
 
 /** Plugins served by this module. */
 export const DEMO_DRAWING_PLUGINS: readonly string[] = [
@@ -236,36 +243,52 @@ export function regressionValues(
  * @param spec DEMO instrument.
  * @param query Series query.
  * @param nowMs Clock.
+ * @param calendar Session calendar of the instrument (default `24x7`).
  * @return Series, or null when the plugin is not a drawing plugin.
  * @throws {Error} For invalid settings (the engine answers 422).
+ * @throws {ApiError} When the anchor is more than 50 000 bars back.
  */
 export function demoDrawingSeries(
   spec: DemoInstrumentSpec,
   query: IndicatorSeriesQuery,
-  nowMs: number
+  nowMs: number,
+  calendar: BarCalendar = CONTINUOUS_CALENDAR
 ): IndicatorSeries | null {
   if (!DEMO_DRAWING_PLUGINS.includes(query.pluginId)) return null;
   const settings = query.settings ?? {};
   const tf = query.timeframe;
-  const lastStart = shiftTimeframe(tf, floorToTimeframe(tf, nowMs), -1);
-  const windowStart = shiftTimeframe(tf, lastStart, -(DEMO_SERIES_BAR_CAP - 1));
-  const fromMs = Math.max(
-    windowStart,
-    floorToTimeframe(
-      query.timeframe,
-      query.fromMs ?? shiftTimeframe(tf, lastStart, -199)
-    )
-  );
+  const lastStart = calendar.lastClosedStart(tf, nowMs) ?? 0;
   const anchorRaw = settings.anchor_ms;
   if (typeof anchorRaw !== 'number' || !Number.isInteger(anchorRaw)) {
     throw new Error('Invalid setting anchor_ms: expected an integer');
   }
-  const anchorMs = floorToTimeframe(query.timeframe, anchorRaw);
-  const inWindow = anchorMs >= windowStart && anchorMs <= lastStart;
+  const anchorMs = calendar.floor(query.timeframe, anchorRaw);
+  const barsBack =
+    anchorMs <= lastStart ? calendar.barsBetween(tf, anchorMs, lastStart) : 0;
+  if (barsBack >= DEMO_SERIES_BAR_CAP) {
+    throw new ApiError(422, {
+      code: 'VALIDATION_FAILED',
+      message: DEMO_ANCHOR_REFUSAL,
+      trace_id: 'demo',
+      retryable: false,
+      field_errors: [
+        {field: 'settings.anchor_ms', message: DEMO_ANCHOR_REFUSAL},
+      ],
+    });
+  }
+  const requested = calendar.floor(
+    query.timeframe,
+    query.fromMs ?? calendar.shift(tf, lastStart, -199)
+  );
+  const fromMs =
+    calendar.barsBetween(tf, requested, lastStart) >= DEMO_SERIES_BAR_CAP
+      ? calendar.shift(tf, lastStart, -(DEMO_SERIES_BAR_CAP - 1))
+      : requested;
+  const inWindow = anchorMs <= lastStart;
   const candles: Candle[] = [];
   if (inWindow) {
-    for (let t = anchorMs; t <= lastStart; t = timeframeEnd(tf, t)) {
-      candles.push(demoCandle(spec, query.timeframe, t, nowMs));
+    for (let t = anchorMs; t <= lastStart; t = calendar.shift(tf, t, 1)) {
+      candles.push(demoCandle(spec, query.timeframe, t, nowMs, calendar));
     }
   }
   const points: IndicatorSeriesPoint[] = [];
@@ -276,18 +299,31 @@ export function demoDrawingSeries(
     const byStart = new Map(
       anchoredVwapPoints(candles, settings).map(p => [p.bar_start_ms, p])
     );
-    for (let t = fromMs; t <= lastStart; t = timeframeEnd(tf, t)) {
+    for (let t = fromMs; t <= lastStart; t = calendar.shift(tf, t, 1)) {
       points.push(
         byStart.get(t) ?? {bar_start_ms: t, values: NULL_VWAP_VALUES}
       );
     }
   } else {
-    for (let t = fromMs; t <= lastStart; t = timeframeEnd(tf, t)) {
-      const count =
-        inWindow && t >= anchorMs ? barsBetween(tf, anchorMs, t) + 1 : 0;
+    // Bars from the anchor are consecutive in `candles`, so the count is the
+    // number of candles that start at or before the point's bar.
+    let count = 0;
+    for (let t = fromMs; t <= lastStart; t = calendar.shift(tf, t, 1)) {
+      while (
+        inWindow &&
+        count < candles.length &&
+        (candles[count]?.start_ms ?? Infinity) <= t
+      )
+        count += 1;
+      // The channel reads the point of its end bar (the first point); later
+      // points are filled for the first few hundred bars only, which keeps
+      // anchors far back cheap in the browser.
       points.push({
         bar_start_ms: t,
-        values: regressionValues(candles.slice(0, count), settings),
+        values: regressionValues(
+          points.length < REGRESSION_POINT_CAP ? candles.slice(0, count) : [],
+          settings
+        ),
       });
     }
   }
@@ -297,7 +333,7 @@ export function demoDrawingSeries(
     plugin_id: query.pluginId,
     indicator_version: 'demo',
     points,
-    as_of_ms: timeframeEnd(tf, lastStart),
+    as_of_ms: calendar.endOf(tf, lastStart),
     feed_state: 'DEMO',
   };
 }

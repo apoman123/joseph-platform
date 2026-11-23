@@ -154,9 +154,10 @@ DEMO spec in `apps/web/e2e/`, **S** screenshot in `apps/web/e2e/screenshots/`.
 | `1M` timeframe | Native calendar-month klines on Binance, Bitget and MEXC (and DEMO). Hyperliquid's `1M` is 30-day buckets and Lighter has none, so those venues do not offer it. |
 | True delta | From klines' taker volume on Binance and DEMO, and on every venue's seconds bars; other venues' minute-and-above bars stay *estimate* (drawn faint, `method: pine_parity`). |
 | Signal ranking by volume | Ranks by venue quote turnover of the signal bar; venues that publish none show *—* and sort last (never estimated). |
-| Detachable panes | Each window runs its own provider connection (in DEMO its own simulated broker); browsers allow one window per click, so re-opening several needs several clicks. |
-| Anchored VWAP / regression channel | Anchors more than 2000 bars back are refused with a message rather than computed from the wrong bar. |
-| Workspace export | Carries layouts, not drawings; drawings persist through the drawing store (as before). |
+| Detachable panes | Each window runs its own provider connection (in DEMO its own simulated broker). A main-window reload re-adopts running pop-outs without a click; after a browser restart *Restore pop-outs* opens one window per click unless pop-ups are allowed for the site (then all at once). |
+| Anchored VWAP / regression channel | The engine computes from anchors up to 50 000 bars back; the terminal shows the engine's message only when the engine refuses a request. |
+| Workspace export | Carries the layout and the drawings of every instrument (format 2 envelope, migrated from v0/v1 files); share links carry the layout only. |
+| Session markets | Bar boundaries come from the engine's session lists (`/v1/calendars/{id}/sessions`, cached and prefetched around the visible range); until a list arrives regular weekday hours are assumed, so a holiday or early close appears once it loads. TWSE volume is shown in 張 in the data window and Market panel and in shares on the volume pane. |
 
 ## Tests added
 
@@ -166,6 +167,19 @@ Vitest (+14 files): `chart-core/panes`, `terminal-shell/charting`,
 `polyline`, `brush`, `zone-box`; web `shell/charting.test.tsx`,
 `alerts/triage.test.tsx`, `watchlist/columns.test.tsx`.
 Playwright DEMO: `e2e/charting.spec.ts` (8 tests), screenshots 12–19.
+
+Third increment (2026-11-23, session markets): Vitest
+`contracts/sessions` (engine scenarios: 1h bars from 09:30, early close,
+holidays, DST, the TWSE 13:30 print, periodic bars, 900 shift/floor/
+barsBetween round trips, 24x7 parity), `chart-core/sessions-axis`,
+`terminal-shell/sessions`, `drawing-core/sessions`,
+`mock-provider/demo-sessions`, web `shell/sessions` (picker groups and
+Chinese-name search, ladder prices, 張 volumes, status badge, classified
+delta); Playwright DEMO `sessions.spec.ts` (screenshots 30–34),
+`popout.spec.ts` (reload survival, *Restore pop-outs*; 35–36),
+`workspace-export.spec.ts` (37), `trading-equity.spec.ts` (38–40);
+full-stack `sessions.spec.ts` (needs the engine's calendar endpoint and
+`mock:stock:ACME`; 41).
 
 Second increment (2026-11-22): Vitest `contracts/timeframes`,
 `terminal-shell/{timeframes,detach}`, `chart-core/time-scale`,

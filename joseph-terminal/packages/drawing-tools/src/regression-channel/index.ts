@@ -19,10 +19,10 @@
  *   dashed; upper line from `upper_start` to `upper_end` and lower line
  *   from `lower_start` to `lower_end`; optional fill between them; optional
  *   "Pearson's R" label at the right end.
- * - Status: the engine caps a series at 2000 bars; null values (t1 too old)
- *   or a t2 bar older than the returned window show "Anchor is more than
- *   2000 bars back — move it closer" instead of lines. Both anchors on one
- *   bar, an unclosed t2 bar, loading and failed requests show a notice too.
+ * - Status: the engine computes from anchors up to 50 000 bars back; when
+ *   it refuses the anchors the notice shows the engine's own message. Both
+ *   anchors on one bar, an unclosed t2 bar, null values, loading and failed
+ *   requests show a notice too.
  *   Dashed vertical markers show both anchor bars while nothing is drawn.
  * - Hit-testing: handles first, then the three lines, then the inside of
  *   the channel when filled (or the vertical markers when nothing is
@@ -35,12 +35,12 @@
  */
 import {
   Decimal,
-  timeframeEnd,
+  CONTINUOUS_CALENDAR,
+  type BarCalendar,
   type DrawingDocument,
   type Timeframe,
 } from '@joseph/contracts';
 import {
-  ANCHOR_TOO_FAR_MESSAGE,
   anchorPoints,
   applyStroke,
   barStartAt,
@@ -158,19 +158,21 @@ export function anchorOrder(
  * Bar starts of t1 and t2 on a timeframe.
  * @param doc Drawing.
  * @param timeframe Chart timeframe.
+ * @param calendar Session calendar of the instrument (default UTC bars).
  * @return `[t1Bar, t2Bar]` or null.
  */
 export function channelBars(
   doc: Pick<DrawingDocument, 'anchors'>,
-  timeframe: Timeframe
+  timeframe: Timeframe,
+  calendar?: BarCalendar
 ): [number, number] | null {
   const order = anchorOrder(doc);
   const first = order ? doc.anchors[order[0]] : undefined;
   const second = order ? doc.anchors[order[1]] : undefined;
   if (!first || !second) return null;
   return [
-    barStartAt(first.time_ms, timeframe),
-    barStartAt(second.time_ms, timeframe),
+    barStartAt(first.time_ms, timeframe, calendar),
+    barStartAt(second.time_ms, timeframe, calendar),
   ];
 }
 
@@ -178,14 +180,16 @@ export function channelBars(
  * Builds the engine request for a drawing.
  * @param doc Drawing.
  * @param timeframe Chart timeframe.
+ * @param calendar Session calendar of the instrument (default UTC bars).
  * @return Request, or null without two anchors. Anchors on one bar still
  *     request (the tool then shows a notice), so the state stays known.
  */
 export function regressionRequest(
   doc: Pick<DrawingDocument, 'anchors' | 'props'>,
-  timeframe: Timeframe
+  timeframe: Timeframe,
+  calendar?: BarCalendar
 ): DrawingSeriesRequest | null {
-  const bars = channelBars(doc, timeframe);
+  const bars = channelBars(doc, timeframe, calendar);
   if (!bars) return null;
   const deviations = REGRESSION_INPUTS[0];
   return {
@@ -210,7 +214,7 @@ export function channelView(
   series: DrawingSeriesState | null
 ): ChannelView {
   if (series) {
-    const bars = channelBars(doc, series.timeframe);
+    const bars = channelBars(doc, series.timeframe, series.calendar);
     if (bars && bars[0] === bars[1])
       return {kind: 'notice', text: SAME_BAR_MESSAGE};
   }
@@ -219,12 +223,10 @@ export function channelView(
   const endMs = series.request.fromMs;
   const point = seriesPointAt(series.points, endMs);
   if (!point) {
-    const earliest = series.points[0]?.bar_start_ms;
-    if (earliest !== undefined && earliest > endMs)
-      return {kind: 'notice', text: ANCHOR_TOO_FAR_MESSAGE};
     if (
       series.asOfMs === null ||
-      series.asOfMs <= timeframeEnd(series.timeframe, endMs)
+      series.asOfMs <=
+        (series.calendar ?? CONTINUOUS_CALENDAR).endOf(series.timeframe, endMs)
     )
       return {kind: 'notice', text: 'Waiting for the end bar to close'};
     return {kind: 'notice', text: 'No engine values for these anchors yet'};
@@ -250,7 +252,7 @@ export function channelView(
     lowerStart == null ||
     lowerEnd == null
   ) {
-    return {kind: 'notice', text: ANCHOR_TOO_FAR_MESSAGE};
+    return {kind: 'notice', text: 'No engine values for these anchors yet'};
   }
   return {
     kind: 'ready',
@@ -345,7 +347,7 @@ function markerXs(
   series: DrawingSeriesState | null
 ): number[] {
   const bars = series
-    ? channelBars(doc, series.timeframe)
+    ? channelBars(doc, series.timeframe, series.calendar)
     : doc.anchors.map(a => a.time_ms);
   return (bars ?? [])
     .map(time => transform.timeToX(time))
@@ -390,7 +392,8 @@ export const regressionChannelTool: ToolPlugin = {
   }),
   defaultProps: () => inputDefaults(REGRESSION_INPUTS),
   inputs: REGRESSION_INPUTS,
-  seriesRequest: (doc, env) => regressionRequest(doc, env.timeframe),
+  seriesRequest: (doc, env) =>
+    regressionRequest(doc, env.timeframe, env.calendar),
   render(ctx, doc, transform, state) {
     const series = state.series ?? null;
     const view = channelView(doc, series);
@@ -495,8 +498,8 @@ export const regressionChannelTool: ToolPlugin = {
   dataRows(doc, _barStartMs, {series, tickSize}) {
     const view = channelView(doc, series);
     if (view.kind === 'notice') {
-      return view.text === ANCHOR_TOO_FAR_MESSAGE
-        ? [{label: 'Regression', value: 'anchor > 2000 bars back'}]
+      return series?.refusal
+        ? [{label: 'Regression', value: 'refused by the engine'}]
         : [];
     }
     const {values} = view;

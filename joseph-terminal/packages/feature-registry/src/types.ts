@@ -13,6 +13,7 @@ import type {
   FeedMode,
   InstrumentId,
   OrderMode,
+  SessionCalendarCache,
   Timeframe,
 } from '@joseph/contracts';
 import type {Disposer, ReadableStore, WritableStore} from './store';
@@ -330,6 +331,11 @@ export interface FeatureContext<TView> {
   readonly events: EventBus;
   /** Notifications. */
   readonly notifier: Notifier;
+  /**
+   * Session calendars (exchange sessions from the engine or DEMO) for
+   * calendar-aware bar boundaries and market hours.
+   */
+  readonly calendars: SessionCalendarCache;
   /** Persisted settings for this feature. */
   readonly settings: FeatureSettingsStore;
 }

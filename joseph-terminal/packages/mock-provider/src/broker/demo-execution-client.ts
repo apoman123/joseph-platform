@@ -7,6 +7,13 @@
  * built without a backend. It is a simulation: no order ever reaches a
  * venue, and the authoritative Risk Gateway/OMS live in the execution
  * engine.
+ *
+ * Accounts: the crypto paper account plus simulated broker accounts
+ * (IBKR paper for Nasdaq/NYSE, a SinoPac Shioaji simulation for TWSE, a
+ * SinoPac live account without credentials and Cathay awaiting its API
+ * SDK). Orders route like the engine: IBKR trades XNYS listings, TWSE
+ * brokers XTAI listings. Stock orders use whole shares (TWSE board lots
+ * or odd lots), tick-ladder prices and cash, never leverage.
  */
 import {
   ApiError,
@@ -39,15 +46,17 @@ import {
   type RiskCheckResult,
   type RiskDecision,
   type SubmitIntentResponse,
-  type TradingCapabilities,
 } from '@joseph/contracts';
 import {canonicalJson, sha256Hex} from '../strategy/sha256';
 import {
+  DEMO_ACCOUNTS,
   DEMO_ACCOUNT_ID,
   DEMO_BROKER_INSTRUMENTS,
   DEMO_MARKS,
   DEMO_TENANT_ID,
   DEMO_USER_ID,
+  demoAccount,
+  demoRoutingProblem,
 } from './instruments';
 
 /** Events published by the DEMO broker. */
@@ -74,7 +83,7 @@ export interface DemoBrokerOptions {
   restingFillDelayMs?: number | null;
   /** Split marketable fills into two parts (exercise PARTIALLY_FILLED). */
   partialFills?: boolean;
-  /** Starting paper equity. */
+  /** Starting paper equity of the crypto paper account. */
   startingEquity?: string;
 }
 
@@ -92,27 +101,6 @@ const TERMINAL: ReadonlySet<OrderState> = new Set<OrderState>([
   'EXPIRED',
   'FAILED',
 ]);
-
-/** DEMO trading capabilities of the paper account. */
-const DEMO_CAPABILITIES: TradingCapabilities = {
-  venue: 'mock',
-  status: 'AVAILABLE',
-  order_types: ['market', 'limit', 'stop_market'],
-  time_in_force: ['GTC', 'IOC', 'POST_ONLY'],
-  native_reduce_only: true,
-  native_stop_loss: true,
-  native_take_profit: true,
-  native_oco: false,
-  amend: true,
-  batch: false,
-  position_modes: ['ONE_WAY'],
-  margin_modes: ['isolated', 'cross'],
-  client_order_id: true,
-  query_by_client_id: true,
-  notes: [
-    'DEMO paper simulation in your browser. Nothing is sent to any venue.',
-  ],
-};
 
 /**
  * Builds an ApiError with a contract error body.
@@ -133,6 +121,8 @@ function apiError(status: number, code: ErrorCode, message: string): ApiError {
 
 /** Internal position record. */
 interface PositionBook {
+  /** Account holding the position. */
+  accountId: string;
   /** Signed quantity (positive = long). */
   qty: Decimal;
   /** Average entry price. */
@@ -151,6 +141,7 @@ export class DemoExecutionClient implements ExecutionClient {
   private readonly restingFillDelayMs: number | null;
   private readonly partialFills: boolean;
   private readonly startingEquity: Decimal;
+  private readonly accountEquity = new Map<string, Decimal>();
   private readonly instruments = new Map<string, Instrument>(
     DEMO_BROKER_INSTRUMENTS.map(i => [i.instrument_id, i])
   );
@@ -186,6 +177,42 @@ export class DemoExecutionClient implements ExecutionClient {
     this.restingFillDelayMs = options.restingFillDelayMs ?? null;
     this.partialFills = options.partialFills ?? true;
     this.startingEquity = Decimal.parse(options.startingEquity ?? '100000');
+    for (const spec of DEMO_ACCOUNTS) {
+      this.accountEquity.set(
+        spec.accountId,
+        spec.accountId === DEMO_ACCOUNT_ID
+          ? this.startingEquity
+          : Decimal.parse(spec.startingEquity)
+      );
+    }
+  }
+
+  /**
+   * Tick size of an instrument at a price (TWSE ladder, else tick size).
+   * @param instrument Instrument.
+   * @param price Price.
+   * @return Tick.
+   */
+  private tickAt(instrument: Instrument | null, price: Decimal): Decimal {
+    let tick = Decimal.parse(instrument?.tick_size ?? '0.01');
+    const ladder = [...(instrument?.tick_ladder ?? [])].sort((a, b) =>
+      Decimal.parse(a.min_price).cmp(Decimal.parse(b.min_price))
+    );
+    for (const step of ladder) {
+      if (price.cmp(Decimal.parse(step.min_price)) >= 0)
+        tick = Decimal.parse(step.tick_size);
+    }
+    return tick;
+  }
+
+  /**
+   * Whether an instrument is a cash security (stock or ETF).
+   * @param instrument Instrument.
+   * @return True for stocks and ETFs.
+   */
+  private isSecurity(instrument: Instrument | null): boolean {
+    const type = instrument?.key.market_type;
+    return type === 'stock' || type === 'etf';
   }
 
   /**
@@ -265,11 +292,12 @@ export class DemoExecutionClient implements ExecutionClient {
   private normalize(request: OrderIntentRequest): OrderIntentRequest {
     const instrument = this.instrument(request.instrument_id);
     if (!instrument) return {...request, preview_token: null};
-    const tick = Decimal.parse(instrument.tick_size);
     const lot = Decimal.parse(instrument.lot_size);
     const round = (value: string | null | undefined) =>
       value && Decimal.isValid(value)
-        ? Decimal.parse(value).roundToStep(tick).toString()
+        ? Decimal.parse(value)
+            .roundToStep(this.tickAt(instrument, Decimal.parse(value)))
+            .toString()
         : (value ?? null);
     const qty = Decimal.isValid(request.quantity_base)
       ? Decimal.parse(request.quantity_base).floorToStep(lot).toString()
@@ -343,7 +371,8 @@ export class DemoExecutionClient implements ExecutionClient {
         `${request.mode.toLowerCase()} mode is enabled for this account.`
       );
     }
-    if (request.account_id === DEMO_ACCOUNT_ID)
+    const account = demoAccount(request.account_id);
+    if (account)
       add('identity.account', 'IDENTITY', 'PASS', 'Account belongs to you.');
     else
       add(
@@ -353,6 +382,49 @@ export class DemoExecutionClient implements ExecutionClient {
         'Unknown account.',
         'FORBIDDEN'
       );
+    if (account && account.accountId !== DEMO_ACCOUNT_ID) {
+      const connected =
+        account.status === 'CONNECTED' &&
+        account.capabilities.status === 'AVAILABLE';
+      if (!connected)
+        add(
+          'account.connected',
+          'CONNECTIVITY',
+          'FAIL',
+          account.capabilities.notes[0] ??
+            'The broker account is not connected.',
+          'TRADE_MODE_DISABLED'
+        );
+      else if (request.mode !== 'LIVE' && !account.modes.includes(request.mode))
+        add(
+          'account.mode',
+          'MODE',
+          'FAIL',
+          `${request.mode.toLowerCase()} orders are not enabled for this account.`,
+          'TRADE_MODE_DISABLED'
+        );
+      else
+        add(
+          'account.connected',
+          'CONNECTIVITY',
+          'PASS',
+          `${account.label} is connected (simulated).`
+        );
+      const routed = this.instrument(request.instrument_id);
+      const problem = routed ? demoRoutingProblem(account, routed) : null;
+      if (problem)
+        add('account.routing', 'ACCOUNT', 'FAIL', problem, 'UNSUPPORTED');
+    } else if (account) {
+      const routed = this.instrument(request.instrument_id);
+      if (routed && this.isSecurity(routed))
+        add(
+          'account.routing',
+          'ACCOUNT',
+          'FAIL',
+          'Stocks and ETFs trade through a broker account (IBKR, SinoPac or Cathay).',
+          'UNSUPPORTED'
+        );
+    }
     if (instrument && instrument.status === 'TRADING')
       add(
         'market.instrument_trading',
@@ -417,7 +489,44 @@ export class DemoExecutionClient implements ExecutionClient {
           qty.toString()
         );
       }
+      const boardLot =
+        instrument.board_lot && Decimal.isValid(instrument.board_lot)
+          ? Decimal.parse(instrument.board_lot)
+          : null;
       if (
+        boardLot &&
+        !qty.isZero() &&
+        !qty.isMultipleOf(boardLot) &&
+        qty.cmp(boardLot) >= 0
+      ) {
+        add(
+          'size.board_lot',
+          'SIZE',
+          'FAIL',
+          `TWSE orders are whole board lots of ${boardLot.toString()} shares or odd lots below ${boardLot.toString()} shares.`,
+          'INVALID_LOT_SIZE',
+          qty.toString(),
+          boardLot.toString()
+        );
+      }
+      const offLadder = [request.limit_price, request.trigger_price].find(
+        price =>
+          price &&
+          Decimal.isValid(price) &&
+          !Decimal.parse(price).isMultipleOf(
+            this.tickAt(instrument, Decimal.parse(price))
+          )
+      );
+      if (offLadder) {
+        add(
+          'size.tick',
+          'SIZE',
+          'FAIL',
+          `${offLadder} is not on the tick ladder.`,
+          'INVALID_TICK_SIZE',
+          offLadder
+        );
+      } else if (
         (request.order_type === 'limit' ||
           request.order_type === 'stop_limit') &&
         !request.limit_price
@@ -485,8 +594,14 @@ export class DemoExecutionClient implements ExecutionClient {
         leverage.toString(),
         '20'
       );
-    const margin = leverage.isZero() ? notional : notional.div(leverage);
-    if (notional.cmp(MAX_NOTIONAL) > 0)
+    const cash = this.isSecurity(instrument);
+    const margin =
+      cash || leverage.isZero() ? notional : notional.div(leverage);
+    const maxNotional =
+      account && account.accountId !== DEMO_ACCOUNT_ID
+        ? Decimal.parse(account.maxNotional)
+        : MAX_NOTIONAL;
+    if (notional.cmp(maxNotional) > 0)
       add(
         'exposure.max_notional',
         'EXPOSURE',
@@ -494,7 +609,7 @@ export class DemoExecutionClient implements ExecutionClient {
         'Order exceeds the account notional limit.',
         'RISK_LIMIT',
         notional.toFixed(2),
-        MAX_NOTIONAL.toString()
+        maxNotional.toString()
       );
     else
       add(
@@ -504,15 +619,17 @@ export class DemoExecutionClient implements ExecutionClient {
         'Within the account notional limit.',
         null,
         notional.toFixed(2),
-        MAX_NOTIONAL.toString()
+        maxNotional.toString()
       );
-    const available = this.availableMargin();
+    const available = this.availableMargin(request.account_id);
     if (!request.reduce_only && margin.cmp(available) > 0)
       add(
         'account.margin',
         'ACCOUNT',
         'FAIL',
-        'Not enough available margin.',
+        cash
+          ? 'Not enough cash in the account.'
+          : 'Not enough available margin.',
         'INSUFFICIENT_MARGIN',
         margin.toFixed(2),
         available.toFixed(2)
@@ -621,39 +738,46 @@ export class DemoExecutionClient implements ExecutionClient {
 
   /**
    * Computes available margin (equity minus margin in use).
+   * @param accountId Account.
    * @return Available margin.
    */
-  private availableMargin(): Decimal {
+  private availableMargin(accountId: string): Decimal {
     let used = Decimal.zero();
     for (const [id, book] of this.positions) {
+      if (book.accountId !== accountId) continue;
       const mark = this.mark(id);
       if (mark) used = used.add(book.qty.abs().mul(Decimal.parse(mark)));
     }
-    return this.equity().sub(used);
+    return this.equity(accountId).sub(used);
   }
 
   /**
    * Computes equity including realized and unrealized PnL.
+   * @param accountId Account.
    * @return Equity.
    */
-  private equity(): Decimal {
-    let equity = this.startingEquity;
+  private equity(accountId: string): Decimal {
+    let equity = this.accountEquity.get(accountId) ?? Decimal.zero();
     for (const [id, book] of this.positions) {
+      if (book.accountId !== accountId) continue;
       equity = equity.add(book.realized);
       const mark = this.mark(id);
       if (mark && !book.qty.isZero())
         equity = equity.add(Decimal.parse(mark).sub(book.entry).mul(book.qty));
     }
-    for (const fill of this.fills) equity = equity.sub(Decimal.parse(fill.fee));
+    for (const fill of this.fills) {
+      if (fill.account_id === accountId)
+        equity = equity.sub(Decimal.parse(fill.fee));
+    }
     return equity;
   }
 
   /**
    * Lists accounts.
-   * @return Account list with the DEMO paper account.
+   * @return The crypto paper account first, then the broker accounts.
    */
   async listAccounts(): Promise<AccountList> {
-    return {accounts: [this.summary()]};
+    return {accounts: DEMO_ACCOUNTS.map(spec => this.summary(spec.accountId))};
   }
 
   /**
@@ -662,34 +786,42 @@ export class DemoExecutionClient implements ExecutionClient {
    * @return Summary.
    */
   async getAccountSummary(accountId: string): Promise<AccountSummary> {
-    if (accountId !== DEMO_ACCOUNT_ID)
+    if (!demoAccount(accountId))
       throw apiError(404, 'NOT_FOUND', 'Unknown account.');
-    return this.summary();
+    return this.summary(accountId);
   }
 
   /**
-   * Builds the account summary.
+   * Builds an account summary.
+   * @param accountId Account id (defaults to the crypto paper account).
    * @return Summary.
    */
-  private summary(): AccountSummary {
+  private summary(accountId: string = DEMO_ACCOUNT_ID): AccountSummary {
+    const spec = demoAccount(accountId) ?? DEMO_ACCOUNTS[0];
+    if (!spec) throw apiError(404, 'NOT_FOUND', 'Unknown account.');
+    const connected = spec.status === 'CONNECTED';
     return {
-      account_id: DEMO_ACCOUNT_ID,
+      account_id: spec.accountId,
       tenant_id: DEMO_TENANT_ID,
-      venue: 'mock',
-      label: 'Demo paper account',
-      status: 'CONNECTED',
-      modes: ['PAPER', 'SHADOW'],
-      equity: this.equity().toFixed(2),
-      available_margin: this.availableMargin().toFixed(2),
-      currency: 'USD',
-      positions: this.positionList(),
-      open_orders: [...this.orders.values()].filter(
-        o => !TERMINAL.has(o.state)
+      venue: spec.venue,
+      label: spec.label,
+      status: spec.status,
+      modes: [...spec.modes],
+      equity: connected ? this.equity(spec.accountId).toFixed(2) : null,
+      available_margin: connected
+        ? this.availableMargin(spec.accountId).toFixed(2)
+        : null,
+      currency: spec.currency,
+      positions: this.positionList().filter(
+        p => p.account_id === spec.accountId
       ),
-      capabilities: DEMO_CAPABILITIES,
-      health: 'HEALTHY',
+      open_orders: [...this.orders.values()].filter(
+        o => !TERMINAL.has(o.state) && o.account_id === spec.accountId
+      ),
+      capabilities: spec.capabilities,
+      health: spec.health,
       stale: false,
-      last_sync_ms: this.now(),
+      last_sync_ms: connected ? this.now() : null,
     };
   }
 
@@ -954,7 +1086,7 @@ export class DemoExecutionClient implements ExecutionClient {
       return;
     }
     const instrument = this.instrument(order.instrument_id);
-    const tick = Decimal.parse(instrument?.tick_size ?? '0.01');
+    const tick = this.tickAt(instrument, price);
     const lot = Decimal.parse(instrument?.lot_size ?? '0.001');
     const fillPrice = price.roundToStep(tick);
     const remaining = Decimal.parse(order.quantity_base).sub(
@@ -1010,6 +1142,7 @@ export class DemoExecutionClient implements ExecutionClient {
       return;
     let qty = quantity;
     const book = this.positions.get(order.instrument_id) ?? {
+      accountId: order.account_id,
       qty: Decimal.zero(),
       entry: Decimal.zero(),
       realized: Decimal.zero(),
@@ -1049,7 +1182,7 @@ export class DemoExecutionClient implements ExecutionClient {
       price: price.toString(),
       quantity_base: qty.toString(),
       fee: fee.toFixed(6),
-      fee_asset: 'USD',
+      fee_asset: demoAccount(order.account_id)?.currency ?? 'USD',
       liquidity,
       ts_ms: this.now(),
       mode: order.mode,
@@ -1092,7 +1225,11 @@ export class DemoExecutionClient implements ExecutionClient {
     book: PositionBook
   ): void {
     const signed = order.side === 'buy' ? qty : Decimal.zero().sub(qty);
-    const next: PositionBook = {...book};
+    // A flat book is re-opened by whichever account trades next.
+    const next: PositionBook = {
+      ...book,
+      accountId: book.qty.isZero() ? order.account_id : book.accountId,
+    };
     const sameSide =
       book.qty.isZero() || book.qty.isNegative() === signed.isNegative();
     if (sameSide) {
@@ -1116,7 +1253,7 @@ export class DemoExecutionClient implements ExecutionClient {
     const position = this.toPosition(order.instrument_id, next);
     this.emit({type: 'position.updated', payload: position});
     if (next.qty.isZero()) this.cancelChildren(order.instrument_id);
-    this.emit({type: 'account.updated', payload: this.summary()});
+    this.emit({type: 'account.updated', payload: this.summary(book.accountId)});
   }
 
   /**
@@ -1216,17 +1353,18 @@ export class DemoExecutionClient implements ExecutionClient {
         : null;
     const instrument = this.instrument(instrumentId);
     const tick = Decimal.parse(instrument?.tick_size ?? '0.01');
-    const liquidation = book.qty.isZero()
-      ? null
-      : (book.qty.isNegative()
-          ? book.entry.mul(Decimal.parse('1.5'))
-          : book.entry.mul(Decimal.parse('0.5'))
-        )
-          .roundToStep(tick)
-          .toString();
+    const liquidation =
+      book.qty.isZero() || this.isSecurity(instrument)
+        ? null
+        : (book.qty.isNegative()
+            ? book.entry.mul(Decimal.parse('1.5'))
+            : book.entry.mul(Decimal.parse('0.5'))
+          )
+            .roundToStep(tick)
+            .toString();
     return {
       position_id: `demo-pos-${instrumentId}`,
-      account_id: DEMO_ACCOUNT_ID,
+      account_id: book.accountId,
       instrument_id: instrumentId,
       side,
       quantity_base: book.qty.abs().toString(),
@@ -1521,12 +1659,9 @@ export class DemoExecutionClient implements ExecutionClient {
         }
       }
     }
-    if (
-      state.engaged &&
-      state.flatten_positions &&
-      this.inScope(state, DEMO_ACCOUNT_ID, null)
-    ) {
+    if (state.engaged && state.flatten_positions) {
       for (const position of this.positionList()) {
+        if (!this.inScope(state, position.account_id, null)) continue;
         await this.submitIntent(
           {
             ...this.closeRequest(position.position_id, {
@@ -1601,7 +1736,7 @@ export class DemoExecutionClient implements ExecutionClient {
    * @return Deployment.
    */
   async createDeployment(request: DeploymentRequest): Promise<Deployment> {
-    if (request.account_id !== DEMO_ACCOUNT_ID)
+    if (!demoAccount(request.account_id))
       throw apiError(404, 'NOT_FOUND', 'Unknown account.');
     const now = this.now();
     const deployment: Deployment = {

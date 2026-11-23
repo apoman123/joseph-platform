@@ -4,10 +4,14 @@
  * `startMainDetach` runs in the main window: it opens pop-out windows,
  * tracks their liveness (hello, heartbeats, `pagehide` goodbye and the
  * window handle's `closed` flag), re-docks crashed or closed windows,
- * remembers detached panes in the workspace layout and broadcasts the
- * workspace, theme and crosshair. `startPopoutLink` runs in a pop-out: it
- * adopts the main window's workspace and theme and forwards its own
- * workspace actions.
+ * remembers detached panes (and their window position) in the workspace
+ * layout and broadcasts the workspace, theme and crosshair. After a reload
+ * it probes for pop-outs that kept running and re-adopts them without a
+ * click; only panes nobody claims are offered for "Restore pop-outs".
+ * `startPopoutLink` runs in a pop-out: it adopts the main window's
+ * workspace and theme and forwards its own workspace actions, keeping them
+ * until the main window acknowledges them so a reloading main window
+ * cannot lose them.
  *
  * Order modes, accounts and trading state never cross windows: each window
  * runs its own provider connection and the same trading guards.
@@ -15,21 +19,29 @@
 import {
   DETACHED_PANEL_KEY,
   HEARTBEAT_MS,
+  PROBE_MS,
   PopoutBus,
   createTrailingThrottle,
   detachReducer,
   detachedPanelState,
-  detachedStatus,
+  dormantPanes,
   lostKeys,
   paneKey,
+  parseGeometry,
+  parsePending,
   popoutUrl,
+  queueAction,
   readDetachedPanes,
+  rebaseWorkspace,
   samePanes,
+  unappliedActions,
   type ChannelPort,
   type DetachEvent,
   type DetachedPane,
   type DetachedPaneRef,
   type PopoutMessage,
+  type SequencedAction,
+  type WindowGeometry,
   type WorkspaceAction,
 } from '@joseph/terminal-shell';
 import {createStore, type ReadableStore} from '@joseph/feature-registry';
@@ -49,6 +61,12 @@ const MAIN_TIMEOUT_MS = 75_000;
 
 /** Time a new pop-out waits for the main window's first answer. */
 const MAIN_FIRST_CONTACT_MS = 6_000;
+
+/** Time a pop-out waits for a reloading main window to come back. */
+const MAIN_RETURN_MS = 15_000;
+
+/** Command that restores pop-outs remembered by the layout. */
+export const RESTORE_POPOUTS_COMMAND = 'windows.restore';
 
 /** Browser services used by the controllers (injectable for tests). */
 export interface DetachEnvironment {
@@ -75,6 +93,8 @@ export interface DetachEnvironment {
 export interface DetachController {
   /** Window actions exposed to the UI. */
   actions: WindowActions;
+  /** Tells pop-outs this window is going away (`pagehide`, e.g. reload). */
+  goodbye(): void;
   /** Stops timers and closes the channel. */
   dispose(): void;
 }
@@ -89,14 +109,36 @@ export function popoutWindowName(key: string): string {
 }
 
 /**
- * Window features for a pane.
+ * Window features for a pane, at its remembered position when known.
  * @param ref Pane reference.
+ * @param geometry Remembered window position and size.
  * @return `window.open` features string.
  */
-export function popoutFeatures(ref: DetachedPaneRef): string {
+export function popoutFeatures(
+  ref: DetachedPaneRef,
+  geometry?: WindowGeometry | null
+): string {
+  if (geometry) {
+    const {left, top, width, height} = geometry;
+    return `popup=yes,width=${width},height=${height},left=${left},top=${top}`;
+  }
   return ref.kind === 'chart'
     ? 'popup=yes,width=1100,height=720'
     : 'popup=yes,width=520,height=720';
+}
+
+/**
+ * Explains how many remembered windows a restore click opened.
+ * @param opened Windows opened.
+ * @param wanted Windows to restore.
+ * @return Message, or null when every window opened.
+ */
+export function restoreMessage(opened: number, wanted: number): string | null {
+  if (opened >= wanted) return null;
+  if (opened === 0) {
+    return 'The browser blocked the windows. Allow pop-ups for this site (the blocked-pop-up icon in the address bar), then choose Restore pop-outs again; with pop-ups allowed one click restores every window.';
+  }
+  return `Restored ${opened} of ${wanted} windows. Without pop-up permission the browser opens one window per click: choose Restore pop-outs again for the next one, or allow pop-ups for this site to restore the rest at once.`;
 }
 
 /**
@@ -112,6 +154,8 @@ export function startMainDetach(
   const handles = new Map<string, Window>();
   /** When each pane was docked here (late heartbeats must not re-detach). */
   const docked = new Map<string, number>();
+  /** Last pop-out action applied, per pop-out window id. */
+  const applied = new Map<string, number>();
   const bus = env.port
     ? new PopoutBus(
         env.port,
@@ -124,12 +168,20 @@ export function startMainDetach(
   const send = (msg: PopoutMessage) => bus?.send(msg);
   const titleOf = (key: string) =>
     runtime.detached.get().panes.find(p => p.key === key)?.title ?? 'pane';
+  const disposers: (() => void)[] = [];
 
-  // Restore what the saved layout remembers: dormant until a window claims it.
-  apply({
-    type: 'restore',
-    panes: readDetachedPanes(runtime.workspace.get().panels),
-  });
+  // Restore what the saved layout remembers. Pop-outs that survived a reload
+  // of this window claim their panes during the probe; the rest turn dormant.
+  const remembered = readDetachedPanes(runtime.workspace.get().panels);
+  apply({type: 'restore', panes: remembered});
+  if (remembered.length > 0 && bus) {
+    apply({type: 'probe', probing: true});
+    const probe = setTimeout(
+      () => apply({type: 'probe', probing: false}),
+      PROBE_MS
+    );
+    disposers.push(() => clearTimeout(probe));
+  }
 
   /**
    * Opens (or re-opens) a pane's window.
@@ -143,7 +195,7 @@ export function startMainDetach(
       handle = env.open(
         url,
         popoutWindowName(pane.key),
-        popoutFeatures(pane.ref)
+        popoutFeatures(pane.ref, pane.geometry)
       );
     } catch {
       handle = null;
@@ -161,6 +213,38 @@ export function startMainDetach(
     docked.set(key, env.now());
     apply({type: 'close', key});
     if (message) runtime.notifier.notify(message, 'info');
+  };
+
+  const acknowledgements = (): Record<string, number> =>
+    Object.fromEntries(applied);
+  const sendWorkspace = () =>
+    send({
+      type: 'workspace',
+      doc: runtime.workspace.get(),
+      applied: acknowledgements(),
+    });
+
+  /**
+   * Applies a pop-out's unacknowledged actions in order, then makes sure
+   * the pop-out hears the acknowledgement.
+   * @param from Pop-out window id.
+   * @param raw Untrusted pending actions.
+   */
+  const replay = (from: string, raw: unknown) => {
+    const pending = parsePending(raw) ?? [];
+    if (pending.length === 0) return;
+    const todo = unappliedActions(pending, applied.get(from) ?? 0);
+    const last = todo.at(-1);
+    if (!last) {
+      // Already applied: the acknowledgement was lost, so repeat it.
+      sendWorkspace();
+      return;
+    }
+    // Acknowledge first, so the workspace broadcasts below carry it.
+    applied.set(from, last.seq);
+    const before = runtime.workspace.get();
+    for (const entry of todo) runtime.dispatch(entry.action);
+    if (runtime.workspace.get() === before) sendWorkspace();
   };
 
   const actions: WindowActions = {
@@ -206,25 +290,43 @@ export function startMainDetach(
       }
     },
     reopenAll() {
-      const now = env.now();
       const state = runtime.detached.get();
-      const dormant = state.panes.filter(
-        p => detachedStatus(state.live[p.key], now) === 'dormant'
-      );
-      let opened = 0;
-      for (const pane of dormant) if (openWindow(pane)) opened += 1;
-      if (opened < dormant.length) {
+      if (state.probing) {
         runtime.notifier.notify(
-          opened === 0
-            ? 'The browser blocked the windows. Allow pop-ups for this site, then try again.'
-            : `Opened ${opened} of ${dormant.length} windows. The browser allows one window per click; click again for the rest.`,
-          'warning'
+          'Still looking for windows that kept running during the reload. Try again in a moment.',
+          'info'
         );
+        return;
       }
+      const dormant = dormantPanes(state, env.now());
+      if (dormant.length === 0) {
+        runtime.notifier.notify(
+          'Every detached pane already has its window.',
+          'info'
+        );
+        return;
+      }
+      let opened = 0;
+      // Browsers allow one window per click unless pop-ups are allowed for
+      // the site; try them all so an allowed site restores everything.
+      for (const pane of dormant) if (openWindow(pane)) opened += 1;
+      const message = restoreMessage(opened, dormant.length);
+      if (message) runtime.notifier.notify(message, 'warning');
     },
   };
 
-  const disposers: (() => void)[] = [];
+  try {
+    disposers.push(
+      runtime.commands.register({
+        id: RESTORE_POPOUTS_COMMAND,
+        title: 'Restore pop-outs',
+        run: () => actions.reopenAll(),
+      })
+    );
+  } catch {
+    // Another controller of this runtime already offers the command.
+  }
+
   // Crosshair: forward local moves, relay remote ones without echoing.
   let relaying = false;
   const relayCrosshair = (value: SyncedPoint) => {
@@ -236,12 +338,12 @@ export function startMainDetach(
     }
   };
   const announce = () => {
-    send({type: 'workspace', doc: runtime.workspace.get()});
+    sendWorkspace();
     send({type: 'theme', theme: runtime.theme.get()});
   };
   if (bus) {
     disposers.push(
-      bus.on(msg => {
+      bus.on((msg, from) => {
         switch (msg.type) {
           case 'popout-hello':
           case 'heartbeat':
@@ -257,7 +359,10 @@ export function startMainDetach(
               title: msg.title,
               hidden: msg.hidden,
               nowMs: env.now(),
+              geometry: parseGeometry(msg.geometry),
             });
+            // Changes made in the pop-out while this window was away.
+            replay(from, msg.pending);
             if (msg.type === 'popout-hello') announce();
             break;
           case 'closed':
@@ -267,7 +372,8 @@ export function startMainDetach(
             );
             break;
           case 'action':
-            runtime.dispatch(msg.action);
+            if (msg.pending !== undefined) replay(from, msg.pending);
+            else runtime.dispatch(msg.action);
             break;
           case 'theme':
             runtime.theme.set(msg.theme);
@@ -307,7 +413,7 @@ export function startMainDetach(
         });
         return;
       }
-      send({type: 'workspace', doc});
+      send({type: 'workspace', doc, applied: acknowledgements()});
     }),
     runtime.detached.subscribe(state => {
       const doc = runtime.workspace.get();
@@ -351,6 +457,9 @@ export function startMainDetach(
 
   return {
     actions,
+    goodbye() {
+      send({type: 'main-bye'});
+    },
     dispose() {
       for (const dispose of disposers.splice(0).reverse()) dispose();
       bus?.close();
@@ -358,15 +467,21 @@ export function startMainDetach(
   };
 }
 
-/** Main-window connection seen from a pop-out. */
-export type MainLinkState = 'connecting' | 'linked' | 'lost';
+/**
+ * Main-window connection seen from a pop-out: `reconnecting` after the main
+ * window said goodbye (usually a reload) until it says hello again.
+ */
+export type MainLinkState = 'connecting' | 'linked' | 'reconnecting' | 'lost';
 
 /** Running pop-out link. */
 export interface PopoutLink {
   /** Whether the main window is reachable. */
   main: ReadableStore<MainLinkState>;
+  /** Actions the main window has not acknowledged yet. */
+  pending: ReadableStore<number>;
   /**
-   * Forwards a workspace action to the main window.
+   * Forwards a workspace action to the main window (kept until the main
+   * window acknowledges it).
    * @param action Action applied locally.
    */
   forward(action: WorkspaceAction): void;
@@ -390,6 +505,12 @@ export interface PopoutLinkOptions {
   close: () => void;
   /** Focuses this window. */
   focus: () => void;
+  /**
+   * Window position and size reported to the main window (remembered for
+   * "Restore pop-outs").
+   * @return Geometry or null when unknown.
+   */
+  geometry?: () => WindowGeometry | null;
 }
 
 /**
@@ -406,6 +527,7 @@ export function startPopoutLink(
 ): PopoutLink {
   const key = paneKey(options.ref);
   const main = createStore<MainLinkState>('connecting');
+  const pendingCount = createStore(0);
   const bus = env.port
     ? new PopoutBus(
         env.port,
@@ -416,22 +538,28 @@ export function startPopoutLink(
   const send = (msg: PopoutMessage) => bus?.send(msg);
   const startedMs = env.now();
   let mainSeen: number | null = null;
-  const hello = () =>
-    send({
-      type: 'popout-hello',
-      key,
-      ref: options.ref,
-      title: options.title(),
-      hidden: options.hidden(),
-    });
-  const heartbeat = () =>
-    send({
-      type: 'heartbeat',
-      key,
-      ref: options.ref,
-      title: options.title(),
-      hidden: options.hidden(),
-    });
+  let byeMs: number | null = null;
+  let seq = 0;
+  let pending: SequencedAction[] = [];
+  const setPending = (next: SequencedAction[]) => {
+    pending = next;
+    pendingCount.set(pending.length);
+  };
+  const heard = () => {
+    mainSeen = env.now();
+    byeMs = null;
+    main.set('linked');
+  };
+  const report = () => ({
+    key,
+    ref: options.ref,
+    title: options.title(),
+    hidden: options.hidden(),
+    geometry: parseGeometry(options.geometry?.() ?? null),
+    ...(pending.length > 0 ? {pending: [...pending]} : {}),
+  });
+  const hello = () => send({type: 'popout-hello', ...report()});
+  const heartbeat = () => send({type: 'heartbeat', ...report()});
   let relaying = false;
   const disposers: (() => void)[] = [];
   if (bus) {
@@ -439,19 +567,27 @@ export function startPopoutLink(
       bus.on(msg => {
         switch (msg.type) {
           case 'main-hello':
-            mainSeen = env.now();
-            main.set('linked');
+            heard();
+            // Includes the actions a reloading main window missed.
             hello();
             break;
           case 'main-heartbeat':
-            mainSeen = env.now();
-            main.set('linked');
+            heard();
             break;
-          case 'workspace':
-            mainSeen = env.now();
-            main.set('linked');
-            runtime.adoptWorkspace(msg.doc);
+          case 'main-bye':
+            byeMs = env.now();
+            main.set('reconnecting');
             break;
+          case 'workspace': {
+            heard();
+            const acknowledged = msg.applied?.[env.windowId] ?? 0;
+            setPending(unappliedActions(pending, acknowledged));
+            // Keep showing changes the main window has not applied yet.
+            runtime.adoptWorkspace(
+              rebaseWorkspace(msg.doc, pending, env.now())
+            );
+            break;
+          }
           case 'theme':
             runtime.theme.set(msg.theme);
             break;
@@ -493,17 +629,22 @@ export function startPopoutLink(
     // budget is generous. A pop-out keeps working on its own meanwhile.
     const now = env.now();
     const silent =
-      mainSeen === null
-        ? now - startedMs > MAIN_FIRST_CONTACT_MS
-        : now - mainSeen > MAIN_TIMEOUT_MS;
+      byeMs !== null
+        ? now - byeMs > MAIN_RETURN_MS
+        : mainSeen === null
+          ? now - startedMs > MAIN_FIRST_CONTACT_MS
+          : now - mainSeen > MAIN_TIMEOUT_MS;
     if (silent) main.set('lost');
   }, HEARTBEAT_MS);
   disposers.push(() => clearInterval(beat));
   hello();
   return {
     main,
+    pending: pendingCount,
     forward(action) {
-      send({type: 'action', action});
+      seq += 1;
+      setPending(queueAction(pending, {seq, action}));
+      send({type: 'action', action, pending: [...pending]});
     },
     bringBack() {
       send({type: 'closed', key});

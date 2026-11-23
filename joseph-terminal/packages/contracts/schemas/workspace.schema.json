@@ -151,6 +151,37 @@
         "panels": {"type": "object", "description": "Opaque per-feature panel state keyed by feature id."},
         "updated_at_ms": {"$ref": "common.schema.json#/$defs/TimestampMs"}
       }
+    },
+    "WorkspaceExportDrawings": {
+      "title": "WorkspaceExportDrawings",
+      "description": "Drawings of one exact instrument inside a workspace export.",
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["instrument_id", "drawings"],
+      "properties": {
+        "instrument_id": {"$ref": "common.schema.json#/$defs/InstrumentId"},
+        "drawings": {"type": "array", "maxItems": 2000, "items": {"$ref": "#/$defs/DrawingDocument"}},
+        "opaque": {
+          "type": "array",
+          "maxItems": 500,
+          "items": {"type": "object"},
+          "description": "Stored drawing payloads this build cannot read (for example a newer drawing schema). Exported and restored verbatim, never deleted (ADR 0007)."
+        }
+      }
+    },
+    "WorkspaceExport": {
+      "title": "WorkspaceExport",
+      "description": "Workspace export file, format version 2: the workspace document (schema v1, unchanged) plus the drawings of its instruments. Import also accepts a plain v1 WorkspaceDocument (export format 1, no drawings) and the V4 starter shape (format 0), migrated step by step; drawings of unknown tools are kept.",
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["format", "schema_version", "exported_at_ms", "workspace", "drawings"],
+      "properties": {
+        "format": {"const": "joseph.workspace-export"},
+        "schema_version": {"const": 2},
+        "exported_at_ms": {"$ref": "common.schema.json#/$defs/TimestampMs"},
+        "workspace": {"$ref": "#/$defs/WorkspaceDocument"},
+        "drawings": {"type": "array", "maxItems": 500, "items": {"$ref": "#/$defs/WorkspaceExportDrawings"}}
+      }
     }
   }
 }

@@ -7,6 +7,9 @@ import {defineConfig, devices} from '@playwright/test';
 /** Port used by the test server. */
 const PORT = Number(process.env.E2E_PORT ?? 3157);
 
+/** Build directory (separate runs in one checkout need separate ones). */
+const DIST_DIR = process.env.E2E_DIST_DIR ?? '.next/e2e';
+
 export default defineConfig({
   testDir: './e2e',
   timeout: 60_000,
@@ -38,7 +41,7 @@ export default defineConfig({
     env: {
       NEXT_PUBLIC_MARKET_API_URL: '',
       NEXT_PUBLIC_EXECUTION_API_URL: '',
-      NEXT_DIST_DIR: '.next/e2e',
+      NEXT_DIST_DIR: DIST_DIR,
     },
   },
 });
