@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import json
 import pathlib
+from collections.abc import Callable
 from collections.abc import Iterator
 from typing import Any
 
@@ -204,14 +205,20 @@ def install_routes(router: respx.Router) -> None:
 
 
 @pytest.fixture
-def venue_api() -> Iterator[respx.Router]:
+def venue_api(
+    exchange_routes: Callable[[respx.Router], None],
+) -> Iterator[respx.Router]:
     """Serves captured fixtures for every venue host.
+
+    Args:
+        exchange_routes: Installer of the exchange and rate venue routes.
 
     Yields:
         Active respx router.
     """
     with respx.mock(assert_all_called=False) as router:
         install_routes(router)
+        exchange_routes(router)
         yield router
 
 

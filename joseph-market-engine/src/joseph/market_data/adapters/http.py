@@ -20,6 +20,24 @@ from joseph.domain import instruments
 USER_AGENT = "joseph-market-engine/0.5"
 
 
+class HttpStatusError(errors.VenueUnavailableError):
+    """A venue rejected a request with a 4xx status (not rate limiting).
+
+    Attributes:
+        status_code: HTTP status of the response.
+    """
+
+    def __init__(self, message: str, status_code: int) -> None:
+        """Initializes the error (never retryable).
+
+        Args:
+            message: Explanation.
+            status_code: HTTP status.
+        """
+        super().__init__(message, retryable=False)
+        self.status_code = status_code
+
+
 class RateLimiter:
     """Async token bucket.
 
@@ -70,6 +88,8 @@ class VenueHttp:
         rate_per_s: float = 10.0,
         burst: int = 10,
         max_concurrency: int = 5,
+        name: str | None = None,
+        limiter: RateLimiter | None = None,
     ) -> None:
         """Initializes the client.
 
@@ -81,27 +101,64 @@ class VenueHttp:
             rate_per_s: Token-bucket rate.
             burst: Token-bucket capacity.
             max_concurrency: Concurrent request cap.
+            name: Source name for error messages (defaults to the venue;
+                e.g. ``alpaca`` serves two venues).
+            limiter: Shared token bucket (a data source whose budget spans
+                several clients); ``rate_per_s``/``burst`` are then unused.
         """
         self.venue = venue
+        self.name = name or venue.value
         self.base_url = base_url.rstrip("/")
         self._owns_client = client is None
         self._client = client or httpx.AsyncClient(
             timeout=timeout_s, headers={"User-Agent": USER_AGENT}
         )
-        self._limiter = RateLimiter(rate_per_s, burst)
+        self._limiter = limiter or RateLimiter(rate_per_s, burst)
         self._semaphore = asyncio.Semaphore(max_concurrency)
 
-    async def get(self, path: str, params: dict[str, Any] | None = None) -> Any:
+    async def get(
+        self,
+        path: str,
+        params: dict[str, Any] | None = None,
+        *,
+        headers: dict[str, str] | None = None,
+    ) -> Any:
         """Performs a GET and parses JSON.
 
         Args:
             path: Path appended to the base URL.
             params: Query parameters.
+            headers: Extra request headers (e.g. API keys; never logged).
 
         Returns:
             Parsed JSON body.
         """
-        return await self._request("GET", path, params=params)
+        response = await self._request(
+            "GET", path, params=params, headers=headers
+        )
+        return self._json(response, path)
+
+    async def get_text(
+        self,
+        path: str,
+        params: dict[str, Any] | None = None,
+        *,
+        headers: dict[str, str] | None = None,
+    ) -> str:
+        """Performs a GET and returns the body as text (CSV, pipe files).
+
+        Args:
+            path: Path appended to the base URL.
+            params: Query parameters.
+            headers: Extra request headers.
+
+        Returns:
+            Decoded body.
+        """
+        response = await self._request(
+            "GET", path, params=params, headers=headers
+        )
+        return response.text
 
     async def post(self, path: str, body: dict[str, Any]) -> Any:
         """Performs a JSON POST and parses JSON.
@@ -113,7 +170,28 @@ class VenueHttp:
         Returns:
             Parsed JSON body.
         """
-        return await self._request("POST", path, json_body=body)
+        response = await self._request("POST", path, json_body=body)
+        return self._json(response, path)
+
+    def _json(self, response: httpx.Response, path: str) -> Any:
+        """Parses a JSON body.
+
+        Args:
+            response: Successful response.
+            path: Request path for the error message.
+
+        Returns:
+            Parsed JSON body.
+
+        Raises:
+            errors.VenueUnavailableError: On invalid JSON.
+        """
+        try:
+            return response.json()
+        except ValueError as err:
+            raise errors.VenueUnavailableError(
+                f"{self.name} returned invalid JSON on {path}"
+            ) from err
 
     async def _request(
         self,
@@ -122,7 +200,8 @@ class VenueHttp:
         *,
         params: dict[str, Any] | None = None,
         json_body: dict[str, Any] | None = None,
-    ) -> Any:
+        headers: dict[str, str] | None = None,
+    ) -> httpx.Response:
         """Sends a request with rate limiting and error mapping.
 
         Args:
@@ -130,17 +209,18 @@ class VenueHttp:
             path: Path appended to the base URL.
             params: Query parameters.
             json_body: JSON body.
+            headers: Extra request headers.
 
         Returns:
-            Parsed JSON body.
+            The successful (2xx/3xx) response.
 
         Raises:
             errors.RateLimitedError: On HTTP 418/429.
             errors.VenueUnavailableError: On timeouts, transport errors,
-                non-2xx responses or invalid JSON.
+                non-2xx responses.
         """
         await self._limiter.acquire()
-        name = self.venue.value
+        name = self.name
         try:
             async with self._semaphore:
                 response = await self._client.request(
@@ -148,6 +228,7 @@ class VenueHttp:
                     f"{self.base_url}{path}",
                     params=params,
                     json=json_body,
+                    headers=headers,
                 )
         except httpx.TimeoutException as err:
             raise errors.VenueUnavailableError(
@@ -164,16 +245,11 @@ class VenueHttp:
                 f"{name} returned HTTP {response.status_code} on {path}"
             )
         if response.status_code >= 400:
-            raise errors.VenueUnavailableError(
+            raise HttpStatusError(
                 f"{name} rejected {path} with HTTP {response.status_code}",
-                retryable=False,
+                response.status_code,
             )
-        try:
-            return response.json()
-        except ValueError as err:
-            raise errors.VenueUnavailableError(
-                f"{name} returned invalid JSON on {path}"
-            ) from err
+        return response
 
     async def close(self) -> None:
         """Closes the underlying client if owned."""

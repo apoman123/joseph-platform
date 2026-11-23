@@ -234,6 +234,10 @@ def test_all_venues_served_from_captured_fixtures(
         "lighter",
         "bitget",
         "mexc",
+        "twse",
+        "nasdaq",
+        "nyse",
+        "treasury",
         "mock",
     }
     for instrument in (
@@ -622,11 +626,19 @@ def test_venue_capabilities_expose_trade_built_timeframes(
     caps = {
         v["capabilities"]["venue"]: v["capabilities"] for v in body["venues"]
     }
+    no_trades = {"twse", "treasury"}  # Snapshots / published rates only.
     for venue, cap in caps.items():
+        if venue in no_trades:
+            assert cap["trade_built_timeframes"] == [], venue
+            assert not {"1s", "5s", "15s", "30s"} & set(cap["timeframes"])
+            continue
         assert cap["trade_built_timeframes"] == ["1s", "5s", "15s", "30s"], (
             venue
         )
         assert cap["market_data"]["native_ws_trades"], venue
+    assert caps["twse"]["calendar"] == "XTAI"
+    assert caps["nasdaq"]["requires_credentials"] is True
+    assert caps["treasury"]["calendar"] == "USBOND"
     assert caps["binance"]["market_data"]["taker_volume"] is True
     assert caps["bitget"]["market_data"]["taker_volume"] is False
     assert "1M" in caps["binance"]["timeframes"]

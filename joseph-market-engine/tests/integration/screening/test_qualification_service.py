@@ -10,6 +10,7 @@ import respx
 
 from joseph.domain import clock as clock_lib
 from joseph.domain import instruments
+from joseph.market_data.adapters import alpaca
 from joseph.market_data.adapters import factory
 from joseph.market_data.adapters import mock
 from joseph.screening.app import service
@@ -31,20 +32,22 @@ def _service(
     Returns:
         Service.
     """
-    adapters = factory.build_adapters(venues, clock, client=httpx.AsyncClient())
+    adapters = factory.build_adapters(
+        venues,
+        clock,
+        client=httpx.AsyncClient(),
+        alpaca_config=alpaca.AlpacaConfig(key_id="test", secret_key="test"),
+    )
     return service.QualificationService(adapters, clock, **kwargs)  # type: ignore[arg-type]
 
 
 @pytest.mark.parametrize(
     "venue",
-    # Crypto venues with recorded fixtures; exchange venues join as their
-    # adapters land.
+    # Every real venue with recorded fixtures; rate series are never screened.
     [
         v
         for v in instruments.Venue
-        if v is not instruments.Venue.MOCK
-        and v not in instruments.EXCHANGE_VENUES
-        and v not in instruments.RATE_VENUES
+        if v is not instruments.Venue.MOCK and v not in instruments.RATE_VENUES
     ],
     ids=lambda v: v.value,
 )
@@ -63,7 +66,9 @@ async def test_each_venue_produces_contract_valid_reports(
     assert report.records
     for record in report.records:
         assert record.instrument_id.venue is venue
-        assert len(record.gates) == 5
+        # Listed securities have no open-interest or funding gates.
+        listed = venue in instruments.EXCHANGE_VENUES
+        assert len(record.gates) == (3 if listed else 5)
         if record.status is policy.Status.QUALIFIED:
             assert all(g.passed for g in record.gates)
             assert record.funding_risk is not policy.FundingRisk.HIGH_RISK
