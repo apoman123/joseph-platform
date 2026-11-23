@@ -22,8 +22,9 @@ PositiveStr = Annotated[
 InstrumentIdStr = Annotated[
     str,
     pydantic.StringConstraints(
-        pattern=r"^(binance|hyperliquid|lighter|bitget|mexc|mock):"
-        r"(perp|spot|future):[A-Za-z0-9._/-]{1,64}$"
+        pattern=r"^(binance|hyperliquid|lighter|bitget|mexc|twse|nasdaq|nyse"
+        r"|treasury|mock):(perp|spot|future|stock|etf|rate)"
+        r":[A-Za-z0-9._/-]{1,64}$"
     ),
 ]
 
@@ -69,7 +70,7 @@ class IntentBody(_Body):
     limit_price: DecimalStr | None = None
     trigger_price: DecimalStr | None = None
     trigger_basis: Literal["mark", "last"] | None = None
-    time_in_force: Literal["GTC", "IOC", "FOK", "POST_ONLY"]
+    time_in_force: Literal["GTC", "IOC", "FOK", "POST_ONLY", "DAY"]
     reduce_only: bool
     margin_mode: Literal["isolated", "cross"] = "isolated"
     leverage: PositiveStr | None = None
@@ -80,6 +81,7 @@ class IntentBody(_Body):
     signal_id: str | None = None
     expires_at_ms: int | None = None
     preview_token: str | None = pydantic.Field(default=None, max_length=256)
+    outside_rth: bool = False
 
 
 class AmendBody(_Body):
@@ -157,7 +159,16 @@ class LiveConsentBody(_Body):
 class ConnectBody(_Body):
     """Venue connection request (credentials are never echoed)."""
 
-    venue: Literal["binance", "hyperliquid", "lighter", "bitget", "mexc"]
+    venue: Literal[
+        "binance",
+        "hyperliquid",
+        "lighter",
+        "bitget",
+        "mexc",
+        "ibkr",
+        "sinopac",
+        "cathay",
+    ]
     label: str = pydantic.Field(default="", max_length=120)
     credentials: dict[str, str]
     withdrawal_permission_disabled: bool
