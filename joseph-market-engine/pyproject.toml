@@ -16,6 +16,12 @@ dependencies = [
   "joseph-smc-indicators",
 ]
 
+[project.optional-dependencies]
+# SinoPac Shioaji market data for TWSE/TPEx (JOSEPH_TW_DATA_SOURCE=sinopac):
+# SinoPac's proprietary SDK, binary abi3 wheels for Linux x86_64/aarch64,
+# macOS and Windows. Same pin as the execution engine.
+sinopac = ["shioaji>=1.7.11,<2"]
+
 [tool.uv.sources]
 # Indicator algorithms live in the private apoman123/PineScripts repository
 # (python_indicators/). Pinned to a commit; bump `rev` to adopt new ports.
@@ -49,6 +55,7 @@ asyncio_default_fixture_loop_scope = "function"
 markers = [
   "network: hits real public venue APIs (opt-in with JOSEPH_NETWORK_TESTS=1)",
   "slow: long-running replay or property tests",
+  "sinopac_data: reads real SinoPac Shioaji market data (opt-in with JOSEPH_SINOPAC_DATA_TESTS=1 and credentials)",
 ]
 addopts = "-q --strict-markers --import-mode=importlib"
 

@@ -50,10 +50,12 @@ from joseph.indicators import catalog
 from joseph.indicators import service as indicator_service
 from joseph.indicators.sdk import registry as plugin_registry
 from joseph.market_data.adapters import alpaca
+from joseph.market_data.adapters import bar_archive_sql
 from joseph.market_data.adapters import binance_vision
 from joseph.market_data.adapters import bitget_archive
 from joseph.market_data.adapters import factory
 from joseph.market_data.adapters import replay as replay_lib
+from joseph.market_data.adapters import sinopac
 from joseph.market_data.adapters import trade_archive_sql
 from joseph.market_data.adapters import ws
 from joseph.market_data.app import candle_store
@@ -222,6 +224,13 @@ def build_container(
     settings = settings or config.Settings.from_env()
     clock = clock or clock_lib.SystemClock()
     metrics = metrics_lib.standard_registry()
+    engine = db.create_engine(settings.database_url)
+    archive_engine = (
+        db.create_engine(settings.trade_archive_url)
+        if settings.trade_archive_url
+        else None
+    )
+    exchange = {instruments.Venue.TWSE, instruments.Venue.TPEX}
     raw_adapters = factory.build_adapters(
         settings.active_venues,
         clock,
@@ -234,10 +243,15 @@ def build_container(
             feed=alpaca.Feed(settings.alpaca_feed),
             seconds_history_ms=settings.alpaca_seconds_history_ms,
         ),
+        sinopac_config=sinopac_config(settings),
+        bar_archive=(
+            bar_archive_sql.SqlBarArchive(archive_engine or engine)
+            if exchange & set(settings.active_venues)
+            else None
+        ),
     )
-    engine = db.create_engine(settings.database_url)
-    recorder, archive_engine = _trade_recorder(
-        settings, raw_adapters, clock, engine
+    recorder = _trade_recorder(
+        settings, raw_adapters, clock, archive_engine or engine
     )
     adapters = derived_bars.wrap(raw_adapters, clock, recorder=recorder)
     hub = streaming.StreamHub(clock, retention=settings.stream_retention)
@@ -365,33 +379,50 @@ def build_container(
     return container
 
 
+def sinopac_config(settings: config.Settings) -> sinopac.SinopacConfig | None:
+    """Builds the Shioaji market-data settings of TWSE and TPEx.
+
+    Args:
+        settings: Settings.
+
+    Returns:
+        Settings when ``JOSEPH_TW_DATA_SOURCE=sinopac`` (without credentials
+        the source stays disabled and says so), else ``None``.
+    """
+    if settings.tw_data_source != "sinopac":
+        return None
+    return sinopac.SinopacConfig(
+        api_key=settings.sinopac_api_key,
+        secret_key=settings.sinopac_secret_key,
+        max_symbols=settings.sinopac_max_symbols,
+        intraday_ticks_calls=settings.sinopac_intraday_ticks_calls,
+        intraday_kbars_calls=settings.sinopac_intraday_kbars_calls,
+        seconds_history_days=settings.sinopac_seconds_history_days,
+    )
+
+
 def _trade_recorder(
     settings: config.Settings,
     adapters: Mapping[instruments.Venue, ports.MarketDataPort],
     clock: clock_lib.Clock,
-    engine: sa.Engine,
-) -> tuple[trade_recorder.TradeRecorder | None, sa.Engine | None]:
+    archive_engine: sa.Engine,
+) -> trade_recorder.TradeRecorder | None:
     """Builds the public-trade recorder and its archive.
 
     Args:
         settings: Settings.
         adapters: Raw venue adapters.
         clock: Time source.
-        engine: Engine of ``database_url``.
+        archive_engine: Engine of ``trade_archive_url`` (else of
+            ``database_url``).
 
     Returns:
-        ``(recorder, dedicated archive engine)``; the recorder is ``None``
-        when recording is disabled or no real venue is enabled, and the
-        engine is ``None`` when the archive shares ``database_url``.
+        Recorder, or ``None`` when recording is disabled or no real venue
+        is enabled.
     """
     real = [v for v in adapters if v is not instruments.Venue.MOCK]
     if not settings.trade_recording or not real:
-        return None, None
-    dedicated = (
-        db.create_engine(settings.trade_archive_url)
-        if settings.trade_archive_url
-        else None
-    )
+        return None
     day_archives: list[trade_recorder.DayArchive] = []
     if settings.binance_archive and instruments.Venue.BINANCE in adapters:
         day_archives.append(
@@ -401,9 +432,9 @@ def _trade_recorder(
         day_archives.append(
             bitget_archive.BitgetArchive(settings.bitget_archive_dir)
         )
-    recorder = trade_recorder.TradeRecorder(
+    return trade_recorder.TradeRecorder(
         adapters,
-        trade_archive_sql.SqlTradeArchive(dedicated or engine),
+        trade_archive_sql.SqlTradeArchive(archive_engine),
         clock,
         trade_recorder.RecorderSettings(
             retention_ms=int(settings.trade_bar_retention_days * 86_400_000),
@@ -416,7 +447,6 @@ def _trade_recorder(
         ),
         day_archives=day_archives,
     )
-    return recorder, dedicated
 
 
 def _channel_policy(
