@@ -248,8 +248,9 @@ class MexcAdapter(base.BaseVenueAdapter):
                 "API trading eligibility is verified per account in the "
                 "execution engine.",
                 "Seconds bars are built from the live deal stream only: the "
-                "deals endpoint has no time range, so there is no seconds "
-                "history and outages are recorded as gaps.",
+                "deals endpoint has no time range and no public trade "
+                "archive exists, so seconds history exists only where the "
+                "engine recorded the stream and outages are gaps.",
                 "Klines publish no taker buy volume (taker_volume is false); "
                 "seconds bars built from trades do carry it.",
             ),

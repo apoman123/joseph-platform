@@ -97,6 +97,8 @@ def _hyperliquid(request: httpx.Request) -> httpx.Response:
     if kind == "metaAndAssetCtxs":
         return _json(load("hyperliquid", "meta_and_asset_ctxs"))
     if kind == "candleSnapshot":
+        if body["req"].get("interval") == "1d":
+            return _json(load("hyperliquid", "candles_1d"))
         return _json(load("hyperliquid", "candles_5m"))
     if kind == "l2Book":
         return _json(load("hyperliquid", "l2_book"))
@@ -118,6 +120,8 @@ def _lighter(request: httpx.Request) -> httpx.Response:
     if path.endswith("/orderBookDetails"):
         return _json(load("lighter", "order_book_details"))
     if path.endswith("/candles"):
+        if request.url.params.get("resolution") == "1d":
+            return _json(load("lighter", "candles_1d"))
         return _json(load("lighter", "candles_5m"))
     if path.endswith("/fundings"):
         return _json(load("lighter", "fundings"))

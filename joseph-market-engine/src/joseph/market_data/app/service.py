@@ -28,6 +28,7 @@ from joseph.market_data.app import candle_store
 from joseph.market_data.app import feed_router
 from joseph.market_data.app import ports
 from joseph.market_data.app import registry
+from joseph.market_data.app import trade_archive
 from joseph.market_data.domain import candles as candle_rules
 from joseph.market_data.domain import capabilities
 from joseph.market_data.domain import health
@@ -138,6 +139,7 @@ class MarketDataService:
         *,
         replay: replay_lib.ReplaySource | None = None,
         stale_after_ms: int = 30_000,
+        recorded: trade_archive.RecordedTrades | None = None,
     ) -> None:
         """Initializes the service.
 
@@ -149,6 +151,8 @@ class MarketDataService:
             clock: Time source.
             replay: Optional replay source.
             stale_after_ms: Snapshot staleness budget.
+            recorded: Optional recorded-trade archive (seconds history
+                across restarts and true delta on covered bars).
         """
         self._adapters = dict(adapters)
         self.registry = instrument_registry
@@ -157,6 +161,7 @@ class MarketDataService:
         self._clock = clock
         self._replay = replay
         self.stale_after_ms = stale_after_ms
+        self._recorded = recorded
         self._snapshots: dict[
             instruments.InstrumentId, tuple[int, market.MarketSnapshot]
         ] = {}
@@ -237,6 +242,13 @@ class MarketDataService:
         now = self._clock.now_ms()
         current = timeframe.floor(now)
         closed_end = min(end_ms, current)
+        if self._recorded is not None and timeframe.is_seconds:
+            # Recorded seconds (earlier sessions, restarts, archives) first.
+            self._store.upsert_many(
+                await self._recorded.seconds_bars(
+                    instrument, timeframe, start_ms, closed_end
+                )
+            )
         gaps = self._store.final_gaps(
             instrument, timeframe, start_ms, closed_end
         )
@@ -294,7 +306,7 @@ class MarketDataService:
         tf = as_timeframe(timeframe)
         await self._refresh(instrument, tf, start_ms, end_ms)
         return candle_rules.finals_only(
-            self._store.range(instrument, tf, start_ms, end_ms)
+            self._enrich(self._store.range(instrument, tf, start_ms, end_ms))
         )
 
     async def get_batch(
@@ -349,7 +361,9 @@ class MarketDataService:
         else:
             self.adapter(instrument.venue)
             await self._refresh(instrument, tf, start, end)
-            rows = self._store.range(instrument, tf, start, end)[-bars:]
+            rows = self._enrich(
+                self._store.range(instrument, tf, start, end)[-bars:]
+            )
             state, source = self._provenance(instrument, tf)
         closed_end = min(end, tf.floor(now))
         window_start = rows[0].start_ms if rows and from_ms is None else start
@@ -368,6 +382,17 @@ class MarketDataService:
             as_of_ms=now,
             gaps=tuple(gaps),
         )
+
+    def _enrich(self, rows: list[market.Candle]) -> list[market.Candle]:
+        """Attaches recorded true delta to fully covered final bars.
+
+        Args:
+            rows: Stored candles of one series.
+
+        Returns:
+            Candles in the same order.
+        """
+        return rows if self._recorded is None else self._recorded.enrich(rows)
 
     def _provenance(
         self,
