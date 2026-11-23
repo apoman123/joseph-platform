@@ -45,6 +45,7 @@ from joseph.domain import errors
 from joseph.domain import instruments
 from joseph.domain import market
 from joseph.domain import quality
+from joseph.domain import sessions
 from joseph.domain import timeframes
 from joseph.market_data.adapters import replay as replay_lib
 from joseph.market_data.app import candle_store
@@ -606,19 +607,21 @@ class FeedRouter:
         adapter = self._adapter(session.instrument.venue)
         failures = 0
         tf = session.timeframe
+        calendar = sessions.for_instrument(session.instrument)
         # Look back far enough that consecutive polls overlap; window
-        # sizing may use the nominal duration.
+        # sizing may use the nominal duration, boundaries the calendar.
         back = 1 + math.ceil(self._poll_interval_s * 1000 / tf.duration_ms)
         if not tf.is_seconds:
             back = 1
         while until_ms is None or self._clock.now_ms() < until_ms:
             now = self._clock.now_ms()
             try:
+                current = calendar.floor(tf, now)
                 rows = await adapter.fetch_candles(
                     session.instrument,
                     tf,
-                    tf.shift(tf.floor(now), -back),
-                    tf.end_of(tf.floor(now)),
+                    calendar.shift(tf, current, -back),
+                    calendar.end_of(tf, current),
                 )
             except errors.JosephError as err:
                 failures += 1

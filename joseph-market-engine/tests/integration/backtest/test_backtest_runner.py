@@ -166,7 +166,7 @@ async def test_report_contains_trade_and_metrics(
     assert report.feed_state is quality.FeedState.LIVE
     assert report.missing_bars == 0
     assert any("stop is assumed first" in a for a in report.assumptions)
-    assert report.evaluator_version == "1.0.0"
+    assert report.evaluator_version == "1.1.0"
 
 
 async def test_backtest_matches_live_processing(
