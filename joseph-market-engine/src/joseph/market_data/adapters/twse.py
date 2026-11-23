@@ -34,7 +34,11 @@ Sources (all public, verified live 2026-11-23):
   every other weekday entry is a closure added to the XTAI calendar.
 
 Intraday bars are reconstructed from MIS snapshots recorded while the
-engine runs (``snapshot_bars``); there is no intraday history.
+engine runs (``snapshot_bars``); there is no intraday history. Bars are
+sparse (a minute or day without trades has no bar), so fetches state their
+coverage: the recording's segments for intraday bars, the STOCK_DAY months
+read for daily bars. Missing bars there are not gaps; minutes the recorder
+did not see (before recording started, across a polling gap) still are.
 """
 
 from __future__ import annotations
@@ -65,6 +69,7 @@ from joseph.domain import timeframes
 from joseph.market_data.adapters import base
 from joseph.market_data.adapters import http
 from joseph.market_data.domain import books
+from joseph.market_data.domain import candles as candle_rules
 from joseph.market_data.domain import capabilities
 from joseph.market_data.domain import session_bars
 from joseph.market_data.domain import snapshot_bars
@@ -176,6 +181,19 @@ def number(text: object) -> decimal.Decimal | None:
         return decimal.Decimal(raw)
     except decimal.InvalidOperation:
         return None
+
+
+def taipei_ms(day: datetime.date) -> int:
+    """Returns Taipei midnight of a date.
+
+    Args:
+        day: Taipei date.
+
+    Returns:
+        UTC epoch milliseconds.
+    """
+    moment = datetime.datetime.combine(day, datetime.time(0), tzinfo=_TPE)
+    return int(moment.timestamp() * 1000)
 
 
 def taipei_date(ts_ms: int) -> datetime.date:
@@ -806,11 +824,12 @@ class _Month:
 
 
 class TwseAdapter(base.BaseVenueAdapter):
-    """``MarketDataPort`` for TWSE-listed stocks and ETFs."""
+    """``SparseBarsPort`` for TWSE-listed stocks and ETFs."""
 
     VENUE = instruments.Venue.TWSE
     INSTRUMENT_TTL_MS = 6 * 3_600_000
     TRADE_BUY_VOLUME_METHOD = market.BuyVolumeMethod.CLASSIFIED
+    SPARSE_BARS = True
 
     def __init__(
         self,
@@ -1064,7 +1083,7 @@ class TwseAdapter(base.BaseVenueAdapter):
         start_ms: int,
         end_ms: int,
         wanted: int | None,
-    ) -> list[market.Candle]:
+    ) -> tuple[list[market.Candle], list[candle_rules.Span], bool]:
         """Collects daily bars of a range, newest months first.
 
         Args:
@@ -1076,7 +1095,9 @@ class TwseAdapter(base.BaseVenueAdapter):
         Returns:
             Ascending final daily bars plus, during or after today's
             session, today's non-final bar from MIS when STOCK_DAY has no
-            row yet.
+            row yet; the spans of the months read, each up to the day
+            before it was read (a trading day there without a row had no
+            trades); and whether every month of the range was read.
         """
         now = self._clock.now_ms()
         meta = self.listing.get(instrument.venue_market_id)
@@ -1087,6 +1108,7 @@ class TwseAdapter(base.BaseVenueAdapter):
         first = max(floor, taipei_date(max(start_ms, 0)))
         last = taipei_date(min(end_ms - 1, now))
         rows: dict[int, market.Candle] = {}
+        covered: list[candle_rules.Span] = []
         year, month = last.year, last.month
         months = 0
         while (year, month) >= (
@@ -1096,12 +1118,25 @@ class TwseAdapter(base.BaseVenueAdapter):
             for bar in await self._month(instrument, year, month):
                 rows[bar.start_ms] = bar
             months += 1
+            following = datetime.date(year + month // 12, month % 12 + 1, 1)
+            read_on = taipei_date(
+                self._months[
+                    (instrument.venue_market_id, year, month)
+                ].fetched_ms
+            )
+            covered.append(
+                (
+                    taipei_ms(datetime.date(year, month, 1)),
+                    taipei_ms(min(following, read_on)),
+                )
+            )
+            year, month = (year, month - 1) if month > 1 else (year - 1, 12)
             if (
                 wanted is not None
                 and sum(1 for s in rows if start_ms <= s < end_ms) >= wanted
             ):
                 break
-            year, month = (year, month - 1) if month > 1 else (year - 1, 12)
+        complete = (year, month) < (first.year, first.month)
         today = sessions.XTAI.session(taipei_date(now))
         if (
             today is not None
@@ -1112,7 +1147,11 @@ class TwseAdapter(base.BaseVenueAdapter):
             live = await self._live_daily(instrument)
             if live is not None and live.start_ms == today.open_ms:
                 rows[live.start_ms] = live
-        return [rows[s] for s in sorted(rows) if start_ms <= s < end_ms]
+        return (
+            [rows[s] for s in sorted(rows) if start_ms <= s < end_ms],
+            covered,
+            complete,
+        )
 
     async def _live_daily(
         self, instrument: instruments.InstrumentId
@@ -1300,14 +1339,49 @@ class TwseAdapter(base.BaseVenueAdapter):
         Returns:
             Ascending candles on the XTAI calendar.
         """
+        fetched = await self.fetch_candle_coverage(
+            instrument, timeframe, start_ms, end_ms, limit
+        )
+        return list(fetched.candles)
+
+    async def fetch_candle_coverage(
+        self,
+        instrument: instruments.InstrumentId,
+        timeframe: timeframes.Timeframe,
+        start_ms: int,
+        end_ms: int,
+        limit: int | None = None,
+    ) -> candle_rules.CandleCoverage:
+        """Fetches daily history or recorded intraday bars with coverage.
+
+        Args:
+            instrument: Instrument.
+            timeframe: Resolution (1m and above).
+            start_ms: Inclusive start.
+            end_ms: Exclusive end.
+            limit: Optional maximum bars (newest kept).
+
+        Returns:
+            Ascending candles on the XTAI calendar and the spans proven
+            complete: the MIS recording for intraday bars, the STOCK_DAY
+            months read for daily, weekly and monthly bars.
+        """
         self._require_timeframe(timeframe)
         await self._require(instrument)
         if end_ms <= start_ms:
-            return []
+            return candle_rules.CandleCoverage((), (), complete=True)
         if timeframe in _INTRADAY:
-            self.watch(instrument.venue_market_id)
+            code = instrument.venue_market_id
+            self.watch(code)
             rows = self._intraday(instrument, timeframe, start_ms, end_ms)
-            return base.clip_range(rows, start_ms, end_ms, limit)
+            return base.candle_coverage(
+                rows,
+                start_ms,
+                end_ms,
+                limit,
+                self._builders[code].coverage(),
+                complete=True,
+            )
         calendar = sessions.XTAI
         try:
             grid = calendar.floor(timeframe, start_ms)
@@ -1319,7 +1393,7 @@ class TwseAdapter(base.BaseVenueAdapter):
             timeframes.Timeframe.MN1: 23,
         }
         wanted = None if limit is None else limit * per_bar[timeframe]
-        daily = await self._daily(
+        daily, covered, complete = await self._daily(
             instrument, min(grid, start_ms), end_ms, wanted
         )
         if timeframe is not _D1:
@@ -1330,7 +1404,9 @@ class TwseAdapter(base.BaseVenueAdapter):
                 now_ms=self._clock.now_ms(),
                 covered_to_ms=max(finals, default=0),
             )
-        return base.clip_range(daily, start_ms, end_ms, limit)
+        return base.candle_coverage(
+            daily, start_ms, end_ms, limit, covered, complete=complete
+        )
 
     # Snapshots and books -------------------------------------------------
 

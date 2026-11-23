@@ -20,6 +20,11 @@ history. A venue without a time-range trade history cannot poll seconds
 bars: ``REST_POLL`` is rejected at acquire and ``AUTO`` goes ``STALE`` and
 retries the trade stream instead of emulating bars from anything else.
 
+Sessions of venues with sparse bars (``ports.sparse_bars``) also record
+what they covered: each poll the spans its fetch delivered completely, each
+native update the spans its connection proved. The store keeps them, so a
+quiet interval a live session saw is not a gap later.
+
 Session transitions::
 
     CONNECTING -> LIVE -> (failure) -> POLLING [AUTO] | STALE [NATIVE_WS]
@@ -36,6 +41,8 @@ import dataclasses
 import enum
 import logging
 import math
+from collections.abc import AsyncGenerator
+from collections.abc import AsyncIterator
 from collections.abc import Awaitable
 from collections.abc import Callable
 from collections.abc import Mapping
@@ -538,14 +545,29 @@ class FeedRouter:
             else quality.FeedState.LIVE
         )
         await self._set_state(session, SessionState.CONNECTING)
-        async for candle in adapter.stream_candles(
-            session.instrument, session.timeframe, tracker=session.tracker
-        ):
-            if session.state is not SessionState.LIVE:
-                session.tracker.set_transport(transport, feed_state)
-                await self._set_state(session, SessionState.LIVE)
-            session.tracker.record_message(self._clock.now_ms())
-            await self._emit(session, candle)
+        updates = (
+            adapter.stream_candle_coverage(
+                session.instrument, session.timeframe, tracker=session.tracker
+            )
+            if ports.sparse_bars(adapter)
+            else _uncovered(
+                adapter.stream_candles(
+                    session.instrument,
+                    session.timeframe,
+                    tracker=session.tracker,
+                )
+            )
+        )
+        async for update in updates:
+            for candle in update.candles:
+                if session.state is not SessionState.LIVE:
+                    session.tracker.set_transport(transport, feed_state)
+                    await self._set_state(session, SessionState.LIVE)
+                session.tracker.record_message(self._clock.now_ms())
+                await self._emit(session, candle)
+            self._store.add_coverage(
+                session.instrument, session.timeframe, update.covered
+            )
         raise errors.VenueUnavailableError("native stream ended")
 
     async def _run_native_only(self, session: FeedSession) -> None:
@@ -617,12 +639,22 @@ class FeedRouter:
             now = self._clock.now_ms()
             try:
                 current = calendar.floor(tf, now)
-                rows = await adapter.fetch_candles(
-                    session.instrument,
-                    tf,
+                window = (
                     calendar.shift(tf, current, -back),
                     calendar.end_of(tf, current),
                 )
+                if ports.sparse_bars(adapter):
+                    fetched = await adapter.fetch_candle_coverage(
+                        session.instrument, tf, *window
+                    )
+                else:
+                    fetched = candle_rules.CandleCoverage(
+                        tuple(
+                            await adapter.fetch_candles(
+                                session.instrument, tf, *window
+                            )
+                        )
+                    )
             except errors.JosephError as err:
                 failures += 1
                 session.tracker.record_error(now, err.message)
@@ -641,7 +673,7 @@ class FeedRouter:
                     await self._set_state(session, SessionState.POLLING)
                 failures = 0
                 session.tracker.record_message(now)
-                for candle in rows:
+                for candle in fetched.candles:
                     await self._emit(
                         session,
                         dataclasses.replace(
@@ -654,7 +686,30 @@ class FeedRouter:
                             source=candle.source.replace(".rest", ".poll"),
                         ),
                     )
+                self._store.add_coverage(
+                    session.instrument, tf, fetched.covered
+                )
             await self._sleep(self._poll_interval_s)
+
+
+async def _uncovered(
+    candles: AsyncIterator[market.Candle],
+) -> AsyncGenerator[candle_rules.CandleCoverage, None]:
+    """Wraps a dense venue's candle stream as updates without coverage.
+
+    Args:
+        candles: Native candle stream.
+
+    Yields:
+        One update per candle.
+    """
+    try:
+        async for candle in candles:
+            yield candle_rules.CandleCoverage((candle,))
+    finally:
+        close = getattr(candles, "aclose", None)
+        if close is not None:
+            await close()
 
 
 def _native(

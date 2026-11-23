@@ -32,6 +32,11 @@ are reconstructed from consecutive snapshots of one trading day:
 * **Finality.** A bar is final once a snapshot of its segment with a data
   time at or after its end has been applied (later volume belongs to later
   bars).
+* **Recording coverage.** Inside a segment, every bar ending by its newest
+  snapshot has its final attribution, so a minute there without a bar had
+  no (attributed) trades. ``coverage`` returns those spans, minus minutes
+  whose volume has no known price (they traded but are not emitted) and
+  minus bars dropped by the retention.
 """
 
 from __future__ import annotations
@@ -46,10 +51,12 @@ from joseph.domain import market
 from joseph.domain import quality
 from joseph.domain import sessions
 from joseph.domain import timeframes
+from joseph.market_data.domain import candles as candle_rules
 from joseph.market_data.domain import classification
 from joseph.market_data.domain import session_bars
 
 _M1 = timeframes.Timeframe.M1
+_FOREVER_MS = 2**63
 
 
 @dataclasses.dataclass(frozen=True, slots=True)
@@ -178,6 +185,7 @@ class SnapshotBarBuilder:
         self._previous: Snapshot | None = None
         self._last_price: decimal.Decimal | None = None
         self._classifier = classification.LeeReadyClassifier()
+        self._retained_from: int | None = None
 
     @property
     def latest(self) -> Snapshot | None:
@@ -197,6 +205,27 @@ class SnapshotBarBuilder:
             if first <= ts_ms <= last:
                 return first, last
         return None
+
+    def coverage(self) -> list[candle_rules.Span]:
+        """Returns the spans in which every one-minute bar is known.
+
+        Returns:
+            Disjoint ascending spans: the coverage segments, without the
+            minutes holding volume of unknown price and without the time
+            before the oldest retained bar (after an eviction).
+        """
+        spans = [(first, last) for first, last in self._segments]
+        unpriced = [
+            (start, self._calendar.end_of(_M1, start))
+            for start, bar in self._bars.items()
+            if bar.open is None
+        ]
+        spans = candle_rules.subtract_spans(spans, unpriced)
+        if self._retained_from is not None:
+            spans = candle_rules.clip_spans(
+                spans, self._retained_from, _FOREVER_MS
+            )
+        return spans
 
     def _bar_start(self, data_ms: int) -> int | None:
         """Returns the bar of the trades just before ``data_ms``.
@@ -416,7 +445,9 @@ class SnapshotBarBuilder:
     def _evict(self) -> None:
         """Drops the oldest bars beyond the retention (and old segments)."""
         while len(self._bars) > self._retention:
-            del self._bars[min(self._bars)]
+            dropped = min(self._bars)
+            del self._bars[dropped]
+            self._retained_from = self._calendar.end_of(_M1, dropped)
         oldest = min(self._bars, default=None)
         while (
             len(self._segments) > 1

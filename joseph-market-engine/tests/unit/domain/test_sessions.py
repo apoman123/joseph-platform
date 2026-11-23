@@ -4,7 +4,11 @@ from __future__ import annotations
 
 import datetime
 import decimal
+import importlib.util
+import json
+import pathlib
 import zoneinfo
+from typing import Any
 
 import hypothesis
 import pytest
@@ -248,13 +252,122 @@ def test_runtime_closures_are_applied() -> None:
     assert calendar.session(D(2026, 11, 24)) is None
 
 
-def test_bond_market_calendar() -> None:
-    """Treasury market: closed Columbus and Veterans Day, open Good Friday."""
+def _table(name: str) -> dict[str, Any]:
+    """Reads a generated calendar table.
+
+    Args:
+        name: File stem in ``calendar_data``.
+
+    Returns:
+        Parsed table.
+    """
+    path = pathlib.Path(sessions.__file__).with_name("calendar_data")
+    table: dict[str, Any] = json.loads(
+        (path / f"{name}.json").read_text(encoding="utf-8")
+    )
+    return table
+
+
+@pytest.mark.parametrize(
+    ("day", "published"),
+    [
+        (D(2026, 4, 3), True),
+        (D(2021, 4, 2), True),
+        (D(2015, 4, 3), True),
+        (D(2024, 3, 29), False),
+        (D(2025, 4, 18), False),
+    ],
+)
+def test_bond_good_fridays_follow_treasury_publications(
+    day: datetime.date, published: bool
+) -> None:
+    """Good Friday is a session only in years Treasury published yields."""
+    assert (sessions.USBOND.session(day) is not None) is published
+    assert (day.isoformat() not in _table("usbond")["closures"]) is published
+
+
+@pytest.mark.parametrize(
+    "day",
+    [
+        D(2026, 10, 12),
+        D(2026, 11, 11),
+        D(2025, 10, 13),
+        D(2025, 11, 11),
+        D(2010, 10, 11),  # Listed by Treasury with blank values only.
+        D(2027, 10, 11),
+        D(2027, 11, 11),
+    ],
+)
+def test_bond_market_closes_columbus_and_veterans_day(
+    day: datetime.date,
+) -> None:
+    """Columbus and Veterans Day close the bond market, not NYSE."""
+    assert sessions.USBOND.session(day) is None
+    assert XNYS.session(day) is not None
+
+
+def test_bond_calendar_is_the_observed_publication_days() -> None:
+    """MLK Day closed before 1998; NYSE special closures only if unpublished."""
     bond = sessions.USBOND
-    assert bond.session(D(2026, 10, 12)) is None
-    assert bond.session(D(2026, 11, 11)) is None
-    assert bond.session(D(2026, 4, 3)) is not None
-    assert XNYS.session(D(2026, 10, 12)) is not None
+    assert bond.session(D(1997, 1, 20)) is None  # MLK, NYSE was open.
+    assert XNYS.session(D(1997, 1, 20)) is not None
+    assert bond.session(D(2001, 9, 11)) is None
+    assert bond.session(D(2012, 10, 30)) is None
+    for published in (D(2001, 9, 13), D(2012, 10, 29), D(2025, 1, 9)):
+        assert bond.session(published) is not None
+        assert XNYS.session(published) is None
+    assert bond.session(D(2023, 11, 10)) is not None  # Veterans on a Sat.
+    assert bond.session(D(2026, 11, 20)) is not None
+    assert bond.first_day == D(1990, 1, 1)
+    assert bond.session(D(1990, 1, 1)) is None
+    assert bond.session(D(1990, 1, 2)) is not None
+
+
+def test_bond_table_has_the_xtai_layout() -> None:
+    """The USBOND table carries the XTAI keys and only weekday closures."""
+    table = _table("usbond")
+    assert set(table) == set(_table("xtai"))
+    assert table["weekend_sessions"] == []
+    closures = [D.fromisoformat(day) for day in table["closures"]]
+    assert closures == sorted(closures)
+    assert all(day.weekday() < 5 for day in closures)
+    through = D.fromisoformat(str(table["observed_through"]))
+    assert all(day <= through for day in closures)
+
+
+def test_bond_calendar_falls_back_to_rules_after_the_table() -> None:
+    """After the observed range rule holidays apply; Good Friday trades."""
+    bond = sessions.USBOND
+    good_friday = D(2027, 3, 26)
+    assert XNYS.session(good_friday) is None
+    assert bond.session(good_friday) is not None
+    for holiday in (D(2027, 1, 18), D(2027, 7, 5), D(2027, 12, 24)):
+        assert bond.session(holiday) is None
+    assert bond.session(D(2027, 11, 12)) is not None
+
+
+def test_usbond_generator_counts_only_rows_with_values() -> None:
+    """A Treasury row of blank or N/A cells is not a publication day."""
+    script = (
+        pathlib.Path(__file__).resolve().parents[3]
+        / "scripts"
+        / "generate_usbond_calendar.py"
+    )
+    spec = importlib.util.spec_from_file_location("usbond_script", script)
+    assert spec is not None and spec.loader is not None
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    body = (
+        '\ufeffDate,"3 Mo","10 Yr"\n'
+        "10/12/2010,0.14,2.44\n"
+        "10/11/2010,,\n"
+        "10/08/2010,N/A,2.41\n"
+        "10/07/2010,N/A,N/A\n"
+        "\n"
+    )
+    assert module.parse_dates(body) == {D(2010, 10, 12), D(2010, 10, 8)}
+    with pytest.raises(ValueError, match="header"):
+        module.parse_dates("<html>403</html>")
 
 
 def test_calendar_lookup_by_instrument() -> None:
@@ -352,3 +465,12 @@ def test_boundary_arithmetic_is_consistent(
         assert calendar.bars_between(tf, start, moved) == bars
     else:
         assert calendar.bars_between(tf, moved, start) == -bars
+
+
+def test_times_before_a_calendar_have_no_bar() -> None:
+    """Before the first session nothing is aligned, closed or open."""
+    for calendar in (XNYS, sessions.USBOND):
+        assert not calendar.is_aligned(TF.M1, 0)
+        assert calendar.last_closed_start(TF.D1, 0) is None
+        assert not calendar.is_open(0)
+    assert sessions.CONTINUOUS.is_open(0)

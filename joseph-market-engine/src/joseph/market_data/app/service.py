@@ -12,6 +12,12 @@ batches serve what the store holds and report the rest as gaps.
 Every bar boundary (history windows, the live edge, gap repair) follows the
 instrument's session calendar (``sessions.for_instrument``): exchange bars
 start at the session open, and the time between sessions is never a gap.
+
+On venues with sparse bars (``ports.sparse_bars``: TWSE, Nasdaq, NYSE) a
+quiet interval has no bar. Their fetches report the spans they delivered
+completely, which the store keeps as coverage: a missing bar inside it is
+neither a reported gap nor re-fetched, while an interval no fetch or live
+session covered (an outage) still is both.
 """
 
 from __future__ import annotations
@@ -344,6 +350,43 @@ class MarketDataService:
                 gaps = [gap for gap in gaps if gap[0] >= tail]
         return gaps
 
+    async def _fetch(
+        self,
+        instrument: instruments.InstrumentId,
+        timeframe: timeframes.Timeframe,
+        start_ms: int,
+        end_ms: int,
+    ) -> candle_rules.CandleCoverage:
+        """Fetches history into the store, recording sparse-bar coverage.
+
+        Args:
+            instrument: Instrument.
+            timeframe: Resolution.
+            start_ms: Inclusive start.
+            end_ms: Exclusive end.
+
+        Returns:
+            The fetch (dense venues prove no coverage and are never
+            ``complete``, so repair rounds continue as before).
+        """
+        adapter = self.adapter(instrument.venue)
+        if ports.sparse_bars(adapter):
+            fetched = await self._call(
+                instrument.venue,
+                adapter.fetch_candle_coverage(
+                    instrument, timeframe, start_ms, end_ms
+                ),
+            )
+        else:
+            rows = await self._call(
+                instrument.venue,
+                adapter.fetch_candles(instrument, timeframe, start_ms, end_ms),
+            )
+            fetched = candle_rules.CandleCoverage(tuple(rows))
+        self._store.upsert_many(list(fetched.candles))
+        self._store.add_coverage(instrument, timeframe, fetched.covered)
+        return fetched
+
     async def _refresh(
         self,
         instrument: instruments.InstrumentId,
@@ -358,7 +401,9 @@ class MarketDataService:
         ranges are repaired in rounds, each continuing after the newest bar
         the previous one returned, until ``max_bars`` bars were fetched; a
         round that makes no progress ends the repair (what the venue cannot
-        serve stays a reported gap).
+        serve stays a reported gap). A sparse-bar fetch that reports itself
+        complete ends it too: repeating it cannot return more, and its
+        coverage already settles the quiet intervals.
 
         Args:
             instrument: Instrument.
@@ -383,7 +428,6 @@ class MarketDataService:
             not caps.market_data.trades_history
         ):
             return
-        adapter = self.adapter(instrument.venue)
         cursor = start_ms
         fetched = 0
         for attempt in range(_MAX_REFRESH_ROUNDS):
@@ -407,17 +451,14 @@ class MarketDataService:
                 )
             else:
                 return
-            rows = await self._call(
-                instrument.venue,
-                adapter.fetch_candles(
-                    instrument, timeframe, fetch_from, end_ms
-                ),
+            result = await self._fetch(
+                instrument, timeframe, fetch_from, end_ms
             )
-            self._store.upsert_many(list(rows))
-            fetched += len(rows)
-            reached = max((c.end_ms for c in rows), default=cursor)
+            fetched += len(result.candles)
+            reached = max((c.end_ms for c in result.candles), default=cursor)
             if (
                 not gaps
+                or result.complete
                 or fetched >= max_bars
                 or reached <= max(cursor, fetch_from)
             ):
@@ -517,12 +558,18 @@ class MarketDataService:
             state, source = self._provenance(instrument, tf)
         closed_end = min(end, closed_through(calendar, tf, now)[0])
         window_start = rows[0].start_ms if rows and from_ms is None else start
+        covered = (
+            []
+            if feed_mode is quality.FeedMode.REPLAY
+            else self._store.coverage(instrument, tf, window_start, closed_end)
+        )
         gaps = candle_rules.find_gaps(
             [c.start_ms for c in rows if c.is_final],
             tf,
             window_start,
             closed_end,
             calendar=calendar,
+            covered=covered,
         )
         return CandleBatchResult(
             instrument_id=instrument,

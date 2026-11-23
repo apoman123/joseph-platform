@@ -387,11 +387,14 @@ class TreasuryAdapter(base.BaseVenueAdapter):
                 "from 2010-02-22; the 30Y par yield was not published "
                 "2002-02-19 to 2006-02-08 and the 3M on 2008-12-10/18/24. "
                 "Days without a value have no bar.",
-                "Treasury publishes nothing on some USBOND sessions: most "
-                "Good Fridays (it did publish in 2015, 2021 and 2026), "
-                "Martin Luther King Jr. Day before 1998 and the NYSE special "
-                "closures 1994-04-27, 2001-09-11/12, 2004-06-11, 2012-10-30 "
-                "and 2018-12-05; those sessions have no bar.",
+                "USBOND sessions are the days Treasury published a par "
+                "yield curve (observed from the per-year CSVs since 1990): "
+                "Good Friday only in the years it published (e.g. 2015, "
+                "2021, 2026), Martin Luther King Jr. Day closed before 1998, "
+                "NYSE special closures closed only where Treasury did not "
+                "publish (e.g. 2001-09-11/12, 2012-10-30). Days after the "
+                "observed table follow the SIFMA holiday rules, with Good "
+                "Friday as a session until Treasury's data says otherwise.",
             ),
             docs_url=DOCS_URL,
             verified_at_ms=self._verified_at_ms,
