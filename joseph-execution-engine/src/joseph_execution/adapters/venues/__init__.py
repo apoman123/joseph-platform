@@ -1,1 +1,1 @@
-"""Live venue trading adapters (fail closed in this build)."""
+"""Live venue trading adapters (credentialed, negotiated per account)."""

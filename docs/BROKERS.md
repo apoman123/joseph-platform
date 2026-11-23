@@ -31,7 +31,7 @@ Paper securities fill only in session, clamp market fills into the daily limits 
 
 | Variable | Default | Purpose |
 |---|---|---|
-| `JOSEPH_LIVE_TRADING_ENABLED` | `false` | Global LIVE gate |
+| `JOSEPH_LIVE_TRADING_ENABLED` | `false` in code, `true` in `deploy/` | Global LIVE gate (brokers additionally need `JOSEPH_IBKR_ENABLED` / `JOSEPH_SINOPAC_ENABLED`) |
 | `JOSEPH_EQUITY_CLOSED_MARKET_ORDERS` | `reject` | `reject` or `queue` closed-market market orders |
 | `JOSEPH_PAPER_TWD_STARTING_CASH` | `3000000` | TWD paper account (`0`/`off` disables it) |
 | `JOSEPH_IBKR_ENABLED` | `false` | Allow connecting to IB Gateway |
