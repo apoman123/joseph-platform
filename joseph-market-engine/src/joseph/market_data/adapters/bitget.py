@@ -22,7 +22,9 @@ newest first with lowercase ``side`` (122/122 printed through the matching
 side of the BBO) and no snapshot on subscribe. ``fills-history`` returns
 trades newest first (``Buy``/``Sell``), both bounds inclusive, at most 1000
 per page with ``idLessThan`` paging, windows of at most 7 days within the
-last 90 days; ``size`` is in base coin.
+last 90 days; ``size`` is in base coin. A request whose ``startTime`` and
+``endTime`` fall in the same second returns no rows at all (verified
+2026-11-23), so short windows are widened before clipping.
 """
 
 from __future__ import annotations
@@ -79,6 +81,8 @@ _WINDOW_MS = 90 * _DAY_MS - 1
 _MAX_FILLS = 1000
 _FILLS_WINDOW_MS = 7 * _DAY_MS
 _FILLS_HISTORY_MS = 90 * _DAY_MS - 60_000
+_MIN_FILLS_WINDOW_MS = 2_000
+"""``fills-history`` returns nothing when both bounds fall in one second."""
 _SIDES = {"buy": market.AggressorSide.BUY, "sell": market.AggressorSide.SELL}
 _BOOK_LIMITS = (1, 5, 15, 50, 100)
 _STATUS = {
@@ -293,8 +297,8 @@ class BitgetAdapter(base.BaseVenueAdapter):
                 "used.",
                 "RWA contracts are flagged by isRwa; equities are not "
                 "distinguished from other RWA.",
-                "Seconds bars are built from public trades; their history "
-                "reaches back 90 days.",
+                "Seconds bars are built from public trades; the REST "
+                "history reaches back 90 days.",
                 "Klines publish no taker buy volume (taker_volume is false); "
                 "seconds bars built from trades do carry it.",
             ),
@@ -741,7 +745,10 @@ class BitgetAdapter(base.BaseVenueAdapter):
         params: dict[str, Any] = {
             "symbol": instrument.venue_market_id,
             "productType": PRODUCT,
-            "startTime": start,
+            # Bounds inside one second return nothing at all (verified
+            # 2026-11-23), so short windows are widened to two seconds and
+            # clipped back to [start, end) by the coverage below.
+            "startTime": min(start, end_ms - _MIN_FILLS_WINDOW_MS),
             "endTime": end_ms - 1,
             "limit": _MAX_FILLS,
         }
