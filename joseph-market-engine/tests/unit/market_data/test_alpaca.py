@@ -27,6 +27,10 @@ from joseph.domain import timeframes
 from joseph.market_data.adapters import alpaca
 from joseph.market_data.adapters import factory
 from joseph.market_data.adapters import http
+from joseph.market_data.app import candle_store
+from joseph.market_data.app import feed_router
+from joseph.market_data.app import registry
+from joseph.market_data.app import service as service_lib
 from joseph.market_data.domain import classification
 from joseph.market_data.domain import health
 from joseph.platform import config
@@ -637,3 +641,487 @@ async def test_stream_retries_when_auth_never_completes() -> None:
     assert kind == "error" and "after 2 attempts" in err.message
     assert len(opened) == 2
     await stream.close()
+
+
+# Sparse-bar coverage -------------------------------------------------------
+
+_M1 = timeframes.Timeframe.M1
+_US_CLOSE = _SESSION.close_ms
+_UNPACED = (1_000.0, 1_000)
+"""Request pacing for budget tests (they count requests, not seconds)."""
+
+
+class _QuietApi:
+    """Alpaca data API for AAPL: every third minute and Wednesday are quiet.
+
+    Attributes:
+        clock: Clock (stamps each request).
+        page: Bars per page.
+        bars: ``(request time, params)`` of every bar request.
+        trades: Trades served by ``/trades`` (Alpaca shape).
+    """
+
+    def __init__(
+        self, clock: clock_lib.ManualClock, page: int = 10_000
+    ) -> None:
+        """Initializes the API.
+
+        Args:
+            clock: Clock.
+            page: Bars per page.
+        """
+        self.clock = clock
+        self.page = page
+        self.bars: list[tuple[int, dict[str, str]]] = []
+        self.trades: list[dict[str, Any]] = []
+
+    @staticmethod
+    def traded(minute_ms: int) -> bool:
+        """Checks whether a minute had trades.
+
+        Args:
+            minute_ms: Minute start.
+
+        Returns:
+            False for every third minute of the session.
+        """
+        return (minute_ms - _US_OPEN) // 60_000 % 3 != 2
+
+    @staticmethod
+    def _bar(ts_ms: int) -> dict[str, Any]:
+        """Builds an Alpaca bar.
+
+        Args:
+            ts_ms: Bar time.
+
+        Returns:
+            Bar object.
+        """
+        return {
+            "t": alpaca.rfc3339(ts_ms),
+            "o": 1,
+            "h": 1,
+            "l": 1,
+            "c": 1,
+            "v": 100,
+            "n": 1,
+            "vw": 1,
+        }
+
+    def _minutes(self, start: int, last: int) -> list[dict[str, Any]]:
+        """Lists the session minutes with trades.
+
+        Args:
+            start: Inclusive start.
+            last: Inclusive end.
+
+        Returns:
+            Bars.
+        """
+        rows = []
+        for day in sessions.XNYS.sessions(start, last + 1):
+            minute = max(day.open_ms, -(-start // 60_000) * 60_000)
+            while minute < min(day.close_ms, last + 1):
+                if self.traded(minute):
+                    rows.append(self._bar(minute))
+                minute += 60_000
+        return rows
+
+    def _days(self, start: str, last: int) -> list[dict[str, Any]]:
+        """Lists daily bars (Wednesday 2026-11-18 had no trades).
+
+        Args:
+            start: First date (ISO).
+            last: Inclusive end.
+
+        Returns:
+            Bars stamped at New York midnight.
+        """
+        rows = []
+        day = datetime.date.fromisoformat(start)
+        while (
+            midnight := int(
+                datetime.datetime.combine(
+                    day, datetime.time(0), tzinfo=alpaca._NY
+                ).timestamp()
+                * 1000
+            )
+        ) <= last:
+            if sessions.XNYS.session(day) and day != datetime.date(
+                2026, 11, 18
+            ):
+                rows.append(self._bar(midnight))
+            day += datetime.timedelta(days=1)
+        return rows
+
+    def __call__(self, request: httpx.Request) -> httpx.Response:
+        """Serves bars, trades and quotes.
+
+        Args:
+            request: Request.
+
+        Returns:
+            Response.
+        """
+        params = dict(request.url.params)
+        last = alpaca.rfc3339_ms(params["end"])
+        kind = request.url.path.rsplit("/", 1)[-1]
+        if kind != "bars":
+            first = alpaca.rfc3339_ms(params["start"])
+            rows = [
+                t
+                for t in self.trades
+                if first <= alpaca.rfc3339_ms(t["t"]) <= last
+            ]
+            return httpx.Response(
+                200,
+                json={
+                    kind: rows if kind == "trades" else [],
+                    "next_page_token": None,
+                },
+            )
+        self.bars.append((self.clock.now_ms(), params))
+        if params["timeframe"] == "1Day":
+            rows = self._days(params["start"], last)
+        else:
+            rows = self._minutes(alpaca.rfc3339_ms(params["start"]), last)
+        offset = int(params.get("page_token") or 0)
+        more = offset + self.page < len(rows)
+        return httpx.Response(
+            200,
+            json={
+                "bars": rows[offset : offset + self.page],
+                "next_page_token": str(offset + self.page) if more else None,
+                "symbol": "AAPL",
+            },
+        )
+
+
+@pytest.fixture
+def quiet_api(
+    exchange_routes: Callable[[respx.Router], None],
+) -> Iterator[Callable[[clock_lib.ManualClock], _QuietApi]]:
+    """Serves a quiet AAPL over the Alpaca routes.
+
+    Args:
+        exchange_routes: Installer of the exchange fixture routes.
+
+    Yields:
+        Factory binding the API to a clock.
+    """
+    with respx.mock(assert_all_called=False) as router:
+        apis: list[_QuietApi] = []
+
+        def handler(request: httpx.Request) -> httpx.Response:
+            """Delegates to the newest API.
+
+            Args:
+                request: Request.
+
+            Returns:
+                Response.
+            """
+            return apis[-1](request)
+
+        router.route(
+            host="data.alpaca.markets", path__startswith="/v2/stocks/AAPL/"
+        ).mock(side_effect=handler)
+        exchange_routes(router)
+
+        def make(clock: clock_lib.ManualClock) -> _QuietApi:
+            """Creates the API for a clock.
+
+            Args:
+                clock: Clock.
+
+            Returns:
+                API.
+            """
+            apis.append(_QuietApi(clock))
+            return apis[-1]
+
+        yield make
+
+
+def _market_data(
+    adapter: alpaca.AlpacaAdapter, clock: clock_lib.Clock
+) -> service_lib.MarketDataService:
+    """Builds the market-data service over one Alpaca adapter.
+
+    Args:
+        adapter: Adapter.
+        clock: Clock.
+
+    Returns:
+        Service.
+    """
+    adapters = {instruments.Venue.NASDAQ: adapter}
+    store = candle_store.CandleStore()
+    return service_lib.MarketDataService(
+        adapters,  # type: ignore[arg-type]
+        registry.InstrumentRegistry(adapters),  # type: ignore[arg-type]
+        store,
+        feed_router.FeedRouter(adapters, store, clock),  # type: ignore[arg-type]
+        clock,
+    )
+
+
+async def test_quiet_minutes_cost_no_repeat_requests(
+    quiet_api: Callable[[clock_lib.ManualClock], _QuietApi],
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A burst of queries makes one request; without coverage it storms."""
+    monkeypatch.setattr(factory, "_ALPACA_RATE", _UNPACED)
+    clock = clock_lib.ManualClock(_US_CLOSE + 5 * 60_000)
+    api = quiet_api(clock)
+    svc = _market_data(_nasdaq(clock), clock)
+    for _ in range(50):
+        batch = await svc.get_batch(
+            _AAPL, _M1, from_ms=_US_OPEN, to_ms=_US_CLOSE
+        )
+        assert batch.complete and len(batch.candles) == 260
+        await svc.get_candles(_AAPL, _M1, _US_OPEN, _US_CLOSE)
+    assert len(api.bars) == 1
+    # The same burst with dense-bar handling (the old behavior) re-requests
+    # from the first quiet minute on every call.
+    monkeypatch.setattr(alpaca.AlpacaAdapter, "SPARSE_BARS", False)
+    dense_api = quiet_api(clock)
+    dense = _market_data(_nasdaq(clock), clock)
+    for _ in range(50):
+        await dense.get_batch(_AAPL, _M1, from_ms=_US_OPEN, to_ms=_US_CLOSE)
+    assert len(dense_api.bars) >= 100
+    quiet = alpaca.rfc3339(_US_OPEN + 2 * 60_000)
+    assert sum(p["start"] == quiet for _, p in dense_api.bars) >= 49
+
+
+async def test_live_repairs_ask_once_and_only_for_unsettled_minutes(
+    quiet_api: Callable[[clock_lib.ManualClock], _QuietApi],
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """During the session each call asks at most once, for the tail only."""
+    monkeypatch.setattr(factory, "_ALPACA_RATE", _UNPACED)
+    clock = clock_lib.ManualClock(_US_OPEN + 60 * 60_000)
+    api = quiet_api(clock)
+    svc = _market_data(_nasdaq(clock), clock)
+    calls = 40
+    for _ in range(calls):
+        clock.current_ms += 15_000
+        closed = clock.current_ms - clock.current_ms % 60_000
+        rows = await svc.get_candles(_AAPL, _M1, _US_OPEN, closed)
+        assert rows and rows[-1].end_ms <= closed
+    assert len(api.bars) <= calls
+    first, *later = api.bars
+    assert alpaca.rfc3339_ms(first[1]["start"]) == _US_OPEN
+    for asked_at, params in later:
+        assert alpaca.rfc3339_ms(params["start"]) >= asked_at - 3 * 60_000
+
+
+async def test_fetch_coverage_spans_what_alpaca_settled(
+    quiet_api: Callable[[clock_lib.ManualClock], _QuietApi],
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Minute, aggregated and daily fetches cover up to the settled time."""
+    clock = clock_lib.ManualClock(_US_OPEN + 10 * 60_000 + 30_000)
+    api = quiet_api(clock)
+    adapter = _nasdaq(clock)
+    assert adapter.SPARSE_BARS
+    end = _US_OPEN + 10 * 60_000
+    ones = await adapter.fetch_candle_coverage(_AAPL, _M1, _US_OPEN, end)
+    settled = clock.now_ms() - 60_000
+    assert ones.covered == ((_US_OPEN, settled),) and ones.complete
+    assert all(c.is_final for c in ones.candles if c.end_ms <= settled)
+    fives = await adapter.fetch_candle_coverage(
+        _AAPL, timeframes.Timeframe.M5, _US_OPEN, end
+    )
+    assert fives.covered == ((_US_OPEN, settled),)
+    assert (
+        await adapter.fetch_candle_coverage(_AAPL, _M1, end, end)
+    ).candles == ()
+    # A page cap ends the coverage at the last bar read.
+    monkeypatch.setattr(alpaca, "MAX_PAGES", 1)
+    api.page = 4
+    capped = await adapter.fetch_candle_coverage(_AAPL, _M1, _US_OPEN, end)
+    assert not capped.complete and len(capped.candles) == 4
+    assert capped.covered == ((_US_OPEN, capped.candles[-1].start_ms),)
+    monkeypatch.setattr(alpaca, "MAX_PAGES", 20)
+    # Days are covered up to New York midnight; Wednesday had no trades.
+    clock.current_ms = _US_OPEN + 3_600_000
+    monday = sessions.XNYS.session(datetime.date(2026, 11, 16))
+    assert monday is not None
+    days = await adapter.fetch_candle_coverage(
+        _AAPL, timeframes.Timeframe.D1, monday.open_ms, _US_CLOSE
+    )
+    midnight = int(
+        datetime.datetime(2026, 11, 20, tzinfo=alpaca._NY).timestamp() * 1000
+    )
+    assert days.covered == ((monday.open_ms, midnight),)
+    assert len(days.candles) == 4 and not days.candles[-1].is_final
+    store = candle_store.CandleStore()
+    store.upsert_many(list(days.candles))
+    store.add_coverage(_AAPL, timeframes.Timeframe.D1, days.covered)
+    assert (
+        store.final_gaps(
+            _AAPL, timeframes.Timeframe.D1, monday.open_ms, midnight
+        )
+        == []
+    )
+
+
+async def test_seconds_history_reads_the_closing_print(
+    quiet_api: Callable[[clock_lib.ManualClock], _QuietApi],
+) -> None:
+    """A window ending at the close reads on until the print has settled."""
+    clock = clock_lib.ManualClock(_US_CLOSE + 120_000)
+    api = quiet_api(clock)
+
+    def trade(i: int, ts_ms: int, price: float, conditions: list[str]) -> None:
+        """Adds a served trade.
+
+        Args:
+            i: Trade id.
+            ts_ms: Trade time.
+            price: Price.
+            conditions: Sale conditions.
+        """
+        api.trades.append(
+            {
+                "i": i,
+                "x": "Q",
+                "p": price,
+                "s": 100 * i,
+                "c": conditions,
+                "t": alpaca.rfc3339(ts_ms),
+                "z": "C",
+            }
+        )
+
+    trade(1, _US_CLOSE - 1_500, 230.0, ["@"])
+    trade(2, _US_CLOSE - 400, 230.1, ["@"])
+    trade(3, _US_CLOSE + 350, 230.4, ["@", "6"])
+    trade(4, _US_CLOSE + 4_000, 231.0, ["@", "T"])
+    adapter = _nasdaq(clock)
+    s1 = timeframes.Timeframe.S1
+    window = (_US_CLOSE - 2_000, _US_CLOSE)
+    done = await adapter.fetch_candle_coverage(_AAPL, s1, *window)
+    last = done.candles[-1]
+    assert last.start_ms == _US_CLOSE - 1_000 and last.is_final
+    assert last.close == _D("230.4") and last.base_volume == _D(500)
+    assert done.covered == (window,)
+    early = clock_lib.ManualClock(_US_CLOSE + 20_000)
+    pending = await _nasdaq(early).fetch_candle_coverage(_AAPL, s1, *window)
+    assert pending.candles[-1].close == _D("230.4")
+    assert not pending.candles[-1].is_final
+    assert pending.covered == ((window[0], _US_CLOSE - 1_000),)
+
+
+async def test_minute_stream_proves_quiet_minutes_between_bars(
+    alpaca_api: respx.Router,
+) -> None:
+    """Consecutive ``b`` messages cover the minutes between; a drop resets."""
+    del alpaca_api
+
+    def bar(minute: int) -> str:
+        """Builds a ``b`` frame.
+
+        Args:
+            minute: Minutes after the open.
+
+        Returns:
+            Frame.
+        """
+        ts = alpaca.rfc3339(_US_OPEN + minute * 60_000)
+        return json.dumps(
+            [
+                {
+                    "T": "b",
+                    "S": "AAPL",
+                    "t": ts,
+                    "o": 1,
+                    "h": 1,
+                    "l": 1,
+                    "c": 1,
+                    "v": 10,
+                    "n": 1,
+                    "vw": 1,
+                }
+            ]
+        )
+
+    drop = websockets.ConnectionClosedError(None, None)
+    adapter = _nasdaq(
+        clock_lib.ManualClock(_NOW),
+        scripts=[
+            [*_OK, bar(0), bar(1), bar(3), drop],
+            [*_OK, bar(9), bar(10)],
+        ],
+    )
+    stream = adapter.stream_candle_coverage(_AAPL, _M1)
+    spans: list[tuple[int, int]] = []
+    starts: list[int] = []
+    while not starts or starts[-1] != _US_OPEN + 600_000:
+        update = await asyncio.wait_for(anext(stream), 5)
+        spans.extend(update.covered)
+        starts.extend(c.start_ms for c in update.candles)
+    await stream.aclose()  # type: ignore[attr-defined]
+    minute = 60_000
+    assert spans == [
+        (_US_OPEN + minute, _US_OPEN + 2 * minute),
+        (_US_OPEN + 2 * minute, _US_OPEN + 4 * minute),
+        (_US_OPEN + 10 * minute, _US_OPEN + 11 * minute),
+    ]
+
+
+async def test_seconds_stream_covers_only_what_frames_prove(
+    alpaca_api: respx.Router,
+) -> None:
+    """Seconds coverage starts after the partial bar and follows frames."""
+    del alpaca_api
+    clock = clock_lib.ManualClock(_US_OPEN + 10_000)
+    trades = json.dumps(
+        [
+            {
+                "T": "t",
+                "S": "AAPL",
+                "c": ["@"],
+                "i": 1,
+                "p": 230.1,
+                "s": 100,
+                "t": alpaca.rfc3339(_US_OPEN + 500),
+                "x": "V",
+                "z": "C",
+            },
+            {
+                "T": "t",
+                "S": "AAPL",
+                "c": ["@"],
+                "i": 2,
+                "p": 230.2,
+                "s": 100,
+                "t": alpaca.rfc3339(_US_OPEN + 4_200),
+                "x": "V",
+                "z": "C",
+            },
+            {
+                "T": "t",
+                "S": "AAPL",
+                "c": ["@"],
+                "i": 3,
+                "p": 230.3,
+                "s": 100,
+                "t": alpaca.rfc3339(_US_OPEN + 9_800),
+                "x": "V",
+                "z": "C",
+            },
+        ]
+    )
+    adapter = _nasdaq(clock, scripts=[[*_OK, trades]])
+    stream = adapter.stream_candle_coverage(_AAPL, timeframes.Timeframe.S1)
+    update = await asyncio.wait_for(anext(stream), 5)
+    while not update.covered:
+        update = await asyncio.wait_for(anext(stream), 5)
+    assert update.covered == ((_US_OPEN + 1_000, _US_OPEN + 8_500),)
+    # Idle ticks finalize bars but prove nothing new.
+    clock.current_ms += 30_000
+    ticked = await asyncio.wait_for(anext(stream), 5)
+    await stream.aclose()  # type: ignore[attr-defined]
+    assert ticked.candles and ticked.covered == ()
