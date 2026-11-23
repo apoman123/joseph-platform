@@ -27,6 +27,8 @@ from smc_indicators import regression_channel
 from smc_indicators import types as smc_types
 
 from joseph.domain import decimals
+from joseph.domain import market
+from joseph.domain import sessions
 from joseph.domain import structures
 from joseph.domain import timeframes as tfs
 from joseph.indicators.packaged import bridge
@@ -875,10 +877,14 @@ _AUTO_INTRABARS: Mapping[tfs.Timeframe, tfs.Timeframe] = {
 class OrderFlowPressurePlugin(bridge.PackagedPlugin):
     """Volume delta (true or estimated) with failure and breakout signals.
 
-    ``delta_source = "auto"`` uses true delta from the venue's taker buy
-    volume when the chart bar carries it (``method`` value
-    ``taker_volume``, snapshot method ``trade``); otherwise, and always with
-    ``"estimate"``, the Pine intrabar candle-direction estimate.
+    ``delta_source = "auto"`` uses the chart bar's buy volume when it carries
+    one: true delta from the venue's taker flag (``method`` value
+    ``taker_volume``, snapshot method ``trade``) or, on stock exchanges that
+    publish no aggressor side, trades classified against the quote
+    (``buy_volume_method = classified``; ``method`` value
+    ``trade_classification``, snapshot method ``trade_classification``).
+    Otherwise, and always with ``"estimate"``, the Pine intrabar
+    candle-direction estimate.
     """
 
     PLUGIN_ID = "order_flow_pressure"
@@ -1056,16 +1062,20 @@ class OrderFlowPressurePlugin(bridge.PackagedPlugin):
     def snapshot_method(
         self, values: Mapping[str, structures.ValueType]
     ) -> structures.IndicatorMethod:
-        """Labels true-delta bars as trade-derived, never Pine parity.
+        """Labels trade-derived delta bars, never as Pine parity.
 
         Args:
             values: Published values.
 
         Returns:
-            ``trade`` for taker-volume bars, else ``pine_parity``.
+            ``trade`` for taker-volume bars, ``trade_classification`` for
+            classified buy volume, else ``pine_parity``.
         """
-        if values.get("method") == "taker_volume":
+        method = values.get("method")
+        if method == "taker_volume":
             return structures.IndicatorMethod.TRADE
+        if method == "trade_classification":
+            return structures.IndicatorMethod.TRADE_CLASSIFICATION
         return self.METHOD
 
     def _build(
@@ -1142,6 +1152,14 @@ class OrderFlowPressurePlugin(bridge.PackagedPlugin):
         result = indicator.update(convert.to_bar(bar.candle), intrabars)
         raw = result.values
         coverage = convert.ratio(_opt_float(raw.get("coverage_percent")), 2)
+        method = "candle_direction"
+        if raw.get("method") == "taker_volume":
+            method = (
+                "trade_classification"
+                if bar.candle.buy_volume_method
+                is market.BuyVolumeMethod.CLASSIFIED
+                else "taker_volume"
+            )
         values: dict[str, structures.ValueType] = {
             "delta_pct": convert.ratio(_opt_float(raw.get("delta_percent")), 2),
             "coverage_pct": coverage,
@@ -1149,11 +1167,7 @@ class OrderFlowPressurePlugin(bridge.PackagedPlugin):
             "rel_volume": convert.ratio(
                 _opt_float(raw.get("relative_volume")), 4
             ),
-            "method": (
-                "taker_volume"
-                if raw.get("method") == "taker_volume"
-                else "candle_direction"
-            ),
+            "method": method,
             "buy_volume": convert.quantity(_opt_float(raw.get("buy_volume"))),
             "sell_volume": convert.quantity(_opt_float(raw.get("sell_volume"))),
             "prior_high": _price(raw.get("prior_high"), step),
@@ -1487,18 +1501,32 @@ def _anchor_spec(description: str) -> settings_lib.SettingSpec:
 def _effective_anchor(
     settings: Mapping[str, settings_lib.SettingValue],
     timeframe: tfs.Timeframe,
+    calendar: sessions.BarCalendar,
 ) -> int:
     """Returns the start of the chart bar containing ``anchor_ms``.
 
     Args:
         settings: Resolved settings.
         timeframe: Chart timeframe.
+        calendar: Session calendar of the instrument (between sessions the
+            anchor is the last bar before it).
 
     Returns:
         Aligned anchor bar start (0 when no anchor is set).
+
+    Raises:
+        ValueError: If the anchor precedes the calendar's first session.
     """
     anchor = _int(settings, "anchor_ms")
-    return timeframe.floor(anchor) if anchor > 0 else 0
+    return calendar.floor(timeframe, anchor) if anchor > 0 else 0
+
+
+_CALENDAR_ANCHORS: Mapping[str, tfs.Timeframe] = {
+    "session": tfs.Timeframe.D1,
+    "week": tfs.Timeframe.W1,
+    "month": tfs.Timeframe.MN1,
+}
+"""Exchange anchor periods: the calendar's daily, weekly and monthly bars."""
 
 
 class AnchoredVwapPlugin(bridge.PackagedPlugin):
@@ -1510,6 +1538,12 @@ class AnchoredVwapPlugin(bridge.PackagedPlugin):
     not inside the computed window every value is ``None`` and
     ``anchor_in_window`` is False, so a too-distant anchor is never drawn
     from the wrong bar.
+
+    On a 24x7 market ``session`` / ``week`` / ``month`` are the library's
+    UTC day, ISO week and calendar month. On an exchange they are the
+    calendar's ``1d``, ``1w`` and ``1M`` bars (one session, the sessions of
+    an ISO week or calendar month in exchange time): the adapter restarts a
+    time-anchored library study at each such bar.
     """
 
     PLUGIN_ID = "anchored_vwap"
@@ -1568,22 +1602,120 @@ class AnchoredVwapPlugin(bridge.PackagedPlugin):
         Raises:
             ValueError: If ``anchor`` is ``time`` without ``anchor_ms``.
         """
+        return self._objects(settings, tick, timeframe, sessions.CONTINUOUS)
+
+    def _build_series(
+        self,
+        header: protocol.SeriesHeader,
+        settings: Mapping[str, settings_lib.SettingValue],
+        tick: decimal.Decimal,
+    ) -> dict[str, object]:
+        """Creates the library object on the instrument's calendar.
+
+        Args:
+            header: Series header.
+            settings: Resolved settings.
+            tick: Tick size.
+
+        Returns:
+            Objects by role.
+        """
+        return self._objects(
+            settings,
+            tick,
+            header.timeframe,
+            sessions.for_instrument(header.instrument_id),
+        )
+
+    def _objects(
+        self,
+        settings: Mapping[str, settings_lib.SettingValue],
+        tick: decimal.Decimal,
+        timeframe: tfs.Timeframe,
+        calendar: sessions.BarCalendar,
+    ) -> dict[str, object]:
+        """Creates the library object for a calendar.
+
+        Args:
+            settings: Resolved settings.
+            tick: Tick size.
+            timeframe: Series timeframe.
+            calendar: Instrument calendar.
+
+        Returns:
+            Objects by role.
+
+        Raises:
+            ValueError: If ``anchor`` is ``time`` without ``anchor_ms``.
+        """
         anchor = settings_lib.get_str(settings, "anchor")
-        anchor_ms = _effective_anchor(settings, timeframe)
+        anchor_ms = _effective_anchor(settings, timeframe, calendar)
         if anchor == "time" and anchor_ms == 0:
             raise ValueError("anchored_vwap: anchor_ms is required for time")
-        return {
-            "main": anchored_vwap.AnchoredVwap(
-                float(tick),
-                anchor=anchor,
-                anchor_time_ms=anchor_ms,
-                source=settings_lib.get_str(settings, "source"),
-                band_multipliers=tuple(
-                    bridge.float_setting(settings, f"band_{index}")
-                    for index in (1, 2, 3)
-                ),
+        return {"main": self._library(settings, tick, anchor, anchor_ms)}
+
+    @staticmethod
+    def _library(
+        settings: Mapping[str, settings_lib.SettingValue],
+        tick: decimal.Decimal,
+        anchor: str,
+        anchor_ms: int,
+    ) -> anchored_vwap.AnchoredVwap:
+        """Builds one library study.
+
+        Args:
+            settings: Resolved settings.
+            tick: Tick size.
+            anchor: Library anchor mode.
+            anchor_ms: Anchor time for ``time``.
+
+        Returns:
+            The study.
+        """
+        return anchored_vwap.AnchoredVwap(
+            float(tick),
+            anchor=anchor,
+            anchor_time_ms=anchor_ms,
+            source=settings_lib.get_str(settings, "source"),
+            band_multipliers=tuple(
+                bridge.float_setting(settings, f"band_{index}")
+                for index in (1, 2, 3)
+            ),
+        )
+
+    def _period_study(
+        self,
+        payload: bridge.Payload,
+        candle: market.Candle,
+        settings: Mapping[str, settings_lib.SettingValue],
+    ) -> object:
+        """Returns the study of the bar's exchange anchor period.
+
+        On an exchange a session, week or month anchor restarts a
+        time-anchored study at the first bar of each calendar ``1d``/``1w``
+        /``1M`` bar; a 24x7 market keeps the library's UTC periods.
+
+        Args:
+            payload: Live payload (its study may be replaced).
+            candle: Chart bar.
+            settings: Resolved settings.
+
+        Returns:
+            The study to feed.
+        """
+        period_tf = _CALENDAR_ANCHORS.get(
+            settings_lib.get_str(settings, "anchor")
+        )
+        calendar = sessions.for_instrument(candle.instrument_id)
+        if period_tf is None or calendar.continuous:
+            return _main(payload)
+        period = calendar.floor(period_tf, candle.start_ms)
+        if payload.memo.get("period_ms") != period:
+            payload.objects["main"] = self._library(
+                settings, payload.tick, "time", period
             )
-        }
+            payload.memo["period_ms"] = period
+        return _main(payload)
 
     def _advance(
         self,
@@ -1603,13 +1735,17 @@ class AnchoredVwapPlugin(bridge.PackagedPlugin):
         Returns:
             Library outputs and values.
         """
-        indicator = _main(payload)
+        indicator = self._period_study(payload, bar.candle, settings)
         assert isinstance(indicator, anchored_vwap.AnchoredVwap)
         raw = indicator.update(convert.to_bar(bar.candle)).values
         started = _opt_int(raw.get("anchor_time_ms"))
         in_window = True
         if settings_lib.get_str(settings, "anchor") == "time":
-            wanted = _effective_anchor(settings, bar.candle.timeframe)
+            wanted = _effective_anchor(
+                settings,
+                bar.candle.timeframe,
+                sessions.for_instrument(bar.candle.instrument_id),
+            )
             in_window = started is None or started == wanted
         keys = (
             "vwap",
@@ -1706,11 +1842,54 @@ class RegressionChannelPlugin(bridge.PackagedPlugin):
         Returns:
             Objects by role.
         """
+        return self._objects(settings, tick, timeframe, sessions.CONTINUOUS)
+
+    def _build_series(
+        self,
+        header: protocol.SeriesHeader,
+        settings: Mapping[str, settings_lib.SettingValue],
+        tick: decimal.Decimal,
+    ) -> dict[str, object]:
+        """Creates the library object with the anchor bar on the calendar.
+
+        Args:
+            header: Series header.
+            settings: Resolved settings.
+            tick: Tick size.
+
+        Returns:
+            Objects by role.
+        """
+        return self._objects(
+            settings,
+            tick,
+            header.timeframe,
+            sessions.for_instrument(header.instrument_id),
+        )
+
+    @staticmethod
+    def _objects(
+        settings: Mapping[str, settings_lib.SettingValue],
+        tick: decimal.Decimal,
+        timeframe: tfs.Timeframe,
+        calendar: sessions.BarCalendar,
+    ) -> dict[str, object]:
+        """Creates the library object for a calendar.
+
+        Args:
+            settings: Resolved settings.
+            tick: Tick size.
+            timeframe: Series timeframe.
+            calendar: Instrument calendar.
+
+        Returns:
+            Objects by role.
+        """
         return {
             "main": regression_channel.RegressionChannel(
                 float(tick),
                 length=_int(settings, "length"),
-                anchor_time_ms=_effective_anchor(settings, timeframe),
+                anchor_time_ms=_effective_anchor(settings, timeframe, calendar),
                 source=settings_lib.get_str(settings, "source"),
                 deviations=bridge.float_setting(settings, "deviations"),
             )
@@ -1738,7 +1917,11 @@ class RegressionChannelPlugin(bridge.PackagedPlugin):
         assert isinstance(indicator, regression_channel.RegressionChannel)
         raw = indicator.update(convert.to_bar(bar.candle)).values
         started = _opt_int(raw.get("start_time_ms"))
-        wanted = _effective_anchor(settings, bar.candle.timeframe)
+        wanted = _effective_anchor(
+            settings,
+            bar.candle.timeframe,
+            sessions.for_instrument(bar.candle.instrument_id),
+        )
         in_window = wanted == 0 or started is None or started == wanted
         prices = (
             "start",
