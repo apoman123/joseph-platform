@@ -5,6 +5,8 @@ from __future__ import annotations
 import dataclasses
 import pathlib
 
+import pytest
+
 from joseph import bootstrap
 from joseph.domain import clock as clock_lib
 from joseph.domain import decimals
@@ -122,3 +124,22 @@ def test_recording_can_be_disabled(tmp_path: pathlib.Path) -> None:
         _settings(tmp_path, demo_only=True), clock=clock_lib.ManualClock(_T0)
     )
     assert demo.recorder is None
+
+
+@pytest.mark.parametrize("enabled", [True, False])
+async def test_lighter_archive_follows_its_setting(
+    tmp_path: pathlib.Path, enabled: bool
+) -> None:
+    """``JOSEPH_LIGHTER_ARCHIVE`` adds or omits the Lighter day archive."""
+    container = bootstrap.build_container(
+        _settings(
+            tmp_path,
+            enabled_venues=(instruments.Venue.LIGHTER,),
+            lighter_archive=enabled,
+        ),
+        clock=clock_lib.ManualClock(_T0),
+    )
+    assert container.recorder is not None
+    notes = container.adapters[instruments.Venue.LIGHTER].capabilities().notes
+    assert any("aws-public-blockchain" in note for note in notes) is enabled
+    await container.aclose()

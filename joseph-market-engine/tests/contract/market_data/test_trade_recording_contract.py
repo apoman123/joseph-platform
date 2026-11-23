@@ -115,7 +115,7 @@ def _raw_trades(venue: instruments.Venue, frames: list[str]) -> list[RawTrade]:
                         bool(r["is_maker_ask"]),
                     )
                     for r in message.get("trades") or []
-                    if r.get("type", "trade") in ("trade", "liquidation")
+                    if r.get("type", "trade") == "trade"
                 )
         elif message.get("channel") == "push.deal":
             data = message["data"]

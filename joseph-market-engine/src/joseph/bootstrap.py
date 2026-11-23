@@ -53,6 +53,7 @@ from joseph.market_data.adapters import alpaca
 from joseph.market_data.adapters import binance_vision
 from joseph.market_data.adapters import bitget_archive
 from joseph.market_data.adapters import factory
+from joseph.market_data.adapters import lighter_archive
 from joseph.market_data.adapters import replay as replay_lib
 from joseph.market_data.adapters import trade_archive_sql
 from joseph.market_data.adapters import ws
@@ -401,6 +402,8 @@ def _trade_recorder(
         day_archives.append(
             bitget_archive.BitgetArchive(settings.bitget_archive_dir)
         )
+    if settings.lighter_archive and instruments.Venue.LIGHTER in adapters:
+        day_archives.append(lighter_archive.LighterArchive())
     recorder = trade_recorder.TradeRecorder(
         adapters,
         trade_archive_sql.SqlTradeArchive(dedicated or engine),

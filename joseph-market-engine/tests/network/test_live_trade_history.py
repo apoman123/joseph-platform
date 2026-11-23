@@ -2,8 +2,10 @@
 
 Run with ``JOSEPH_NETWORK_TESTS=1 uv run pytest tests/network -m network``.
 Requests stay small: one ~0.3 MB archive day of a quiet Binance contract,
-a few kline pages and a few trade-history pages; the stream test records
-Hyperliquid and MEXC trades for about 75 seconds.
+the needed column chunks of one Lighter archive day of BTC (about 15-20 MB
+of a 150-300 MB file, by HTTP range requests), a few kline pages and a few
+trade-history pages; the stream test records Hyperliquid and MEXC trades
+for about 75 seconds.
 """
 
 from __future__ import annotations
@@ -25,6 +27,7 @@ from joseph.market_data.adapters import base
 from joseph.market_data.adapters import binance_vision
 from joseph.market_data.adapters import bitget_archive
 from joseph.market_data.adapters import factory
+from joseph.market_data.adapters import lighter_archive
 from joseph.market_data.app import derived_bars
 from joseph.market_data.app import ports
 from joseph.market_data.app import trade_archive
@@ -196,6 +199,78 @@ async def test_live_bitget_archive_day_is_verified_and_matches_rest(
     assert match.base_quantity == first.base_quantity
     assert match.price == first.price
     assert match.venue_event_ts_ms // 1000 * 1000 == first.venue_event_ts_ms
+
+
+async def test_live_lighter_archive_day_folds_to_its_daily_candle() -> None:
+    """A Lighter archive day read by ranges reproduces Lighter's own bars.
+
+    The day's 1s aggregates fold to the venue's 1d candle (which opens at
+    the previous close), the day's 1m candles all get a recorded true
+    delta, and the transfer stays a small part of the day's file.
+    """
+    clock = clock_lib.SystemClock()
+    btc = instruments.InstrumentId.parse(_BTC[instruments.Venue.LIGHTER])
+    archive = lighter_archive.LighterArchive()
+    store = trade_archive.MemoryTradeArchive()
+
+    def sink(
+        rows: list[market.Candle], covered: list[recorded_trades.Interval]
+    ) -> None:
+        """Writes into the memory archive.
+
+        Args:
+            rows: Aggregates.
+            covered: Coverage.
+        """
+        store.put(btc, rows, covered)
+
+    now = clock.now_ms()
+    day = lighter_archive.day_of(now) - datetime.timedelta(days=1)
+    if not await archive.import_day(btc, day, sink, now):
+        day -= datetime.timedelta(days=1)
+        assert await archive.import_day(btc, day, sink, now)
+    transferred, requests = archive.bytes_received, archive.requests
+    remote = await archive.open_file(day)
+    await archive.close()
+    assert remote is not None
+    start, end = lighter_archive.day_bounds(day)
+    assert store.coverage(btc, 0, end + _DAY) == [(start, end)]
+    adapter = _adapter(instruments.Venue.LIGHTER)
+    (kline,) = await adapter.fetch_candles(btc, _TF.D1, start, end)
+    minutes = await adapter.fetch_candles(btc, _TF.M1, start, start + 3_600_000)
+    await adapter.close()
+    folded = aggregation.fold(
+        store.seconds(btc, start, end),
+        timeframe=_TF.D1,
+        start_ms=start,
+        end_ms=end,
+        is_final=True,
+        source="x",
+    )
+    assert folded.close == kline.close
+    assert max(folded.high, kline.open) == kline.high
+    assert min(folded.low, kline.open) == kline.low
+    assert folded.base_volume == kline.base_volume
+    assert folded.quote_turnover is not None
+    assert kline.quote_turnover is not None
+    assert recorded_trades.volumes_agree(
+        folded.quote_turnover, kline.quote_turnover
+    )
+    reader = trade_archive.ArchiveReader(
+        store, clock, delta_venues=[instruments.Venue.LIGHTER]
+    )
+    enriched = reader.enrich(minutes)
+    assert len(enriched) == 60
+    assert all(
+        m.taker_buy_method is market.BuyVolumeMethod.TAKER
+        for m in enriched
+        if m.base_volume > 0
+    )
+    print(  # noqa: T201
+        f"lighter archive {day}: {transferred} of {remote.size} bytes in "
+        f"{requests} requests"
+    )
+    assert transferred < remote.size // 5
 
 
 async def test_live_binance_aggregated_month_equals_native() -> None:

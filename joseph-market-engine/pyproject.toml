@@ -13,6 +13,8 @@ dependencies = [
   "websockets>=13,<17",
   "sqlalchemy>=2.0,<3",
   "tzdata>=2025.1",
+  # Remote Parquet reads of the Lighter trade archive (column chunks only).
+  "pyarrow>=26,<27",
   "joseph-smc-indicators",
 ]
 
@@ -85,4 +87,9 @@ warn_unused_ignores = true
 
 [[tool.mypy.overrides]]
 module = ["websockets.*"]
+ignore_missing_imports = true
+
+[[tool.mypy.overrides]]
+# pyarrow ships no type information (no py.typed marker).
+module = ["pyarrow", "pyarrow.*"]
 ignore_missing_imports = true

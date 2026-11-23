@@ -19,9 +19,12 @@ aggregates plus coverage intervals, so history accumulates across restarts:
   from now over the venue's REST trade history with a request budget.
   Complete past days come from official day archives where one exists
   (Binance ``data.binance.vision``, sha256 verified; Bitget's public trade
-  archive, verified against its own 1D kline). What the budget or the
-  venue's window cannot reach stays uncovered and is reported as gaps by
-  candle batches.
+  archive, verified against its own 1D kline; Lighter's trades in the AWS
+  Public Blockchain Data bucket, read remotely by column and verified
+  against its own 1d candle). Imports of one instrument-day are
+  serialized, so concurrent requests fetch a day once. What the budget or
+  the venue's window cannot reach stays uncovered and is reported as gaps
+  by candle batches.
 * **Retention** prunes aggregates and coverage older than
   ``retention_ms`` (``JOSEPH_TRADE_BAR_RETENTION_DAYS``).
 
@@ -137,8 +140,8 @@ class TradeEventPort(Protocol):
 class DayArchive(Protocol):
     """Official per-day trade archive of one venue.
 
-    Implemented by ``BinanceVision`` (UTC days) and ``BitgetArchive``
-    (days cut at 00:00 UTC+8).
+    Implemented by ``BinanceVision`` and ``LighterArchive`` (UTC days) and
+    ``BitgetArchive`` (days cut at 00:00 UTC+8).
 
     Attributes:
         venue: Venue whose trades the archive holds.
@@ -312,6 +315,9 @@ class TradeRecorder:
         self._recordings: dict[instruments.InstrumentId, _Recording] = {}
         self._failed_days: dict[
             tuple[instruments.InstrumentId, datetime.date], int
+        ] = {}
+        self._day_locks: dict[
+            tuple[instruments.InstrumentId, datetime.date], asyncio.Lock
         ] = {}
         self._supervisor: asyncio.Task[None] | None = None
         self._started = False
@@ -498,6 +504,11 @@ class TradeRecorder:
         deleted = self.archive.prune(cutoff)
         for archive in self._day_archives.values():
             archive.prune(cutoff)
+        idle = [
+            key for key, lock in self._day_locks.items() if not lock.locked()
+        ]
+        for key in idle:
+            del self._day_locks[key]
         self._last_prune_ms = now
         if deleted:
             _LOG.info("pruned %d archived 1s aggregates", deleted)
@@ -810,34 +821,58 @@ class TradeRecorder:
         day = min(newest_day, today - one)
         imported = 0
         while archive.day_bounds(day)[1] > oldest and imported < max_days:
-            start, end = archive.day_bounds(day)
-            coverage = self.archive.coverage(instrument, start, end)
-            failed = self._failed_days.get((instrument, day))
-            recent_failure = (
-                failed is not None and now_ms - failed < _RETRY_FAILED_MS
-            )
-            if not recorded_trades.covering(coverage, start, end) and (
-                not recent_failure
-            ):
-                try:
-                    found = await archive.import_day(
-                        instrument, day, self._sink(instrument), now_ms
-                    )
-                except errors.JosephError as err:
-                    self._failed_days[(instrument, day)] = now_ms
-                    _LOG.warning(
-                        "archive day %s of %s failed: %s",
-                        day,
-                        instrument,
-                        err.message,
-                    )
-                    found = True
-                else:
-                    imported += int(found)
-                if not found and day < today - one:
-                    break
+            found = await self._import_day(archive, instrument, day, now_ms)
+            imported += int(bool(found))
+            if found is False and day < today - one:
+                break
             day -= one
         return imported
+
+    async def _import_day(
+        self,
+        archive: DayArchive,
+        instrument: instruments.InstrumentId,
+        day: datetime.date,
+        now_ms: int,
+    ) -> bool | None:
+        """Imports one day unless it is covered or failed recently.
+
+        Imports of one instrument-day are serialized and coverage is checked
+        under the lock, so concurrent requests download a day once.
+
+        Args:
+            archive: Day archive of the instrument's venue.
+            instrument: Instrument.
+            day: Archive day.
+            now_ms: Current time.
+
+        Returns:
+            True when imported, False when the day is not published, and
+            ``None`` when it was skipped (covered or failed recently) or
+            failed now.
+        """
+        start, end = archive.day_bounds(day)
+        lock = self._day_locks.setdefault((instrument, day), asyncio.Lock())
+        async with lock:
+            coverage = self.archive.coverage(instrument, start, end)
+            failed = self._failed_days.get((instrument, day))
+            if recorded_trades.covering(coverage, start, end) or (
+                failed is not None and now_ms - failed < _RETRY_FAILED_MS
+            ):
+                return None
+            try:
+                return await archive.import_day(
+                    instrument, day, self._sink(instrument), now_ms
+                )
+            except errors.JosephError as err:
+                self._failed_days[(instrument, day)] = now_ms
+                _LOG.warning(
+                    "archive day %s of %s failed: %s",
+                    day,
+                    instrument,
+                    err.message,
+                )
+                return None
 
     # Read side (RecordedTrades) -----------------------------------------
 
