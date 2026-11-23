@@ -5,19 +5,22 @@
  *
  * Arming is offered only when the execution engine reports LIVE in the
  * account's modes with trading capabilities AVAILABLE (`modeAvailability`);
- * nothing here can grant LIVE. When the engine offers account-level live
- * consent (`grantAccountLiveConsent`, the same body as the deployments'
- * `POST /v1/deployments/{id}/live-consent`: step-up code, risk
- * acknowledgement, lifetime), arming sends the step-up code there and the
- * engine verifies it. Otherwise the arm is a browser-side acknowledgement
- * and the engine still checks every LIVE order (account permissions, the
- * deployment's live switch, risk limits, kill switches).
+ * nothing here can grant LIVE by itself. Arming is server-side: the panel
+ * sends the step-up code, the risk acknowledgement and the chosen lifetime
+ * to `POST /v1/accounts/{account_id}/live-consent` (the same step-up
+ * verification as a deployment's AUTO_LIVE consent) and the engine answers
+ * with the account summary whose `live_armed_until_ms` is the end of the
+ * arming. Until then the engine blocks manual LIVE orders on the account
+ * with `LIVE_NOT_ARMED` (risk-reducing orders still pass), and it re-checks
+ * every LIVE order (account permissions, risk limits, kill switches).
  */
 import {
-  LIVE_ARM_MS,
+  LIVE_ARM_DEFAULT_MS,
+  LIVE_ARM_DURATIONS,
+  liveArmDurationLabel,
+  liveArmRequest,
   liveArmText,
   liveConfirmation,
-  supportsLiveArming,
   validStepUpCode,
   type LiveInstrument,
 } from '@joseph/chart-trading';
@@ -26,6 +29,7 @@ import type {
   ExecutionClient,
   OrderPreview,
 } from '@joseph/contracts';
+import {DEMO_STEP_UP_CODE} from '@joseph/mock-provider';
 import {useId, useState, type ReactNode} from 'react';
 import styles from './trading.module.css';
 import {errorMessage} from './ui/hooks';
@@ -35,56 +39,73 @@ import {ConfirmDialog, Notice} from './ui/primitives';
 export interface ArmLivePanelProps {
   /** Account to arm. */
   account: AccountSummary;
-  /** Execution client (may offer account-level live consent). */
+  /** Execution client (verifies the step-up code and arms the account). */
   client: ExecutionClient;
-  /** Clock. */
-  now: () => number;
+  /** Whether the clients are the DEMO simulation (shows the DEMO code). */
+  demo?: boolean;
+  /** Why arming is asked again (e.g. the engine reported LIVE_NOT_ARMED). */
+  reason?: string | null;
   /**
-   * Called once armed.
-   * @param expiresAtMs When the arm ends.
+   * Called once the engine armed the account.
+   * @param summary Account summary carrying `live_armed_until_ms`.
    */
-  onArmed: (expiresAtMs: number) => void;
+  onArmed: (summary: AccountSummary) => void;
   /** Called when the user cancels. */
   onCancel: () => void;
 }
 
 /**
+ * Message for a refused arming.
+ * @param err Thrown value.
+ * @return Message.
+ */
+function armError(err: unknown): string {
+  const code =
+    err && typeof err === 'object' && 'body' in err
+      ? (err as {body?: {code?: unknown}}).body?.code
+      : null;
+  if (code === 'STEP_UP_REQUIRED')
+    return 'The execution engine did not accept the step-up code. Enter the current code from your authenticator app.';
+  return errorMessage(err);
+}
+
+/**
  * Consent step before LIVE: names the account and broker, requires an
- * explicit acknowledgement and, when the engine verifies one, a step-up
- * code.
+ * explicit acknowledgement, a lifetime and a step-up code that the
+ * execution engine verifies before it arms the account.
  * @param props Props.
  * @return Panel.
  */
 export function ArmLivePanel({
   account,
   client,
-  now,
+  demo = false,
+  reason = null,
   onArmed,
   onCancel,
 }: ArmLivePanelProps): ReactNode {
   const uid = useId();
   const [agreed, setAgreed] = useState(false);
   const [code, setCode] = useState('');
+  const [duration, setDuration] = useState(LIVE_ARM_DEFAULT_MS);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
-  const serverStepUp = supportsLiveArming(client);
-  const ready = agreed && (!serverStepUp || validStepUpCode(code)) && !busy;
+  const ready = agreed && validStepUpCode(code) && !busy;
   const arm = async () => {
     setError(null);
-    if (!supportsLiveArming(client)) {
-      onArmed(now() + LIVE_ARM_MS);
-      return;
-    }
     setBusy(true);
     try {
-      const grant = await client.grantAccountLiveConsent(account.account_id, {
-        step_up_code: code.trim(),
-        acknowledge_risk: true,
-        duration_ms: LIVE_ARM_MS,
-      });
-      onArmed(Math.min(grant.expires_at_ms, now() + LIVE_ARM_MS));
+      const summary = await client.grantAccountLiveConsent(
+        account.account_id,
+        liveArmRequest(code, duration)
+      );
+      if (summary.live_armed_until_ms == null) {
+        setError('The execution engine did not arm this account.');
+        return;
+      }
+      onArmed(summary);
     } catch (err) {
-      setError(errorMessage(err));
+      setError(armError(err));
     } finally {
       setBusy(false);
     }
@@ -97,6 +118,11 @@ export function ArmLivePanel({
       data-testid="arm-live"
     >
       <strong className="j-neg">Arm live trading</strong>
+      {reason && (
+        <div data-testid="arm-live-reason">
+          <Notice tone="warning">{reason}</Notice>
+        </div>
+      )}
       <p className={styles.meta}>{liveArmText(account)}</p>
       <label className="j-check">
         <input
@@ -107,32 +133,44 @@ export function ArmLivePanel({
         I understand that orders from this ticket use real money in{' '}
         {account.label}.
       </label>
-      {serverStepUp ? (
-        <div className="j-field">
-          <label className="j-label" htmlFor={`${uid}-step-up`}>
-            Step-up code
-          </label>
-          <input
-            id={`${uid}-step-up`}
-            className="j-input j-tabular"
-            inputMode="numeric"
-            autoComplete="one-time-code"
-            maxLength={8}
-            value={code}
-            onChange={e => setCode(e.target.value)}
-          />
-          <span className="j-field__hint">
-            The 6 to 8 digit code from your authenticator app. The execution
-            engine verifies it; the terminal never sees your secret.
-          </span>
-        </div>
-      ) : (
-        <p className={styles.meta}>
-          This execution engine asks no step-up code for manual orders; it
-          checks live permission on every order. Automatic live strategies need
-          the step-up consent of their deployment.
-        </p>
-      )}
+      <div className="j-field">
+        <label className="j-label" htmlFor={`${uid}-duration`}>
+          Arm for
+        </label>
+        <select
+          id={`${uid}-duration`}
+          className="j-select"
+          value={duration}
+          disabled={busy}
+          onChange={e => setDuration(Number(e.target.value))}
+        >
+          {LIVE_ARM_DURATIONS.map(option => (
+            <option key={option.ms} value={option.ms}>
+              {option.label}
+            </option>
+          ))}
+        </select>
+      </div>
+      <div className="j-field">
+        <label className="j-label" htmlFor={`${uid}-step-up`}>
+          Step-up code
+        </label>
+        <input
+          id={`${uid}-step-up`}
+          className="j-input j-tabular"
+          inputMode="numeric"
+          autoComplete="one-time-code"
+          maxLength={8}
+          value={code}
+          disabled={busy}
+          onChange={e => setCode(e.target.value)}
+        />
+        <span className="j-field__hint">
+          {demo
+            ? `DEMO rehearsal: the simulated execution engine accepts the step-up code ${DEMO_STEP_UP_CODE}.`
+            : 'The 6 to 8 digit code from your authenticator app. The execution engine verifies it; the terminal never sees your secret.'}
+        </span>
+      </div>
       {error && <Notice tone="danger">{error}</Notice>}
       <div className={styles.inline}>
         <button type="button" className="j-btn j-btn--ghost" onClick={onCancel}>
@@ -145,7 +183,9 @@ export function ArmLivePanel({
           data-testid="arm-live-confirm"
           onClick={() => void arm()}
         >
-          {busy ? 'Verifying…' : 'Arm live for 15 minutes'}
+          {busy
+            ? 'Verifying…'
+            : `Arm live for ${liveArmDurationLabel(duration)}`}
         </button>
       </div>
     </div>

@@ -4,8 +4,8 @@ The venue is simulated with respx (REST) and a scripted WebSocket; every
 other component is the production composition: vault-held credentials,
 account verification, Risk Gateway, OMS outbox, reconciliation and the
 private-stream supervisor. Safety cases prove that a closed gate, missing
-credentials, a kill switch or missing AUTO_LIVE consent never let an order
-request reach the venue.
+credentials, a kill switch, a missing account LIVE arming or missing
+AUTO_LIVE consent never let an order request reach the venue.
 """
 
 from __future__ import annotations
@@ -22,6 +22,7 @@ import respx
 
 from joseph_execution import bootstrap
 from joseph_execution.adapters import market_static
+from joseph_execution.adapters import step_up
 from joseph_execution.adapters import vault
 from joseph_execution.adapters.venues import catalog
 from joseph_execution.adapters.venues import credentials
@@ -141,6 +142,24 @@ async def _connect(engine: Engine, *, live_mode: bool = False) -> str:
             )
     engine.account_id = account_id
     return account_id
+
+
+async def _arm(engine: Engine, account_id: str) -> dict[str, object]:
+    """Arms manual LIVE orders on an account with a valid step-up code.
+
+    Args:
+        engine: Engine.
+        account_id: Verified account.
+
+    Returns:
+        Account summary.
+    """
+    return await engine.container.services.accounts.grant_live_consent(
+        harness.TENANT_A,
+        account_id,
+        step_up.totp(harness.TOTP_SECRET, engine.clock.now_ms()),
+        True,
+    )
 
 
 def _mock_venue(
@@ -314,6 +333,7 @@ async def test_live_order_flows_end_to_end_with_reconciliation() -> None:
         assert verified["status"] == "CONNECTED"
         assert verified["modes"] == ["LIVE"]
         assert verified["capabilities"]["status"] == "AVAILABLE"
+        assert (await _arm(engine, account_id))["live_armed_until_ms"]
         result = await _submit(engine, _intent(account_id), "live-1")
         assert result.decision.allowed, result.decision.failures()
         (order,) = result.orders
@@ -373,6 +393,7 @@ async def test_private_stream_fills_resting_orders_through_the_supervisor() -> (
         await engine.container.services.accounts.verify(
             harness.TENANT_A, account_id
         )
+        await _arm(engine, account_id)
         result = await _submit(
             engine,
             _intent(
@@ -467,6 +488,7 @@ async def test_kill_switch_and_missing_consent_never_send_orders() -> None:
         await engine.container.services.accounts.verify(
             harness.TENANT_A, account_id
         )
+        await _arm(engine, account_id)
         await engine.container.services.kill_switches.set(
             harness.TENANT_A,
             enums.KillSwitchScope.GLOBAL,
@@ -502,6 +524,64 @@ async def test_kill_switch_and_missing_consent_never_send_orders() -> None:
         assert _order_calls(routes, router) == 0
     adapter = engine.container.registry.live["binance"]
     assert "submit_order" not in adapter.calls  # type: ignore[attr-defined]
+
+
+async def test_unarmed_manual_live_orders_never_reach_the_venue() -> None:
+    """Without arming nothing is sent; arming sends; disarming stops it."""
+    engine = _engine(gate=True)
+    with respx.mock(assert_all_called=False) as router:
+        routes = _mock_venue(
+            router,
+            {
+                "orderId": 1001,
+                "status": "FILLED",
+                "executedQty": "0.010",
+                "updateTime": 1,
+            },
+        )
+        account_id = await _connect(engine)
+        await engine.container.services.accounts.verify(
+            harness.TENANT_A, account_id
+        )
+        blocked = await _submit(engine, _intent(account_id), "unarmed")
+        assert blocked.decision.primary_code() == "LIVE_NOT_ARMED"
+        assert blocked.orders == ()
+        assert _order_calls(routes, router) == 0
+        await _arm(engine, account_id)
+        sent = await _submit(engine, _intent(account_id), "armed")
+        assert sent.decision.allowed, sent.decision.failures()
+        assert routes["order"].call_count == 1
+        disarmed = await engine.container.services.accounts.revoke_live_consent(
+            harness.TENANT_A, account_id
+        )
+        assert disarmed["live_armed_until_ms"] is None
+        again = await _submit(engine, _intent(account_id), "disarmed")
+        assert again.decision.primary_code() == "LIVE_NOT_ARMED"
+        position = next(
+            p
+            for p in await engine.container.services.oms.list_positions(
+                harness.TENANT_A, account_id
+            )
+            if p["mode"] == "LIVE"
+        )
+        close = await engine.container.services.oms.close_request(
+            harness.TENANT_A,
+            str(position["position_id"]),
+            D(1),
+            enums.OrderType.MARKET,
+            None,
+        )
+        reduced = await _submit(engine, close, "close-disarmed")
+        assert reduced.decision.allowed, reduced.decision.failures()
+        mode_check = next(
+            c for c in reduced.decision.checks if c.check == "mode.allowed"
+        )
+        assert mode_check.outcome is enums.CheckOutcome.WARN
+        assert routes["order"].call_count == 2
+    with engine.container.uow_factory() as uow:
+        actions = [e.action for e in uow.audit.chain("tenant-a")]
+    assert actions.count("live_arming.granted") == 1
+    assert actions.count("live_arming.revoked") == 1
 
 
 @pytest.mark.parametrize("venue", ["bitget", "hyperliquid", "lighter", "mexc"])

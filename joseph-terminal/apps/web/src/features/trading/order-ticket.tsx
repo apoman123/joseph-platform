@@ -9,8 +9,12 @@
  * Cathay for TWSE) with cash-equity rules: whole shares or TWSE board/odd
  * lots, tick-ladder prices inside the daily price limit, DAY/GTC, IBKR's
  * outside-RTH flag and market-hours notices from the session calendar.
- * LIVE needs the server's permission, an explicit arm step and a dedicated
- * confirmation. Published rates have no ticket.
+ * LIVE needs the server's permission, a server-side arming of the account
+ * (step-up code verified by the execution engine; the ticket shows the
+ * armed-until time from `live_armed_until_ms` and can disarm) and a
+ * dedicated confirmation. When the engine answers `LIVE_NOT_ARMED` (the
+ * arming expired or was revoked elsewhere) the ticket returns to paper and
+ * asks to arm again. Published rates have no ticket.
  */
 import {
   accountInstrumentMismatch,
@@ -27,6 +31,8 @@ import {
   isBusy,
   isCashEquityId,
   isRateInstrumentId,
+  liveArmedUntil,
+  liveNotArmed,
   marketHoursNotice,
   modeAvailability,
   needsLimitPrice,
@@ -45,6 +51,7 @@ import {
   type TicketInputs,
 } from '@joseph/chart-trading';
 import {
+  ApiError,
   Decimal,
   instrumentCalendarId,
   type AccountSummary,
@@ -128,8 +135,14 @@ export function OrderTicket({ctx, runtime}: OrderTicketProps): ReactNode {
   const now = useNow(1000);
   const uid = useId();
   const calendarRevision = useCalendarRevision(ctx);
+  // Each poll remembers when it started, so a server answer on arming
+  // that arrived later wins until the next poll reports the arming.
   const accounts = usePolling(
-    () => ctx.clients.execution.listAccounts(),
+    async () => {
+      const startedMs = Date.now();
+      const list = await ctx.clients.execution.listAccounts();
+      return {...list, startedMs};
+    },
     'accounts',
     10_000
   );
@@ -265,9 +278,23 @@ export function OrderTicket({ctx, runtime}: OrderTicketProps): ReactNode {
     runtime.controller.setContext({account, reference, calendar, nowMs: now});
   }, [runtime.controller, account, reference, calendar, now]);
 
-  // An expired arm (or another account) drops the ticket back to paper.
-  const armedUntil = account ? (armed[account.account_id] ?? 0) : 0;
+  // The execution engine owns the arming: its newest answer (a grant or
+  // revoke response, else the account poll) says until when LIVE is armed.
+  // An expired or revoked arm (or another account) drops back to paper.
+  const answer = account ? armed[account.account_id] : undefined;
+  const armedUntil =
+    liveArmedUntil(
+      account && answer && answer.atMs >= (accounts.data?.startedMs ?? 0)
+        ? {...account, live_armed_until_ms: answer.untilMs}
+        : account,
+      now
+    ) ?? 0;
   const liveArmed = armedUntil > now;
+  const rememberArming = (accountId: string, untilMs: number | null) =>
+    runtime.liveArm.update(all => ({
+      ...all,
+      [accountId]: {untilMs, atMs: Date.now()},
+    }));
   useEffect(() => {
     if (inputs.mode === 'LIVE' && !liveArmed && !busy) {
       runtime.controller.edit({mode: 'PAPER'});
@@ -278,7 +305,50 @@ export function OrderTicket({ctx, runtime}: OrderTicketProps): ReactNode {
     }
   }, [inputs.mode, liveArmed, busy, runtime.controller, ctx.notifier]);
   const [arming, setArming] = useState(false);
+  const [armReason, setArmReason] = useState<string | null>(null);
   const [liveConfirm, setLiveConfirm] = useState(false);
+
+  // The engine refused a LIVE order because the account is not armed: the
+  // local view was stale (expired or disarmed elsewhere). Forget it and ask
+  // to arm again.
+  const notArmedAccount =
+    account &&
+    inputs.mode === 'LIVE' &&
+    ((state.preview !== null &&
+      state.previewRevision === state.inputRevision &&
+      liveNotArmed(state.preview.risk)) ||
+      (state.phase === 'SUBMITTED' && liveNotArmed(state.result?.risk)) ||
+      state.error?.code === 'LIVE_NOT_ARMED')
+      ? account.account_id
+      : null;
+  useEffect(() => {
+    if (!notArmedAccount) return;
+    runtime.liveArm.update(all => ({
+      ...all,
+      [notArmedAccount]: {untilMs: null, atMs: Date.now()},
+    }));
+    setArmReason(
+      'The execution engine refused this LIVE order: live trading is not armed for this account (the arming expired or was disarmed). Arm again to continue.'
+    );
+    setArming(true);
+  }, [notArmedAccount, runtime.liveArm]);
+
+  const disarm = async (target: AccountSummary) => {
+    runtime.controller.edit({mode: 'PAPER'});
+    try {
+      const summary = await ctx.clients.execution.revokeAccountLiveConsent(
+        target.account_id
+      );
+      rememberArming(target.account_id, summary.live_armed_until_ms ?? null);
+      ctx.notifier.notify(`Live trading disarmed for ${target.label}.`, 'info');
+    } catch (err) {
+      ctx.notifier.notify(
+        `The execution engine did not confirm disarming: ${errorMessage(err)}`,
+        'error'
+      );
+    }
+    accounts.refresh();
+  };
 
   const modes = useMemo(() => modeAvailability(account), [account]);
   const built = useMemo(
@@ -574,6 +644,7 @@ export function OrderTicket({ctx, runtime}: OrderTicketProps): ReactNode {
                 title={m.reason ?? undefined}
                 onClick={() => {
                   if (m.mode === 'LIVE' && !liveArmed) {
+                    setArmReason(null);
                     setArming(true);
                     return;
                   }
@@ -597,19 +668,15 @@ export function OrderTicket({ctx, runtime}: OrderTicketProps): ReactNode {
           {inputs.mode === 'LIVE' && liveArmed && account && (
             <span className={styles.armed} data-testid="live-armed">
               <span className="j-badge j-badge--ask">Live armed</span>
-              <span className="j-field__hint">
+              <span className="j-field__hint" data-testid="live-armed-until">
                 {account.label} until{' '}
                 {new Date(armedUntil).toISOString().slice(11, 16)} UTC
               </span>
               <button
                 type="button"
                 className="j-btn j-btn--sm j-btn--ghost"
-                onClick={() => {
-                  runtime.liveArm.update(
-                    ({[account.account_id]: _gone, ...rest}) => rest
-                  );
-                  edit({mode: 'PAPER'});
-                }}
+                disabled={busy}
+                onClick={() => void disarm(account)}
               >
                 Disarm
               </button>
@@ -620,16 +687,22 @@ export function OrderTicket({ctx, runtime}: OrderTicketProps): ReactNode {
           <ArmLivePanel
             account={account}
             client={ctx.clients.execution}
-            now={() => Date.now()}
-            onArmed={expiresAtMs => {
-              runtime.liveArm.update(all => ({
-                ...all,
-                [account.account_id]: expiresAtMs,
-              }));
+            demo={ctx.clients.demo}
+            reason={armReason}
+            onArmed={summary => {
+              rememberArming(
+                account.account_id,
+                summary.live_armed_until_ms ?? null
+              );
               setArming(false);
+              setArmReason(null);
               edit({mode: 'LIVE'});
+              accounts.refresh();
             }}
-            onCancel={() => setArming(false)}
+            onCancel={() => {
+              setArming(false);
+              setArmReason(null);
+            }}
           />
         )}
         {hoursNotice && (
@@ -1219,7 +1292,11 @@ function AmendPanel({ctx, runtime}: OrderTicketProps): ReactNode {
       runtime.amend.set(null);
       void runtime.refreshOrders();
     } catch (err) {
-      setError(errorMessage(err));
+      setError(
+        err instanceof ApiError && err.body.code === 'LIVE_NOT_ARMED'
+          ? 'Live trading is not armed for this account. Arm it in the order ticket (Live) before amending LIVE orders.'
+          : errorMessage(err)
+      );
     } finally {
       setBusy(false);
     }

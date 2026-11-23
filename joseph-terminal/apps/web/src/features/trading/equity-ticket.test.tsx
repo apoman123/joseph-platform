@@ -7,16 +7,12 @@
  */
 import {
   DEMO_IBKR_ACCOUNT_ID,
+  DEMO_LIVE_REHEARSAL_ACCOUNT_ID,
   DEMO_SINOPAC_ACCOUNT_ID,
+  DEMO_STEP_UP_CODE,
   DEMO_TWD_ACCOUNT_ID,
   DemoExecutionClient,
 } from '@joseph/mock-provider';
-import type {
-  AccountList,
-  OrderIntentRequest,
-  OrderPreview,
-  SubmitIntentResponse,
-} from '@joseph/contracts';
 import {act, render, screen, waitFor, within} from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import {afterEach, describe, expect, it, vi} from 'vitest';
@@ -35,64 +31,26 @@ afterEach(() => {
   rendered = null;
 });
 
-/** DEMO broker that rehearses LIVE on the IBKR account (tests only). */
-class LiveRehearsalBroker extends DemoExecutionClient {
-  readonly submitted: OrderIntentRequest[] = [];
-
-  /**
-   * Lists accounts with LIVE permitted on IBKR.
-   * @return Accounts.
-   */
-  override async listAccounts(): Promise<AccountList> {
-    const list = await super.listAccounts();
-    return {
-      accounts: list.accounts.map(a =>
-        a.account_id === DEMO_IBKR_ACCOUNT_ID
-          ? {...a, modes: [...a.modes, 'LIVE' as const]}
-          : a
-      ),
-    };
-  }
-
-  /**
-   * Previews as paper and reports the requested mode.
-   * @param request Request.
-   * @return Allowed preview.
-   */
-  override async previewOrder(
-    request: OrderIntentRequest
-  ): Promise<OrderPreview> {
-    const preview = await super.previewOrder({...request, mode: 'PAPER'});
-    return {
-      ...preview,
-      allowed: true,
-      normalized: {...preview.normalized, mode: request.mode},
-    };
-  }
-
-  /**
-   * Records the request and fills it as paper.
-   * @param request Request.
-   * @param key Idempotency key.
-   * @return Submission.
-   */
-  override async submitIntent(
-    request: OrderIntentRequest,
-    key: string
-  ): Promise<SubmitIntentResponse> {
-    this.submitted.push(request);
-    return super.submitIntent(
-      {...request, mode: 'PAPER', preview_token: null},
-      key
-    );
-  }
+/**
+ * DEMO broker with the LIVE rehearsal account (simulated IBKR live).
+ * @return Broker.
+ */
+function rehearsalBroker(): DemoExecutionClient {
+  return new DemoExecutionClient({
+    liveRehearsal: true,
+    ackDelayMs: 0,
+    fillDelayMs: 0,
+    partialFills: false,
+  });
 }
 
-/** Rehearsal broker that also verifies a step-up code. */
-class StepUpBroker extends LiveRehearsalBroker {
-  readonly grantAccountLiveConsent = vi.fn(async () => ({
-    expires_at_ms: Date.now() + 60_000,
-  }));
+/**
+ * Formats an armed-until time like the ticket.
+ * @param ms UTC ms.
+ * @return `HH:MM`.
+ */
+function hhmm(ms: number): string {
+  return new Date(ms).toISOString().slice(11, 16);
 }
 
 /**
@@ -270,31 +228,58 @@ describe('equity order ticket', () => {
 });
 
 describe('live trading', () => {
-  it('arms LIVE, then confirms a LIVE order in a dedicated step', async () => {
-    const broker = new LiveRehearsalBroker({
-      ackDelayMs: 0,
-      fillDelayMs: 0,
-      partialFills: false,
-    });
+  it('arms LIVE on the server, then confirms a LIVE order in a dedicated step', async () => {
+    const broker = rehearsalBroker();
+    const grant = vi.spyOn(broker, 'grantAccountLiveConsent');
+    const revoke = vi.spyOn(broker, 'revokeAccountLiveConsent');
     await renderOn('mock:stock:ACME', 'acct-paper-demo', {
       broker,
-      select: DEMO_IBKR_ACCOUNT_ID,
+      select: DEMO_LIVE_REHEARSAL_ACCOUNT_ID,
     });
     const user = userEvent.setup();
     await user.click(screen.getByRole('button', {name: 'Live'}));
     const arm = screen.getByTestId('arm-live');
     expect(arm).toHaveTextContent(
-      'Live orders from this ticket go to Interactive Brokers account "IBKR paper (demo)" with real money.'
+      'Live orders from this ticket go to Interactive Brokers account "IBKR live rehearsal (demo)" with real money.'
     );
-    expect(
-      within(arm).queryByRole('textbox', {name: 'Step-up code'})
-    ).toBeNull();
+    expect(arm).toHaveTextContent(
+      `the simulated execution engine accepts the step-up code ${DEMO_STEP_UP_CODE}`
+    );
     const armButton = screen.getByTestId('arm-live-confirm');
     expect(armButton).toBeDisabled();
+    expect(armButton).toHaveTextContent('Arm live for 1 hour');
     await user.click(within(arm).getByRole('checkbox'));
+    const code = within(arm).getByRole('textbox', {name: 'Step-up code'});
+    await user.type(code, '12345');
+    expect(armButton).toBeDisabled();
+    await user.type(code, '9');
+    await user.click(armButton);
+    expect(await within(arm).findByRole('alert')).toHaveTextContent(
+      'The execution engine did not accept the step-up code.'
+    );
+    expect(screen.getByTestId('mode-badge')).toHaveTextContent('Paper');
+    await user.clear(code);
+    await user.type(code, DEMO_STEP_UP_CODE);
+    await user.selectOptions(
+      within(arm).getByRole('combobox', {name: 'Arm for'}),
+      '4 hours'
+    );
+    expect(armButton).toHaveTextContent('Arm live for 4 hours');
     await user.click(armButton);
     expect(await screen.findByTestId('live-armed')).toHaveTextContent(
       'Live armed'
+    );
+    expect(grant).toHaveBeenLastCalledWith(DEMO_LIVE_REHEARSAL_ACCOUNT_ID, {
+      step_up_code: DEMO_STEP_UP_CODE,
+      acknowledge_risk: true,
+      duration_ms: 4 * 3_600_000,
+    });
+    const until = (
+      await broker.getAccountSummary(DEMO_LIVE_REHEARSAL_ACCOUNT_ID)
+    ).live_armed_until_ms;
+    expect(until).not.toBeNull();
+    expect(screen.getByTestId('live-armed-until')).toHaveTextContent(
+      `IBKR live rehearsal (demo) until ${hhmm(until ?? 0)} UTC`
     );
     expect(screen.getByTestId('mode-badge')).toHaveTextContent('Live money');
     await user.type(
@@ -314,7 +299,7 @@ describe('live trading', () => {
     const facts = within(dialog).getByTestId('live-confirmation');
     expect(facts).toHaveTextContent(/LIVE money/);
     expect(facts).toHaveTextContent(/Interactive Brokers/);
-    expect(facts).toHaveTextContent(/IBKR paper \(demo\)/);
+    expect(facts).toHaveTextContent(/IBKR live rehearsal \(demo\)/);
     expect(facts).toHaveTextContent(/100 shares/);
     expect(facts).toHaveTextContent(/182\.40 USD/);
     expect(facts).toHaveTextContent(/DAY/);
@@ -328,36 +313,70 @@ describe('live trading', () => {
       })
     );
     await user.click(send);
-    await waitFor(() => expect(broker.submitted).toHaveLength(1));
-    expect(broker.submitted[0]).toMatchObject({
-      mode: 'LIVE',
-      time_in_force: 'DAY',
-    });
+    await waitFor(async () =>
+      expect(
+        (await broker.listOrders(DEMO_LIVE_REHEARSAL_ACCOUNT_ID)).orders
+      ).toHaveLength(1)
+    );
+    const {orders} = await broker.listOrders(DEMO_LIVE_REHEARSAL_ACCOUNT_ID);
+    expect(orders[0]).toMatchObject({mode: 'LIVE', time_in_force: 'DAY'});
     await user.click(screen.getByRole('button', {name: 'New order'}));
     await user.click(screen.getByRole('button', {name: 'Disarm'}));
     expect(screen.getByTestId('mode-badge')).toHaveTextContent('Paper');
+    await waitFor(() =>
+      expect(revoke).toHaveBeenCalledWith(DEMO_LIVE_REHEARSAL_ACCOUNT_ID)
+    );
+    expect(
+      (await broker.getAccountSummary(DEMO_LIVE_REHEARSAL_ACCOUNT_ID))
+        .live_armed_until_ms
+    ).toBeNull();
+    expect(screen.queryByTestId('live-armed')).toBeNull();
+    await user.click(screen.getByRole('button', {name: 'Live'}));
+    expect(screen.getByTestId('arm-live')).toBeInTheDocument();
   });
 
-  it('sends a step-up code when the engine verifies live consent', async () => {
-    const broker = new StepUpBroker({ackDelayMs: 0, fillDelayMs: 0});
+  it('uses the server arming and asks to arm again on LIVE_NOT_ARMED', async () => {
+    const broker = rehearsalBroker();
+    await broker.grantAccountLiveConsent(DEMO_LIVE_REHEARSAL_ACCOUNT_ID, {
+      step_up_code: DEMO_STEP_UP_CODE,
+      acknowledge_risk: true,
+      duration_ms: 3_600_000,
+    });
     await renderOn('mock:stock:ACME', 'acct-paper-demo', {
       broker,
-      select: DEMO_IBKR_ACCOUNT_ID,
+      select: DEMO_LIVE_REHEARSAL_ACCOUNT_ID,
     });
     const user = userEvent.setup();
+    // Armed on the server already: Live needs no new step-up.
     await user.click(screen.getByRole('button', {name: 'Live'}));
+    expect(screen.queryByTestId('arm-live')).toBeNull();
+    expect(await screen.findByTestId('live-armed')).toBeInTheDocument();
+    // Disarmed elsewhere; the ticket still shows the last poll.
+    await broker.revokeAccountLiveConsent(DEMO_LIVE_REHEARSAL_ACCOUNT_ID);
+    await user.type(
+      screen.getByRole('textbox', {name: 'Quantity (shares)'}),
+      '10'
+    );
+    await user.type(
+      screen.getByRole('textbox', {name: 'Limit price (USD)'}),
+      '182.4'
+    );
+    await user.click(screen.getByRole('button', {name: 'Preview order'}));
+    expect(await screen.findByTestId('arm-live-reason')).toHaveTextContent(
+      'live trading is not armed for this account'
+    );
+    expect(screen.getByTestId('mode-badge')).toHaveTextContent('Paper');
+    expect(screen.queryByTestId('live-armed')).toBeNull();
     const arm = screen.getByTestId('arm-live');
     await user.click(within(arm).getByRole('checkbox'));
-    const code = within(arm).getByRole('textbox', {name: 'Step-up code'});
-    await user.type(code, '12345');
-    expect(screen.getByTestId('arm-live-confirm')).toBeDisabled();
-    await user.type(code, '6');
+    await user.type(
+      within(arm).getByRole('textbox', {name: 'Step-up code'}),
+      DEMO_STEP_UP_CODE
+    );
     await user.click(screen.getByTestId('arm-live-confirm'));
     expect(await screen.findByTestId('live-armed')).toBeInTheDocument();
-    expect(broker.grantAccountLiveConsent).toHaveBeenCalledWith(
-      DEMO_IBKR_ACCOUNT_ID,
-      {step_up_code: '123456', acknowledge_risk: true, duration_ms: 900_000}
-    );
+    expect(screen.queryByTestId('arm-live')).toBeNull();
+    expect(screen.getByTestId('mode-badge')).toHaveTextContent('Live money');
   });
 
   it('keeps LIVE off for DEMO accounts and explains broker states', async () => {
