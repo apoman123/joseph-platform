@@ -1,0 +1,26 @@
+MEXC futures WebSocket Protocol Buffers definitions (vendored)
+
+Origin:   https://github.com/mexcdevelop/websocket-future-proto
+Commit:   033825833318b4bc3add4481997e9f76005c6483 (2026-10-22, "[pb] 初始化pb 文件目录 (#1)")
+Fetched:  2026-11-23
+License:  Apache License 2.0 (LICENSE in this directory, copied unmodified
+          from the repository root). The upstream LICENSE names no
+          copyright holder; the repository belongs to the mexcdevelop
+          (MEXC) GitHub organization.
+Docs:     https://www.mexc.com/api-docs/futures/websocket-api/protocol-buffers-integration
+
+Files (byte-for-byte copies of proto/<name> at the commit above):
+
+  ContractWrapper.proto  eca565de5c01e6354314b3e612fa0d9a2a54a4a895a92fdbce79cbd04f4ab2f1
+  Deal.proto             decbc9df2a3b78e26e1094211a671fe7c6e75184e1f0b1e72bbc16b4e6a23207
+  WsKLine.proto          86abd498e90fd5bcf76454448633bfb75649c09c64c21aca46093dafb3b1c756
+  QuotationEnums.proto   9e270a88b141cea620628fd68170ee67265a3aa2e649fa4448808c7e662d72b3
+  LICENSE                c71d239df91726fc519c6eb72d318ec65820627232b2f796219e87dcf35d0ab4
+
+(SHA-256.) Only the messages the market adapter decodes are vendored:
+ContractWrapper.proto imports ~60 other upstream files that are not copied.
+No code is generated from these files. joseph.market_data.adapters.
+mexc_protobuf transcribes the fields it needs into protobuf descriptors,
+and tests/unit/market_data/test_mexc_protobuf.py checks that transcription
+against these files. To update: copy the new upstream files here, record
+the commit and hashes above, and run that test.
