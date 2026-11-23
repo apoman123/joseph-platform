@@ -9,6 +9,7 @@ from collections.abc import Sequence
 from joseph_execution.domain import accounts
 from joseph_execution.domain import deployments
 from joseph_execution.domain import enums
+from joseph_execution.domain import equities
 from joseph_execution.domain import identity
 from joseph_execution.domain import intents
 from joseph_execution.domain import kill_switch
@@ -54,6 +55,14 @@ class RiskContext:
         notional: Order notional at the reference price.
         margin_required: Margin needed by the order.
         slippage_pct: Estimated market-order slippage.
+        sessions: Exchange sessions around ``now_ms`` for securities
+            (``None`` when unknown or not gathered).
+        previous_close: Reference price of daily limits (securities).
+        cash: Cash buying power of the account (securities).
+        estimated_fee: Estimated fee of the order.
+        queue_closed_market_orders: Configuration allows DAY market
+            orders to queue for the next open while the exchange is
+            closed.
     """
 
     request: intents.OrderIntentRequest
@@ -84,6 +93,23 @@ class RiskContext:
     notional: decimal.Decimal | None
     margin_required: decimal.Decimal | None
     slippage_pct: decimal.Decimal | None
+    sessions: tuple[market.TradingSession, ...] | None = None
+    previous_close: decimal.Decimal | None = None
+    cash: equities.CashBalance | None = None
+    estimated_fee: decimal.Decimal | None = None
+    queue_closed_market_orders: bool = False
+
+    @property
+    def security(self) -> bool:
+        """Whether the order is for an exchange-listed security."""
+        return equities.is_security(self.request.instrument_id)
+
+    @property
+    def long_qty(self) -> decimal.Decimal:
+        """Returns the long quantity held (0 when flat, short or unknown)."""
+        if self.position is None or self.position.signed_qty <= 0:
+            return decimal.Decimal(0)
+        return self.position.signed_qty
 
     @property
     def risk_reducing(self) -> bool:
