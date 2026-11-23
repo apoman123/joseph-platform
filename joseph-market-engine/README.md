@@ -1,12 +1,12 @@
 # Joseph Market Engine (private)
 
-Python-authoritative market data, perpetual qualification, the seven SMC indicator plugins, the strategy rule AST evaluator, signals, alerts and backtests. FastAPI on port 8000.
+Market data, perpetual qualification, indicator plugins (eight Pine ports, two native studies), the rule-AST evaluator, signals, alerts and backtests. FastAPI on :8000. Settings: [`docs/OPERATIONS.md`](../docs/OPERATIONS.md#market-engine).
 
 ```bash
-uv sync
+uv sync                                              # --extra sinopac for SinoPac data
 JOSEPH_DEV_TOKENS=dev-local-token:tenant-01:user-01 \
   uv run uvicorn joseph.bootstrap:create_application --factory --port 8000
-uv run pytest                 # all offline tiers
+uv run pytest                                        # all offline tiers
 JOSEPH_NETWORK_TESTS=1 uv run pytest tests/network   # live venue checks
 uv run python scripts/probe_venues.py                # connectivity evidence
 ```
@@ -15,52 +15,54 @@ uv run python scripts/probe_venues.py                # connectivity evidence
 
 | Package | Responsibility |
 |---|---|
-| `domain/` | Standard-library kernel: ids (UUIDv7), decimals, timeframes, instruments, candles, AOIs, `BarFrame` |
-| `market_data/` | Venue adapters (httpx + websockets; klines and public trades), seconds bars built from trades, feed router (AUTO / NATIVE_WS / REST_POLL / REPLAY), candle store, order books |
-| `screening/` | Five strict gates, funding risk, three-state qualification with reasons and policy version |
-| `indicators/` | Plugin SDK, multi-timeframe engine (no look-ahead), adapters for the eight indicators of the external `smc_indicators` library (`apoman123/PineScripts`) |
-| `strategy/` | Rule AST v2 models, compiler, tri-state evaluator with reason trees, setup state machine, immutable versions |
-| `signals/`, `alerts/` | Signal records with dedupe keys; durable alert outbox → UI stream, Telegram, LINE Messaging API, e-mail, webhook, execution forwarder |
-| `pipeline/` | Live loop: closed candles → indicator engine → runtime (history warms up without firing) |
-| `backtest/` | Same evaluator over engine frames, conservative fills, metrics |
-| `api/`, `bootstrap.py` | FastAPI routers; dependency-injection composition root |
+| `domain/` | Stdlib kernel: ids, decimals, timeframes, instruments, session calendars, candles, AOIs, `BarFrame` |
+| `market_data/` | Venue adapters, seconds bars, trade recorder and archives, aggregated timeframes, feed router (AUTO / NATIVE_WS / REST_POLL / REPLAY), candle store, order books |
+| `screening/` | Five strict gates, funding risk, three-state qualification with reasons |
+| `indicators/` | Plugin SDK, multi-timeframe engine, adapters for `smc_indicators` ([README](src/joseph/indicators/README.md)) |
+| `strategy/` | Rule AST v2, compiler, tri-state evaluator, setup state machine, immutable versions |
+| `signals/`, `alerts/` | Deduplicated signals; durable outbox → UI, Telegram, LINE, e-mail, webhook, execution forwarder |
+| `pipeline/`, `backtest/` | Live loop over closed candles (history warms up without firing); backtests on the same evaluator |
+| `api/`, `bootstrap.py` | FastAPI routers; composition root |
 
-## Venues (verified against live public APIs, 2026-11-22)
+## Venues
 
-Capabilities (`GET /v1/venues`) list only what is implemented and verified; everything else is refused with `UNSUPPORTED`, never approximated.
+`GET /v1/venues` lists only implemented, verified capabilities; anything else is refused with `UNSUPPORTED`. Order-book snapshots exist everywhere except Alpaca and Treasury; only SinoPac data streams books.
 
-| Venue | Klines (REST history + native WS) | `1M` | Taker buy volume | Trade stream (WS) | Trade history (REST, time range) | Seconds `1s 5s 15s 30s` |
-|---|---|---|---|---|---|---|
-| Binance USDⓈ-M | every timeframe `1m`…`1M` | native `1M` | yes: kline index 9 / `k.V` | `<sym>@aggTrade` on `/market/ws` | `aggTrades`, last 48 h | built from trades, 48 h history |
-| Hyperliquid | `1m`…`1d` except `6h`; `1w` (Thursday-anchored) refused | no: the venue's `1M` is 30-day epoch buckets | no | `trades` | none | built from the live stream only |
-| Bitget futures | UTC granularities (`6Hutc`…`1Mutc`); windows ≤ 90 days, older ranges via `history-candles` | native `1Mutc` | no | `trade` | `fills-history`, last 90 days, 7-day windows | built from trades, 90-day history |
-| MEXC futures | `1m 5m 15m 30m 1h 4h 1d 1w 1M` | native `Month1` | no | `push.deal` | none (latest 100 only) | built from the live stream only |
-| Lighter | `1m 5m 15m 30m 1h 4h 12h 1d`, REST only (AUTO polls; the venue's WS candle channel is not wired) | no (venue has no `1w`/`1M`) | no | `trade/<market_id>` | `trades`, about 53 min back | built from trades, about 53 min history |
-| `mock` (DEMO) | every timeframe, synthetic | calendar months | synthetic, every bar | synthetic | synthetic | built from synthetic trades that sum exactly to the 1m bars |
+### Crypto (verified live 2026-11-22/23)
 
-Aggressor side (each checked live against the contemporaneous best bid/ask): Binance `m=true` (buyer is maker) is a **sell**; Bitget `side` is the taker side; MEXC `T` 1 = buy, 2 = sell (`v` is in contracts, converted with `contractSize`); Hyperliquid `side` "B" = buy, "A" = sell; Lighter `is_maker_ask=true` = **buy**.
+| Venue | Klines | `1M` | Taker volume | Trade history (REST) | Public archive |
+|---|---|---|---|---|---|
+| Binance USDⓈ-M | all, REST + WS | native | yes | 48 h | `data.binance.vision`, sha256-checked; next day about 07:30 UTC |
+| Bitget | UTC granularities, ≤90-day windows (older via `history-candles`) | native | no | 90 days | Download page; UTC+8 days, about a day late; checked against the `1D` kline |
+| Hyperliquid | `1m`…`1d` except `6h`; Thursday `1w` refused | from `1d` | no | none | S3, requester-pays: not used |
+| Lighter | `1m 5m 15m 30m 1h 4h 12h 1d`, REST only | from `1d` | no | about 53 min | AWS Parquet range reads (about 14–19 MB per market-day, nothing on disk), from 2025-01-17, about 7 h after the UTC day; checked against Lighter's `1d` candle |
+| MEXC futures | `1m`…`1M` | native | no | latest 100 only | none |
+| `mock` (DEMO) | all, synthetic | yes | yes | synthetic | — |
 
-Seconds bars (`market_data/domain/trade_bars.py`) are folded from public trades: OHLC, base volume, quote turnover, trade count (null for aggregated fills) and `taker_buy_base_volume` (null if any trade lacks a side). Empty seconds between two observed trades of one continuous coverage segment become flat zero-volume bars; nothing is filled before the first trade, after the last one or across a disconnect. After a reconnect missed trades are backfilled from the REST history where one exists (Hyperliquid's 30-trade replay can also prove continuity); otherwise a gap is recorded and `REST_POLL` of seconds bars is refused. `source` is `<venue>.trades` (stream) or `<venue>.trades.rest` (history).
+- **Trade streams:** Binance `<sym>@aggTrade`, Bitget `trade`, Hyperliquid `trades`, Lighter `trade/<market_id>`, MEXC `push.deal`. Aggressor side, checked against the best bid/ask: Binance `m=true` is a sell; Bitget `side` is the taker; MEXC `T` 1 buy / 2 sell (`v` × `contractSize`); Hyperliquid `B` buy / `A` sell; Lighter `is_maker_ask=true` is a buy.
+- **Seconds bars** (`1s 5s 15s 30s`, `market_data/domain/trade_bars.py`) fold trades into OHLC, volume, turnover, trade count and taker buy volume. Empty seconds inside one coverage segment are flat zero-volume bars; nothing is filled across a disconnect. Reconnects backfill from REST where possible (Hyperliquid's 30-trade replay can prove continuity), else a gap is recorded and `REST_POLL` of seconds is refused.
+- **True delta** on venues without kline taker volume only when recorded trades cover the whole bar and match its volume. Lighter liquidation, deleverage and settlement fills are excluded, as in Lighter's candles.
+- **Aggregated timeframes** fold a shorter native timeframe that tiles exactly; a missing child bar is a gap.
+- **MEXC** market data is Protobuf by default (`JOSEPH_MEXC_WS_FORMAT`; JSON ends 2026-12-01 10:00 UTC); vendored `.proto` files are Apache-2.0 (`adapters/mexc_proto/NOTICE`).
 
-Order-book streams are not wired for any venue yet; capabilities say so.
+### Securities and rates
 
-### Taiwan: TWSE and TPEx (verified 2026-11-23)
+| Venue | Source | Calendar | Intraday | Delta |
+|---|---|---|---|---|
+| `twse`, `tpex` | Official lists, daily reports and MIS snapshots; optional SinoPac | XTAI | Recorded MIS (coarse, no seconds) or Shioaji | Classified (quote rule; Shioaji `tick_type`) |
+| `nasdaq`, `nyse`, `cboe` | Nasdaq Trader listings, Alpaca data | XNYS | Alpaca minutes on the XNYS grid; seconds from 30 min of trades | Classified (Lee-Ready) |
+| `treasury` | Treasury.gov par and real yields | USBOND | daily only, not tradable | — |
 
-`twse` (Taiwan Stock Exchange, `adapters/twse.py`) and `tpex` (Taipei Exchange mainboard, 上櫃, `adapters/tpex.py`) share one implementation (`twse.TaiwanExchangeAdapter`): the XTAI calendar (09:00-13:30 Asia/Taipei), daily bars from the exchange's monthly report, intraday bars recorded from TWSE's MIS snapshots (`tse_` and `otc_` channels, one shared request pace), classified delta, no seconds bars, sparse bars with coverage. Ids look like `twse:stock:2330`, `tpex:stock:6488` and `tpex:etf:00679B`.
+**Taiwan** (`adapters/twse.py`, `tpex.py`; one `TaiwanExchangeAdapter`). Ids `twse:stock:2330`, `tpex:etf:00679B`. Bars are sparse with stated coverage; recorded bars persist across restarts.
 
-TPEx specifics:
+- MIS responses are cached server-side (data advances every 4–120 s); TWSE blocks clients above about 3 requests per 5 s, shared by TWSE and TPEx. www.tpex.org.tw is paced at 1 request per 2 s.
+- TPEx lists come from OpenAPI `tpex_mainboard_quotes`, `mopsfin_t187ap03_O`, `tpex_ipo_no_limit`, `tpex_cmode`: stocks and ETFs, incl. bond ETFs (sixth character `B`, or `D` active; asset class `BOND`). Not served: 興櫃, foreign-currency counters (`K`/`C`), preferreds, ETNs, warrants. Suspended companies are `HALTED`. Daily history goes back to 1994 with volume exact to 1,000 shares, including odd-lot and after-hours trades but not block trades; prices are unadjusted. TPEx's index matched XTAI in every month 2005–2026; new closures are added to XTAI at runtime. Screening uses TWD thresholds (`tpex_equity`, `tpex_bond` in `screening/domain/policy.py`).
+- **SinoPac** (`adapters/sinopac.py`): 1m kbars back to 2020-03-02 (3m–12h aggregated), live 1m and seconds bars from ticks, seconds history from tick history, streamed 5-level books, classified buy volume. Board lots only (no odd-lot, after-hours or block trades); listings, limits and 1d/1w/1M stay official. Quotas: 50 queries per 10 s; 10 tick and 270 kbar queries in trading hours; 500 MB–10 GB of data a day (reset 08:00 Taipei); 200 subscriptions; 5 connections per person, shared with trading. Failures fall back to official data (`twse.mis`/`tpex.mis`, `DEGRADED`); a bar never mixes sources. Opt-in test: `JOSEPH_SINOPAC_DATA_TESTS=1 uv run --extra sinopac pytest tests/network/test_live_sinopac.py -m sinopac_data`, outside trading hours.
 
-- **Listings**: OpenAPI `tpex_mainboard_quotes`, `mopsfin_t187ap03_O`, `tpex_ipo_no_limit` and `tpex_cmode`. Stocks and ETFs (codes `00…`), including the bond ETFs most Taiwan bond funds list on TPEx (sixth character `B`, or `D` for active bond funds) with asset class `BOND`. Not served: the emerging-stock board (興櫃), foreign-currency ETF counters (sixth character `K`/`C`), preferred shares, ETNs and warrants. Suspended companies are listed as `HALTED`.
-- **Rules**: TWSE's tick ladders; 10 % price limits, none where TPEx publishes limit-up 9999.95 (bond and other foreign-constituent ETFs, a listing's first five days); 1,000-share board lots; T+2.
-- **Daily history**: `/www/zh-tw/afterTrading/tradingStock` (one month per request, back to 1994). TPEx publishes volume and turnover in thousands, rounded, so daily volume is exact to 1,000 shares. Bars include odd-lot and after-hours fixed-price trades, not block trades. The listing-day mark (`106/01/17*`) stops reads of older months.
-- **Calendar**: TPEx's daily index matched the XTAI sessions in every month from 2005-01 to 2026-11, and its published 2026-2027 schedules (`/www/zh-tw/bulletin/tradingDate`) list the XTAI closures. Newly published closures are added to XTAI at runtime.
-- **Screening**: TWD thresholds with TWSE's values (`tpex_equity`, `tpex_bond` in `screening/domain/policy.py`).
-- **Pacing**: www.tpex.org.tw at one request per 2 s; MIS shares TWSE's budget.
+**US** (`adapters/alpaca.py`). Exchange `Z` in `otherlisted` is `cboe` (e.g. `cboe:etf:GOVT`); IEX, NYSE Texas, TXSE, OTC listings, preferreds, units, warrants and rights are skipped. Free plan: 200 requests/min, one stream, 30 symbols. Ticks 0.01, or 0.0001 below $1.
 
-## Configuration
-
-See `docs/OPERATIONS.md` for every variable. The key ones are `JOSEPH_DEV_TOKENS`, `JOSEPH_SERVICE_TOKEN`, `JOSEPH_ENABLED_VENUES` / `JOSEPH_DEMO_ONLY`, `JOSEPH_DATABASE_URL`, `JOSEPH_EXECUTION_URL`, `JOSEPH_PIPELINE_*` and the notification-channel credentials.
+- **Closing print:** on `sip`/`delayed_sip`, each session's official closing print (condition `6`) is read once per symbol from `[close, close + 60 s)` and folded into the last minute bar, so 1m/1h/4h/1d closes agree. At most 20 requests per fetch and 60 per minute; until read, that minute stays out of coverage (a gap). `iex` reads nothing.
 
 ## API
 
-OpenAPI: `../joseph-terminal/packages/contracts/openapi/market-engine.openapi.json` (regenerate with `uv run python scripts/export_openapi.py`). WebSocket protocol: `../joseph-terminal/packages/contracts/asyncapi/joseph-streams.asyncapi.yaml`.
+OpenAPI: `../joseph-terminal/packages/contracts/openapi/market-engine.openapi.json` (`uv run python scripts/export_openapi.py`). WebSocket: `../joseph-terminal/packages/contracts/asyncapi/joseph-streams.asyncapi.yaml`.
