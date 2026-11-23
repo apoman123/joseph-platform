@@ -1,8 +1,9 @@
 """Public market-data REST endpoints.
 
-Routes: ``/v1/venues``, ``/v1/instruments``, ``/v1/candles`` and
-``/v1/market/*``. Query parameter names match ``joseph-terminal/packages/
-contracts/src/client/http.ts``; responses are contract objects.
+Routes: ``/v1/venues``, ``/v1/instruments``, ``/v1/candles``,
+``/v1/calendars/{calendar_id}/sessions`` and ``/v1/market/*``. Query
+parameter names match ``joseph-terminal/packages/contracts/src/client/
+http.ts``; responses are contract objects.
 """
 
 from __future__ import annotations
@@ -133,6 +134,28 @@ def build_router(
             feed_mode=mode or quality.FeedMode.AUTO,
         )
         return batch.to_contract()
+
+    @router.get("/calendars/{calendar_id}/sessions")
+    async def calendar_sessions(
+        calendar_id: str,
+        from_ms: int = fastapi.Query(..., ge=0),
+        to_ms: int = fastapi.Query(..., ge=0),
+    ) -> dict[str, object]:
+        """Lists the trading sessions of a calendar in a window.
+
+        The window ``[from_ms, to_ms)`` may span at most 400 days. A 24x7
+        calendar never closes and returns no sessions.
+
+        Args:
+            calendar_id: Contract ``CalendarId`` (``24x7``, ``XTAI``,
+                ``XNYS``, ``USBOND``).
+            from_ms: Inclusive window start.
+            to_ms: Exclusive window end.
+
+        Returns:
+            Contract ``SessionList``.
+        """
+        return market_data.calendar_sessions(calendar_id, from_ms, to_ms)
 
     @router.get("/market/snapshot")
     async def snapshot(instrument_id: str) -> dict[str, object]:

@@ -6,6 +6,13 @@ compiler adds the semantic checks the schema cannot express and produces a
 engine must compute, how many bars of history the evaluator needs, and the
 canonical definition hash. A condition whose plugin or operator has been
 removed fails validation with actionable metadata; it is never skipped.
+
+Session calendars: lower-timeframe inputs must nest in the signal timeframe
+on the calendar of every universe venue (``sessions``). Rate series
+(``treasury:rate:*``) publish no tradable price, so a universe venue that
+only publishes rates, or a whitelisted rate instrument, is rejected; funding
+and open-interest operands are rejected for a universe of exchange venues,
+which have neither (ADR 0008: never emulate an unsupported feature).
 """
 
 from __future__ import annotations
@@ -17,6 +24,8 @@ from collections.abc import Iterator
 from collections.abc import Mapping
 from typing import Any
 
+from joseph.domain import instruments
+from joseph.domain import sessions
 from joseph.domain import structures
 from joseph.domain import timeframes
 from joseph.strategy.domain import ast
@@ -33,6 +42,54 @@ MAX_DEPTH = 12
 
 RISK_WINDOW_BARS = 60
 """Signal bars kept for the risk model (ATR(14) Wilder warm-up, swings)."""
+
+DERIVATIVE_MARKET_FIELDS = frozenset(
+    {"funding_8h_pct", "open_interest_usd", "oi_change_pct"}
+)
+"""Market operands that exist only for perpetual futures."""
+
+
+def untradable_reason(instrument_id: str) -> str | None:
+    """Explains why an instrument can never be a strategy's traded one.
+
+    Args:
+        instrument_id: Canonical instrument id.
+
+    Returns:
+        The reason, or ``None`` when it may be traded.
+    """
+    try:
+        parsed = instruments.InstrumentId.parse(instrument_id)
+    except ValueError:
+        return None
+    if (
+        parsed.market_type is instruments.MarketType.RATE
+        or parsed.venue in instruments.RATE_VENUES
+    ):
+        return (
+            f"{instrument_id} is a published rate series, not a tradable "
+            "instrument; a strategy cannot be deployed on it. Trade rates "
+            "through a bond ETF (e.g. nasdaq:etf:TLT); rate series may only "
+            "be read as context."
+        )
+    return None
+
+
+def venue_calendars(
+    venue: instruments.Venue,
+) -> frozenset[sessions.BarCalendar]:
+    """Returns every session calendar used by a venue's instruments.
+
+    Args:
+        venue: Venue.
+
+    Returns:
+        Calendars (the DEMO venue has 24x7 perps and an XNYS stock).
+    """
+    return frozenset(
+        sessions.get(instruments.calendar_code(venue, market_type))
+        for market_type in instruments.MarketType
+    )
 
 
 @dataclasses.dataclass(frozen=True, slots=True)
@@ -330,6 +387,17 @@ class _Collector:
         self.signal_tf = definition.signal_timeframe
         self.available = available
         self.unsupported_ops = unsupported_ops
+        venues = definition.universe.venues
+        self.calendars = frozenset(
+            calendar for venue in venues for calendar in venue_calendars(venue)
+        )
+        self.exchange_venues = frozenset(
+            venue.value
+            for venue in venues
+            if venue in instruments.EXCHANGE_VENUES
+            or venue in instruments.RATE_VENUES
+        )
+        self.only_exchanges = len(self.exchange_venues) == len(set(venues))
         self.errors: list[ValidationIssue] = []
         self.warnings: list[ValidationIssue] = []
         self.plugins: dict[str, set[timeframes.Timeframe]] = {}
@@ -391,12 +459,14 @@ class _Collector:
                 f"{tf.value} is finer than the {self.signal_tf.value} signal "
                 "timeframe; use a timeframe at or above it.",
             )
-        elif not self.signal_tf.contains(tf):
+        elif not all(
+            calendar.contains(self.signal_tf, tf) for calendar in self.calendars
+        ):
             self.error(
                 path,
                 "TIMEFRAME_NOT_NESTED",
                 f"{tf.value} bars do not nest inside {self.signal_tf.value} "
-                "bars.",
+                "bars on the session calendars of the universe.",
             )
         else:
             self.warn(
@@ -429,6 +499,27 @@ def _visit_operand(
                 "CANDLE_TF_UNSUPPORTED",
                 "Candle operands read the signal timeframe only; use an "
                 "indicator value for other timeframes.",
+            )
+    elif (
+        isinstance(operand, ast.MarketOperand)
+        and operand.field in DERIVATIVE_MARKET_FIELDS
+        and collector.exchange_venues
+    ):
+        venues = ", ".join(sorted(collector.exchange_venues))
+        if collector.only_exchanges:
+            collector.error(
+                path,
+                "MARKET_FIELD_UNAVAILABLE",
+                f"{operand.field} exists only for perpetual futures; {venues} "
+                "list exchange securities, which have no funding or open "
+                "interest. Remove this condition.",
+            )
+        else:
+            collector.warn(
+                path,
+                "MARKET_FIELD_PARTIAL",
+                f"{operand.field} exists only for perpetual futures; on "
+                f"{venues} it is UNKNOWN and blocks entries.",
             )
     elif isinstance(operand, ast.IndicatorOperand):
         tf = operand.tf or collector.signal_tf
@@ -750,8 +841,45 @@ def _check_strategy_level(collector: _Collector, root: ast.AnyRuleNode) -> None:
         collector.require(
             "/risk/target_model", catalog.LIQUIDITY_SWEEPS, collector.signal_tf
         )
-    universe = definition.universe
+    _check_universe(collector)
+    if not definition.notification.emit:
+        collector.warn(
+            "/notification/emit", "EMIT_EMPTY", "No signal kinds are emitted."
+        )
+    if definition.execution_mode == "AUTO_LIVE":
+        collector.warn(
+            "/execution_mode",
+            "AUTO_LIVE_REQUIRES_DEPLOYMENT",
+            "AUTO_LIVE only runs through an execution-engine deployment with "
+            "explicit consent, limits and kill switch; saving the rule does "
+            "not enable live trading.",
+        )
+
+
+def _check_universe(collector: _Collector) -> None:
+    """Checks universe venues and instrument lists.
+
+    Args:
+        collector: Issue collector.
+    """
+    universe = collector.definition.universe
     venues = {venue.value for venue in universe.venues}
+    for index, venue in enumerate(universe.venues):
+        if venue in instruments.RATE_VENUES:
+            collector.error(
+                f"/universe/venues/{index}",
+                "RATE_VENUE_NOT_TRADABLE",
+                f"{venue.value} publishes non-tradable rate series "
+                f"({venue.value}:rate:*); a strategy cannot trade them. Trade "
+                "rates through a bond ETF on nasdaq or nyse; rate series may "
+                "only be read as context.",
+            )
+    for index, instrument in enumerate(universe.whitelist):
+        reason = untradable_reason(instrument)
+        if reason is not None:
+            collector.error(
+                f"/universe/whitelist/{index}", "RATE_NOT_TRADABLE", reason
+            )
     for field_name, values in (
         ("whitelist", universe.whitelist),
         ("blacklist", universe.blacklist),
@@ -769,18 +897,6 @@ def _check_strategy_level(collector: _Collector, root: ast.AnyRuleNode) -> None:
             "/universe",
             "UNIVERSE_OVERLAP",
             f"Listed in both whitelist and blacklist: {sorted(overlap)}.",
-        )
-    if not definition.notification.emit:
-        collector.warn(
-            "/notification/emit", "EMIT_EMPTY", "No signal kinds are emitted."
-        )
-    if definition.execution_mode == "AUTO_LIVE":
-        collector.warn(
-            "/execution_mode",
-            "AUTO_LIVE_REQUIRES_DEPLOYMENT",
-            "AUTO_LIVE only runs through an execution-engine deployment with "
-            "explicit consent, limits and kill switch; saving the rule does "
-            "not enable live trading.",
         )
 
 

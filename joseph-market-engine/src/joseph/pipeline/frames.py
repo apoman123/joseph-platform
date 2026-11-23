@@ -2,6 +2,7 @@
 
 Used by backtests (``FrameProvider``) and by the live pipeline for warm-up,
 so historical and live evaluation share the same closed-bar visibility rules.
+History windows count bars of the instrument's session calendar.
 """
 
 from __future__ import annotations
@@ -13,6 +14,7 @@ from collections.abc import Sequence
 
 from joseph.domain import instruments
 from joseph.domain import market
+from joseph.domain import sessions
 from joseph.domain import structures
 from joseph.domain import timeframes
 from joseph.indicators import service as indicator_service
@@ -87,6 +89,8 @@ def fetch_windows(
     required: Iterable[timeframes.Timeframe],
     signal_tf: timeframes.Timeframe,
     start_ms: int,
+    *,
+    calendar: sessions.BarCalendar = sessions.CONTINUOUS,
 ) -> dict[timeframes.Timeframe, int]:
     """Chooses the fetch start for every required timeframe.
 
@@ -94,6 +98,7 @@ def fetch_windows(
         required: Timeframes the engine consumes.
         signal_tf: Signal timeframe.
         start_ms: First signal bar (including warm-up) to compute.
+        calendar: Session calendar of the instrument.
 
     Returns:
         Fetch start per timeframe.
@@ -103,7 +108,9 @@ def fetch_windows(
         if tf.duration_ms <= signal_tf.duration_ms:
             windows[tf] = start_ms
         else:
-            windows[tf] = tf.shift(tf.floor(start_ms), -_AUX_LOOKBACK_BARS)
+            windows[tf] = calendar.shift(
+                tf, calendar.floor(tf, start_ms), -_AUX_LOOKBACK_BARS
+            )
     return windows
 
 
@@ -204,7 +211,12 @@ class EngineFrameProvider:
             Candles per timeframe, final only, ending at or before
             ``end_ms``.
         """
-        windows = fetch_windows(engine.required_timeframes, signal_tf, start_ms)
+        windows = fetch_windows(
+            engine.required_timeframes,
+            signal_tf,
+            start_ms,
+            calendar=sessions.for_instrument(instrument_id),
+        )
         ordered = sorted(windows, key=lambda tf: tf.duration_ms)
         fetched = await asyncio.gather(
             *(
@@ -238,8 +250,11 @@ class EngineFrameProvider:
             Frames, oldest first; warm-up frames precede ``from_ms``.
         """
         engine = await self.engine_for(instrument_id, requirements)
-        start = signal_tf.shift(
-            signal_tf.floor(from_ms), -max(requirements.history_bars, 1)
+        calendar = engine.calendar
+        start = calendar.shift(
+            signal_tf,
+            calendar.floor(signal_tf, from_ms),
+            -max(requirements.history_bars, 1),
         )
         candles = await self.candles(
             engine, instrument_id, signal_tf, start, to_ms

@@ -60,9 +60,13 @@ def _htf_as_of(
         tf: Higher timeframe.
 
     Returns:
-        As-of time (UTC ms).
+        As-of time (UTC ms), on the instrument's session calendar.
     """
-    return tf.floor(factory.close(index))
+    close = factory.close(index)
+    start = factory.calendar.last_closed_start(tf, close)
+    if start is None:
+        return factory.calendar.floor(tf, close)
+    return factory.calendar.end_of(tf, start)
 
 
 def long_a_frames(
