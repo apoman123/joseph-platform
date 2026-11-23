@@ -126,11 +126,14 @@ export function isStrategyConfigV1(value: unknown): value is StrategyConfigV1 {
  * @return Slug matching `^[a-z0-9][a-z0-9-]{0,62}$`.
  */
 function slug(id: string): string {
-  const cleaned = id
-    .toLowerCase()
-    .replace(/[^a-z0-9-]+/g, '-')
-    .replace(/^-+|-+$/g, '')
-    .slice(0, 63);
+  const dashed = id.toLowerCase().replace(/[^a-z0-9-]+/g, '-');
+  // Trims leading/trailing dashes in linear time (a `-+$` regex is
+  // quadratic on long runs of dashes).
+  let start = 0;
+  let end = dashed.length;
+  while (start < end && dashed[start] === '-') start++;
+  while (end > start && dashed[end - 1] === '-') end--;
+  const cleaned = dashed.slice(start, end).slice(0, 63);
   return cleaned || 'migrated-strategy';
 }
 

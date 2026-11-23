@@ -3,7 +3,14 @@
  * gitleaks in CI as well). Fails on private keys, provider tokens, high
  * entropy secret assignments and committed .env files.
  */
-import {readFileSync, readdirSync, statSync} from 'node:fs';
+import {
+  closeSync,
+  fstatSync,
+  openSync,
+  readFileSync,
+  readdirSync,
+  statSync,
+} from 'node:fs';
 import {join, relative} from 'node:path';
 import {fileURLToPath} from 'node:url';
 
@@ -69,8 +76,15 @@ for (const file of walk(ROOT)) {
     continue;
   }
   if (SKIP_FILES.test(rel) || ALLOWLIST.some(re => re.test(rel))) continue;
-  if (statSync(file).size > 2_000_000) continue;
-  const text = readFileSync(file, 'utf8');
+  // Size check and read use one descriptor, so they see the same file.
+  const fd = openSync(file, 'r');
+  let text;
+  try {
+    if (fstatSync(fd).size > 2_000_000) continue;
+    text = readFileSync(fd, 'utf8');
+  } finally {
+    closeSync(fd);
+  }
   text.split('\n').forEach((line, index) => {
     for (const rule of RULES) {
       if (rule.re.test(line))

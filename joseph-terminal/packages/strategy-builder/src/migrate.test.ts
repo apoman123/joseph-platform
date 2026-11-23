@@ -97,6 +97,18 @@ describe('migrateV1', () => {
     });
   });
 
+  it('slugs ids, trimming dash runs in linear time', () => {
+    const id = (value: string): string =>
+      migrateV1({...STARTER, id: value}).definition.strategy_id;
+    expect(id('  My Long_v1!! ')).toBe('my-long-v1');
+    expect(id('--a--b--')).toBe('a--b');
+    expect(id('***')).toBe('migrated-strategy');
+    // An inner dash run made the old `-+$` trim quadratic (~4 s here).
+    const started = performance.now();
+    expect(id(`x${'-'.repeat(80_000)}y`)).toBe(`x${'-'.repeat(62)}`);
+    expect(performance.now() - started).toBeLessThan(1_000);
+  });
+
   it('preserves conditions across random v1 configs (property)', () => {
     const zones = ['discount', 'premium', 'ote'];
     const aois = ['fvg', 'ifvg', 'ob', 'breaker'];
