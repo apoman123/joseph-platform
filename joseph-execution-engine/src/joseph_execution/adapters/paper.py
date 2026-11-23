@@ -5,6 +5,23 @@ book-walk slippage and maker/taker fees. Fault injection hooks reproduce
 ACK loss, timeouts, rejects, duplicate and out-of-order events, dropped
 fill events and cancel-versus-fill races for chaos tests. No real order is
 ever sent anywhere.
+
+Exchange-listed securities (``stock``/``etf``) follow exchange semantics:
+
+* Fills happen only inside a session of the instrument's calendar; orders
+  placed while the exchange is closed wait for the open, IOC/FOK are
+  canceled and DAY orders expire at the close of their session.
+* Market fills are rounded to the tick ladder and clamped into the daily
+  price limits (TWSE +-10% from the previous close).
+* The account is a long-only cash account in shares: sells are capped at
+  the shares held. TWSE fills charge the estimated brokerage fee and
+  securities transaction tax; other exchanges use the maker/taker rates.
+* Settlement is modelled as unsettled cash: each fill's cash flow becomes
+  settled at the open of the T+n session (TWSE T+2, US T+1), falling back
+  to weekdays when no calendar is available. The ledger lives in memory
+  (like the simulator's orders), so a restart treats pending amounts as
+  settled. Unsettled sale proceeds count as buying power, as both markets
+  allow; no funding applies to securities.
 """
 
 from __future__ import annotations
@@ -13,11 +30,13 @@ import asyncio
 import dataclasses
 import decimal
 from collections.abc import AsyncIterator
+from collections.abc import Mapping
 from collections.abc import Sequence
 
 from joseph_execution.domain import accounts
 from joseph_execution.domain import decimals
 from joseph_execution.domain import enums
+from joseph_execution.domain import equities
 from joseph_execution.domain import errors
 from joseph_execution.domain import market
 from joseph_execution.ports import market as market_port
@@ -27,6 +46,9 @@ from joseph_execution.ports import trading
 S = enums.OrderState
 _ALL_TYPES = tuple(enums.OrderType)
 _ALL_TIF = tuple(enums.TimeInForce)
+_DAY_MS = 86_400_000
+_SESSION_BACK_MS = 5 * _DAY_MS
+_SESSION_AHEAD_MS = 15 * _DAY_MS
 
 
 @dataclasses.dataclass(slots=True)
@@ -74,6 +96,8 @@ class _SimOrder:
         triggered: Whether a stop order triggered.
         reason: Status reason.
         ts_ms: Last update.
+        accepted_ms: Acceptance time.
+        expires_at_ms: Close at which a DAY order expires, once known.
     """
 
     request: trading.VenueOrderRequest
@@ -83,6 +107,8 @@ class _SimOrder:
     triggered: bool
     reason: str | None
     ts_ms: int
+    accepted_ms: int = 0
+    expires_at_ms: int | None = None
 
     def state(self) -> trading.VenueOrderState:
         """Returns the venue view of the order.
@@ -105,6 +131,19 @@ class _SimOrder:
         return self.status in (S.ACKNOWLEDGED, S.PARTIALLY_FILLED)
 
 
+@dataclasses.dataclass(frozen=True, slots=True)
+class _Pending:
+    """A securities cash flow awaiting settlement.
+
+    Attributes:
+        settles_at_ms: Settlement time.
+        amount: Cash flow (negative = payable).
+    """
+
+    settles_at_ms: int
+    amount: decimal.Decimal
+
+
 @dataclasses.dataclass(slots=True)
 class _SimAccount:
     """Per-account simulator state.
@@ -115,6 +154,8 @@ class _SimAccount:
         fills: Fills in time order.
         events: Undelivered stream events.
         realized: Realized PnL net of fees.
+        cash_delta: Settled cash change since the start.
+        pending: Securities cash flows awaiting settlement.
     """
 
     orders: dict[str, _SimOrder] = dataclasses.field(default_factory=dict)
@@ -124,6 +165,8 @@ class _SimAccount:
     fills: list[trading.VenueFill] = dataclasses.field(default_factory=list)
     events: list[trading.VenueEvent] = dataclasses.field(default_factory=list)
     realized: decimal.Decimal = decimals.ZERO
+    cash_delta: decimal.Decimal = decimals.ZERO
+    pending: list[_Pending] = dataclasses.field(default_factory=list)
 
 
 class PaperTradingAdapter:
@@ -143,6 +186,7 @@ class PaperTradingAdapter:
         maker_bps: decimal.Decimal = decimal.Decimal(2),
         taker_bps: decimal.Decimal = decimal.Decimal(5),
         starting_equity: decimal.Decimal = decimal.Decimal(100_000),
+        starting_cash: Mapping[str, decimal.Decimal] | None = None,
     ) -> None:
         """Initializes the simulator.
 
@@ -153,6 +197,8 @@ class PaperTradingAdapter:
             maker_bps: Maker fee.
             taker_bps: Taker fee.
             starting_equity: Equity reported by ``account_snapshot``.
+            starting_cash: Starting cash by currency of non-USD paper
+                accounts (e.g. ``{"TWD": 3000000}``).
         """
         self._market = market_data
         self._clock = clock
@@ -160,6 +206,7 @@ class PaperTradingAdapter:
         self._maker = maker_bps
         self._taker = taker_bps
         self._starting = starting_equity
+        self._starting_cash = dict(starting_cash or {})
         self._accounts: dict[str, _SimAccount] = {}
         self._seq = 0
         self._fill_seq = 0
@@ -191,9 +238,16 @@ class PaperTradingAdapter:
             account_id: Account.
 
         Returns:
-            Capabilities (AVAILABLE; simulated venue-side triggers).
+            Capabilities (AVAILABLE; simulated venue-side triggers). For
+            securities the account is a long-only cash account in its
+            currency's exchanges.
         """
-        del account_id
+        currency = accounts.paper_currency(account_id)
+        venues = tuple(
+            venue
+            for venue, ccy in equities.EXCHANGE_CURRENCY.items()
+            if ccy == currency
+        )
         return accounts.TradingCapabilities(
             venue="mock",
             status=enums.TradingStatus.AVAILABLE,
@@ -213,6 +267,14 @@ class PaperTradingAdapter:
                 f"{self._name.capitalize()} simulator: no real orders are "
                 "sent; fills are simulated from market data.",
             ),
+            tradable_venues=venues,
+            cash_account=True,
+            short_selling=False,
+            outside_rth=False,
+            odd_lot=True,
+            queue_market_when_closed=True,
+            simulation=True,
+            currencies=(currency,),
         )
 
     async def health(self) -> enums.HealthState:
@@ -235,12 +297,23 @@ class PaperTradingAdapter:
             Snapshot.
         """
         state = self._acct(account_id)
-        equity = self._starting + state.realized
+        now = self._clock.now_ms()
+        currency = accounts.paper_currency(account_id)
+        starting = self._starting_cash.get(currency, self._starting)
+        due = [p for p in state.pending if p.settles_at_ms <= now]
+        if due:
+            state.pending = [p for p in state.pending if p.settles_at_ms > now]
+            state.cash_delta += sum((p.amount for p in due), decimals.ZERO)
+        equity = starting + state.realized
         return trading.VenueAccountSnapshot(
             equity=equity,
             available_margin=equity,
-            currency="USD",
-            ts_ms=self._clock.now_ms(),
+            currency=currency,
+            ts_ms=now,
+            settled_cash=starting + state.cash_delta,
+            unsettled_cash=sum(
+                (p.amount for p in state.pending), decimals.ZERO
+            ),
         )
 
     async def list_open_orders(
@@ -351,6 +424,7 @@ class PaperTradingAdapter:
             triggered=False,
             reason=None,
             ts_ms=now,
+            accepted_ms=now,
         )
         state.orders[request.client_order_id] = order
         if faults.reject_next:
@@ -565,6 +639,12 @@ class PaperTradingAdapter:
             Fills produced.
         """
         req = order.request
+        security = equities.is_security(req.instrument_id)
+        meta: market.InstrumentMeta | None = None
+        if security:
+            meta = await self._instrument(req.instrument_id)
+            if not await self._in_session(account_id, order, meta, initial):
+                return []
         quote = await self._quote(req.instrument_id)
         if quote is None:
             if initial:
@@ -582,7 +662,11 @@ class PaperTradingAdapter:
         cap = self._reduce_cap(account_id, req)
         if cap is not None and cap <= 0:
             order.status = S.CANCELED
-            order.reason = "reduce-only order would increase the position"
+            order.reason = (
+                "long-only account holds no shares to sell"
+                if security and not req.reduce_only
+                else "reduce-only order would increase the position"
+            )
             self._emit(
                 account_id,
                 [
@@ -629,12 +713,16 @@ class PaperTradingAdapter:
             kind is enums.OrderType.STOP_MARKET and order.triggered
         ):
             price = await self._walk_price(req, remaining, quote)
+            if price is not None and meta is not None:
+                price = await self._exchange_price(meta, price)
             if price is None:
                 order.status = S.CANCELED
                 order.reason = "no liquidity for market order"
             else:
                 produced.append(
-                    self._fill(account_id, order, remaining, price, maker=False)
+                    await self._book(
+                        account_id, order, remaining, price, False, meta
+                    )
                 )
             if order.open and req.time_in_force in (
                 enums.TimeInForce.IOC,
@@ -668,8 +756,8 @@ class PaperTradingAdapter:
                     qty = await self._partial(req.instrument_id, remaining)
                 fill_price = best if initial else req.limit_price
                 produced.append(
-                    self._fill(
-                        account_id, order, qty, fill_price, maker=not initial
+                    await self._book(
+                        account_id, order, qty, fill_price, not initial, meta
                     )
                 )
             elif req.time_in_force in (
@@ -709,7 +797,11 @@ class PaperTradingAdapter:
             meta = None
         qty = remaining * fraction
         if meta is not None:
-            qty = decimals.floor_to_step(qty, meta.lot_size)
+            step = meta.lot_size
+            board = meta.board_lot
+            if board is not None and decimals.is_multiple(remaining, board):
+                step = board
+            qty = decimals.floor_to_step(qty, step)
         return qty if qty > 0 else remaining
 
     def _reduce_cap(
@@ -721,10 +813,17 @@ class PaperTradingAdapter:
             account_id: Account.
             req: Request.
 
+        Long-only securities accounts also cap every sell at the shares
+        held.
+
         Returns:
-            Cap, or ``None`` for non-reduce-only orders.
+            Cap, or ``None`` when uncapped.
         """
-        if not req.reduce_only:
+        long_only = (
+            equities.is_security(req.instrument_id)
+            and req.side is enums.OrderSide.SELL
+        )
+        if not req.reduce_only and not long_only:
             return None
         qty, _ = self._acct(account_id).positions.get(
             req.instrument_id, (decimals.ZERO, None)
@@ -764,6 +863,175 @@ class PaperTradingAdapter:
         )
         return best or quote.reference_price
 
+    async def _instrument(
+        self, instrument_id: str
+    ) -> market.InstrumentMeta | None:
+        """Fetches instrument metadata, mapping failures to ``None``.
+
+        Args:
+            instrument_id: Instrument.
+
+        Returns:
+            Metadata or ``None``.
+        """
+        try:
+            return await self._market.instrument(instrument_id)
+        except errors.ExecutionError:
+            return None
+
+    async def _sessions(
+        self, meta: market.InstrumentMeta | None
+    ) -> Sequence[market.TradingSession] | None:
+        """Fetches sessions around now for an instrument's calendar.
+
+        Args:
+            meta: Instrument metadata.
+
+        Returns:
+            Sessions, or ``None`` when unknown.
+        """
+        if meta is None:
+            return None
+        now = self._clock.now_ms()
+        try:
+            return await self._market.sessions(
+                meta.calendar, now - _SESSION_BACK_MS, now + _SESSION_AHEAD_MS
+            )
+        except errors.ExecutionError:
+            return None
+
+    async def _in_session(
+        self,
+        account_id: str,
+        order: _SimOrder,
+        meta: market.InstrumentMeta | None,
+        initial: bool,
+    ) -> bool:
+        """Applies session rules to a securities order before matching.
+
+        Args:
+            account_id: Account.
+            order: Order (status may change).
+            meta: Instrument metadata.
+            initial: True on submission.
+
+        Returns:
+            True when the exchange is open and matching may proceed.
+        """
+        req = order.request
+        now = self._clock.now_ms()
+        sessions = await self._sessions(meta)
+        if (
+            sessions is not None
+            and order.expires_at_ms is None
+            and req.time_in_force is enums.TimeInForce.DAY
+        ):
+            order.expires_at_ms = equities.day_order_expiry(
+                sessions, order.accepted_ms
+            )
+        if order.expires_at_ms is not None and now >= order.expires_at_ms:
+            order.status = S.EXPIRED
+            order.reason = "DAY order expired at the close"
+        elif sessions is None or not equities.session_state(sessions, now).open:
+            if req.time_in_force in (
+                enums.TimeInForce.IOC,
+                enums.TimeInForce.FOK,
+            ):
+                order.status = S.CANCELED
+                order.reason = "exchange closed; IOC/FOK canceled"
+            elif not initial:
+                return False
+        else:
+            return True
+        order.ts_ms = now
+        self._emit(
+            account_id,
+            [
+                trading.VenueEvent(
+                    account_id, self._next_seq(), order=order.state()
+                )
+            ],
+        )
+        return False
+
+    async def _exchange_price(
+        self, meta: market.InstrumentMeta, price: decimal.Decimal
+    ) -> decimal.Decimal:
+        """Puts a simulated market fill on the tick grid inside the limits.
+
+        Args:
+            meta: Instrument metadata.
+            price: Raw fill price.
+
+        Returns:
+            Exchange-valid price.
+        """
+        price = equities.round_to_tick(price, meta)
+        if meta.price_limit_pct is None:
+            return price
+        try:
+            reference = await self._market.previous_close(meta.instrument_id)
+        except errors.ExecutionError:
+            reference = None
+        limits = (
+            None
+            if reference is None
+            else equities.price_limits(reference, meta)
+        )
+        return price if limits is None else limits.clamp(price)
+
+    async def _book(  # noqa: PLR0917
+        self,
+        account_id: str,
+        order: _SimOrder,
+        quantity: decimal.Decimal,
+        price: decimal.Decimal,
+        maker: bool,
+        meta: market.InstrumentMeta | None,
+    ) -> trading.VenueFill:
+        """Books a fill with securities fees and settlement when needed.
+
+        Args:
+            account_id: Account.
+            order: Order.
+            quantity: Quantity.
+            price: Price.
+            maker: Maker (True) or taker.
+            meta: Instrument metadata of a security, else ``None``.
+
+        Returns:
+            The fill.
+        """
+        req = order.request
+        if meta is None or not equities.is_security(req.instrument_id):
+            return self._fill(account_id, order, quantity, price, maker)
+        ref = equities.parse_instrument_id(req.instrument_id)
+        fee = None
+        if ref.venue == enums.Venue.TWSE.value:
+            fee = equities.twse_fee(req.side, quantity * price, ref.market_type)
+        now = self._clock.now_ms()
+        days = equities.SETTLEMENT_DAYS.get(meta.calendar, 2)
+        sessions = await self._sessions(meta)
+        settles = (
+            None
+            if sessions is None
+            else equities.settlement_ms(sessions, now, days)
+        )
+        if settles is None:
+            settles = equities.fallback_settlement_ms(now, days)
+        return self._fill(
+            account_id,
+            order,
+            quantity,
+            price,
+            maker,
+            fee=fee,
+            fee_asset=equities.instrument_currency(
+                req.instrument_id, meta.quote
+            ),
+            settles_at_ms=settles,
+        )
+
     def _fill(
         self,
         account_id: str,
@@ -771,6 +1039,10 @@ class PaperTradingAdapter:
         quantity: decimal.Decimal,
         price: decimal.Decimal,
         maker: bool,
+        *,
+        fee: decimal.Decimal | None = None,
+        fee_asset: str = "USD",
+        settles_at_ms: int | None = None,
     ) -> trading.VenueFill:
         """Books a fill and updates the simulated position.
 
@@ -780,6 +1052,10 @@ class PaperTradingAdapter:
             quantity: Quantity.
             price: Price.
             maker: Maker (True) or taker.
+            fee: Fee override (securities), else maker/taker rates.
+            fee_asset: Fee currency.
+            settles_at_ms: Settlement time of a securities cash flow;
+                ``None`` settles PnL immediately (crypto).
 
         Returns:
             The fill.
@@ -787,15 +1063,17 @@ class PaperTradingAdapter:
         state = self._acct(account_id)
         req = order.request
         self._fill_seq += 1
-        rate = self._maker if maker else self._taker
-        fee = quantity * price * rate / decimals.BPS
+        if fee is None:
+            rate = self._maker if maker else self._taker
+            fee = quantity * price * rate / decimals.BPS
+        realized_before = state.realized
         fill = trading.VenueFill(
             exchange_fill_id=f"{self._name}-fill-{self._fill_seq}",
             client_order_id=req.client_order_id,
             price=price,
             quantity_base=quantity,
             fee=fee,
-            fee_asset="USD",
+            fee_asset=fee_asset,
             liquidity="maker" if maker else "taker",
             ts_ms=self._clock.now_ms(),
         )
@@ -825,6 +1103,12 @@ class PaperTradingAdapter:
             )
             state.positions[req.instrument_id] = (new_qty, new_entry)
         state.realized -= fee
+        if settles_at_ms is None:
+            state.cash_delta += state.realized - realized_before
+        else:
+            gross = quantity * price
+            flow = -gross if req.side is enums.OrderSide.BUY else gross
+            state.pending.append(_Pending(settles_at_ms, flow - fee))
         state.fills.append(fill)
         self._emit(
             account_id,

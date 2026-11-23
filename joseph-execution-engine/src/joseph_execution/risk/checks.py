@@ -7,11 +7,13 @@ Each check is a pure function of a ``RiskContext`` returning one
 from __future__ import annotations
 
 import dataclasses
+import datetime
 import decimal
 from collections.abc import Callable
 
 from joseph_execution.domain import decimals
 from joseph_execution.domain import enums
+from joseph_execution.domain import equities
 from joseph_execution.domain import risk
 from joseph_execution.risk import context
 
@@ -208,6 +210,13 @@ def account_margin(ctx: context.RiskContext) -> risk.RiskCheckResult:
         Result.
     """
     name = "account.margin"
+    if ctx.security:
+        return _result(
+            name,
+            Domain.ACCOUNT,
+            Outcome.SKIP,
+            "Securities are bought from cash (see account.cash).",
+        )
     if ctx.risk_reducing:
         return _result(
             name,
@@ -460,7 +469,7 @@ def size_tick(ctx: context.RiskContext) -> risk.RiskCheckResult:
             "INVALID_TICK_SIZE",
         )
     for price in prices:
-        if not decimals.is_multiple(price, inst.tick_size):
+        if not equities.on_tick(price, inst):
             return _result(
                 name,
                 Domain.SIZE,
@@ -468,7 +477,7 @@ def size_tick(ctx: context.RiskContext) -> risk.RiskCheckResult:
                 "Price is not a multiple of the tick size.",
                 "INVALID_TICK_SIZE",
                 price,
-                inst.tick_size,
+                inst.tick_for(price),
             )
     return _result(name, Domain.SIZE, Outcome.PASS, "Prices on tick grid.")
 
@@ -632,7 +641,14 @@ def size_order_type(ctx: context.RiskContext) -> risk.RiskCheckResult:
             "UNSUPPORTED_ORDER_TYPE",
             req.time_in_force.value,
         )
-    if req.reduce_only and not caps.native_reduce_only:
+    long_only_sell = (
+        ctx.security
+        and not caps.short_selling
+        and req.side is enums.OrderSide.SELL
+    )
+    if req.reduce_only and not caps.native_reduce_only and not long_only_sell:
+        # A long-only securities account cannot open a short: the broker
+        # rejects uncovered sells, so a reduce-only sell stays reducing.
         return _result(
             name,
             Domain.SIZE,
@@ -1173,6 +1189,551 @@ def protection(ctx: context.RiskContext) -> risk.RiskCheckResult:
     )
 
 
+# ---------------------------------------------------------------------------
+# Broker routing and exchange-listed securities. These checks SKIP for
+# crypto instruments (except that DAY and outside-RTH need an exchange).
+# ---------------------------------------------------------------------------
+
+
+def _when(ts_ms: int) -> str:
+    """Formats a time for messages.
+
+    Args:
+        ts_ms: UTC epoch milliseconds.
+
+    Returns:
+        Text like ``2026-11-24 01:00 UTC``.
+    """
+    moment = datetime.datetime.fromtimestamp(ts_ms / 1000, tz=datetime.UTC)
+    return moment.strftime("%Y-%m-%d %H:%M UTC")
+
+
+def routing_venue(ctx: context.RiskContext) -> risk.RiskCheckResult:
+    """Checks that the account may trade the instrument's venue.
+
+    Crypto accounts trade their own venue; broker accounts trade the
+    exchanges their broker serves; paper accounts trade in their currency;
+    rate series are never tradable.
+
+    Args:
+        ctx: Risk context.
+
+    Returns:
+        Result.
+    """
+    name = "routing.venue"
+    account = ctx.account
+    req = ctx.request
+    if account is None:
+        return _result(
+            name,
+            Domain.ACCOUNT,
+            Outcome.UNKNOWN,
+            "Account is unknown.",
+            "NOT_FOUND",
+        )
+    verdict = equities.route(
+        account.venue, account.is_paper, account.currency, req.instrument_id
+    )
+    if not verdict.allowed:
+        return _result(
+            name,
+            Domain.ACCOUNT,
+            Outcome.FAIL,
+            verdict.message,
+            "UNSUPPORTED",
+            req.instrument_id,
+            account.venue,
+        )
+    venue = equities.parse_instrument_id(req.instrument_id).venue
+    caps = ctx.capabilities
+    if (
+        venue in equities.EXCHANGE_VENUES
+        and caps is not None
+        and caps.tradable_venues
+        and venue not in caps.tradable_venues
+    ):
+        return _result(
+            name,
+            Domain.ACCOUNT,
+            Outcome.FAIL,
+            f"The {caps.venue} adapter does not route {venue} orders.",
+            "UNSUPPORTED",
+            venue,
+            ",".join(caps.tradable_venues),
+        )
+    return _result(name, Domain.ACCOUNT, Outcome.PASS, verdict.message)
+
+
+def market_session(ctx: context.RiskContext) -> risk.RiskCheckResult:  # noqa: PLR0911, PLR0912
+    """Applies exchange-session rules from the instrument's calendar.
+
+    Market orders while the exchange is closed are rejected, or queue as
+    DAY orders for the next open when configuration and the broker allow
+    it. IOC/FOK need an open session; resting limit orders wait for it.
+
+    Args:
+        ctx: Risk context.
+
+    Returns:
+        Result.
+    """
+    name = "market.session"
+    req = ctx.request
+    if not ctx.security:
+        if req.time_in_force is enums.TimeInForce.DAY:
+            return _result(
+                name,
+                Domain.MARKET_STATUS,
+                Outcome.FAIL,
+                "DAY orders expire at an exchange close; this market trades "
+                "around the clock. Use GTC.",
+                "UNSUPPORTED_ORDER_TYPE",
+                req.time_in_force.value,
+            )
+        if req.outside_rth:
+            return _result(
+                name,
+                Domain.MARKET_STATUS,
+                Outcome.FAIL,
+                "Outside-RTH applies to exchange-listed securities only.",
+                "UNSUPPORTED_ORDER_TYPE",
+            )
+        return _result(
+            name, Domain.MARKET_STATUS, Outcome.SKIP, "Market trades 24x7."
+        )
+    caps = ctx.capabilities
+    if req.outside_rth:
+        if caps is None or not caps.outside_rth:
+            return _result(
+                name,
+                Domain.MARKET_STATUS,
+                Outcome.FAIL,
+                "This account cannot flag orders for outside regular hours.",
+                "UNSUPPORTED_ORDER_TYPE",
+            )
+        if req.order_type not in (
+            enums.OrderType.LIMIT,
+            enums.OrderType.STOP_LIMIT,
+        ):
+            return _result(
+                name,
+                Domain.MARKET_STATUS,
+                Outcome.FAIL,
+                "Outside-RTH orders must be limit or stop-limit orders.",
+                "UNSUPPORTED_ORDER_TYPE",
+                req.order_type.value,
+            )
+    if ctx.sessions is None:
+        outcome = Outcome.WARN if ctx.risk_reducing else Outcome.UNKNOWN
+        return _result(
+            name,
+            Domain.MARKET_STATUS,
+            outcome,
+            "The exchange session calendar is unavailable.",
+            "MARKET_STALE",
+        )
+    state = equities.session_state(ctx.sessions, ctx.now_ms)
+    if state.current is not None:
+        return _result(
+            name,
+            Domain.MARKET_STATUS,
+            Outcome.PASS,
+            f"Market open until {_when(state.current.close_ms)}.",
+        )
+    upcoming = state.next_session
+    next_open = "the next open" + (
+        "" if upcoming is None else f" ({_when(upcoming.open_ms)})"
+    )
+    if req.order_type is enums.OrderType.MARKET:
+        queueable = (
+            ctx.queue_closed_market_orders
+            and caps is not None
+            and caps.queue_market_when_closed
+        )
+        if queueable and req.time_in_force is enums.TimeInForce.DAY:
+            return _result(
+                name,
+                Domain.MARKET_STATUS,
+                Outcome.WARN,
+                f"Market closed; the market order queues as DAY for "
+                f"{next_open}.",
+            )
+        if queueable:
+            return _result(
+                name,
+                Domain.MARKET_STATUS,
+                Outcome.FAIL,
+                f"Market closed; submit the market order as DAY to queue "
+                f"it for {next_open}.",
+                "UNSUPPORTED_ORDER_TYPE",
+                req.time_in_force.value,
+                "DAY",
+            )
+        return _result(
+            name,
+            Domain.MARKET_STATUS,
+            Outcome.FAIL,
+            f"Market closed; market orders are rejected until {next_open}.",
+            "VENUE_UNAVAILABLE",
+        )
+    if req.time_in_force in (enums.TimeInForce.IOC, enums.TimeInForce.FOK):
+        return _result(
+            name,
+            Domain.MARKET_STATUS,
+            Outcome.FAIL,
+            f"Market closed; {req.time_in_force.value} orders need an open "
+            f"session ({next_open}).",
+            "UNSUPPORTED_ORDER_TYPE",
+            req.time_in_force.value,
+        )
+    if req.outside_rth:
+        return _result(
+            name,
+            Domain.MARKET_STATUS,
+            Outcome.WARN,
+            "Outside regular hours; the broker routes the order to "
+            "extended-hours trading where the venue offers it.",
+        )
+    return _result(
+        name,
+        Domain.MARKET_STATUS,
+        Outcome.WARN,
+        f"Market closed; the order rests until {next_open}.",
+    )
+
+
+def size_board_lot(ctx: context.RiskContext) -> risk.RiskCheckResult:  # noqa: PLR0911
+    """Checks board lots and intraday odd-lot rules (TWSE).
+
+    Common orders are whole board lots (1000 shares); intraday odd-lot
+    orders are 1-999 shares, limit and ROD (DAY) only.
+
+    Args:
+        ctx: Risk context.
+
+    Returns:
+        Result.
+    """
+    name = "size.board_lot"
+    inst = ctx.instrument
+    req = ctx.request
+    if not ctx.security or inst is None or inst.board_lot is None:
+        return _result(
+            name, Domain.SIZE, Outcome.SKIP, "No board-lot rule applies."
+        )
+    lot = inst.board_lot
+    qty = req.quantity_base
+    kind = equities.lot_kind(qty, lot)
+    if kind is equities.LotKind.BOARD:
+        return _result(
+            name,
+            Domain.SIZE,
+            Outcome.PASS,
+            f"{decimals.fmt(qty / lot)} board lot(s) of {decimals.fmt(lot)} "
+            "shares.",
+        )
+    if kind is equities.LotKind.MIXED:
+        whole = decimals.floor_to_step(qty, lot)
+        return _result(
+            name,
+            Domain.SIZE,
+            Outcome.FAIL,
+            f"{decimals.fmt(qty)} shares is not a whole number of "
+            f"{decimals.fmt(lot)}-share board lots; send "
+            f"{decimals.fmt(whole)} as board lots and "
+            f"{decimals.fmt(qty - whole)} as an intraday odd-lot order.",
+            "INVALID_LOT_SIZE",
+            qty,
+            lot,
+        )
+    caps = ctx.capabilities
+    if caps is None:
+        return _result(
+            name,
+            Domain.SIZE,
+            Outcome.UNKNOWN,
+            "Capabilities unknown; odd-lot support cannot be checked.",
+            "INVALID_LOT_SIZE",
+        )
+    if not caps.odd_lot:
+        return _result(
+            name,
+            Domain.SIZE,
+            Outcome.FAIL,
+            "This account cannot send intraday odd-lot orders.",
+            "INVALID_LOT_SIZE",
+            qty,
+            lot,
+        )
+    if req.order_type is not enums.OrderType.LIMIT:
+        return _result(
+            name,
+            Domain.SIZE,
+            Outcome.FAIL,
+            "Intraday odd-lot orders must be limit orders.",
+            "UNSUPPORTED_ORDER_TYPE",
+            req.order_type.value,
+        )
+    if req.time_in_force is not enums.TimeInForce.DAY:
+        return _result(
+            name,
+            Domain.SIZE,
+            Outcome.FAIL,
+            "Intraday odd-lot orders are ROD (DAY) only.",
+            "UNSUPPORTED_ORDER_TYPE",
+            req.time_in_force.value,
+            "DAY",
+        )
+    return _result(
+        name,
+        Domain.SIZE,
+        Outcome.PASS,
+        f"Intraday odd-lot order of {decimals.fmt(qty)} shares.",
+    )
+
+
+def size_price_limit(ctx: context.RiskContext) -> risk.RiskCheckResult:
+    """Checks limit prices against the daily limits (TWSE +-10%).
+
+    Args:
+        ctx: Risk context.
+
+    Returns:
+        Result.
+    """
+    name = "size.price_limit"
+    inst = ctx.instrument
+    price = ctx.request.limit_price
+    if not ctx.security or inst is None or inst.price_limit_pct is None:
+        return _result(name, Domain.SIZE, Outcome.SKIP, "No daily price limit.")
+    if price is None:
+        return _result(
+            name,
+            Domain.SIZE,
+            Outcome.SKIP,
+            "Market and stop orders execute inside the exchange limits.",
+        )
+    reference = ctx.previous_close
+    limits = (
+        None if reference is None else equities.price_limits(reference, inst)
+    )
+    if limits is None:
+        return _result(
+            name,
+            Domain.SIZE,
+            Outcome.UNKNOWN,
+            "The reference price (previous close) is unknown; daily limits "
+            "cannot be checked.",
+            "MARKET_STALE",
+        )
+    band = f"{decimals.fmt(limits.low)}-{decimals.fmt(limits.high)}"
+    if not limits.contains(price):
+        return _result(
+            name,
+            Domain.SIZE,
+            Outcome.FAIL,
+            f"Limit price is outside today's "
+            f"{decimals.fmt(inst.price_limit_pct)}% band from the "
+            f"{decimals.fmt(limits.reference)} reference ({band}).",
+            "RISK_LIMIT",
+            price,
+            band,
+        )
+    return _result(
+        name,
+        Domain.SIZE,
+        Outcome.PASS,
+        "Limit price within the daily limits.",
+        observed=price,
+        limit=band,
+    )
+
+
+def account_cash(ctx: context.RiskContext) -> risk.RiskCheckResult:  # noqa: PLR0911
+    """Checks cash buying power and currency for securities (no margin).
+
+    Args:
+        ctx: Risk context.
+
+    Returns:
+        Result.
+    """
+    name = "account.cash"
+    req = ctx.request
+    if not ctx.security:
+        return _result(
+            name, Domain.ACCOUNT, Outcome.SKIP, "Not a securities order."
+        )
+    if req.side is enums.OrderSide.SELL and req.quantity_base <= ctx.long_qty:
+        return _result(
+            name,
+            Domain.ACCOUNT,
+            Outcome.SKIP,
+            "Selling shares already held needs no cash.",
+        )
+    cash = ctx.cash
+    if cash is None:
+        return _result(
+            name,
+            Domain.ACCOUNT,
+            Outcome.UNKNOWN,
+            "Cash buying power is unknown.",
+            "INSUFFICIENT_MARGIN",
+        )
+    quote = None if ctx.instrument is None else ctx.instrument.quote
+    currency = equities.instrument_currency(req.instrument_id, quote)
+    if currency != cash.currency:
+        return _result(
+            name,
+            Domain.ACCOUNT,
+            Outcome.FAIL,
+            f"{req.instrument_id} trades in {currency}; the account holds "
+            f"{cash.currency}.",
+            "UNSUPPORTED",
+            currency,
+            cash.currency,
+        )
+    if ctx.notional is None:
+        return _result(
+            name,
+            Domain.ACCOUNT,
+            Outcome.UNKNOWN,
+            "Order cost is unknown.",
+            "INSUFFICIENT_MARGIN",
+        )
+    needed = ctx.notional + (ctx.estimated_fee or decimals.ZERO)
+    if needed > cash.available:
+        return _result(
+            name,
+            Domain.ACCOUNT,
+            Outcome.FAIL,
+            f"Not enough {cash.currency} cash; securities are bought from "
+            "cash without margin.",
+            "INSUFFICIENT_MARGIN",
+            needed,
+            cash.available,
+        )
+    return _result(
+        name,
+        Domain.ACCOUNT,
+        Outcome.PASS,
+        f"{cash.currency} cash available.",
+        observed=needed,
+        limit=cash.available,
+    )
+
+
+def size_cash_account(ctx: context.RiskContext) -> risk.RiskCheckResult:
+    """Enforces no leverage and long-only selling for securities.
+
+    Args:
+        ctx: Risk context.
+
+    Returns:
+        Result.
+    """
+    name = "size.cash_account"
+    req = ctx.request
+    if not ctx.security:
+        return _result(
+            name, Domain.SIZE, Outcome.SKIP, "Not a securities order."
+        )
+    caps = ctx.capabilities
+    if caps is None:
+        return _result(
+            name,
+            Domain.SIZE,
+            Outcome.UNKNOWN,
+            "Capabilities unknown.",
+            "UNSUPPORTED",
+        )
+    if caps.cash_account and req.leverage != decimals.ONE:
+        return _result(
+            name,
+            Domain.SIZE,
+            Outcome.FAIL,
+            "Cash accounts trade securities without leverage (use 1).",
+            "RISK_LIMIT",
+            req.leverage,
+            decimals.ONE,
+        )
+    held = ctx.long_qty
+    if (
+        req.side is enums.OrderSide.SELL
+        and req.quantity_base > held
+        and not caps.short_selling
+    ):
+        return _result(
+            name,
+            Domain.SIZE,
+            Outcome.FAIL,
+            f"Long-only account: sell at most the {decimals.fmt(held)} "
+            "shares held.",
+            "VALIDATION_FAILED",
+            req.quantity_base,
+            held,
+        )
+    return _result(
+        name, Domain.SIZE, Outcome.PASS, "Cash-account rules satisfied."
+    )
+
+
+def protection_bracket(ctx: context.RiskContext) -> risk.RiskCheckResult:
+    """Checks that protective legs can be placed with the account's orders.
+
+    Protective children are GTC stop-market and limit orders; a broker
+    without them cannot hold a bracket.
+
+    Args:
+        ctx: Risk context.
+
+    Returns:
+        Result.
+    """
+    name = "protection.bracket_orders"
+    bracket = ctx.request.bracket
+    if bracket.empty:
+        return _result(
+            name, Domain.PROTECTION, Outcome.SKIP, "No protective orders."
+        )
+    caps = ctx.capabilities
+    if caps is None:
+        return _result(
+            name,
+            Domain.PROTECTION,
+            Outcome.UNKNOWN,
+            "Capabilities unknown.",
+            "UNSUPPORTED",
+        )
+    missing: list[str] = []
+    if (
+        bracket.stop_loss is not None
+        and enums.OrderType.STOP_MARKET not in caps.order_types
+    ):
+        missing.append("stop-market")
+    if bracket.take_profit and enums.OrderType.LIMIT not in caps.order_types:
+        missing.append("limit")
+    if enums.TimeInForce.GTC not in caps.time_in_force:
+        missing.append("GTC")
+    if missing:
+        return _result(
+            name,
+            Domain.PROTECTION,
+            Outcome.FAIL,
+            f"Protective orders need {', '.join(missing)} support, which "
+            f"{caps.venue} does not offer.",
+            "UNSUPPORTED",
+            ",".join(missing),
+        )
+    return _result(
+        name,
+        Domain.PROTECTION,
+        Outcome.PASS,
+        "Protective order types are supported.",
+    )
+
+
 @dataclasses.dataclass(frozen=True, slots=True)
 class CheckSpec:
     """Registered check.
@@ -1191,14 +1752,20 @@ class CheckSpec:
 PIPELINE: tuple[CheckSpec, ...] = (
     CheckSpec(mode_allowed),
     CheckSpec(identity_scope),
+    CheckSpec(routing_venue, reject_on_fail=True),
     CheckSpec(account_state_known),
     CheckSpec(account_margin),
+    CheckSpec(account_cash),
     CheckSpec(market_status),
+    CheckSpec(market_session, reject_on_fail=True),
     CheckSpec(data_quote_fresh),
     CheckSpec(size_quantity, reject_on_fail=True),
+    CheckSpec(size_board_lot, reject_on_fail=True),
     CheckSpec(size_tick, reject_on_fail=True),
+    CheckSpec(size_price_limit, reject_on_fail=True),
     CheckSpec(size_min_notional, reject_on_fail=True),
     CheckSpec(size_leverage, reject_on_fail=True),
+    CheckSpec(size_cash_account, reject_on_fail=True),
     CheckSpec(size_price_band, reject_on_fail=True),
     CheckSpec(size_order_type, reject_on_fail=True),
     CheckSpec(size_reduce_only, reject_on_fail=True),
@@ -1211,5 +1778,6 @@ PIPELINE: tuple[CheckSpec, ...] = (
     CheckSpec(connectivity, pause_on_fail=True),
     CheckSpec(kill_switch_guard),
     CheckSpec(protection),
+    CheckSpec(protection_bracket, reject_on_fail=True),
 )
 """Ordered, mandatory check pipeline (deny by default)."""

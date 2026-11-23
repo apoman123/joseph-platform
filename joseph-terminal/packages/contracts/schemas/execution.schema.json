@@ -33,12 +33,14 @@
     },
     "TimeInForce": {
       "title": "TimeInForce",
+      "description": "Time in force. DAY (TWSE ROD) expires at the close of the exchange session and applies to exchange-listed securities only; crypto venues trade 24x7 and use GTC/IOC/FOK/POST_ONLY.",
       "type": "string",
       "enum": [
         "GTC",
         "IOC",
         "FOK",
-        "POST_ONLY"
+        "POST_ONLY",
+        "DAY"
       ]
     },
     "MarginMode": {
@@ -255,6 +257,11 @@
             "null"
           ],
           "description": "Token from /v1/orders/preview binding the confirmed parameters. Required for manual LIVE submissions."
+        },
+        "outside_rth": {
+          "type": "boolean",
+          "default": false,
+          "description": "Securities only: allow execution outside regular trading hours (Interactive Brokers outsideRth; limit and stop-limit orders). Omitted when false."
         }
       }
     },
@@ -1047,6 +1054,44 @@
           "items": {
             "type": "string"
           }
+        },
+        "tradable_venues": {
+          "description": "Exchange venues this broker (or paper account) routes securities to, e.g. ibkr -> nasdaq, nyse; sinopac and cathay -> twse. Empty for crypto venues, which trade their own instruments.",
+          "type": "array",
+          "items": {
+            "$ref": "common.schema.json#/$defs/Venue"
+          }
+        },
+        "cash_account": {
+          "description": "Securities trade from cash: no leverage and no margin modes.",
+          "type": "boolean"
+        },
+        "short_selling": {
+          "description": "Securities may be sold short; false means long-only (sells are limited to shares held).",
+          "type": "boolean"
+        },
+        "outside_rth": {
+          "description": "Orders may carry an outside-regular-trading-hours flag (Interactive Brokers).",
+          "type": "boolean"
+        },
+        "odd_lot": {
+          "description": "Intraday odd-lot orders (1 to board_lot-1 shares; TWSE limit ROD only, e.g. Shioaji order_lot IntradayOdd).",
+          "type": "boolean"
+        },
+        "queue_market_when_closed": {
+          "description": "The broker queues DAY market orders placed while the exchange is closed for the next open; Joseph additionally requires configuration to allow it.",
+          "type": "boolean"
+        },
+        "simulation": {
+          "description": "The account is a broker paper/simulation environment (IBKR paper account, Shioaji simulation) or the Joseph simulator.",
+          "type": "boolean"
+        },
+        "currencies": {
+          "description": "Settlement currencies of the account, e.g. USD or TWD.",
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
         }
       }
     },
@@ -1151,6 +1196,28 @@
           "oneOf": [
             {
               "$ref": "common.schema.json#/$defs/TimestampMs"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "settled_cash": {
+          "description": "Settled cash of a securities or paper account, when known.",
+          "oneOf": [
+            {
+              "$ref": "common.schema.json#/$defs/DecimalString"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "unsettled_cash": {
+          "description": "Net cash awaiting settlement (TWSE T+2, US T+1); negative when purchases are payable.",
+          "oneOf": [
+            {
+              "$ref": "common.schema.json#/$defs/DecimalString"
             },
             {
               "type": "null"

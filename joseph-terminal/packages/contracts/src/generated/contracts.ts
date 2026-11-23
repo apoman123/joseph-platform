@@ -213,10 +213,12 @@ export type PositionEffect = 'open' | 'close' | 'reduce';
  */
 export type OrderType = 'market' | 'limit' | 'stop_market' | 'stop_limit';
 /**
+ * Time in force. DAY (TWSE ROD) expires at the close of the exchange session and applies to exchange-listed securities only; crypto venues trade 24x7 and use GTC/IOC/FOK/POST_ONLY.
+ *
  * This interface was referenced by `JosephContracts`'s JSON-Schema
  * via the `definition` "TimeInForce".
  */
-export type TimeInForce = 'GTC' | 'IOC' | 'FOK' | 'POST_ONLY';
+export type TimeInForce = 'GTC' | 'IOC' | 'FOK' | 'POST_ONLY' | 'DAY';
 /**
  * This interface was referenced by `JosephContracts`'s JSON-Schema
  * via the `definition` "MarginMode".
@@ -675,6 +677,10 @@ export interface OrderIntentRequest {
    * Token from /v1/orders/preview binding the confirmed parameters. Required for manual LIVE submissions.
    */
   preview_token?: string | null;
+  /**
+   * Securities only: allow execution outside regular trading hours (Interactive Brokers outsideRth; limit and stop-limit orders). Omitted when false.
+   */
+  outside_rth?: boolean;
 }
 /**
  * Immutable server-side intent.
@@ -868,6 +874,38 @@ export interface TradingCapabilities {
   client_order_id: boolean;
   query_by_client_id: boolean;
   notes: string[];
+  /**
+   * Exchange venues this broker (or paper account) routes securities to, e.g. ibkr -> nasdaq, nyse; sinopac and cathay -> twse. Empty for crypto venues, which trade their own instruments.
+   */
+  tradable_venues?: Venue[];
+  /**
+   * Securities trade from cash: no leverage and no margin modes.
+   */
+  cash_account?: boolean;
+  /**
+   * Securities may be sold short; false means long-only (sells are limited to shares held).
+   */
+  short_selling?: boolean;
+  /**
+   * Orders may carry an outside-regular-trading-hours flag (Interactive Brokers).
+   */
+  outside_rth?: boolean;
+  /**
+   * Intraday odd-lot orders (1 to board_lot-1 shares; TWSE limit ROD only, e.g. Shioaji order_lot IntradayOdd).
+   */
+  odd_lot?: boolean;
+  /**
+   * The broker queues DAY market orders placed while the exchange is closed for the next open; Joseph additionally requires configuration to allow it.
+   */
+  queue_market_when_closed?: boolean;
+  /**
+   * The account is a broker paper/simulation environment (IBKR paper account, Shioaji simulation) or the Joseph simulator.
+   */
+  simulation?: boolean;
+  /**
+   * Settlement currencies of the account, e.g. USD or TWD.
+   */
+  currencies?: string[];
 }
 /**
  * This interface was referenced by `JosephContracts`'s JSON-Schema
@@ -892,6 +930,14 @@ export interface AccountSummary {
   health: HealthState;
   stale: boolean;
   last_sync_ms: TimestampMs | null;
+  /**
+   * Settled cash of a securities or paper account, when known.
+   */
+  settled_cash?: DecimalString | null;
+  /**
+   * Net cash awaiting settlement (TWSE T+2, US T+1); negative when purchases are payable.
+   */
+  unsettled_cash?: DecimalString | null;
 }
 /**
  * Engaging blocks new opening orders. Cancelling and flattening are separate explicit options.
