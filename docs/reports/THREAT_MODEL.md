@@ -1,8 +1,10 @@
 # Threat model (STRIDE, compact)
 
-**Assets:** venue and broker credentials, the ability to place orders, strategy IP, tenant data, audit integrity.
-**Public source:** no control relies on secrecy of code; credentials, keys and deployment settings live outside the repository (vault, `deploy/.env`, GitHub Secrets), and the private indicator library ships only in private images.
-**Trust zones:** browser (untrusted) → market engine (server side; data keys only, no trading credentials) → execution engine (server side; encrypted credentials) → venues and brokers.
+The main threats to Joseph, their mitigations and the tests that verify them, grouped by STRIDE plus trading-specific risks. For operators and security reviewers.
+
+- **Assets:** venue and broker credentials, the ability to place orders, strategy IP, tenant data, audit integrity.
+- **Public source:** no control relies on secrecy of code. Credentials, keys and deployment settings live outside the repository (vault, `deploy/.env`, GitHub Secrets), and the private indicator library ships only in private images.
+- **Trust zones:** browser (untrusted) → market engine (server side; data keys only, no trading credentials) → execution engine (server side; encrypted credentials) → venues and brokers.
 
 | Threat | Example | Mitigation | Verified by |
 |---|---|---|---|
@@ -14,6 +16,7 @@
 | Key misuse | Withdrawal-capable or master keys used for trading | Withdrawal-capable keys refused by attestation; Binance verifies `enableWithdrawals=false`; Hyperliquid refuses the master key as agent; Lighter refuses reserved key indexes; broker logins never pass through the API; secrets redacted in reprs, errors and logs | `unit/venues/`, `integration/test_live_venues.py` |
 | Elevation of privilege | Tenant A reads or cancels tenant B's orders; a feature flag enables LIVE | Tenant scoping in every query (foreign ids → 404); flags cannot grant trading; deny-by-default risk gateway | Tenant-isolation tests (REST + WS); mode-gate tests |
 | Duplicate or runaway orders | Lost ACK, partition, replayed signal | Idempotency keys, transactional outbox, `UNKNOWN_RECONCILING` + reconcile by `client_order_id`, once-per-signal intake, kill switch | Chaos and property tests |
+| Supply chain and CI | A tampered third-party action, a malicious fork pull request, a leaked engine image | Third-party actions pinned to commit SHAs (Dependabot updates them); fork workflows need maintainer approval and get no secrets; deploys need environment approval and run only from `main` and `v*` tags; engine images publish only into private packages | `security.yml` on `main`, pull requests and weekly (CodeQL incl. Actions, gitleaks, audits, dependency review); `.github/actions/private-image` |
 | Bad data → bad trades | Stale book, unclosed HTF bar, DEMO data, unknown holdings | Provenance on every value; stale or unknown → BLOCK; confirmed-bar evaluation; DEMO/REPLAY never tradable live; position mismatch blocks new exposure | No-look-ahead properties; risk data-quality tests |
 
 **Residual risks:** no production identity (OIDC + MFA) or BFF (dev tokens only); the KMS is a local master key; venue keys are decrypted in process per signed request (no HSM or remote signer); MEXC has no sandbox, so its adapter is verified only against documented payloads; no WAF or edge rate limiting.

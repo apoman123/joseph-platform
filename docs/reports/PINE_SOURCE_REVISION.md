@@ -1,20 +1,24 @@
 # Pine source revision record
 
+The Pine revision the indicators are ported from, how each script maps to a plugin, and what remains before TradingView parity is verified. For indicator contributors.
+
+## Revisions
+
 | Item | Value |
 |---|---|
-| Pine baseline named in V5 | `apoman123/PineScripts` @ `cf1ea56` |
-| Pine HEAD ported (2026-11-22) | `4091278` ("new indicator": adds `smc_current_timeframe_structure.pine`, revises the daily-bias dashboard) |
-| Python library | `PineScripts/python_indicators` (`joseph-smc-indicators`, import `smc_indicators`) @ `89aa506` |
+| Pine baseline in the original plan | `apoman123/PineScripts` @ `cf1ea56` |
+| Pine revision ported | `4091278` (2026-11-22, "new indicator": adds `smc_current_timeframe_structure.pine`, revises the daily-bias dashboard); no Pine file has changed since |
+| Python library | `PineScripts/python_indicators` (`joseph-smc-indicators` 1.1.0, import `smc_indicators`) @ `e9720b9`: the line-by-line ports, true taker delta, anchored VWAP, regression channel and the pivot tie rule |
 | Platform pin | `joseph-market-engine/pyproject.toml` → `[tool.uv.sources]` git `rev`, locked in `uv.lock` |
-| Method | Line-by-line port: the result of closed bar k is the Pine state on bar k with `barstate.isconfirmed`. Plugins report `licensing_status: PINE_PORT_PENDING_REVIEW`, `parity_status: SPEC_ONLY` until TradingView exports are compared |
+| Method | Line-by-line port: the result of closed bar k is the Pine state on bar k with `barstate.isconfirmed`. Plugins report `licensing_status: PINE_PORT_PENDING_REVIEW` and `parity_status: SPEC_ONLY` until compared with TradingView exports |
 
-The platform holds **no indicator logic** ("平台歸平台，指標歸指標"): `joseph/indicators/packaged/` has only adapters (settings with the Pine defaults and bounds, data streams, decimal conversion, AOI identity, published values). The seven clean-room plugins and `sdk/ta.py` were removed.
+The platform holds **no indicator logic** ("平台歸平台，指標歸指標": the platform is a platform, indicators are indicators). `joseph/indicators/packaged/` has only adapters: settings with the Pine defaults and bounds, data streams, decimal conversion, AOI identity and published values. The earlier clean-room plugins and `sdk/ta.py` were removed ([ADR 0009](../adr/0009-external-indicator-library.md)).
 
 ## Script → library → plugin
 
 | Pine script | Library class | Plugin id | Streams |
 |---|---|---|---|
-| `smc_current_timeframe_structure.pine` | `market_structure.MarketStructure` | `market_structure` (new) | chart |
+| `smc_current_timeframe_structure.pine` | `market_structure.MarketStructure` | `market_structure` | chart |
 | `smc_daily_bias_dashboard.pine` | `daily_bias.StructureTracker` + `DailyBiasDashboard` | `daily_bias` | chart, aux 1D/4H/1H |
 | `smc_fvg_ifvg.pine` | `fvg_ifvg.FvgIfvg` | `fvg_ifvg` | chart |
 | `smc_order_breaker_blocks.pine` | `order_breaker_blocks.OrderBreakerBlocks` | `order_breaker_blocks` | chart |
@@ -23,10 +27,12 @@ The platform holds **no indicator logic** ("平台歸平台，指標歸指標"):
 | `smc_auction_value_areas.pine` | `auction_value_areas.AuctionValueAreas` | `auction_value_areas` (1m–30m charts) | chart, aux 1H |
 | `smc_premium_discount_ote_zones.pine` | `premium_discount_ote.PremiumDiscountOte` | `premium_discount_ote` | chart |
 | `joseph_hot_perpetual_filter.pine` | `hot_perpetual_filter.HotPerpetualPrefilter` | none (screening implements the full 5-gate job) | — |
+| none (Python-native, TradingView's built-in VWAP definition) | `anchored_vwap.AnchoredVwap` | `anchored_vwap` | chart |
+| none (Python-native least-squares channel) | `regression_channel.RegressionChannel` | `regression_channel` | chart |
 
-## Behavior changes versus the clean-room plugins
+## Behaviour changes versus the clean-room plugins
 
-Golden scenarios were re-derived by hand from the Pine source and match it:
+The golden scenarios are derived by hand from the Pine source and match it:
 
 | Area | Clean-room (old) | Pine (now) |
 |---|---|---|
@@ -37,11 +43,11 @@ Golden scenarios were re-derived by hand from the Pine source and match it:
 | PDH/PDL, sessions | UTC day | Previous 1D bar; New York sessions (Asia 20:00–00:00, London 02:00–05:00, NY 08:30–11:00) |
 | HTF visibility | Bar end ≤ chart close | Engine supplies bars ending ≤ close; the library applies Pine `lookahead_on` + `[1]` (visible from the next chart bar) |
 
-**Decided (owner, 2026-11-22):** an exactly equal neighbouring high or low disqualifies a pivot (`pine.PIVOT_TIES_DISQUALIFY = True`).
+**Pivot ties (decided 2026-11-22):** an exactly equal neighbouring high or low disqualifies a pivot (`pine.PIVOT_TIES_DISQUALIFY = True`).
 
 **Assumptions to verify against TradingView exports:** values Pine computes only on `barstate.islast` (chart value area, OTE table) are published on every bar as if it were last; `na` comparisons in the daily-bias agreement follow Pine (`na != 0` is true). Per-script notes: `python_indicators/docs/<module>.md`.
 
-## To reach `GOLDEN_VERIFIED`
+## Reaching `GOLDEN_VERIFIED`
 
 1. Export per-bar values and events from TradingView for a pinned instrument and range into `joseph-market-engine/fixtures/indicators/pine_exports/{venue}/{symbol}/{tf}/{range}.jsonl` (format in `golden.py`).
 2. Run `uv run pytest tests/replay -k parity`; it reports the first divergent bar.
