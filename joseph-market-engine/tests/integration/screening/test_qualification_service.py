@@ -10,6 +10,7 @@ import respx
 
 from joseph.domain import clock as clock_lib
 from joseph.domain import instruments
+from joseph.market_data.adapters import alpaca
 from joseph.market_data.adapters import factory
 from joseph.market_data.adapters import mock
 from joseph.screening.app import service
@@ -31,21 +32,19 @@ def _service(
     Returns:
         Service.
     """
-    adapters = factory.build_adapters(venues, clock, client=httpx.AsyncClient())
+    adapters = factory.build_adapters(
+        venues,
+        clock,
+        client=httpx.AsyncClient(),
+        alpaca_config=alpaca.AlpacaConfig(key_id="test", secret_key="test"),
+    )
     return service.QualificationService(adapters, clock, **kwargs)  # type: ignore[arg-type]
 
 
 @pytest.mark.parametrize(
     "venue",
-    # Crypto venues with recorded fixtures; exchange venues join as their
-    # adapters land.
-    [
-        v
-        for v in instruments.Venue
-        if v is not instruments.Venue.MOCK
-        and v not in instruments.EXCHANGE_VENUES
-        and v not in instruments.RATE_VENUES
-    ],
+    # Every real venue, crypto, exchange and rate, from recorded fixtures.
+    [v for v in instruments.Venue if v is not instruments.Venue.MOCK],
     ids=lambda v: v.value,
 )
 async def test_each_venue_produces_contract_valid_reports(

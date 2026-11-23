@@ -94,6 +94,27 @@ def _bool(value: str | None, default: bool) -> bool:
     return value.strip().lower() in {"1", "true", "yes", "on"}
 
 
+_ALPACA_FEEDS = frozenset({"iex", "sip", "delayed_sip"})
+
+
+def _alpaca_feed(value: str) -> str:
+    """Validates ``JOSEPH_ALPACA_FEED``.
+
+    Args:
+        value: Raw value.
+
+    Returns:
+        ``iex``, ``sip`` or ``delayed_sip``.
+
+    Raises:
+        ValueError: For another value.
+    """
+    feed = value.strip().lower() or "iex"
+    if feed not in _ALPACA_FEEDS:
+        raise ValueError("JOSEPH_ALPACA_FEED must be iex, sip or delayed_sip")
+    return feed
+
+
 @dataclasses.dataclass(frozen=True)
 class Settings:
     """Market-engine settings.
@@ -128,6 +149,12 @@ class Settings:
         smtp_from: Sender address.
         smtp_username: SMTP username.
         smtp_password: SMTP password (secret).
+        alpaca_key_id: Alpaca API key id for Nasdaq/NYSE data (secret).
+        alpaca_secret_key: Alpaca API secret (secret).
+        alpaca_feed: Alpaca stock feed: ``iex``, ``sip`` or
+            ``delayed_sip``.
+        alpaca_seconds_history_ms: Longest seconds-bar history built on
+            demand from Alpaca trades and quotes.
     """
 
     dev_tokens: tuple[DevToken, ...] = ()
@@ -157,6 +184,10 @@ class Settings:
     smtp_from: str | None = None
     smtp_username: str | None = None
     smtp_password: str | None = None
+    alpaca_key_id: str | None = None
+    alpaca_secret_key: str | None = None
+    alpaca_feed: str = "iex"
+    alpaca_seconds_history_ms: int = 1_800_000
 
     def __repr__(self) -> str:
         """Returns a representation with secrets redacted."""
@@ -248,4 +279,10 @@ class Settings:
             smtp_from=source.get("JOSEPH_SMTP_FROM") or None,
             smtp_username=source.get("JOSEPH_SMTP_USERNAME") or None,
             smtp_password=source.get("JOSEPH_SMTP_PASSWORD") or None,
+            alpaca_key_id=source.get("JOSEPH_ALPACA_KEY_ID") or None,
+            alpaca_secret_key=source.get("JOSEPH_ALPACA_SECRET_KEY") or None,
+            alpaca_feed=_alpaca_feed(source.get("JOSEPH_ALPACA_FEED", "iex")),
+            alpaca_seconds_history_ms=int(
+                source.get("JOSEPH_ALPACA_SECONDS_HISTORY_MS", "1800000")
+            ),
         )
