@@ -16,6 +16,7 @@ import pathlib
 import secrets
 from collections.abc import Mapping
 
+from joseph_execution.domain import accounts
 from joseph_execution.platform import logging as log_lib
 
 _LOG = logging.getLogger(__name__)
@@ -301,6 +302,8 @@ class Settings:
         vault_master_key: 32-byte master key.
         preview_secret: HMAC key for preview tokens.
         step_up_totp_secret: Base32 TOTP secret or ``None``.
+        live_arm_max_ms: Longest (and default) account LIVE arming; at
+            most 24 hours.
         cors_origins: Allowed browser origins.
         paper_starting_equity: Paper equity.
         background_tasks: Run outbox, tick and reconcile loops.
@@ -325,6 +328,7 @@ class Settings:
     vault_master_key: bytes = b""
     preview_secret: bytes = b""
     step_up_totp_secret: str | None = None
+    live_arm_max_ms: int = accounts.LIVE_ARM_DEFAULT_MS
     cors_origins: tuple[str, ...] = (
         "http://localhost:3000",
         "http://127.0.0.1:3000",
@@ -371,6 +375,27 @@ def parse_tokens(raw: str) -> dict[str, tuple[str, str]]:
             raise ValueError("JOSEPH_DEV_TOKENS entries are token:tenant:user")
         tokens[parts[0]] = (parts[1], parts[2])
     return tokens
+
+
+def live_arm_max_ms(source: Mapping[str, str]) -> int:
+    """Reads ``JOSEPH_LIVE_ARM_MAX_MS`` (fail closed on bad values).
+
+    Args:
+        source: Environment.
+
+    Returns:
+        Maximum account LIVE arming in milliseconds (default 8 hours).
+
+    Raises:
+        ValueError: Unless 0 < value <= 24 hours.
+    """
+    raw = source.get("JOSEPH_LIVE_ARM_MAX_MS", "").strip()
+    value = int(raw) if raw else accounts.LIVE_ARM_DEFAULT_MS
+    if not 0 < value <= accounts.LIVE_ARM_CEILING_MS:
+        raise ValueError(
+            "JOSEPH_LIVE_ARM_MAX_MS must be between 1 and 86400000 (24 h)"
+        )
+    return value
 
 
 def from_env(env: Mapping[str, str] | None = None) -> Settings:
@@ -437,6 +462,7 @@ def from_env(env: Mapping[str, str] | None = None) -> Settings:
         vault_master_key=master,
         preview_secret=preview,
         step_up_totp_secret=source.get("JOSEPH_STEP_UP_TOTP_SECRET") or None,
+        live_arm_max_ms=live_arm_max_ms(source),
         cors_origins=origins,
         paper_starting_equity=decimal.Decimal(
             source.get("JOSEPH_PAPER_STARTING_EQUITY", "100000")

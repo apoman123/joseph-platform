@@ -201,6 +201,12 @@ async def test_every_gate_still_applies_to_open_brokers() -> None:
     )
     auto = await svc.oms.submit_intent(harness.TENANT_A, strategy, "auto")
     assert auto.decision.primary_code() == "TRADE_MODE_DISABLED"
+    unarmed = await svc.oms.preview(harness.TENANT_A, _live_request(account_id))
+    assert unarmed.decision.primary_code() == "LIVE_NOT_ARMED"
+    armed = await svc.accounts.grant_live_consent(
+        harness.TENANT_A, account_id, h.totp(), True
+    )
+    assert armed["live_armed_until_ms"] is not None
     await svc.kill_switches.set(
         harness.TENANT_A,
         enums.KillSwitchScope.ACCOUNT,

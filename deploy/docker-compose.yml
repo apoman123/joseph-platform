@@ -55,6 +55,7 @@ services:
       JOSEPH_VAULT_MASTER_KEY: ${JOSEPH_VAULT_MASTER_KEY:-}
       JOSEPH_PREVIEW_SECRET: ${JOSEPH_PREVIEW_SECRET:-}
       JOSEPH_STEP_UP_TOTP_SECRET: ${JOSEPH_STEP_UP_TOTP_SECRET:-}
+      JOSEPH_LIVE_ARM_MAX_MS: ${JOSEPH_LIVE_ARM_MAX_MS:-28800000}
       # Global LIVE gate: on by default for this deployment (owner
       # decision 2026-11-23). Every order still needs a verified account,
       # the Risk Gateway, preview/consent with step-up and no kill switch.

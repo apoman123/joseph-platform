@@ -1223,6 +1223,46 @@
               "type": "null"
             }
           ]
+        },
+        "live_armed_until_ms": {
+          "description": "End of the server-side LIVE arming of this account (POST /v1/accounts/{account_id}/live-consent). Manual LIVE orders (ticket, chart, quick trade) need an unexpired, unrevoked arming; `null` when the account is not armed.",
+          "oneOf": [
+            {
+              "$ref": "common.schema.json#/$defs/TimestampMs"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        }
+      }
+    },
+    "AccountLiveConsentRequest": {
+      "title": "AccountLiveConsentRequest",
+      "description": "Arms manual LIVE orders on one verified (LIVE-capable) account for a bounded time: `POST /v1/accounts/{account_id}/live-consent`. The step-up code is verified exactly like the AUTO_LIVE consent of a deployment. `DELETE` on the same path disarms. Both return the `AccountSummary`.",
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "step_up_code",
+        "acknowledge_risk"
+      ],
+      "properties": {
+        "step_up_code": {
+          "type": "string",
+          "minLength": 6,
+          "maxLength": 8,
+          "description": "Step-up (TOTP) code verified by the execution engine."
+        },
+        "acknowledge_risk": {
+          "type": "boolean",
+          "const": true,
+          "description": "Explicit acknowledgement that orders use real money."
+        },
+        "duration_ms": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 86400000,
+          "description": "Arming lifetime. Defaults to, and may not exceed, the server's JOSEPH_LIVE_ARM_MAX_MS (8 hours unless configured; never more than 24 hours)."
         }
       }
     },

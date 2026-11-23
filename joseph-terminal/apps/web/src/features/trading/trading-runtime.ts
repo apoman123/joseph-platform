@@ -80,6 +80,14 @@ export interface AmendDraft {
   price: string;
 }
 
+/** A server answer on the LIVE arming of one account. */
+export interface LiveArmAnswer {
+  /** `live_armed_until_ms` the engine answered (null: not armed). */
+  untilMs: number | null;
+  /** When the answer arrived (UTC ms). */
+  atMs: number;
+}
+
 /** Runtime state of the trading feature. */
 export interface TradingRuntime {
   /** Ticket controller. */
@@ -95,10 +103,11 @@ export interface TradingRuntime {
   /** Pending amendment. */
   amend: WritableStore<AmendDraft | null>;
   /**
-   * Live arming per account id: when the arm expires (UTC ms). Arming is a
-   * browser-side step on top of the server's checks; it never grants LIVE.
+   * Latest server answers on LIVE arming per account id (from granting or
+   * revoking). The execution engine owns the arming; these answers only
+   * bridge the time until the next account poll reports it.
    */
-  liveArm: WritableStore<Readonly<Record<string, number>>>;
+  liveArm: WritableStore<Readonly<Record<string, LiveArmAnswer>>>;
   /**
    * Reloads orders and positions.
    * @return Promise resolving when done.
@@ -154,7 +163,7 @@ export function createTradingRuntime(
   const positions = createStore<readonly Position[]>([]);
   const menu = createStore<ContextMenuState | null>(null);
   const amend = createStore<AmendDraft | null>(null);
-  const liveArm = createStore<Readonly<Record<string, number>>>({});
+  const liveArm = createStore<Readonly<Record<string, LiveArmAnswer>>>({});
   const precisionCache = new Map<string, InstrumentPrecision>();
   const disposers: Disposer[] = [];
   let orderSeq = 0;

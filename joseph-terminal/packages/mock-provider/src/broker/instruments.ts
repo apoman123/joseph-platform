@@ -10,7 +10,9 @@
  * the server and Cathay awaiting its API SDK. Capabilities carry the
  * contract's `tradable_venues`, `cash_account`, `short_selling`,
  * `outside_rth`, `odd_lot`, `queue_market_when_closed`, `simulation` and
- * `currencies`. None of the accounts offers LIVE.
+ * `currencies`. None of the default accounts offers LIVE; the opt-in live
+ * rehearsal account (`DEMO_LIVE_REHEARSAL_ACCOUNT`) does, so arming can be
+ * rehearsed without a backend.
  */
 import type {
   AccountStatus,
@@ -101,6 +103,19 @@ export const DEMO_SINOPAC_LIVE_ACCOUNT_ID = 'acct-sinopac-live-demo';
 /** DEMO Cathay account awaiting the broker's API SDK. */
 export const DEMO_CATHAY_ACCOUNT_ID = 'acct-cathay-demo';
 
+/** Opt-in DEMO account that rehearses LIVE arming (IBKR, simulated). */
+export const DEMO_LIVE_REHEARSAL_ACCOUNT_ID = 'acct-ibkr-live-rehearsal-demo';
+
+/**
+ * Step-up code the DEMO broker accepts when arming LIVE (the execution
+ * engine verifies a TOTP code instead). Any other code is refused with
+ * `STEP_UP_REQUIRED`.
+ */
+export const DEMO_STEP_UP_CODE = '123456';
+
+/** Longest DEMO arming (the engine's default `JOSEPH_LIVE_ARM_MAX_MS`). */
+export const DEMO_LIVE_ARM_MAX_MS = 8 * 60 * 60_000;
+
 /** Tenant id used by DEMO services. */
 export const DEMO_TENANT_ID = 'demo-tenant';
 
@@ -117,7 +132,7 @@ export interface DemoAccountSpec {
   label: string;
   /** Connection status. */
   status: AccountStatus;
-  /** Permitted modes (never LIVE in DEMO). */
+  /** Permitted modes (LIVE only on the opt-in rehearsal account). */
   modes: readonly OrderMode[];
   /** Account currency. */
   currency: string;
@@ -353,6 +368,33 @@ export const DEMO_ACCOUNTS: readonly DemoAccountSpec[] = [
     health: 'UNAVAILABLE',
   },
 ];
+
+/**
+ * Opt-in DEMO account that rehearses a verified Interactive Brokers live
+ * account (`DemoExecutionClient` option `liveRehearsal`). It offers LIVE so
+ * the server-side arming flow (step-up code, armed-until, disarm,
+ * `LIVE_NOT_ARMED`) can be tried; armed LIVE orders are simulated in the
+ * browser like paper orders and nothing is sent to IBKR.
+ */
+export const DEMO_LIVE_REHEARSAL_ACCOUNT: DemoAccountSpec = {
+  accountId: DEMO_LIVE_REHEARSAL_ACCOUNT_ID,
+  venue: 'ibkr',
+  label: 'IBKR live rehearsal (demo)',
+  status: 'CONNECTED',
+  modes: ['LIVE'],
+  currency: 'USD',
+  startingEquity: '100000',
+  maxNotional: '1000000',
+  capabilities: {
+    ...IBKR_CAPABILITIES,
+    notes: [
+      'DEMO rehearsal of a verified Interactive Brokers live account: arming and LIVE orders are simulated in your browser. Nothing is sent to IBKR and no real money moves.',
+      ...IBKR_CAPABILITIES.notes.slice(1),
+    ],
+    simulation: false,
+  },
+  health: 'HEALTHY',
+};
 
 /**
  * Finds a DEMO account.

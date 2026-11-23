@@ -73,6 +73,22 @@ export function demoMark(instrumentId: string): string | null {
   return demoLastPrice(spec, Date.now()).price.toString();
 }
 
+/** URL query parameter that opts the DEMO into the LIVE arming rehearsal. */
+export const DEMO_LIVE_REHEARSAL_PARAM = 'demo-live-rehearsal';
+
+/**
+ * Whether the page asked for the DEMO LIVE rehearsal account
+ * (`?demo-live-rehearsal=1`). Only DEMO clients read it; a configured
+ * execution engine ignores it.
+ * @param search Query string; defaults to the current page's.
+ * @return True when the rehearsal is requested.
+ */
+export function demoLiveRehearsalRequested(search?: string): boolean {
+  const query =
+    search ?? (typeof window === 'undefined' ? '' : window.location.search);
+  return new URLSearchParams(query).get(DEMO_LIVE_REHEARSAL_PARAM) === '1';
+}
+
 /**
  * Builds DEMO or HTTP clients from configuration.
  * @param config Terminal configuration.
@@ -81,7 +97,10 @@ export function demoMark(instrumentId: string): string | null {
 export function buildClients(config: TerminalConfig): ClientBundle {
   if (config.demo) {
     const market = new DemoMarketDataClient();
-    const execution = new DemoExecutionClient({markPrice: demoMark});
+    const execution = new DemoExecutionClient({
+      markPrice: demoMark,
+      liveRehearsal: demoLiveRehearsalRequested(),
+    });
     const strategy = new DemoStrategyClient({
       validate: definition => toValidationResult(definition),
     });

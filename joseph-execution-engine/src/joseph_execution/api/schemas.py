@@ -156,6 +156,19 @@ class LiveConsentBody(_Body):
     duration_ms: int = pydantic.Field(default=86_400_000, gt=0)
 
 
+class AccountLiveConsentBody(_Body):
+    """Contract ``AccountLiveConsentRequest`` (account LIVE arming).
+
+    The step-up code has the same shape as AUTO_LIVE deployment consent;
+    the service enforces the acknowledgement and the configured maximum
+    duration (and audits refusals).
+    """
+
+    step_up_code: str = pydantic.Field(min_length=6, max_length=8)
+    acknowledge_risk: bool
+    duration_ms: int | None = pydantic.Field(default=None, gt=0)
+
+
 class ConnectBody(_Body):
     """Venue connection request (credentials are never echoed)."""
 

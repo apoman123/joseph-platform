@@ -184,6 +184,7 @@ export type ErrorCode =
   | 'MIN_NOTIONAL'
   | 'TRADE_MODE_DISABLED'
   | 'LIVE_TRADING_DISABLED'
+  | 'LIVE_NOT_ARMED'
   | 'KILL_SWITCH_ENGAGED'
   | 'DUPLICATE_INTENT'
   | 'IDEMPOTENCY_CONFLICT'
@@ -941,6 +942,30 @@ export interface AccountSummary {
    * Net cash awaiting settlement (TWSE T+2, US T+1); negative when purchases are payable.
    */
   unsettled_cash?: DecimalString | null;
+  /**
+   * End of the server-side LIVE arming of this account (POST /v1/accounts/{account_id}/live-consent). Manual LIVE orders (ticket, chart, quick trade) need an unexpired, unrevoked arming; `null` when the account is not armed.
+   */
+  live_armed_until_ms?: TimestampMs | null;
+}
+/**
+ * Arms manual LIVE orders on one verified (LIVE-capable) account for a bounded time: `POST /v1/accounts/{account_id}/live-consent`. The step-up code is verified exactly like the AUTO_LIVE consent of a deployment. `DELETE` on the same path disarms. Both return the `AccountSummary`.
+ *
+ * This interface was referenced by `JosephContracts`'s JSON-Schema
+ * via the `definition` "AccountLiveConsentRequest".
+ */
+export interface AccountLiveConsentRequest {
+  /**
+   * Step-up (TOTP) code verified by the execution engine.
+   */
+  step_up_code: string;
+  /**
+   * Explicit acknowledgement that orders use real money.
+   */
+  acknowledge_risk: true;
+  /**
+   * Arming lifetime. Defaults to, and may not exceed, the server's JOSEPH_LIVE_ARM_MAX_MS (8 hours unless configured; never more than 24 hours).
+   */
+  duration_ms?: number;
 }
 /**
  * Engaging blocks new opening orders. Cancelling and flattening are separate explicit options.

@@ -11,7 +11,9 @@
  * limits, board lots (張) and intraday odd lots (零股, limit DAY only, when
  * `odd_lot`), IBKR's `outside_rth`, market orders while the exchange is
  * closed (`queue_market_when_closed`), long-only cash accounts, settled
- * cash, broker account status and the wording of LIVE confirmations.
+ * cash, broker account status, the wording of LIVE confirmations and the
+ * server-side LIVE arming of an account (`live_armed_until_ms`,
+ * `LIVE_NOT_ARMED`).
  */
 import {
   Decimal,
@@ -22,6 +24,7 @@ import {
   marketStatus,
   parseInstrumentId,
   stepDecimals,
+  type AccountLiveConsentRequest,
   type AccountSummary,
   type BarCalendar,
   type Broker,
@@ -30,6 +33,7 @@ import {
   type MarketType,
   type OrderIntentRequest,
   type OrderType,
+  type RiskDecision,
   type TickStep,
   type TimeInForce,
   type TradingVenue,
@@ -1079,55 +1083,89 @@ export function liveConfirmation(
 
 // Live arming -----------------------------------------------------------------
 
-/** Body of a live consent request (execution engine `LiveConsentBody`). */
-export interface LiveConsentRequest {
-  /** Step-up (TOTP) code. */
-  step_up_code: string;
-  /** Explicit risk acknowledgement. */
-  acknowledge_risk: boolean;
-  /** Consent lifetime. */
-  duration_ms: number;
-}
-
-/** Consent granted by the engine. */
-export interface LiveConsentGrant {
-  /** When it expires (UTC ms). */
-  expires_at_ms: number;
+/** One arming lifetime offered by the ticket. */
+export interface LiveArmDuration {
+  /** Lifetime in milliseconds. */
+  ms: number;
+  /** Label, e.g. `1 hour`. */
+  label: string;
 }
 
 /**
- * Optional execution-client method for account-level live consent with a
- * step-up code (same body as `POST /v1/deployments/{id}/live-consent`).
+ * Arming lifetimes the ticket offers. All stay within the execution
+ * engine's default maximum (8 hours, `JOSEPH_LIVE_ARM_MAX_MS`); the engine
+ * refuses anything longer than its configured maximum.
  */
-export interface LiveArmingClient {
-  /**
-   * Grants scoped, expiring live consent for manual orders on an account.
-   * @param accountId Account id.
-   * @param request Step-up code, acknowledgement and lifetime.
-   * @return Consent with its expiry.
-   */
-  grantAccountLiveConsent(
-    accountId: string,
-    request: LiveConsentRequest
-  ): Promise<LiveConsentGrant>;
+export const LIVE_ARM_DURATIONS: readonly LiveArmDuration[] = [
+  {ms: 15 * 60_000, label: '15 minutes'},
+  {ms: 60 * 60_000, label: '1 hour'},
+  {ms: 4 * 60 * 60_000, label: '4 hours'},
+  {ms: 8 * 60 * 60_000, label: '8 hours'},
+];
+
+/** Default arming lifetime (1 hour). */
+export const LIVE_ARM_DEFAULT_MS = 60 * 60_000;
+
+/**
+ * Label of an arming lifetime.
+ * @param durationMs Lifetime.
+ * @return Label such as `1 hour`.
+ */
+export function liveArmDurationLabel(durationMs: number): string {
+  const known = LIVE_ARM_DURATIONS.find(d => d.ms === durationMs);
+  if (known) return known.label;
+  const minutes = Math.round(durationMs / 60_000);
+  return minutes % 60 === 0 ? `${minutes / 60} hours` : `${minutes} minutes`;
 }
 
 /**
- * Whether an execution client offers account-level live consent.
- * @param client Execution client.
- * @return True when `grantAccountLiveConsent` exists.
+ * Builds the account live-consent request (execution engine
+ * `POST /v1/accounts/{account_id}/live-consent`).
+ * @param code Step-up code as typed.
+ * @param durationMs Requested lifetime.
+ * @return Request body.
  */
-export function supportsLiveArming(
-  client: unknown
-): client is LiveArmingClient {
+export function liveArmRequest(
+  code: string,
+  durationMs: number
+): AccountLiveConsentRequest {
+  return {
+    step_up_code: code.trim(),
+    acknowledge_risk: true,
+    duration_ms: durationMs,
+  };
+}
+
+/**
+ * When the server-side LIVE arming of an account ends.
+ * @param account Account summary.
+ * @param nowMs Current time (UTC ms).
+ * @return End of the arming, or null when the account is not armed (no
+ *     arming, revoked or expired).
+ */
+export function liveArmedUntil(
+  account: AccountSummary | null,
+  nowMs: number
+): number | null {
+  const until = account?.live_armed_until_ms ?? null;
+  return until !== null && until > nowMs ? until : null;
+}
+
+/**
+ * Whether a risk decision blocked an order because LIVE is not armed on
+ * the account (`LIVE_NOT_ARMED`).
+ * @param risk Risk decision of a preview or submission.
+ * @return True when a failing check carries `LIVE_NOT_ARMED`.
+ */
+export function liveNotArmed(risk: RiskDecision | null | undefined): boolean {
   return (
-    typeof (client as Partial<LiveArmingClient> | null)
-      ?.grantAccountLiveConsent === 'function'
+    risk?.checks.some(
+      c =>
+        c.code === 'LIVE_NOT_ARMED' &&
+        (c.outcome === 'FAIL' || c.outcome === 'UNKNOWN')
+    ) ?? false
   );
 }
-
-/** How long a browser-side arm lasts. */
-export const LIVE_ARM_MS = 15 * 60_000;
 
 /**
  * Consent text shown before arming LIVE.
@@ -1135,7 +1173,7 @@ export const LIVE_ARM_MS = 15 * 60_000;
  * @return Text.
  */
 export function liveArmText(account: AccountSummary): string {
-  return `Live orders from this ticket go to ${tradingVenueName(account.venue)} account "${account.label}" with real money. The execution engine decides on every order (account permissions, risk limits, kill switch); arming only unlocks Live in this window for 15 minutes.`;
+  return `Live orders from this ticket go to ${tradingVenueName(account.venue)} account "${account.label}" with real money. The execution engine arms this account until the time shown after you confirm and still checks every LIVE order (account permissions, risk limits, kill switch). You can disarm at any time.`;
 }
 
 /**

@@ -212,6 +212,19 @@ async def test_live_gate_positive_control_reaches_only_when_all_pass() -> None:
     gated.market.feed_state = enums.FeedState.LIVE
     body = harness.intent_body(mode="LIVE")
     request = intents.OrderIntentRequest.from_contract(body)
+    unarmed = await svc.oms.preview(harness.TENANT_A, request)
+    assert unarmed.decision.primary_code() == "LIVE_NOT_ARMED"
+    with gated.container.uow_factory() as uow:
+        # The paper account cannot be armed through the API, so this
+        # positive control stores the arming directly (like the forced
+        # LIVE mode above).
+        forced = uow.accounts.get(harness.PAPER_A)
+        assert forced is not None
+        uow.live_arming.put(
+            accounts.LiveArming.grant(
+                forced, "user:user-a", gated.clock.now_ms(), 60_000
+            )
+        )
     preview = await svc.oms.preview(harness.TENANT_A, request)
     assert preview.allowed, preview.decision.failures()
     tokened = dataclasses.replace(

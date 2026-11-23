@@ -1,6 +1,6 @@
 # Securities brokers: Interactive Brokers, SinoPac, Cathay
 
-Joseph routes exchange-listed stocks and ETFs through brokers. Every order still travels `OrderIntent -> Risk Gateway -> OMS -> adapter`, and every LIVE order still needs all the gates: `JOSEPH_LIVE_TRADING_ENABLED=true`, the broker explicitly enabled, an account verified into LIVE mode, a preview token for manual orders, AUTO_LIVE consent with step-up for strategies (plus a venue-held stop-loss), the Risk Gateway, the kill switch, idempotent client ids and the audit log.
+Joseph routes exchange-listed stocks and ETFs through brokers. Every order still travels `OrderIntent -> Risk Gateway -> OMS -> adapter`, and every LIVE order still needs all the gates: `JOSEPH_LIVE_TRADING_ENABLED=true`, the broker explicitly enabled, an account verified into LIVE mode, a preview token and a server-side LIVE arming of the account (step-up code, at most `JOSEPH_LIVE_ARM_MAX_MS`) for manual orders, AUTO_LIVE consent with step-up for strategies (plus a venue-held stop-loss), the Risk Gateway, the kill switch, idempotent client ids and the audit log.
 
 | Broker (account venue) | Routes | Currency | Adapter | Status |
 |---|---|---|---|---|
@@ -32,6 +32,7 @@ Paper securities fill only in session, clamp market fills into the daily limits 
 | Variable | Default | Purpose |
 |---|---|---|
 | `JOSEPH_LIVE_TRADING_ENABLED` | `false` in code, `true` in `deploy/` | Global LIVE gate (brokers additionally need `JOSEPH_IBKR_ENABLED` / `JOSEPH_SINOPAC_ENABLED`) |
+| `JOSEPH_LIVE_ARM_MAX_MS` | `28800000` (8 h) | Longest (and default) account LIVE arming for manual orders; at most 24 h |
 | `JOSEPH_EQUITY_CLOSED_MARKET_ORDERS` | `reject` | `reject` or `queue` closed-market market orders |
 | `JOSEPH_PAPER_TWD_STARTING_CASH` | `3000000` | TWD paper account (`0`/`off` disables it) |
 | `JOSEPH_IBKR_ENABLED` | `false` | Allow connecting to IB Gateway |
@@ -54,9 +55,9 @@ Broker secrets come only from the environment or `*_FILE` secret files, are regi
 3. **Start the gateway.** `docker compose -f deploy/docker-compose.yml --env-file deploy/.env --profile ibkr up -d`. The image is `ghcr.io/gnzsnz/ib-gateway` (IB Gateway + IBC), pinned to `10.50.1h`; override with `IB_GATEWAY_IMAGE`. From the execution container the API is `ib-gateway:4004` (paper) or `ib-gateway:4003` (live).
 4. **Two-factor authentication.** Every gateway login sends an IBKR Mobile notification; approve it on the phone within about three minutes (IBC cannot do 2FA for you; with `RELOGIN_AFTER_TWOFA_TIMEOUT=yes` it retries until you approve). `AUTO_RESTART_TIME` (default 11:45 PM New York) restarts the gateway daily *without* 2FA, but IBKR requires one full login with 2FA per week after 01:00 ET on Sunday, so expect one approval at the start of each week. For the first login or troubleshooting, set `IBKR_VNC_PASSWORD_FILE` and connect a VNC client to `127.0.0.1:5900`.
 5. **Enable Joseph.** `JOSEPH_IBKR_ENABLED=true`, `JOSEPH_IBKR_PORT=4004`, `JOSEPH_IBKR_PAPER=true`; restart the execution engine.
-6. **Connect and verify.** `POST /v1/accounts/connect/start` with `{"venue": "ibkr", "credentials": {"account": "DU1234567"}, "withdrawal_permission_disabled": true}`, then `POST /v1/accounts/{id}/verify`. The account becomes `CONNECTED` with LIVE mode only when the gateway manages that account and the global LIVE flag is on.
+6. **Connect and verify.** `POST /v1/accounts/connect/start` with `{"venue": "ibkr", "credentials": {"account": "DU1234567"}, "withdrawal_permission_disabled": true}`, then `POST /v1/accounts/{id}/verify`. The account becomes `CONNECTED` with LIVE mode only when the gateway manages that account and the global LIVE flag is on. Manual orders then also need the account armed: `POST /v1/accounts/{id}/live-consent` with `{"step_up_code": "<TOTP>", "acknowledge_risk": true, "duration_ms": 3600000}` (the terminal's *Arm live* step); `DELETE` on the same path disarms. Unarmed LIVE orders are blocked with `LIVE_NOT_ARMED`, except reduce-only closes.
 7. **Opt-in check.** `JOSEPH_IBKR_PAPER_TESTS=1 JOSEPH_IBKR_PAPER_ACCOUNT=DU1234567 uv run --extra ibkr pytest -m ibkr_paper tests/brokers` places and cancels a 1-share limit order far from the market.
-8. **Live.** Switch `IBKR_TRADING_MODE=live`, `JOSEPH_IBKR_PORT=4003`, `JOSEPH_IBKR_PAPER=false`, connect the `U...` account and verify again. US equities settle T+1.
+8. **Live.** Switch `IBKR_TRADING_MODE=live`, `JOSEPH_IBKR_PORT=4003`, `JOSEPH_IBKR_PAPER=false`, connect the `U...` account, verify again and arm it before trading. US equities settle T+1.
 
 ## SinoPac (Shioaji) setup
 
@@ -66,7 +67,7 @@ Broker secrets come only from the environment or `*_FILE` secret files, are regi
 4. **Secrets.** Write the API key, secret key, CA password and person id into `deploy/secrets/sinopac_*` files and point the `JOSEPH_SINOPAC_*_FILE` variables at `/run/joseph-secrets/...`.
 5. **Simulation test (required by SinoPac before production).** With `JOSEPH_SINOPAC_SIMULATION=true` run, Mon-Fri 08:00-20:00 Taipei (18:00-20:00 from a Taiwan IP only): `JOSEPH_SINOPAC_SIM_TESTS=1 JOSEPH_SINOPAC_ACCOUNT=9A95-0000000 uv run --extra sinopac pytest -m sinopac_sim tests/brokers` (logs in with `simulation=True` and calls `place_order`). Wait at least five minutes for SinoPac's review.
 6. **Check signing.** In production mode the stock account must report `signed=True`; until then Joseph keeps the account `TRADING_UNAVAILABLE` with a note.
-7. **Production.** `JOSEPH_SINOPAC_SIMULATION=false`, `JOSEPH_SINOPAC_ENABLED=true`; connect `{"venue": "sinopac", "credentials": {"account": "9A95-0000000"}}` and verify. Orders: `price_type` LMT/MKT, ROD (DAY)/IOC/FOK, `order_lot` Common (lots of 1000) or IntradayOdd (shares), `order_cond` Cash. No stop orders, so no brackets or AUTO_LIVE. SinoPac allows 250 order calls per 10 s and 25 account queries per 5 s; Joseph paces below both.
+7. **Production.** `JOSEPH_SINOPAC_SIMULATION=false`, `JOSEPH_SINOPAC_ENABLED=true`; connect `{"venue": "sinopac", "credentials": {"account": "9A95-0000000"}}`, verify and arm the account (`POST /v1/accounts/{id}/live-consent`). Orders: `price_type` LMT/MKT, ROD (DAY)/IOC/FOK, `order_lot` Common (lots of 1000) or IntradayOdd (shares), `order_cond` Cash. No stop orders, so no brackets or AUTO_LIVE. SinoPac allows 250 order calls per 10 s and 25 account queries per 5 s; Joseph paces below both.
 
 ## Cathay Securities
 

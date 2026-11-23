@@ -63,6 +63,8 @@ class RiskContext:
         queue_closed_market_orders: Configuration allows DAY market
             orders to queue for the next open while the exchange is
             closed.
+        live_arming: Current LIVE arming of the account (manual LIVE
+            orders need a valid one), ``None`` when never armed.
     """
 
     request: intents.OrderIntentRequest
@@ -98,6 +100,7 @@ class RiskContext:
     cash: equities.CashBalance | None = None
     estimated_fee: decimal.Decimal | None = None
     queue_closed_market_orders: bool = False
+    live_arming: accounts.LiveArming | None = None
 
     @property
     def security(self) -> bool:

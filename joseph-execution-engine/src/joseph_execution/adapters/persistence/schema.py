@@ -231,6 +231,23 @@ deployments = sa.Table(
     sa.Column("updated_at_ms", _MS, nullable=False),
 )
 
+account_live_arming = sa.Table(
+    # One current LIVE arming per tenant account; revocation is kept on the
+    # row and every grant/revoke is in the audit chain. A new table, so
+    # ``create_all`` adds it to existing databases (no column migration).
+    "account_live_arming",
+    METADATA,
+    sa.Column("tenant_id", sa.String(128), primary_key=True),
+    sa.Column("account_id", sa.String(128), primary_key=True),
+    sa.Column("granted_at_ms", _MS, nullable=False),
+    sa.Column("expires_at_ms", _MS, nullable=False),
+    sa.Column("granted_by", sa.String(160), nullable=False),
+    sa.Column("acknowledgement", _TEXT, nullable=False),
+    sa.Column("scope_hash", sa.String(80), nullable=False),
+    sa.Column("revoked_at_ms", _MS),
+    sa.Column("revoked_by", sa.String(160)),
+)
+
 SQLITE_AUDIT_TRIGGERS = (
     """CREATE TRIGGER IF NOT EXISTS audit_no_update BEFORE UPDATE ON
     audit_events BEGIN SELECT RAISE(ABORT, 'audit log is append-only'); END""",

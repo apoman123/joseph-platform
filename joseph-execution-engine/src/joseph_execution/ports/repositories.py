@@ -654,6 +654,32 @@ class DeploymentRepository(Protocol):
         ...
 
 
+class LiveArmingRepository(Protocol):
+    """Current LIVE arming of each account (one row per tenant account)."""
+
+    def get(
+        self, tenant_id: str, account_id: str
+    ) -> accounts.LiveArming | None:
+        """Loads the current arming of an account.
+
+        Args:
+            tenant_id: Tenant (foreign tenants never see a record).
+            account_id: Account.
+
+        Returns:
+            Arming (possibly expired or revoked) or ``None``.
+        """
+        ...
+
+    def put(self, arming: accounts.LiveArming) -> None:
+        """Stores an arming, replacing the account's previous one.
+
+        Args:
+            arming: Arming.
+        """
+        ...
+
+
 class UnitOfWork(Protocol):
     """Transaction boundary exposing every repository."""
 
@@ -715,6 +741,11 @@ class UnitOfWork(Protocol):
     @property
     def deployments(self) -> DeploymentRepository:
         """Returns the deployments repository."""
+        ...
+
+    @property
+    def live_arming(self) -> LiveArmingRepository:
+        """Returns the account LIVE arming repository."""
         ...
 
     def __enter__(self) -> UnitOfWork:

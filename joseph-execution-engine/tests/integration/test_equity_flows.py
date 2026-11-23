@@ -371,6 +371,11 @@ async def test_live_ibkr_order_end_to_end() -> None:
     verified = await svc.accounts.verify(harness.TENANT_A, account_id)
     assert verified["status"] == "CONNECTED" and verified["modes"] == ["LIVE"]
     assert verified["equity"] == "50000"
+    assert verified["live_armed_until_ms"] is None
+    armed = await svc.accounts.grant_live_consent(
+        harness.TENANT_A, account_id, h.totp(), True, 3_600_000
+    )
+    assert armed["live_armed_until_ms"] == h.clock.now_ms() + 3_600_000
     request = intents.OrderIntentRequest(
         account_id=account_id,
         instrument_id=fixtures.AAPL,

@@ -138,6 +138,13 @@ def _ctx(**overrides: object) -> context.RiskContext:
         "estimated_fee": D(855),
     }
     fields.update(overrides)
+    armed = fields["account"]
+    if "live_arming" not in overrides and isinstance(armed, accounts.Account):
+        # LIVE manual orders need an account arming; these tests target
+        # the securities checks, so the effective account is armed.
+        fields["live_arming"] = accounts.LiveArming.grant(
+            armed, "user:u", int(str(fields["now_ms"])) - 1_000, 3_600_000
+        )
     return context.RiskContext(**fields)  # type: ignore[arg-type]
 
 
