@@ -243,12 +243,126 @@ def test_taiwan_fees() -> None:
     """Brokerage applies to every fill; the sale tax to sells only."""
     assert equities.is_taiwan("twse") and equities.is_taiwan("tpex")
     assert not equities.is_taiwan("nasdaq")
-    buy = equities.taiwan_fee(enums.OrderSide.BUY, D(600_000), "stock")
+    now = fixtures.taipei(MONDAY, 10)
+    stock = equities.TaiwanTaxClass.STOCK
+    buy = equities.taiwan_fee(enums.OrderSide.BUY, D(600_000), stock, now)
     assert buy == D(855)
-    sell = equities.taiwan_fee(enums.OrderSide.SELL, D(600_000), "stock")
+    sell = equities.taiwan_fee(enums.OrderSide.SELL, D(600_000), stock, now)
     assert sell == D(855 + 1800)
-    etf = equities.taiwan_fee(enums.OrderSide.SELL, D(150_000), "etf")
+    etf = equities.taiwan_fee(
+        enums.OrderSide.SELL, D(150_000), equities.TaiwanTaxClass.ETF, now
+    )
     assert etf == D(213 + 150)
+    bond = equities.taiwan_fee(
+        enums.OrderSide.SELL, D(150_000), equities.TaiwanTaxClass.BOND_ETF, now
+    )
+    assert bond == D(213)
+
+
+_BOND = enums.AssetClass.BOND
+_EQUITY = enums.AssetClass.EQUITY
+
+
+@pytest.mark.parametrize(
+    ("instrument", "asset_class", "expected"),
+    [
+        ("twse:stock:2330", _EQUITY, equities.TaiwanTaxClass.STOCK),
+        ("tpex:stock:6488", None, equities.TaiwanTaxClass.STOCK),
+        ("twse:etf:0050", _EQUITY, equities.TaiwanTaxClass.ETF),
+        ("tpex:etf:00679B", _BOND, equities.TaiwanTaxClass.BOND_ETF),
+        ("twse:etf:00865B", _BOND, equities.TaiwanTaxClass.BOND_ETF),
+        ("tpex:etf:00679B", None, equities.TaiwanTaxClass.ETF),
+        (
+            "tpex:etf:00679B",
+            enums.AssetClass.UNKNOWN,
+            equities.TaiwanTaxClass.ETF,
+        ),
+        ("tpex:etf:00680L", _BOND, equities.TaiwanTaxClass.ETF),
+        ("tpex:etf:00681R", _BOND, equities.TaiwanTaxClass.ETF),
+        ("tpex:etf:00980D", _BOND, equities.TaiwanTaxClass.ETF),
+    ],
+)
+def test_taiwan_tax_classes(
+    instrument: str,
+    asset_class: enums.AssetClass | None,
+    expected: equities.TaiwanTaxClass,
+) -> None:
+    """BOND ETFs are bond ETFs except leveraged, inverse and active funds."""
+    assert equities.taiwan_tax_class(instrument, asset_class) is expected
+
+
+@pytest.mark.parametrize(
+    ("tax_class", "rate"),
+    [
+        (equities.TaiwanTaxClass.STOCK, "0.003"),
+        (equities.TaiwanTaxClass.ETF, "0.001"),
+        (equities.TaiwanTaxClass.BOND_ETF, "0"),
+    ],
+)
+def test_taiwan_tax_rate_per_class(
+    tax_class: equities.TaiwanTaxClass, rate: str
+) -> None:
+    """Stocks pay 0.3%, ETFs 0.1% and bond ETFs nothing in 2026."""
+    now = fixtures.taipei(MONDAY, 10)
+    assert equities.taiwan_tax_rate(tax_class, now) == D(rate)
+
+
+@pytest.mark.parametrize(
+    ("day", "hour", "rate"),
+    [
+        (datetime.date(2016, 12, 30), 10, "0.001"),
+        (datetime.date(2017, 1, 3), 10, "0"),
+        (datetime.date(2026, 12, 31), 13, "0"),
+        (datetime.date(2026, 12, 31), 23, "0"),
+        (datetime.date(2027, 1, 1), 0, "0.001"),
+        (datetime.date(2027, 1, 4), 10, "0.001"),
+    ],
+)
+def test_bond_etf_suspension_ends_after_2026_12_31(
+    day: datetime.date, hour: int, rate: str
+) -> None:
+    """The bond ETF suspension covers Taipei trade dates 2017-2026 only."""
+    when = fixtures.taipei(day, hour)
+    bond = equities.TaiwanTaxClass.BOND_ETF
+    assert equities.taiwan_tax_rate(bond, when) == D(rate)
+    sale = equities.taiwan_fee(enums.OrderSide.SELL, D(100_000), bond, when)
+    assert sale == D(142) + D(100_000) * D(rate)
+
+
+def test_suspension_follows_the_taipei_date_not_utc() -> None:
+    """2026-12-31 16:30 UTC is already 2027-01-01 in Taipei (taxed)."""
+    bond = equities.TaiwanTaxClass.BOND_ETF
+    late_utc = fixtures.at(datetime.date(2026, 12, 31), 16, 30, datetime.UTC)
+    assert equities.taipei_date(late_utc) == datetime.date(2027, 1, 1)
+    assert equities.taiwan_tax_rate(bond, late_utc) == D("0.001")
+    assert equities.BOND_ETF_TAX_SUSPENSION.contains(
+        datetime.date(2026, 12, 31)
+    )
+    assert not equities.BOND_ETF_TAX_SUSPENSION.contains(
+        datetime.date(2027, 1, 1)
+    )
+
+
+@pytest.mark.parametrize(
+    ("day", "tax_class", "rate"),
+    [
+        (MONDAY, equities.TaiwanTaxClass.STOCK, "0.0015"),
+        (datetime.date(2027, 12, 31), equities.TaiwanTaxClass.STOCK, "0.0015"),
+        (datetime.date(2028, 1, 3), equities.TaiwanTaxClass.STOCK, "0.003"),
+        (MONDAY, equities.TaiwanTaxClass.ETF, "0.001"),
+        (MONDAY, equities.TaiwanTaxClass.BOND_ETF, "0"),
+    ],
+)
+def test_day_trade_rate_applies_to_stocks_until_2027_12_31(
+    day: datetime.date, tax_class: equities.TaiwanTaxClass, rate: str
+) -> None:
+    """A same-day round trip in shares pays 0.15% through 2027-12-31."""
+    when = fixtures.taipei(day, 10)
+    assert equities.taiwan_tax_rate(tax_class, when, day_trade=True) == D(rate)
+    fee = equities.taiwan_fee(
+        enums.OrderSide.SELL, D(600_000), tax_class, when, day_trade=True
+    )
+    assert fee == D(855) + D(600_000) * D(rate)
 
 
 def test_paper_account_ids() -> None:

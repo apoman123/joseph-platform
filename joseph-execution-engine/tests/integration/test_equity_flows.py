@@ -123,6 +123,47 @@ async def test_tpex_paper_orders_follow_taiwan_rules() -> None:
     assert not wrong.decision.allowed
 
 
+async def test_preview_fee_follows_the_bond_etf_tax_window() -> None:
+    """Previewed bond ETF sales show no sale tax until 2026-12-31."""
+    h = _build()
+    oms = h.container.services.oms
+    sale = _twse(
+        instrument_id=fixtures.YUANTA_US20,
+        side=enums.OrderSide.SELL,
+        position_effect=enums.PositionEffect.CLOSE,
+        reduce_only=True,
+        limit_price=D(26),
+    )
+    stock = _twse(side=enums.OrderSide.SELL, limit_price=D(600))
+    fees: dict[int, tuple[decimal.Decimal | None, decimal.Decimal | None]] = {}
+    for day in (datetime.date(2026, 12, 31), datetime.date(2027, 1, 1)):
+        h.clock.current_ms = fixtures.taipei(day, 10)
+        bond = await oms.preview(harness.TENANT_A, sale)
+        shares = await oms.preview(harness.TENANT_A, stock)
+        fees[day.year] = (bond.estimates.fee, shares.estimates.fee)
+    assert fees[2026] == (D(37), D(855 + 1800))
+    assert fees[2027] == (D(37 + 26), D(855 + 1800))
+
+
+async def test_twd_limit_factor_sizes_risk_checks_and_the_api() -> None:
+    """A configured TWD factor (here 2) replaces the default 30 everywhere."""
+    h = _build(twd_limit_factor=D(2))
+    oms = h.container.services.oms
+    blocked = await oms.submit_intent(harness.TENANT_A, _twse(), "f-1")
+    assert blocked.decision.primary_code() == "RISK_LIMIT"
+    small = _twse(quantity_base=D(500), limit_price=D(601))
+    allowed = await oms.submit_intent(harness.TENANT_A, small, "f-2")
+    assert allowed.decision.allowed, allowed.decision.failures()
+    with testclient.TestClient(bootstrap.build_app(h.container)) as client:
+        body = client.get(
+            "/v1/risk/limits",
+            params={"account_id": TWD_A},
+            headers=harness.headers(),
+        ).json()
+    assert body["limits"]["max_position_notional"] == "500000"
+    assert body["hard_limits"]["max_position_notional"] == "2000000"
+
+
 @pytest.mark.parametrize(
     ("overrides", "code"),
     [
