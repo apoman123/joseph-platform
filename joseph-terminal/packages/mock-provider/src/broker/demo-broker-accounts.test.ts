@@ -104,7 +104,7 @@ describe('DEMO accounts', () => {
     expect(accounts.every(a => !a.modes.includes('LIVE'))).toBe(true);
     const [usd, twd, ibkr, sinopac, live, cathay] = accounts;
     expect(usd?.capabilities).toMatchObject({
-      tradable_venues: ['nasdaq', 'nyse'],
+      tradable_venues: ['nasdaq', 'nyse', 'cboe'],
       cash_account: true,
       simulation: true,
       currencies: ['USD'],

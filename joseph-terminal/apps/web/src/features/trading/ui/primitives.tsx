@@ -27,6 +27,7 @@ const VENUE_CODES: Readonly<Record<Venue, string>> = {
   tpex: 'TPEx',
   nasdaq: 'NSDQ',
   nyse: 'NYSE',
+  cboe: 'CBOE',
   treasury: 'UST',
   mock: 'DEMO',
 };

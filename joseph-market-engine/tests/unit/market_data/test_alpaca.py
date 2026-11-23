@@ -590,6 +590,7 @@ async def test_trades_limit_snapshot_shapes_and_ids(
     assert alpaca.parse_directory("", "", 0) == {
         instruments.Venue.NASDAQ: [],
         instruments.Venue.NYSE: [],
+        instruments.Venue.CBOE: [],
     }
     assert (
         await adapter.fetch_candles(_AAPL, timeframes.Timeframe.M1, 10, 5) == []

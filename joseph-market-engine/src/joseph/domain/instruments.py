@@ -27,6 +27,7 @@ class Venue(enum.StrEnum):
     TPEX = "tpex"
     NASDAQ = "nasdaq"
     NYSE = "nyse"
+    CBOE = "cboe"
     TREASURY = "treasury"
     MOCK = "mock"
 
@@ -67,11 +68,14 @@ class AssetClass(enum.StrEnum):
 
 
 _ID_PATTERN = re.compile(
-    r"^(binance|hyperliquid|lighter|bitget|mexc|twse|tpex|nasdaq|nyse|treasury"
-    r"|mock):(perp|spot|future|stock|etf|rate):([A-Za-z0-9._/-]{1,64})$"
+    r"^(binance|hyperliquid|lighter|bitget|mexc|twse|tpex|nasdaq|nyse|cboe"
+    r"|treasury|mock):(perp|spot|future|stock|etf|rate)"
+    r":([A-Za-z0-9._/-]{1,64})$"
 )
 
-EXCHANGE_VENUES = frozenset({Venue.TWSE, Venue.TPEX, Venue.NASDAQ, Venue.NYSE})
+EXCHANGE_VENUES = frozenset(
+    {Venue.TWSE, Venue.TPEX, Venue.NASDAQ, Venue.NYSE, Venue.CBOE}
+)
 """Venues that are securities exchanges (session calendars, brokers)."""
 
 RATE_VENUES = frozenset({Venue.TREASURY})
@@ -82,6 +86,7 @@ _CALENDAR_BY_VENUE: dict[Venue, str] = {
     Venue.TPEX: "XTAI",
     Venue.NASDAQ: "XNYS",
     Venue.NYSE: "XNYS",
+    Venue.CBOE: "XNYS",
     Venue.TREASURY: "USBOND",
 }
 

@@ -1,4 +1,4 @@
-"""Interactive Brokers adapter (US stocks and ETFs on Nasdaq and NYSE).
+"""Interactive Brokers adapter (US stocks and ETFs: Nasdaq, NYSE, Cboe).
 
 Talks to IB Gateway or TWS through ``ib_async`` (BSD-2-Clause, optional
 extra ``ibkr``). IB Gateway ports: paper 4002 / live 4001 (TWS: 7497 /
@@ -6,7 +6,8 @@ extra ``ibkr``). IB Gateway ports: paper 4002 / live 4001 (TWS: 7497 /
 
 * Contracts: ``Stock(symbol, "SMART", "USD", primaryExchange=...)`` with
   the primary exchange from the instrument's ``listing_exchange`` (NASDAQ,
-  NYSE, ARCA, AMEX), qualified with ``qualifyContractsAsync``.
+  NYSE, ARCA, AMEX, and BATS for Cboe BZX), qualified with
+  ``qualifyContractsAsync``.
 * Orders: MKT, LMT, STP, STP LMT; TIF DAY/GTC/IOC; ``outsideRth``; the
   Joseph client order id travels in ``orderRef`` and is used to find the
   order again after a timeout or restart.
@@ -61,14 +62,21 @@ _PRIMARY_BY_LISTING = {
     "arca": "ARCA",
     "nyse american": "AMEX",
     "amex": "AMEX",
+    "cboe bzx": "BATS",
+    "bats": "BATS",
 }
-_PRIMARY_BY_VENUE = {"nasdaq": "NASDAQ", "nyse": "NYSE"}
+_PRIMARY_BY_VENUE = {
+    "nasdaq": "NASDAQ",
+    "nyse": "NYSE",
+    "cboe": "BATS",
+}
 _VENUE_BY_PRIMARY = {
     "NASDAQ": "nasdaq",
     "ISLAND": "nasdaq",
     "NYSE": "nyse",
     "ARCA": "nyse",
     "AMEX": "nyse",
+    "BATS": "cboe",
 }
 _ORDER_TYPES = {
     enums.OrderType.MARKET: "MKT",
@@ -295,7 +303,8 @@ class IbFactory(Protocol):
 
         Args:
             symbol: IBKR symbol.
-            primary_exchange: Listing exchange (NASDAQ, NYSE, ARCA, AMEX).
+            primary_exchange: Listing exchange (NASDAQ, NYSE, ARCA, AMEX,
+                BATS).
 
         Returns:
             Contract.
@@ -398,7 +407,7 @@ def primary_exchange(listing_exchange: str | None, venue: str) -> str:
     Args:
         listing_exchange: Instrument ``listing_exchange`` (e.g. ``NYSE
             Arca``), if known.
-        venue: Joseph venue (``nasdaq`` or ``nyse``).
+        venue: Joseph venue (``nasdaq``, ``nyse`` or ``cboe``).
 
     Returns:
         IBKR primary exchange code.
@@ -1286,7 +1295,7 @@ class IbkrAdapter:
             contract: ``ib_async.Contract``.
 
         Returns:
-            Instrument id, or ``None`` outside Nasdaq/NYSE.
+            Instrument id, or ``None`` outside Nasdaq/NYSE/Cboe BZX.
         """
         known = self._instruments.get(int(contract.conId or 0))
         if known is not None:
@@ -1305,8 +1314,8 @@ class IbkrAdapter:
             account_id: Joseph account.
 
         Returns:
-            Positions on Nasdaq/NYSE (ETFs traded through Joseph keep their
-            ``etf`` id; others default to ``stock``).
+            Positions on Nasdaq/NYSE/Cboe BZX (ETFs traded through Joseph
+            keep their ``etf`` id; others default to ``stock``).
         """
         ib, number = await self._session("list_positions", account_id)
         result = []

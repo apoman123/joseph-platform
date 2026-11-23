@@ -126,7 +126,7 @@ test('routes US shares to the paper or IBKR account with DAY and outside RTH', a
   await openPanel(page, 'Order ticket');
   const t = ticket(page);
   const account = t.getByRole('combobox', {name: 'Account'});
-  // The USD paper account trades crypto, Nasdaq and NYSE.
+  // The USD paper account trades crypto, Nasdaq, NYSE and Cboe BZX.
   await expect(account).toHaveValue('acct-paper-demo');
   await account.selectOption('acct-ibkr-demo');
   await expect(
@@ -192,7 +192,7 @@ test('a published rate has no ticket and accounts show their state', async ({
   await openPanel(page, 'Accounts');
   const table = page.getByRole('table', {name: 'Accounts'});
   await expect(table.getByTestId('account-row-acct-paper-demo')).toContainText(
-    'Crypto, Nasdaq, NYSE'
+    'Crypto, Nasdaq, NYSE, Cboe BZX'
   );
   await expect(
     table.getByTestId('account-row-acct-twd-paper-demo')

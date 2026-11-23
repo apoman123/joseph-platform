@@ -376,6 +376,7 @@ def test_calendar_lookup_by_instrument() -> None:
     assert sessions.for_instrument(parse("twse:stock:2330")) is XTAI
     assert sessions.for_instrument(parse("nasdaq:etf:TLT")) is XNYS
     assert sessions.for_instrument(parse("nyse:stock:IBM")) is XNYS
+    assert sessions.for_instrument(parse("cboe:etf:GOVT")) is XNYS
     assert (
         sessions.for_instrument(parse("treasury:rate:UST10Y"))
         is sessions.USBOND

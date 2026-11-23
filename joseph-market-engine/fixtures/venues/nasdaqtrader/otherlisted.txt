@@ -1,14 +1,18 @@
 ACT Symbol|Security Name|Exchange|CQS Symbol|ETF|Round Lot Size|Test Issue|NASDAQ Symbol
 AAA|Alternative Access First Priority CLO Bond ETF|P|AAA|Y|100|N|AAA
+AAAU|Goldman Sachs Physical Gold ETF Shares|Z|AAAU|Y|100|N|AAAU
 AAC.U|Ares Acquisition Corporation III Units, each consisting of one Class A ordinary share and one-tenth of one redeemable warrant|N|AAC.U|N|100|N|AAC=
 AAC.W|Ares Acquisition Corporation III Redeemable warrants, each whole warrant exercisable for one Class A ordinary share at an exercise price of $11.50|N|AAC.WS|N|100|N|AAC+
 ABR$D|Arbor Realty Trust 6.375% Series D Cumulative Redeemable Preferred Stock, Liquidation Preference $25.00 per Share|N|ABRpD|N|100|N|ABR-D
 AGG|iShares Core U.S. Aggregate Bond ETF|P|AGG|Y|100|N|AGG
 AIIA.R|AI Infrastructure Acquisition Corp. Rights, each entitling the holder to receive one-fifth (1/5) of one Class A Ordinary Share|N|AIIAr|N|100|N|AIIA^
+BBAG|JPMorgan BetaBuilders U.S. Aggregate Bond ETF|Z|BBAG|Y|100|N|BBAG
 BF.B|Brown Forman Inc Class B Common Stock|N|BF.B|N|100|N|BF.B
 BIL|State Street SPDR Bloomberg 1-3 Month T-Bill ETF|P|BIL|Y|100|N|BIL
 BRK.A|Berkshire Hathaway Inc. Common Stock|N|BRK.A|N|1|N|BRK.A
 BRK.B|Berkshire Hathaway Inc. New Common Stock|N|BRK.B|N|40|N|BRK.B
+CBOE|Cboe Global Markets, Inc. Common Stock|Z|CBOE|N|40|N|CBOE
+CECO|CECO Environmental Corp. Common Stock|F|CECO|N|100|N|CECO
 GOVT|iShares U.S. Treasury Bond ETF|Z|GOVT|Y|100|N|GOVT
 HYG|iShares iBoxx $ High Yield Corporate Bond ETF|P|HYG|Y|100|N|HYG
 IBM|International Business Machines Corporation Common Stock|N|IBM|N|100|N|IBM
@@ -19,6 +23,8 @@ MUB|iShares National Muni Bond ETF|P|MUB|Y|100|N|MUB
 SGOV|iShares 0-3 Month Treasury Bond ETF|N|SGOV|Y|100|N|SGOV
 SPY|State Street SPDR S&P 500 ETF Trust|P|SPY|Y|40|N|SPY
 TIP|iShares TIPS Bond ETF|P|TIP|Y|100|N|TIP
+VXX|iPath Series B S&P 500 VIX Short-Term Futures ETN|Z|VXX|N|100|N|VXX
+ZBZX|BATS BZX Exchange test issue|Z|ZBZX|N|100|Y|ZBZX
 ZEXIT|IEX Test Company Test Symbol Two for IEX|V|ZEXIT|N|100|Y|ZEXIT
 ZZZTX|TXSE Test Stk 5 Common Stock|F|ZZZTX|N|40|Y|ZZZTX
-File Creation Time: 1120202621:31||||||
+File Creation Time: 1123202603:02||||||

@@ -151,7 +151,7 @@ class Settings:
         smtp_from: Sender address.
         smtp_username: SMTP username.
         smtp_password: SMTP password (secret).
-        alpaca_key_id: Alpaca API key id for Nasdaq/NYSE data (secret).
+        alpaca_key_id: Alpaca API key id for US exchange data (secret).
         alpaca_secret_key: Alpaca API secret (secret).
         alpaca_feed: Alpaca stock feed: ``iex``, ``sip`` or
             ``delayed_sip``.
