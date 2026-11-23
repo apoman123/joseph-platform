@@ -2,12 +2,13 @@
  * @fileoverview Cash-equity and broker rules for the order ticket.
  *
  * Exchange-listed stocks and ETFs trade through securities brokers
- * (Interactive Brokers for Nasdaq/NYSE, SinoPac Shioaji and Cathay for
- * TWSE and TPEx) or the engine's paper accounts (USD: crypto, Nasdaq,
- * NYSE; TWD: TWSE, TPEx). This module holds the pure rules the ticket
- * applies before the execution engine re-checks everything, read from the
- * account's `TradingCapabilities`: routing by `tradable_venues`, time in
- * force (DAY only for exchange sessions), TWSE/TPEx tick ladders and daily
+ * (Interactive Brokers for Nasdaq/NYSE/Cboe BZX, SinoPac Shioaji and
+ * Cathay for TWSE and TPEx) or the engine's paper accounts (USD: crypto,
+ * Nasdaq, NYSE, Cboe BZX; TWD: TWSE, TPEx). This module holds the pure
+ * rules the ticket applies before the execution engine re-checks
+ * everything, read from the account's `TradingCapabilities`: routing by
+ * `tradable_venues`, time in force (DAY only for exchange sessions),
+ * TWSE/TPEx tick ladders and daily
  * price limits, board lots (張) and intraday odd lots (零股, limit DAY only, when
  * `odd_lot`), IBKR's `outside_rth`, market orders while the exchange is
  * closed (`queue_market_when_closed`), long-only cash accounts, settled
@@ -63,6 +64,7 @@ export const EXCHANGE_VENUES: readonly Venue[] = [
   'tpex',
   'nasdaq',
   'nyse',
+  'cboe',
 ];
 
 /** Short names of exchange venues for routing messages. */
@@ -71,6 +73,7 @@ const EXCHANGE_NAMES: Readonly<Partial<Record<Venue, string>>> = {
   tpex: 'TPEx',
   nasdaq: 'Nasdaq',
   nyse: 'NYSE',
+  cboe: 'Cboe BZX',
 };
 
 /**
@@ -78,14 +81,14 @@ const EXCHANGE_NAMES: Readonly<Partial<Record<Venue, string>>> = {
  * `tradable_venues` (engine `BROKER_EXCHANGES`).
  */
 export const BROKER_EXCHANGES: Readonly<Record<Broker, readonly Venue[]>> = {
-  ibkr: ['nasdaq', 'nyse'],
+  ibkr: ['nasdaq', 'nyse', 'cboe'],
   sinopac: ['twse', 'tpex'],
   cathay: ['twse', 'tpex'],
 };
 
 /** Exchanges whose listings trade in each currency (paper accounts). */
 const CURRENCY_EXCHANGES: Readonly<Record<string, readonly Venue[]>> = {
-  USD: ['nasdaq', 'nyse'],
+  USD: ['nasdaq', 'nyse', 'cboe'],
   TWD: ['twse', 'tpex'],
 };
 
@@ -475,12 +478,16 @@ function exchangeName(venue: Venue): string {
 }
 
 /**
- * Joins exchange names, e.g. `Nasdaq and NYSE`.
+ * Joins exchange names, e.g. `TWSE and TPEx` or `Nasdaq, NYSE and Cboe
+ * BZX`.
  * @param venues Exchange venues.
  * @return Text.
  */
 function exchangeList(venues: readonly Venue[]): string {
-  return venues.map(exchangeName).join(' and ');
+  const names = venues.map(exchangeName);
+  const last = names.pop();
+  if (last === undefined) return '';
+  return names.length > 0 ? `${names.join(', ')} and ${last}` : last;
 }
 
 /** Connection state shown for an account. */
@@ -628,7 +635,7 @@ export function accountExchanges(account: AccountSummary): readonly Venue[] {
 function securityExchanges(venue: Venue, calendar: string): readonly Venue[] {
   if (EXCHANGE_VENUES.includes(venue)) return [venue];
   if (calendar === 'XTAI') return ['twse', 'tpex'];
-  if (calendar === 'XNYS') return ['nasdaq', 'nyse'];
+  if (calendar === 'XNYS') return ['nasdaq', 'nyse', 'cboe'];
   return [];
 }
 

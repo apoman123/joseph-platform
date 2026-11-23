@@ -871,8 +871,8 @@ def _check_universe(collector: _Collector) -> None:
                 "RATE_VENUE_NOT_TRADABLE",
                 f"{venue.value} publishes non-tradable rate series "
                 f"({venue.value}:rate:*); a strategy cannot trade them. Trade "
-                "rates through a bond ETF on nasdaq or nyse; rate series may "
-                "only be read as context.",
+                "rates through a bond ETF on nasdaq, nyse or cboe; rate "
+                "series may only be read as context.",
             )
     for index, instrument in enumerate(universe.whitelist):
         reason = untradable_reason(instrument)

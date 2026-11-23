@@ -20,6 +20,7 @@ GLOBALWAFERS = "tpex:stock:6488"
 YUANTA_US20 = "tpex:etf:00679B"
 AAPL = "nasdaq:stock:AAPL"
 SPY = "nyse:etf:SPY"
+GOVT = "cboe:etf:GOVT"
 UST10Y = "treasury:rate:UST10Y"
 MOCK_STOCK = "mock:stock:DEMO"
 
@@ -119,8 +120,10 @@ def us(
     """Builds US-listed instrument metadata.
 
     Args:
-        instrument_id: Instrument id (``nasdaq:...`` or ``nyse:...``).
-        listing_exchange: Listing exchange, e.g. ``NYSE Arca``.
+        instrument_id: Instrument id (``nasdaq:...``, ``nyse:...`` or
+            ``cboe:...``).
+        listing_exchange: Listing exchange, e.g. ``NYSE Arca`` or
+            ``Cboe BZX``.
 
     Returns:
         Metadata (cent ticks, single shares, no daily limit).
@@ -279,6 +282,7 @@ def install(
     gateway.add_instrument(bond, _D("26"))
     gateway.add_instrument(us(), _D(aapl_mark))
     gateway.add_instrument(us(SPY, "NYSE Arca"), _D("580"))
+    gateway.add_instrument(us(GOVT, "Cboe BZX"), _D("23"))
     gateway.add_instrument(treasury(), _D("4.25"))
     gateway.set_previous_close(TSMC, _D(tsmc_close))
     gateway.set_previous_close(YUANTA_50, _D("150"))

@@ -94,6 +94,18 @@ describe('identity helpers', () => {
     expect(VENUE_NAMES.tpex).toBe('Taipei Exchange (TPEx)');
   });
 
+  it('knows Cboe BZX listings', () => {
+    expect(parseInstrumentId('cboe:etf:GOVT')).toEqual({
+      venue: 'cboe',
+      marketType: 'etf',
+      venueMarketId: 'GOVT',
+    });
+    expect(isInstrumentId('cboe:stock:CBOE')).toBe(true);
+    expect(isInstrumentId('iex:etf:GOVT')).toBe(false);
+    expect(VENUES.indexOf('cboe')).toBe(VENUES.indexOf('nyse') + 1);
+    expect(VENUE_NAMES.cboe).toBe('Cboe BZX');
+  });
+
   it('aligns weekly bars to Monday UTC', () => {
     const monday = Date.UTC(2026, 10, 16);
     expect(floorToTimeframe('1w', monday + 3 * 86_400_000)).toBe(monday);

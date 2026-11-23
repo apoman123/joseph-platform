@@ -27,6 +27,7 @@ MONDAY = datetime.date(2026, 11, 23)
         ("hyperliquid", False, "USD", "hyperliquid:perp:BTC", True),
         ("ibkr", False, "USD", "nasdaq:stock:AAPL", True),
         ("ibkr", False, "USD", "nyse:etf:SPY", True),
+        ("ibkr", False, "USD", "cboe:etf:GOVT", True),
         ("ibkr", False, "USD", "twse:stock:2330", False),
         ("sinopac", False, "TWD", "twse:stock:2330", True),
         ("sinopac", False, "TWD", "tpex:stock:6488", True),
@@ -35,10 +36,13 @@ MONDAY = datetime.date(2026, 11, 23)
         ("cathay", False, "TWD", "twse:etf:0050", True),
         ("cathay", False, "TWD", "tpex:etf:00937B", True),
         ("cathay", False, "TWD", "nyse:stock:IBM", False),
+        ("sinopac", False, "TWD", "cboe:etf:GOVT", False),
         ("ibkr", False, "USD", "tpex:stock:6488", False),
         ("mock", True, "USD", "mock:perp:BTCUSD", True),
         ("mock", True, "USD", "binance:perp:BTCUSDT", True),
         ("mock", True, "USD", "nasdaq:stock:AAPL", True),
+        ("mock", True, "USD", "cboe:etf:GOVT", True),
+        ("mock", True, "TWD", "cboe:etf:GOVT", False),
         ("mock", True, "USD", "twse:stock:2330", False),
         ("mock", True, "TWD", "twse:stock:2330", True),
         ("mock", True, "TWD", "tpex:etf:00679B", True),
@@ -61,7 +65,7 @@ def test_route_matrix(
 def test_route_messages_name_the_rule() -> None:
     """Routing errors explain the broker's exchanges and rate series."""
     ib = equities.route("ibkr", False, "USD", "twse:stock:2330")
-    assert "Nasdaq and NYSE" in ib.message
+    assert "Nasdaq, NYSE and Cboe BZX listings" in ib.message
     rate = equities.route("ibkr", False, "USD", fixtures.UST10Y)
     assert "rate series" in rate.message
     paper = equities.route("mock", True, "USD", fixtures.TSMC)
@@ -70,6 +74,10 @@ def test_route_messages_name_the_rule() -> None:
     assert "TWSE and TPEx listings" in sinopac.message
     tpex = equities.route("cathay", False, "TWD", fixtures.GLOBALWAFERS)
     assert tpex.allowed and "TPEx via Cathay Securities" in tpex.message
+    cboe = equities.route("ibkr", False, "USD", fixtures.GOVT)
+    assert cboe.allowed and "Cboe BZX via Interactive" in cboe.message
+    usd = equities.route("mock", True, "TWD", fixtures.GOVT)
+    assert "Cboe BZX listings settle in USD" in usd.message
 
 
 def test_instrument_helpers() -> None:

@@ -44,8 +44,8 @@ export const MARKET_GROUP_LABELS: Readonly<Record<MarketGroup, string>> = {
 export const GROUP_VENUES: Readonly<Record<MarketGroup, readonly string[]>> = {
   crypto: ['binance', 'hyperliquid', 'lighter', 'bitget', 'mexc'],
   tw: ['twse', 'tpex'],
-  us: ['nasdaq', 'nyse'],
-  bonds: ['treasury', 'nasdaq', 'nyse', 'twse', 'tpex'],
+  us: ['nasdaq', 'nyse', 'cboe'],
+  bonds: ['treasury', 'nasdaq', 'nyse', 'cboe', 'twse', 'tpex'],
 };
 
 /**
@@ -179,7 +179,9 @@ export function venueAccess(
     capabilities.requires_credentials === true &&
     capabilities.credentials_configured === false;
   const provider =
-    capabilities.venue === 'nasdaq' || capabilities.venue === 'nyse'
+    capabilities.venue === 'nasdaq' ||
+    capabilities.venue === 'nyse' ||
+    capabilities.venue === 'cboe'
       ? 'Alpaca'
       : capabilities.display_name;
   return {

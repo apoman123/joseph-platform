@@ -18,6 +18,7 @@ _VENUES = [
     instruments.Venue.TPEX,
     instruments.Venue.NASDAQ,
     instruments.Venue.NYSE,
+    instruments.Venue.CBOE,
     instruments.Venue.TREASURY,
 ]
 
