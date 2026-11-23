@@ -4,6 +4,12 @@ Shipped with the package (no runtime cost) so every bounded context can
 build consistent multi-timeframe fixtures: lower-timeframe series are
 generated first and higher timeframes are aggregated from them, exactly as
 a venue would.
+
+Every builder follows the instrument's session calendar: pass an exchange
+instrument (``STOCK_INSTRUMENT`` is ``mock:stock:ACME`` on XNYS) and bars
+start at the session open, the last bar of a session is cut at the close,
+weekends and holidays are skipped, and ``aggregate`` builds session daily
+and weekly bars.
 """
 
 from __future__ import annotations
@@ -18,6 +24,7 @@ from joseph.domain import decimals
 from joseph.domain import instruments
 from joseph.domain import market
 from joseph.domain import quality
+from joseph.domain import sessions
 from joseph.domain import structures
 from joseph.domain import timeframes
 from joseph.indicators.sdk import protocol
@@ -28,6 +35,36 @@ Number = str | int | decimal.Decimal
 DEFAULT_INSTRUMENT = instruments.InstrumentId.parse("binance:perp:BTCUSDT")
 # 2026-11-16 00:00:00 UTC (a Monday), aligned for every timeframe.
 DEFAULT_START_MS = 1_794_787_200_000
+STOCK_INSTRUMENT = instruments.InstrumentId.parse("mock:stock:ACME")
+"""DEMO stock on the XNYS calendar (09:30-16:00 America/New_York)."""
+# 2026-11-16 09:30 America/New_York (14:30 UTC), a Monday session open.
+STOCK_START_MS = 1_794_839_400_000
+
+
+def bar_starts(
+    timeframe: timeframes.Timeframe,
+    start_ms: int,
+    count: int,
+    instrument_id: instruments.InstrumentId = DEFAULT_INSTRUMENT,
+) -> list[int]:
+    """Returns consecutive bar starts on the instrument's calendar.
+
+    Args:
+        timeframe: Bar resolution.
+        start_ms: First bar start (a later time counts from the next bar).
+        count: Number of bars.
+        instrument_id: Instrument.
+
+    Returns:
+        Ascending bar starts.
+    """
+    calendar = sessions.for_instrument(instrument_id)
+    starts: list[int] = []
+    current = calendar.shift(timeframe, start_ms, 0)
+    for _ in range(count):
+        starts.append(current)
+        current = calendar.shift(timeframe, current, 1)
+    return starts
 
 
 def make_candle(  # noqa: PLR0917 - OHLCV reads naturally positionally.
@@ -62,11 +99,12 @@ def make_candle(  # noqa: PLR0917 - OHLCV reads naturally positionally.
     Returns:
         The candle.
     """
+    end_ms = sessions.for_instrument(instrument_id).end_of(timeframe, start_ms)
     return market.Candle(
         instrument_id=instrument_id,
         timeframe=timeframe,
         start_ms=start_ms,
-        end_ms=timeframe.end_of(start_ms),
+        end_ms=end_ms,
         open=decimals.to_decimal(open_),
         high=decimals.to_decimal(high),
         low=decimals.to_decimal(low),
@@ -75,7 +113,7 @@ def make_candle(  # noqa: PLR0917 - OHLCV reads naturally positionally.
         is_final=is_final,
         source="test",
         feed_state=feed_state,
-        received_at_ms=timeframe.end_of(start_ms),
+        received_at_ms=end_ms,
         revision=revision,
     )
 
@@ -98,6 +136,8 @@ def candles_from_rows(
     Returns:
         Candles.
     """
+    rows = list(rows)
+    starts = bar_starts(timeframe, start_ms, len(rows), instrument_id)
     candles = []
     for index, row in enumerate(rows):
         open_, high, low, close = row[:4]
@@ -105,7 +145,7 @@ def candles_from_rows(
         candles.append(
             make_candle(
                 timeframe,
-                timeframe.shift(start_ms, index),
+                starts[index],
                 open_,
                 high,
                 low,
@@ -145,6 +185,7 @@ def random_walk(
     rng = random.Random(seed)  # noqa: S311 - deterministic test data.
     tick = decimal.Decimal("0.01")
     price = decimals.to_decimal(base)
+    starts = bar_starts(timeframe, start_ms, count, instrument_id)
     candles = []
     for index in range(count):
         open_ = price
@@ -160,7 +201,7 @@ def random_walk(
         candles.append(
             make_candle(
                 timeframe,
-                timeframe.shift(start_ms, index),
+                starts[index],
                 open_,
                 high,
                 low,
@@ -194,14 +235,20 @@ def aggregate(
     if not candles:
         return []
     source_tf = candles[0].timeframe
-    if not timeframe.contains(source_tf) and timeframe is not source_tf:
+    calendar = sessions.for_instrument(candles[0].instrument_id)
+    if not calendar.contains(timeframe, source_tf) and (
+        timeframe is not source_tf
+    ):
         raise ValueError(f"{source_tf} does not nest in {timeframe}")
     buckets: dict[int, list[market.Candle]] = {}
     for candle in candles:
-        buckets.setdefault(timeframe.floor(candle.start_ms), []).append(candle)
+        buckets.setdefault(
+            calendar.floor(timeframe, candle.start_ms), []
+        ).append(candle)
     result = []
     for start, members in sorted(buckets.items()):
-        per_bucket = source_tf.bars_between(start, timeframe.end_of(start))
+        end = calendar.end_of(timeframe, start)
+        per_bucket = calendar.bars_between(source_tf, start, end)
         if len(members) != per_bucket:
             continue
         result.append(
@@ -209,7 +256,7 @@ def aggregate(
                 instrument_id=members[0].instrument_id,
                 timeframe=timeframe,
                 start_ms=start,
-                end_ms=timeframe.end_of(start),
+                end_ms=end,
                 open=members[0].open,
                 high=max(c.high for c in members),
                 low=min(c.low for c in members),
@@ -220,10 +267,29 @@ def aggregate(
                 is_final=True,
                 source="test.aggregate",
                 feed_state=members[-1].feed_state,
-                received_at_ms=timeframe.end_of(start),
+                received_at_ms=end,
+                taker_buy_base_volume=_sum_taker(members),
+                taker_buy_method=members[-1].taker_buy_method,
             )
         )
     return result
+
+
+def _sum_taker(members: Sequence[market.Candle]) -> decimal.Decimal | None:
+    """Sums the members' buy volume when every member carries one.
+
+    Args:
+        members: Candles of one bucket.
+
+    Returns:
+        Total buy volume, or ``None`` when any member has none.
+    """
+    if any(c.taker_buy_base_volume is None for c in members):
+        return None
+    return sum(
+        (c.taker_buy_base_volume or decimals.ZERO for c in members),
+        decimals.ZERO,
+    )
 
 
 def run_bars(

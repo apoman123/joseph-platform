@@ -13,12 +13,17 @@ Both engines use SQLAlchemy: SQLite by default (`./var/*.db`), PostgreSQL via `J
 ## Start
 
 ```bash
-eval "$(ssh-agent -s)" && ssh-add <key with read access to apoman123/PineScripts>
-make setup     # locked dependencies for all projects (fetches the indicator library over SSH)
+# Once, either: fetch the indicator library over SSH (key with access to PineScripts) …
+git config --global url."ssh://git@github.com/apoman123/PineScripts".insteadOf https://github.com/apoman123/PineScripts
+eval "$(ssh-agent -s)" && ssh-add <that key>
+# … or with a read-only token (see CI_CD.md) exported as PINESCRIPTS_TOKEN:
+git config --global credential.https://github.com/apoman123/PineScripts.git.helper \
+  '!f() { test "$1" = get && printf "username=x-access-token\npassword=%s\n" "$PINESCRIPTS_TOKEN"; }; f'
+make setup     # locked dependencies for all projects (fetches the indicator library)
 make dev       # market :8000, execution :8100, terminal :3000 (dev tokens)
 ```
 
-The market engine's indicators come from the private `apoman123/PineScripts` repository (`python_indicators/`), pinned by commit in `joseph-market-engine/pyproject.toml`. `make images` / `make compose-up` forward the same ssh-agent to the image build (`docker build --ssh default`); the key never enters an image. To work on an indicator and the platform together: `cd joseph-market-engine && uv pip install -e ../../PineScripts/python_indicators` (undo with `uv sync`).
+The market engine's indicators come from the private `apoman123/PineScripts` repository (`python_indicators/`), pinned by commit in `joseph-market-engine/pyproject.toml` (`https://github.com/apoman123/PineScripts.git`). Both settings above apply to that repository only. `make images` passes `PINESCRIPTS_TOKEN` to the image build as a BuildKit secret when it is set and forwards the ssh-agent otherwise; `make compose-up` does both, so it needs a running agent (it may hold no key when the token is set). Neither credential enters an image. To work on an indicator and the platform together: `cd joseph-market-engine && uv pip install -e ../../PineScripts/python_indicators` (undo with `uv sync`).
 
 Containers: `deploy/docker-compose.yml` runs the published images (`make compose-up` builds them locally); GitHub Actions deploys the same file — see `CI_CD.md`.
 
