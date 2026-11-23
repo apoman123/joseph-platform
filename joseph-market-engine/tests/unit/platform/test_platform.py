@@ -51,6 +51,7 @@ def test_trade_recording_settings_parse_with_bounds() -> None:
     assert defaults.trade_bar_retention_days == 30.0
     assert defaults.binance_archive is True
     assert defaults.bitget_archive is True
+    assert defaults.lighter_archive is True
     assert defaults.trade_archive_url is None
     settings = config.Settings.from_env(
         {
@@ -64,6 +65,7 @@ def test_trade_recording_settings_parse_with_bounds() -> None:
             "JOSEPH_BINANCE_ARCHIVE_DIR": "/data/vision",
             "JOSEPH_BITGET_ARCHIVE": "no",
             "JOSEPH_BITGET_ARCHIVE_DIR": "/data/bitget",
+            "JOSEPH_LIGHTER_ARCHIVE": "off",
         }
     )
     assert settings.trade_recording is False
@@ -76,6 +78,10 @@ def test_trade_recording_settings_parse_with_bounds() -> None:
     assert settings.binance_archive_dir == "/data/vision"
     assert settings.bitget_archive is False
     assert settings.bitget_archive_dir == "/data/bitget"
+    assert settings.lighter_archive is False
+    assert config.Settings.from_env(
+        {"JOSEPH_LIGHTER_ARCHIVE": "on"}
+    ).lighter_archive
 
 
 def test_demo_only_restricts_to_mock() -> None:

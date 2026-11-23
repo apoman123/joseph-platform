@@ -23,6 +23,7 @@ forbidden_modules =
     httpx
     websockets
     uvicorn
+    pyarrow
 
 [importlinter:contract:context-domains-pure]
 name = Bounded-context domain layers never import frameworks or infrastructure
@@ -41,6 +42,7 @@ forbidden_modules =
     httpx
     websockets
     uvicorn
+    pyarrow
 
 [importlinter:contract:indicator-adapters-thin]
 name = Indicator adapters depend only on the SDK, the domain and the external library

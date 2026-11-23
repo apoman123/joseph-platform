@@ -34,9 +34,13 @@ Trades (verified live 2026-11-22, docs.lighter.xyz/api):
 * REST ``trades`` (``sort_by=timestamp``, ``from`` exclusive, newest first,
   100 per page, ``next_cursor``) only reaches back about 53 minutes, so
   older seconds history is unavailable (never fabricated).
-* ASSUMPTION: ``liquidation`` trades in ``trades[]`` are order-book fills
-  and count toward bars; ``deleverage`` and ``market-settlement`` entries
-  are off-book transfers and are excluded. The separate
+* Only ``type == "trade"`` entries count toward bars. Lighter's own
+  candles exclude ``liquidation`` fills from volume and prices (verified
+  2026-11-23 against the AWS trade archive: the ``trade`` rows reproduce
+  the 1d candle exactly and every sampled 1m candle of a minute with
+  liquidations, adding liquidations never does), so seconds bars and
+  recorded true delta follow the venue's bars. ``deleverage`` and
+  ``market-settlement`` entries are off-book transfers. The separate
   ``liquidation_trades`` list (hours old in the replay) is ignored.
 """
 
@@ -79,7 +83,7 @@ _KLINE_TF = (
 _TF = (*timeframes.SECONDS, *_KLINE_TF)
 _MAX_CANDLES = 500
 _MAX_TRADES = 100
-_BOOK_TRADE_TYPES = frozenset({"trade", "liquidation"})
+_BOOK_TRADE_TYPES = frozenset({"trade"})
 _MAX_BOOK_ORDERS = 250
 _QUOTE_DECIMALS = 6
 _HOUR_MS = 3_600_000
@@ -233,7 +237,8 @@ def parse_trade(
         now_ms: Receipt time.
 
     Returns:
-        Trade, or ``None`` for off-book entries (deleverage, settlement).
+        Trade, or ``None`` for entries Lighter's candles do not count
+        (liquidation, deleverage, settlement).
     """
     if str(row.get("type", "trade")) not in _BOOK_TRADE_TYPES:
         return None

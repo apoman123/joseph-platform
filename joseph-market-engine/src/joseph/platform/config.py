@@ -171,6 +171,9 @@ class Settings:
         bitget_archive: Whether Bitget seconds history is imported from
             its public trade archive (verified against 1D klines).
         bitget_archive_dir: Cache directory of downloaded Bitget parts.
+        lighter_archive: Whether Lighter seconds history is imported from
+            the AWS Public Blockchain Data trade archive (remote range
+            reads, verified against 1d candles, nothing cached on disk).
     """
 
     dev_tokens: tuple[DevToken, ...] = ()
@@ -215,6 +218,7 @@ class Settings:
     binance_archive_dir: str = "./var/binance-vision"
     bitget_archive: bool = True
     bitget_archive_dir: str = "./var/bitget-archive"
+    lighter_archive: bool = True
 
     def __repr__(self) -> str:
         """Returns a representation with secrets redacted."""
@@ -342,4 +346,5 @@ class Settings:
             bitget_archive_dir=source.get(
                 "JOSEPH_BITGET_ARCHIVE_DIR", "./var/bitget-archive"
             ),
+            lighter_archive=_bool(source.get("JOSEPH_LIGHTER_ARCHIVE"), True),
         )
