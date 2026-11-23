@@ -110,8 +110,8 @@ def test_five_thousand_bars_all_plugins_within_budget() -> None:
 
 @pytest.mark.slow
 def test_fifty_thousand_bar_anchored_vwap_within_budget() -> None:
-    """A 50,000-bar anchored VWAP is computed cold, then incrementally."""
-    bars = testing.random_walk(50_001, seed=17)
+    """An anchored VWAP runs cold, then incrementally up to the 50k cap."""
+    bars = testing.random_walk(50_000, seed=17)
     source = _Source(bars[:-1])
     clock = clock_lib.ManualClock(bars[-2].end_ms)
     query = service.IndicatorQueryService(
@@ -146,7 +146,7 @@ def test_fifty_thousand_bar_anchored_vwap_within_budget() -> None:
     warm_s = time.perf_counter() - started
     message = f"[perf] anchored 50k cold {cold_s:.2f}s, next bar {warm_s:.2f}s"
     print(message)  # noqa: T201
-    assert len(cold["points"]) == 50_000  # type: ignore[arg-type]
-    assert len(warm["points"]) == 50_001  # type: ignore[arg-type]
+    assert len(cold["points"]) == 49_999  # type: ignore[arg-type]
+    assert len(warm["points"]) == 50_000  # type: ignore[arg-type]
     assert cold_s < _budget(_ANCHORED_BUDGET_S), message
     assert warm_s < _budget(_INCREMENTAL_BUDGET_S), message
