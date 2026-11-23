@@ -10,7 +10,7 @@ dependencies = [
   "uvicorn[standard]>=0.32,<1",
   "pydantic>=2.9,<3",
   "httpx>=0.27,<1",
-  "websockets>=13,<17",
+  "websockets>=13,<18",
   "sqlalchemy>=2.0,<3",
   "cryptography>=49.0.0,<51",
   # MEXC futures WebSocket Protobuf pushes (BSD-3-Clause; decoded with
