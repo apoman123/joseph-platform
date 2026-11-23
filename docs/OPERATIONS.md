@@ -40,7 +40,8 @@ Production checklist: `JOSEPH_ENV=production` on the execution engine (refuses d
 | `JOSEPH_FORWARD_SIGNALS` | market | true | forward PAPER/SHADOW entries to execution |
 | `JOSEPH_TELEGRAM_BOT_TOKEN`, `JOSEPH_LINE_CHANNEL_TOKEN`, `JOSEPH_WEBHOOK_SECRET`, `JOSEPH_SMTP_*` | market | — | enable notification channels |
 | `JOSEPH_MARKET_GATEWAY` / `JOSEPH_MARKET_URL` | execution | static / :8000 | `http` = risk and paper fills on real market data |
-| `JOSEPH_LIVE_TRADING_ENABLED` | execution | false | one of five LIVE gates; leave false |
+| `JOSEPH_LIVE_TRADING_ENABLED` | execution | false in code, **true** in `deploy/` | global LIVE gate; false stops all new live orders and venue negotiation |
+| `JOSEPH_VENUE_SANDBOX` / `JOSEPH_VENUE_URLS` | execution | — | default accounts to venue testnets; endpoint overrides |
 | `JOSEPH_EMERGENCY_HALT` | execution | false | platform-wide block on new exposure |
 | `NEXT_PUBLIC_MARKET_API_URL`, `…_WS_URL`, `NEXT_PUBLIC_EXECUTION_API_URL`, `…_WS_URL` | terminal | empty = DEMO | baked in at build time |
 
@@ -73,6 +74,6 @@ Production checklist: `JOSEPH_ENV=production` on the execution engine (refuses d
 | Audit `chain_valid: false` | Treat as tampering or corruption: freeze writes, restore from backup, compare chains. |
 | Alerts not arriving | Check the alert outbox (dead letters in `alert_deliveries`), channel credentials, and quiet hours on the subscription. |
 
-## LIVE enablement (not active)
+## LIVE enablement
 
-LIVE requires, in order: implemented and sandbox-verified venue signing adapters; independent security and risk review; `JOSEPH_LIVE_TRADING_ENABLED=true`; per-account LIVE permission with verified, withdrawal-disabled credentials; a strategy deployment with scoped consent + step-up (MFA); venue-native stop-loss capability for automated orders; a kill-switch drill. None of these are switched on in this release.
+LIVE adapters for Binance, Bitget (UTA), Hyperliquid, Lighter and MEXC are implemented. The deploy compose sets `JOSEPH_LIVE_TRADING_ENABLED=true` (owner decision); the code default stays false. An account trades LIVE only after: storing withdrawal-disabled credentials (`POST /v1/accounts/connect/start`); `POST /v1/accounts/{id}/verify` negotiating `AVAILABLE` (healthy venue, permission probe, one-way mode); a previewed manual order, or an AUTO_LIVE deployment with scoped consent + step-up (MFA) and venue-native stop-loss; and no engaged kill switch. Before the first real order: run `make test-sandbox` against each venue's testnet, use a dedicated (sub)account (reconciliation flags any position Joseph did not open and blocks new exposure), and run a kill-switch drill. MEXC has no sandbox and needs KYC plus the "Order Placing" key permission.

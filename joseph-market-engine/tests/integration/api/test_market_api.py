@@ -2,7 +2,9 @@
 
 from __future__ import annotations
 
+import decimal
 import json
+import pathlib
 from collections.abc import Callable
 from typing import Any
 
@@ -14,6 +16,27 @@ from fastapi import testclient
 from joseph import bootstrap
 
 Validate = Callable[[str, str, object], None]
+
+
+def _fixture_rows(venue: str, name: str) -> list[dict[str, object]]:
+    """Reads a captured venue fixture.
+
+    Args:
+        venue: Venue directory.
+        name: File name without extension.
+
+    Returns:
+        Parsed rows.
+    """
+    path = (
+        pathlib.Path(__file__).resolve().parents[3]
+        / "fixtures"
+        / "venues"
+        / venue
+        / f"{name}.json"
+    )
+    rows: list[dict[str, object]] = json.loads(path.read_text())
+    return rows
 
 
 def _error(response: httpx.Response, status: int, code: str) -> None:
@@ -256,19 +279,22 @@ def test_search_never_merges_same_symbol_across_venues(
     assert len(ids) == len(set(ids))
 
 
-def test_unsupported_timeframe_is_explicit(
+def test_weekly_bars_are_aggregated_not_relabelled(
     venue_client: tuple[testclient.TestClient, respx.Router],
 ) -> None:
-    """Hyperliquid weekly bars are refused, not faked."""
+    """Hyperliquid 1w is folded from 1d on Mondays, not its Thursday weeks."""
     client, _ = venue_client
-    _error(
-        client.get(
-            "/v1/candles",
-            params={"instrument_id": "hyperliquid:perp:BTC", "tf": "1w"},
-        ),
-        422,
-        "UNSUPPORTED",
+    response = client.get(
+        "/v1/candles",
+        params={"instrument_id": "hyperliquid:perp:BTC", "tf": "1w"},
     )
+    assert response.status_code == 200, response.text
+    candles = response.json()["candles"]
+    assert candles
+    monday_anchor = 4 * 86_400_000  # 1970-01-05 was a Monday.
+    for candle in candles:
+        assert (candle["start_ms"] - monday_anchor) % (7 * 86_400_000) == 0
+        assert candle["source"] == "hyperliquid.rest.agg1d"
 
 
 @pytest.mark.parametrize(
@@ -604,23 +630,48 @@ def test_venue_capabilities_expose_trade_built_timeframes(
     assert caps["binance"]["market_data"]["taker_volume"] is True
     assert caps["bitget"]["market_data"]["taker_volume"] is False
     assert "1M" in caps["binance"]["timeframes"]
-    assert "1M" not in caps["hyperliquid"]["timeframes"]
-    assert "1M" not in caps["lighter"]["timeframes"]
+    assert caps["binance"]["aggregated_timeframes"] == []
+    for venue in ("hyperliquid", "lighter"):
+        assert "1M" in caps[venue]["timeframes"], venue
+        assert "1M" in caps[venue]["aggregated_timeframes"], venue
+    assert caps["hyperliquid"]["aggregated_timeframes"] == ["6h", "1w", "1M"]
+    for venue in ("bitget", "mexc", "hyperliquid", "lighter"):
+        assert caps[venue]["market_data"]["trade_delta"] is True, venue
+    assert caps["binance"]["market_data"]["trade_delta"] is False
 
 
-def test_unsupported_monthly_and_unbacked_seconds_are_explicit(
+def test_aggregated_monthly_and_unbacked_seconds_are_explicit(
     venue_client: tuple[testclient.TestClient, respx.Router],
+    contract_validate: Validate,
 ) -> None:
-    """Hyperliquid 1M is refused; its seconds history is an honest gap."""
+    """Hyperliquid 1M is aggregated from 1d; its seconds history is a gap."""
     client, _ = venue_client
-    _error(
-        client.get(
-            "/v1/candles",
-            params={"instrument_id": "hyperliquid:perp:BTC", "tf": "1M"},
-        ),
-        422,
-        "UNSUPPORTED",
+    monthly = client.get(
+        "/v1/candles",
+        params={"instrument_id": "hyperliquid:perp:BTC", "tf": "1M"},
     )
+    assert monthly.status_code == 200, monthly.text
+    months = monthly.json()
+    contract_validate("market.schema.json", "CandleBatch", months)
+    july = 1_782_864_000_000  # 2026-07-01, the first fixture day.
+    by_start = {c["start_ms"]: c for c in months["candles"]}
+    days = [
+        row
+        for row in _fixture_rows("hyperliquid", "candles_1d")
+        if july <= int(row["t"]) < 1_785_542_400_000
+    ]
+    assert len(days) == 31
+    assert decimal.Decimal(by_start[july]["open"]) == decimal.Decimal(
+        str(days[0]["o"])
+    )
+    assert decimal.Decimal(by_start[july]["close"]) == decimal.Decimal(
+        str(days[-1]["c"])
+    )
+    assert decimal.Decimal(by_start[july]["base_volume"]) == sum(
+        decimal.Decimal(str(day["v"])) for day in days
+    )
+    assert by_start[july]["source"] == "hyperliquid.rest.agg1d"
+    assert months["candles"][-1]["is_final"] is False
     seconds = client.get(
         "/v1/candles",
         params={"instrument_id": "hyperliquid:perp:BTC", "tf": "5s"},

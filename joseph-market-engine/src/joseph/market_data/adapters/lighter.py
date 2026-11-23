@@ -379,9 +379,9 @@ class LighterAdapter(base.BaseVenueAdapter):
                 "exists); AUTO polls REST for minute and longer bars.",
                 "Funding is the last settled hourly rate.",
                 "Asset class is not published (treated as UNKNOWN).",
-                "3m, 2h, 6h, 1w and 1M candles are not offered by the venue.",
-                "Trade history reaches back only about 53 minutes; seconds "
-                "bars older than that are unavailable.",
+                "3m, 2h, 6h, 1w and 1M candles are not published by the venue.",
+                "Trade history reaches back only about 53 minutes; older "
+                "seconds bars exist only where the engine recorded trades.",
                 "Klines publish no taker buy volume (taker_volume is false); "
                 "seconds bars built from trades do carry it.",
             ),

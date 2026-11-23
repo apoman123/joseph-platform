@@ -13,8 +13,8 @@ Legend: **Done** (implemented and tested) · **Partial** (works; listed gaps rem
 | P4 Filter & indicators | **Partial** | Strict 5-gate qualification + funding policy; 8 indicators ported line by line from the Pine scripts into `PineScripts/python_indicators` (heat scores included) and adapted as plugins; batch == incremental == restore, no look-ahead (property tests). Gap: `GOLDEN_VERIFIED` needs TradingView exports (`SPEC_ONLY` until then) |
 | P5 Strategy & alerts | **Done** | Rule AST v2, compiler, Kleene evaluator with reason trees, setup FSM, immutable versions, backtests on engine frames, live pipeline (fires once, never on history), alert outbox → UI/Telegram/LINE/e-mail/webhook, subscriptions with quiet hours. Gap: external channels only tested against mocks |
 | P6 Paper / shadow OMS | **Done** | Preview tokens, idempotency, transactional outbox, partial fills, cancel/fill race, `UNKNOWN_RECONCILING` reconcile, brackets, reduce-only close, kill switch, audit chain, deployments + signal intake |
-| P7 Private execution hardening | **Partial** | Deny-by-default risk gateway (22 checks), AES-GCM vault, step-up gate, capability catalog for 5 venues. Not done: venue signing/private streams, sandbox verification, KMS, OIDC/MFA |
-| P8 Live pilot gate | **Not done (by design)** | LIVE fails closed; requires owner approval and the P7 items |
+| P7 Private execution hardening | **Partial** | Deny-by-default risk gateway (22 checks), AES-GCM vault, step-up gate, signed live adapters and private streams for 5 venues with runtime capability negotiation. Not done: testnet runs with real keys, KMS, OIDC/MFA |
+| P8 Live pilot gate | **Partial** | Owner enabled the global gate in deploy config; accounts trade only after verification, preview/consent and the risk gateway. Pending: testnet runs per venue and a kill-switch drill |
 | P9 Production & ecosystem | **Partial** | Extension guides, plugin lifecycle, latency smoke. Not done: load/DR drills, PostgreSQL CI, multi-worker leases |
 
 ## Requirements spot-check

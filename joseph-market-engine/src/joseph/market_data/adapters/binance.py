@@ -323,7 +323,7 @@ class BinanceAdapter(base.BaseVenueAdapter):
             trade_built_timeframes=timeframes.SECONDS,
             notes=(
                 "Kline and aggTrade WebSockets use the /market/ws route.",
-                "Seconds bars are built from aggTrades; their history only "
+                "Seconds bars are built from aggTrades; the REST history "
                 "reaches back 48 hours and trade_count is null (fills are "
                 "aggregated).",
                 "Depth streams are not wired yet.",
