@@ -35,7 +35,7 @@ All suites below were run on the final build (Linux, Python 3.13 via uv, Node 24
 | Check | Result |
 |---|---|
 | `actionlint` on all workflows (`ci-cd`, `security`, `nightly`, `redeploy`, standalone terminal CI) and PineScripts `python-indicators` | No issues (fixed an unquoted comma in the deploy action's input description) |
-| Market-engine image with the private indicator library | Builds with only a forwarded ssh-agent (`docker build --ssh default`); runtime image loads all 10 plugins (library 1.1.0), runs as uid 10001, contains no git, ssh client or key |
+| Market-engine image with the private indicator library | Builds with only a forwarded ssh-agent (`docker build --ssh default`); a fake `pinescripts_token` BuildKit secret reaches GitHub and is rejected at the authenticated HTTPS fetch, which shows the CI token path is wired; runtime image loads all 10 plugins (library 1.1.0), runs as uid 10001, contains no git, ssh client, key or token |
 | Indicator performance | 5,000 5m frames through all 10 plugins, 11 series (1m intrabars, 1h/4h/1d aux): 9.7 s (1.9 ms/frame) |
 | Clean-checkout rehearsal: a fresh copy holding only the 706 committable files, frozen installs, then the CI command sequence | All green on a cold first run (it exposed a cold-start fixture flake, now fixed) |
 | Container images built from the Dockerfiles | market 285 MB, execution 303 MB, terminal 412 MB; all run as non-root with health checks |

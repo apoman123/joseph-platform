@@ -39,8 +39,12 @@ Every plugin is an adapter around the external ``smc_indicators`` library
     ``active_count``: ``int``. AOIs of kind BSL / SSL / EQH / EQL (lines).
 ``order_flow_pressure``
     ``delta_pct``: ``Decimal | None``; ``method``: ``"taker_volume"`` (true
-    delta from the venue's taker buy volume; snapshot method ``trade``) or
-    ``"candle_direction"`` (Pine intrabar estimate)
+    delta from the venue's taker buy volume; snapshot method ``trade``),
+    ``"trade_classification"`` (buy volume classified from trades against
+    the quote where the exchange publishes no aggressor side, candles with
+    ``buy_volume_method = classified``; snapshot method
+    ``trade_classification``) or ``"candle_direction"`` (Pine intrabar
+    estimate)
     ``buy_volume`` / ``sell_volume``: ``Decimal | None`` (base units)
     ``coverage_pct``: ``Decimal | None``; ``intrabar_count``: ``int``
     ``rel_volume``: ``Decimal | None``
@@ -60,14 +64,20 @@ Every plugin is an adapter around the external ``smc_indicators`` library
     None`` (a band is ``None`` when its multiplier is 0); ``anchor_ms``:
     ``int | None`` (current anchor bar); ``bars``: ``int``;
     ``anchor_in_window``: ``bool`` (False: the anchor bar was not computed,
-    every value is ``None``)
+    every value is ``None``). ``session`` / ``week`` / ``month`` anchors are
+    UTC periods on 24x7 markets and the calendar's ``1d`` / ``1w`` / ``1M``
+    bars on exchanges. Series requests compute from the anchor bar onward
+    up to 50,000 bars back (``QueryConfig.max_anchored_bars``).
 ``regression_channel`` (Python-native study, least squares)
     ``start_ms``: ``int | None`` (oldest bar of the fit); ``start`` /
     ``end`` / ``upper_start`` / ``upper_end`` / ``lower_start`` /
     ``lower_end`` / ``slope`` (price per bar) / ``stdev`` (sample stdev of
     residuals) / ``max_up`` / ``max_down``: ``Decimal | None``;
     ``pearson_r``: ``Decimal | None``; ``bars``: ``int``;
-    ``anchor_in_window``: ``bool``
+    ``anchor_in_window``: ``bool`` (anchored series as for ``anchored_vwap``)
+
+Bars, anchors and higher-timeframe visibility follow the instrument's session
+calendar (``joseph.domain.sessions``).
 """
 
 from __future__ import annotations
@@ -137,10 +147,17 @@ class AoiState(enum.StrEnum):
 
 
 class IndicatorMethod(enum.StrEnum):
-    """Calculation method; ``TRADE`` outputs are never parity outputs."""
+    """Calculation method (contract ``IndicatorMethod``).
+
+    ``TRADE`` and ``TRADE_CLASSIFICATION`` outputs are never parity outputs.
+    """
 
     PINE_PARITY = "pine_parity"
     TRADE = "trade"
+    """Venue trade data with a published aggressor side (true delta)."""
+    TRADE_CLASSIFICATION = "trade_classification"
+    """Trades whose side was classified against the quote (Lee-Ready /
+    quote rule) on stock exchanges: an estimate, not true taker delta."""
 
 
 class StructureEventName(enum.StrEnum):
@@ -371,6 +388,16 @@ class IndicatorSnapshot:
     warmup_complete: bool
     data_quality: quality.DataQuality
 
+    def values_contract(self) -> dict[str, object]:
+        """Serializes the published values alone (contract ``values``).
+
+        Returns:
+            JSON-compatible dict with decimals as strings.
+        """
+        return {
+            key: _contract_value(value) for key, value in self.values.items()
+        }
+
     def to_contract(self) -> dict[str, object]:
         """Serializes to the contract ``IndicatorSnapshot`` object.
 
@@ -388,10 +415,7 @@ class IndicatorSnapshot:
             "bar_start_ms": self.bar_start_ms,
             "aois": [aoi.to_contract() for aoi in self.aois],
             "events": [event.to_contract() for event in self.events],
-            "values": {
-                key: _contract_value(value)
-                for key, value in self.values.items()
-            },
+            "values": self.values_contract(),
             "warmup_complete": self.warmup_complete,
             "data_quality": self.data_quality.to_contract(),
         }

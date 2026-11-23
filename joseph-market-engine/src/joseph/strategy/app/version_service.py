@@ -373,6 +373,9 @@ class StrategyVersionService:
                 raise errors.ValidationFailedError(
                     f"{instrument} is outside the strategy universe"
                 )
+            reason = compiler.untradable_reason(instrument)
+            if reason is not None:
+                raise errors.ValidationFailedError(reason)
         for other in self.repository.list_versions(
             principal.tenant_id, strategy_id
         ):

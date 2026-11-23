@@ -24,6 +24,7 @@ from typing import Protocol
 from joseph.domain import instruments
 from joseph.domain import market
 from joseph.domain import quality
+from joseph.domain import sessions
 from joseph.domain import structures
 from joseph.domain import timeframes as tfs
 from joseph.indicators.sdk import settings as settings_lib
@@ -154,6 +155,9 @@ class SeriesHeader:
     def advance(self, candle: market.Candle) -> SeriesHeader:
         """Records a newly processed bar.
 
+        Missing bars are counted on the instrument's session calendar, so
+        the time between exchange sessions is never a gap.
+
         Args:
             candle: The closed bar.
 
@@ -174,10 +178,11 @@ class SeriesHeader:
         if self.last_start_ms is not None:
             if candle.start_ms <= self.last_start_ms:
                 raise ValueError("bars must be strictly increasing")
-            expected = self.timeframe.end_of(self.last_start_ms)
+            calendar = sessions.for_instrument(self.instrument_id)
+            expected = calendar.shift(self.timeframe, self.last_start_ms, 1)
             if candle.start_ms > expected:
-                missing += self.timeframe.bars_between(
-                    expected, candle.start_ms
+                missing += calendar.bars_between(
+                    self.timeframe, expected, candle.start_ms
                 )
         return dataclasses.replace(
             self,

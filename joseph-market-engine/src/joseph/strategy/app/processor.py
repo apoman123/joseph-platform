@@ -12,6 +12,8 @@ import collections
 import dataclasses
 
 from joseph.domain import decimals
+from joseph.domain import instruments
+from joseph.domain import sessions
 from joseph.domain import structures
 from joseph.signals.domain import signal as signal_domain
 from joseph.strategy.domain import compiler
@@ -188,7 +190,12 @@ class InstanceProcessor:
         self.version = version
         self.key = key
         self.mode = mode
-        self.policy = setup_fsm.LifecyclePolicy.from_plan(plan)
+        self.policy = setup_fsm.LifecyclePolicy.from_plan(
+            plan,
+            sessions.for_instrument(
+                instruments.InstrumentId.parse(key.instrument_id)
+            ),
+        )
         self.state = state or setup_fsm.InstanceState(key=key)
         self._window: collections.deque[structures.BarFrame] = (
             collections.deque(maxlen=plan.window_bars)

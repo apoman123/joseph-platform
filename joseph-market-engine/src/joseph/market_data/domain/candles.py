@@ -19,6 +19,7 @@ from collections.abc import Iterable
 from collections.abc import Sequence
 
 from joseph.domain import market
+from joseph.domain import sessions
 from joseph.domain import timeframes
 
 
@@ -130,35 +131,40 @@ def find_gaps(
     timeframe: timeframes.Timeframe,
     from_ms: int,
     to_ms: int,
+    *,
+    calendar: sessions.BarCalendar = sessions.CONTINUOUS,
 ) -> list[tuple[int, int]]:
     """Finds missing bars in ``[from_ms, to_ms)``.
 
     Runs in time proportional to the bars present, not to the slots in the
-    range, so wide ranges of seconds bars stay cheap.
+    range, so wide ranges of seconds bars stay cheap. Bars follow the
+    instrument's session calendar: the time between two sessions (nights,
+    weekends, holidays) belongs to no bar and is never a gap.
 
     Args:
         starts: Bar start times present (any order, duplicates allowed).
         timeframe: Bar resolution.
         from_ms: Inclusive range start (rounded up to a bar boundary).
         to_ms: Exclusive range end.
+        calendar: Session calendar of the series (``sessions.for_instrument``;
+            UTC-aligned bars by default).
 
     Returns:
-        Missing ranges as ``(from_ms, to_ms)`` half-open pairs.
+        Missing ranges as ``(from_ms, to_ms)`` half-open pairs; each starts
+        at the first missing bar start.
     """
-    first = timeframe.floor(from_ms)
-    if first < from_ms:
-        first = timeframe.end_of(first)
+    first = calendar.ceil(timeframe, from_ms)
     present = sorted(
         start
         for start in set(starts)
-        if first <= start < to_ms and timeframe.is_aligned(start)
+        if first <= start < to_ms and calendar.is_aligned(timeframe, start)
     )
     gaps: list[tuple[int, int]] = []
     cursor = first
     for start in present:
         if start > cursor:
             gaps.append((cursor, start))
-        cursor = timeframe.end_of(start)
+        cursor = calendar.shift(timeframe, start, 1)
     if cursor < to_ms:
         gaps.append((cursor, to_ms))
     return gaps

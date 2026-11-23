@@ -1,6 +1,8 @@
-"""Perpetual qualification policy (V5 §5), pure and deterministic.
+"""Qualification policy (V5 §5), pure and deterministic.
 
 Hard gates use **strict** comparators: a value equal to its threshold fails.
+
+Perpetual futures (crypto venues and DEMO perps):
 
 ========================  ===================  ===============  ======
 Gate                      Crypto / RWA         Equity perp      Strict
@@ -12,6 +14,23 @@ Best bid/ask spread       < 0.10 %             < 0.10 %          ``<``
 USD 50K worst-side slip   < 0.25 %             < 0.25 %          ``<``
 ========================  ===================  ===============  ======
 
+Exchange-listed securities (stocks and ETFs on ``twse``, ``nasdaq``,
+``nyse``, and the DEMO stock). They have no funding, open interest or
+liquidations, so those gates and the funding assessment do not apply
+(``FundingRisk.NOT_APPLICABLE``) and never block qualification. Turnover is
+the latest session's, in the listing currency; slippage walks the book for
+about USD 50K (TWD 1.5M on TWSE, where one tick can be 0.5 % of the price):
+
+========================  ==============  ============  =================
+Gate                      US equity       US bond ETF   TWSE equity/bond
+========================  ==============  ============  =================
+Session turnover          > USD 20M       > USD 10M     > TWD 300M / 100M
+Best bid/ask spread       < 0.10 %        < 0.10 %      < 0.60 %
+Worst-side slippage       < 0.25 %        < 0.25 %      < 1.00 %
+========================  ==============  ============  =================
+
+Rate series (``treasury:rate:*``) are not tradable and are never screened.
+
 Funding is normalized to 8 hours (``rate * 100 * 8 / interval_hours``);
 ``|x| >= 0.10`` is ``WATCH`` and ``|x| >= 0.30`` is ``HIGH_RISK``.
 
@@ -19,8 +38,9 @@ Status (default parity policy, configurable):
 
 * ``REJECTED`` if any known gate fails, or funding is ``HIGH_RISK`` while
   ``reject_high_funding_risk`` is set;
-* otherwise ``INSUFFICIENT_DATA`` if any gate input or the funding rate is
-  missing or stale (never treated as zero or as a pass);
+* otherwise ``INSUFFICIENT_DATA`` if any gate input or (where funding
+  applies) the funding rate is missing or stale (never treated as zero or
+  as a pass);
 * otherwise ``QUALIFIED`` (``WATCH`` funding adds a risk tag only).
 
 The heat score orders results and never overrides a gate.
@@ -36,7 +56,8 @@ import math
 from joseph.domain import decimals
 from joseph.domain import instruments
 
-POLICY_VERSION = "joseph-perp-qualification/2026-11-v1"
+POLICY_VERSION = "joseph-qualification/2026-11-v2"
+"""v2: thresholds for exchange-listed equities and bond ETFs."""
 
 
 class Status(enum.StrEnum):
@@ -54,6 +75,8 @@ class FundingRisk(enum.StrEnum):
     WATCH = "WATCH"
     HIGH_RISK = "HIGH_RISK"
     UNKNOWN = "UNKNOWN"
+    NOT_APPLICABLE = "NOT_APPLICABLE"
+    """The instrument has no funding (exchange-listed securities)."""
 
 
 class Gate(enum.StrEnum):
@@ -78,29 +101,103 @@ _SLIPPAGE_PCT = _D("0.25")
 _FUNDING_WATCH_PCT = _D("0.10")
 _FUNDING_HIGH_RISK_PCT = _D("0.30")
 _SLIPPAGE_NOTIONAL_USD = _D(50_000)
+_SLIPPAGE_NOTIONAL_TWD = _D(1_500_000)
+_LISTED_TYPES = frozenset(
+    {instruments.MarketType.STOCK, instruments.MarketType.ETF}
+)
 
 
 @dataclasses.dataclass(frozen=True, slots=True)
 class Thresholds:
-    """Gate thresholds for one asset class.
+    """Gate thresholds for one asset class and market.
 
     Attributes:
-        turnover_24h_usd: Minimum (exclusive) 24h quote turnover.
-        open_interest_usd: Minimum (exclusive) open interest.
-        turnover_oi_ratio: Minimum (exclusive) turnover/OI.
+        turnover_24h: Minimum (exclusive) 24h (session) quote turnover in
+            ``currency``.
+        open_interest_usd: Minimum (exclusive) open interest; ``None`` when
+            the market has none (the gate is not applied).
+        turnover_oi_ratio: Minimum (exclusive) turnover/OI; ``None`` when
+            not applied.
         spread_pct: Maximum (exclusive) spread in percent.
-        slippage_pct: Maximum (exclusive) 50K slippage in percent.
+        slippage_pct: Maximum (exclusive) slippage in percent.
+        currency: Turnover and slippage currency (``USD`` or ``TWD``).
+        slippage_notional: Book-walk notional in ``currency``; ``None``
+            uses the policy's ``slippage_notional_usd``.
+        funding: Whether the market has funding to assess.
     """
 
-    turnover_24h_usd: decimal.Decimal
-    open_interest_usd: decimal.Decimal = _OPEN_INTEREST_USD
-    turnover_oi_ratio: decimal.Decimal = _TURNOVER_OI_RATIO
+    turnover_24h: decimal.Decimal
+    open_interest_usd: decimal.Decimal | None = _OPEN_INTEREST_USD
+    turnover_oi_ratio: decimal.Decimal | None = _TURNOVER_OI_RATIO
     spread_pct: decimal.Decimal = _SPREAD_PCT
     slippage_pct: decimal.Decimal = _SLIPPAGE_PCT
+    currency: str = "USD"
+    slippage_notional: decimal.Decimal | None = None
+    funding: bool = True
 
 
-CRYPTO_THRESHOLDS = Thresholds(turnover_24h_usd=_TURNOVER_CRYPTO_USD)
-EQUITY_THRESHOLDS = Thresholds(turnover_24h_usd=_TURNOVER_EQUITY_USD)
+CRYPTO_THRESHOLDS = Thresholds(turnover_24h=_TURNOVER_CRYPTO_USD)
+EQUITY_THRESHOLDS = Thresholds(turnover_24h=_TURNOVER_EQUITY_USD)
+"""Equity perpetuals on crypto venues."""
+US_EQUITY_THRESHOLDS = Thresholds(
+    turnover_24h=_D(20_000_000),
+    open_interest_usd=None,
+    turnover_oi_ratio=None,
+    funding=False,
+)
+"""Stocks and equity ETFs on Nasdaq and NYSE (and the DEMO stock)."""
+US_BOND_THRESHOLDS = Thresholds(
+    turnover_24h=_D(10_000_000),
+    open_interest_usd=None,
+    turnover_oi_ratio=None,
+    funding=False,
+)
+"""Bond ETFs on Nasdaq and NYSE."""
+TW_EQUITY_THRESHOLDS = Thresholds(
+    turnover_24h=_D(300_000_000),
+    open_interest_usd=None,
+    turnover_oi_ratio=None,
+    spread_pct=_D("0.60"),
+    slippage_pct=_D("1.00"),
+    currency="TWD",
+    slippage_notional=_SLIPPAGE_NOTIONAL_TWD,
+    funding=False,
+)
+"""Stocks and equity ETFs on TWSE (amounts in TWD)."""
+TW_BOND_THRESHOLDS = dataclasses.replace(
+    TW_EQUITY_THRESHOLDS, turnover_24h=_D(100_000_000)
+)
+"""Bond ETFs on TWSE (amounts in TWD)."""
+
+
+def is_listed(instrument_id: instruments.InstrumentId) -> bool:
+    """Checks whether an instrument is an exchange-listed security.
+
+    Args:
+        instrument_id: Instrument.
+
+    Returns:
+        True for stocks and ETFs (exchange venues or the DEMO stock).
+    """
+    return (
+        instrument_id.market_type in _LISTED_TYPES
+        or instrument_id.venue in instruments.EXCHANGE_VENUES
+    )
+
+
+def is_screened(instrument_id: instruments.InstrumentId) -> bool:
+    """Checks whether an instrument takes part in qualification.
+
+    Args:
+        instrument_id: Instrument.
+
+    Returns:
+        False for non-tradable rate series (``treasury:rate:*``).
+    """
+    return (
+        instrument_id.market_type is not instruments.MarketType.RATE
+        and instrument_id.venue not in instruments.RATE_VENUES
+    )
 
 
 @dataclasses.dataclass(frozen=True, slots=True)
@@ -111,6 +208,10 @@ class QualificationPolicy:
         version: Policy version stamped on every record.
         crypto: Thresholds for crypto, RWA and unknown asset classes.
         equity: Thresholds for equity perpetuals.
+        us_equity: Thresholds for US-listed stocks and equity ETFs.
+        us_bond: Thresholds for US-listed bond ETFs.
+        tw_equity: Thresholds for TWSE stocks and equity ETFs.
+        tw_bond: Thresholds for TWSE bond ETFs.
         funding_watch_pct: ``|8h funding|`` at or above which is WATCH.
         funding_high_risk_pct: ``|8h funding|`` at or above which is
             HIGH_RISK.
@@ -122,24 +223,53 @@ class QualificationPolicy:
     version: str = POLICY_VERSION
     crypto: Thresholds = CRYPTO_THRESHOLDS
     equity: Thresholds = EQUITY_THRESHOLDS
+    us_equity: Thresholds = US_EQUITY_THRESHOLDS
+    us_bond: Thresholds = US_BOND_THRESHOLDS
+    tw_equity: Thresholds = TW_EQUITY_THRESHOLDS
+    tw_bond: Thresholds = TW_BOND_THRESHOLDS
     funding_watch_pct: decimal.Decimal = _FUNDING_WATCH_PCT
     funding_high_risk_pct: decimal.Decimal = _FUNDING_HIGH_RISK_PCT
     reject_high_funding_risk: bool = True
     max_data_age_ms: int = 300_000
     slippage_notional_usd: decimal.Decimal = _SLIPPAGE_NOTIONAL_USD
 
-    def thresholds(self, asset_class: instruments.AssetClass) -> Thresholds:
-        """Selects thresholds for an asset class.
+    def thresholds(
+        self,
+        asset_class: instruments.AssetClass,
+        instrument_id: instruments.InstrumentId | None = None,
+    ) -> Thresholds:
+        """Selects thresholds for an asset class and market.
 
         Args:
             asset_class: Instrument asset class.
+            instrument_id: Instrument, to tell exchange-listed securities
+                (and their listing currency) from perpetuals.
 
         Returns:
-            Thresholds (UNKNOWN uses the stricter crypto set).
+            Thresholds (UNKNOWN uses the stricter crypto set for perpetuals
+            and the equity set for listed securities).
         """
+        if instrument_id is not None and is_listed(instrument_id):
+            bond = asset_class is instruments.AssetClass.BOND
+            if instrument_id.venue is instruments.Venue.TWSE:
+                return self.tw_bond if bond else self.tw_equity
+            return self.us_bond if bond else self.us_equity
         if asset_class is instruments.AssetClass.EQUITY:
             return self.equity
         return self.crypto
+
+    def slippage_notional(self, limits: Thresholds) -> decimal.Decimal:
+        """Returns the book-walk notional for a threshold set.
+
+        Args:
+            limits: Thresholds.
+
+        Returns:
+            Notional in the thresholds' currency.
+        """
+        if limits.slippage_notional is None:
+            return self.slippage_notional_usd
+        return limits.slippage_notional
 
 
 @dataclasses.dataclass(frozen=True, slots=True)
@@ -163,7 +293,9 @@ class QualificationInput:
         instrument_id: Instrument.
         display_symbol: Display symbol.
         asset_class: Asset class.
-        turnover_24h_usd: 24h quote turnover.
+        turnover_24h_usd: 24h quote turnover in the thresholds' currency
+            (USD, or TWD for TWSE listings; the latest session for listed
+            securities).
         open_interest_usd: Open interest notional.
         spread_pct: Best bid/ask spread in percent.
         slippage_pct: Worst-side 50K slippage in percent.
@@ -196,7 +328,7 @@ class GateResult:
         threshold: Threshold.
         comparator: ``"gt"`` or ``"lt"`` (strict).
         passed: True/False, or ``None`` when data is missing or stale.
-        unit: ``USD``, ``ratio`` or ``pct``.
+        unit: ``USD``, ``TWD``, ``ratio`` or ``pct``.
         as_of_ms: Observation time.
         reason: Human-readable explanation.
     """
@@ -460,7 +592,7 @@ def evaluate(
     Returns:
         Qualification record.
     """
-    limits = policy.thresholds(item.asset_class)
+    limits = policy.thresholds(item.asset_class, item.instrument_id)
     turnover = _fresh(item.turnover_24h_usd, now_ms, policy)
     oi = _fresh(item.open_interest_usd, now_ms, policy)
     ratio = Observation(
@@ -509,39 +641,53 @@ def evaluate(
             policy=policy,
         )
 
-    gates = (
+    gates = [
         check(
             Gate.TURNOVER_24H,
             item.turnover_24h_usd,
-            limits.turnover_24h_usd,
+            limits.turnover_24h,
             "gt",
-            "USD",
-        ),
-        check(
-            Gate.OPEN_INTEREST_USD,
-            item.open_interest_usd,
-            limits.open_interest_usd,
-            "gt",
-            "USD",
-        ),
-        check(
-            Gate.TURNOVER_OI_RATIO,
-            ratio,
-            limits.turnover_oi_ratio,
-            "gt",
-            "ratio",
-        ),
-        check(Gate.SPREAD_PCT, item.spread_pct, limits.spread_pct, "lt", "pct"),
+            limits.currency,
+        )
+    ]
+    if limits.open_interest_usd is not None:
+        gates.append(
+            check(
+                Gate.OPEN_INTEREST_USD,
+                item.open_interest_usd,
+                limits.open_interest_usd,
+                "gt",
+                "USD",
+            )
+        )
+    if limits.turnover_oi_ratio is not None:
+        gates.append(
+            check(
+                Gate.TURNOVER_OI_RATIO,
+                ratio,
+                limits.turnover_oi_ratio,
+                "gt",
+                "ratio",
+            )
+        )
+    gates.append(
+        check(Gate.SPREAD_PCT, item.spread_pct, limits.spread_pct, "lt", "pct")
+    )
+    gates.append(
         check(
             Gate.SLIPPAGE_50K_PCT,
             item.slippage_pct,
             limits.slippage_pct,
             "lt",
             "pct",
-        ),
+        )
     )
     funding = _fresh(item.funding_8h_pct, now_ms, policy)
-    risk = classify_funding(funding, policy)
+    risk = (
+        classify_funding(funding, policy)
+        if limits.funding
+        else FundingRisk.NOT_APPLICABLE
+    )
     reasons: list[str] = [g.reason for g in gates if g.passed is not True]
     tags: list[str] = []
     if risk is FundingRisk.WATCH:
@@ -570,8 +716,8 @@ def evaluate(
         display_symbol=item.display_symbol,
         status=status,
         risk_tags=tuple(tags),
-        gates=gates,
-        funding_8h_pct=funding,
+        gates=tuple(gates),
+        funding_8h_pct=funding if limits.funding else None,
         funding_interval_hours=item.funding_interval_hours,
         funding_risk=risk,
         asset_class=item.asset_class,
