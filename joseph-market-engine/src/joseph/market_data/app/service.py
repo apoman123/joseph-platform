@@ -8,12 +8,18 @@ Seconds bars are built from public trades. Where the venue has a REST
 trade history they are fetched like klines (only the fully covered part);
 where it has none they exist only from a live trade-stream session, so
 batches serve what the store holds and report the rest as gaps.
+
+Every bar boundary (history windows, the live edge, gap repair) follows the
+instrument's session calendar (``sessions.for_instrument``): exchange bars
+start at the session open, and the time between sessions is never a gap.
 """
 
 from __future__ import annotations
 
+import contextlib
 import dataclasses
 from collections.abc import Awaitable
+from collections.abc import Iterator
 from collections.abc import Mapping
 from collections.abc import Sequence
 
@@ -22,6 +28,7 @@ from joseph.domain import errors
 from joseph.domain import instruments
 from joseph.domain import market
 from joseph.domain import quality
+from joseph.domain import sessions
 from joseph.domain import timeframes
 from joseph.market_data.adapters import replay as replay_lib
 from joseph.market_data.app import candle_store
@@ -34,6 +41,10 @@ from joseph.market_data.domain import health
 
 DEFAULT_LIMIT = 500
 MAX_LIMIT = 5_000
+_MAX_REFRESH_ROUNDS = 64
+"""History calls per refresh (adapters may cap one call at 10,000 bars)."""
+MAX_SESSION_WINDOW_MS = 400 * 86_400_000
+"""Longest window of ``calendar_sessions`` (400 days)."""
 _SNAPSHOT_TTL_MS = 1_000
 
 
@@ -125,6 +136,70 @@ def as_timeframe(value: timeframes.Timeframe | str) -> timeframes.Timeframe:
         raise errors.ValidationFailedError(str(err)) from err
 
 
+def closed_through(
+    calendar: sessions.BarCalendar, timeframe: timeframes.Timeframe, now_ms: int
+) -> tuple[int, int | None]:
+    """Locates the newest bar that has closed at ``now_ms``.
+
+    Args:
+        calendar: Session calendar of the instrument.
+        timeframe: Resolution.
+        now_ms: Current time.
+
+    Returns:
+        ``(closed_end, last_start)``: the exclusive end of that bar (bars
+        starting before it are closed) and its start, or ``(0, None)``
+        before the first bar.
+    """
+    last = calendar.last_closed_start(timeframe, now_ms)
+    if last is None:
+        return 0, None
+    return calendar.end_of(timeframe, last), last
+
+
+def calendar_sessions(
+    calendar_id: str, from_ms: int, to_ms: int
+) -> dict[str, object]:
+    """Lists the trading sessions of a calendar (contract ``SessionList``).
+
+    Args:
+        calendar_id: Contract ``CalendarId``.
+        from_ms: Inclusive window start.
+        to_ms: Exclusive window end.
+
+    Returns:
+        Contract ``SessionList`` (empty sessions for ``24x7``).
+
+    Raises:
+        errors.NotFoundError: For an unknown calendar.
+        errors.ValidationFailedError: For an empty, negative or too long
+            window.
+    """
+    try:
+        calendar = sessions.get(calendar_id)
+    except ValueError as err:
+        raise errors.NotFoundError(
+            f"unknown calendar {calendar_id!r}; expected one of "
+            f"{', '.join(c.value for c in sessions.CalendarId)}"
+        ) from err
+    if from_ms < 0 or to_ms <= from_ms:
+        raise errors.ValidationFailedError(
+            "to_ms must be after from_ms (both non-negative)"
+        )
+    if to_ms - from_ms > MAX_SESSION_WINDOW_MS:
+        raise errors.ValidationFailedError(
+            "session window exceeds 400 days; request shorter windows"
+        )
+    return {
+        "calendar": calendar.calendar_id.value,
+        "sessions": [
+            s.to_contract() for s in calendar.sessions(from_ms, to_ms)
+        ],
+        "from_ms": from_ms,
+        "to_ms": to_ms,
+    }
+
+
 class MarketDataService:
     """Read-side facade over adapters, store, registry and feeds."""
 
@@ -138,6 +213,7 @@ class MarketDataService:
         *,
         replay: replay_lib.ReplaySource | None = None,
         stale_after_ms: int = 30_000,
+        max_refresh_bars: int = 60_000,
     ) -> None:
         """Initializes the service.
 
@@ -149,6 +225,8 @@ class MarketDataService:
             clock: Time source.
             replay: Optional replay source.
             stale_after_ms: Snapshot staleness budget.
+            max_refresh_bars: Most bars one ``get_candles`` repair fetches
+                across rounds (covers an anchored study's window).
         """
         self._adapters = dict(adapters)
         self.registry = instrument_registry
@@ -157,6 +235,7 @@ class MarketDataService:
         self._clock = clock
         self._replay = replay
         self.stale_after_ms = stale_after_ms
+        self._max_refresh_bars = max_refresh_bars
         self._snapshots: dict[
             instruments.InstrumentId, tuple[int, market.MarketSnapshot]
         ] = {}
@@ -219,28 +298,29 @@ class MarketDataService:
         tracker.record_message(self._clock.now_ms())
         return result
 
-    async def _refresh(
+    def _missing(
         self,
         instrument: instruments.InstrumentId,
         timeframe: timeframes.Timeframe,
+        caps: capabilities.VenueCapabilities,
         start_ms: int,
-        end_ms: int,
-    ) -> None:
-        """Fetches missing or recent bars from the venue into the store.
+        closed_end: int,
+    ) -> list[tuple[int, int]]:
+        """Lists closed-bar gaps of the store worth requesting.
 
         Args:
             instrument: Instrument.
             timeframe: Resolution.
+            caps: Venue capabilities.
             start_ms: Inclusive start.
-            end_ms: Exclusive end.
+            closed_end: End of the newest closed bar in range.
+
+        Returns:
+            Gaps, oldest first.
         """
-        now = self._clock.now_ms()
-        current = timeframe.floor(now)
-        closed_end = min(end_ms, current)
         gaps = self._store.final_gaps(
             instrument, timeframe, start_ms, closed_end
         )
-        caps = self.adapter(instrument.venue).capabilities()
         if gaps and caps.is_trade_built(timeframe):
             # Seconds history is page-capped and short-lived at the venue:
             # gaps behind the newest stored final bar could not be covered
@@ -253,24 +333,84 @@ class MarketDataService:
                 if c.is_final
             ]
             if finals:
-                tail = timeframe.end_of(finals[-1])
+                tail = sessions.for_instrument(instrument).end_of(
+                    timeframe, finals[-1]
+                )
                 gaps = [gap for gap in gaps if gap[0] >= tail]
-        if gaps:
-            fetch_from = gaps[0][0]
-        elif end_ms > current:
-            fetch_from = max(start_ms, timeframe.shift(current, -1))
-        else:
-            return
-        adapter = self.adapter(instrument.venue)
+        return gaps
+
+    async def _refresh(
+        self,
+        instrument: instruments.InstrumentId,
+        timeframe: timeframes.Timeframe,
+        start_ms: int,
+        end_ms: int,
+        max_bars: int,
+    ) -> None:
+        """Fetches missing or recent bars from the venue into the store.
+
+        Adapters may cap one history call (e.g. 10,000 bars), so long
+        ranges are repaired in rounds, each continuing after the newest bar
+        the previous one returned, until ``max_bars`` bars were fetched; a
+        round that makes no progress ends the repair (what the venue cannot
+        serve stays a reported gap).
+
+        Args:
+            instrument: Instrument.
+            timeframe: Resolution.
+            start_ms: Inclusive start.
+            end_ms: Exclusive end.
+            max_bars: Bars after which no further round is started.
+        """
+        now = self._clock.now_ms()
+        calendar = sessions.for_instrument(instrument)
+        current, last_closed = closed_through(calendar, timeframe, now)
+        closed_end = min(end_ms, current)
+        caps = self.adapter(instrument.venue).capabilities()
         if caps.is_trade_built(timeframe) and (
             not caps.market_data.trades_history
         ):
             return
-        rows = await self._call(
-            instrument.venue,
-            adapter.fetch_candles(instrument, timeframe, fetch_from, end_ms),
-        )
-        self._store.upsert_many(list(rows))
+        adapter = self.adapter(instrument.venue)
+        cursor = start_ms
+        fetched = 0
+        for attempt in range(_MAX_REFRESH_ROUNDS):
+            gaps = self._missing(
+                instrument, timeframe, caps, cursor, closed_end
+            )
+            if gaps:
+                fetch_from = gaps[0][0]
+            elif (
+                attempt == 0
+                and end_ms > current
+                and calendar.ceil(timeframe, current) < end_ms
+                and (last_closed is not None or calendar.continuous)
+            ):
+                # A live bar may exist in range; between sessions none does.
+                fetch_from = max(
+                    start_ms,
+                    last_closed
+                    if last_closed is not None
+                    else timeframe.shift(current, -1),
+                )
+            else:
+                return
+            rows = await self._call(
+                instrument.venue,
+                adapter.fetch_candles(
+                    instrument, timeframe, fetch_from, end_ms
+                ),
+            )
+            self._store.upsert_many(list(rows))
+            fetched += len(rows)
+            reached = max((c.end_ms for c in rows), default=cursor)
+            if (
+                not gaps
+                or fetched >= max_bars
+                or reached <= max(cursor, fetch_from)
+            ):
+                return
+            cursor = reached
 
     async def get_candles(
         self,
@@ -292,7 +432,9 @@ class MarketDataService:
         """
         instrument = as_instrument_id(instrument_id)
         tf = as_timeframe(timeframe)
-        await self._refresh(instrument, tf, start_ms, end_ms)
+        await self._refresh(
+            instrument, tf, start_ms, end_ms, self._max_refresh_bars
+        )
         return candle_rules.finals_only(
             self._store.range(instrument, tf, start_ms, end_ms)
         )
@@ -331,12 +473,20 @@ class MarketDataService:
                 f"limit must be between 1 and {MAX_LIMIT}"
             )
         now = self._clock.now_ms()
-        end = to_ms if to_ms is not None else tf.end_of(tf.floor(now))
-        start = (
-            from_ms
-            if from_ms is not None
-            else tf.shift(tf.floor(end - 1), -(bars - 1))
-        )
+        calendar = sessions.for_instrument(instrument)
+        with _calendar_errors(instrument):
+            end = (
+                to_ms
+                if to_ms is not None
+                else calendar.end_of(tf, calendar.floor(tf, now))
+            )
+            start = (
+                from_ms
+                if from_ms is not None
+                else calendar.shift(
+                    tf, calendar.floor(tf, end - 1), -(bars - 1)
+                )
+            )
         if end <= start:
             raise errors.ValidationFailedError("to_ms must be after from_ms")
         if feed_mode is quality.FeedMode.REPLAY:
@@ -348,16 +498,17 @@ class MarketDataService:
             state, source = quality.FeedState.REPLAY, "replay"
         else:
             self.adapter(instrument.venue)
-            await self._refresh(instrument, tf, start, end)
+            await self._refresh(instrument, tf, start, end, bars)
             rows = self._store.range(instrument, tf, start, end)[-bars:]
             state, source = self._provenance(instrument, tf)
-        closed_end = min(end, tf.floor(now))
+        closed_end = min(end, closed_through(calendar, tf, now)[0])
         window_start = rows[0].start_ms if rows and from_ms is None else start
         gaps = candle_rules.find_gaps(
             [c.start_ms for c in rows if c.is_final],
             tf,
             window_start,
             closed_end,
+            calendar=calendar,
         )
         return CandleBatchResult(
             instrument_id=instrument,
@@ -454,6 +605,21 @@ class MarketDataService:
         )
         return book
 
+    def calendar_sessions(
+        self, calendar_id: str, from_ms: int, to_ms: int
+    ) -> dict[str, object]:
+        """Lists a calendar's sessions (see ``calendar_sessions``).
+
+        Args:
+            calendar_id: Contract ``CalendarId``.
+            from_ms: Inclusive window start.
+            to_ms: Exclusive window end.
+
+        Returns:
+            Contract ``SessionList``.
+        """
+        return calendar_sessions(calendar_id, from_ms, to_ms)
+
     def venue_status(
         self,
     ) -> list[tuple[capabilities.VenueCapabilities, health.FeedHealth]]:
@@ -466,3 +632,30 @@ class MarketDataService:
             (adapter.capabilities(), self._router.venue_health(venue))
             for venue, adapter in self._adapters.items()
         ]
+
+
+@contextlib.contextmanager
+def _calendar_errors(
+    instrument: instruments.InstrumentId,
+) -> Iterator[None]:
+    """Turns times outside an instrument's calendar into validation errors.
+
+    Exchange calendars start at a fixed date (e.g. 1990-01-02 for XNYS);
+    asking for bars before it is a client error, not a server fault.
+
+    Args:
+        instrument: Instrument whose calendar is used.
+
+    Yields:
+        Nothing.
+
+    Raises:
+        errors.ValidationFailedError: If the calendar rejected a time.
+    """
+    try:
+        yield
+    except ValueError as err:
+        calendar = sessions.for_instrument(instrument).calendar_id.value
+        raise errors.ValidationFailedError(
+            f"{instrument}: {err} (calendar {calendar})"
+        ) from err

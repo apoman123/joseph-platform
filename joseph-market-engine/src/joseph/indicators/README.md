@@ -15,16 +15,25 @@ outputs; it never recomputes a tradable signal.
 | `fvg_ifvg` | FVG / IFVG zones with heat scores, first-test decay, inversion | chart |
 | `order_breaker_blocks` | OB / breaker zones | chart |
 | `liquidity_sweeps` | BSL / SSL / EQH / EQL pools, sweeps vs breaks | chart |
-| `order_flow_pressure` | true delta from venue taker volume (`method: taker_volume`, snapshot method `trade`) or the Pine candle-direction estimate; buyer/seller failure & breakout | chart + `intrabars:auto` (1s / 1m / 5m / 1h by chart) |
+| `order_flow_pressure` | true delta from venue taker volume (`method: taker_volume`, snapshot method `trade`), stock-exchange buy volume classified against the quote (`method: trade_classification`, snapshot method `trade_classification`) or the Pine candle-direction estimate; buyer/seller failure & breakout | chart + `intrabars:auto` (1s / 1m / 5m / 1h by chart) |
 | `auction_value_areas` | VAH / POC / VAL (chart and 1H profiles), 1s–30m charts | chart + `aux:1h` |
 | `premium_discount_ote` | dealing range, premium / discount / EQ / OTE (LuxAlgo, CC BY-NC-SA 4.0) | chart |
 | `anchored_vwap` | VWAP + 3 stdev bands from a session/week/month or an anchor bar (Python-native study) | chart |
 | `regression_channel` | least-squares channel, rolling or from an anchor bar, Pearson's R (Python-native study) | chart |
 
 The two Python-native studies follow TradingView's built-in VWAP and
-regression-channel definitions; they are not Pine ports. A study anchored to
-a bar outside the computed window (series cap 2000 bars) publishes `None`
-values and `anchor_in_window = false` rather than starting at the wrong bar.
+regression-channel definitions; they are not Pine ports. A series of an
+anchored study (requested alone) is computed from the anchor bar onward, up
+to `QueryConfig.max_anchored_bars` (50,000; `JOSEPH_MAX_ANCHORED_BARS`)
+closed bars back; a more distant anchor is refused with a validation error.
+Anchored series are kept incrementally between requests, so a re-request
+after a bar closes only feeds the new bar. On exchange calendars the VWAP's
+`session` / `week` / `month` anchors are the calendar's `1d` / `1w` / `1M`
+bars.
+
+Every bar boundary (nesting, higher-timeframe visibility, missing bars,
+anchor bars) follows the instrument's session calendar
+(`joseph.domain.sessions.for_instrument`).
 
 `licensing_status = PINE_PORT_PENDING_REVIEW`, `parity_status = SPEC_ONLY`
 until TradingView exports are compared (`golden.py`,
