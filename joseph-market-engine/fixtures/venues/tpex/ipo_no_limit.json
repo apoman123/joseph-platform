@@ -1,0 +1,17 @@
+[
+ {
+  "CompanyName": "\u9a0f\u5104\u946b",
+  "CurrentDayCumulativeTradingVolume": "100,000",
+  "Date": "1151116",
+  "EndDateForStabilizationOperation": "1151120",
+  "OverAllotmentShares": "100,000",
+  "SecuritiesCompanyCode": "7848",
+  "StartDateForStabilizationOperation": "1151116",
+  "TradingPrice": "248.50",
+  "TradingType": "\u8cb7",
+  "TradingVolume": "100,000",
+  "TransactionType": "\u4e3b\u8fa6\u627f\u92b7\u5546\u57f7\u884c\u7a69\u5b9a\u50f9\u683c\u64cd\u4f5c\u5c08\u6236",
+  "Underwriter": "9A00 \u6c38\u8c50\u91d1",
+  "UnderwritingPrice": "249.65"
+ }
+]

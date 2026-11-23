@@ -3,10 +3,10 @@
  * by the in-browser paper broker. Every value here is synthetic.
  *
  * The accounts mirror the execution engine: a USD paper account (crypto,
- * Nasdaq and NYSE) and a TWD paper account (TWSE), an Interactive Brokers
- * paper account (Nasdaq/NYSE, outside RTH, queued market orders), a
- * SinoPac Shioaji simulation account (TWSE board and intraday odd lots, no
- * stop orders), a SinoPac live account whose credentials are missing on
+ * Nasdaq and NYSE) and a TWD paper account (TWSE, TPEx), an Interactive
+ * Brokers paper account (Nasdaq/NYSE, outside RTH, queued market orders),
+ * a SinoPac Shioaji simulation account (TWSE and TPEx board and intraday
+ * odd lots, no stop orders), a SinoPac live account whose credentials are missing on
  * the server and Cathay awaiting its API SDK. Capabilities carry the
  * contract's `tradable_venues`, `cash_account`, `short_selling`,
  * `outside_rth`, `odd_lot`, `queue_market_when_closed`, `simulation` and
@@ -83,18 +83,22 @@ export const DEMO_MARKS: Readonly<Record<string, string>> = {
   'mock:stock:ACME': '182.40',
   'mock:etf:TLTD': '91.20',
   'mock:stock:9901': '585',
+  'mock:etf:00999B': '26.20',
 };
 
 /** Account id of the DEMO USD paper account (crypto, Nasdaq, NYSE). */
 export const DEMO_ACCOUNT_ID = 'acct-paper-demo';
 
-/** DEMO TWD paper account (TWSE), like the engine's `acct-twd-paper-*`. */
+/**
+ * DEMO TWD paper account (TWSE, TPEx), like the engine's
+ * `acct-twd-paper-*`.
+ */
 export const DEMO_TWD_ACCOUNT_ID = 'acct-twd-paper-demo';
 
 /** DEMO Interactive Brokers paper account (Nasdaq/NYSE). */
 export const DEMO_IBKR_ACCOUNT_ID = 'acct-ibkr-demo';
 
-/** DEMO SinoPac Shioaji simulation account (TWSE). */
+/** DEMO SinoPac Shioaji simulation account (TWSE, TPEx). */
 export const DEMO_SINOPAC_ACCOUNT_ID = 'acct-sinopac-demo';
 
 /** DEMO SinoPac live account whose credentials are missing on the server. */
@@ -249,7 +253,7 @@ function sinopacCapabilities(
     client_order_id: false,
     query_by_client_id: true,
     notes: [...notes],
-    tradable_venues: ['twse'],
+    tradable_venues: ['twse', 'tpex'],
     cash_account: true,
     short_selling: false,
     outside_rth: false,
@@ -279,7 +283,7 @@ const CATHAY_CAPABILITIES: TradingCapabilities = {
   notes: [
     'Awaiting the Cathay API SDK: Cathay has not released a trading API, so orders cannot be placed yet.',
   ],
-  tradable_venues: ['twse'],
+  tradable_venues: ['twse', 'tpex'],
   cash_account: true,
   short_selling: false,
   outside_rth: false,
@@ -312,7 +316,7 @@ export const DEMO_ACCOUNTS: readonly DemoAccountSpec[] = [
     currency: 'TWD',
     startingEquity: '3000000',
     maxNotional: '30000000',
-    capabilities: paperCapabilities('TWD', ['twse']),
+    capabilities: paperCapabilities('TWD', ['twse', 'tpex']),
     health: 'HEALTHY',
   },
   {
@@ -406,7 +410,7 @@ export function demoAccount(accountId: string): DemoAccountSpec | null {
 }
 
 /** Exchange venues of listed securities. */
-const EXCHANGES: readonly Venue[] = ['twse', 'nasdaq', 'nyse'];
+const EXCHANGES: readonly Venue[] = ['twse', 'tpex', 'nasdaq', 'nyse'];
 
 /**
  * Exchanges a security trades on: its venue, or for DEMO securities the
@@ -417,7 +421,7 @@ const EXCHANGES: readonly Venue[] = ['twse', 'nasdaq', 'nyse'];
 function listingExchanges(instrument: Instrument): readonly Venue[] {
   const venue = instrument.key.venue;
   if (EXCHANGES.includes(venue)) return [venue];
-  if (instrument.calendar === 'XTAI') return ['twse'];
+  if (instrument.calendar === 'XTAI') return ['twse', 'tpex'];
   if (instrument.calendar === 'XNYS') return ['nasdaq', 'nyse'];
   return [];
 }
@@ -426,7 +430,7 @@ function listingExchanges(instrument: Instrument): readonly Venue[] {
  * Why a DEMO account cannot trade an instrument (engine `equities.route`
  * and the `tradable_venues` check): securities go to accounts listing their
  * exchange; brokers trade securities only; the TWD paper account trades
- * TWSE only.
+ * TWSE and TPEx only.
  * @param account Account.
  * @param instrument Instrument.
  * @return Reason, or null when routable.

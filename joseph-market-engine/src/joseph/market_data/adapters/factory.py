@@ -16,6 +16,7 @@ from joseph.market_data.adapters import hyperliquid
 from joseph.market_data.adapters import lighter
 from joseph.market_data.adapters import mexc
 from joseph.market_data.adapters import mock
+from joseph.market_data.adapters import tpex
 from joseph.market_data.adapters import treasury
 from joseph.market_data.adapters import twse
 from joseph.market_data.adapters import ws
@@ -34,6 +35,11 @@ VERIFIED_AT_MS = 1_795_351_391_000
 # carries no verification time.
 EXCHANGE_VERIFIED_AT_MS = 1_795_409_443_000
 
+# TPEx (OpenAPI, tradingStock, tradingDate schedules, MIS otc channels)
+# verified live by fixture captures and the opt-in tests/network suite,
+# 2026-11-23 08:18 UTC.
+TPEX_VERIFIED_AT_MS = 1_795_421_880_000
+
 _RATES: dict[instruments.Venue, tuple[float, int]] = {
     instruments.Venue.BINANCE: (10.0, 20),
     instruments.Venue.HYPERLIQUID: (5.0, 10),
@@ -45,6 +51,8 @@ _RATES: dict[instruments.Venue, tuple[float, int]] = {
 _TWSE_OPENAPI_RATE = (1.0, 3)
 _TWSE_PACED_RATE = (0.5, 2)
 """www.twse.com.tw and MIS block clients above roughly 3 requests / 5 s."""
+_TPEX_RATE = (0.5, 3)
+"""www.tpex.org.tw (OpenAPI and reports share one budget; none published)."""
 _ALPACA_RATE = (3.0, 10)
 """Alpaca's free plan allows 200 requests per minute (shared by venues)."""
 _SYMDIR_RATE = (1.0, 2)
@@ -80,6 +88,7 @@ def build_adapters(
         url: str,
         rate: tuple[float, int] | None = None,
         name: str | None = None,
+        limiter: http.RateLimiter | None = None,
     ) -> http.VenueHttp:
         """Creates the rate-limited HTTP client of a venue.
 
@@ -88,11 +97,16 @@ def build_adapters(
             url: Base URL.
             rate: ``(rate_per_s, burst)`` (defaults to the venue's).
             name: Source name for error messages.
+            limiter: Token bucket shared with other clients of the host
+                (``rate`` is then unused).
 
         Returns:
             HTTP client.
         """
-        rate_per_s, burst = rate or _RATES[venue]
+        if limiter is not None:
+            rate_per_s, burst = limiter.rate_per_s, limiter.burst
+        else:
+            rate_per_s, burst = rate or _RATES[venue]
         return http.VenueHttp(
             venue,
             url,
@@ -101,7 +115,21 @@ def build_adapters(
             rate_per_s=rate_per_s,
             burst=burst,
             name=name,
+            limiter=limiter,
         )
+
+    mis_limiter: http.RateLimiter | None = None
+
+    def shared_mis_limiter() -> http.RateLimiter:
+        """Returns the MIS token bucket shared by TWSE and TPEx.
+
+        Returns:
+            Limiter (MIS is one host whatever the market).
+        """
+        nonlocal mis_limiter
+        if mis_limiter is None:
+            mis_limiter = http.RateLimiter(*_TWSE_PACED_RATE)
+        return mis_limiter
 
     alpaca_source: alpaca.AlpacaSource | None = None
 
@@ -175,9 +203,28 @@ def build_adapters(
             adapters[venue] = twse.TwseAdapter(
                 venue_http(venue, twse.OPENAPI_URL, _TWSE_OPENAPI_RATE),
                 venue_http(venue, twse.WWW_URL, _TWSE_PACED_RATE),
-                venue_http(venue, twse.MIS_URL, _TWSE_PACED_RATE, "twse MIS"),
+                venue_http(
+                    venue,
+                    twse.MIS_URL,
+                    name="twse MIS",
+                    limiter=shared_mis_limiter(),
+                ),
                 clock,
                 EXCHANGE_VERIFIED_AT_MS,
+            )
+        elif venue is instruments.Venue.TPEX:
+            tpex_limiter = http.RateLimiter(*_TPEX_RATE)
+            adapters[venue] = tpex.TpexAdapter(
+                venue_http(venue, tpex.OPENAPI_URL, limiter=tpex_limiter),
+                venue_http(venue, tpex.WWW_URL, limiter=tpex_limiter),
+                venue_http(
+                    venue,
+                    twse.MIS_URL,
+                    name="tpex MIS",
+                    limiter=shared_mis_limiter(),
+                ),
+                clock,
+                TPEX_VERIFIED_AT_MS,
             )
         elif venue in (instruments.Venue.NASDAQ, instruments.Venue.NYSE):
             adapters[venue] = alpaca.AlpacaAdapter(

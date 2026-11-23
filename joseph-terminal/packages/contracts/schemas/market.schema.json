@@ -189,20 +189,20 @@
           "$ref": "common.schema.json#/$defs/CalendarId"
         },
         "listing_exchange": {
-          "description": "Exchange that lists a security, e.g. `Nasdaq`, `NYSE Arca`, `TWSE`; null for crypto.",
+          "description": "Exchange that lists a security, e.g. `Nasdaq`, `NYSE Arca`, `TWSE`, `TPEx`; null for crypto.",
           "type": ["string", "null"]
         },
         "tick_ladder": {
-          "description": "Price-dependent ticks (TWSE). Empty when tick_size applies at every price.",
+          "description": "Price-dependent ticks (TWSE, TPEx). Empty when tick_size applies at every price.",
           "type": "array",
           "items": {"$ref": "#/$defs/TickStep"}
         },
         "price_limit_pct": {
-          "description": "Daily price limit from the reference price in percent (TWSE 10); null when unlimited.",
+          "description": "Daily price limit from the reference price in percent (TWSE and TPEx 10); null when unlimited.",
           "oneOf": [{"$ref": "common.schema.json#/$defs/NonNegativeDecimalString"}, {"type": "null"}]
         },
         "board_lot": {
-          "description": "Shares per board lot (TWSE 1000); null when orders are in single units.",
+          "description": "Shares per board lot (TWSE and TPEx 1000); null when orders are in single units.",
           "oneOf": [{"$ref": "common.schema.json#/$defs/NonNegativeDecimalString"}, {"type": "null"}]
         },
         "name": {
@@ -211,7 +211,7 @@
           "maxLength": 200
         },
         "local_name": {
-          "description": "Name in the listing market's language, e.g. `台積電` on TWSE; null when none.",
+          "description": "Name in the listing market's language, e.g. `台積電` on TWSE, `環球晶` on TPEx; null when none.",
           "type": ["string", "null"],
           "maxLength": 200
         }

@@ -88,7 +88,8 @@ class AccountService:
             id_gen: Id generator.
             paper_starting_equity: Starting equity of paper accounts.
             paper_twd_starting_cash: Starting cash of the TWD paper
-                account for TWSE securities; ``None`` disables it.
+                account for TWSE and TPEx securities; ``None``
+                disables it.
             step_up: Step-up verifier (shared with deployment consent).
             live_trading_enabled: Global LIVE gate.
             live_arm_max_ms: Longest (and default) LIVE arming, capped at
@@ -110,8 +111,8 @@ class AccountService:
     def ensure_paper_account(self, tenant_id: str) -> accounts.Account:
         """Returns (creating once) the tenant's paper account.
 
-        Also provisions the TWD paper account (TWSE securities) when one is
-        configured.
+        Also provisions the TWD paper account (TWSE and TPEx securities)
+        when one is configured.
 
         Args:
             tenant_id: Tenant.
@@ -147,7 +148,7 @@ class AccountService:
                 venue="mock",
                 label="Paper trading"
                 if currency == "USD"
-                else f"Paper trading ({currency}, TWSE)",
+                else f"Paper trading ({currency}, TWSE/TPEx)",
                 status=enums.AccountStatus.CONNECTED,
                 modes=(enums.OrderMode.PAPER, enums.OrderMode.SHADOW),
                 currency=currency,

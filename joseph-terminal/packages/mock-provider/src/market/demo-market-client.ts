@@ -219,7 +219,7 @@ export class DemoMarketDataClient implements MarketDataClient {
             notes: [
               'Synthetic data generated in the browser. Not a real market.',
               'Seconds bars stand in for bars the engine builds from public trades.',
-              'Demo stocks, the bond ETF and the Treasury yield follow their exchange session calendars (XNYS, XTAI, USBOND).',
+              'Demo stocks, the bond ETFs and the Treasury yield follow their exchange session calendars (XNYS, XTAI, USBOND).',
             ],
             docs_url: '',
             verified_at_ms: null,

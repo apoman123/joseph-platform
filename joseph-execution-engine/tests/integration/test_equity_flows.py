@@ -95,6 +95,34 @@ async def test_twse_paper_order_fills_in_shares() -> None:
     assert summary["settled_cash"] == "3000000"
 
 
+async def test_tpex_paper_orders_follow_taiwan_rules() -> None:
+    """TPEx orders fill in the TWD paper account with Taiwan fees and lots."""
+    h = _build()
+    oms = h.container.services.oms
+    stock = _twse(instrument_id=fixtures.GLOBALWAFERS, limit_price=D(462))
+    result = await oms.submit_intent(harness.TENANT_A, stock, "tp-1")
+    assert result.decision.allowed, result.decision.failures()
+    assert result.orders[0].state is S.FILLED
+    fill = oms.list_fills(harness.TENANT_A, TWD_A)[0]
+    assert fill.fee_asset == "TWD"
+    assert fill.fee == (fill.price * 1000 * D("0.001425")).to_integral_value(
+        decimal.ROUND_FLOOR
+    )
+    beyond = _twse(instrument_id=fixtures.GLOBALWAFERS, limit_price=D(486))
+    refused = await oms.submit_intent(harness.TENANT_A, beyond, "tp-2")
+    assert not refused.decision.allowed
+    unlimited = _twse(
+        instrument_id=fixtures.YUANTA_US20,
+        limit_price=D("26.2"),
+        quantity_base=D(500),
+    )
+    bond = await oms.submit_intent(harness.TENANT_A, unlimited, "tp-3")
+    assert bond.decision.allowed, bond.decision.failures()
+    usd = _twse(account_id=harness.PAPER_A, instrument_id=fixtures.YUANTA_US20)
+    wrong = await oms.submit_intent(harness.TENANT_A, usd, "tp-4")
+    assert not wrong.decision.allowed
+
+
 @pytest.mark.parametrize(
     ("overrides", "code"),
     [

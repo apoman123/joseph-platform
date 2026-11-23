@@ -18,7 +18,7 @@
  * true volume delta and turnover ranking work offline. Sub-minute bars
  * scale wicks and volume to their length; monthly bars end on the 1st.
  *
- * Session instruments (DEMO stocks, the bond ETF and the Treasury yield)
+ * Session instruments (DEMO stocks, the bond ETFs and the Treasury yield)
  * only have bars inside their calendar's sessions, built with the same
  * calendar arithmetic as the engine; stock bars carry a buy volume
  * classified against quotes (`taker_buy_method: classified`), as on stock
@@ -75,7 +75,7 @@ export interface DemoInstrumentSpec {
   boardLot?: string;
 }
 
-/** TWSE price ladder (Taiwan Stock Exchange tick sizes). */
+/** Taiwan stock price ladder (TWSE and TPEx stock tick sizes). */
 export const TWSE_TICK_LADDER: readonly TickStep[] = [
   {min_price: '0', tick_size: '0.01'},
   {min_price: '10', tick_size: '0.05'},
@@ -83,6 +83,12 @@ export const TWSE_TICK_LADDER: readonly TickStep[] = [
   {min_price: '100', tick_size: '0.5'},
   {min_price: '500', tick_size: '1'},
   {min_price: '1000', tick_size: '5'},
+];
+
+/** Taiwan ETF price ladder (TWSE and TPEx: 0.01 below 50, 0.05 from 50). */
+export const TAIWAN_ETF_TICK_LADDER: readonly TickStep[] = [
+  {min_price: '0', tick_size: '0.01'},
+  {min_price: '50', tick_size: '0.05'},
 ];
 
 /** DEMO instruments on the `mock` venue. */
@@ -159,6 +165,25 @@ export const DEMO_INSTRUMENT_SPECS: readonly DemoInstrumentSpec[] = [
     listingExchange: 'TWSE',
     tickLadder: TWSE_TICK_LADDER,
     priceLimitPct: '10',
+    boardLot: '1000',
+  },
+  {
+    // A TPEx bond ETF holding foreign bonds: ETF ladder, no daily limit.
+    instrumentId: 'mock:etf:00999B',
+    displaySymbol: '00999B',
+    base: '00999B',
+    basePrice: 26.2,
+    tickSize: '0.01',
+    lotSize: '1',
+    volumePerMinute: 120_000,
+    marketType: 'etf',
+    calendar: 'XTAI',
+    assetClass: 'BOND',
+    quote: 'TWD',
+    name: 'Demo US Treasury 20+ Year Bond ETF (demo)',
+    localName: '示範美債20年',
+    listingExchange: 'TPEx',
+    tickLadder: TAIWAN_ETF_TICK_LADDER,
     boardLot: '1000',
   },
   {

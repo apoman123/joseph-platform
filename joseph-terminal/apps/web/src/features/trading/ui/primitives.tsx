@@ -24,6 +24,7 @@ const VENUE_CODES: Readonly<Record<Venue, string>> = {
   bitget: 'BG',
   mexc: 'MEXC',
   twse: 'TWSE',
+  tpex: 'TPEx',
   nasdaq: 'NSDQ',
   nyse: 'NYSE',
   treasury: 'UST',

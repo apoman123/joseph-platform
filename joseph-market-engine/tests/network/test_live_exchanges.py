@@ -1,9 +1,11 @@
-"""Opt-in live tests against TWSE, Nasdaq Trader, Treasury and Alpaca.
+"""Opt-in live tests against TWSE, TPEx, Nasdaq Trader, Treasury and Alpaca.
 
 Run with ``JOSEPH_NETWORK_TESTS=1 uv run pytest tests/network -m network``.
 Requests are few and paced (TWSE blocks clients above roughly 3 requests
-per 5 seconds). Alpaca tests also need ``JOSEPH_ALPACA_KEY_ID`` and
-``JOSEPH_ALPACA_SECRET_KEY`` and skip without them.
+per 5 seconds; TPEx is paced at one request per 2 seconds, and its MIS
+data comes from TWSE's host). Alpaca tests also need
+``JOSEPH_ALPACA_KEY_ID`` and ``JOSEPH_ALPACA_SECRET_KEY`` and skip without
+them.
 """
 
 from __future__ import annotations
@@ -20,6 +22,8 @@ from joseph.domain import sessions
 from joseph.domain import timeframes
 from joseph.market_data.adapters import alpaca
 from joseph.market_data.adapters import factory
+from joseph.market_data.adapters import tpex
+from joseph.market_data.adapters import twse
 from joseph.market_data.app import ports
 
 pytestmark = [
@@ -83,6 +87,61 @@ async def test_live_twse_listings_history_and_mis(
     tick = rows["twse:stock:2330"].tick_for(book.best_bid)
     assert book.best_ask - book.best_bid >= tick
     assert all(level.quantity % 1000 == 0 for level in book.bids)
+    await adapter.close()
+
+
+async def test_live_tpex_listings_history_and_mis(
+    contract_validate: Validate,
+) -> None:
+    """TPEx instruments, tradingStock history and MIS otc data work live."""
+    adapter, clock = _live(instruments.Venue.TPEX)
+    rows = {str(r.instrument_id): r for r in await adapter.list_instruments()}
+    assert len(rows) > 900
+    for key in ("tpex:stock:6488", "tpex:etf:00679B", "tpex:etf:00937B"):
+        contract_validate(
+            "market.schema.json", "Instrument", rows[key].to_contract()
+        )
+    for bond in ("tpex:etf:00679B", "tpex:etf:00937B"):
+        assert rows[bond].asset_class is instruments.AssetClass.BOND
+        assert rows[bond].price_limit_pct is None
+    assert rows["tpex:stock:6488"].price_limit_pct is not None
+    assert not any(key.startswith("tpex:etf:00687C") for key in rows)
+    stock = instruments.InstrumentId.parse("tpex:stock:6488")
+    now = clock.now_ms()
+    days = await adapter.fetch_candles(
+        stock, _TF.D1, now - 20 * 86_400_000, now
+    )
+    assert len(days) >= 10
+    for candle in days:
+        contract_validate("market.schema.json", "Candle", candle.to_contract())
+        assert sessions.XTAI.is_aligned(_TF.D1, candle.start_ms)
+        assert candle.base_volume % 1000 == 0
+    for key in ("tpex:stock:6488", "tpex:etf:00679B"):
+        instrument = instruments.InstrumentId.parse(key)
+        snapshot = await adapter.fetch_snapshot(instrument)
+        assert snapshot.last is not None and snapshot.volume_24h_base
+        book = await adapter.fetch_order_book(instrument, 5)
+        assert book.best_bid is not None and book.best_ask is not None
+        assert book.best_bid < book.best_ask
+        tick = rows[key].tick_for(book.best_bid)
+        assert (book.best_ask - book.best_bid) % tick == 0
+        assert all(level.price % tick == 0 for level in book.bids)
+        assert all(level.quantity % 1000 == 0 for level in book.bids)
+    await adapter.close()
+
+
+async def test_live_tpex_schedule_matches_xtai() -> None:
+    """TPEx's published closures are XTAI closures (same Taiwan calendar)."""
+    adapter, clock = _live(instruments.Venue.TPEX)
+    assert isinstance(adapter, tpex.TpexAdapter)
+    today = twse.taipei_date(clock.now_ms())
+    for year in (today.year, today.year + 1):
+        payload = await adapter._www.get(
+            "/www/zh-tw/bulletin/tradingDate",
+            params={"date": str(year), "response": "json"},
+        )
+        for day in tpex.schedule_closures(payload or {}, year, today):
+            assert sessions.XTAI.session(day) is None, day
     await adapter.close()
 
 

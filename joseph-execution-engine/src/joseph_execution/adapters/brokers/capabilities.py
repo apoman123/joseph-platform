@@ -68,7 +68,7 @@ def ibkr(
 
 
 def sinopac(*, simulation: bool = True) -> accounts.TradingCapabilities:
-    """Returns SinoPac Shioaji capabilities (TWSE stocks and ETFs).
+    """Returns SinoPac Shioaji capabilities (TWSE and TPEx listings).
 
     Args:
         simulation: Shioaji simulation mode.
@@ -101,8 +101,11 @@ def sinopac(*, simulation: bool = True) -> accounts.TradingCapabilities:
             "and brackets are not available.",
             "Deal reports carry no fees: commission (0.1425% maximum) and "
             "transaction tax (0.3% stocks, 0.1% ETFs) are estimated.",
+            "TWSE codes resolve in Shioaji's Stocks.TSE contracts and TPEx "
+            "codes in Stocks.OTC; emerging-board (OES) stocks are not "
+            "routed.",
         ),
-        tradable_venues=(enums.Venue.TWSE.value,),
+        tradable_venues=(enums.Venue.TWSE.value, enums.Venue.TPEX.value),
         cash_account=True,
         short_selling=False,
         outside_rth=False,
@@ -114,7 +117,7 @@ def sinopac(*, simulation: bool = True) -> accounts.TradingCapabilities:
 
 
 def cathay() -> accounts.TradingCapabilities:
-    """Returns the Cathay Securities entry (TWSE; fail-closed).
+    """Returns the Cathay Securities entry (TWSE, TPEx; fail-closed).
 
     Returns:
         Capabilities with status TRADING_UNAVAILABLE.
@@ -135,7 +138,7 @@ def cathay() -> accounts.TradingCapabilities:
         client_order_id=False,
         query_by_client_id=False,
         notes=(),
-        tradable_venues=(enums.Venue.TWSE.value,),
+        tradable_venues=(enums.Venue.TWSE.value, enums.Venue.TPEX.value),
         cash_account=True,
         short_selling=False,
         outside_rth=False,

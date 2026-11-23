@@ -109,7 +109,9 @@ describe('DEMO accounts', () => {
       simulation: true,
       currencies: ['USD'],
     });
-    expect(twd?.capabilities.tradable_venues).toEqual(['twse']);
+    expect(twd?.capabilities.tradable_venues).toEqual(['twse', 'tpex']);
+    expect(sinopac?.capabilities.tradable_venues).toEqual(['twse', 'tpex']);
+    expect(cathay?.capabilities.tradable_venues).toEqual(['twse', 'tpex']);
     expect(twd?.settled_cash).toBe('3000000.00');
     expect(ibkr?.capabilities).toMatchObject({
       outside_rth: true,
@@ -227,6 +229,31 @@ describe('DEMO accounts', () => {
     const offLadder = await client.previewOrder(twse({limit_price: '585.5'}));
     // The DEMO broker normalizes to the ladder like the engine.
     expect(offLadder.normalized.limit_price).toBe('586');
+  });
+
+  it('routes the TPEx bond ETF to Taiwan accounts in board lots', async () => {
+    const client = broker(TWSE_OPEN);
+    const etf = (patch: Partial<OrderIntentRequest> = {}) =>
+      twse({
+        instrument_id: 'mock:etf:00999B',
+        quantity_base: '2000',
+        limit_price: '26.20',
+        ...patch,
+      });
+    expect(await failing(client, etf())).toEqual([]);
+    expect(
+      await failing(client, etf({account_id: DEMO_TWD_ACCOUNT_ID}))
+    ).toEqual([]);
+    expect(
+      await failing(client, etf({account_id: DEMO_IBKR_ACCOUNT_ID}))
+    ).toContain('account.routing');
+    const mixed = await client.previewOrder(etf({quantity_base: '1500'}));
+    expect(
+      mixed.risk.checks.find(c => c.check === 'size.board_lot')?.message
+    ).toMatch(/^TPEx orders are whole board lots of 1000 shares/);
+    // ETF ladder: 0.01 below 50 TWD.
+    const offTick = await client.previewOrder(etf({limit_price: '26.204'}));
+    expect(offTick.normalized.limit_price).toBe('26.2');
   });
 
   it('applies closed-market rules', async () => {

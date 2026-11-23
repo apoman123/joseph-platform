@@ -222,7 +222,8 @@ async def test_capabilities_follow_the_account_currency() -> None:
     """Paper capabilities describe a long-only cash account per currency."""
     adapter, _, _ = _setup(fixtures.taipei(MONDAY, 10))
     twd = await adapter.capabilities(TWD)
-    assert twd.tradable_venues == ("twse",) and twd.currencies == ("TWD",)
+    assert twd.tradable_venues == ("twse", "tpex")
+    assert twd.currencies == ("TWD",)
     assert twd.cash_account and not twd.short_selling and twd.odd_lot
     usd = await adapter.capabilities(USD)
     assert usd.tradable_venues == ("nasdaq", "nyse")

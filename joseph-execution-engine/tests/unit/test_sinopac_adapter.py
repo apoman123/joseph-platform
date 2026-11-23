@@ -145,7 +145,7 @@ async def test_login_activates_the_ca_and_negotiates() -> None:
     rig = _Rig()
     caps = await rig.adapter.capabilities(ACCOUNT)
     assert caps.status is enums.TradingStatus.AVAILABLE
-    assert caps.tradable_venues == ("twse",) and caps.odd_lot
+    assert caps.tradable_venues == ("twse", "tpex") and caps.odd_lot
     assert caps.simulation and rig.api.simulation
     assert rig.api.calls[:2] == ["login", "activate_ca"]
     assert await rig.adapter.health() is enums.HealthState.HEALTHY
@@ -328,11 +328,65 @@ async def test_rejections_and_errors() -> None:
     rig.api.place_error = unknown_type("no ack")
     with pytest.raises(errors.AdapterTimeoutError):
         await rig.adapter.submit_order(_req(rig.cid(3)))
-    for instrument in ("twse:stock:6488", "twse:stock:9999", fixtures.AAPL):
+    for instrument in (
+        "twse:stock:6488",
+        "twse:stock:9999",
+        "tpex:stock:2330",
+        "tpex:stock:7777",
+        fixtures.AAPL,
+    ):
         with pytest.raises(errors.AdapterUnavailableError):
             await rig.adapter.submit_order(
                 _req(rig.cid(4), instrument_id=instrument)
             )
+
+
+async def test_tpex_orders_use_the_otc_contract() -> None:
+    """TPEx ids resolve in Stocks.OTC; fills carry Taiwan fees and tax."""
+    rig = _Rig()
+    stock = rig.cid(1)
+    result = await rig.adapter.submit_order(
+        _req(stock, instrument_id=fixtures.GLOBALWAFERS, limit_price=D(460))
+    )
+    assert result.accepted
+    trade = rig.api.trades[0]
+    assert (trade.contract.code, trade.contract.exchange) == ("6488", "OTC")
+    assert (trade.order.order_lot, trade.order.quantity) == ("Common", 2)
+    rig.api.deal(trade, 1, 460.0, "1")
+    await _settle()
+    fill = next(e.fill for e in rig.adapter.drain_events(ACCOUNT) if e.fill)
+    assert fill.quantity_base == D(1000) and fill.fee == D(655)
+    odd = rig.cid(2)
+    await rig.adapter.submit_order(
+        _req(
+            odd,
+            instrument_id=fixtures.YUANTA_US20,
+            quantity_base=D(500),
+            limit_price=D("26.15"),
+            side=enums.OrderSide.SELL,
+        )
+    )
+    bond = rig.api.trades[1]
+    assert (bond.contract.code, bond.contract.exchange) == ("00679B", "OTC")
+    assert (bond.order.order_lot, bond.order.quantity) == ("IntradayOdd", 500)
+    second = _Rig()
+    second.api = rig.api
+    second.factory.api = rig.api
+    found = await second.adapter.get_order_by_client_id(ACCOUNT, odd)
+    assert found is not None
+    assert second.adapter._tracked[odd].instrument_id == fixtures.YUANTA_US20
+
+
+def test_exchange_mapping_helpers() -> None:
+    """Shioaji exchanges map to venues; the emerging board is not routed."""
+    assert sinopac.venue_of("TSE") == "twse"
+    assert sinopac.venue_of("OTC") == "tpex"
+    assert sinopac.venue_of("OES") is None
+    assert sinopac.instrument_id("00679B", "OTC") == fixtures.YUANTA_US20
+    assert sinopac.instrument_id("2330", "") == fixtures.TSMC
+    info = types.SimpleNamespace(base=types.SimpleNamespace(exchange="OTC"))
+    assert sinopac.exchange_of(info) == "OTC"
+    assert sinopac.exchange_of(None) == ""
 
 
 async def test_cancel_paths() -> None:
@@ -473,6 +527,7 @@ async def test_balances_positions_and_pacing() -> None:
     rig.api.position_rows = [
         fake_shioaji.FakeStockPosition("2330", "Buy", 1500, 590.0, 600.0),
         fake_shioaji.FakeStockPosition("0050", "Sell", 10, 150.0, 151.0),
+        fake_shioaji.FakeStockPosition("6488", "Buy", 0, 440.0, 460.0),
     ]
     snap = await rig.adapter.account_snapshot(ACCOUNT)
     assert snap.currency == "TWD"
@@ -490,6 +545,7 @@ async def test_balances_positions_and_pacing() -> None:
     assert {p.instrument_id: p.signed_qty for p in positions} == {
         fixtures.TSMC: D(1500),
         fixtures.YUANTA_50: D(-10),
+        fixtures.GLOBALWAFERS: D(0),
     }
     assert "list_positions:Share" in rig.api.calls
 

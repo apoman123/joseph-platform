@@ -9,11 +9,16 @@
  *   Christmas with weekend observance, the ad hoc closures the engine lists,
  *   and 13:00 early closes on July 3, Christmas Eve (Monday-Thursday) and
  *   the day after Thanksgiving.
- * - USBOND (08:00-17:00 America/New_York): the NYSE holidays without Good
- *   Friday, plus Columbus Day and Veterans Day.
- * - XTAI (TWSE, 09:00-13:30 Asia/Taipei): weekdays minus the closures of the
- *   engine's TWSE table for 2024-2027 (observed through 2026-11-22 and
- *   published through 2027); later dates follow the weekday rule.
+ * - USBOND (08:00-17:00 America/New_York): like the engine, the observed
+ *   Treasury publication days through 2026-11-20 (the rule below plus the
+ *   observed extra closures: most Good Fridays, MLK Day before 1998, NYSE
+ *   special closures); later dates follow the rule, the NYSE holidays
+ *   without Good Friday plus Columbus Day and Veterans Day, so a future
+ *   Good Friday is a session.
+ * - XTAI (TWSE and TPEx, 09:00-13:30 Asia/Taipei): weekdays minus the
+ *   closures of the engine's TWSE table for 2024-2027 (observed through
+ *   2026-11-22 and published through 2027; TPEx keeps the same days);
+ *   later dates follow the weekday rule.
  */
 import {
   CONTINUOUS_CALENDAR,
@@ -123,6 +128,76 @@ export const DEMO_XTAI_CLOSURES: readonly string[] = [
 const XTAI_CLOSED: ReadonlySet<number> = new Set(
   DEMO_XTAI_CLOSURES.map(dayNumberOf)
 );
+
+/**
+ * Last day of the engine's observed US Treasury table
+ * (`calendar_data/usbond.json`). Through it, USBOND sessions are the days
+ * Treasury published its par yield curve; later dates follow
+ * `bondHolidays`, under which Good Friday is a session.
+ */
+export const DEMO_USBOND_OBSERVED_THROUGH = '2026-11-20';
+
+/**
+ * Weekdays through `DEMO_USBOND_OBSERVED_THROUGH` on which Treasury
+ * published no par yield curve although `bondHolidays` has a session: Good
+ * Fridays (Treasury published on those of 1996, 1999, 2007, 2010, 2012,
+ * 2015, 2021, 2023 and 2026 only), Martin Luther King Jr. Day before 1998
+ * and NYSE special closures. Generated from the engine's `usbond.json`,
+ * whose other closures are all `bondHolidays` dates, so the two together
+ * reproduce the engine's observed calendar.
+ */
+export const DEMO_USBOND_EXTRA_CLOSURES: readonly string[] = [
+  '1990-01-15',
+  '1990-04-13',
+  '1991-01-21',
+  '1991-03-29',
+  '1992-01-20',
+  '1992-04-17',
+  '1993-01-18',
+  '1993-04-09',
+  '1994-01-17',
+  '1994-04-01',
+  '1994-04-27',
+  '1995-01-16',
+  '1995-04-14',
+  '1996-01-15',
+  '1997-01-20',
+  '1997-03-28',
+  '1998-04-10',
+  '2000-04-21',
+  '2001-04-13',
+  '2001-09-11',
+  '2001-09-12',
+  '2002-03-29',
+  '2003-04-18',
+  '2004-04-09',
+  '2004-06-11',
+  '2005-03-25',
+  '2006-04-14',
+  '2008-03-21',
+  '2009-04-10',
+  '2011-04-22',
+  '2012-10-30',
+  '2013-03-29',
+  '2014-04-18',
+  '2016-03-25',
+  '2017-04-14',
+  '2018-03-30',
+  '2018-12-05',
+  '2019-04-19',
+  '2020-04-10',
+  '2022-04-15',
+  '2024-03-29',
+  '2025-04-18',
+];
+
+/** Observed extra US Treasury closures as day numbers. */
+const USBOND_EXTRA_CLOSED: ReadonlySet<number> = new Set(
+  DEMO_USBOND_EXTRA_CLOSURES.map(dayNumberOf)
+);
+
+/** Day number of `DEMO_USBOND_OBSERVED_THROUGH`. */
+const USBOND_OBSERVED_THROUGH = dayNumberOf(DEMO_USBOND_OBSERVED_THROUGH);
 
 /** NYSE ad hoc closures the engine lists. */
 const NYSE_SPECIAL_CLOSURES: ReadonlySet<number> = new Set(
@@ -266,7 +341,8 @@ export function nyseEarlyClose(day: number): boolean {
 }
 
 /**
- * US Treasury market closures of a year (engine `_bond_holidays`).
+ * Rule-based US Treasury market closures of a year (engine
+ * `_bond_holidays`, used after the observed table).
  * @param year Year.
  * @return Closed weekdays.
  */
@@ -288,7 +364,12 @@ export function bondHolidays(year: number): ReadonlySet<number> {
 function closedOn(calendar: ExchangeCalendarId, day: number): boolean {
   const year = new Date(day * DAY_MS).getUTCFullYear();
   if (calendar === 'XTAI') return XTAI_CLOSED.has(day);
-  if (calendar === 'USBOND') return bondHolidays(year).has(day);
+  if (calendar === 'USBOND') {
+    return (
+      bondHolidays(year).has(day) ||
+      (day <= USBOND_OBSERVED_THROUGH && USBOND_EXTRA_CLOSED.has(day))
+    );
+  }
   return nyseHolidays(year).has(day) || NYSE_SPECIAL_CLOSURES.has(day);
 }
 

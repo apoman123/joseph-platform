@@ -37,8 +37,8 @@ class FakeStock:
     """``sj.Contract`` of a stock.
 
     Attributes:
-        code: TWSE code.
-        exchange: ``TSE`` (TWSE) or ``OTC`` (TPEx).
+        code: Security code.
+        exchange: ``TSE`` (TWSE), ``OTC`` (TPEx) or ``OES`` (emerging).
         unit: Shares per lot.
     """
 
@@ -48,7 +48,10 @@ class FakeStock:
 
 
 class FakeCategory:
-    """``contracts.stocks``.
+    """``contracts.stocks`` (a ``ContractCategory``).
+
+    ``[code]`` searches every exchange; the attributes ``TSE``, ``OTC`` and
+    ``OES`` are the per-exchange groups, as in Shioaji 1.7.
 
     Attributes:
         items: Contracts by code.
@@ -72,6 +75,28 @@ class FakeCategory:
             Contract.
         """
         return self.items[code]
+
+    def __getattr__(self, exchange: str) -> FakeCategory:
+        """Returns the contracts of one exchange (``ContractGroup``).
+
+        Args:
+            exchange: ``TSE``, ``OTC`` or ``OES``.
+
+        Returns:
+            Group of that exchange's contracts.
+
+        Raises:
+            AttributeError: For names that are not exchange codes.
+        """
+        if exchange not in ("TSE", "OTC", "OES"):
+            raise AttributeError(exchange)
+        return FakeCategory(
+            {
+                code: stock
+                for code, stock in self.items.items()
+                if stock.exchange == exchange
+            }
+        )
 
 
 @dataclasses.dataclass
@@ -267,6 +292,8 @@ class FakeShioaji:
                     "2330": FakeStock("2330"),
                     "0050": FakeStock("0050"),
                     "6488": FakeStock("6488", exchange="OTC"),
+                    "00679B": FakeStock("00679B", exchange="OTC"),
+                    "7777": FakeStock("7777", exchange="OES"),
                 }
             )
         )

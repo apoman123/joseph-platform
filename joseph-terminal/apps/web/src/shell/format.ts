@@ -353,7 +353,7 @@ export function formatInstrumentPrice(
 }
 
 /**
- * Shares per board lot when volumes are shown in lots (TWSE 張).
+ * Shares per board lot when volumes are shown in lots (TWSE/TPEx 張).
  * @param instrument Instrument, or null while loading.
  * @return Board lot, or null when volumes are shown in shares or units.
  */
@@ -366,8 +366,9 @@ export function lotSizeForVolume(
 }
 
 /**
- * Formats a bar volume in the market's usual unit: TWSE in board lots (張,
- * 1 張 = 1,000 shares), other securities in shares, crypto in base units.
+ * Formats a bar volume in the market's usual unit: TWSE and TPEx in board
+ * lots (張, 1 張 = 1,000 shares), other securities in shares, crypto in
+ * base units.
  * @param volume Base volume (shares or base asset).
  * @param instrument Instrument, or null while loading.
  * @return Text such as `1,234 張`, `52,300 sh` or `12.50`.

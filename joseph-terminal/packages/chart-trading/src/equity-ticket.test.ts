@@ -22,6 +22,7 @@ import {
 } from './intent-builder';
 import {TicketController, modeAvailability} from './ticket';
 import {
+  TPEX_BOND_ETF,
   TWSE_STOCK,
   US_STOCK,
   account,
@@ -70,6 +71,42 @@ function inputs(
 function messages(result: ReturnType<typeof buildIntentRequest>): string[] {
   return result.issues.map(issue => issue.message);
 }
+
+describe('TPEx orders', () => {
+  it('routes a TPEx bond ETF to SinoPac in board lots without a limit', () => {
+    const ref = Decimal.parse('26.15');
+    const result = buildIntentRequest(
+      inputs(TPEX_BOND_ETF.instrument_id, SINOPAC.account_id, {
+        quantity: '3',
+        limitPrice: '30',
+      }),
+      TPEX_BOND_ETF,
+      ref,
+      {account: SINOPAC, reference: ref, calendar: XTAI, nowMs: TPE_OPEN}
+    );
+    // Foreign-constituent funds have no daily limit: 30 is 14.7 % up.
+    expect(result.issues).toEqual([]);
+    expect(result.request).toMatchObject({
+      instrument_id: 'tpex:etf:00679B',
+      quantity_base: '3000',
+      limit_price: '30',
+      time_in_force: 'DAY',
+    });
+    const offLadder = buildIntentRequest(
+      inputs(TPEX_BOND_ETF.instrument_id, SINOPAC.account_id, {
+        quantity: '1',
+        limitPrice: '57.72',
+      }),
+      TPEX_BOND_ETF,
+      ref,
+      {account: SINOPAC, reference: ref, calendar: XTAI, nowMs: TPE_OPEN}
+    );
+    expect(offLadder.request?.limit_price).toBe('57.7');
+    expect(messages(offLadder).join(' ')).toMatch(
+      /Rounded to the tick ladder \(0\.05 at this price\)/
+    );
+  });
+});
 
 describe('TWSE orders', () => {
   it('sends board lots as shares with DAY and no leverage', () => {
@@ -367,7 +404,7 @@ describe('US orders through IBKR', () => {
       {account: SINOPAC}
     );
     expect(messages(wrong)).toContain(
-      'SinoPac Securities (Shioaji) accounts route TWSE listings only.'
+      'SinoPac Securities (Shioaji) accounts route TWSE and TPEx listings only.'
     );
     const empty = buildEquityIntentRequest(
       inputs(US_STOCK.instrument_id, '', {accountId: null}),

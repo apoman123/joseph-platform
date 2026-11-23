@@ -26,6 +26,7 @@ import styles from './portfolio.module.css';
 /** Display names of exchange venues. */
 const EXCHANGE_NAMES: Readonly<Record<string, string>> = {
   twse: 'TWSE',
+  tpex: 'TPEx',
   nasdaq: 'Nasdaq',
   nyse: 'NYSE',
 };
