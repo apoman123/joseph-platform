@@ -44,7 +44,7 @@ RUN --mount=type=cache,target=/root/.cache/uv \
 FROM python:${PYTHON_VERSION}-slim-bookworm
 LABEL org.opencontainers.image.title="joseph-market-engine" \
       org.opencontainers.image.description="Joseph market data, screening, indicators, strategies, signals and alerts" \
-      org.opencontainers.image.licenses="Proprietary"
+      org.opencontainers.image.licenses="MIT"
 RUN useradd --system --uid 10001 --create-home --home-dir /home/joseph joseph \
  && mkdir -p /app/var && chown joseph:joseph /app/var
 WORKDIR /app

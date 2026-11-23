@@ -18,8 +18,8 @@ RUN --mount=type=cache,target=/root/.cache/uv \
 
 FROM python:${PYTHON_VERSION}-slim-bookworm
 LABEL org.opencontainers.image.title="joseph-execution-engine" \
-      org.opencontainers.image.description="Joseph risk gateway, OMS, paper/shadow trading, audit and kill switch" \
-      org.opencontainers.image.licenses="Proprietary"
+      org.opencontainers.image.description="Joseph risk gateway, OMS, paper/shadow/live trading, audit and kill switch" \
+      org.opencontainers.image.licenses="MIT"
 RUN useradd --system --uid 10001 --create-home --home-dir /home/joseph joseph \
  && mkdir -p /app/var && chown joseph:joseph /app/var
 WORKDIR /app
