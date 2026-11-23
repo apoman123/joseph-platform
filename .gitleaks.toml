@@ -10,3 +10,18 @@ description = "Fake credentials used by redaction/security tests"
 paths = [
   '''joseph-execution-engine/tests/security/test_security\.py''',
 ]
+# Exact fake or published values only; anything else still fails the scan.
+regexes = [
+  # Binance USDⓈ-M docs' HMAC example secret (public signing test vector).
+  '''^2b5eb11e18796d12d88f13dc27dbbd02c2cc51ff7059765ed9821957d82bb4d9$''',
+  # MEXC docs' example access key; fake adapter-test credentials.
+  '''^mx0aBYs33eIilxBW5C$''',
+  '''^LIVE-SECRET-binance-77$''',
+  '''^secret-123456$''',
+  # Base32 TOTP secret of the system-test execution engine only.
+  '''^NJXXGZLQNAWXG6LTORSW2LLUMVZXILJR$''',
+  # TWSE/TPEx MIS record keys (market, code, date) in captured fixtures.
+  '''^(tse|otc)_[0-9A-Z]{4,6}\.tw_[0-9]{8}$''',
+  # Alpaca pagination token in a documented-shape fixture (base64 of a cursor).
+  '''^QUFQTHxNfDIwMjYtMTEtMjBUMTQ6MzI6MDAuMDAwMDAwMDAwWg==$''',
+]

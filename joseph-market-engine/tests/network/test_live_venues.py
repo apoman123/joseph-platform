@@ -32,6 +32,9 @@ pytestmark = [
 ]
 
 Validate = Callable[[str, str, object], None]
+_BOUNDARY_LAG_MS = 10_000
+"""How long after a bar closes a venue may still omit the next one."""
+
 _BTC = {
     instruments.Venue.BINANCE: "binance:perp:BTCUSDT",
     instruments.Venue.HYPERLIQUID: "hyperliquid:perp:BTC",
@@ -87,7 +90,10 @@ async def test_live_rest_endpoints(
         instrument, tf, now - 600_000, now + 60_000
     )
     assert len(candles) >= 5
-    assert not candles[-1].is_final
+    newest = candles[-1]
+    # Right after a minute boundary a venue may not list the new bar yet,
+    # so the just-closed bar is newest; otherwise the newest bar is open.
+    assert not newest.is_final or now - newest.end_ms < _BOUNDARY_LAG_MS
     assert candles[-2].is_final
     for candle in candles:
         contract_validate("market.schema.json", "Candle", candle.to_contract())
