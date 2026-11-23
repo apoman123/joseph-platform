@@ -9,9 +9,12 @@ Price precision follows Hyperliquid's rule (at most 5 significant figures
 and ``6 - szDecimals`` decimals), so ``tick_size`` is derived from the
 current mark price and refreshed with the instrument cache. Weekly candles
 are epoch-aligned (Thursday) and 6h candles do not exist, so neither is
-offered. Verified live 2026-11-22: the ``1M`` interval is a 30-day bucket
-counted from the epoch (bars start e.g. 2026-10-04 and 2026-11-03), not a
-calendar month, so ``1M`` is not offered either.
+used natively. Verified live 2026-11-22: the ``1M`` interval is a 30-day
+bucket counted from the epoch (bars start e.g. 2026-10-04 and 2026-11-03),
+not a calendar month, so it is never relabelled ``1M``. The engine
+aggregates ``6h`` (from 2h), Monday-aligned ``1w`` and calendar ``1M``
+(from 1d) instead (``app.derived_bars``; verified live 2026-11-23 that 24
+native 1h bars fold to the native 1d bar exactly).
 
 Trades (verified live 2026-11-22): ``side`` is the aggressor ("B" buy, "A"
 sell; 193/193 trades printed through the matching side of the BBO) and
@@ -262,12 +265,14 @@ class HyperliquidAdapter(base.BaseVenueAdapter):
             notes=(
                 "Main perp dex only; HIP-3 builder dexes are not listed.",
                 "No last-trade price in asset contexts; `last` is null.",
-                "Weekly candles start Thursday and 6h is not offered.",
+                "The venue's weekly candles start Thursday and it has no "
+                "6h, so neither is used natively.",
                 "The venue's 1M interval is 30-day epoch buckets, not "
-                "calendar months, so 1M is not offered.",
+                "calendar months, so it is never relabelled as 1M.",
                 "Tick size is derived from the 5-significant-figure rule.",
                 "Seconds bars are built from the live trade stream only (no "
-                "public trade history); outages are recorded as gaps unless "
+                "public trade history; the S3 archive is requester-pays and "
+                "needs AWS credentials); outages are recorded as gaps unless "
                 "the 30-trade replay on resubscribe overlaps.",
                 "Klines publish no taker buy volume (taker_volume is false); "
                 "seconds bars built from trades do carry it.",

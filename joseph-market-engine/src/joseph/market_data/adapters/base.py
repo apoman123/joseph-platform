@@ -594,6 +594,119 @@ class BaseVenueAdapter:
         )
         return trades_lib.keep_latest(coverage.trades, limit)
 
+    async def fetch_trade_coverage(
+        self,
+        instrument: instruments.InstrumentId,
+        start_ms: int,
+        end_ms: int,
+        max_pages: int | None = None,
+    ) -> trades_lib.TradeCoverage:
+        """Fetches the newest complete trades of a range with their coverage.
+
+        Unlike ``fetch_trades`` the result states which interval it covers
+        completely, so trade recorders can archive coverage honestly.
+
+        Args:
+            instrument: Canonical id.
+            start_ms: Inclusive start.
+            end_ms: Exclusive end.
+            max_pages: Request budget (defaults to ``TRADE_MAX_PAGES``).
+
+        Returns:
+            Complete suffix ``[from, end_ms)`` of the range.
+
+        Raises:
+            errors.UnsupportedError: Without a time-range trade history.
+        """
+        if not self.capabilities().market_data.trades_history:
+            raise errors.UnsupportedError(
+                f"{self.VENUE.value} publishes no time-range trade history"
+            )
+        if end_ms <= start_ms:
+            return trades_lib.TradeCoverage((), end_ms, end_ms)
+        await self._require(instrument)
+        return await self._trade_history(
+            instrument, start_ms, end_ms, max_pages or self.TRADE_MAX_PAGES
+        )
+
+    def stream_trade_events(
+        self,
+        instrument: instruments.InstrumentId,
+        tracker: health.FeedHealthTracker | None = None,
+        *,
+        prime_from_ms: int | None = None,
+    ) -> AsyncIterator[ws.TradeStreamEvent]:
+        """Streams coverage-tagged public trade events (for recorders).
+
+        Args:
+            instrument: Canonical id.
+            tracker: Optional health tracker.
+            prime_from_ms: With a REST trade history, the first connection
+                backfills from this venue time so coverage continues an
+                earlier recording; otherwise coverage starts at the first
+                trade received.
+
+        Returns:
+            Async iterator of ``CoverageStart``, ``TradesReceived`` and
+            ``FrameReceived`` events.
+
+        Raises:
+            errors.UnsupportedError: When the venue stream is not wired.
+        """
+        if not self.capabilities().market_data.native_ws_trades:
+            raise errors.UnsupportedError(
+                f"{self.VENUE.value} has no native trade stream in Joseph"
+            )
+        return self._stream_trade_events(instrument, tracker, prime_from_ms)
+
+    async def _stream_trade_events(
+        self,
+        instrument: instruments.InstrumentId,
+        tracker: health.FeedHealthTracker | None,
+        prime_from_ms: int | None,
+    ) -> AsyncGenerator[ws.TradeStreamEvent, None]:
+        """Runs the reconnecting, coverage-tracking trade stream.
+
+        Args:
+            instrument: Canonical id.
+            tracker: Optional health tracker.
+            prime_from_ms: Optional first-connection backfill start.
+
+        Yields:
+            Trade stream events.
+        """
+        await self._require(instrument)
+        backfill = self._trade_backfill(instrument)
+
+        def prime(now_ms: int) -> int:
+            """Returns the first connection's backfill start.
+
+            Args:
+                now_ms: Current time.
+
+            Returns:
+                Venue time to backfill from.
+            """
+            del now_ms
+            assert prime_from_ms is not None
+            return prime_from_ms
+
+        events = ws.trade_stream_events(
+            self._trade_spec(instrument),
+            clock=self._clock,
+            connect=self._connect,
+            backfill=backfill,
+            prime=(
+                prime
+                if prime_from_ms is not None and backfill is not None
+                else None
+            ),
+            tracker=tracker,
+        )
+        async with contextlib.aclosing(events):
+            async for event in events:
+                yield event
+
     def _trade_spec(
         self, instrument: instruments.InstrumentId
     ) -> ws.WsTradeSpec:
