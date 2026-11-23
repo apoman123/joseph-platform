@@ -1,6 +1,6 @@
 # Coding standards
 
-Joseph follows the [Google Python Style Guide](https://google.github.io/styleguide/pyguide.html) and the [Google TypeScript Style Guide](https://google.github.io/styleguide/tsguide.html). "Enforced by" names the check that fails CI.
+The rules every contribution follows: the [Google Python Style Guide](https://google.github.io/styleguide/pyguide.html) and the [Google TypeScript Style Guide](https://google.github.io/styleguide/tsguide.html), plus the project rules below. "Enforced by" names the check that fails CI; run `make lint typecheck` before opening a pull request.
 
 ## Python (both engines)
 

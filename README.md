@@ -1,41 +1,86 @@
-# Joseph trading platform (V5)
+# Joseph trading platform
 
-Multi-market research and trading: crypto perpetuals (Binance, Bitget, Hyperliquid, Lighter, MEXC), Taiwan stocks and ETFs (TWSE, TPEx), US stocks and ETFs (Nasdaq, NYSE, Cboe BZX) and US Treasury yields. A browser charting terminal, a market engine (data, screening, SMC indicators, strategies, alerts, backtests) and an execution engine behind its own trust boundary (risk gateway, OMS, paper/shadow/live trading, audit, kill switch). MIT licensed ([LICENSE](LICENSE)).
+Joseph is a self-hosted platform for charting, researching and trading crypto perpetuals, Taiwan and US stocks and ETFs, with US Treasury yields as reference data. It has three parts: a browser charting terminal, a market engine (data, screening, Smart Money Concepts (SMC) indicators, strategies, alerts, backtests) and an execution engine (risk gateway, order management, paper, shadow and live trading, audit, kill switch).
 
-> **Status:** paper and shadow trading work end to end. Live orders are implemented for the five crypto venues, Interactive Brokers and SinoPac (Cathay awaits its SDK) but verified only against mocks and fakes. The global gate is on in `deploy/`, off in code; every live order also needs a verified account, step-up arming or strategy consent, preview, the risk gateway and no kill switch ([gates](docs/OPERATIONS.md#live-enablement)). Indicators are Python ports of the owner's Pine scripts (private `apoman123/PineScripts`, pinned), `SPEC_ONLY` until compared with TradingView exports.
+> **Risk disclaimer.** Joseph is research software, provided as is under the MIT licence with no warranty. Live trading can lose money. The LIVE adapters are tested only against mocked venues and fake broker clients, never with real orders. Nothing in this repository is financial advice.
 
-## What you need to do
+## Markets and venues
 
-**GitHub**
+| Market | Venues | Market data | Trading |
+|---|---|---|---|
+| Crypto perpetuals | Binance USDⓈ-M, Bitget USDT-M, Hyperliquid, Lighter, MEXC futures | Each venue's public API; no key | Paper and shadow; LIVE through each venue's own adapter |
+| Taiwan stocks and ETFs | TWSE, TPEx (mainboard) | Official exchange data, free, no key; optional SinoPac Shioaji data (SinoPac API key) | Paper and shadow; LIVE through SinoPac Shioaji. Cathay is wired in but refuses every order (no public API) |
+| US stocks and ETFs | Nasdaq, NYSE, Cboe BZX | Alpaca market data; needs a free Alpaca key (IEX real time by default) | Paper and shadow; LIVE through Interactive Brokers (IB Gateway). Alpaca is data only |
+| US Treasury yields | Par and real yield curves | Treasury.gov; free, no key | Data only |
+| DEMO | `mock` | Synthetic, clearly labelled | Paper |
 
-1. Delete the mistaken private copy `HuJK/joseph-platform` (it still holds the history from before the author rewrite). It needs the HuJK account: `gh auth refresh -h github.com -s delete_repo`, then `gh repo delete HuJK/joseph-platform`.
+Futures and options are not supported.
 
-**Market data**
+**Trading modes.** PAPER fills on a simulated venue; SHADOW records what it would send and sends nothing; LIVE sends real orders and needs all of: the global gate `JOSEPH_LIVE_TRADING_ENABLED` turned on (off in code, on in `deploy/`), a verified account, step-up arming of the account (manual orders) or step-up consent for an AUTO_LIVE deployment (strategies), an order preview, a pass from the risk gateway and no engaged kill switch ([LIVE enablement](docs/OPERATIONS.md#live-enablement)).
 
-Set these in `deploy/.env` (the compose file passes them to the market engine; every venue is enabled by default).
+## Architecture at a glance
 
-2. US data: a free Alpaca account's `JOSEPH_ALPACA_KEY_ID` / `JOSEPH_ALPACA_SECRET_KEY`, and a feed `JOSEPH_ALPACA_FEED`: `iex` (default, real time, IEX volume only), `delayed_sip` (free, all volume, ≥15 min late) or `sip` (paid real time).
-3. Optional SinoPac data for Taiwan: `JOSEPH_TW_DATA_SOURCE=sinopac`, `JOSEPH_SINOPAC_API_KEY_FILE` / `JOSEPH_SINOPAC_SECRET_KEY_FILE` (no CA; the same files as trading) and `MARKET_UV_EXTRAS=--extra sinopac`. Test it outside trading hours: `JOSEPH_SINOPAC_DATA_TESTS=1 uv run --extra sinopac pytest tests/network/test_live_sinopac.py -m sinopac_data` (in `joseph-market-engine/`).
+| Path | Port | What it is |
+|---|---|---|
+| `joseph-terminal/` | 3000 | Next.js terminal: charts, drawing tools, screener, strategy builder, order tickets. Renders engine outputs; holds only a session token. Own licence; can become a separate repository |
+| `joseph-market-engine/` | 8000 | FastAPI service: market data, screening, indicator plugins, strategy evaluation, signals, alerts, backtests. Holds no trading credentials |
+| `joseph-execution-engine/` | 8100 | FastAPI service: accounts and an encrypted credential vault, risk gateway, order management system (OMS), reconciliation, audit log, kill switch. The only holder of trading credentials |
+| `system-tests/` | | Cross-service tests that boot both engines |
+| `deploy/` | | Docker Compose stack for the three services (plus optional IB Gateway) |
+| `docs/` | | Manual, runbook, architecture, ADRs, reports |
 
-**Live trading**
+**Trust boundary.** The browser never sees venue credentials or signing code; it sends order *intents*. Every order (manual, chart, emergency or strategy) takes one path inside the execution engine: intent → risk gateway (deny by default) → OMS → venue or broker adapter. The market engine forwards strategy signals with a separate service token. Details: [architecture index](docs/architecture/INDEX.md).
 
-4. Interactive Brokers: IB Gateway via the compose profile `ibkr`, the paper account (`DU…`) first, and an IBKR Mobile 2FA approval each week ([steps](docs/BROKERS.md#interactive-brokers)).
-5. SinoPac trading: API key with trading permission, signed API agreement, CA certificate, and SinoPac's mandatory simulation test ([steps](docs/BROKERS.md#sinopac-shioaji)).
-6. Cathay: ask your Cathay representative for the API SDK/spec and send it to the developer; until then Cathay refuses every order ([details](docs/BROKERS.md#cathay-securities)).
-7. Crypto venues: run `make test-sandbox` on each testnet first; use dedicated accounts or subaccounts (positions Joseph did not open block new orders); one-way position mode, not hedge; Bitget needs a Unified Trading Account; MEXC needs KYC and the "Order Placing" key permission ([gates](docs/OPERATIONS.md#live-enablement)).
-8. Production secrets: `JOSEPH_ENV=production`, `JOSEPH_VAULT_MASTER_KEY`, `JOSEPH_PREVIEW_SECRET`, `JOSEPH_STEP_UP_TOTP_SECRET` (also in your authenticator app) on the execution engine; the same `JOSEPH_SERVICE_TOKEN` on both engines ([checklist](docs/OPERATIONS.md#start)).
+## Getting started
 
-**Decisions**
+### Try the terminal (DEMO)
 
-9. TWD risk limits: choose `JOSEPH_TWD_LIMIT_FACTOR` (default 30), the multiple of USD-sized limits and hard caps for TWD accounts (a sizing convention, not an FX rate).
+Needs Node 20+ with corepack (pnpm 10). No keys and no engines:
 
-**Recurring**
+```bash
+cd joseph-terminal
+corepack enable && pnpm install
+pnpm dev   # http://localhost:3000, DEMO mode: synthetic data, clearly labelled
+```
 
-10. Rotate `PINESCRIPTS_TOKEN` (Actions and Dependabot secret; Contents read-only on PineScripts only) before it expires ([CI/CD](docs/CI_CD.md#indicator-library-access)).
-11. After 2026-12-01 10:00 UTC, run `make test-network` to confirm MEXC's JSON shutdown; if JSON is gone, remove any `JOSEPH_MEXC_WS_FORMAT=json`.
-12. When Taiwan's bond-ETF tax-suspension extension (to 2036) becomes law, update the end date of `BOND_ETF_TAX_SUSPENSION` in `joseph-execution-engine/src/joseph_execution/domain/equities.py`.
-13. Yearly or after an ad hoc closure, regenerate the calendars: `uv run python scripts/generate_xtai_calendar.py` and `scripts/generate_usbond_calendar.py` (in `joseph-market-engine/`).
-14. Honour LuxAlgo's CC BY-NC-SA 4.0 licence of the ported OTE indicator: no commercial use while it is enabled ([licensing](docs/reports/LICENSING_REPORT.md)).
+### Full stack
+
+> **Private dependency.** The market engine installs its indicator library, `joseph-smc-indicators`, from the private repository `apoman123/PineScripts` (`python_indicators/`, pinned to a commit in `joseph-market-engine/pyproject.toml`). Without read access to that repository the market engine cannot be built or run. The terminal (DEMO) and the execution engine do not need it.
+
+Needs uv with Python 3.12+, Node 20+ with corepack, and read access to the library ([how](docs/OPERATIONS.md#start)).
+
+```bash
+make setup   # locked installs for both engines, system tests and the terminal
+make dev     # market :8000, execution :8100 (paper; LIVE off), terminal http://localhost:3000
+```
+
+`make dev` uses development tokens; `make help` lists every target.
+
+**Containers.** Building the market image needs the same library access.
+
+```bash
+cp deploy/.env.example deploy/.env   # replace every change-me value
+make compose-up                      # build and start the stack
+```
+
+`deploy/docker-compose.yml` enables every venue and turns the global LIVE gate on; accounts still trade live only after verification and arming. Optional SDKs are build args in `deploy/.env`: `MARKET_UV_EXTRAS=--extra sinopac` (SinoPac data) and `EXECUTION_UV_EXTRAS="--extra ibkr --extra sinopac"` (brokers).
+
+## Configuration and operations
+
+- [Operations runbook](docs/OPERATIONS.md): start-up and production secrets, [every setting](docs/OPERATIONS.md#settings) of both engines, monitoring, incidents, [LIVE enablement](docs/OPERATIONS.md#live-enablement) and [maintenance](docs/OPERATIONS.md#maintenance) (dated tasks such as MEXC retiring its JSON stream on 2026-12-01).
+- [Brokers and venues](docs/BROKERS.md): Interactive Brokers, SinoPac and Cathay setup, securities order rules, and live prerequisites per broker and venue.
+- [CI/CD](docs/CI_CD.md): pipelines, container images, environments, releases and access to the indicator library.
+
+## Testing
+
+| Command | Runs |
+|---|---|
+| `make ci` | Lint, types, OpenAPI drift and every offline tier: `make test-python` (both engines), `test-terminal` (Vitest plus boundary, secret and licence scans), `test-system` (both engines as real processes), `test-e2e` (DEMO browser tests with accessibility checks) |
+| `cd joseph-terminal && pnpm test:e2e:fullstack` | Browser tests against a production build and both engines |
+| `make test-network` | Opt-in: live public venue APIs |
+| `make test-sandbox` | Opt-in: testnet order round trips; needs `JOSEPH_SANDBOX_<VENUE>_*` keys |
+
+CI runs every offline tier on each push and pull request. Counts, coverage and evidence: [test report](docs/reports/TEST_REPORT.md).
 
 ## Known limitations
 
@@ -43,53 +88,34 @@ These come from venues, data plans or law; code cannot remove them.
 
 | Limitation | Why | Workaround |
 |---|---|---|
-| Stock delta is *classified* (Lee-Ready / quote rule), never *true* | Stock exchanges publish no aggressor side | Labelled `classified` everywhere |
-| Alpaca free plan: real time is IEX only, a few % of US volume | Consolidated real-time data (SIP) is a paid plan, about $99/month | `delayed_sip`: all volume, ≥15 min late |
-| Alpaca free plan: 30 streamed symbols | Plan limit | Paid plan |
+| Stock delta is *classified* (Lee-Ready or quote rule), never *true* | Stock exchanges publish no aggressor side | Labelled `classified` everywhere |
+| Alpaca free plan: real time is IEX only (a few % of US volume); 30 streamed symbols | Consolidated real-time data (SIP) is a paid plan, about $99/month | `delayed_sip` (all volume, ≥15 min late) or a paid plan |
 | US intraday bars include the official closing print only on `sip` / `delayed_sip` | IEX carries no closing cross | Use a consolidated feed |
-| TWSE/TPEx official data: 1m bars are coarse; no seconds bars; intraday history only since recording began; daily prices not adjusted | Free intraday data is MIS snapshots that the server caches 4–120 s | `JOSEPH_TW_DATA_SOURCE=sinopac` (Shioaji quotas; board lots only) |
+| TWSE/TPEx official data: coarse 1m bars, no seconds bars, intraday history only since recording began, unadjusted daily prices | Free intraday data is MIS snapshots that the exchange caches for 4–120 s | `JOSEPH_TW_DATA_SOURCE=sinopac` (Shioaji quotas; board lots only) |
 | MEXC and Hyperliquid: seconds bars and true delta only since recording began | Neither publishes trade history; Hyperliquid's S3 archive is requester-pays | An AWS account could read Hyperliquid's archive (not implemented) |
-| The newest archive day arrives late | Binance publishes at about 07:30 UTC the next day; Lighter about 7 h after the UTC day; Bitget about a day later, in UTC+8 days | Recorded trades fill the gap while the engine runs |
-| Live trading is unproven against real venues and brokers | Tests use mocked venues and fake broker clients; real orders need your keys and accounts | Testnet, IBKR paper and SinoPac simulation first |
+| The newest archive day arrives late | Binance publishes about 07:30 UTC the next day, Lighter about 7 h after the UTC day, Bitget about a day later in UTC+8 days | Recorded trades fill the gap while the engine runs |
+| Live trading is unproven against real venues and brokers | Tests use mocked venues and fake broker clients; real orders need real keys and accounts | Testnets, IBKR paper and SinoPac simulation first |
 | MEXC's private-stream format after 2026-12-01 is unknown | MEXC announced only the market-data change | The private stream reads JSON and Protobuf |
-| IBKR's `BATS` code for Cboe BZX listings is unchecked live | Needs a logged-in gateway | Check with the IBKR paper account |
-| No Cathay or Firstrade trading | Cathay has no public API (SDK pending); Firstrade has no official API (out of scope) | SinoPac for Taiwan, IBKR for US |
-| Not served: TXSE, IEX, NYSE Texas and OTC listings; the 興櫃 emerging board; futures and options | Outside the supported listings (IEX and NYSE Texas listed only test issues on 2026-11-23); futures and options deferred by the owner | None |
-| Taiwan fee estimates charge 0.3% on stock day trades | The 0.15% day-trade rate depends on the broker agreement and the whole day's trades | The broker statement decides |
-| Bond-ETF sale tax returns on 2027-01-01 | The 2036 extension is not law yet | Update the date when it passes (item 12) |
+| IBKR's `BATS` code for Cboe BZX listings is unchecked live | Needs a logged-in gateway | Check with an IBKR paper account |
+| No Cathay or Firstrade trading | Cathay has no public API; Firstrade has no official API | SinoPac for Taiwan, IBKR for US |
+| Not served: TXSE, IEX, NYSE Texas and OTC listings; the 興櫃 emerging board; futures and options | Outside the supported listings (IEX and NYSE Texas listed only test issues on 2026-11-23); futures and options are out of scope | None |
+| Taiwan fee estimates charge 0.3% tax on stock day trades | The 0.15% day-trade rate depends on the broker agreement and the whole day's trades | The broker statement decides |
+| Bond-ETF sale tax returns on 2027-01-01 | The extension to 2036 is not law yet | Update `BOND_ETF_TAX_SUSPENSION` when it passes ([maintenance](docs/OPERATIONS.md#maintenance)) |
 | The US half-penny tick tier is not modelled | Prices snap to $0.01 (≥ $1) and $0.0001 (< $1) | None |
-
-## Repository layout
-
-| Path | What it is |
-|---|---|
-| `joseph-terminal/` | Next.js terminal, framework-free packages, JSON Schema contracts (own `LICENSE`/`NOTICE`, splittable) |
-| `joseph-market-engine/` | FastAPI service on :8000 |
-| `joseph-execution-engine/` | FastAPI service on :8100; the only holder of trading credentials |
-| `system-tests/` | Cross-service tests that boot both engines |
-| `docs/` | Manual, runbook, ADRs, reports |
-
-## Quick start
-
-```bash
-make setup   # uv + pnpm, locked versions (Python 3.12+, Node 20+); needs PineScripts access
-make dev     # market :8000 · execution :8100 · terminal http://localhost:3000
-```
-
-The terminal alone runs in labelled DEMO mode: `cd joseph-terminal && pnpm install && pnpm dev`. Containers: `cp deploy/.env.example deploy/.env`, fill the secrets, then `make compose-up`. Every push runs `.github/workflows/ci-cd.yml`; `main` and `v*` tags also publish images and deploy ([CI/CD](docs/CI_CD.md)).
-
-## Tests
-
-- `make ci`: lint, types, OpenAPI drift and every offline tier (`make test-python`, `test-terminal`, `test-system`, `test-e2e`).
-- `cd joseph-terminal && pnpm test:e2e:fullstack`: browser → production build → both engines.
-- Opt-in: `make test-network` (live public venue APIs), `make test-sandbox` (testnet orders; needs your testnet keys).
-
-Tiers and latest results: [test report](docs/reports/TEST_REPORT.md).
 
 ## Documentation
 
-- [User manual](docs/USER_MANUAL.md) · [Operations runbook](docs/OPERATIONS.md) · [Brokers](docs/BROKERS.md) · [CI/CD](docs/CI_CD.md) · [Extending](docs/EXTENDING.md)
-- [Architecture](docs/architecture/INDEX.md) · [ADRs](docs/adr/) · [Proposal revisions](docs/PROPOSAL_REVISIONS.md) · [Spec gap matrix](docs/SPEC_GAP_MATRIX.md) · [Coding standards](docs/standards/CODING_STANDARDS.md)
-- Reports: [threat model](docs/reports/THREAT_MODEL.md) · [licensing](docs/reports/LICENSING_REPORT.md) · [Pine source](docs/reports/PINE_SOURCE_REVISION.md) · [TradingView audit](docs/reports/TRADINGVIEW_USE_CASE_AUDIT.md) · [tests](docs/reports/TEST_REPORT.md)
-- Engines: [market](joseph-market-engine/README.md) · [execution](joseph-execution-engine/README.md) · [terminal](joseph-terminal/README.md)
-- API: `joseph-terminal/packages/contracts/{schemas,openapi,asyncapi}`
+- **Users:** [User manual](docs/USER_MANUAL.md)
+- **Operators:** [Operations runbook](docs/OPERATIONS.md) · [Brokers](docs/BROKERS.md) · [CI/CD](docs/CI_CD.md)
+- **Contributors:** [Architecture](docs/architecture/INDEX.md) · [ADRs](docs/adr/) · [Extending](docs/EXTENDING.md) · [Coding standards](docs/standards/CODING_STANDARDS.md) · [Design decisions](docs/DESIGN_DECISIONS.md) · [Feature status](docs/FEATURE_STATUS.md)
+- **Components:** [Market engine](joseph-market-engine/README.md) · [Indicators](joseph-market-engine/src/joseph/indicators/README.md) · [Execution engine](joseph-execution-engine/README.md) · [Terminal](joseph-terminal/README.md)
+- **Reports:** [Threat model](docs/reports/THREAT_MODEL.md) · [Licensing](docs/reports/LICENSING_REPORT.md) · [Pine source](docs/reports/PINE_SOURCE_REVISION.md) · [TradingView use-case audit](docs/reports/TRADINGVIEW_USE_CASE_AUDIT.md) · [Tests](docs/reports/TEST_REPORT.md)
+- **API contracts:** `joseph-terminal/packages/contracts/` (`schemas/`, `openapi/`, `asyncapi/`)
+
+## Licence
+
+- **MIT** ([LICENSE](LICENSE)), copied into both engines and their images.
+- **Terminal:** `joseph-terminal/` keeps its own MIT [LICENSE](joseph-terminal/LICENSE) and [NOTICE](joseph-terminal/NOTICE) so it can become a separate repository. Charts use TradingView's Lightweight Charts (Apache-2.0); Joseph is not affiliated with TradingView.
+- **Indicator library:** the private library is not part of this repository or its licence. Its optional `premium_discount_ote` indicator is derived from a LuxAlgo script under CC BY-NC-SA 4.0: do not use the market engine commercially while that plugin is enabled.
+
+Third-party components and obligations: [licensing report](docs/reports/LICENSING_REPORT.md).
