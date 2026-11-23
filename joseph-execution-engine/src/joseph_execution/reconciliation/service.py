@@ -6,6 +6,10 @@ orders, (2) pulls recent fills so missed stream events are applied, and
 Risk Gateway treats as a block on new exposure until it matches again.
 LIVE accounts are reconciled against their venue adapter the same way
 (an adapter without credentials refuses and the account is skipped).
+Holdings the adapter reports as unmanaged (``VenuePosition.managed`` is
+False, e.g. emerging-board stocks in a SinoPac account) are not compared:
+Joseph can neither trade nor match them, so they must not block the
+account. Each is logged once with the adapter's note and counted.
 """
 
 from __future__ import annotations
@@ -36,6 +40,7 @@ class ReconcileReport:
         mismatches: Positions flagged unknown.
         cleared: Positions that matched again.
         lag_ms: Time since the previous pass.
+        unmanaged: Venue holdings skipped as not managed by Joseph.
     """
 
     outbox_items: int
@@ -43,6 +48,7 @@ class ReconcileReport:
     mismatches: int
     cleared: int
     lag_ms: int
+    unmanaged: int = 0
 
 
 class Reconciler:
@@ -74,6 +80,7 @@ class Reconciler:
         self._clock = clock
         self._metrics = metrics
         self._last_run_ms: int | None = None
+        self._noted: set[tuple[str, str]] = set()
 
     async def run_once(self) -> ReconcileReport:
         """Runs one reconciliation pass.
@@ -85,7 +92,7 @@ class Reconciler:
         lag = 0 if self._last_run_ms is None else now - self._last_run_ms
         self._last_run_ms = now
         processed = await self._oms.dispatch_pending()
-        fills_applied = mismatches = cleared = 0
+        fills_applied = mismatches = cleared = unmanaged = 0
         with self._uow() as uow:
             scopes: set[tuple[str, enums.OrderMode]] = set()
             for pos in uow.positions.list(include_flat=True):
@@ -111,15 +118,45 @@ class Reconciler:
             except errors.ExecutionError as err:
                 _LOG.warning("reconcile of %s failed: %s", account_id, err.code)
                 continue
-            found, fixed = self._compare(account_id, mode, venue_positions)
+            managed = [p for p in venue_positions if p.managed]
+            unmanaged += self._note_unmanaged(account_id, venue_positions)
+            found, fixed = self._compare(account_id, mode, managed)
             mismatches += found
             cleared += fixed
         self._metrics.gauge("reconcile_lag_ms", float(lag))
         if mismatches:
             self._metrics.increment("reconcile_mismatch_total")
         return ReconcileReport(
-            processed, fills_applied, mismatches, cleared, lag
+            processed, fills_applied, mismatches, cleared, lag, unmanaged
         )
+
+    def _note_unmanaged(
+        self, account_id: str, venue_positions: Sequence[trading.VenuePosition]
+    ) -> int:
+        """Logs each unmanaged holding once with the adapter's note.
+
+        Args:
+            account_id: Account.
+            venue_positions: Venue positions.
+
+        Returns:
+            Number of unmanaged holdings.
+        """
+        count = 0
+        for position in venue_positions:
+            if position.managed:
+                continue
+            count += 1
+            key = (account_id, position.instrument_id)
+            if key not in self._noted:
+                self._noted.add(key)
+                _LOG.info(
+                    "account %s: holding %s skipped: %s",
+                    account_id,
+                    position.instrument_id,
+                    position.unmanaged_note,
+                )
+        return count
 
     def _compare(
         self,

@@ -43,12 +43,17 @@ _TAIPEI = datetime.timezone(datetime.timedelta(hours=8))
 _NEW_YORK_WINTER = datetime.timezone(datetime.timedelta(hours=-5))
 
 
-def twse(symbol: str = "2330", etf: bool = False) -> market.InstrumentMeta:
+def twse(
+    symbol: str = "2330",
+    etf: bool = False,
+    asset_class: enums.AssetClass = enums.AssetClass.EQUITY,
+) -> market.InstrumentMeta:
     """Builds TWSE instrument metadata (as the market engine publishes it).
 
     Args:
         symbol: TWSE code.
         etf: ETF instead of stock.
+        asset_class: ``BOND`` for bond ETFs such as 00865B.
 
     Returns:
         Metadata with the tick ladder, 10% limit and 1000-share board lot.
@@ -67,11 +72,15 @@ def twse(symbol: str = "2330", etf: bool = False) -> market.InstrumentMeta:
         tick_ladder=TAIWAN_ETF_LADDER if etf else TAIWAN_STOCK_LADDER,
         price_limit_pct=_D(10),
         board_lot=_D(1000),
+        asset_class=asset_class,
     )
 
 
 def tpex(
-    symbol: str = "6488", etf: bool = False, limited: bool = True
+    symbol: str = "6488",
+    etf: bool = False,
+    limited: bool = True,
+    asset_class: enums.AssetClass = enums.AssetClass.EQUITY,
 ) -> market.InstrumentMeta:
     """Builds TPEx instrument metadata (as the market engine publishes it).
 
@@ -80,6 +89,7 @@ def tpex(
         etf: ETF instead of stock.
         limited: False for listings without a daily limit (foreign-
             constituent ETFs such as 00679B, new listings' first days).
+        asset_class: ``BOND`` for bond ETFs such as 00679B.
 
     Returns:
         Metadata with the TWSE tick ladders, the 10% limit (or none),
@@ -99,6 +109,7 @@ def tpex(
         tick_ladder=TAIWAN_ETF_LADDER if etf else TAIWAN_STOCK_LADDER,
         price_limit_pct=_D(10) if limited else None,
         board_lot=_D(1000),
+        asset_class=asset_class,
     )
 
 
@@ -262,7 +273,10 @@ def install(
     gateway.add_instrument(twse(), _D(tsmc_mark))
     gateway.add_instrument(twse("0050", etf=True), _D("150"))
     gateway.add_instrument(tpex(), _D("460"))
-    gateway.add_instrument(tpex("00679B", etf=True, limited=False), _D("26"))
+    bond = tpex(
+        "00679B", etf=True, limited=False, asset_class=enums.AssetClass.BOND
+    )
+    gateway.add_instrument(bond, _D("26"))
     gateway.add_instrument(us(), _D(aapl_mark))
     gateway.add_instrument(us(SPY, "NYSE Arca"), _D("580"))
     gateway.add_instrument(treasury(), _D("4.25"))

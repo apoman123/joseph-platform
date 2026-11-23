@@ -128,6 +128,8 @@ def estimate(
     quote: market.MarketQuote | None,
     book: market.BookView | None,
     fees: FeeSchedule,
+    *,
+    now_ms: int,
 ) -> Estimates:
     """Estimates execution price, notional, fee, slippage and margin.
 
@@ -137,6 +139,7 @@ def estimate(
         quote: Latest quote.
         book: Order book (market orders walk it).
         fees: Fee schedule.
+        now_ms: Estimate time; selects the Taiwan transaction tax in force.
 
     Returns:
         Estimates with ``None`` for anything that cannot be known.
@@ -166,7 +169,12 @@ def estimate(
     venue = equities.parse_instrument_id(request.instrument_id).venue
     if equities.is_taiwan(venue):
         fee = equities.taiwan_fee(
-            request.side, notional, instrument.market_type
+            request.side,
+            notional,
+            equities.taiwan_tax_class(
+                request.instrument_id, instrument.asset_class
+            ),
+            now_ms,
         )
     margin = (
         decimals.ZERO

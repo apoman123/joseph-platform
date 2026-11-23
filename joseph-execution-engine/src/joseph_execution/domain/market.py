@@ -80,6 +80,8 @@ class InstrumentMeta:
             (TWSE and TPEx 10); ``None`` when unlimited.
         board_lot: Shares per board lot (TWSE/TPEx 1000); ``None`` when
             orders are in single units.
+        asset_class: Asset class (``BOND`` for TWSE/TPEx bond ETFs, which
+            selects their transaction tax).
     """
 
     instrument_id: str
@@ -98,6 +100,7 @@ class InstrumentMeta:
     tick_ladder: tuple[TickStep, ...] = ()
     price_limit_pct: decimal.Decimal | None = None
     board_lot: decimal.Decimal | None = None
+    asset_class: enums.AssetClass = enums.AssetClass.UNKNOWN
 
     @property
     def market_type(self) -> str:

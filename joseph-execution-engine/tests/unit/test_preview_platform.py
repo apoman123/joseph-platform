@@ -103,6 +103,7 @@ def test_estimates() -> None:
         None,
         book,
         fees,
+        now_ms=0,
     )
     assert est.reference_price == D(101)
     assert est.slippage_pct == D(1)
@@ -117,6 +118,7 @@ def test_estimates() -> None:
         None,
         None,
         fees,
+        now_ms=0,
     )
     assert maker.fee == D("0.02")
     reduce = preview.estimate(
@@ -131,6 +133,7 @@ def test_estimates() -> None:
         None,
         None,
         fees,
+        now_ms=0,
     )
     assert reduce.margin_required == 0
     unknown = preview.estimate(
@@ -143,6 +146,7 @@ def test_estimates() -> None:
         None,
         None,
         fees,
+        now_ms=0,
     )
     assert unknown.notional is None
 

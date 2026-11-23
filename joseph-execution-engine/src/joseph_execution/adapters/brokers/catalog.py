@@ -95,6 +95,7 @@ def build(
             gate_reason(
                 live_trading_enabled, sinopac_enabled, "JOSEPH_SINOPAC_ENABLED"
             ),
+            market_data=market_data,
         ),
         enums.Broker.CATHAY.value: cathay.build(),
     }

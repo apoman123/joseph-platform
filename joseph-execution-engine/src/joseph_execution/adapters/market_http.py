@@ -310,7 +310,23 @@ def parse_instrument(row: Mapping[str, object]) -> market.InstrumentMeta:
         tick_ladder=_ladder(row.get("tick_ladder")),
         price_limit_pct=decimals.to_optional(row.get("price_limit_pct")),
         board_lot=decimals.to_optional(row.get("board_lot")),
+        asset_class=_asset_class(row.get("asset_class")),
     )
+
+
+def _asset_class(raw: object) -> enums.AssetClass:
+    """Parses a contract ``AssetClass`` leniently.
+
+    Args:
+        raw: Contract value.
+
+    Returns:
+        Asset class; ``UNKNOWN`` for missing or unrecognized values.
+    """
+    try:
+        return enums.AssetClass(str(raw))
+    except ValueError:
+        return enums.AssetClass.UNKNOWN
 
 
 def parse_snapshot(body: Mapping[str, object]) -> market.MarketQuote:

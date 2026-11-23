@@ -148,11 +148,21 @@ class VenuePosition:
         instrument_id: Instrument.
         signed_qty: Signed base quantity.
         entry_price: Average entry.
+        unmanaged_note: Why Joseph does not manage this holding (e.g. an
+            emerging-board stock in a SinoPac account); ``None`` for
+            positions on a venue Joseph routes. Reconciliation skips
+            unmanaged holdings.
     """
 
     instrument_id: str
     signed_qty: decimal.Decimal
     entry_price: decimal.Decimal | None
+    unmanaged_note: str | None = None
+
+    @property
+    def managed(self) -> bool:
+        """Whether the holding is on a venue Joseph routes."""
+        return self.unmanaged_note is None
 
 
 @dataclasses.dataclass(frozen=True, slots=True)

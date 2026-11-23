@@ -289,3 +289,17 @@ class InstrumentStatus(enum.StrEnum):
     PRE_LAUNCH = "PRE_LAUNCH"
     DELISTED = "DELISTED"
     UNKNOWN = "UNKNOWN"
+
+
+class AssetClass(enum.StrEnum):
+    """Asset class of an instrument (contract ``AssetClass``).
+
+    The market engine sets ``BOND`` on TWSE and TPEx bond ETFs, which
+    selects their securities transaction tax.
+    """
+
+    CRYPTO = "CRYPTO"
+    RWA = "RWA"
+    EQUITY = "EQUITY"
+    BOND = "BOND"
+    UNKNOWN = "UNKNOWN"
