@@ -48,8 +48,16 @@ services:
       JOSEPH_VAULT_MASTER_KEY: ${JOSEPH_VAULT_MASTER_KEY:-}
       JOSEPH_PREVIEW_SECRET: ${JOSEPH_PREVIEW_SECRET:-}
       JOSEPH_STEP_UP_TOTP_SECRET: ${JOSEPH_STEP_UP_TOTP_SECRET:-}
-      JOSEPH_LIVE_TRADING_ENABLED: "false"
+      # Global LIVE gate: on by default for this deployment (owner
+      # decision 2026-11-23). Every order still needs a verified account,
+      # the Risk Gateway, preview/consent with step-up and no kill switch.
+      JOSEPH_LIVE_TRADING_ENABLED: ${JOSEPH_LIVE_TRADING_ENABLED:-true}
       JOSEPH_EMERGENCY_HALT: ${JOSEPH_EMERGENCY_HALT:-false}
+      JOSEPH_VENUE_SANDBOX: ${JOSEPH_VENUE_SANDBOX:-}
+      JOSEPH_VENUE_URLS: ${JOSEPH_VENUE_URLS:-}
+      JOSEPH_VENUE_TIMEOUT_S: ${JOSEPH_VENUE_TIMEOUT_S:-10}
+      JOSEPH_VENUE_MARKET_SLIPPAGE_BPS: ${JOSEPH_VENUE_MARKET_SLIPPAGE_BPS:-50}
+      JOSEPH_LIVE_STREAMS: ${JOSEPH_LIVE_STREAMS:-true}
     volumes: [execution-data:/app/var]
     ports: ["${EXECUTION_PORT:-8100}:8100"]
 

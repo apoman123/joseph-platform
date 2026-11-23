@@ -1224,7 +1224,7 @@
     },
     "/v1/deployments/{deployment_id}/live-consent": {
       "post": {
-        "description": "Grants AUTO_LIVE consent (fails closed in this build).\n\nArgs:\n    deployment_id: Deployment.\n    body: Consent request.\n    request: Request.\n    principal: Caller.\n\nReturns:\n    Contract ``Deployment``.",
+        "description": "Grants scoped AUTO_LIVE consent (step-up required).\n\nArgs:\n    deployment_id: Deployment.\n    body: Consent request.\n    request: Request.\n    principal: Caller.\n\nReturns:\n    Contract ``Deployment``.",
         "operationId": "live_consent_v1_deployments__deployment_id__live_consent_post",
         "parameters": [
           {
