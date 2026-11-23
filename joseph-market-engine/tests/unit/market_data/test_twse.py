@@ -322,6 +322,46 @@ async def test_mis_client_caches_and_coalesces() -> None:
     assert client.requests == 3
 
 
+async def test_mis_client_serves_callers_arriving_mid_request() -> None:
+    """A caller joining while a batch is in flight gets the next batch."""
+    release = asyncio.Event()
+    started = asyncio.Event()
+    seen: list[str] = []
+
+    class _Slow(_Http):
+        """Stub whose first request waits for a release."""
+
+        async def get(
+            self, path: str, params: dict[str, Any] | None = None
+        ) -> Any:
+            """Answers after the release.
+
+            Args:
+                path: Path.
+                params: Query.
+
+            Returns:
+                Body.
+            """
+            assert params is not None
+            seen.append(params["ex_ch"])
+            started.set()
+            if len(seen) == 1:
+                await release.wait()
+            codes = [c[4:-3] for c in params["ex_ch"].split("|")]
+            return _mis_body(codes, _OPEN, 1)
+
+    client = twse.MisClient(_Slow({}), clock_lib.ManualClock(_OPEN))  # type: ignore[arg-type]
+    first = asyncio.create_task(client.quotes(["2330"]))
+    await asyncio.wait_for(started.wait(), 5)
+    second = asyncio.create_task(client.quotes(["0050"]))
+    await asyncio.sleep(0.05)
+    release.set()
+    assert set(await asyncio.wait_for(first, 5)) == {"2330"}
+    assert set(await asyncio.wait_for(second, 5)) == {"0050"}
+    assert seen == ["tse_2330.tw", "tse_0050.tw"]
+
+
 async def test_mis_client_reports_errors_to_every_caller() -> None:
     """A MIS error reaches all coalesced callers."""
     http = _Http({"/stock/api/getStockInfo.jsp": {"rtcode": "9999"}})

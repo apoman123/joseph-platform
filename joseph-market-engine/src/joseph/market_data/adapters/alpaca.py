@@ -860,11 +860,16 @@ class AlpacaStream:
             if sub.symbol == symbol and channel in sub.channels:
                 sub.queue.put_nowait(("msg", message))
 
-    async def _handshake(self, connection: ws.WsConnection) -> None:
+    async def _handshake(
+        self, connection: ws.WsConnection
+    ) -> dict[str, set[str]]:
         """Authenticates and subscribes everything wanted.
 
         Args:
             connection: Open connection.
+
+        Returns:
+            The channels and symbols subscribed.
 
         Raises:
             errors.VenueUnavailableError: On an authentication or
@@ -899,7 +904,7 @@ class AlpacaStream:
                             }
                         )
                     )
-                    return
+                    return wanted
         raise errors.VenueUnavailableError("alpaca stream did not authenticate")
 
     async def _run(self) -> None:
@@ -909,8 +914,17 @@ class AlpacaStream:
         while self._subs:
             try:
                 async with self._connect(self.url) as connection:
-                    await self._handshake(connection)
+                    sent = await self._handshake(connection)
                     self._connection = connection
+                    # Subscribers added during the handshake.
+                    await self._send_subscription(
+                        "subscribe",
+                        {
+                            c: sorted(s - sent.get(c, set()))
+                            for c, s in self._wanted().items()
+                            if s - sent.get(c, set())
+                        },
+                    )
                     if connected_before:
                         self._broadcast("reset", self._clock.now_ms())
                     connected_before = True
