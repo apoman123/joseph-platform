@@ -15,7 +15,7 @@ USD 50K worst-side slip   < 0.25 %             < 0.25 %          ``<``
 ========================  ===================  ===============  ======
 
 Exchange-listed securities (stocks and ETFs on ``twse``, ``tpex``,
-``nasdaq``, ``nyse``, and the DEMO stock). They have no funding, open
+``nasdaq``, ``nyse``, ``cboe``, and the DEMO stock). They have no funding, open
 interest or liquidations, so those gates and the funding assessment do not
 apply (``FundingRisk.NOT_APPLICABLE``) and never block qualification.
 Turnover is the latest session's, in the listing currency; slippage walks
@@ -152,14 +152,14 @@ US_EQUITY_THRESHOLDS = Thresholds(
     turnover_oi_ratio=None,
     funding=False,
 )
-"""Stocks and equity ETFs on Nasdaq and NYSE (and the DEMO stock)."""
+"""Stocks and equity ETFs on Nasdaq, NYSE and Cboe (and the DEMO stock)."""
 US_BOND_THRESHOLDS = Thresholds(
     turnover_24h=_D(10_000_000),
     open_interest_usd=None,
     turnover_oi_ratio=None,
     funding=False,
 )
-"""Bond ETFs on Nasdaq and NYSE."""
+"""Bond ETFs on Nasdaq, NYSE and Cboe."""
 TW_EQUITY_THRESHOLDS = Thresholds(
     turnover_24h=_D(300_000_000),
     open_interest_usd=None,

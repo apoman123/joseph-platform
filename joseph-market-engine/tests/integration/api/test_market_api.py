@@ -238,6 +238,7 @@ def test_all_venues_served_from_captured_fixtures(
         "tpex",
         "nasdaq",
         "nyse",
+        "cboe",
         "treasury",
         "mock",
     }

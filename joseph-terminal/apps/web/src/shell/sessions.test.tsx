@@ -132,8 +132,17 @@ describe('market groups and search', () => {
       marketGroupOf({instrument_id: 'tpex:etf:00679B', asset_class: 'BOND'})
     ).toBe('bonds');
     expect(marketGroupOf(demo('mock:etf:00999B'))).toBe('bonds');
+    // Cboe BZX listings are US stocks (XNYS); its bond ETFs are bonds.
+    expect(
+      marketGroupOf({instrument_id: 'cboe:etf:AAAU', asset_class: 'EQUITY'})
+    ).toBe('us');
+    expect(
+      marketGroupOf({instrument_id: 'cboe:etf:GOVT', asset_class: 'BOND'})
+    ).toBe('bonds');
     expect(GROUP_VENUES.tw).toEqual(['twse', 'tpex']);
+    expect(GROUP_VENUES.us).toEqual(['nasdaq', 'nyse', 'cboe']);
     expect(GROUP_VENUES.bonds).toContain('tpex');
+    expect(GROUP_VENUES.bonds).toContain('cboe');
     expect(isRateInstrument('mock:rate:UST10Y')).toBe(true);
     expect(isSecurity('mock:etf:TLTD')).toBe(true);
     expect(isSecurity('bad id')).toBe(false);
@@ -175,6 +184,12 @@ describe('market groups and search', () => {
     const access = venueAccess(nasdaq);
     expect(access.delay).toBe('Delayed 15 min');
     expect(access.missingCredentials).toMatch(/^Alpaca API key missing/);
+    const cboe = venueAccess({
+      ...nasdaq,
+      venue: 'cboe',
+      display_name: 'Cboe BZX',
+    } as VenueCapabilities);
+    expect(cboe.missingCredentials).toMatch(/^Alpaca API key missing/);
     expect(venueAccess(null)).toEqual({delay: null, missingCredentials: null});
     expect(delayLabel(7_200_000)).toBe('Delayed 2 h');
     expect(delayLabel(5000)).toBe('Delayed 5 s');

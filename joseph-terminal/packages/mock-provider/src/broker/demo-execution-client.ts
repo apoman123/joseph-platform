@@ -9,7 +9,7 @@
  * engine.
  *
  * Accounts: the crypto paper account plus simulated broker accounts
- * (IBKR paper for Nasdaq/NYSE, a SinoPac Shioaji simulation for TWSE and
+ * (IBKR paper for Nasdaq/NYSE/Cboe BZX, a SinoPac Shioaji simulation for TWSE and
  * TPEx, a SinoPac live account without credentials and Cathay awaiting
  * its API SDK). Orders route like the engine: IBKR trades XNYS listings,
  * Taiwan brokers XTAI listings (TWSE and TPEx). Stock orders use whole

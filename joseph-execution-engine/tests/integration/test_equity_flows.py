@@ -95,6 +95,29 @@ async def test_twse_paper_order_fills_in_shares() -> None:
     assert summary["settled_cash"] == "3000000"
 
 
+async def test_cboe_paper_order_fills_in_the_usd_account() -> None:
+    """A Cboe BZX ETF fills in the USD paper account during XNYS hours."""
+    h = _build()
+    h.clock.current_ms = fixtures.new_york(MONDAY, 10)
+    oms = h.container.services.oms
+    request = _twse(
+        account_id=harness.PAPER_A,
+        instrument_id=fixtures.GOVT,
+        limit_price=D("23.01"),
+        quantity_base=D(10),
+    )
+    result = await oms.submit_intent(harness.TENANT_A, request, "govt-1")
+    assert result.decision.allowed, result.decision.failures()
+    assert result.orders[0].state is S.FILLED
+    positions = await oms.list_positions(harness.TENANT_A, harness.PAPER_A)
+    held = {p["instrument_id"]: p["quantity_base"] for p in positions}
+    assert held[fixtures.GOVT] == "10"
+    taiwan = _twse(instrument_id=fixtures.GOVT, limit_price=D("23.01"))
+    refused = await oms.submit_intent(harness.TENANT_A, taiwan, "govt-2")
+    assert not refused.decision.allowed and not refused.orders
+    assert "Cboe BZX listings settle in USD" in str(refused.decision)
+
+
 async def test_tpex_paper_orders_follow_taiwan_rules() -> None:
     """TPEx orders fill in the TWD paper account with Taiwan fees and lots."""
     h = _build()
@@ -332,7 +355,11 @@ def test_broker_connections_take_only_the_account_number(
     contract_validate(EXEC, "AccountSummary", summary)
     assert summary["currency"] == "USD"
     assert summary["capabilities"]["status"] == "TRADING_UNAVAILABLE"
-    assert summary["capabilities"]["tradable_venues"] == ["nasdaq", "nyse"]
+    assert summary["capabilities"]["tradable_venues"] == [
+        "nasdaq",
+        "nyse",
+        "cboe",
+    ]
     verified = client.post(
         f"/v1/accounts/{summary['account_id']}/verify", headers=hdr
     ).json()

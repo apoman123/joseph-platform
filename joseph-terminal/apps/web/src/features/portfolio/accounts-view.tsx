@@ -29,6 +29,7 @@ const EXCHANGE_NAMES: Readonly<Record<string, string>> = {
   tpex: 'TPEx',
   nasdaq: 'Nasdaq',
   nyse: 'NYSE',
+  cboe: 'Cboe BZX',
 };
 
 /**
@@ -47,7 +48,8 @@ function money(account: AccountSummary, value: string | null | undefined) {
  * What an account trades: its exchanges, crypto on its own venue, or both
  * for the USD paper account.
  * @param account Account.
- * @return Text such as `Nasdaq, NYSE` or `Crypto, Nasdaq, NYSE`.
+ * @return Text such as `Nasdaq, NYSE, Cboe BZX` or `Crypto, Nasdaq, NYSE,
+ * Cboe BZX`.
  */
 function tradesText(account: AccountSummary): string {
   const exchanges = accountExchanges(account).map(

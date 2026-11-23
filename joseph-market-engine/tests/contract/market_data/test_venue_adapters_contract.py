@@ -46,6 +46,7 @@ _EXCHANGE = [
     instruments.Venue.TPEX,
     instruments.Venue.NASDAQ,
     instruments.Venue.NYSE,
+    instruments.Venue.CBOE,
     instruments.Venue.TREASURY,
 ]
 """Exchange and rate venues; venue-specific tests live in

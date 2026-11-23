@@ -5,7 +5,7 @@
  * orders. Submitting shows the venue-reported state, never an assumed fill.
  *
  * Perpetuals keep leverage, reduce-only and attached stop/target. Stocks
- * and ETFs route to a broker account (IBKR for Nasdaq/NYSE, SinoPac or
+ * and ETFs route to a broker account (IBKR for Nasdaq/NYSE/Cboe, SinoPac or
  * Cathay for TWSE and TPEx) with cash-equity rules: whole shares or
  * Taiwan board/odd lots, tick-ladder prices inside the daily price limit,
  * DAY/GTC, IBKR's outside-RTH flag and market-hours notices from the

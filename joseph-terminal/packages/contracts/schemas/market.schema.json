@@ -189,7 +189,7 @@
           "$ref": "common.schema.json#/$defs/CalendarId"
         },
         "listing_exchange": {
-          "description": "Exchange that lists a security, e.g. `Nasdaq`, `NYSE Arca`, `TWSE`, `TPEx`; null for crypto.",
+          "description": "Exchange that lists a security, e.g. `Nasdaq`, `NYSE Arca`, `Cboe BZX`, `TWSE`, `TPEx`; null for crypto.",
           "type": ["string", "null"]
         },
         "tick_ladder": {

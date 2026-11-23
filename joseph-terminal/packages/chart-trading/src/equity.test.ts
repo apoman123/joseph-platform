@@ -315,7 +315,14 @@ describe('account status', () => {
 
 describe('routing by tradable venues', () => {
   it('reads tradable_venues, else broker or currency exchanges', () => {
-    expect(accountExchanges(brokerAccount('ibkr'))).toEqual(['nasdaq', 'nyse']);
+    expect(accountExchanges(brokerAccount('ibkr'))).toEqual([
+      'nasdaq',
+      'nyse',
+      'cboe',
+    ]);
+    expect(
+      accountExchanges(brokerAccount('ibkr', {}, {tradable_venues: undefined}))
+    ).toEqual(['nasdaq', 'nyse', 'cboe']);
     expect(
       accountExchanges(
         brokerAccount('sinopac', {}, {tradable_venues: undefined})
@@ -334,7 +341,7 @@ describe('routing by tradable venues', () => {
         capabilities: {...twdPaper.capabilities, tradable_venues: []},
       })
     ).toEqual(['twse', 'tpex']);
-    expect(accountExchanges(account())).toEqual(['nasdaq', 'nyse']);
+    expect(accountExchanges(account())).toEqual(['nasdaq', 'nyse', 'cboe']);
     expect(accountExchanges(account({venue: 'binance'}))).toEqual([]);
   });
 
@@ -344,6 +351,14 @@ describe('routing by tradable venues', () => {
     const usd = paperAccount('USD');
     const twd = paperAccount('TWD');
     expect(accountInstrumentMismatch(ibkr, 'nasdaq:stock:AAPL')).toBeNull();
+    expect(accountInstrumentMismatch(ibkr, 'cboe:etf:GOVT')).toBeNull();
+    expect(accountInstrumentMismatch(usd, 'cboe:etf:GOVT')).toBeNull();
+    expect(accountInstrumentMismatch(twd, 'cboe:etf:GOVT')).toBe(
+      'Paper TWD routes TWSE and TPEx listings only.'
+    );
+    expect(accountInstrumentMismatch(sinopac, 'cboe:etf:GOVT')).toBe(
+      'SinoPac Securities (Shioaji) accounts route TWSE and TPEx listings only.'
+    );
     expect(accountInstrumentMismatch(ibkr, 'mock:stock:ACME')).toBeNull();
     expect(accountInstrumentMismatch(usd, 'mock:stock:ACME')).toBeNull();
     expect(accountInstrumentMismatch(sinopac, 'twse:stock:2330')).toBeNull();
@@ -359,16 +374,18 @@ describe('routing by tradable venues', () => {
       )
     ).toBe('SinoPac Securities (Shioaji) accounts route TWSE listings only.');
     expect(accountInstrumentMismatch(ibkr, 'tpex:etf:00679B')).toBe(
-      'Interactive Brokers accounts route Nasdaq and NYSE listings only.'
+      'Interactive Brokers accounts route Nasdaq, NYSE and Cboe BZX listings only.'
     );
     expect(
       accountInstrumentMismatch(twd, 'mock:stock:9901', {calendar: 'XTAI'})
     ).toBeNull();
     expect(
       accountInstrumentMismatch(ibkr, 'mock:stock:9901', {calendar: 'XTAI'})
-    ).toBe('Interactive Brokers accounts route Nasdaq and NYSE listings only.');
+    ).toBe(
+      'Interactive Brokers accounts route Nasdaq, NYSE and Cboe BZX listings only.'
+    );
     expect(accountInstrumentMismatch(usd, 'twse:stock:2330')).toBe(
-      'Paper USD routes Nasdaq and NYSE listings only.'
+      'Paper USD routes Nasdaq, NYSE and Cboe BZX listings only.'
     );
     expect(
       accountInstrumentMismatch(account({venue: 'binance'}), 'mock:stock:ACME')

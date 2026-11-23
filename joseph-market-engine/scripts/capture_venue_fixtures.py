@@ -556,7 +556,8 @@ _OTHER_KEEP = frozenset(
     {
         "BRK.A", "BRK.B", "BF.B", "AGG", "LQD", "HYG", "TIP", "GOVT", "BIL",
         "SGOV", "JNK", "MUB", "SPY", "ABR$D", "AAC.U", "AAC.W", "ZEXIT",
-        "MTEST", "ZZZTX", "AIIA.R", "IBM", "AAA",
+        "MTEST", "ZZZTX", "AIIA.R", "IBM", "AAA", "AAAU", "BBAG", "CBOE",
+        "VXX", "ZBZX", "CECO",
     }
 )  # fmt: skip
 

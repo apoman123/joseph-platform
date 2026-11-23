@@ -401,14 +401,14 @@ describe('accounts tab', () => {
       'portfolio.accounts'
     );
     const usd = await screen.findByTestId('account-row-acct-paper-demo');
-    expect(usd).toHaveTextContent('Crypto, Nasdaq, NYSE');
+    expect(usd).toHaveTextContent('Crypto, Nasdaq, NYSE, Cboe BZX');
     expect(usd).toHaveTextContent('Simulation');
     const twd = screen.getByTestId(`account-row-${DEMO_TWD_ACCOUNT_ID}`);
     expect(twd).toHaveTextContent('TWSE');
     expect(twd).toHaveTextContent('3,000,000.00 TWD');
     const ibkr = screen.getByTestId(`account-row-${DEMO_IBKR_ACCOUNT_ID}`);
     expect(ibkr).toHaveTextContent('Interactive Brokers');
-    expect(ibkr).toHaveTextContent('Nasdaq, NYSE');
+    expect(ibkr).toHaveTextContent('Nasdaq, NYSE, Cboe BZX');
     expect(ibkr).toHaveTextContent('Connected');
     expect(ibkr).toHaveTextContent('Credentials configured on the server');
     expect(ibkr).toHaveTextContent('Paper, Shadow');

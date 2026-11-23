@@ -3,9 +3,10 @@
  * by the in-browser paper broker. Every value here is synthetic.
  *
  * The accounts mirror the execution engine: a USD paper account (crypto,
- * Nasdaq and NYSE) and a TWD paper account (TWSE, TPEx), an Interactive
- * Brokers paper account (Nasdaq/NYSE, outside RTH, queued market orders),
- * a SinoPac Shioaji simulation account (TWSE and TPEx board and intraday
+ * Nasdaq, NYSE, Cboe BZX) and a TWD paper account (TWSE, TPEx), an
+ * Interactive Brokers paper account (Nasdaq/NYSE/Cboe BZX, outside RTH,
+ * queued market orders), a SinoPac Shioaji simulation account (TWSE and
+ * TPEx board and intraday
  * odd lots, no stop orders), a SinoPac live account whose credentials are missing on
  * the server and Cathay awaiting its API SDK. Capabilities carry the
  * contract's `tradable_venues`, `cash_account`, `short_selling`,
@@ -86,7 +87,10 @@ export const DEMO_MARKS: Readonly<Record<string, string>> = {
   'mock:etf:00999B': '26.20',
 };
 
-/** Account id of the DEMO USD paper account (crypto, Nasdaq, NYSE). */
+/**
+ * Account id of the DEMO USD paper account (crypto, Nasdaq, NYSE, Cboe
+ * BZX).
+ */
 export const DEMO_ACCOUNT_ID = 'acct-paper-demo';
 
 /**
@@ -95,7 +99,7 @@ export const DEMO_ACCOUNT_ID = 'acct-paper-demo';
  */
 export const DEMO_TWD_ACCOUNT_ID = 'acct-twd-paper-demo';
 
-/** DEMO Interactive Brokers paper account (Nasdaq/NYSE). */
+/** DEMO Interactive Brokers paper account (Nasdaq/NYSE/Cboe BZX). */
 export const DEMO_IBKR_ACCOUNT_ID = 'acct-ibkr-demo';
 
 /** DEMO SinoPac Shioaji simulation account (TWSE, TPEx). */
@@ -195,6 +199,7 @@ function paperCapabilities(
 export const DEMO_CAPABILITIES: TradingCapabilities = paperCapabilities('USD', [
   'nasdaq',
   'nyse',
+  'cboe',
 ]);
 
 /** Interactive Brokers (engine `capabilities.ibkr`, paper, cash account). */
@@ -214,10 +219,10 @@ const IBKR_CAPABILITIES: TradingCapabilities = {
   client_order_id: true,
   query_by_client_id: true,
   notes: [
-    'DEMO simulation of an Interactive Brokers paper account (Nasdaq and NYSE). Nothing is sent to IBKR.',
+    'DEMO simulation of an Interactive Brokers paper account (Nasdaq, NYSE and Cboe BZX). Nothing is sent to IBKR.',
     'Outside-RTH applies to limit and stop-limit orders; IBKR queues DAY market orders placed while closed for the open.',
   ],
-  tradable_venues: ['nasdaq', 'nyse'],
+  tradable_venues: ['nasdaq', 'nyse', 'cboe'],
   cash_account: true,
   short_selling: false,
   outside_rth: true,
@@ -410,7 +415,7 @@ export function demoAccount(accountId: string): DemoAccountSpec | null {
 }
 
 /** Exchange venues of listed securities. */
-const EXCHANGES: readonly Venue[] = ['twse', 'tpex', 'nasdaq', 'nyse'];
+const EXCHANGES: readonly Venue[] = ['twse', 'tpex', 'nasdaq', 'nyse', 'cboe'];
 
 /**
  * Exchanges a security trades on: its venue, or for DEMO securities the
@@ -422,7 +427,7 @@ function listingExchanges(instrument: Instrument): readonly Venue[] {
   const venue = instrument.key.venue;
   if (EXCHANGES.includes(venue)) return [venue];
   if (instrument.calendar === 'XTAI') return ['twse', 'tpex'];
-  if (instrument.calendar === 'XNYS') return ['nasdaq', 'nyse'];
+  if (instrument.calendar === 'XNYS') return ['nasdaq', 'nyse', 'cboe'];
   return [];
 }
 
