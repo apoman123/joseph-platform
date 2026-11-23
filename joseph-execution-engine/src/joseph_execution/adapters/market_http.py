@@ -6,9 +6,11 @@ closed; nothing is fabricated.
 
 from __future__ import annotations
 
+import decimal
 import logging
 import time
 from collections.abc import Mapping
+from collections.abc import Sequence
 
 import httpx
 
@@ -19,8 +21,12 @@ from joseph_execution.domain import market
 _LOG = logging.getLogger(__name__)
 
 
+_SESSION_TTL_S = 3_600.0
+_CLOSE_TTL_S = 300.0
+
+
 class HttpMarketDataGateway:
-    """Reads ``/v1/instruments``, ``/v1/market/snapshot`` and orderbook."""
+    """Reads instruments, snapshots, books, calendars and daily closes."""
 
     def __init__(
         self,
@@ -39,6 +45,11 @@ class HttpMarketDataGateway:
         self._client = client or httpx.AsyncClient(timeout=5.0)
         self._ttl = metadata_ttl_s
         self._meta: dict[str, tuple[float, market.InstrumentMeta]] = {}
+        self._sessions: dict[
+            tuple[str, int, int],
+            tuple[float, tuple[market.TradingSession, ...]],
+        ] = {}
+        self._closes: dict[str, tuple[float, decimal.Decimal]] = {}
 
     async def close(self) -> None:
         """Closes the HTTP client."""
@@ -131,6 +142,142 @@ class HttpMarketDataGateway:
         )
         return None if body is None else parse_book(body)
 
+    async def sessions(
+        self, calendar: str, from_ms: int, to_ms: int
+    ) -> Sequence[market.TradingSession] | None:
+        """Reads ``/v1/calendars/{id}/sessions`` (cached for an hour).
+
+        Args:
+            calendar: Calendar id.
+            from_ms: Window start.
+            to_ms: Window end.
+
+        Returns:
+            Sessions, ``()`` for ``24x7`` or ``None`` on failure.
+        """
+        if calendar == market.CONTINUOUS_CALENDAR:
+            return ()
+        hour = 3_600_000
+        key = (calendar, from_ms // hour, to_ms // hour)
+        cached = self._sessions.get(key)
+        if cached is not None and time.monotonic() - cached[0] < (
+            _SESSION_TTL_S
+        ):
+            return cached[1]
+        body = await self._get(
+            f"/v1/calendars/{calendar}/sessions",
+            {"from_ms": str(from_ms), "to_ms": str(to_ms)},
+        )
+        if body is None:
+            return None
+        try:
+            parsed = parse_sessions(body)
+        except (KeyError, TypeError, ValueError):
+            _LOG.warning("malformed session list for %s", calendar)
+            return None
+        self._sessions[key] = (time.monotonic(), parsed)
+        return parsed
+
+    async def previous_close(
+        self, instrument_id: str
+    ) -> decimal.Decimal | None:
+        """Reads the last final daily candle close (cached 5 minutes).
+
+        Args:
+            instrument_id: Canonical id.
+
+        Returns:
+            Close or ``None``.
+        """
+        cached = self._closes.get(instrument_id)
+        if cached is not None and time.monotonic() - cached[0] < _CLOSE_TTL_S:
+            return cached[1]
+        body = await self._get(
+            "/v1/candles",
+            {"instrument_id": instrument_id, "tf": "1d", "limit": "5"},
+        )
+        close = None if body is None else parse_previous_close(body)
+        if close is not None:
+            self._closes[instrument_id] = (time.monotonic(), close)
+        return close
+
+
+def parse_sessions(
+    body: Mapping[str, object],
+) -> tuple[market.TradingSession, ...]:
+    """Parses a contract ``SessionList``.
+
+    Args:
+        body: Contract object.
+
+    Returns:
+        Sessions in open order.
+
+    Raises:
+        KeyError: When a session lacks a field.
+        TypeError: When ``sessions`` is not a list.
+        ValueError: When a timestamp is not an integer.
+    """
+    rows = body["sessions"]
+    if not isinstance(rows, list):
+        raise TypeError("sessions must be a list")
+    parsed = [
+        market.TradingSession(
+            day=str(row["day"]),
+            open_ms=int(str(row["open_ms"])),
+            close_ms=int(str(row["close_ms"])),
+        )
+        for row in rows
+    ]
+    return tuple(sorted(parsed, key=lambda s: s.open_ms))
+
+
+def parse_previous_close(body: Mapping[str, object]) -> decimal.Decimal | None:
+    """Finds the close of the latest final bar of a ``CandleBatch``.
+
+    Args:
+        body: Contract object.
+
+    Returns:
+        Close, or ``None`` when no final bar exists.
+    """
+    rows = body.get("candles")
+    finals = [
+        row
+        for row in (rows if isinstance(rows, list) else [])
+        if isinstance(row, dict) and row.get("is_final") and "close" in row
+    ]
+    if not finals:
+        return None
+    latest = max(finals, key=lambda row: int(str(row.get("start_ms", 0))))
+    try:
+        return decimals.to_decimal(latest["close"])
+    except ValueError:
+        return None
+
+
+def _ladder(raw: object) -> tuple[market.TickStep, ...]:
+    """Parses a contract tick ladder.
+
+    Args:
+        raw: List of ``TickStep`` objects.
+
+    Returns:
+        Steps sorted by ``min_price``.
+    """
+    if not isinstance(raw, list):
+        return ()
+    return tuple(
+        sorted(
+            market.TickStep(
+                decimals.to_decimal(step["min_price"]),
+                decimals.to_decimal(step["tick_size"]),
+            )
+            for step in raw
+            if isinstance(step, dict)
+        )
+    )
+
 
 def parse_instrument(row: Mapping[str, object]) -> market.InstrumentMeta:
     """Parses a contract ``Instrument``.
@@ -156,6 +303,13 @@ def parse_instrument(row: Mapping[str, object]) -> market.InstrumentMeta:
         max_qty=decimals.to_optional(row.get("max_qty")),
         max_leverage=decimals.to_optional(row.get("max_leverage")),
         quote=str(key.get("quote", "USD")) if isinstance(key, dict) else "USD",
+        calendar=str(row.get("calendar") or market.CONTINUOUS_CALENDAR),
+        listing_exchange=None
+        if row.get("listing_exchange") is None
+        else str(row["listing_exchange"]),
+        tick_ladder=_ladder(row.get("tick_ladder")),
+        price_limit_pct=decimals.to_optional(row.get("price_limit_pct")),
+        board_lot=decimals.to_optional(row.get("board_lot")),
     )
 
 

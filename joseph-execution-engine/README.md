@@ -8,6 +8,8 @@ OrderIntent -> Risk Gateway (deny by default) -> OMS (transactional outbox) -> T
 
 **LIVE trading is disabled.** Live venue adapters for Binance, Hyperliquid, Lighter, Bitget and MEXC declare their documented capabilities but report `TRADING_UNAVAILABLE` and refuse every call: signing and private streams are not implemented or sandbox-verified in this build. PAPER runs on a simulated venue. SHADOW records the orders Joseph would send but never sends them.
 
+**Securities brokers** (`adapters/brokers/`): Interactive Brokers (`ib_async` to IB Gateway/TWS; Nasdaq and NYSE), SinoPac Shioaji (TWSE) and a fail-closed Cathay Securities entry awaiting its SDK. They stay gated (no client is even created) unless `JOSEPH_LIVE_TRADING_ENABLED=true` and the broker is enabled, and every order still passes every LIVE gate. Setup, 2FA, SinoPac's simulation test and the securities risk rules are in [`docs/BROKERS.md`](../docs/BROKERS.md). Optional extras: `uv sync --extra ibkr --extra sinopac`.
+
 ## Run
 
 ```bash
@@ -33,7 +35,10 @@ The defaults are for development: dev token `dev-local-token` maps to `tenant-01
 | `JOSEPH_STEP_UP_TOTP_SECRET` | unset (step-up always fails) | Base32 TOTP secret for live consent |
 | `JOSEPH_CORS_ORIGINS` | `http://localhost:3000,...` | Browser origins |
 | `JOSEPH_PAPER_STARTING_EQUITY` | `100000` | Paper account equity |
-| `JOSEPH_BACKGROUND_TASKS` | `true` | Outbox worker, paper ticker and reconciler loops |
+| `JOSEPH_BACKGROUND_TASKS` | `true` | Outbox worker, paper ticker, reconciler and broker event loops |
+| `JOSEPH_PAPER_TWD_STARTING_CASH` | `3000000` | TWD paper account for TWSE securities (`off` disables it) |
+| `JOSEPH_EQUITY_CLOSED_MARKET_ORDERS` | `reject` | `queue` lets DAY market orders wait for the next open |
+| `JOSEPH_IBKR_*`, `JOSEPH_SINOPAC_*` | disabled | Broker connections; see `docs/BROKERS.md` |
 
 ## API
 
@@ -66,6 +71,7 @@ All routes except `/health` require `Authorization: Bearer <token>`. Errors use 
 
 ```bash
 uv run pytest                 # unit, integration, chaos, security, property, contract, architecture, system
+# opt-in broker checks (skipped by default): -m ibkr_paper / -m sinopac_sim, see docs/BROKERS.md
 uv run ruff check src tests && uv run mypy src && uv run lint-imports
 ```
 
@@ -77,3 +83,4 @@ The system tests start a real uvicorn process and talk to it over HTTP and WebSo
 - Production MFA, KMS/HSM master-key custody and key rotation tooling. The vault uses a process-held master key.
 - Multi-instance deployment: outbox in-flight guards are per process, so multiple workers need row leases.
 - Funding accrual and liquidation prices are not modelled for paper positions.
+- LIVE position reconciliation is skipped (broker positions bought outside Joseph are not managed); see `docs/BROKERS.md` for the broker-specific limitations.

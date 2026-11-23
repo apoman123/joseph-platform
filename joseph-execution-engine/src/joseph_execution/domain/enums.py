@@ -6,14 +6,31 @@ import enum
 
 
 class Venue(enum.StrEnum):
-    """Venue identifiers (contract ``Venue``)."""
+    """Venue identifiers (contract ``Venue``).
+
+    Crypto venues trade their own instruments; ``twse``, ``nasdaq`` and
+    ``nyse`` are securities exchanges reached through a broker;
+    ``treasury`` publishes rates that are never tradable.
+    """
 
     BINANCE = "binance"
     HYPERLIQUID = "hyperliquid"
     LIGHTER = "lighter"
     BITGET = "bitget"
     MEXC = "mexc"
+    TWSE = "twse"
+    NASDAQ = "nasdaq"
+    NYSE = "nyse"
+    TREASURY = "treasury"
     MOCK = "mock"
+
+
+class Broker(enum.StrEnum):
+    """Securities brokers (contract ``Broker``); account venues too."""
+
+    IBKR = "ibkr"
+    SINOPAC = "sinopac"
+    CATHAY = "cathay"
 
 
 class OrderSide(enum.StrEnum):
@@ -46,12 +63,17 @@ class OrderType(enum.StrEnum):
 
 
 class TimeInForce(enum.StrEnum):
-    """Time in force."""
+    """Time in force.
+
+    ``DAY`` (TWSE ``ROD``) expires at the close of the exchange session and
+    applies to exchange-listed securities only.
+    """
 
     GTC = "GTC"
     IOC = "IOC"
     FOK = "FOK"
     POST_ONLY = "POST_ONLY"
+    DAY = "DAY"
 
 
 class MarginMode(enum.StrEnum):
