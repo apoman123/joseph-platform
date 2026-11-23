@@ -43,8 +43,12 @@ def _service(
 
 @pytest.mark.parametrize(
     "venue",
-    # Every real venue, crypto, exchange and rate, from recorded fixtures.
-    [v for v in instruments.Venue if v is not instruments.Venue.MOCK],
+    # Every real venue with recorded fixtures; rate series are never screened.
+    [
+        v
+        for v in instruments.Venue
+        if v is not instruments.Venue.MOCK and v not in instruments.RATE_VENUES
+    ],
     ids=lambda v: v.value,
 )
 async def test_each_venue_produces_contract_valid_reports(
@@ -62,7 +66,9 @@ async def test_each_venue_produces_contract_valid_reports(
     assert report.records
     for record in report.records:
         assert record.instrument_id.venue is venue
-        assert len(record.gates) == 5
+        # Listed securities have no open-interest or funding gates.
+        listed = venue in instruments.EXCHANGE_VENUES
+        assert len(record.gates) == (3 if listed else 5)
         if record.status is policy.Status.QUALIFIED:
             assert all(g.passed for g in record.gates)
             assert record.funding_risk is not policy.FundingRisk.HIGH_RISK

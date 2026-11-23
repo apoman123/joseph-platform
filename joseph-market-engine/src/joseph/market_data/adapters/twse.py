@@ -797,6 +797,7 @@ class TwseAdapter(base.BaseVenueAdapter):
 
     VENUE = instruments.Venue.TWSE
     INSTRUMENT_TTL_MS = 6 * 3_600_000
+    TRADE_BUY_VOLUME_METHOD = market.BuyVolumeMethod.CLASSIFIED
 
     def __init__(
         self,

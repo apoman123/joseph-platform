@@ -4,10 +4,13 @@ from __future__ import annotations
 
 import asyncio
 import contextlib
+import datetime
 import decimal
 import json
+import pathlib
 from collections.abc import AsyncIterator
 from collections.abc import Callable
+from collections.abc import Iterator
 from typing import Any
 
 import httpx
@@ -19,9 +22,13 @@ from joseph.domain import clock as clock_lib
 from joseph.domain import errors
 from joseph.domain import instruments
 from joseph.domain import market
+from joseph.domain import sessions
+from joseph.domain import timeframes
 from joseph.market_data.adapters import alpaca
+from joseph.market_data.adapters import factory
 from joseph.market_data.adapters import http
 from joseph.market_data.domain import classification
+from joseph.market_data.domain import health
 from joseph.platform import config
 
 _D = decimal.Decimal
@@ -164,6 +171,29 @@ def test_classify_keeps_odd_lots_out_of_the_tick_reference() -> None:
         market.AggressorSide.BUY,
     ]
     assert rows[1].trade_id == "V:2" and rows[1].tape == "C"
+
+
+def test_changed_candle_ignores_receipt_time() -> None:
+    """Re-built aggregates with equal values are not re-emitted."""
+    aapl = instruments.InstrumentId.parse("nasdaq:stock:AAPL")
+    row = {
+        "o": 1,
+        "h": 2,
+        "l": 1,
+        "c": 2,
+        "v": 5,
+        "n": 1,
+        "t": "2026-11-20T14:30:00Z",
+    }
+    first = alpaca.minute_bar(row, aapl, 1, settled_before_ms=0, source="x")
+    again = alpaca.minute_bar(row, aapl, 2, settled_before_ms=0, source="x")
+    moved = alpaca.minute_bar(
+        {**row, "c": 1.5}, aapl, 3, settled_before_ms=0, source="x"
+    )
+    assert first is not None and again is not None and moved is not None
+    assert alpaca.changed_candle(None, first)
+    assert not alpaca.changed_candle(first, again)
+    assert alpaca.changed_candle(first, moved)
 
 
 def test_bars_outside_sessions_are_dropped() -> None:
@@ -402,4 +432,208 @@ async def test_stream_connection_limit_is_not_retried() -> None:
     sub = await stream.subscribe("AAPL", ["trades"])
     kind, err = await _next(sub)
     assert kind == "error" and "406" in err.message
+    await stream.close()
+
+
+# Adapter paths over the fixture routes ------------------------------------
+
+_SESSION = sessions.XNYS.session(datetime.date(2026, 11, 20))
+assert _SESSION is not None
+_US_OPEN = _SESSION.open_ms
+_NOW = _US_OPEN + 7 * 60_000 + 30_000
+_AAPL = instruments.InstrumentId.parse("nasdaq:stock:AAPL")
+_FRAMES = json.loads(
+    (
+        pathlib.Path(__file__).resolve().parents[3]
+        / "fixtures/venues/alpaca/ws_frames.json"
+    ).read_text("utf-8")
+)["frames"]
+
+
+@pytest.fixture
+def alpaca_api(
+    exchange_routes: Callable[[respx.Router], None],
+) -> Iterator[respx.Router]:
+    """Serves the Alpaca and Nasdaq Trader fixtures.
+
+    Args:
+        exchange_routes: Installer of the exchange fixture routes.
+
+    Yields:
+        Router.
+    """
+    with respx.mock(assert_all_called=False) as router:
+        exchange_routes(router)
+        yield router
+
+
+def _nasdaq(
+    clock: clock_lib.Clock,
+    *,
+    cfg: alpaca.AlpacaConfig = _KEYS,
+    scripts: list[list[str | BaseException]] | None = None,
+) -> alpaca.AlpacaAdapter:
+    """Builds a Nasdaq adapter over the fixtures.
+
+    Args:
+        clock: Clock.
+        cfg: Alpaca configuration.
+        scripts: Stream frames per connection.
+
+    Returns:
+        Adapter.
+    """
+    adapter = factory.build_adapters(
+        [instruments.Venue.NASDAQ],
+        clock,
+        client=httpx.AsyncClient(),
+        connect=_connector(scripts or [[*_FRAMES]], []),
+        alpaca_config=cfg,
+    )[instruments.Venue.NASDAQ]
+    assert isinstance(adapter, alpaca.AlpacaAdapter)
+    return adapter
+
+
+async def test_daily_and_weekly_streams_follow_daily_bars(
+    alpaca_api: respx.Router,
+) -> None:
+    """Seeded days update from dailyBars; weeks aggregate them."""
+    del alpaca_api
+    clock = clock_lib.ManualClock(_NOW)
+    tracker = health.FeedHealthTracker(instruments.Venue.NASDAQ, "AAPL 1d")
+    stream = _nasdaq(clock).stream_candles(
+        _AAPL, timeframes.Timeframe.D1, tracker
+    )
+    seen = [await asyncio.wait_for(anext(stream), 5) for _ in range(2)]
+    await stream.aclose()  # type: ignore[attr-defined]
+    assert seen[0].source == "alpaca.rest" and seen[1].source == "alpaca.ws"
+    assert not seen[1].is_final
+    weeks = _nasdaq(clock).stream_candles(_AAPL, timeframes.Timeframe.W1)
+    week = await asyncio.wait_for(anext(weeks), 5)
+    await weeks.aclose()  # type: ignore[attr-defined]
+    assert week.timeframe is timeframes.Timeframe.W1 and not week.is_final
+
+
+async def test_aggregated_minute_stream_and_reconnect(
+    alpaca_api: respx.Router,
+) -> None:
+    """5m bars aggregate streamed minutes; a reconnect re-seeds them."""
+    del alpaca_api
+    clock = clock_lib.ManualClock(_NOW)
+    drop = websockets.ConnectionClosedError(None, None)
+    adapter = _nasdaq(clock, scripts=[[*_FRAMES[:5], drop], [*_FRAMES]])
+    stream = adapter.stream_candles(_AAPL, timeframes.Timeframe.M5)
+    first = await asyncio.wait_for(anext(stream), 5)
+    assert first.start_ms == _US_OPEN + 300_000 and not first.is_final
+    second = await asyncio.wait_for(anext(stream), 5)
+    await stream.aclose()  # type: ignore[attr-defined]
+    assert second.start_ms == first.start_ms
+
+
+async def test_seconds_stream_resets_and_finalizes_on_idle(
+    alpaca_api: respx.Router,
+) -> None:
+    """A reconnect starts a new segment; idle ticks finalize bars."""
+    del alpaca_api
+    clock = clock_lib.ManualClock(_NOW)
+    drop = websockets.ConnectionClosedError(None, None)
+    adapter = _nasdaq(clock, scripts=[[*_FRAMES[:4], drop], [*_FRAMES]])
+    stream = adapter.stream_candles(_AAPL, timeframes.Timeframe.S1)
+    seen = [await asyncio.wait_for(anext(stream), 10)]
+    while not seen[-1].is_final and len(seen) < 10:
+        seen.append(await asyncio.wait_for(anext(stream), 10))
+    await stream.aclose()  # type: ignore[attr-defined]
+    assert not seen[0].is_final and seen[-1].is_final
+
+
+async def test_delayed_feed_and_empty_windows(alpaca_api: respx.Router) -> None:
+    """The delayed feed stops 15 minutes back and asks for delayed_sip."""
+    clock = clock_lib.ManualClock(_NOW)
+    cfg = alpaca.AlpacaConfig(
+        key_id="k", secret_key="s", feed=alpaca.Feed.DELAYED_SIP
+    )
+    adapter = _nasdaq(clock, cfg=cfg)
+    assert adapter.capabilities().data_delay_ms == 900_000
+    m1 = timeframes.Timeframe.M1
+    assert await adapter.fetch_candles(_AAPL, m1, _US_OPEN, _NOW) == []
+    assert await adapter.fetch_trades(_AAPL, _US_OPEN, _NOW) == []
+    assert (
+        await adapter.fetch_candles(
+            _AAPL, timeframes.Timeframe.S1, _US_OPEN, _NOW
+        )
+        == []
+    )
+    assert await adapter.fetch_candles(_AAPL, m1, 0, 1_000, 5) == []
+    await adapter.fetch_snapshot(_AAPL)
+    call = alpaca_api.calls[-1].request
+    assert call.url.params["feed"] == "delayed_sip"
+
+
+async def test_trades_limit_snapshot_shapes_and_ids(
+    alpaca_api: respx.Router,
+) -> None:
+    """Trade limits, wrapped snapshots and unknown snapshots are handled."""
+    clock = clock_lib.ManualClock(_NOW)
+    adapter = _nasdaq(clock)
+    assert str(adapter.instrument_id("QQQ")) == "nasdaq:stock:QQQ"
+    trades = await adapter.fetch_trades(_AAPL, _US_OPEN - 5_000, _NOW, 2)
+    assert len(trades) == 2
+    assert str(adapter.instrument_id("QQQ")) == "nasdaq:etf:QQQ"
+    with pytest.raises(errors.MissingDataError):
+        await adapter.fetch_snapshot(
+            instruments.InstrumentId.parse("nasdaq:etf:IEF")
+        )
+    assert alpaca.parse_directory("", "", 0) == {
+        instruments.Venue.NASDAQ: [],
+        instruments.Venue.NYSE: [],
+    }
+    assert (
+        await adapter.fetch_candles(_AAPL, timeframes.Timeframe.M1, 10, 5) == []
+    )
+    await adapter.close()
+
+
+async def test_wrapped_snapshot_bodies_are_accepted(
+    exchange_routes: Callable[[respx.Router], None],
+) -> None:
+    """A body nested under ``snapshots`` parses like the flat form."""
+    with respx.mock(assert_all_called=False) as router:
+        router.route(
+            host="data.alpaca.markets", path="/v2/stocks/snapshots"
+        ).mock(
+            return_value=httpx.Response(
+                200, json={"snapshots": {"AAPL": {"latestTrade": {"p": 1}}}}
+            )
+        )
+        exchange_routes(router)
+        adapter = _nasdaq(clock_lib.ManualClock(_NOW))
+        snapshot = await adapter.fetch_snapshot(_AAPL)
+    assert snapshot.last == _D(1) and snapshot.as_of_ms == _NOW
+
+
+async def test_stream_retries_when_auth_never_completes() -> None:
+    """A handshake without authentication is retried, then reported."""
+    opened: list[_Script] = []
+
+    async def no_sleep(seconds: float) -> None:
+        """Skips backoff.
+
+        Args:
+            seconds: Ignored.
+        """
+        del seconds
+
+    silent = [_OK[0], '[{"T":"x"}]', '[{"T":"y"}]']
+    stream = alpaca.AlpacaStream(
+        _KEYS,
+        clock_lib.ManualClock(0),
+        _connector([list(silent), list(silent)], opened),
+        sleep=no_sleep,
+        max_failures=2,
+    )
+    await stream._send_subscription("subscribe", {"bars": ["A"]})
+    sub = await stream.subscribe("AAPL", ["trades"])
+    kind, err = await _next(sub)
+    assert kind == "error" and "after 2 attempts" in err.message
+    assert len(opened) == 2
     await stream.close()
