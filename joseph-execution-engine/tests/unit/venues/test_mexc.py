@@ -14,6 +14,7 @@ from joseph_execution.adapters.venues import credentials
 from joseph_execution.adapters.venues import directory
 from joseph_execution.adapters.venues import live
 from joseph_execution.adapters.venues import mexc
+from joseph_execution.adapters.venues import mexc_protobuf
 from joseph_execution.adapters.venues import signing
 from joseph_execution.domain import enums
 from joseph_execution.domain import errors
@@ -103,6 +104,7 @@ def _adapter(
     known: list[directory.KnownOrder] | None = None,
     connector: venue_fakes.FakeConnector | None = None,
     mono: venue_fakes.ManualMonotonic | None = None,
+    urls: dict[str, str] | None = None,
 ) -> mexc.MexcFuturesAdapter:
     """Builds an adapter for account ``acct``.
 
@@ -111,6 +113,7 @@ def _adapter(
         known: Directory orders.
         connector: Fake WebSocket connector.
         mono: Manual monotonic clock.
+        urls: Endpoint overrides.
 
     Returns:
         Adapter.
@@ -125,7 +128,28 @@ def _adapter(
         connect=connector or venue_fakes.FakeConnector([], clock),
         monotonic=clock,
         sleep=clock.sleep,
+        urls=urls,
     )
+
+
+def _pb(member: str, channel: str, **fields: object) -> bytes:
+    """Encodes a private push as the Protobuf endpoint would.
+
+    Args:
+        member: ``ContractWrapper`` payload member (``orderChange`` …).
+        channel: Wrapper channel.
+        **fields: Payload fields (decimals as strings, like MEXC).
+
+    Returns:
+        Serialized ``ContractWrapper``.
+    """
+    schema = mexc_protobuf.SCHEMA
+    wrapper = schema.message_class("ContractWrapper")(
+        channel=channel, symbol="BTC_USDT", ts=1760942212000
+    )
+    payload = schema.message_class(member[0].upper() + member[1:])(**fields)
+    getattr(wrapper, member).CopyFrom(payload)
+    return wrapper.SerializeToString()
 
 
 def _ok(data: object) -> httpx.Response:
@@ -623,3 +647,125 @@ async def test_stream_logs_in_and_relies_on_default_pushes() -> None:
             ),
             1,
         )
+
+
+async def test_stream_parser_on_protobuf_pushes() -> None:
+    """Binary pushes parse like their JSON twins (decimals as strings)."""
+    mono = venue_fakes.ManualMonotonic()
+    adapter = _adapter(mono=mono)
+    adapter._contracts["BTC_USDT"] = (
+        mono(),
+        mexc.Contract("BTC_USDT", D("0.0001"), D(1), True),
+    )
+    session = adapter._new_session("acct", credentials.from_fields(KEYS), False)
+    order = _pb(
+        "orderChange",
+        "push.personal.order",
+        orderId="123456789",
+        symbol="BTC_USDT",
+        price="45000.5",
+        vol="10",
+        dealVol="5",
+        state=2,
+        externalOid=CID,
+        updateTime=1760942212000,
+    )
+    (update,) = await adapter.parse(session, order)
+    assert update.order is not None
+    assert update.order.status is S.PARTIALLY_FILLED
+    assert update.order.client_order_id == CID
+    assert update.order.filled_base == D("0.0005")
+    assert update.order.reason is None
+    maker = _pb(
+        "orderDealDetail",
+        "push.personal.order.deal",
+        id="987654321",
+        symbol="BTC_USDT",
+        vol="10",
+        price="45000.5",
+        feeCurrency="USDT",
+        fee="0.225",
+        timestamp=1760942212000,
+        orderId="123456789",
+    )
+    (fill,) = await adapter.parse(session, maker)
+    assert fill.fill is not None and fill.fill.client_order_id == CID
+    assert fill.fill.quantity_base == D("0.0010")
+    assert fill.fill.price == D("45000.5") and fill.fill.fee == D("0.225")
+    assert fill.fill.liquidity == "maker"
+    position = _pb(
+        "positionChange",
+        "push.personal.position",
+        symbol="BTC_USDT",
+        holdVol="10",
+        positionType=2,
+        state=1,
+        holdAvgPrice="45000",
+    )
+    (short,) = await adapter.parse(session, position)
+    assert short.position is not None
+    assert short.position.signed_qty == D("-0.0010")
+    asset = _pb(
+        "assetChange",
+        "push.personal.asset",
+        currency="USDT",
+        positionMargin="5000",
+        frozenBalance="1000",
+        availableBalance="9000",
+    )
+    (balance,) = await adapter.parse(session, asset)
+    assert balance.balance is not None and balance.balance.equity == D(15000)
+    assert balance.balance.ts_ms == 1760942212000
+    session.plans["55"] = f"{CID}-sl"
+    plan = _pb(
+        "contractPlanOrder",
+        "push.personal.plan.order",
+        id="55",
+        state=2,
+        orderId="0",
+    )
+    (canceled,) = await adapter.parse(session, plan)
+    assert canceled.order is not None and canceled.order.status is S.CANCELED
+    assert "0" not in session.order_ids
+
+
+@respx.mock
+async def test_stream_logs_in_on_the_protobuf_endpoint() -> None:
+    """``ws_url`` selects the Protobuf endpoint; JSON acks still log in."""
+    _detail()
+    respx.get(f"{API}/api/v1/private/order/list/open_orders").mock(
+        return_value=_ok([])
+    )
+    respx.get(f"{API}/api/v1/private/position/open_positions").mock(
+        return_value=_ok([])
+    )
+    respx.get(f"{API}/api/v1/private/account/assets").mock(
+        return_value=_ok(
+            [{"currency": "USDT", "equity": 1, "availableOpen": 1}]
+        )
+    )
+    mono = venue_fakes.ManualMonotonic()
+    deal = _pb(
+        "orderDealDetail",
+        "push.personal.order.deal",
+        id="1",
+        symbol="BTC_USDT",
+        vol="1",
+        price="1",
+        orderId="5",
+        externalOid=CID,
+        timestamp=1,
+        taker=True,
+    )
+    connector = venue_fakes.FakeConnector(
+        [venue_fakes.Script(['{"channel":"rs.login","data":"success"}', deal])],
+        mono,
+    )
+    adapter = _adapter(
+        connector=connector, mono=mono, urls={"ws_url": mexc.WS_PROTOBUF_URL}
+    )
+    events = await venue_fakes.collect(adapter.stream_account_events("acct"), 2)
+    assert connector.urls == [mexc.WS_PROTOBUF_URL]
+    fill = events[-1].fill  # type: ignore[attr-defined]
+    assert fill is not None and fill.client_order_id == CID
+    assert fill.liquidity == "taker"

@@ -78,6 +78,15 @@ def test_trade_recording_settings_parse_with_bounds() -> None:
     assert settings.bitget_archive_dir == "/data/bitget"
 
 
+def test_mexc_ws_format_defaults_to_protobuf() -> None:
+    """``JOSEPH_MEXC_WS_FORMAT`` is protobuf unless json is chosen."""
+    assert config.Settings.from_env({}).mexc_ws_format == "protobuf"
+    chosen = config.Settings.from_env({"JOSEPH_MEXC_WS_FORMAT": " JSON "})
+    assert chosen.mexc_ws_format == "json"
+    with pytest.raises(ValueError, match="JOSEPH_MEXC_WS_FORMAT"):
+        config.Settings.from_env({"JOSEPH_MEXC_WS_FORMAT": "gzip"})
+
+
 def test_demo_only_restricts_to_mock() -> None:
     """DEMO deployments never construct real venue adapters."""
     settings = config.Settings.from_env({"JOSEPH_DEMO_ONLY": "true"})
