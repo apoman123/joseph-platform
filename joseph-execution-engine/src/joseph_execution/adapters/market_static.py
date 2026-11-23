@@ -8,6 +8,7 @@ from __future__ import annotations
 import dataclasses
 import decimal
 import random
+from collections.abc import Sequence
 
 from joseph_execution.domain import decimals
 from joseph_execution.domain import enums
@@ -82,6 +83,8 @@ class StaticMarketDataGateway:
         self._quotes: dict[str, market.MarketQuote] = {}
         self._pinned: set[str] = set()
         self._stale_books: set[str] = set()
+        self._calendars: dict[str, tuple[market.TradingSession, ...]] = {}
+        self._closes: dict[str, decimal.Decimal] = {}
         self._random = random.Random(seed)  # noqa: S311 - simulation only.
         self.feed_state = enums.FeedState.DEMO
         self.unavailable = False
@@ -112,7 +115,7 @@ class StaticMarketDataGateway:
             self._pinned.discard(instrument_id)
         else:
             self._pinned.add(instrument_id)
-        tick = self._instruments[instrument_id].tick_size
+        tick = self._instruments[instrument_id].tick_for(mark)
         mark = decimals.round_to_step(mark, tick)
         quote = market.MarketQuote(
             instrument_id=instrument_id,
@@ -134,6 +137,48 @@ class StaticMarketDataGateway:
         """
         self._quotes[quote.instrument_id] = quote
         self._pinned.add(quote.instrument_id)
+
+    def add_instrument(
+        self,
+        meta: market.InstrumentMeta,
+        mark: decimal.Decimal | None = None,
+    ) -> None:
+        """Registers an instrument (tests and demos).
+
+        Args:
+            meta: Metadata.
+            mark: Optional initial mark.
+        """
+        self._instruments[meta.instrument_id] = meta
+        if mark is not None:
+            self.set_mark(meta.instrument_id, mark)
+
+    def set_sessions(
+        self, calendar: str, sessions: Sequence[market.TradingSession]
+    ) -> None:
+        """Sets the sessions of a calendar (fake of the market engine).
+
+        Args:
+            calendar: Calendar id.
+            sessions: Sessions.
+        """
+        self._calendars[calendar] = tuple(
+            sorted(sessions, key=lambda s: s.open_ms)
+        )
+
+    def set_previous_close(
+        self, instrument_id: str, close: decimal.Decimal | None
+    ) -> None:
+        """Sets the previous session close of an instrument.
+
+        Args:
+            instrument_id: Instrument.
+            close: Close, or ``None`` to make it unknown.
+        """
+        if close is None:
+            self._closes.pop(instrument_id, None)
+        else:
+            self._closes[instrument_id] = close
 
     def set_book_stale(self, instrument_id: str, stale: bool = True) -> None:
         """Marks an instrument's book stale.
@@ -222,11 +267,13 @@ class StaticMarketDataGateway:
             return None
         size = meta.lot_size * 1000
         levels = min(depth, 20)
+        bid_tick = meta.tick_for(quote.best_bid)
+        ask_tick = meta.tick_for(quote.best_ask)
         bids = tuple(
-            (quote.best_bid - meta.tick_size * i, size) for i in range(levels)
+            (quote.best_bid - bid_tick * i, size) for i in range(levels)
         )
         asks = tuple(
-            (quote.best_ask + meta.tick_size * i, size) for i in range(levels)
+            (quote.best_ask + ask_tick * i, size) for i in range(levels)
         )
         return market.BookView(
             instrument_id=instrument_id,
@@ -235,3 +282,42 @@ class StaticMarketDataGateway:
             as_of_ms=quote.as_of_ms,
             stale=instrument_id in self._stale_books,
         )
+
+    async def sessions(
+        self, calendar: str, from_ms: int, to_ms: int
+    ) -> Sequence[market.TradingSession] | None:
+        """Returns configured sessions overlapping a window.
+
+        Args:
+            calendar: Calendar id.
+            from_ms: Window start.
+            to_ms: Window end.
+
+        Returns:
+            Sessions, ``()`` for ``24x7``, ``None`` when not configured.
+        """
+        if self.unavailable:
+            return None
+        if calendar == market.CONTINUOUS_CALENDAR:
+            return ()
+        sessions = self._calendars.get(calendar)
+        if sessions is None:
+            return None
+        return tuple(
+            s for s in sessions if s.close_ms > from_ms and s.open_ms < to_ms
+        )
+
+    async def previous_close(
+        self, instrument_id: str
+    ) -> decimal.Decimal | None:
+        """Returns the configured previous close.
+
+        Args:
+            instrument_id: Instrument.
+
+        Returns:
+            Close or ``None``.
+        """
+        if self.unavailable:
+            return None
+        return self._closes.get(instrument_id)

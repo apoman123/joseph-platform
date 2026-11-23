@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import decimal
+from collections.abc import Sequence
 from typing import Protocol
 
 from joseph_execution.domain import market
@@ -49,5 +51,39 @@ class MarketDataGateway(Protocol):
 
         Returns:
             Book or ``None``.
+        """
+        ...
+
+    async def sessions(
+        self, calendar: str, from_ms: int, to_ms: int
+    ) -> Sequence[market.TradingSession] | None:
+        """Lists exchange sessions overlapping ``[from_ms, to_ms)``.
+
+        Backed by the market engine's
+        ``GET /v1/calendars/{id}/sessions?from_ms&to_ms``.
+
+        Args:
+            calendar: Calendar id (contract ``CalendarId``).
+            from_ms: Window start.
+            to_ms: Window end (exclusive).
+
+        Returns:
+            Sessions (empty for ``24x7``, which never closes), or ``None``
+            when the calendar cannot be read.
+        """
+        ...
+
+    async def previous_close(
+        self, instrument_id: str
+    ) -> decimal.Decimal | None:
+        """Returns the close of the last completed session (daily bar).
+
+        Used as the reference price of daily price limits.
+
+        Args:
+            instrument_id: Canonical id.
+
+        Returns:
+            Close, or ``None`` when unknown.
         """
         ...
