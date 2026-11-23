@@ -141,6 +141,9 @@ class Settings:
         binance_archive: Whether Binance seconds history older than the
             REST window is imported from data.binance.vision.
         binance_archive_dir: Cache directory of verified archive files.
+        bitget_archive: Whether Bitget seconds history is imported from
+            its public trade archive (verified against 1D klines).
+        bitget_archive_dir: Cache directory of downloaded Bitget parts.
     """
 
     dev_tokens: tuple[DevToken, ...] = ()
@@ -179,6 +182,8 @@ class Settings:
     trade_archive_url: str | None = None
     binance_archive: bool = True
     binance_archive_dir: str = "./var/binance-vision"
+    bitget_archive: bool = True
+    bitget_archive_dir: str = "./var/bitget-archive"
 
     def __repr__(self) -> str:
         """Returns a representation with secrets redacted."""
@@ -295,5 +300,9 @@ class Settings:
             binance_archive=_bool(source.get("JOSEPH_BINANCE_ARCHIVE"), True),
             binance_archive_dir=source.get(
                 "JOSEPH_BINANCE_ARCHIVE_DIR", "./var/binance-vision"
+            ),
+            bitget_archive=_bool(source.get("JOSEPH_BITGET_ARCHIVE"), True),
+            bitget_archive_dir=source.get(
+                "JOSEPH_BITGET_ARCHIVE_DIR", "./var/bitget-archive"
             ),
         )

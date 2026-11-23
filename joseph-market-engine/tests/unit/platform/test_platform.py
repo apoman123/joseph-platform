@@ -50,6 +50,7 @@ def test_trade_recording_settings_parse_with_bounds() -> None:
     assert defaults.trade_recording is True
     assert defaults.trade_bar_retention_days == 30.0
     assert defaults.binance_archive is True
+    assert defaults.bitget_archive is True
     assert defaults.trade_archive_url is None
     settings = config.Settings.from_env(
         {
@@ -61,6 +62,8 @@ def test_trade_recording_settings_parse_with_bounds() -> None:
             "JOSEPH_TRADE_ARCHIVE_URL": "sqlite:///./var/trades.db",
             "JOSEPH_BINANCE_ARCHIVE": "0",
             "JOSEPH_BINANCE_ARCHIVE_DIR": "/data/vision",
+            "JOSEPH_BITGET_ARCHIVE": "no",
+            "JOSEPH_BITGET_ARCHIVE_DIR": "/data/bitget",
         }
     )
     assert settings.trade_recording is False
@@ -71,6 +74,8 @@ def test_trade_recording_settings_parse_with_bounds() -> None:
     assert settings.trade_archive_url == "sqlite:///./var/trades.db"
     assert settings.binance_archive is False
     assert settings.binance_archive_dir == "/data/vision"
+    assert settings.bitget_archive is False
+    assert settings.bitget_archive_dir == "/data/bitget"
 
 
 def test_demo_only_restricts_to_mock() -> None:

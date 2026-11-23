@@ -16,15 +16,17 @@ aggregates plus coverage intervals, so history accumulates across restarts:
   archive never bridges them.
 * **Backfill** runs when recording starts and, on startup, for every
   archived instrument: the gap since the newest coverage is walked back
-  from now over the venue's REST trade history with a request budget
-  (Binance additionally imports complete past days from the official
-  ``data.binance.vision`` archive). What the budget or the venue's window
-  cannot reach stays uncovered and is reported as gaps by candle batches.
+  from now over the venue's REST trade history with a request budget.
+  Complete past days come from official day archives where one exists
+  (Binance ``data.binance.vision``, sha256 verified; Bitget's public trade
+  archive, verified against its own 1D kline). What the budget or the
+  venue's window cannot reach stays uncovered and is reported as gaps by
+  candle batches.
 * **Retention** prunes aggregates and coverage older than
   ``retention_ms`` (``JOSEPH_TRADE_BAR_RETENTION_DAYS``).
 
 The recorder is also the ``RecordedTrades`` read side of the service:
-archived seconds bars (importing archive days on demand for Binance) and
+archived seconds bars (importing archive days on demand) and
 true delta for fully covered bars.
 """
 
@@ -133,9 +135,34 @@ class TradeEventPort(Protocol):
 
 
 class DayArchive(Protocol):
-    """Official per-day trade archive of one venue (``BinanceVision``)."""
+    """Official per-day trade archive of one venue.
+
+    Implemented by ``BinanceVision`` (UTC days) and ``BitgetArchive``
+    (days cut at 00:00 UTC+8).
+
+    Attributes:
+        venue: Venue whose trades the archive holds.
+        note: Capability note describing the archive.
+    """
 
     venue: instruments.Venue
+    note: str
+
+    def day_of(self, ts_ms: int) -> datetime.date:
+        """Returns the archive day containing a time.
+
+        Args:
+            ts_ms: Epoch milliseconds.
+        """
+        ...
+
+    def day_bounds(self, day: datetime.date) -> recorded_trades.Interval:
+        """Returns the ``[start, end)`` epoch milliseconds of a day.
+
+        Args:
+            day: Archive day.
+        """
+        ...
 
     async def import_day(
         self,
@@ -229,33 +256,6 @@ class _Recording:
     flushed_ms: int = 0
 
 
-def _utc_day(ts_ms: int) -> datetime.date:
-    """Returns the UTC date of a time.
-
-    Args:
-        ts_ms: Epoch milliseconds.
-
-    Returns:
-        Date.
-    """
-    return datetime.datetime.fromtimestamp(ts_ms / 1000, datetime.UTC).date()
-
-
-def _day_start(day: datetime.date) -> int:
-    """Returns 00:00 UTC of a date in epoch milliseconds.
-
-    Args:
-        day: Date.
-
-    Returns:
-        Epoch milliseconds.
-    """
-    moment = datetime.datetime(
-        day.year, day.month, day.day, tzinfo=datetime.UTC
-    )
-    return int(moment.timestamp()) * 1000
-
-
 class TradeRecorder:
     """Records public trades into a ``TradeArchive`` (see module docs).
 
@@ -272,7 +272,7 @@ class TradeRecorder:
         clock: clock_lib.Clock,
         settings: RecorderSettings | None = None,
         *,
-        day_archive: DayArchive | None = None,
+        day_archives: Sequence[DayArchive] = (),
         sleep: Sleep = asyncio.sleep,
     ) -> None:
         """Initializes a stopped recorder.
@@ -282,14 +282,14 @@ class TradeRecorder:
             archive: Archive.
             clock: Time source.
             settings: Recording policy.
-            day_archive: Optional official day archive (Binance).
+            day_archives: Official day archives (one per venue).
             sleep: Sleep function (injectable for tests).
         """
         self.archive = archive
         self.settings = settings or RecorderSettings()
         self._clock = clock
         self._sleep = sleep
-        self._day_archive = day_archive
+        self._day_archives = {a.venue: a for a in day_archives}
         self._ports: dict[instruments.Venue, TradeEventPort] = {
             venue: adapter
             for venue, adapter in adapters.items()
@@ -367,14 +367,9 @@ class TradeRecorder:
                 "The venue publishes no trade history, so seconds bars and "
                 "true delta exist only where trades were recorded live."
             )
-        archive = self._day_archive
-        if archive is not None and archive.venue is venue:
-            notes.append(
-                "Older seconds history is imported from the official "
-                "data.binance.vision daily aggTrades archive (sha256 "
-                "verified); a day's file appears the next day, so the "
-                "newest day comes from the REST window and live recording."
-            )
+        archive = self._day_archives.get(venue)
+        if archive is not None:
+            notes.append(archive.note)
         return tuple(notes)
 
     def start(self) -> None:
@@ -399,8 +394,8 @@ class TradeRecorder:
             self._close_segment(recording)
         self._recordings.clear()
         self._supervisor = None
-        if self._day_archive is not None:
-            await self._day_archive.close()
+        for archive in self._day_archives.values():
+            await archive.close()
 
     def touch(self, instrument: instruments.InstrumentId) -> bool:
         """Starts or extends recording of an instrument in use.
@@ -498,8 +493,8 @@ class TradeRecorder:
         now = self._clock.now_ms()
         cutoff = now - self.settings.retention_ms
         deleted = self.archive.prune(cutoff)
-        if self._day_archive is not None:
-            self._day_archive.prune(cutoff)
+        for archive in self._day_archives.values():
+            archive.prune(cutoff)
         self._last_prune_ms = now
         if deleted:
             _LOG.info("pruned %d archived 1s aggregates", deleted)
@@ -739,9 +734,7 @@ class TradeRecorder:
         floor_ms = now - self.settings.retention_ms
         last = self.archive.covered_until(instrument)
         target = floor_ms if last is None else max(floor_ms, last)
-        if self._day_archive is not None and (
-            instrument.venue is self._day_archive.venue
-        ):
+        if instrument.venue in self._day_archives:
             await self._import_days(
                 instrument,
                 target,
@@ -804,24 +797,25 @@ class TradeRecorder:
         Returns:
             Number of days imported.
         """
-        archive = self._day_archive
+        archive = self._day_archives.get(instrument.venue)
         if archive is None or max_days <= 0:
             return 0
+        one = datetime.timedelta(days=1)
         oldest = max(from_ms, now_ms - self.settings.retention_ms)
-        newest_day = _utc_day(min(until_ms or now_ms, now_ms))
-        today = _utc_day(now_ms)
-        day = min(newest_day, today - datetime.timedelta(days=1))
+        today = archive.day_of(now_ms)
+        newest_day = archive.day_of(min(until_ms or now_ms, now_ms))
+        day = min(newest_day, today - one)
         imported = 0
-        while _day_start(day) + _DAY_MS > oldest and imported < max_days:
-            start = _day_start(day)
-            coverage = self.archive.coverage(instrument, start, start + _DAY_MS)
+        while archive.day_bounds(day)[1] > oldest and imported < max_days:
+            start, end = archive.day_bounds(day)
+            coverage = self.archive.coverage(instrument, start, end)
             failed = self._failed_days.get((instrument, day))
             recent_failure = (
                 failed is not None and now_ms - failed < _RETRY_FAILED_MS
             )
-            if not recorded_trades.covering(
-                coverage, start, start + _DAY_MS
-            ) and (not recent_failure):
+            if not recorded_trades.covering(coverage, start, end) and (
+                not recent_failure
+            ):
                 try:
                     found = await archive.import_day(
                         instrument, day, self._sink(instrument), now_ms
@@ -837,9 +831,9 @@ class TradeRecorder:
                     found = True
                 else:
                     imported += int(found)
-                if not found and day < today - datetime.timedelta(days=1):
+                if not found and day < today - one:
                     break
-            day -= datetime.timedelta(days=1)
+            day -= one
         return imported
 
     # Read side (RecordedTrades) -----------------------------------------
@@ -865,9 +859,7 @@ class TradeRecorder:
         if end_ms <= start_ms:
             return []
         now = self._clock.now_ms()
-        if self._day_archive is not None and (
-            instrument.venue is self._day_archive.venue
-        ):
+        if instrument.venue in self._day_archives:
             await self._import_days(
                 instrument,
                 start_ms,

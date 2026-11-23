@@ -50,6 +50,7 @@ from joseph.indicators import catalog
 from joseph.indicators import service as indicator_service
 from joseph.indicators.sdk import registry as plugin_registry
 from joseph.market_data.adapters import binance_vision
+from joseph.market_data.adapters import bitget_archive
 from joseph.market_data.adapters import factory
 from joseph.market_data.adapters import replay as replay_lib
 from joseph.market_data.adapters import trade_archive_sql
@@ -384,11 +385,15 @@ def _trade_recorder(
         if settings.trade_archive_url
         else None
     )
-    day_archive = (
-        binance_vision.BinanceVision(settings.binance_archive_dir)
-        if settings.binance_archive and instruments.Venue.BINANCE in adapters
-        else None
-    )
+    day_archives: list[trade_recorder.DayArchive] = []
+    if settings.binance_archive and instruments.Venue.BINANCE in adapters:
+        day_archives.append(
+            binance_vision.BinanceVision(settings.binance_archive_dir)
+        )
+    if settings.bitget_archive and instruments.Venue.BITGET in adapters:
+        day_archives.append(
+            bitget_archive.BitgetArchive(settings.bitget_archive_dir)
+        )
     recorder = trade_recorder.TradeRecorder(
         adapters,
         trade_archive_sql.SqlTradeArchive(dedicated or engine),
@@ -402,7 +407,7 @@ def _trade_recorder(
                 for value in settings.trade_record_instruments
             ),
         ),
-        day_archive=day_archive,
+        day_archives=day_archives,
     )
     return recorder, dedicated
 
