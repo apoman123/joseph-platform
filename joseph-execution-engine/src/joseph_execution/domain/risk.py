@@ -3,8 +3,19 @@
 from __future__ import annotations
 
 import dataclasses
+import decimal
 
 from joseph_execution.domain import enums
+
+DEFAULT_TWD_LIMIT_FACTOR = decimal.Decimal(30)
+"""Default multiplier of USD-sized money limits for TWD accounts.
+
+Notional and loss limits are in the account's own currency; TWD accounts
+(TWSE, TPEx, the TWD paper account) multiply the USD-sized defaults and
+platform hard caps by this factor, so one board lot of a large-cap is not
+blocked by a USD-sized cap. It is a sizing convention, not an exchange
+rate. Deployments override it with ``JOSEPH_TWD_LIMIT_FACTOR``.
+"""
 
 
 @dataclasses.dataclass(frozen=True, slots=True)

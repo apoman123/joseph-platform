@@ -16,6 +16,7 @@ from joseph_execution.adapters.brokers import cathay
 from joseph_execution.adapters.brokers import ibkr
 from joseph_execution.domain import enums
 from joseph_execution.domain import errors
+from joseph_execution.domain import risk
 from joseph_execution.platform import clock as clock_lib
 from joseph_execution.platform import config
 from joseph_execution.platform import logging as log_lib
@@ -226,6 +227,27 @@ def test_money_limits_scale_with_the_account_currency() -> None:
         limits.PLATFORM_HARD_LIMITS.max_position_notional * 30
     )
     assert limits.hard_limits("USD") == limits.PLATFORM_HARD_LIMITS
+    assert limits.money_factor("TWD") == risk.DEFAULT_TWD_LIMIT_FACTOR == 30
+    assert limits.money_factor("USD", D(40)) == 1
+    custom = limits.from_mapping(None, "TWD", D(32))
+    assert custom.max_account_notional == usd.max_account_notional * 32
+    assert limits.hard_limits("TWD", D(32)).max_daily_loss == (
+        limits.PLATFORM_HARD_LIMITS.max_daily_loss * 32
+    )
+    assert limits.from_mapping(None, "USD", D(32)) == usd
+
+
+def test_twd_limit_factor_is_configurable() -> None:
+    """JOSEPH_TWD_LIMIT_FACTOR sets the TWD factor; the default stays 30."""
+    assert config.securities_from_env({}).twd_limit_factor == D(30)
+    assert config.securities_from_env(
+        {"JOSEPH_TWD_LIMIT_FACTOR": " "}
+    ).twd_limit_factor == D(30)
+    tuned = config.from_env({"JOSEPH_TWD_LIMIT_FACTOR": "31.5"})
+    assert tuned.securities.twd_limit_factor == D("31.5")
+    for bad in ("0", "-30", "thirty", "NaN", "Infinity"):
+        with pytest.raises(ValueError, match="JOSEPH_TWD_LIMIT_FACTOR"):
+            config.securities_from_env({"JOSEPH_TWD_LIMIT_FACTOR": bad})
 
 
 @respx.mock
@@ -278,6 +300,7 @@ async def test_http_gateway_reads_sessions_closes_and_securities() -> None:
                         ],
                         "price_limit_pct": "10",
                         "board_lot": "1000",
+                        "asset_class": "EQUITY",
                     }
                 ]
             },
@@ -295,6 +318,7 @@ async def test_http_gateway_reads_sessions_closes_and_securities() -> None:
     assert meta is not None and meta.board_lot == D(1000)
     assert meta.tick_for(D(600)) == D(1) and meta.calendar == "XTAI"
     assert meta.listing_exchange == "TWSE" and meta.quote == "TWD"
+    assert meta.asset_class is enums.AssetClass.EQUITY
     await gateway.close()
 
 
@@ -318,12 +342,26 @@ async def test_http_gateway_fails_closed_on_bad_payloads() -> None:
     assert await gateway.sessions("XTAI", 0, 1) is None
     assert await gateway.previous_close(fixtures.TSMC) is None
     assert market_http.parse_previous_close({"candles": []}) is None
-    assert market_http.parse_instrument(
+    bare = market_http.parse_instrument(
         {
             "instrument_id": "mock:perp:BTCUSD",
             "tick_size": "0.1",
             "lot_size": "0.001",
             "min_qty": "0.001",
         }
-    ).continuous
+    )
+    assert bare.continuous and bare.asset_class is enums.AssetClass.UNKNOWN
+    row = {
+        "instrument_id": fixtures.YUANTA_US20,
+        "tick_size": "0.01",
+        "lot_size": "1",
+        "min_qty": "1",
+    }
+    for raw, parsed in (
+        ("BOND", enums.AssetClass.BOND),
+        ("PRIVATE_CREDIT", enums.AssetClass.UNKNOWN),
+        (None, enums.AssetClass.UNKNOWN),
+    ):
+        meta = market_http.parse_instrument({**row, "asset_class": raw})
+        assert meta.asset_class is parsed
     await gateway.close()

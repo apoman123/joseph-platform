@@ -1007,12 +1007,15 @@ class PaperTradingAdapter:
         if meta is None or not equities.is_security(req.instrument_id):
             return self._fill(account_id, order, quantity, price, maker)
         ref = equities.parse_instrument_id(req.instrument_id)
+        now = self._clock.now_ms()
         fee = None
         if equities.is_taiwan(ref.venue):
             fee = equities.taiwan_fee(
-                req.side, quantity * price, ref.market_type
+                req.side,
+                quantity * price,
+                equities.taiwan_tax_class(req.instrument_id, meta.asset_class),
+                now,
             )
-        now = self._clock.now_ms()
         days = equities.SETTLEMENT_DAYS.get(meta.calendar, 2)
         sessions = await self._sessions(meta)
         settles = (

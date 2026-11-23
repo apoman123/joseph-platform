@@ -74,6 +74,8 @@ class OmsSettings:
         queue_closed_market_orders: Let DAY market orders for securities
             queue for the next open while the exchange is closed (where
             the broker allows it); otherwise they are rejected.
+        twd_limit_factor: Multiplier of USD-sized money risk limits for
+            TWD accounts (``JOSEPH_TWD_LIMIT_FACTOR``).
     """
 
     live_trading_enabled: bool = False
@@ -87,6 +89,7 @@ class OmsSettings:
     max_reconcile_attempts: int = 8
     inline_dispatch: bool = True
     queue_closed_market_orders: bool = False
+    twd_limit_factor: decimal.Decimal = risk.DEFAULT_TWD_LIMIT_FACTOR
 
 
 @dataclasses.dataclass(frozen=True, slots=True)
@@ -694,6 +697,7 @@ class OmsService:
             lim = risk_limits.from_mapping(
                 uow.risk_limits.get(principal.tenant_id, account.account_id),
                 account.currency,
+                self.settings.twd_limit_factor,
             )
             position = uow.positions.get(
                 account.account_id, request.instrument_id, request.mode
@@ -766,7 +770,7 @@ class OmsService:
             await _venue_balances(adapter, account, request.mode, caps),
         )
         est = preview_lib.estimate(
-            request, instrument, quote, book, self.settings.fees
+            request, instrument, quote, book, self.settings.fees, now_ms=now
         )
         open_count = sum(1 for p in val.positions if p.signed_qty != 0)
         ctx = risk_context.RiskContext(

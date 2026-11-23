@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import dataclasses
 import decimal
 
 import pytest
@@ -9,6 +10,7 @@ import pytest
 from joseph_execution.domain import enums
 from joseph_execution.domain import errors
 from joseph_execution.domain import intents
+from joseph_execution.ports import trading
 from joseph_execution.testing import harness
 
 D = decimal.Decimal
@@ -360,3 +362,46 @@ async def test_insufficient_margin_and_tenant_isolation() -> None:
     assert svc.oms.list_orders(harness.TENANT_B) == []
     with pytest.raises(errors.ExecutionError):
         await svc.oms.submit_intent(harness.TENANT_B, _req(), "steal")
+
+
+async def test_reconciler_skips_unmanaged_holdings(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Unmanaged holdings never block the account; mislabelled ones would."""
+    h = harness.build()
+    oms = h.container.services.oms
+    assert (await oms.submit_intent(A, _req(), "k1")).decision.allowed
+    paper = h.container.paper
+    real = paper.list_positions
+    emerging = trading.VenuePosition(
+        "oes:stock:7777",
+        D(3000),
+        D(35),
+        unmanaged_note="7777 is an emerging-board (興櫃) holding",
+    )
+    extra = [emerging]
+
+    async def with_holding(account_id: str) -> list[trading.VenuePosition]:
+        """Adds the extra holdings to the simulator's positions.
+
+        Args:
+            account_id: Account.
+
+        Returns:
+            Positions.
+        """
+        return [*await real(account_id), *extra]
+
+    monkeypatch.setattr(paper, "list_positions", with_holding)
+    report = await h.container.services.reconciler.run_once()
+    assert (report.mismatches, report.unmanaged) == (0, 1)
+    assert (await oms.submit_intent(A, _req(), "k2")).decision.allowed
+    extra[:] = [
+        dataclasses.replace(
+            emerging, instrument_id="twse:stock:7777", unmanaged_note=None
+        )
+    ]
+    report = await h.container.services.reconciler.run_once()
+    assert (report.mismatches, report.unmanaged) == (1, 0)
+    blocked = await oms.submit_intent(A, _req(), "k3")
+    assert blocked.decision.primary_code() == "POSITION_UNKNOWN"

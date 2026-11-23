@@ -10,7 +10,8 @@ simulator:
 * Sessions from exchange calendars, DAY-order expiry and settlement days.
 * Price-dependent tick ladders and daily price limits (TWSE and TPEx +-10%
   from the reference price), board lots and intraday odd lots.
-* Estimated Taiwan brokerage fees and securities transaction tax.
+* Estimated Taiwan brokerage fees and the securities transaction tax by
+  trade date (stocks, ETFs, bond ETFs during the statutory suspension).
 
 TPEx (Taipei Exchange) mainboard listings follow the TWSE rules here, as
 TPEx publishes them ("上櫃有價證券交易系統簡介",
@@ -26,6 +27,7 @@ emerging-stock board (興櫃) is not a ``tpex`` listing.
 from __future__ import annotations
 
 import dataclasses
+import datetime
 import decimal
 import enum
 from collections.abc import Mapping
@@ -114,12 +116,6 @@ DISPLAY_NAMES: Mapping[str, str] = {
 
 TAIWAN_BROKERAGE_RATE = decimal.Decimal("0.001425")
 """Statutory maximum brokerage commission (0.1425%) before discounts."""
-
-TAIWAN_STOCK_TAX_RATE = decimal.Decimal("0.003")
-"""Securities transaction tax on stock sales (0.3%)."""
-
-TAIWAN_ETF_TAX_RATE = decimal.Decimal("0.001")
-"""Securities transaction tax on ETF sales (0.1%)."""
 
 _DAY_MS = 86_400_000
 
@@ -576,22 +572,203 @@ def is_taiwan(venue: str) -> bool:
     return venue in TAIWAN_VENUES
 
 
+# ---------------------------------------------------------------------------
+# Taiwan securities transaction tax (證券交易稅)
+# ---------------------------------------------------------------------------
+#
+# Source: 證券交易稅條例 as last amended 2025-01-02 (民國114年1月2日) in the
+# Ministry of Finance law database, read 2026-11-23:
+# https://law-out.mof.gov.tw/LawContent.aspx?id=FL006079
+# A bill extending the bond ETF suspension to 2036-12-31 and adding active
+# bond ETFs from 2027-01-01 passed the Executive Yuan on 2026-10-01:
+# https://www.ey.gov.tw/Page/9277F759E41CCD91/4d7b8a90-f834-4035-ab54-7728b91f243b
+# and the Legislative Yuan Finance Committee's first review on 2026-11-11:
+# https://www.cna.com.tw/news/afe/202611110159.aspx
+# It is not law as of 2026-11-23 (no third reading). Only enacted windows
+# are modelled: once the bill is promulgated, move the end of
+# BOND_ETF_TAX_SUSPENSION and add active bond ETFs.
+
+TAIWAN_STOCK_TAX_RATE = decimal.Decimal("0.003")
+"""Sale tax on shares: 證券交易稅條例 §2(1), 千分之三 (0.3%)."""
+
+TAIWAN_ETF_TAX_RATE = decimal.Decimal("0.001")
+"""Sale tax on ETF units: §2(2), 千分之一 (0.1%).
+
+ETF beneficiary certificates are "其他經政府核准之有價證券".
+"""
+
+TAIWAN_DAY_TRADE_TAX_RATE = decimal.Decimal("0.0015")
+"""Sale tax of a same-day round trip in shares: §2-2, 千分之一點五 (0.15%).
+
+Applies when the same account at the same broker buys with cash and sells
+the same quantity of the same TWSE or TPEx stock on one trading day
+(現股當日沖銷); ETFs are not covered.
+"""
+
+TAIPEI = datetime.timezone(datetime.timedelta(hours=8), "Asia/Taipei")
+"""Taiwan time (UTC+8, no daylight saving): tax rules go by trade date."""
+
+_NOT_INDEX_BOND_ETF = frozenset("LMRSUVAD")
+"""Sixth code characters of ETFs outside the §2-1 bond ETF suspension.
+
+From 中華民國證券市場編碼原則 (Financial Supervisory Commission,
+2020-05-01):
+https://www.twse.com.tw/staticFiles/announcement/announcement/1090007509-2.pdf
+Leveraged ETFs end in L (M in foreign currency) and inverse ETFs in R (S),
+leveraged and inverse bond ETFs included, which §2-1 excludes; futures ETFs
+(U, V) are futures trust funds, not the securities investment trust funds
+§2-1 names. Active ETFs end in A, active bond ETFs in D (e.g. 00983D,
+listed on TWSE as 主動式ETF); they are not index funds (指數股票型基金),
+so the suspension does not cover them (the pending bill would, from
+2027-01-01).
+"""
+
+
+@dataclasses.dataclass(frozen=True, slots=True)
+class TaxWindow:
+    """Taipei trade dates, both inclusive, in which a tax rule applies.
+
+    Attributes:
+        first: First trade date.
+        last: Last trade date.
+    """
+
+    first: datetime.date
+    last: datetime.date
+
+    def contains(self, day: datetime.date) -> bool:
+        """Checks whether a trade date falls inside the window.
+
+        Args:
+            day: Taipei trade date.
+
+        Returns:
+            True when ``first <= day <= last``.
+        """
+        return self.first <= day <= self.last
+
+
+BOND_ETF_TAX_SUSPENSION = TaxWindow(
+    datetime.date(2017, 1, 1), datetime.date(2026, 12, 31)
+)
+"""§2-1(2): no tax on bond ETF sales, 2017-01-01 through 2026-12-31.
+
+The tax on listed and OTC index ETFs investing mainly in bonds is
+suspended "自中華民國一百零六年一月一日起至一百十五年十二月三十一日止";
+leveraged and inverse bond ETFs are excluded. Outside the window bond ETFs
+pay the 0.1% ETF rate.
+"""
+
+DAY_TRADE_TAX_REDUCTION = TaxWindow(
+    datetime.date(2017, 4, 28), datetime.date(2027, 12, 31)
+)
+"""§2-2: the 0.15% day-trade rate for brokered trades, through 2027-12-31.
+
+"自中華民國一百零六年四月二十八日起至一百十六年十二月三十一日止" (the
+Legislative Yuan extended it on 2024-12-31; amendment of 2025-01-02).
+"""
+
+
+class TaiwanTaxClass(enum.StrEnum):
+    """Which securities transaction tax a TWSE/TPEx sale pays."""
+
+    STOCK = "stock"
+    ETF = "etf"
+    BOND_ETF = "bond_etf"
+
+
+def taipei_date(ts_ms: int) -> datetime.date:
+    """Returns the Taipei calendar date of a time.
+
+    Args:
+        ts_ms: UTC epoch milliseconds.
+
+    Returns:
+        Taipei date.
+    """
+    return datetime.datetime.fromtimestamp(ts_ms / 1000, TAIPEI).date()
+
+
+def taiwan_tax_class(
+    instrument_id: str, asset_class: enums.AssetClass | None
+) -> TaiwanTaxClass:
+    """Classifies a TWSE/TPEx listing for the transaction tax.
+
+    Bond ETFs are ETFs the market engine classifies as ``BOND``, less the
+    funds §2-1 excludes by their code (see ``_NOT_INDEX_BOND_ETF``).
+
+    Args:
+        instrument_id: Canonical id such as ``tpex:etf:00679B``.
+        asset_class: Asset class from the market engine, ``None`` or
+            ``UNKNOWN`` when not known (charged as a plain ETF).
+
+    Returns:
+        Tax class.
+    """
+    ref = parse_instrument_id(instrument_id)
+    if ref.market_type != "etf":
+        return TaiwanTaxClass.STOCK
+    if (
+        asset_class is enums.AssetClass.BOND
+        and ref.symbol[5:6] not in _NOT_INDEX_BOND_ETF
+    ):
+        return TaiwanTaxClass.BOND_ETF
+    return TaiwanTaxClass.ETF
+
+
+def taiwan_tax_rate(
+    tax_class: TaiwanTaxClass, trade_ms: int, *, day_trade: bool = False
+) -> decimal.Decimal:
+    """Returns the securities transaction tax rate of a sale.
+
+    Args:
+        tax_class: Tax class of the listing.
+        trade_ms: Trade time; the Taipei trade date selects the rule.
+        day_trade: The sale closes a same-day round trip (現股當沖). The
+            engine does not set it: whether a sale qualifies depends on
+            the broker's day-trading agreement with the investor and on the
+            whole day's buys and sells in the account (including trades
+            outside Joseph), which are only netted after the close, so
+            estimates charge the full 0.3% and the broker's statement
+            decides.
+
+    Returns:
+        Rate on the sale price.
+    """
+    day = taipei_date(trade_ms)
+    if tax_class is TaiwanTaxClass.BOND_ETF:
+        if BOND_ETF_TAX_SUSPENSION.contains(day):
+            return decimals.ZERO
+        return TAIWAN_ETF_TAX_RATE
+    if tax_class is TaiwanTaxClass.ETF:
+        return TAIWAN_ETF_TAX_RATE
+    if day_trade and DAY_TRADE_TAX_REDUCTION.contains(day):
+        return TAIWAN_DAY_TRADE_TAX_RATE
+    return TAIWAN_STOCK_TAX_RATE
+
+
 def taiwan_fee(
     side: enums.OrderSide,
     notional: decimal.Decimal,
-    market_type: str,
+    tax_class: TaiwanTaxClass,
+    trade_ms: int,
+    *,
+    day_trade: bool = False,
 ) -> decimal.Decimal:
     """Estimates Taiwan brokerage fee plus transaction tax for one fill.
 
     TWSE and TPEx listings pay the same statutory rates: the maximum
-    commission (brokers discount it) and the sale tax (0.3% stocks, 0.1%
-    ETFs); each part is floored to whole TWD. Minimum commissions are not
-    modelled.
+    commission (brokers discount it) and the sale tax of
+    ``taiwan_tax_rate``; each part is floored to whole TWD. Minimum
+    commissions are not modelled.
 
     Args:
         side: Fill side (tax applies to sales).
         notional: Shares times price in TWD.
-        market_type: ``stock`` or ``etf``.
+        tax_class: Tax class of the listing (``taiwan_tax_class``).
+        trade_ms: Trade time.
+        day_trade: The sale closes a same-day round trip (see
+            ``taiwan_tax_rate``).
 
     Returns:
         Estimated charge in TWD.
@@ -601,10 +778,6 @@ def taiwan_fee(
     )
     tax = decimals.ZERO
     if side is enums.OrderSide.SELL:
-        rate = (
-            TAIWAN_ETF_TAX_RATE
-            if market_type == "etf"
-            else TAIWAN_STOCK_TAX_RATE
-        )
+        rate = taiwan_tax_rate(tax_class, trade_ms, day_trade=day_trade)
         tax = decimals.floor_to_step(notional * rate, decimals.ONE)
     return brokerage + tax

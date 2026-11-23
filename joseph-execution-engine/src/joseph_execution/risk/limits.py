@@ -8,6 +8,7 @@ from collections.abc import Mapping
 
 from joseph_execution.domain import decimals
 from joseph_execution.domain import errors
+from joseph_execution.domain import risk
 
 POLICY_VERSION = "risk-policy-2026.11.1"
 """Policy id recorded on every decision (2026.11.1: account LIVE arming)."""
@@ -90,15 +91,6 @@ PLATFORM_HARD_LIMITS = RiskLimits(
 )
 
 
-CURRENCY_SCALE: Mapping[str, decimal.Decimal] = {"TWD": _D(30)}
-"""Approximate units per USD of non-USD account currencies.
-
-Notional and loss limits are expressed in the account's own currency; the
-USD-sized defaults and platform hard caps are scaled by this factor for
-TWD accounts (TWSE, TPEx), so one board lot of a large-cap is not blocked by a
-USD-sized cap. It is a sizing convention, not an exchange rate.
-"""
-
 _MONEY_FIELDS = (
     "max_account_notional",
     "max_position_notional",
@@ -106,37 +98,67 @@ _MONEY_FIELDS = (
 )
 
 
-def in_currency(base: RiskLimits, currency: str) -> RiskLimits:
+def money_factor(
+    currency: str,
+    twd_limit_factor: decimal.Decimal = risk.DEFAULT_TWD_LIMIT_FACTOR,
+) -> decimal.Decimal:
+    """Returns the multiplier of USD-sized money limits for a currency.
+
+    This is the only place account currencies scale limits.
+
+    Args:
+        currency: Account currency.
+        twd_limit_factor: Factor of TWD accounts (``JOSEPH_TWD_LIMIT_FACTOR``,
+            default ``risk.DEFAULT_TWD_LIMIT_FACTOR``).
+
+    Returns:
+        ``twd_limit_factor`` for TWD, else 1.
+    """
+    return twd_limit_factor if currency == "TWD" else decimals.ONE
+
+
+def in_currency(
+    base: RiskLimits,
+    currency: str,
+    twd_limit_factor: decimal.Decimal = risk.DEFAULT_TWD_LIMIT_FACTOR,
+) -> RiskLimits:
     """Expresses USD-sized money limits in an account currency.
 
     Args:
         base: Limits sized in USD.
         currency: Account currency.
+        twd_limit_factor: Factor of TWD accounts.
 
     Returns:
-        Limits with notional and loss limits scaled.
+        Limits with notional and loss limits scaled by ``money_factor``.
     """
-    scale = CURRENCY_SCALE.get(currency)
-    if scale is None:
+    factor = money_factor(currency, twd_limit_factor)
+    if factor == decimals.ONE:
         return base
-    scaled = {name: getattr(base, name) * scale for name in _MONEY_FIELDS}
+    scaled = {name: getattr(base, name) * factor for name in _MONEY_FIELDS}
     return dataclasses.replace(base, **scaled)
 
 
-def hard_limits(currency: str = "USD") -> RiskLimits:
+def hard_limits(
+    currency: str = "USD",
+    twd_limit_factor: decimal.Decimal = risk.DEFAULT_TWD_LIMIT_FACTOR,
+) -> RiskLimits:
     """Returns the platform hard caps in an account currency.
 
     Args:
         currency: Account currency.
+        twd_limit_factor: Factor of TWD accounts.
 
     Returns:
         Hard caps.
     """
-    return in_currency(PLATFORM_HARD_LIMITS, currency)
+    return in_currency(PLATFORM_HARD_LIMITS, currency, twd_limit_factor)
 
 
 def from_mapping(
-    values: Mapping[str, str] | None, currency: str = "USD"
+    values: Mapping[str, str] | None,
+    currency: str = "USD",
+    twd_limit_factor: decimal.Decimal = risk.DEFAULT_TWD_LIMIT_FACTOR,
 ) -> RiskLimits:
     """Builds limits from stored values, clamped to platform hard caps.
 
@@ -145,7 +167,8 @@ def from_mapping(
     Args:
         values: Stored or user-supplied values; ``None`` for defaults.
         currency: Account currency of money limits (defaults and hard caps
-            scale with ``CURRENCY_SCALE``).
+            scale with ``money_factor``).
+        twd_limit_factor: Factor of TWD accounts.
 
     Returns:
         Effective limits.
@@ -153,8 +176,8 @@ def from_mapping(
     Raises:
         ExecutionError: ``VALIDATION_FAILED`` for unknown keys or bad values.
     """
-    base = in_currency(RiskLimits(), currency)
-    caps = hard_limits(currency)
+    base = in_currency(RiskLimits(), currency, twd_limit_factor)
+    caps = hard_limits(currency, twd_limit_factor)
     if not values:
         return base
     known = {f.name: f for f in dataclasses.fields(RiskLimits)}
