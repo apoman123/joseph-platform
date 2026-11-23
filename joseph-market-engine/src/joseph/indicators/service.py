@@ -735,7 +735,10 @@ class IndicatorQueryService:
         start = calendar.floor(timeframe, oldest)
         bars = calendar.bars_between(timeframe, start, end_ms)
         current = calendar.floor(timeframe, end_ms)
-        closed = bars - (calendar.end_of(timeframe, current) > end_ms)
+        # ``bars`` counts the bar at ``end_ms`` only when it started before
+        # ``end_ms``; on an exact bar boundary every counted bar is closed.
+        still_open = current < end_ms < calendar.end_of(timeframe, current)
+        closed = bars - still_open
         cap = self._config.max_anchored_bars
         if closed > cap:
             raise errors.ValidationFailedError(

@@ -13,7 +13,7 @@ All suites below were run on the final build (Linux, Python 3.13 via uv, Node 24
 | Unit, component, contract, architecture (Vitest) | Terminal | **698 passed** (88 files) · 80% line coverage (the canvas chart adapter is covered by the browser tiers) |
 | Browser system, DEMO mode (Playwright + axe) | Terminal | **34 passed** (incl. panes, structure, settings, compare, replay, drawings + style editor + object list, alert triage, resizing, seconds/1M bars, true delta, signal volume ranking, pop-out windows, P3 tools, anchored VWAP and regression channel) |
 | Full-stack browser: production build + both real engines | All three | **8 passed** (incl. Delta % series and `market_structure` output, seconds bars built from trades with true delta, and an anchored-VWAP drawing fed by the engine series) |
-| Cross-service system (real processes, HTTP + WebSocket) | Both engines | **26 passed** |
+| Cross-service system (real processes, HTTP + WebSocket) | Both engines | **70 passed** (incl. session calendars XNYS/XTAI/USBOND/24x7, the XNYS DEMO stock's bars, classified buy volume and screening, equity paper trading on execution engines with a pinned clock (session rules, DAY expiry, T+1 settlement, closed-market reject and queue policies), the TWD paper account, rate series refused by compiler, backtests and orders, LIVE arming with the gate open, and the anchored-study bar cap) |
 
 ## Static checks
 

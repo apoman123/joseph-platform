@@ -518,6 +518,52 @@ def test_anchor_beyond_the_hard_cap_is_refused() -> None:
         )
 
 
+@pytest.mark.parametrize(
+    ("instrument", "start"),
+    [
+        (testing.DEFAULT_INSTRUMENT, testing.DEFAULT_START_MS),
+        (ACME, testing.STOCK_START_MS),
+    ],
+    ids=["24x7", "XNYS"],
+)
+def test_anchor_cap_counts_every_closed_bar_on_a_boundary(
+    instrument: instruments.InstrumentId, start: int
+) -> None:
+    """At a bar boundary the cap counts all closed bars, not one fewer."""
+    bars = testing.random_walk(
+        2_600, seed=3, instrument_id=instrument, start_ms=start
+    )
+    query, _, _ = _query(bars, service.QueryConfig(max_anchored_bars=2_500))
+    at_ms = bars[-1].end_ms
+    if instrument is ACME:
+        assert XNYS.is_open(at_ms)
+
+    def snapshot(anchor_index: int) -> dict[str, object]:
+        """Requests the anchored VWAP anchored at one bar.
+
+        Args:
+            anchor_index: Index of the anchor bar.
+
+        Returns:
+            Contract ``IndicatorSnapshotList``.
+        """
+        anchor = bars[anchor_index].start_ms
+        return asyncio.run(
+            query.snapshots(
+                instrument,
+                TF.M1,
+                ["anchored_vwap"],
+                at_ms,
+                {"anchored_vwap": {"anchor": "time", "anchor_ms": anchor}},
+            )
+        )
+
+    values = snapshot(-2_500)["snapshots"][0]["values"]  # type: ignore[index]
+    assert values["bars"] == 2_500
+    with pytest.raises(errors.ValidationFailedError, match="is 2501 closed"):
+        snapshot(-2_501)
+
+
 def test_only_anchored_requests_are_widened() -> None:
     """A snapshot set mixing plugins keeps the default window."""
     bars = testing.random_walk(3_000, seed=2)
