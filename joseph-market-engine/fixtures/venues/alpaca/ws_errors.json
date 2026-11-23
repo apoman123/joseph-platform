@@ -1,0 +1,4 @@
+{
+ "auth_failed": "[{\"T\":\"error\",\"code\":402,\"msg\":\"auth failed\"}]",
+ "connection_limit": "[{\"T\":\"error\",\"code\":406,\"msg\":\"connection limit exceeded\"}]"
+}

@@ -296,6 +296,9 @@ class TradeRecorder:
             if venue is not instruments.Venue.MOCK
             and isinstance(adapter, TradeEventPort)
             and adapter.capabilities().market_data.native_ws_trades
+            # No aggressor side (stock exchanges): trades cannot give a true
+            # delta, and those adapters build their own classified bars.
+            and not adapter.capabilities().market_data.classified_delta
         }
         self.reader = trade_archive.ArchiveReader(
             archive,

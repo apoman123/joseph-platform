@@ -49,6 +49,7 @@ from joseph.domain import market
 from joseph.indicators import catalog
 from joseph.indicators import service as indicator_service
 from joseph.indicators.sdk import registry as plugin_registry
+from joseph.market_data.adapters import alpaca
 from joseph.market_data.adapters import binance_vision
 from joseph.market_data.adapters import bitget_archive
 from joseph.market_data.adapters import factory
@@ -227,6 +228,12 @@ def build_container(
         timeout_s=settings.http_timeout_s,
         client=http_client,
         connect=connect,
+        alpaca_config=alpaca.AlpacaConfig(
+            key_id=settings.alpaca_key_id,
+            secret_key=settings.alpaca_secret_key,
+            feed=alpaca.Feed(settings.alpaca_feed),
+            seconds_history_ms=settings.alpaca_seconds_history_ms,
+        ),
     )
     engine = db.create_engine(settings.database_url)
     recorder, archive_engine = _trade_recorder(

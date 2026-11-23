@@ -2,7 +2,13 @@
 
 Run manually (network required); never run in CI::
 
-    uv run python scripts/capture_venue_fixtures.py
+    uv run python scripts/capture_venue_fixtures.py [venue ...]
+
+Venues: binance hyperliquid lighter bitget mexc twse nasdaqtrader treasury
+(default: all). ``twse`` records a short MIS snapshot series and must run
+during a TWSE session (09:00-13:30 Asia/Taipei) to capture live data. Alpaca
+fixtures are hand-written from Alpaca's documentation (no key is needed or
+used here; see ``fixtures/venues/alpaca/README.md``).
 
 Each venue directory under ``fixtures/venues`` receives truncated JSON
 responses so that adapter parsing is contract-tested without network access.
@@ -11,8 +17,10 @@ No credentials are involved: every endpoint is public market data.
 
 from __future__ import annotations
 
+import datetime
 import json
 import pathlib
+import sys
 import time
 from typing import Any
 
@@ -34,6 +42,19 @@ def _save(venue: str, name: str, payload: Any) -> None:
     (directory / f"{name}.json").write_text(
         json.dumps(payload, indent=1, sort_keys=True) + "\n", encoding="utf-8"
     )
+
+
+def _save_text(venue: str, name: str, body: str) -> None:
+    """Writes one text fixture file (CSV, pipe-separated).
+
+    Args:
+        venue: Venue directory name.
+        name: File name with extension.
+        body: Response text.
+    """
+    directory = _ROOT / venue
+    directory.mkdir(parents=True, exist_ok=True)
+    (directory / name).write_text(body, encoding="utf-8")
 
 
 def _binance(client: httpx.Client) -> None:
@@ -286,14 +307,204 @@ def _mexc(client: httpx.Client) -> None:
     )
 
 
+_TWSE_CODES = (
+    "2330",
+    "2317",
+    "2603",
+    "0050",
+    "00878",
+    "00865B",
+    "00631L",
+    "00632R",
+    "00646",
+    "00625K",
+    "01001T",
+    "2881A",
+    "2314",
+)
+"""Stocks, domestic/foreign/leveraged/inverse/bond ETFs and exclusions."""
+_MIS_CODES = ("2330", "0050", "2317", "00865B")
+_TWSE_PACE_S = 2.5
+"""TWSE blocks clients above roughly 3 requests per 5 seconds."""
+_COMPANY_FIELDS = (
+    "出表日期",
+    "公司代號",
+    "公司名稱",
+    "公司簡稱",
+    "英文簡稱",
+    "產業別",
+    "上市日期",
+)
+_FUND_FIELDS = (
+    "出表日期",
+    "基金代號",
+    "基金簡稱",
+    "基金英文名稱",
+    "基金類型",
+    "標的指數/追蹤指數名稱",
+    "是否包含國外成分股",
+    "上市日期",
+)
+
+
+def _twse(client: httpx.Client) -> None:
+    """Captures TWSE OpenAPI, STOCK_DAY, holiday and MIS samples.
+
+    Args:
+        client: HTTP client.
+    """
+    openapi = "https://openapi.twse.com.tw/v1"
+    keep = set(_TWSE_CODES)
+    day_all = client.get(f"{openapi}/exchangeReport/STOCK_DAY_ALL").json()
+    _save("twse", "stock_day_all", [r for r in day_all if r["Code"] in keep])
+    companies = client.get(f"{openapi}/opendata/t187ap03_L").json()
+    _save(
+        "twse",
+        "t187ap03_L",
+        [
+            {k: r.get(k) for k in _COMPANY_FIELDS}
+            for r in companies
+            if r["公司代號"] in keep
+        ],
+    )
+    funds = client.get(f"{openapi}/opendata/t187ap47_L").json()
+    _save(
+        "twse",
+        "t187ap47_L",
+        [
+            {k: r.get(k) for k in _FUND_FIELDS}
+            for r in funds
+            if r["基金代號"] in keep
+        ],
+    )
+    for name in ("TWT88U", "TWTAWU"):
+        _save(
+            "twse",
+            name.lower(),
+            client.get(f"{openapi}/exchangeReport/{name}").json(),
+        )
+    _save(
+        "twse",
+        "holiday_openapi",
+        client.get(f"{openapi}/holidaySchedule/holidaySchedule").json(),
+    )
+    www = "https://www.twse.com.tw/rwd/zh"
+    year = datetime.datetime.now(datetime.UTC).year
+    for offset in (0, 1):
+        _save(
+            "twse",
+            f"holiday_rwd_{year + offset}",
+            client.get(
+                f"{www}/holidaySchedule/holidaySchedule",
+                params={"response": "json", "date": f"{year + offset}0101"},
+            ).json(),
+        )
+        time.sleep(_TWSE_PACE_S)
+    month = datetime.datetime.now(datetime.UTC).strftime("%Y%m01")
+    for code in ("2330", "0050"):
+        _save(
+            "twse",
+            f"stock_day_{code}",
+            client.get(
+                f"{www}/afterTrading/STOCK_DAY",
+                params={"date": month, "stockNo": code, "response": "json"},
+            ).json(),
+        )
+        time.sleep(_TWSE_PACE_S)
+    series = []
+    query = "|".join(f"tse_{code}.tw" for code in (*_MIS_CODES, "00679B"))
+    for _ in range(24):
+        started = int(time.time() * 1000)
+        body = client.get(
+            "https://mis.twse.com.tw/stock/api/getStockInfo.jsp",
+            params={"ex_ch": query, "json": "1", "delay": "0", "_": started},
+        ).json()
+        series.append({"received_ms": started, "response": body})
+        time.sleep(5.0)
+    _save("twse", "mis_series", {"query": query, "responses": series})
+
+
+_NASDAQ_KEEP = frozenset(
+    {
+        "AAPL", "QQQ", "TLT", "IEF", "SHY", "BND", "MBB", "EMB", "VCIT",
+        "VCSH", "BNDX", "AACIU", "ZXYZ.A", "GOOGL", "BRKR",
+    }
+)  # fmt: skip
+_OTHER_KEEP = frozenset(
+    {
+        "BRK.A", "BRK.B", "BF.B", "AGG", "LQD", "HYG", "TIP", "GOVT", "BIL",
+        "SGOV", "JNK", "MUB", "SPY", "ABR$D", "AAC.U", "AAC.W", "ZEXIT",
+        "MTEST", "ZZZTX", "AIIA.R", "IBM", "AAA",
+    }
+)  # fmt: skip
+
+
+def _nasdaqtrader(client: httpx.Client) -> None:
+    """Captures a slice of the Nasdaq Trader symbol directory.
+
+    Args:
+        client: HTTP client.
+    """
+    base = "https://www.nasdaqtrader.com/dynamic/SymDir"
+    for name, keep in (
+        ("nasdaqlisted.txt", _NASDAQ_KEEP),
+        ("otherlisted.txt", _OTHER_KEEP),
+    ):
+        lines = client.get(f"{base}/{name}").text.splitlines()
+        kept = [lines[0]]
+        kept += [line for line in lines[1:-1] if line.split("|")[0] in keep]
+        kept.append(lines[-1])
+        _save_text("nasdaqtrader", name, "\n".join(kept) + "\n")
+
+
+def _treasury(client: httpx.Client) -> None:
+    """Captures Treasury par and real yield-curve CSV years.
+
+    Args:
+        client: HTTP client.
+    """
+    base = (
+        "https://home.treasury.gov/resource-center/data-chart-center/"
+        "interest-rates/daily-treasury-rates.csv"
+    )
+    year = datetime.datetime.now(datetime.UTC).year
+    for curve, kind, years in (
+        ("nominal", "daily_treasury_yield_curve", (year, 2002, 1990)),
+        ("real", "daily_treasury_real_yield_curve", (year,)),
+    ):
+        for when in years:
+            body = client.get(
+                f"{base}/{when}/all",
+                params={
+                    "type": kind,
+                    "field_tdr_date_value": str(when),
+                    "page": "",
+                    "_format": "csv",
+                },
+            ).text
+            _save_text("treasury", f"{curve}_{when}.csv", body)
+            time.sleep(1.0)
+
+
 def main() -> None:
-    """Captures every venue's fixtures."""
+    """Captures the fixtures of the venues named on the command line."""
+    captures = {
+        "binance": _binance,
+        "hyperliquid": _hyperliquid,
+        "lighter": _lighter,
+        "bitget": _bitget,
+        "mexc": _mexc,
+        "twse": _twse,
+        "nasdaqtrader": _nasdaqtrader,
+        "treasury": _treasury,
+    }
+    names = sys.argv[1:] or list(captures)
     with httpx.Client(
-        timeout=20.0, headers={"User-Agent": "joseph-fixture-capture"}
+        timeout=30.0, headers={"User-Agent": "joseph-fixture-capture"}
     ) as c:
-        for capture in (_binance, _hyperliquid, _lighter, _bitget, _mexc):
-            capture(c)
-            print(f"captured {capture.__name__.strip('_')}")  # noqa: T201
+        for name in names:
+            captures[name](c)
+            print(f"captured {name}")  # noqa: T201
 
 
 if __name__ == "__main__":

@@ -236,6 +236,10 @@ class Instrument:
             percent (TWSE 10), ``None`` when unlimited.
         board_lot: Shares per board lot (TWSE 1000), ``None`` when orders
             are in single units.
+        name: Issuer or series name in English (e.g. ``TSMC``), ``None``
+            when the venue publishes none.
+        local_name: Name in the listing market's language (e.g. ``台積電``
+            on TWSE), ``None`` when none.
     """
 
     key: InstrumentKey
@@ -257,6 +261,8 @@ class Instrument:
     tick_ladder: tuple[TickStep, ...] = ()
     price_limit_pct: decimal.Decimal | None = None
     board_lot: decimal.Decimal | None = None
+    name: str | None = None
+    local_name: str | None = None
 
     @property
     def calendar(self) -> str:
@@ -315,4 +321,6 @@ class Instrument:
             "tick_ladder": [step.to_contract() for step in self.tick_ladder],
             "price_limit_pct": decimals.format_optional(self.price_limit_pct),
             "board_lot": decimals.format_optional(self.board_lot),
+            "name": self.name,
+            "local_name": self.local_name,
         }

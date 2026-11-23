@@ -266,14 +266,20 @@ def demo_client(
 
 
 @pytest.fixture
-def venue_client() -> Iterator[tuple[testclient.TestClient, respx.Router]]:
+def venue_client(
+    exchange_routes: Callable[[respx.Router], None],
+) -> Iterator[tuple[testclient.TestClient, respx.Router]]:
     """Serves an app with every venue backed by captured fixtures.
+
+    Args:
+        exchange_routes: Installer of the exchange and rate venue routes.
 
     Yields:
         Test client and the respx router (to inject failures).
     """
     with respx.mock(assert_all_called=False) as router:
         install_routes(router)
+        exchange_routes(router)
         container = bootstrap.build_container(
             _settings(demo_only=False),
             clock=clock_lib.ManualClock(CAPTURE_MS),
