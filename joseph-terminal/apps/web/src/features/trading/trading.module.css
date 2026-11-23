@@ -4,8 +4,15 @@
 }
 .body {
   display: grid;
+  /* Rows keep their content height and the panel body scrolls; auto rows
+     would let overflow-hidden controls (segmented buttons) collapse. */
+  grid-auto-rows: max-content;
   align-content: start;
   gap: var(--space-3);
+}
+.accountStatus {
+  display: grid;
+  gap: 2px;
 }
 .grow {
   flex: 1;

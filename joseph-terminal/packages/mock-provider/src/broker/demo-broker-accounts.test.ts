@@ -1,10 +1,11 @@
 /**
- * @fileoverview Tests for the DEMO broker accounts: IBKR paper, SinoPac
- * simulation and live (credentials missing), Cathay awaiting its API SDK,
- * routing of stocks to brokers, TWSE lots and ladder ticks, and per-account
- * cash and positions.
+ * @fileoverview Tests for the DEMO accounts against the execution contract:
+ * USD and TWD paper accounts, IBKR paper, SinoPac simulation and live
+ * (credentials missing), Cathay awaiting its API SDK; routing by
+ * `tradable_venues`; order types, DAY for sessions only, intraday odd lots,
+ * outside RTH, closed-market rules, long-only cash and settled cash.
  */
-import type {OrderIntentRequest, TradingCapabilities} from '@joseph/contracts';
+import type {OrderIntentRequest} from '@joseph/contracts';
 import {describe, expect, it} from 'vitest';
 import {DemoExecutionClient} from './demo-execution-client';
 import {
@@ -13,9 +14,15 @@ import {
   DEMO_IBKR_ACCOUNT_ID,
   DEMO_SINOPAC_ACCOUNT_ID,
   DEMO_SINOPAC_LIVE_ACCOUNT_ID,
+  DEMO_TWD_ACCOUNT_ID,
   demoAccount,
   demoRoutingProblem,
 } from './instruments';
+
+/** Friday 2027-01-15 08:00 UTC: NYSE and TWSE are both closed. */
+const CLOSED = 1_800_000_000_000;
+/** Monday 2027-01-18 02:00 UTC = 10:00 Taipei: TWSE is open. */
+const TWSE_OPEN = Date.UTC(2027, 0, 18, 2);
 
 /**
  * Builds a stock order.
@@ -31,7 +38,7 @@ function order(patch: Partial<OrderIntentRequest> = {}): OrderIntentRequest {
     order_type: 'limit',
     quantity_base: '100',
     limit_price: '182.40',
-    time_in_force: 'GTC',
+    time_in_force: 'DAY',
     reduce_only: false,
     mode: 'PAPER',
     source: 'MANUAL_TICKET',
@@ -40,13 +47,29 @@ function order(patch: Partial<OrderIntentRequest> = {}): OrderIntentRequest {
 }
 
 /**
+ * TWSE order on the SinoPac simulation account.
+ * @param patch Overrides.
+ * @return Request.
+ */
+function twse(patch: Partial<OrderIntentRequest> = {}): OrderIntentRequest {
+  return order({
+    account_id: DEMO_SINOPAC_ACCOUNT_ID,
+    instrument_id: 'mock:stock:9901',
+    quantity_base: '1000',
+    limit_price: '585',
+    ...patch,
+  });
+}
+
+/**
  * Broker running tasks immediately.
+ * @param now Clock.
  * @return Broker.
  */
-function broker(): DemoExecutionClient {
+function broker(now = CLOSED): DemoExecutionClient {
   return new DemoExecutionClient({
     schedule: task => task(),
-    now: () => 1_800_000_000_000,
+    now: () => now,
     partialFills: false,
   });
 }
@@ -67,28 +90,42 @@ async function failing(
     .map(check => check.check);
 }
 
-describe('DEMO broker accounts', () => {
-  it('lists the crypto paper account first, then the brokers', async () => {
+describe('DEMO accounts', () => {
+  it('lists paper accounts first, then the brokers, with capabilities', async () => {
     const {accounts} = await broker().listAccounts();
     expect(accounts.map(a => a.account_id)).toEqual([
       DEMO_ACCOUNT_ID,
+      DEMO_TWD_ACCOUNT_ID,
       DEMO_IBKR_ACCOUNT_ID,
       DEMO_SINOPAC_ACCOUNT_ID,
       DEMO_SINOPAC_LIVE_ACCOUNT_ID,
       DEMO_CATHAY_ACCOUNT_ID,
     ]);
     expect(accounts.every(a => !a.modes.includes('LIVE'))).toBe(true);
-    const cathay = accounts.find(a => a.venue === 'cathay');
-    expect(cathay?.status).toBe('TRADING_UNAVAILABLE');
-    expect(cathay?.capabilities.notes.join(' ')).toMatch(/API SDK/);
-    const live = accounts.find(
-      a => a.account_id === DEMO_SINOPAC_LIVE_ACCOUNT_ID
-    );
+    const [usd, twd, ibkr, sinopac, live, cathay] = accounts;
+    expect(usd?.capabilities).toMatchObject({
+      tradable_venues: ['nasdaq', 'nyse'],
+      cash_account: true,
+      simulation: true,
+      currencies: ['USD'],
+    });
+    expect(twd?.capabilities.tradable_venues).toEqual(['twse']);
+    expect(twd?.settled_cash).toBe('3000000.00');
+    expect(ibkr?.capabilities).toMatchObject({
+      outside_rth: true,
+      odd_lot: false,
+      queue_market_when_closed: true,
+      time_in_force: ['DAY', 'GTC', 'IOC'],
+    });
+    expect(sinopac?.capabilities).toMatchObject({
+      odd_lot: true,
+      queue_market_when_closed: false,
+      order_types: ['market', 'limit'],
+    });
     expect(live).toMatchObject({status: 'DISCONNECTED', equity: null});
-    const ibkr = accounts.find(a => a.venue === 'ibkr');
-    const caps = ibkr?.capabilities as unknown as Record<string, unknown>;
-    expect(caps.outside_rth).toBe(true);
-    expect(ibkr?.capabilities.time_in_force).toEqual(['DAY', 'GTC']);
+    expect(live?.capabilities.notes.join(' ')).toMatch(/execution server/);
+    expect(cathay?.status).toBe('TRADING_UNAVAILABLE');
+    expect(cathay?.capabilities.notes.join(' ')).toMatch(/Cathay API SDK/);
     expect(
       (await broker().getAccountSummary(DEMO_SINOPAC_ACCOUNT_ID)).currency
     ).toBe('TWD');
@@ -97,64 +134,120 @@ describe('DEMO broker accounts', () => {
     );
   });
 
-  it('routes stocks only to the broker that trades them', async () => {
+  it('routes by tradable venues like the engine', async () => {
     const client = broker();
     expect(await failing(client, order())).toEqual([]);
+    expect(await failing(client, order({account_id: DEMO_ACCOUNT_ID}))).toEqual(
+      []
+    );
     expect(
       await failing(client, order({account_id: DEMO_SINOPAC_ACCOUNT_ID}))
     ).toContain('account.routing');
     expect(
-      await failing(client, order({account_id: DEMO_ACCOUNT_ID}))
+      await failing(client, twse({account_id: DEMO_ACCOUNT_ID}))
     ).toContain('account.routing');
-    const twse = order({
-      account_id: DEMO_SINOPAC_ACCOUNT_ID,
-      instrument_id: 'mock:stock:9901',
-      quantity_base: '2000',
-      limit_price: '585',
-    });
-    expect(await failing(client, twse)).toEqual([]);
-    const spec = demoAccount(DEMO_IBKR_ACCOUNT_ID);
     expect(
-      spec && demoRoutingProblem(spec, {key: {market_type: 'perp'}} as never)
-    ).toMatch(/Nasdaq and NYSE/);
+      await failing(client, twse({account_id: DEMO_TWD_ACCOUNT_ID}))
+    ).toEqual([]);
+    const crypto = order({
+      instrument_id: 'mock:perp:BTCUSD',
+      quantity_base: '0.010',
+      limit_price: '95000',
+      time_in_force: 'GTC',
+    });
+    expect(
+      await failing(client, {...crypto, account_id: DEMO_TWD_ACCOUNT_ID})
+    ).toContain('account.routing');
+    expect(await failing(client, crypto)).toContain('account.routing');
+    expect(
+      await failing(client, {...crypto, account_id: DEMO_ACCOUNT_ID})
+    ).toEqual([]);
+    const spec = demoAccount(DEMO_TWD_ACCOUNT_ID);
+    expect(
+      spec &&
+        demoRoutingProblem(spec, {
+          instrument_id: 'x',
+          key: {venue: 'mock', market_type: 'stock'},
+        } as never)
+    ).toMatch(/does not route/);
   });
 
   it('refuses disconnected and SDK-less broker accounts', async () => {
     const client = broker();
-    const twse = order({
-      instrument_id: 'mock:stock:9901',
-      quantity_base: '1000',
-      limit_price: '585',
-    });
     expect(
-      await failing(client, {...twse, account_id: DEMO_CATHAY_ACCOUNT_ID})
+      await failing(client, twse({account_id: DEMO_CATHAY_ACCOUNT_ID}))
     ).toContain('account.connected');
     expect(
-      await failing(client, {
-        ...twse,
-        account_id: DEMO_SINOPAC_LIVE_ACCOUNT_ID,
-      })
+      await failing(client, twse({account_id: DEMO_SINOPAC_LIVE_ACCOUNT_ID}))
     ).toContain('account.connected');
   });
 
-  it('checks TWSE board lots and the tick ladder', async () => {
-    const client = broker();
-    const base = order({
-      account_id: DEMO_SINOPAC_ACCOUNT_ID,
-      instrument_id: 'mock:stock:9901',
-      limit_price: '585',
-    });
-    expect(await failing(client, {...base, quantity_base: '1500'})).toContain(
+  it('applies order types, DAY, odd lots, outside RTH and long-only rules', async () => {
+    const client = broker(TWSE_OPEN);
+    expect(
+      await failing(
+        client,
+        twse({
+          order_type: 'stop_market',
+          trigger_price: '600',
+          limit_price: null,
+        })
+      )
+    ).toContain('size.order_type');
+    expect(await failing(client, twse({quantity_base: '350'}))).toEqual([]);
+    expect(
+      await failing(
+        client,
+        twse({quantity_base: '350', order_type: 'market', limit_price: null})
+      )
+    ).toContain('size.board_lot');
+    expect(
+      await failing(client, twse({quantity_base: '350', time_in_force: 'IOC'}))
+    ).toContain('size.board_lot');
+    expect(await failing(client, twse({quantity_base: '1500'}))).toContain(
       'size.board_lot'
     );
-    expect(await failing(client, {...base, quantity_base: '999'})).toEqual([]);
-    const offLadder = await client.previewOrder({
-      ...base,
-      quantity_base: '1000',
-      limit_price: '585.5',
-    });
+    expect(await failing(client, twse({outside_rth: true}))).toContain(
+      'market.outside_rth'
+    );
+    expect(
+      await failing(client, twse({side: 'sell', quantity_base: '1000'}))
+    ).toContain('exposure.short_selling');
+    expect(
+      await failing(
+        client,
+        order({
+          account_id: DEMO_ACCOUNT_ID,
+          instrument_id: 'mock:perp:BTCUSD',
+          quantity_base: '0.010',
+          limit_price: '95000',
+        })
+      )
+    ).toContain('market.time_in_force');
+    const offLadder = await client.previewOrder(twse({limit_price: '585.5'}));
     // The DEMO broker normalizes to the ladder like the engine.
     expect(offLadder.normalized.limit_price).toBe('586');
+  });
+
+  it('applies closed-market rules', async () => {
+    const client = broker(CLOSED);
+    const market = {order_type: 'market' as const, limit_price: null};
+    expect(await failing(client, twse(market))).toContain('market.session');
+    expect(await failing(client, order(market))).toEqual([]);
+    const queued = await client.previewOrder(order(market));
+    expect(
+      queued.risk.checks.find(c => c.check === 'market.session')?.outcome
+    ).toBe('WARN');
+    expect(
+      await failing(client, order({...market, time_in_force: 'GTC'}))
+    ).toContain('market.session');
+    expect(await failing(client, order({time_in_force: 'IOC'}))).toContain(
+      'market.session'
+    );
+    const resting = await client.previewOrder(order({outside_rth: true}));
+    expect(
+      resting.risk.checks.find(c => c.check === 'market.session')?.message
+    ).toMatch(/extended hours/);
   });
 
   it('books cash positions and fills per account and currency', async () => {
@@ -179,12 +272,7 @@ describe('DEMO broker accounts', () => {
     expect(fills.fills[0]?.fee_asset).toBe('USD');
     const summary = await client.getAccountSummary(DEMO_IBKR_ACCOUNT_ID);
     expect(summary.positions).toHaveLength(1);
-    expect(Number(summary.available_margin)).toBeLessThan(100_000);
-  });
-
-  it('exposes capabilities without unknown fields for the crypto account', () => {
-    const caps: TradingCapabilities | undefined =
-      demoAccount(DEMO_ACCOUNT_ID)?.capabilities;
-    expect(caps && 'outside_rth' in caps).toBe(false);
+    expect(Number(summary.settled_cash)).toBeLessThan(100_000);
+    expect(summary.unsettled_cash).toBe('0.00');
   });
 });

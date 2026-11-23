@@ -2,17 +2,15 @@
  * @fileoverview DEMO instruments, static reference marks and accounts used
  * by the in-browser paper broker. Every value here is synthetic.
  *
- * Besides the crypto paper account the DEMO broker simulates broker
- * accounts for exchange-listed securities: an Interactive Brokers paper
- * account (Nasdaq/NYSE), a SinoPac Shioaji simulation account (TWSE), a
- * SinoPac live account whose credentials are missing on the engine, and a
- * Cathay account awaiting the broker's API SDK. None of them offers LIVE.
- *
- * Forward compatibility: the IBKR and SinoPac capabilities list `DAY` time
- * in force and IBKR's `outside_rth` flag, which the execution schema does
- * not carry yet (the brokers engineer is adding them). They are attached
- * through `withExtensions`, so the DEMO broker behaves like an engine that
- * already accepts them.
+ * The accounts mirror the execution engine: a USD paper account (crypto,
+ * Nasdaq and NYSE) and a TWD paper account (TWSE), an Interactive Brokers
+ * paper account (Nasdaq/NYSE, outside RTH, queued market orders), a
+ * SinoPac Shioaji simulation account (TWSE board and intraday odd lots, no
+ * stop orders), a SinoPac live account whose credentials are missing on
+ * the server and Cathay awaiting its API SDK. Capabilities carry the
+ * contract's `tradable_venues`, `cash_account`, `short_selling`,
+ * `outside_rth`, `odd_lot`, `queue_market_when_closed`, `simulation` and
+ * `currencies`. None of the accounts offers LIVE.
  */
 import type {
   AccountStatus,
@@ -21,6 +19,7 @@ import type {
   OrderMode,
   TradingCapabilities,
   TradingVenue,
+  Venue,
 } from '@joseph/contracts';
 import {demoInstrument} from '../market/demo-market-client';
 import {DEMO_INSTRUMENT_SPECS} from '../market/prices';
@@ -84,8 +83,11 @@ export const DEMO_MARKS: Readonly<Record<string, string>> = {
   'mock:stock:9901': '585',
 };
 
-/** Account id of the DEMO paper account. */
+/** Account id of the DEMO USD paper account (crypto, Nasdaq, NYSE). */
 export const DEMO_ACCOUNT_ID = 'acct-paper-demo';
+
+/** DEMO TWD paper account (TWSE), like the engine's `acct-twd-paper-*`. */
+export const DEMO_TWD_ACCOUNT_ID = 'acct-twd-paper-demo';
 
 /** DEMO Interactive Brokers paper account (Nasdaq/NYSE). */
 export const DEMO_IBKR_ACCOUNT_ID = 'acct-ibkr-demo';
@@ -93,7 +95,7 @@ export const DEMO_IBKR_ACCOUNT_ID = 'acct-ibkr-demo';
 /** DEMO SinoPac Shioaji simulation account (TWSE). */
 export const DEMO_SINOPAC_ACCOUNT_ID = 'acct-sinopac-demo';
 
-/** DEMO SinoPac live account without credentials on the engine. */
+/** DEMO SinoPac live account whose credentials are missing on the server. */
 export const DEMO_SINOPAC_LIVE_ACCOUNT_ID = 'acct-sinopac-live-demo';
 
 /** DEMO Cathay account awaiting the broker's API SDK. */
@@ -119,7 +121,7 @@ export interface DemoAccountSpec {
   modes: readonly OrderMode[];
   /** Account currency. */
   currency: string;
-  /** Starting paper equity in the account currency. */
+  /** Starting paper cash in the account currency. */
   startingEquity: string;
   /** Largest order value in the account currency. */
   maxNotional: string;
@@ -130,86 +132,149 @@ export interface DemoAccountSpec {
 }
 
 /**
- * Attaches capability fields the execution schema does not carry yet.
- * @param capabilities Contract capabilities.
- * @param extra Forward-compatible fields (`outside_rth`, ...).
- * @return Capabilities with the extra fields.
+ * Capabilities of a DEMO paper account (engine paper adapter): every order
+ * type, crypto on the USD account and long-only cash securities of the
+ * account currency's exchanges.
+ * @param currency Account currency.
+ * @param tradable Exchanges of that currency.
+ * @return Capabilities.
  */
-export function withExtensions(
-  capabilities: TradingCapabilities,
-  extra: Readonly<Record<string, unknown>>
+function paperCapabilities(
+  currency: string,
+  tradable: readonly Venue[]
 ): TradingCapabilities {
-  return {...capabilities, ...extra} as TradingCapabilities;
+  return {
+    venue: 'mock',
+    status: 'AVAILABLE',
+    order_types: ['market', 'limit', 'stop_market', 'stop_limit'],
+    time_in_force: ['GTC', 'IOC', 'FOK', 'POST_ONLY', 'DAY'],
+    native_reduce_only: true,
+    native_stop_loss: true,
+    native_take_profit: true,
+    native_oco: false,
+    amend: true,
+    batch: false,
+    position_modes: ['ONE_WAY'],
+    margin_modes: ['isolated', 'cross'],
+    client_order_id: true,
+    query_by_client_id: true,
+    notes: [
+      'DEMO paper simulation in your browser. Nothing is sent to any venue.',
+    ],
+    tradable_venues: [...tradable],
+    cash_account: true,
+    short_selling: false,
+    outside_rth: false,
+    odd_lot: true,
+    queue_market_when_closed: true,
+    simulation: true,
+    currencies: [currency],
+  };
 }
 
-/**
- * Time-in-force list including `DAY` (not in the generated enum yet).
- * @param values Values.
- * @return Contract-typed list.
- */
-function timeInForce(
-  ...values: readonly string[]
-): TradingCapabilities['time_in_force'] {
-  return [...values] as TradingCapabilities['time_in_force'];
-}
+/** DEMO trading capabilities of the USD paper account. */
+export const DEMO_CAPABILITIES: TradingCapabilities = paperCapabilities('USD', [
+  'nasdaq',
+  'nyse',
+]);
 
-/** DEMO trading capabilities of the crypto paper account. */
-export const DEMO_CAPABILITIES: TradingCapabilities = {
-  venue: 'mock',
+/** Interactive Brokers (engine `capabilities.ibkr`, paper, cash account). */
+const IBKR_CAPABILITIES: TradingCapabilities = {
+  venue: 'ibkr',
   status: 'AVAILABLE',
-  order_types: ['market', 'limit', 'stop_market'],
-  time_in_force: ['GTC', 'IOC', 'POST_ONLY'],
-  native_reduce_only: true,
+  order_types: ['market', 'limit', 'stop_market', 'stop_limit'],
+  time_in_force: ['DAY', 'GTC', 'IOC'],
+  native_reduce_only: false,
   native_stop_loss: true,
   native_take_profit: true,
   native_oco: false,
   amend: true,
   batch: false,
   position_modes: ['ONE_WAY'],
-  margin_modes: ['isolated', 'cross'],
+  margin_modes: [],
   client_order_id: true,
   query_by_client_id: true,
   notes: [
-    'DEMO paper simulation in your browser. Nothing is sent to any venue.',
+    'DEMO simulation of an Interactive Brokers paper account (Nasdaq and NYSE). Nothing is sent to IBKR.',
+    'Outside-RTH applies to limit and stop-limit orders; IBKR queues DAY market orders placed while closed for the open.',
   ],
+  tradable_venues: ['nasdaq', 'nyse'],
+  cash_account: true,
+  short_selling: false,
+  outside_rth: true,
+  odd_lot: false,
+  queue_market_when_closed: true,
+  simulation: true,
+  currencies: ['USD'],
 };
 
 /**
- * Capabilities of a DEMO broker account for cash equities.
- * @param venue Broker.
+ * SinoPac Shioaji (engine `capabilities.sinopac`).
  * @param status Trading status.
  * @param notes Notes.
  * @return Capabilities.
  */
-function brokerCapabilities(
-  venue: TradingVenue,
+function sinopacCapabilities(
   status: TradingCapabilities['status'],
   notes: readonly string[]
 ): TradingCapabilities {
   return {
-    venue,
+    venue: 'sinopac',
     status,
-    order_types:
-      venue === 'ibkr'
-        ? ['market', 'limit', 'stop_market']
-        : ['market', 'limit'],
-    time_in_force:
-      venue === 'ibkr' ? timeInForce('DAY', 'GTC') : timeInForce('DAY'),
+    order_types: ['market', 'limit'],
+    time_in_force: ['DAY', 'IOC', 'FOK'],
     native_reduce_only: false,
-    native_stop_loss: venue === 'ibkr',
-    native_take_profit: venue === 'ibkr',
+    native_stop_loss: false,
+    native_take_profit: false,
     native_oco: false,
     amend: true,
     batch: false,
     position_modes: ['ONE_WAY'],
     margin_modes: [],
-    client_order_id: true,
-    query_by_client_id: venue === 'ibkr',
+    client_order_id: false,
+    query_by_client_id: true,
     notes: [...notes],
+    tradable_venues: ['twse'],
+    cash_account: true,
+    short_selling: false,
+    outside_rth: false,
+    odd_lot: true,
+    queue_market_when_closed: false,
+    simulation: status === 'AVAILABLE',
+    currencies: ['TWD'],
   };
 }
 
-/** DEMO accounts, crypto paper account first. */
+/** Cathay Securities (engine `capabilities.cathay`, fail-closed). */
+const CATHAY_CAPABILITIES: TradingCapabilities = {
+  venue: 'cathay',
+  status: 'TRADING_UNAVAILABLE',
+  order_types: [],
+  time_in_force: [],
+  native_reduce_only: false,
+  native_stop_loss: false,
+  native_take_profit: false,
+  native_oco: false,
+  amend: false,
+  batch: false,
+  position_modes: ['ONE_WAY'],
+  margin_modes: [],
+  client_order_id: false,
+  query_by_client_id: false,
+  notes: [
+    'Awaiting the Cathay API SDK: Cathay has not released a trading API, so orders cannot be placed yet.',
+  ],
+  tradable_venues: ['twse'],
+  cash_account: true,
+  short_selling: false,
+  outside_rth: false,
+  odd_lot: false,
+  queue_market_when_closed: false,
+  simulation: false,
+  currencies: ['TWD'],
+};
+
+/** DEMO accounts, the USD paper account first. */
 export const DEMO_ACCOUNTS: readonly DemoAccountSpec[] = [
   {
     accountId: DEMO_ACCOUNT_ID,
@@ -224,6 +289,18 @@ export const DEMO_ACCOUNTS: readonly DemoAccountSpec[] = [
     health: 'HEALTHY',
   },
   {
+    accountId: DEMO_TWD_ACCOUNT_ID,
+    venue: 'mock',
+    label: 'Demo paper account (TWD)',
+    status: 'CONNECTED',
+    modes: ['PAPER', 'SHADOW'],
+    currency: 'TWD',
+    startingEquity: '3000000',
+    maxNotional: '30000000',
+    capabilities: paperCapabilities('TWD', ['twse']),
+    health: 'HEALTHY',
+  },
+  {
     accountId: DEMO_IBKR_ACCOUNT_ID,
     venue: 'ibkr',
     label: 'IBKR paper (demo)',
@@ -232,12 +309,7 @@ export const DEMO_ACCOUNTS: readonly DemoAccountSpec[] = [
     currency: 'USD',
     startingEquity: '100000',
     maxNotional: '1000000',
-    capabilities: withExtensions(
-      brokerCapabilities('ibkr', 'AVAILABLE', [
-        'DEMO simulation of an Interactive Brokers paper account (Nasdaq and NYSE). Nothing is sent to IBKR.',
-      ]),
-      {outside_rth: true}
-    ),
+    capabilities: IBKR_CAPABILITIES,
     health: 'HEALTHY',
   },
   {
@@ -249,8 +321,8 @@ export const DEMO_ACCOUNTS: readonly DemoAccountSpec[] = [
     currency: 'TWD',
     startingEquity: '5000000',
     maxNotional: '30000000',
-    capabilities: brokerCapabilities('sinopac', 'AVAILABLE', [
-      'DEMO simulation of a SinoPac Shioaji simulation account (TWSE board and odd lots). Nothing is sent to SinoPac.',
+    capabilities: sinopacCapabilities('AVAILABLE', [
+      'DEMO simulation of a SinoPac Shioaji simulation account: board lots (any order type) and intraday odd lots (limit DAY). No stop orders. Nothing is sent to SinoPac.',
     ]),
     health: 'HEALTHY',
   },
@@ -263,8 +335,8 @@ export const DEMO_ACCOUNTS: readonly DemoAccountSpec[] = [
     currency: 'TWD',
     startingEquity: '0',
     maxNotional: '0',
-    capabilities: brokerCapabilities('sinopac', 'TRADING_UNAVAILABLE', [
-      'API key and certificate are not configured on the execution engine, so this account cannot connect.',
+    capabilities: sinopacCapabilities('TRADING_UNAVAILABLE', [
+      'The Shioaji API key and CA certificate are not configured on the execution server, so this account cannot connect. The operator adds them as server secrets.',
     ]),
     health: 'UNAVAILABLE',
   },
@@ -277,9 +349,7 @@ export const DEMO_ACCOUNTS: readonly DemoAccountSpec[] = [
     currency: 'TWD',
     startingEquity: '0',
     maxNotional: '0',
-    capabilities: brokerCapabilities('cathay', 'TRADING_UNAVAILABLE', [
-      'Awaiting the broker API SDK: Cathay has not released a trading API, so orders cannot be placed yet.',
-    ]),
+    capabilities: CATHAY_CAPABILITIES,
     health: 'UNAVAILABLE',
   },
 ];
@@ -293,10 +363,28 @@ export function demoAccount(accountId: string): DemoAccountSpec | null {
   return DEMO_ACCOUNTS.find(a => a.accountId === accountId) ?? null;
 }
 
+/** Exchange venues of listed securities. */
+const EXCHANGES: readonly Venue[] = ['twse', 'nasdaq', 'nyse'];
+
 /**
- * Why a DEMO account cannot trade an instrument (the execution engine's
- * venue routing): IBKR trades XNYS listings, TWSE brokers XTAI listings,
- * the crypto paper account the DEMO perpetuals.
+ * Exchanges a security trades on: its venue, or for DEMO securities the
+ * exchanges of its session calendar.
+ * @param instrument Instrument.
+ * @return Exchange venues.
+ */
+function listingExchanges(instrument: Instrument): readonly Venue[] {
+  const venue = instrument.key.venue;
+  if (EXCHANGES.includes(venue)) return [venue];
+  if (instrument.calendar === 'XTAI') return ['twse'];
+  if (instrument.calendar === 'XNYS') return ['nasdaq', 'nyse'];
+  return [];
+}
+
+/**
+ * Why a DEMO account cannot trade an instrument (engine `equities.route`
+ * and the `tradable_venues` check): securities go to accounts listing their
+ * exchange; brokers trade securities only; the TWD paper account trades
+ * TWSE only.
  * @param account Account.
  * @param instrument Instrument.
  * @return Reason, or null when routable.
@@ -307,14 +395,15 @@ export function demoRoutingProblem(
 ): string | null {
   const type = instrument.key.market_type;
   const equity = type === 'stock' || type === 'etf';
-  const calendar = instrument.calendar ?? '24x7';
-  if (account.venue === 'ibkr')
-    return equity && calendar === 'XNYS'
+  const served = account.capabilities.tradable_venues ?? [];
+  if (equity) {
+    return listingExchanges(instrument).some(v => served.includes(v))
       ? null
-      : 'Interactive Brokers accounts trade Nasdaq and NYSE listings.';
-  if (account.venue === 'sinopac' || account.venue === 'cathay')
-    return equity && calendar === 'XTAI'
-      ? null
-      : 'TWSE broker accounts trade TWSE listings.';
-  return equity ? 'Stocks and ETFs trade through a broker account.' : null;
+      : `${account.label} does not route ${listingExchanges(instrument).join('/') || instrument.instrument_id} listings.`;
+  }
+  if (account.venue !== 'mock')
+    return `${account.label} trades exchange-listed securities only.`;
+  return account.currency === 'USD'
+    ? null
+    : `The ${account.currency} paper account trades ${account.currency} securities only.`;
 }

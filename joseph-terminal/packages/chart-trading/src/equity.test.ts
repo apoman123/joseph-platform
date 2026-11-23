@@ -1,8 +1,8 @@
 /**
  * @fileoverview Unit tests for cash-equity and broker rules: tick ladders,
- * price limits, board and odd lots, broker account status and routing,
- * time in force, outside-RTH, market-hours notices, LIVE confirmations and
- * live arming.
+ * price limits, board and odd lots, account status and `tradable_venues`
+ * routing, time in force, order types, outside RTH, odd lots, closed
+ * markets, cash, market-hours notices, LIVE confirmations and live arming.
  */
 import {
   CONTINUOUS_CALENDAR,
@@ -17,21 +17,25 @@ import {
 import {describe, expect, it} from 'vitest';
 import {
   BROKER_NAMES,
+  accountExchanges,
   accountInstrumentMismatch,
+  accountOrderTypes,
   accountStatusView,
   boardLotOf,
-  capabilityExtensions,
-  equityIntentExtensions,
+  cashSummary,
+  closedMarketProblem,
   equityTimeInForce,
   formatEquityPrice,
   formatExchangeTime,
   formatShares,
+  heldShares,
   isCashEquityId,
   isOnTickLadder,
   isRateInstrumentId,
   liveArmText,
   liveConfirmation,
   marketHoursNotice,
+  oddLotAvailable,
   outsideRthSupport,
   parseEquityQuantity,
   preferredAccount,
@@ -42,13 +46,20 @@ import {
   roundToTickLadder,
   supportsLiveArming,
   tickAt,
-  toContractTimeInForce,
   tradingVenueName,
   validStepUpCode,
+  withOutsideRth,
   withinPriceLimit,
   zoneCity,
 } from './equity';
-import {TWSE_STOCK, US_STOCK, account, brokerAccount} from './testing/fixtures';
+import {
+  TWSE_STOCK,
+  US_STOCK,
+  account,
+  brokerAccount,
+  paperAccount,
+  position,
+} from './testing/fixtures';
 
 /**
  * Parses a decimal.
@@ -183,53 +194,66 @@ describe('board and odd lots', () => {
   });
 });
 
-describe('broker accounts', () => {
+describe('account status', () => {
   it('names brokers and venues', () => {
     expect(tradingVenueName('ibkr')).toBe(BROKER_NAMES.ibkr);
     expect(tradingVenueName('binance')).toBe('Binance USDⓈ-M');
   });
 
-  it('derives connection and credential status', () => {
+  it('derives connection and server-side credential status', () => {
     const ibkr = accountStatusView(brokerAccount('ibkr'));
     expect(ibkr).toMatchObject({
       broker: 'ibkr',
       connection: 'connected',
       credentials: 'configured',
+      credentialsText: 'Credentials configured on the server',
       canTrade: true,
+      simulation: true,
       tone: 'live',
     });
     const missing = accountStatusView(
-      brokerAccount('sinopac', {
-        status: 'DISCONNECTED',
-        modes: [],
-        capabilities: {
-          ...brokerAccount('sinopac').capabilities,
+      brokerAccount(
+        'sinopac',
+        {status: 'DISCONNECTED', modes: []},
+        {
           status: 'TRADING_UNAVAILABLE',
-          notes: ['API key and certificate are not configured.'],
-        },
-      })
+          notes: ['The Shioaji API key and CA certificate are not configured.'],
+        }
+      )
     );
     expect(missing).toMatchObject({
       connection: 'disconnected',
       credentials: 'missing',
+      credentialsText: 'Credentials not configured on the server',
       canTrade: false,
       tone: 'stale',
     });
+    // Cathay reports TRADING_UNAVAILABLE with an SDK note.
     const cathay = accountStatusView(
-      brokerAccount('cathay', {status: 'TRADING_UNAVAILABLE', modes: []})
+      brokerAccount(
+        'cathay',
+        {status: 'TRADING_UNAVAILABLE', modes: []},
+        {
+          status: 'TRADING_UNAVAILABLE',
+          notes: ['Awaiting the Cathay API SDK.'],
+        }
+      )
     );
     expect(cathay.awaitingSdk).toBe(true);
     expect(cathay.connectionText).toBe('Awaiting API SDK');
-    // Once the engine reports Cathay connected and available, it is not.
     expect(accountStatusView(brokerAccount('cathay')).awaitingSdk).toBe(false);
+    expect(
+      accountStatusView(
+        brokerAccount(
+          'ibkr',
+          {},
+          {status: 'TRADING_UNAVAILABLE', notes: ['SDK missing']}
+        )
+      ).awaitingSdk
+    ).toBe(true);
   });
 
-  it('reads forward-compatible credential and capability fields', () => {
-    const reported = {
-      ...brokerAccount('ibkr'),
-      credentials_configured: false,
-    } as ReturnType<typeof brokerAccount>;
-    expect(accountStatusView(reported).credentials).toBe('missing');
+  it('maps the remaining account states', () => {
     expect(
       accountStatusView(brokerAccount('ibkr', {status: 'PENDING_VERIFICATION'}))
     ).toMatchObject({connection: 'verifying', credentials: 'configured'});
@@ -237,149 +261,227 @@ describe('broker accounts', () => {
       accountStatusView(brokerAccount('ibkr', {status: 'READ_ONLY'})).connection
     ).toBe('read-only');
     expect(
-      accountStatusView(account({status: 'TRADING_UNAVAILABLE'}))
-    ).toMatchObject({connection: 'unavailable', credentials: 'unknown'});
+      accountStatusView(brokerAccount('ibkr', {stale: true})).connectionText
+    ).toBe('Connected (stale)');
     expect(
-      capabilityExtensions(brokerAccount('ibkr', {}, {outside_rth: true}))
-    ).toEqual({outsideRth: true, oddLot: false});
-    expect(capabilityExtensions(null)).toEqual({
-      outsideRth: false,
-      oddLot: false,
+      accountStatusView(account({status: 'TRADING_UNAVAILABLE'}))
+    ).toMatchObject({
+      connection: 'unavailable',
+      credentials: 'unknown',
+      credentialsText: 'Credentials not reported',
+      simulation: false,
     });
   });
+});
 
-  it('routes instruments to the accounts that trade them', () => {
+describe('routing by tradable venues', () => {
+  it('reads tradable_venues, else broker or currency exchanges', () => {
+    expect(accountExchanges(brokerAccount('ibkr'))).toEqual(['nasdaq', 'nyse']);
+    expect(
+      accountExchanges(
+        brokerAccount('sinopac', {}, {tradable_venues: undefined})
+      )
+    ).toEqual(['twse']);
+    const twdPaper = paperAccount('TWD');
+    expect(accountExchanges(twdPaper)).toEqual(['twse']);
+    expect(
+      accountExchanges({
+        ...twdPaper,
+        capabilities: {...twdPaper.capabilities, tradable_venues: []},
+      })
+    ).toEqual(['twse']);
+    expect(accountExchanges(account())).toEqual(['nasdaq', 'nyse']);
+    expect(accountExchanges(account({venue: 'binance'}))).toEqual([]);
+  });
+
+  it('routes securities to accounts listing their exchange', () => {
     const ibkr = brokerAccount('ibkr');
     const sinopac = brokerAccount('sinopac');
-    const crypto = account();
+    const usd = paperAccount('USD');
+    const twd = paperAccount('TWD');
+    expect(accountInstrumentMismatch(ibkr, 'nasdaq:stock:AAPL')).toBeNull();
     expect(accountInstrumentMismatch(ibkr, 'mock:stock:ACME')).toBeNull();
+    expect(accountInstrumentMismatch(usd, 'mock:stock:ACME')).toBeNull();
+    expect(accountInstrumentMismatch(sinopac, 'twse:stock:2330')).toBeNull();
+    expect(
+      accountInstrumentMismatch(twd, 'mock:stock:9901', {calendar: 'XTAI'})
+    ).toBeNull();
     expect(
       accountInstrumentMismatch(ibkr, 'mock:stock:9901', {calendar: 'XTAI'})
-    ).toMatch(/Nasdaq and NYSE/);
+    ).toBe('Interactive Brokers accounts route Nasdaq and NYSE listings only.');
+    expect(accountInstrumentMismatch(usd, 'twse:stock:2330')).toBe(
+      'Paper USD routes Nasdaq and NYSE listings only.'
+    );
     expect(
-      accountInstrumentMismatch(sinopac, 'mock:stock:9901', {calendar: 'XTAI'})
+      accountInstrumentMismatch(account({venue: 'binance'}), 'mock:stock:ACME')
+    ).toMatch(/broker or securities paper account/);
+  });
+
+  it('keeps crypto on its venue and paper USD accounts', () => {
+    expect(
+      accountInstrumentMismatch(paperAccount('USD'), 'mock:perp:BTCUSD')
     ).toBeNull();
-    expect(accountInstrumentMismatch(sinopac, 'twse:stock:2330')).toBeNull();
-    expect(accountInstrumentMismatch(crypto, 'mock:stock:ACME')).toMatch(
-      /broker account/
-    );
-    expect(accountInstrumentMismatch(crypto, 'mock:perp:BTCUSD')).toBeNull();
-    expect(accountInstrumentMismatch(crypto, 'binance:perp:BTCUSDT')).toMatch(
-      /demo instruments/
-    );
+    expect(
+      accountInstrumentMismatch(paperAccount('USD'), 'binance:perp:BTCUSDT')
+    ).toBeNull();
+    expect(
+      accountInstrumentMismatch(paperAccount('TWD'), 'mock:perp:BTCUSD')
+    ).toBe('The TWD paper account trades TWSE securities only.');
+    expect(
+      accountInstrumentMismatch(brokerAccount('ibkr'), 'mock:perp:BTCUSD')
+    ).toMatch(/exchange-listed securities only/);
     expect(
       accountInstrumentMismatch(
         account({venue: 'binance'}),
         'hyperliquid:perp:BTC'
       )
     ).toMatch(/Binance/);
-    expect(accountInstrumentMismatch(ibkr, 'mock:rate:UST10Y')).toMatch(
-      /cannot be traded/
+    expect(
+      accountInstrumentMismatch(brokerAccount('ibkr'), 'mock:rate:UST10Y')
+    ).toMatch(/cannot be traded/);
+    expect(accountInstrumentMismatch(brokerAccount('ibkr'), 'bad id')).toMatch(
+      /not valid/
     );
-    expect(accountInstrumentMismatch(ibkr, 'bad id')).toMatch(/not valid/);
   });
 
-  it('prefers a connected account that trades the instrument', () => {
-    const crypto = account();
+  it('prefers the selected or first connected account that fits', () => {
+    const usd = paperAccount('USD');
+    const twd = paperAccount('TWD');
     const ibkr = brokerAccount('ibkr');
     const down = brokerAccount('sinopac', {
       account_id: 'acct-down',
       status: 'DISCONNECTED',
       modes: [],
     });
-    const sinopac = brokerAccount('sinopac');
-    const all = [crypto, ibkr, down, sinopac];
+    const all = [usd, twd, ibkr, down];
     expect(preferredAccount(all, 'mock:stock:ACME', null)?.account_id).toBe(
-      'acct-ibkr'
+      'acct-paper-demo'
     );
     expect(
-      preferredAccount(all, 'mock:stock:9901', 'acct-ibkr', {calendar: 'XTAI'})
-        ?.account_id
-    ).toBe('acct-sinopac');
+      preferredAccount(all, 'mock:stock:ACME', 'acct-ibkr')?.account_id
+    ).toBe('acct-ibkr');
     expect(
-      preferredAccount(all, 'mock:perp:BTCUSD', 'acct-paper-demo')?.account_id
-    ).toBe('acct-paper-demo');
+      preferredAccount(all, 'mock:stock:9901', 'acct-paper-demo', {
+        calendar: 'XTAI',
+      })?.account_id
+    ).toBe('acct-twd-paper-demo');
+    expect(preferredAccount([down], 'twse:stock:2330', null)?.account_id).toBe(
+      'acct-down'
+    );
     expect(preferredAccount([], 'mock:perp:BTCUSD', null)).toBeNull();
-    expect(
-      preferredAccount([crypto], 'mock:stock:ACME', null)?.account_id
-    ).toBe('acct-paper-demo');
+    expect(preferredAccount([ibkr], 'mock:perp:BTCUSD', null)?.account_id).toBe(
+      'acct-ibkr'
+    );
   });
 });
 
-describe('time in force and outside RTH', () => {
-  it('offers DAY and GTC on IBKR and DAY on TWSE brokers when listed', () => {
+describe('order capabilities', () => {
+  it('offers the time in force the account lists, DAY first', () => {
     expect(equityTimeInForce(brokerAccount('ibkr'))).toEqual({
-      options: ['DAY', 'GTC'],
+      options: ['DAY', 'GTC', 'IOC'],
       note: null,
     });
     expect(equityTimeInForce(brokerAccount('sinopac')).options).toEqual([
       'DAY',
+      'IOC',
+      'FOK',
     ]);
-    expect(equityTimeInForce(null).options).toEqual(['GTC']);
-  });
-
-  it('explains when the engine does not list DAY yet', () => {
-    const noDay = brokerAccount('ibkr', {
-      capabilities: {
-        ...brokerAccount('ibkr').capabilities,
-        time_in_force: ['GTC', 'IOC'],
-      },
-    });
-    expect(equityTimeInForce(noDay)).toEqual({
+    expect(equityTimeInForce(null).options).toEqual(['DAY']);
+    expect(
+      equityTimeInForce(brokerAccount('ibkr', {}, {time_in_force: ['GTC']}))
+    ).toEqual({
       options: ['GTC'],
-      note: 'DAY orders are not offered by this account yet.',
+      note: 'DAY orders are not offered by this account.',
     });
-    const none = brokerAccount('sinopac', {
-      capabilities: {
-        ...brokerAccount('sinopac').capabilities,
-        time_in_force: ['IOC'],
-      },
+    expect(
+      equityTimeInForce(brokerAccount('cathay', {}, {time_in_force: []}))
+    ).toEqual({
+      options: [],
+      note: 'This account lists no time in force for stocks and ETFs.',
     });
-    expect(equityTimeInForce(none).options).toEqual(['IOC']);
-    expect(equityTimeInForce(none).note).toMatch(/does not list DAY/);
-    expect(toContractTimeInForce('DAY')).toBe('DAY');
   });
 
-  it('shows outside RTH for IBKR only and enables it when accepted', () => {
+  it('allows only DAY for intraday odd lots', () => {
+    expect(equityTimeInForce(brokerAccount('sinopac'), 'odd')).toEqual({
+      options: ['DAY'],
+      note: 'Odd-lot orders are DAY (ROD) only.',
+    });
+    expect(
+      equityTimeInForce(
+        brokerAccount('sinopac', {}, {time_in_force: ['IOC']}),
+        'odd'
+      ).options
+    ).toEqual([]);
+    expect(oddLotAvailable(brokerAccount('sinopac'), TWSE_STOCK)).toBe(true);
+    expect(
+      oddLotAvailable(
+        brokerAccount('sinopac', {}, {odd_lot: false}),
+        TWSE_STOCK
+      )
+    ).toBe(false);
+    expect(oddLotAvailable(brokerAccount('ibkr'), US_STOCK)).toBe(false);
+  });
+
+  it('offers only the order types the account lists', () => {
+    const offered = ['market', 'limit', 'stop_market'] as const;
+    expect(accountOrderTypes(brokerAccount('sinopac'), offered)).toEqual([
+      'market',
+      'limit',
+    ]);
+    expect(accountOrderTypes(brokerAccount('ibkr'), offered)).toEqual([
+      ...offered,
+    ]);
+    expect(accountOrderTypes(null, offered)).toEqual([...offered]);
+  });
+
+  it('shows outside RTH where listed and sends it only when accepted', () => {
     expect(outsideRthSupport(brokerAccount('sinopac')).shown).toBe(false);
     expect(outsideRthSupport(null).shown).toBe(false);
-    expect(outsideRthSupport(brokerAccount('ibkr'))).toMatchObject({
+    expect(outsideRthSupport(brokerAccount('ibkr'))).toEqual({
       shown: true,
-      enabled: false,
+      enabled: true,
+      reason: null,
     });
     expect(
-      outsideRthSupport(brokerAccount('ibkr', {}, {outside_rth: true}))
-    ).toEqual({shown: true, enabled: true, reason: null});
+      outsideRthSupport(brokerAccount('ibkr', {}, {outside_rth: false}))
+    ).toMatchObject({shown: true, enabled: false});
+    const request = {account_id: 'a'} as OrderIntentRequest;
+    expect(withOutsideRth(request, brokerAccount('ibkr'), true)).toEqual({
+      account_id: 'a',
+      outside_rth: true,
+    });
+    expect(withOutsideRth(request, brokerAccount('ibkr'), false)).toBe(request);
+    expect(withOutsideRth(request, brokerAccount('sinopac'), true)).toBe(
+      request
+    );
   });
 
-  it('adds intent extensions only when the engine accepts them', () => {
-    const request = {account_id: 'a'} as OrderIntentRequest;
-    const ibkr = brokerAccount('ibkr', {}, {outside_rth: true});
+  it('counts held shares and summarizes settled cash', () => {
+    const holding = brokerAccount('sinopac', {
+      positions: [
+        position({instrument_id: 'mock:stock:9901', quantity_base: '2000'}),
+        position({
+          instrument_id: 'mock:stock:9901',
+          side: 'short',
+          quantity_base: '5',
+        }),
+      ],
+      settled_cash: '5000000',
+      unsettled_cash: '-120000',
+    });
+    expect(heldShares(holding, 'mock:stock:9901').toString()).toBe('2000');
+    expect(heldShares(holding, 'mock:stock:ACME').toString()).toBe('0');
+    expect(cashSummary(holding)).toBe(
+      'Settled cash 5,000,000.00 TWD · unsettled −120,000.00 TWD'
+    );
     expect(
-      equityIntentExtensions(request, ibkr, {
-        outsideRth: true,
-        lotMode: 'board',
-        hasBoardLot: false,
-      })
-    ).toEqual({account_id: 'a', outside_rth: true});
-    expect(
-      equityIntentExtensions(request, brokerAccount('ibkr'), {
-        outsideRth: true,
-        lotMode: 'board',
-        hasBoardLot: false,
-      })
-    ).toBe(request);
-    expect(
-      equityIntentExtensions(
-        request,
-        brokerAccount('sinopac', {}, {odd_lot: true}),
-        {outsideRth: false, lotMode: 'odd', hasBoardLot: true}
-      )
-    ).toEqual({account_id: 'a', lot_type: 'odd'});
+      cashSummary({...holding, settled_cash: '10', unsettled_cash: '0'})
+    ).toBe('Settled cash 10.00 TWD');
+    expect(cashSummary(brokerAccount('ibkr'))).toBeNull();
   });
 });
 
-describe('market-hours notices', () => {
+describe('closed markets and notices', () => {
   const order = {
     orderType: 'limit' as const,
     timeInForce: 'DAY' as const,
@@ -400,6 +502,57 @@ describe('market-hours notices', () => {
     ],
     coverage: [{fromMs: ny('2026-11-25'), toMs: ny('2026-11-28')}],
   });
+  const weekend = createBarCalendar('XNYS');
+  const saturday = ny('2026-11-28', 12);
+
+  it('rejects closed-market orders like the engine', () => {
+    const ibkr = brokerAccount('ibkr');
+    const sinopac = brokerAccount('sinopac');
+    expect(
+      closedMarketProblem(weekend, saturday, ibkr, {
+        orderType: 'market',
+        timeInForce: 'DAY',
+      })
+    ).toBeNull();
+    expect(
+      closedMarketProblem(weekend, saturday, ibkr, {
+        orderType: 'market',
+        timeInForce: 'GTC',
+      })
+    ).toBe(
+      'The market is closed: send the market order as DAY to queue it for the next open (Mon 30 Nov 09:30 New York).'
+    );
+    expect(
+      closedMarketProblem(weekend, saturday, sinopac, {
+        orderType: 'market',
+        timeInForce: 'DAY',
+      })
+    ).toMatch(/^The market is closed: market orders are rejected until/);
+    expect(
+      closedMarketProblem(weekend, saturday, ibkr, {
+        orderType: 'limit',
+        timeInForce: 'IOC',
+      })
+    ).toMatch(/IOC orders need an open session/);
+    expect(
+      closedMarketProblem(weekend, saturday, ibkr, {
+        orderType: 'limit',
+        timeInForce: 'DAY',
+      })
+    ).toBeNull();
+    expect(
+      closedMarketProblem(weekend, ny('2026-11-30', 10), sinopac, {
+        orderType: 'market',
+        timeInForce: 'DAY',
+      })
+    ).toBeNull();
+    expect(
+      closedMarketProblem(CONTINUOUS_CALENDAR, 0, null, {
+        orderType: 'market',
+        timeInForce: 'IOC',
+      })
+    ).toBeNull();
+  });
 
   it('is silent for 24x7 markets and regular sessions', () => {
     expect(marketHoursNotice(CONTINUOUS_CALENDAR, 0, order)).toBeNull();
@@ -410,30 +563,27 @@ describe('market-hours notices', () => {
     expect(marketHoursNotice(listed, ny('2026-11-27', 10), order)?.text).toBe(
       'Early close today: NYSE / Nasdaq closes at Fri 27 Nov 13:00 New York.'
     );
-    const holiday = marketHoursNotice(listed, ny('2026-11-26', 11), order);
-    expect(holiday?.text).toBe(
+    expect(marketHoursNotice(listed, ny('2026-11-26', 11), order)?.text).toBe(
       'NYSE / Nasdaq is closed today for a holiday. The next session opens Fri 27 Nov 09:30 New York. A DAY order placed now is good for the next session only.'
     );
-    const weekend = createBarCalendar('XNYS');
     expect(
-      marketHoursNotice(weekend, ny('2026-11-28', 12), {
-        ...order,
-        orderType: 'market',
-      })?.text
+      marketHoursNotice(weekend, saturday, {...order, orderType: 'market'})
+        ?.text
     ).toMatch(
-      /^NYSE \/ Nasdaq is closed now\. The next session opens Mon 30 Nov 09:30 New York\. A market order placed now waits/
+      /^NYSE \/ Nasdaq is closed now\. The next session opens Mon 30 Nov 09:30 New York\. Market orders are rejected until the open/
     );
     expect(
-      marketHoursNotice(weekend, ny('2026-11-28', 12), {
+      marketHoursNotice(weekend, saturday, {
         ...order,
-        outsideRth: true,
+        orderType: 'market',
+        queueMarket: true,
       })?.text
+    ).toMatch(/A DAY market order placed now queues for the next open\.$/);
+    expect(
+      marketHoursNotice(weekend, saturday, {...order, outsideRth: true})?.text
     ).toMatch(/Outside RTH is on/);
     expect(
-      marketHoursNotice(weekend, ny('2026-11-28', 12), {
-        ...order,
-        timeInForce: 'GTC',
-      })?.text
+      marketHoursNotice(weekend, saturday, {...order, timeInForce: 'GTC'})?.text
     ).toMatch(/waits for the next session\.$/);
   });
 
@@ -446,7 +596,7 @@ describe('market-hours notices', () => {
 });
 
 describe('LIVE confirmation and arming', () => {
-  const request = {
+  const request: OrderIntentRequest = {
     account_id: 'acct-sinopac',
     instrument_id: 'mock:stock:9901',
     side: 'buy',
@@ -459,7 +609,7 @@ describe('LIVE confirmation and arming', () => {
     reduce_only: false,
     mode: 'LIVE',
     source: 'MANUAL_TICKET',
-  } as unknown as OrderIntentRequest;
+  };
 
   it('names LIVE money, broker, account, quantity, price and currency', () => {
     const content = liveConfirmation(
@@ -508,6 +658,7 @@ describe('LIVE confirmation and arming', () => {
         instrument_id: 'mock:perp:BTCUSD',
         quantity_base: '0.010',
         limit_price: '95000',
+        time_in_force: 'GTC',
       },
       {
         instrument_id: 'mock:perp:BTCUSD',

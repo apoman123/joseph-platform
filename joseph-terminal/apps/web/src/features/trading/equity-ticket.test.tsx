@@ -1,10 +1,16 @@
 /**
- * @fileoverview Component tests for the equity order ticket (TWSE board
- * and odd lots, tick ladder, price limits, DAY/GTC, IBKR outside-RTH), the
- * rate no-ticket rule, arming LIVE and the LIVE confirmation, and the
- * broker Accounts tab.
+ * @fileoverview Component tests for the equity order ticket (routing by
+ * `tradable_venues`, TWSE board and intraday odd lots, tick ladder, price
+ * limits, time in force and order types from the account's capabilities,
+ * IBKR outside-RTH), the rate no-ticket rule, arming LIVE and the LIVE
+ * confirmation, and the Accounts tab.
  */
-import {DEMO_IBKR_ACCOUNT_ID, DemoExecutionClient} from '@joseph/mock-provider';
+import {
+  DEMO_IBKR_ACCOUNT_ID,
+  DEMO_SINOPAC_ACCOUNT_ID,
+  DEMO_TWD_ACCOUNT_ID,
+  DemoExecutionClient,
+} from '@joseph/mock-provider';
 import type {
   AccountList,
   OrderIntentRequest,
@@ -90,20 +96,21 @@ class StepUpBroker extends LiveRehearsalBroker {
 }
 
 /**
- * Renders the ticket on an instrument and waits for the account.
+ * Renders the ticket on an instrument and waits for the routed account,
+ * then optionally switches to another account.
  * @param instrumentId Instrument.
- * @param accountId Expected routed account.
- * @param broker Optional broker.
+ * @param routed Expected routed account.
+ * @param options Broker and account to switch to.
  * @return Rendered feature.
  */
 async function renderOn(
   instrumentId: string,
-  accountId: string,
-  broker?: DemoExecutionClient
+  routed: string,
+  options: {broker?: DemoExecutionClient; select?: string} = {}
 ): Promise<RenderedFeature> {
   const ctx = createFakeContext({
     selection: {instrumentId},
-    ...(broker ? {broker} : {}),
+    ...(options.broker ? {broker: options.broker} : {}),
   });
   rendered = await renderFeature(
     TRADING_FEATURE,
@@ -111,21 +118,45 @@ async function renderOn(
     'trading.ticket',
     ctx
   );
-  await waitFor(() =>
-    expect(screen.getByRole('combobox', {name: 'Account'})).toHaveValue(
-      accountId
-    )
-  );
+  const picker = () => screen.getByRole('combobox', {name: 'Account'});
+  await waitFor(() => expect(picker()).toHaveValue(routed));
+  if (options.select) {
+    await userEvent.setup().selectOptions(picker(), options.select);
+    await waitFor(() => expect(picker()).toHaveValue(options.select));
+  }
   return rendered;
 }
 
+/**
+ * Texts of the time-in-force options.
+ * @return Option texts.
+ */
+function tifOptions(): (string | null)[] {
+  const tif = screen.getByRole('combobox', {name: 'Time in force'});
+  return within(tif)
+    .getAllByRole('option')
+    .map(o => o.textContent);
+}
+
 describe('equity order ticket', () => {
-  it('orders TWSE board lots and odd lots with ladder and limit checks', async () => {
-    await renderOn('mock:stock:9901', 'acct-sinopac-demo');
+  it('routes TWSE to the TWD paper account and validates lots and prices', async () => {
+    await renderOn('mock:stock:9901', DEMO_TWD_ACCOUNT_ID, {
+      select: DEMO_SINOPAC_ACCOUNT_ID,
+    });
     const user = userEvent.setup();
     expect(screen.getByTestId('account-status')).toHaveTextContent(
-      /SinoPac Securities \(Shioaji\).*Connected/
+      /SinoPac Securities \(Shioaji\) \(simulation\).*Connected.*Credentials configured on the server/
     );
+    expect(screen.getByTestId('account-cash')).toHaveTextContent(
+      'Settled cash 5,000,000.00 TWD'
+    );
+    // SinoPac has no stop orders.
+    expect(screen.queryByRole('button', {name: 'Stop'})).toBeNull();
+    expect(tifOptions()).toEqual([
+      'DAY · Day (this session)',
+      'IOC · Immediate or cancel',
+      'FOK · Fill or kill',
+    ]);
     const quantity = await screen.findByRole('textbox', {
       name: 'Quantity (張, 1,000 shares each)',
     });
@@ -141,15 +172,15 @@ describe('equity order ticket', () => {
     expect(
       await screen.findByText(/outside today's price limit 527 TWD – 643 TWD/)
     ).toBeInTheDocument();
-    const tif = screen.getByRole('combobox', {name: 'Time in force'});
-    expect(
-      within(tif)
-        .getAllByRole('option')
-        .map(o => o.textContent)
-    ).toEqual(['DAY · Day (this session)']);
     expect(screen.queryByRole('textbox', {name: 'Leverage'})).toBeNull();
     expect(screen.queryByTestId('outside-rth')).toBeNull();
+    // Intraday odd lots: limit DAY only.
     await user.click(screen.getByRole('button', {name: 'Odd lot (零股)'}));
+    expect(screen.getByTestId('lot-hint')).toHaveTextContent(
+      'Intraday odd lots are limit orders, DAY (ROD) only.'
+    );
+    expect(tifOptions()).toEqual(['DAY · Day (this session)']);
+    expect(screen.getByRole('button', {name: 'Market'})).toBeDisabled();
     const shares = screen.getByRole('textbox', {name: 'Quantity (shares)'});
     await user.type(shares, '1500');
     expect(
@@ -157,12 +188,26 @@ describe('equity order ticket', () => {
     ).toBeInTheDocument();
   });
 
-  it('places a US share order through IBKR with DAY or GTC', async () => {
-    const {ctx} = await renderOn('mock:stock:ACME', DEMO_IBKR_ACCOUNT_ID);
+  it('offers board lots only where odd lots are not available', async () => {
+    await renderOn('mock:stock:9901', DEMO_TWD_ACCOUNT_ID, {
+      select: 'acct-cathay-demo',
+    });
+    expect(screen.getByRole('button', {name: 'Odd lot (零股)'})).toBeDisabled();
+    expect(screen.getByTestId('lot-hint')).toHaveTextContent(
+      'This account trades board lots only.'
+    );
+  });
+
+  it('places a US share order through IBKR with DAY, GTC or IOC', async () => {
+    const {ctx} = await renderOn('mock:stock:ACME', 'acct-paper-demo', {
+      select: DEMO_IBKR_ACCOUNT_ID,
+    });
     const user = userEvent.setup();
-    const tif = screen.getByRole('combobox', {name: 'Time in force'});
-    expect(within(tif).getAllByRole('option')).toHaveLength(2);
-    await user.selectOptions(tif, 'GTC');
+    expect(tifOptions()).toHaveLength(3);
+    await user.selectOptions(
+      screen.getByRole('combobox', {name: 'Time in force'}),
+      'GTC'
+    );
     const rth = screen.getByTestId('outside-rth');
     expect(rth).toBeEnabled();
     await user.click(rth);
@@ -190,6 +235,7 @@ describe('equity order ticket', () => {
       account_id: DEMO_IBKR_ACCOUNT_ID,
       instrument_id: 'mock:stock:ACME',
       quantity_base: '100',
+      time_in_force: 'GTC',
     });
   });
 
@@ -230,7 +276,10 @@ describe('live trading', () => {
       fillDelayMs: 0,
       partialFills: false,
     });
-    await renderOn('mock:stock:ACME', DEMO_IBKR_ACCOUNT_ID, broker);
+    await renderOn('mock:stock:ACME', 'acct-paper-demo', {
+      broker,
+      select: DEMO_IBKR_ACCOUNT_ID,
+    });
     const user = userEvent.setup();
     await user.click(screen.getByRole('button', {name: 'Live'}));
     const arm = screen.getByTestId('arm-live');
@@ -268,6 +317,7 @@ describe('live trading', () => {
     expect(facts).toHaveTextContent(/IBKR paper \(demo\)/);
     expect(facts).toHaveTextContent(/100 shares/);
     expect(facts).toHaveTextContent(/182\.40 USD/);
+    expect(facts).toHaveTextContent(/DAY/);
     const send = within(dialog).getByRole('button', {
       name: 'Send LIVE buy 100 shares ACME at 182.40 USD',
     });
@@ -279,7 +329,10 @@ describe('live trading', () => {
     );
     await user.click(send);
     await waitFor(() => expect(broker.submitted).toHaveLength(1));
-    expect(broker.submitted[0]?.mode).toBe('LIVE');
+    expect(broker.submitted[0]).toMatchObject({
+      mode: 'LIVE',
+      time_in_force: 'DAY',
+    });
     await user.click(screen.getByRole('button', {name: 'New order'}));
     await user.click(screen.getByRole('button', {name: 'Disarm'}));
     expect(screen.getByTestId('mode-badge')).toHaveTextContent('Paper');
@@ -287,7 +340,10 @@ describe('live trading', () => {
 
   it('sends a step-up code when the engine verifies live consent', async () => {
     const broker = new StepUpBroker({ackDelayMs: 0, fillDelayMs: 0});
-    await renderOn('mock:stock:ACME', DEMO_IBKR_ACCOUNT_ID, broker);
+    await renderOn('mock:stock:ACME', 'acct-paper-demo', {
+      broker,
+      select: DEMO_IBKR_ACCOUNT_ID,
+    });
     const user = userEvent.setup();
     await user.click(screen.getByRole('button', {name: 'Live'}));
     const arm = screen.getByTestId('arm-live');
@@ -305,13 +361,10 @@ describe('live trading', () => {
   });
 
   it('keeps LIVE off for DEMO accounts and explains broker states', async () => {
-    await renderOn('mock:stock:9901', 'acct-sinopac-demo');
+    await renderOn('mock:stock:9901', DEMO_TWD_ACCOUNT_ID, {
+      select: 'acct-cathay-demo',
+    });
     expect(screen.getByRole('button', {name: 'Live'})).toBeDisabled();
-    const user = userEvent.setup();
-    await user.selectOptions(
-      screen.getByRole('combobox', {name: 'Account'}),
-      'acct-cathay-demo'
-    );
     expect(screen.getByTestId('live-disabled-reason')).toHaveTextContent(
       /awaiting its broker API SDK/
     );
@@ -322,29 +375,35 @@ describe('live trading', () => {
 });
 
 describe('accounts tab', () => {
-  it('lists broker accounts with connection and credential status', async () => {
+  it('lists accounts with routing, server credentials and cash', async () => {
     rendered = await renderFeature(
       PORTFOLIO_FEATURE,
       'bottom-panel',
       'portfolio.accounts'
     );
-    const ibkr = await screen.findByTestId(
-      `account-row-${DEMO_IBKR_ACCOUNT_ID}`
-    );
+    const usd = await screen.findByTestId('account-row-acct-paper-demo');
+    expect(usd).toHaveTextContent('Crypto, Nasdaq, NYSE');
+    expect(usd).toHaveTextContent('Simulation');
+    const twd = screen.getByTestId(`account-row-${DEMO_TWD_ACCOUNT_ID}`);
+    expect(twd).toHaveTextContent('TWSE');
+    expect(twd).toHaveTextContent('3,000,000.00 TWD');
+    const ibkr = screen.getByTestId(`account-row-${DEMO_IBKR_ACCOUNT_ID}`);
     expect(ibkr).toHaveTextContent('Interactive Brokers');
+    expect(ibkr).toHaveTextContent('Nasdaq, NYSE');
     expect(ibkr).toHaveTextContent('Connected');
-    expect(ibkr).toHaveTextContent('Credentials configured');
+    expect(ibkr).toHaveTextContent('Credentials configured on the server');
     expect(ibkr).toHaveTextContent('Paper, Shadow');
     const live = screen.getByTestId('account-row-acct-sinopac-live-demo');
     expect(live).toHaveTextContent('Disconnected');
-    expect(live).toHaveTextContent(
-      'Credentials missing on the execution engine'
-    );
+    expect(live).toHaveTextContent('Credentials not configured on the server');
     const cathay = screen.getByTestId('account-row-acct-cathay-demo');
     expect(cathay).toHaveTextContent('Awaiting API SDK');
     expect(cathay).toHaveTextContent('No trading API yet');
+    expect(screen.getByText(/Awaiting the Cathay API SDK/)).toBeInTheDocument();
     expect(
-      screen.getByText(/Awaiting the broker API SDK: Cathay/)
+      screen.getByText(
+        /Broker credentials are configured on the execution server/
+      )
     ).toBeInTheDocument();
   });
 });
