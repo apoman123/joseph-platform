@@ -29,10 +29,10 @@ VERIFIED_AT_MS = 1_795_351_391_000
 
 # TWSE (OpenAPI, STOCK_DAY, MIS, holiday schedules), the Nasdaq Trader
 # symbol directory and Treasury yield-curve CSVs verified live by the opt-in
-# tests/network suite and fixture captures, 2026-11-23 05:40 UTC. Alpaca
+# tests/network suite and fixture captures, 2026-11-23 04:50 UTC. Alpaca
 # market data is implemented from its documentation (no key here) and
 # carries no verification time.
-EXCHANGE_VERIFIED_AT_MS = 1_795_412_400_000
+EXCHANGE_VERIFIED_AT_MS = 1_795_409_443_000
 
 _RATES: dict[instruments.Venue, tuple[float, int]] = {
     instruments.Venue.BINANCE: (10.0, 20),

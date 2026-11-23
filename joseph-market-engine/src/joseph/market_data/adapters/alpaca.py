@@ -577,6 +577,28 @@ def to_market_trade(
     )
 
 
+def changed_candle(
+    previous: market.Candle | None, candle: market.Candle
+) -> bool:
+    """Checks whether a candle differs from the last one emitted.
+
+    Aggregates are rebuilt on every event with a new receipt time, so the
+    receipt time is ignored.
+
+    Args:
+        previous: Last emitted candle of the bar, if any.
+        candle: New candle.
+
+    Returns:
+        True when any value or the finality changed.
+    """
+    if previous is None:
+        return True
+    return dataclasses.replace(previous, received_at_ms=0) != (
+        dataclasses.replace(candle, received_at_ms=0)
+    )
+
+
 class QuoteBook:
     """Recent NBBO quotes of one symbol for Lee-Ready classification."""
 
@@ -1093,6 +1115,7 @@ class AlpacaAdapter(base.BaseVenueAdapter):
     """``MarketDataPort`` for one venue (``nasdaq`` or ``nyse``)."""
 
     INSTRUMENT_TTL_MS = 6 * 3_600_000
+    TRADE_BUY_VOLUME_METHOD = market.BuyVolumeMethod.CLASSIFIED
 
     def __init__(
         self,
@@ -1913,7 +1936,7 @@ class AlpacaAdapter(base.BaseVenueAdapter):
                 )
             changed = []
             for bar in rows:
-                if emitted.get(bar.start_ms) != bar:
+                if changed_candle(emitted.get(bar.start_ms), bar):
                     emitted[bar.start_ms] = bar
                     changed.append(bar)
             return changed
@@ -2008,7 +2031,7 @@ class AlpacaAdapter(base.BaseVenueAdapter):
                         now_ms=now,
                         covered_to_ms=max(finals, default=0),
                     )[-1]
-                if newest != last:
+                if changed_candle(last, newest):
                     last = newest
                     yield newest
 
