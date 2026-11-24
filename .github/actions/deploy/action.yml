@@ -64,6 +64,7 @@ runs:
           echo "::error::health check failed: $url"
           exit 1
         done
+    # Deletes the private key from the runner even after a failed rollout.
     - name: Remove key
       if: always()
       shell: bash

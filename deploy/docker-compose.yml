@@ -5,9 +5,13 @@
 # Images default to GHCR; `--build` builds them from this checkout instead.
 name: joseph
 
+# Settings both engines read. Passing JOSEPH_DEV_TOKENS (even empty)
+# replaces the execution engine's built-in development token.
 x-engine-env: &engine-env
   JOSEPH_ENV: ${JOSEPH_ENV:-development}
   JOSEPH_DEV_TOKENS: ${JOSEPH_DEV_TOKENS:-}
+  # Shared token of the engine-to-engine /internal calls; compose refuses
+  # to start without it.
   JOSEPH_SERVICE_TOKEN: ${JOSEPH_SERVICE_TOKEN:?set JOSEPH_SERVICE_TOKEN in deploy/.env}
   JOSEPH_CORS_ORIGINS: ${JOSEPH_CORS_ORIGINS:-http://localhost:3000}
 
@@ -36,6 +40,7 @@ services:
       JOSEPH_ALPACA_FEED: ${JOSEPH_ALPACA_FEED:-iex}
       # Taiwan intraday: twse (official, keyless) or sinopac (Shioaji).
       JOSEPH_TW_DATA_SOURCE: ${JOSEPH_TW_DATA_SOURCE:-twse}
+      # Paths under /run/joseph-secrets (the JOSEPH_SECRETS_DIR mount).
       JOSEPH_SINOPAC_API_KEY_FILE: ${JOSEPH_SINOPAC_API_KEY_FILE:-}
       JOSEPH_SINOPAC_SECRET_KEY_FILE: ${JOSEPH_SINOPAC_SECRET_KEY_FILE:-}
       JOSEPH_MEXC_WS_FORMAT: ${JOSEPH_MEXC_WS_FORMAT:-protobuf}
@@ -72,13 +77,19 @@ services:
       JOSEPH_MARKET_GATEWAY: http
       JOSEPH_MARKET_URL: http://market:8000
       JOSEPH_DATABASE_URL: ${JOSEPH_EXECUTION_DATABASE_URL:-sqlite:////app/var/execution.db}
+      # Empty vault key: refused unless JOSEPH_ENV=development, which uses
+      # a per-process key (stored credentials are lost on restart). Empty
+      # preview secret: a per-process key. Empty TOTP secret: every step-up
+      # fails, so no LIVE arming or AUTO_LIVE consent.
       JOSEPH_VAULT_MASTER_KEY: ${JOSEPH_VAULT_MASTER_KEY:-}
       JOSEPH_PREVIEW_SECRET: ${JOSEPH_PREVIEW_SECRET:-}
       JOSEPH_STEP_UP_TOTP_SECRET: ${JOSEPH_STEP_UP_TOTP_SECRET:-}
       JOSEPH_LIVE_ARM_MAX_MS: ${JOSEPH_LIVE_ARM_MAX_MS:-28800000}
       # Global LIVE gate: on by default in this deployment (off in code).
-      # Every order still needs a verified account, the Risk Gateway,
-      # preview/consent with step-up and no kill switch.
+      # A LIVE order still needs a verified account, an ALLOW from the Risk
+      # Gateway (which also applies kill switches and the emergency halt)
+      # and step-up: a preview and an armed account for manual orders, a
+      # consent for AUTO_LIVE ones.
       JOSEPH_LIVE_TRADING_ENABLED: ${JOSEPH_LIVE_TRADING_ENABLED:-true}
       JOSEPH_EMERGENCY_HALT: ${JOSEPH_EMERGENCY_HALT:-false}
       JOSEPH_VENUE_SANDBOX: ${JOSEPH_VENUE_SANDBOX:-}
@@ -148,9 +159,12 @@ services:
       TZ: America/New_York
       VNC_SERVER_PASSWORD_FILE: ${IBKR_VNC_PASSWORD_FILE:-}
     secrets: [ibkr_password]
-    # VNC (only when a VNC password file is set) for the first 2FA login.
+    # VNC (only when a VNC password file is set) for the first two-factor
+    # (2FA) login; bound to the host's loopback, so reach it over SSH.
     ports: ["127.0.0.1:${IBKR_VNC_PORT:-5900}:5900"]
 
+# Engine data under /app/var (SQLite databases by default): `down` keeps
+# these volumes, `down -v` deletes them.
 volumes:
   market-data:
   execution-data:

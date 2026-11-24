@@ -7,6 +7,7 @@ on:
     branches: [main]
   pull_request:
   schedule:
+    # Mondays 03:17 UTC.
     - cron: '17 3 * * 1'
   workflow_dispatch:
 
@@ -39,6 +40,7 @@ jobs:
     name: Secret scan (full history)
     runs-on: ubuntu-latest
     steps:
+      # The whole history, so a secret removed in a later commit is found.
       - uses: actions/checkout@v4
         with:
           fetch-depth: 0
@@ -52,6 +54,7 @@ jobs:
     name: Dependency review
     if: github.event_name == 'pull_request' && (!github.event.repository.private || vars.CODE_SCANNING_ENABLED == 'true')
     runs-on: ubuntu-latest
+    # pull-requests: write posts the summary comment on a failure.
     permissions:
       contents: read
       pull-requests: write

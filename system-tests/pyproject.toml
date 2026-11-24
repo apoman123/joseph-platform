@@ -17,13 +17,17 @@ dev = [
 ]
 
 [tool.uv]
+# A test suite, not a package: uv installs only the dependencies.
 package = false
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
 asyncio_mode = "auto"
 asyncio_default_fixture_loop_scope = "session"
+# importlib imports test modules without changing sys.path, so test files
+# in different directories may share a name.
 addopts = "-q --strict-markers --import-mode=importlib"
+# Lets test modules import shared helpers as `tests.conftest`.
 pythonpath = ["."]
 markers = ["load: latency/throughput smoke checks"]
 
@@ -67,7 +71,8 @@ external = ["DOC", "GPY"]
 convention = "google"
 
 [tool.ruff.lint.per-file-ignores]
-# Tests assert (S101) and use fixtures, fakes and signatures they ignore.
+# Tests may assert and hold fake secrets (S), run long scenarios (PLR), need
+# no package docstrings (D104) and take fixtures they do not use (ARG).
 "tests/**" = ["S", "PLR", "D104", "ARG"]
 
 [tool.ruff.lint.isort]

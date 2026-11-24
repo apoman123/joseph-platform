@@ -4,11 +4,14 @@ ARG PYTHON_VERSION=3.13
 
 FROM python:${PYTHON_VERSION}-slim-bookworm AS build
 COPY --from=ghcr.io/astral-sh/uv:0.12.15 /uv /bin/uv
+# Precompile bytecode for a faster start; copy files out of the uv cache
+# mount (another filesystem, so hard links fail); use the image's Python.
 ENV UV_COMPILE_BYTECODE=1 UV_LINK_MODE=copy UV_PYTHON_DOWNLOADS=never
 # git fetches the private indicator library (apoman123/PineScripts) with one
 # of two build-time credentials; neither ends up in a layer or a remote URL:
 #   docker build --secret id=pinescripts_token,env=PINESCRIPTS_TOKEN .  (CI)
 #   docker build --ssh default .  (local agent with access to PineScripts)
+# known_hosts pins GitHub's published ed25519 host key for the ssh route.
 RUN apt-get update \
  && apt-get install -y --no-install-recommends git openssh-client \
  && rm -rf /var/lib/apt/lists/* \
@@ -19,7 +22,9 @@ RUN apt-get update \
 ARG UV_EXTRAS=""
 WORKDIR /app
 COPY pyproject.toml uv.lock README.md LICENSE ./
-# The URL rewrite lives in GIT_CONFIG_* variables of this RUN only.
+# Dependencies first, without the project, so source changes reuse this
+# layer. The URL rewrite lives in GIT_CONFIG_* variables of this RUN only,
+# so the token never reaches a git config file or a layer.
 RUN --mount=type=cache,target=/root/.cache/uv \
     --mount=type=secret,id=pinescripts_token,required=false \
     --mount=type=ssh,required=false \
@@ -38,6 +43,8 @@ RUN --mount=type=cache,target=/root/.cache/uv \
     fi; \
     uv sync --frozen --no-dev --no-install-project ${UV_EXTRAS}
 COPY src ./src
+# --no-editable installs the project into the venv: the runtime stage
+# copies only /app/.venv.
 RUN --mount=type=cache,target=/root/.cache/uv \
     uv sync --frozen --no-dev --no-editable ${UV_EXTRAS}
 
@@ -45,16 +52,19 @@ FROM python:${PYTHON_VERSION}-slim-bookworm
 LABEL org.opencontainers.image.title="joseph-market-engine" \
       org.opencontainers.image.description="Joseph market data, screening, indicators, strategies, signals and alerts" \
       org.opencontainers.image.licenses="MIT"
+# Fixed non-root UID that owns the /app/var data volume.
 RUN useradd --system --uid 10001 --create-home --home-dir /home/joseph joseph \
  && mkdir -p /app/var && chown joseph:joseph /app/var
 WORKDIR /app
 COPY --from=build --chown=joseph:joseph /app/.venv /app/.venv
+# JOSEPH_DATABASE_URL: four slashes make an absolute path on the volume.
 ENV PATH=/app/.venv/bin:$PATH \
     PYTHONUNBUFFERED=1 \
     JOSEPH_DATABASE_URL=sqlite:////app/var/market.db
 USER joseph
 EXPOSE 8000
 VOLUME ["/app/var"]
+# The slim image has no curl, so Python's urllib probes /health.
 HEALTHCHECK --interval=15s --timeout=3s --start-period=30s --retries=5 \
   CMD ["python", "-c", "import sys, urllib.request; sys.exit(0 if urllib.request.urlopen('http://127.0.0.1:8000/health', timeout=2).status == 200 else 1)"]
 CMD ["uvicorn", "joseph.bootstrap:create_application", "--factory", "--host", "0.0.0.0", "--port", "8000", "--proxy-headers"]

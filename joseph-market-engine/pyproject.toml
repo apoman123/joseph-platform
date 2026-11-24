@@ -12,9 +12,12 @@ dependencies = [
   "httpx>=0.27,<1",
   "websockets>=13,<17",
   "sqlalchemy>=2.0,<3",
+  # IANA time zones of exchange sessions; zoneinfo falls back to this
+  # package where the OS has no time zone database.
   "tzdata>=2025.1",
   # Remote Parquet reads of the Lighter trade archive (column chunks only).
   "pyarrow>=26,<27",
+  # Indicator algorithms; source and pinned rev in [tool.uv.sources].
   "joseph-smc-indicators",
   # MEXC futures WebSocket Protobuf pushes (BSD-3-Clause; decoded with
   # runtime-built descriptors, no generated code).
@@ -64,6 +67,8 @@ markers = [
   "slow: long-running replay or property tests",
   "sinopac_data: reads real SinoPac Shioaji market data (opt-in with JOSEPH_SINOPAC_DATA_TESTS=1 and credentials)",
 ]
+# importlib imports test modules without changing sys.path, so test files
+# in different directories may share a name.
 addopts = "-q --strict-markers --import-mode=importlib"
 
 [tool.ruff]
@@ -100,7 +105,8 @@ external = ["DOC", "GPY"]
 convention = "google"
 
 [tool.ruff.lint.per-file-ignores]
-# Tests assert (S101) and use fixtures, fakes and signatures they ignore.
+# Tests may assert and hold fake secrets (S), run long scenarios (PLR), need
+# no package docstrings (D104) and take fixtures they do not use (ARG).
 "tests/**" = ["S", "PLR", "D104", "ARG"]
 
 [tool.ruff.lint.isort]

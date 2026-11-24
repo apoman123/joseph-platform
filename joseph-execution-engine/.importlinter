@@ -1,3 +1,6 @@
+# Layering contracts, run by tests/architecture/test_layering.py through
+# lint-imports. include_external_packages lets a contract forbid
+# third-party frameworks as well as project modules.
 [importlinter]
 root_package = joseph_execution
 include_external_packages = True

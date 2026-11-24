@@ -1,3 +1,6 @@
+# Layering contracts, run by tests/architecture/test_layering.py through
+# lint-imports. include_external_packages lets a contract forbid
+# third-party frameworks as well as project modules.
 [importlinter]
 root_package = joseph
 include_external_packages = True
@@ -119,6 +122,8 @@ forbidden_modules =
     joseph.api
     joseph.bootstrap
 
+# Direct imports only: application services the pipeline calls (such as
+# market_data.app.service) import adapters themselves.
 [importlinter:contract:pipeline-uses-ports]
 name = The signal pipeline orchestrates through application ports, not adapters
 type = forbidden
