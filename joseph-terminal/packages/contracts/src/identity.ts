@@ -16,7 +16,10 @@ import type {
   Venue,
 } from './generated/contracts';
 
-/** Canonical instrument id pattern `{venue}:{market_type}:{venue_market_id}`. */
+/**
+ * Canonical instrument id pattern `{venue}:{market_type}:{venue_market_id}`;
+ * the venue and market type lists are the contract enums.
+ */
 const INSTRUMENT_ID_PATTERN =
   /^(binance|hyperliquid|lighter|bitget|mexc|twse|tpex|nasdaq|nyse|cboe|treasury|mock):(perp|spot|future|stock|etf|rate):([A-Za-z0-9._/-]{1,64})$/;
 
@@ -34,11 +37,13 @@ export interface InstrumentIdParts {
  * Parses a canonical instrument id.
  * @param id Text such as `binance:perp:BTCUSDT`.
  * @return The id parts.
- * @throws {RangeError} If the id is not canonical.
+ * @throws `RangeError` if the id is not canonical.
  */
 export function parseInstrumentId(id: string): InstrumentIdParts {
   const match = INSTRUMENT_ID_PATTERN.exec(id);
   if (!match) throw new RangeError(`Invalid instrument id: ${id}`);
+  // The pattern matched, so every group took part; groups 1 and 2 only
+  // match `Venue` and `MarketType` values.
   return {
     venue: match[1] as Venue,
     marketType: match[2] as MarketType,
@@ -129,7 +134,7 @@ export const TIMEFRAME_MS: Readonly<Record<Timeframe, number>> = {
   '1M': 31 * DAY_MS,
 };
 
-/** Supported timeframes, shortest first. */
+/** Supported timeframes, shortest first (the key order of `TIMEFRAME_MS`). */
 export const TIMEFRAMES: readonly Timeframe[] = Object.keys(
   TIMEFRAME_MS
 ) as Timeframe[];
@@ -138,8 +143,8 @@ export const TIMEFRAMES: readonly Timeframe[] = Object.keys(
 const WEEK_ANCHOR_MS = 4 * DAY_MS;
 
 /**
- * Whether bar length varies with the calendar (`1M`). Case matters: `1m`
- * is one minute.
+ * Returns whether bar length varies with the calendar (`1M`). Case matters:
+ * `1m` is one minute.
  * @param timeframe Bar resolution.
  * @return True for calendar months.
  */
@@ -148,8 +153,8 @@ export function isCalendarTimeframe(timeframe: Timeframe): boolean {
 }
 
 /**
- * Whether the timeframe is sub-minute (the engine builds these bars from
- * the venue's public trades).
+ * Returns whether the timeframe is sub-minute (the engine builds these bars
+ * from the venue's public trades).
  * @param timeframe Bar resolution.
  * @return True for `1s` … `30s`.
  */
@@ -158,7 +163,7 @@ export function isSecondsTimeframe(timeframe: Timeframe): boolean {
 }
 
 /**
- * Floor modulo (the sign follows the divisor, like Python's `%`).
+ * Returns the floor modulo (the sign follows the divisor, like Python's `%`).
  * @param value Dividend.
  * @param divisor Positive divisor.
  * @return Remainder in `[0, divisor)`.
@@ -168,7 +173,8 @@ function floorMod(value: number, divisor: number): number {
 }
 
 /**
- * Months since January 1970 of the UTC month containing a time.
+ * Returns the number of months from January 1970 to the UTC month that
+ * contains a time.
  * @param tsMs UTC epoch milliseconds.
  * @return Zero-based month index (negative before 1970).
  */
@@ -178,7 +184,7 @@ function monthIndex(tsMs: number): number {
 }
 
 /**
- * First instant of a month index (the 1st at 00:00 UTC).
+ * Returns the first instant of a month index (the 1st at 00:00 UTC).
  * @param index Months since January 1970.
  * @return UTC epoch milliseconds.
  */
@@ -221,8 +227,8 @@ export function shiftTimeframe(
 }
 
 /**
- * Exclusive end of the bar starting at `startMs` (engine `end_of`): 28 to
- * 31 days later for `1M`.
+ * Returns the exclusive end of the bar starting at `startMs` (engine
+ * `end_of`): 28 to 31 days later for `1M`.
  * @param timeframe Bar resolution.
  * @param startMs Aligned bar start.
  * @return Exclusive bar end in UTC epoch milliseconds.

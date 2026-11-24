@@ -37,10 +37,10 @@ const DAY_MS = 86_400_000;
 /** Fetch granularity: sessions are loaded in 64-day, epoch-aligned chunks. */
 export const SESSION_CHUNK_MS = 64 * DAY_MS;
 
-/** Longest single request (the engine serves windows up to ~400 days). */
+/** Longest single request, 6 chunks (the engine serves up to ~400 days). */
 export const MAX_REQUEST_DAYS = 384;
 
-/** Wait before retrying a failed chunk. */
+/** Wait in milliseconds before a failed chunk is requested again. */
 export const SESSION_RETRY_MS = 30_000;
 
 /** Margin loaded on both sides of a prefetched range. */
@@ -55,7 +55,7 @@ export type SessionFetcher = (query: SessionQuery) => Promise<SessionList>;
 
 /** Cache options. */
 export interface SessionCacheOptions {
-  /** Clock (retry back-off). */
+  /** Clock in UTC epoch milliseconds for the retry wait (`Date.now`). */
   now?: () => number;
 }
 
@@ -67,7 +67,7 @@ interface CalendarState {
   chunks: Set<number>;
   /** In-flight chunk loads. */
   pending: Map<number, Promise<void>>;
-  /** Chunk index to the time a retry is allowed. */
+  /** Chunk index to the time (UTC ms) from which a retry is allowed. */
   failed: Map<number, number>;
   /** Calendar built from the loaded sessions. */
   calendar: BarCalendar;
@@ -99,7 +99,7 @@ export class SessionCalendarCache {
   /**
    * Creates the cache.
    * @param fetcher Session source, or null to use regular hours only.
-   * @param options Clock.
+   * @param options Optional clock override.
    */
   constructor(
     private readonly fetcher: SessionFetcher | null,
@@ -109,7 +109,7 @@ export class SessionCalendarCache {
   }
 
   /**
-   * State of an exchange calendar (created on first use).
+   * Returns the state of an exchange calendar, creating it on first use.
    * @param id Calendar id.
    * @return State.
    */
@@ -129,9 +129,11 @@ export class SessionCalendarCache {
   }
 
   /**
-   * Best calendar known now (never waits).
+   * Returns the best calendar known now, without waiting.
    * @param id Calendar id.
-   * @return Calendar.
+   * @return A calendar that uses the loaded sessions where it has them and
+   *     the regular weekday hours elsewhere; `CONTINUOUS_CALENDAR` for
+   *     `24x7`.
    */
   calendar(id: CalendarId): BarCalendar {
     return isExchangeCalendar(id)
@@ -140,10 +142,10 @@ export class SessionCalendarCache {
   }
 
   /**
-   * Whether a window is fully loaded.
+   * Returns whether every chunk overlapping `[fromMs, toMs)` is loaded.
    * @param id Calendar id.
-   * @param fromMs Start.
-   * @param toMs End.
+   * @param fromMs Inclusive start, UTC epoch milliseconds.
+   * @param toMs Exclusive end, UTC epoch milliseconds.
    * @return True for `24x7` or when every chunk is loaded.
    */
   covered(id: CalendarId, fromMs: number, toMs: number): boolean {
@@ -156,10 +158,11 @@ export class SessionCalendarCache {
   }
 
   /**
-   * Chunk indexes overlapping a window.
-   * @param fromMs Start.
-   * @param toMs End.
-   * @return Indexes.
+   * Lists the chunk indexes overlapping `[fromMs, toMs)`.
+   * @param fromMs Inclusive start, UTC epoch milliseconds.
+   * @param toMs Exclusive end, UTC epoch milliseconds.
+   * @return Indexes in ascending order; an empty window yields the chunk
+   *     holding `fromMs`.
    */
   private chunkRange(fromMs: number, toMs: number): number[] {
     const first = Math.floor(fromMs / SESSION_CHUNK_MS);
@@ -175,11 +178,16 @@ export class SessionCalendarCache {
 
   /**
    * Loads every missing chunk of a window, then resolves with the updated
-   * calendar. Failures leave the regular-hours fallback in place.
+   * calendar.
+   *
+   * Chunks already loaded or in flight are not requested again, nor are
+   * chunks whose request failed less than `SESSION_RETRY_MS` ago. A failed
+   * request leaves the regular-hours fallback in place for its days.
    * @param id Calendar id.
-   * @param fromMs Start.
-   * @param toMs End.
-   * @return Calendar.
+   * @param fromMs Inclusive start, UTC epoch milliseconds.
+   * @param toMs Exclusive end, UTC epoch milliseconds.
+   * @return The calendar once every request has settled; a failed request
+   *     does not reject it.
    */
   async ensure(
     id: CalendarId,
@@ -190,6 +198,7 @@ export class SessionCalendarCache {
     const state = this.state(id);
     const now = this.now();
     const waits: Array<Promise<void>> = [];
+    // Adjacent missing chunks go out as one request of at most `maxChunks`.
     let run: number[] = [];
     const flush = () => {
       if (run.length > 0) waits.push(this.load(id, state, run));
@@ -218,9 +227,9 @@ export class SessionCalendarCache {
   /**
    * Starts loading a window plus a margin on both sides (fire and forget).
    * @param id Calendar id.
-   * @param fromMs Start.
-   * @param toMs End.
-   * @param marginMs Extra time on both sides.
+   * @param fromMs Inclusive start, UTC epoch milliseconds.
+   * @param toMs Exclusive end, UTC epoch milliseconds.
+   * @param marginMs Extra milliseconds loaded on both sides.
    */
   prefetch(
     id: CalendarId,
@@ -237,8 +246,9 @@ export class SessionCalendarCache {
    * Loads a contiguous run of chunks with one request.
    * @param id Calendar id.
    * @param state Calendar state.
-   * @param chunks Contiguous chunk indexes.
-   * @return Promise settling when the response is merged.
+   * @param chunks Contiguous chunk indexes, ascending.
+   * @return Promise that resolves once the response is merged, or once a
+   *     failure is recorded for retry; it does not reject.
    */
   private load(
     id: ExchangeCalendarId,
@@ -291,7 +301,7 @@ export class SessionCalendarCache {
   /**
    * Subscribes to calendar updates.
    * @param listener Receives the calendar id whose sessions changed.
-   * @return Unsubscribe.
+   * @return A function that removes the listener.
    */
   subscribe(listener: (id: CalendarId) => void): () => void {
     this.listeners.add(listener);
@@ -301,7 +311,7 @@ export class SessionCalendarCache {
   }
 
   /**
-   * Notifies listeners.
+   * Notifies every listener that a calendar changed.
    * @param id Calendar id.
    */
   private emit(id: CalendarId): void {

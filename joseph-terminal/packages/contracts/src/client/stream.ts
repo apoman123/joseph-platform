@@ -54,17 +54,24 @@ export interface StreamClientOptions {
   url: string | (() => string);
   /** Socket factory; defaults to the global `WebSocket`. */
   createSocket?: WebSocketFactory;
-  /** First reconnect delay. */
+  /**
+   * Backoff base of the first reconnect, in ms (default 500). The base
+   * doubles with each failed attempt; the actual delay is drawn between half
+   * of it and all of it.
+   */
   minBackoffMs?: number;
-  /** Maximum reconnect delay. */
+  /** Cap on the backoff base, in ms (default 15 000). */
   maxBackoffMs?: number;
-  /** Heartbeat interval; the connection is recycled after 2 silent intervals. */
+  /**
+   * Ping interval in ms (default 15 000). A connection that receives
+   * nothing for more than two intervals is closed and reconnected.
+   */
   heartbeatMs?: number;
   /** Random source in [0, 1) for jitter. */
   random?: () => number;
 }
 
-/** Socket ready state meaning OPEN. */
+/** `WebSocket.OPEN`, without reading the global (absent on the server). */
 const OPEN = 1;
 /** Number of recent event ids remembered for deduplication. */
 const DEDUPE_WINDOW = 2048;
@@ -75,7 +82,7 @@ interface Subscription {
   channels: readonly ChannelSpec[];
   /** Channel keys derived from the specs. */
   keys: ReadonlySet<string>;
-  /** Handler. */
+  /** Receives the envelopes of these channels. */
   handler: StreamHandler;
 }
 
@@ -112,10 +119,11 @@ export class WebSocketStreamClient implements StreamClient {
   constructor(private readonly options: StreamClientOptions) {}
 
   /**
-   * Subscribes to channels.
+   * Subscribes to channels, connecting first if there is no socket yet.
    * @param channels Channel specs.
    * @param handler Envelope handler.
-   * @return Unsubscribe function.
+   * @return Unsubscribe function. It unsubscribes the channels no other
+   *     subscription uses and closes the connection after the last one.
    */
   subscribe(
     channels: readonly ChannelSpec[],
@@ -168,7 +176,7 @@ export class WebSocketStreamClient implements StreamClient {
     this.shutdown();
   }
 
-  /** Tears down socket and timers. */
+  /** Tears down the socket and timers and reports `CLOSED`. */
   private shutdown(): void {
     if (this.reconnectTimer) clearTimeout(this.reconnectTimer);
     this.reconnectTimer = null;
@@ -176,6 +184,8 @@ export class WebSocketStreamClient implements StreamClient {
     const socket = this.socket;
     this.socket = null;
     if (socket) {
+      // Detach the handlers first so this close does not schedule a
+      // reconnect.
       socket.onopen = null;
       socket.onmessage = null;
       socket.onclose = null;
@@ -193,6 +203,8 @@ export class WebSocketStreamClient implements StreamClient {
         : this.options.url;
     const factory =
       this.options.createSocket ??
+      // The DOM handlers take narrower event types than `WebSocketLike`
+      // declares, so the structural check fails although every use is safe.
       ((target: string) => new WebSocket(target) as unknown as WebSocketLike);
     this.setStatus(this.attempt === 0 ? 'CONNECTING' : 'RECONNECTING');
     let socket: WebSocketLike;
@@ -204,6 +216,8 @@ export class WebSocketStreamClient implements StreamClient {
     }
     this.socket = socket;
     socket.onopen = () => {
+      // Resume from the last sequence seen: the server replays from there, or
+      // sends `snapshot_required` when that is beyond its retention window.
       this.attempt = 0;
       this.lastMessageAt = Date.now();
       this.setStatus('OPEN');
@@ -225,6 +239,7 @@ export class WebSocketStreamClient implements StreamClient {
       // The close handler drives reconnection.
     };
     socket.onclose = () => {
+      // A socket that was replaced or shut down must not touch the state.
       if (this.socket !== socket) return;
       this.socket = null;
       this.stopHeartbeat();
@@ -243,6 +258,7 @@ export class WebSocketStreamClient implements StreamClient {
     const max = this.options.maxBackoffMs ?? 15_000;
     const random = this.options.random ?? Math.random;
     const base = Math.min(max, min * 2 ** this.attempt);
+    // Jitter spreads the reconnects of many clients after a server restart.
     const delay = Math.round(base / 2 + random() * (base / 2));
     this.attempt += 1;
     this.setStatus('RECONNECTING');
@@ -292,8 +308,10 @@ export class WebSocketStreamClient implements StreamClient {
   private handleMessage(data: unknown): void {
     let envelope: StreamEnvelope;
     try {
+      // Only `type` is checked below; the engines send contract envelopes.
       envelope = JSON.parse(String(data)) as StreamEnvelope;
     } catch {
+      // A frame that is not JSON is dropped.
       return;
     }
     if (!envelope || typeof envelope.type !== 'string') return;
@@ -302,6 +320,7 @@ export class WebSocketStreamClient implements StreamClient {
       if (this.seenSet.has(envelope.event_id)) return;
       this.remember(envelope.event_id);
     }
+    // Frames may arrive out of order; resume from the highest sequence.
     if (typeof envelope.sequence === 'number') {
       this.lastSequence = Math.max(this.lastSequence ?? 0, envelope.sequence);
     }
@@ -343,13 +362,16 @@ export class WebSocketStreamClient implements StreamClient {
 }
 
 /**
- * Whether an envelope belongs to a subscription.
+ * Returns whether an envelope belongs to a subscription.
  * @param envelope Envelope.
  * @param keys Subscription channel keys.
- * @return True when it should be delivered.
+ * @return True for its own channels, for a channel-less envelope, and for a
+ *     `snapshot_required` that lists one of its channels or none.
  */
 function matches(envelope: StreamEnvelope, keys: ReadonlySet<string>): boolean {
   if (envelope.type === 'snapshot_required') {
+    // `channels` is checked before use; entries are only compared with
+    // `Set.has`, so a non-string entry never matches.
     const payload = envelope.payload as {channels?: unknown};
     const listed = Array.isArray(payload.channels)
       ? (payload.channels as string[])
@@ -369,7 +391,7 @@ function matches(envelope: StreamEnvelope, keys: ReadonlySet<string>): boolean {
 /**
  * Removes duplicate channel specs.
  * @param channels Specs, possibly repeated.
- * @return Unique specs.
+ * @return One spec per channel key, the last one given for each.
  */
 function dedupeChannels(channels: readonly ChannelSpec[]): ChannelSpec[] {
   const seen = new Map<string, ChannelSpec>();

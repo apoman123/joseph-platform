@@ -22,9 +22,9 @@ interface Call {
 
 /**
  * Builds a client whose fetch answers with a fixed status and body.
- * @param status HTTP status.
- * @param body JSON body.
- * @return Client and recorded calls.
+ * @param status HTTP status of every response.
+ * @param body Value every response carries as JSON.
+ * @return Client and the requests it made, in order.
  */
 function clientAnswering(
   status: number,
@@ -38,6 +38,8 @@ function clientAnswering(
   const client = new HttpExecutionClient({
     baseUrl: 'http://engine.test/',
     getToken: () => 'tok',
+    // The mock covers the one call shape the client uses, not every
+    // overload of `fetch`.
     fetchImpl: fetchImpl as unknown as typeof fetch,
   });
   return {client, calls};

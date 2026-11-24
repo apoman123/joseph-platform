@@ -107,7 +107,7 @@ export const EXCHANGE_HOURS: Readonly<
 };
 
 /**
- * Whether a calendar id names an exchange calendar.
+ * Returns whether a calendar id names an exchange calendar.
  * @param id Calendar id.
  * @return True for every calendar but `24x7`.
  */
@@ -116,7 +116,7 @@ export function isExchangeCalendar(id: CalendarId): id is ExchangeCalendarId {
 }
 
 /**
- * Session calendar implied by an instrument id (engine
+ * Returns the session calendar implied by an instrument id (engine
  * `instruments.calendar_code`): TWSE and TPEx → XTAI, Nasdaq/NYSE/Cboe → XNYS,
  * Treasury → USBOND, DEMO stocks and ETFs → XNYS, everything else `24x7`.
  * @param instrumentId Canonical instrument id.
@@ -149,8 +149,8 @@ export function calendarIdForInstrumentId(instrumentId: string): CalendarId {
 }
 
 /**
- * Calendar of an instrument: the registry's `calendar` when known, else the
- * calendar implied by its id.
+ * Returns the calendar of an instrument: the registry's `calendar` when
+ * known, else the calendar implied by its id.
  * @param instrumentId Canonical instrument id.
  * @param instrument Registry entry, when loaded.
  * @return Calendar id.
@@ -171,19 +171,23 @@ export interface BarCalendar {
   /** IANA time zone used to label times (`UTC` for `24x7`). */
   readonly timeZone: string;
   /**
-   * Start of the bar at or before a time; between sessions, the last bar
-   * that started before it.
+   * Returns the start of the bar at or before a time; between sessions, the
+   * last bar that started before it.
    * @param timeframe Bar resolution.
    * @param tsMs UTC epoch milliseconds.
    * @return Bar start.
+   * @throws `RangeError` (exchange calendars) when no session lies within
+   *     60 days of the time.
    */
   floor(timeframe: Timeframe, tsMs: number): number;
   /**
-   * Exclusive end of the bar starting at `startMs` (the session close for
-   * the last bar of a session).
+   * Returns the exclusive end of the bar starting at `startMs` (the session
+   * close for the last bar of a session).
    * @param timeframe Bar resolution.
    * @param startMs Aligned bar start.
    * @return Exclusive bar end.
+   * @throws `RangeError` (exchange calendars) when no session lies within
+   *     60 days of the time.
    */
   endOf(timeframe: Timeframe, startMs: number): number;
   /**
@@ -193,6 +197,8 @@ export interface BarCalendar {
    * @param startMs Bar start or bar end.
    * @param bars Bars to move; negative moves back.
    * @return Start of the bar `bars` bars away.
+   * @throws `RangeError` (exchange calendars) when no session lies within
+   *     60 days of the time.
    */
   shift(timeframe: Timeframe, startMs: number, bars: number): number;
   /**
@@ -201,38 +207,42 @@ export interface BarCalendar {
    * @param startMs Inclusive start.
    * @param endMs Exclusive end.
    * @return Number of bars (0 when empty).
+   * @throws `RangeError` (exchange calendars) when no session lies within
+   *     60 days of the time.
    */
   barsBetween(timeframe: Timeframe, startMs: number, endMs: number): number;
   /**
-   * Whether a time is exactly a bar start.
+   * Returns whether a time is exactly a bar start.
    * @param timeframe Bar resolution.
    * @param tsMs UTC epoch milliseconds.
    * @return True for a bar start.
    */
   isAligned(timeframe: Timeframe, tsMs: number): boolean;
   /**
-   * Start of the newest bar fully closed at `asOfMs` (higher-timeframe
-   * visibility rule).
+   * Returns the start of the newest bar fully closed at `asOfMs` (the
+   * higher-timeframe visibility rule).
    * @param timeframe Bar resolution.
    * @param asOfMs Evaluation time.
    * @return Bar start, or null when there is none.
    */
   lastClosedStart(timeframe: Timeframe, asOfMs: number): number | null;
   /**
-   * Whether the market is in session at a time.
+   * Returns whether the market is in session at a time.
    * @param tsMs UTC epoch milliseconds.
    * @return True during a session (always for `24x7`).
    */
   isOpen(tsMs: number): boolean;
   /**
-   * Sessions overlapping `[fromMs, toMs)`, in time order.
+   * Lists the sessions overlapping `[fromMs, toMs)`, in time order.
    * @param fromMs Inclusive start.
    * @param toMs Exclusive end.
    * @return Sessions (empty for `24x7`).
+   * @throws `RangeError` (exchange calendars) when no session lies within
+   *     60 days of the time.
    */
   sessions(fromMs: number, toMs: number): TradingSession[];
   /**
-   * Whether bars of `small` nest exactly in bars of `big`.
+   * Returns whether bars of `small` nest exactly in bars of `big`.
    * @param big Higher timeframe.
    * @param small Lower timeframe.
    * @return True when they tile.
@@ -244,7 +254,7 @@ export interface BarCalendar {
 const PERIODIC: ReadonlySet<Timeframe> = new Set<Timeframe>(['1d', '1w', '1M']);
 
 /**
- * Whether a timeframe's bars are whole sessions (`1d`, `1w`, `1M`).
+ * Returns whether a timeframe's bars are whole sessions (`1d`, `1w`, `1M`).
  * @param timeframe Bar resolution.
  * @return True for periodic timeframes.
  */
@@ -261,7 +271,7 @@ class ContinuousCalendar implements BarCalendar {
   /**
    * See `BarCalendar.floor`.
    * @param timeframe Bar resolution.
-   * @param tsMs Time.
+   * @param tsMs UTC epoch milliseconds.
    * @return Bar start.
    */
   floor(timeframe: Timeframe, tsMs: number): number {
@@ -303,7 +313,7 @@ class ContinuousCalendar implements BarCalendar {
   /**
    * See `BarCalendar.isAligned`.
    * @param timeframe Bar resolution.
-   * @param tsMs Time.
+   * @param tsMs UTC epoch milliseconds.
    * @return Whether aligned.
    */
   isAligned(timeframe: Timeframe, tsMs: number): boolean {
@@ -318,6 +328,8 @@ class ContinuousCalendar implements BarCalendar {
    * @return Bar start or null.
    */
   lastClosedStart(timeframe: Timeframe, asOfMs: number): number | null {
+    // The bar before the one containing `asOfMs` has closed; there is none
+    // before the epoch.
     const previous = shiftTimeframe(
       timeframe,
       floorToTimeframe(timeframe, asOfMs),
@@ -327,26 +339,23 @@ class ContinuousCalendar implements BarCalendar {
   }
 
   /**
-   * Always open.
-   * @param _tsMs Ignored.
+   * Returns true: a continuous market is always open.
    * @return True.
    */
-  isOpen(_tsMs: number): boolean {
+  isOpen(): boolean {
     return true;
   }
 
   /**
-   * A continuous market has no sessions.
-   * @param _fromMs Ignored.
-   * @param _toMs Ignored.
+   * Returns no sessions: a continuous market has none.
    * @return Empty list.
    */
-  sessions(_fromMs: number, _toMs: number): TradingSession[] {
+  sessions(): TradingSession[] {
     return [];
   }
 
   /**
-   * Engine `Timeframe.contains`.
+   * See `BarCalendar.contains` (engine `Timeframe.contains`).
    * @param big Higher timeframe.
    * @param small Lower timeframe.
    * @return Whether `small` tiles `big`.
@@ -355,12 +364,17 @@ class ContinuousCalendar implements BarCalendar {
     const bigMs = TIMEFRAME_MS[big];
     const smallMs = TIMEFRAME_MS[small];
     if (smallMs >= bigMs) return false;
+    // Weeks and months start at a UTC midnight, so any timeframe that tiles
+    // a day tiles them.
     if (big === '1w' || big === '1M') return DAY_MS % smallMs === 0;
     return bigMs % smallMs === 0;
   }
 }
 
-/** Calendar of `24x7` markets (today's UTC-aligned bars, unchanged). */
+/**
+ * Calendar of `24x7` markets: bars aligned to the UTC epoch, exactly as in
+ * `identity.ts`.
+ */
 export const CONTINUOUS_CALENDAR: BarCalendar = new ContinuousCalendar();
 
 // Time zones --------------------------------------------------------------
@@ -385,10 +399,10 @@ export interface ZonedParts {
 const FORMATTERS = new Map<string, Intl.DateTimeFormat>();
 
 /**
- * Wall-clock parts of an instant in a time zone.
+ * Returns the wall-clock parts of an instant in a time zone.
  * @param tsMs UTC epoch milliseconds.
  * @param timeZone IANA time zone.
- * @return Parts.
+ * @return Parts, to the second.
  */
 export function zonedParts(tsMs: number, timeZone: string): ZonedParts {
   let format = FORMATTERS.get(timeZone);
@@ -413,6 +427,7 @@ export function zonedParts(tsMs: number, timeZone: string): ZonedParts {
     year: parts.year ?? 1970,
     month: parts.month ?? 1,
     day: parts.day ?? 1,
+    // Some engines print midnight as `24` even with `h23`.
     hour: (parts.hour ?? 0) % 24,
     minute: parts.minute ?? 0,
     second: parts.second ?? 0,
@@ -420,7 +435,7 @@ export function zonedParts(tsMs: number, timeZone: string): ZonedParts {
 }
 
 /**
- * Offset of a time zone from UTC at an instant.
+ * Returns the offset of a time zone from UTC at an instant.
  * @param tsMs UTC epoch milliseconds.
  * @param timeZone IANA time zone.
  * @return Milliseconds to add to UTC to get the wall clock.
@@ -428,11 +443,14 @@ export function zonedParts(tsMs: number, timeZone: string): ZonedParts {
 function zoneOffsetMs(tsMs: number, timeZone: string): number {
   const p = zonedParts(tsMs, timeZone);
   const wall = Date.UTC(p.year, p.month - 1, p.day, p.hour, p.minute, p.second);
+  // `zonedParts` drops milliseconds; compare with the instant truncated the
+  // same way.
   return wall - Math.floor(tsMs / 1000) * 1000;
 }
 
 /**
- * Local day number (days since 1970-01-01) of an instant in a time zone.
+ * Returns the local day number (days since 1970-01-01) of an instant in a
+ * time zone.
  * @param tsMs UTC epoch milliseconds.
  * @param timeZone IANA time zone.
  * @return Day number.
@@ -443,7 +461,7 @@ export function localDayNumber(tsMs: number, timeZone: string): number {
 }
 
 /**
- * UTC instant of a local wall time.
+ * Returns the UTC instant of a local wall time.
  * @param dayNumber Local day number (days since 1970-01-01).
  * @param minuteOfDay Minutes after local midnight.
  * @param timeZone IANA time zone.
@@ -462,7 +480,7 @@ export function zonedTimeToUtc(
 }
 
 /**
- * ISO date text of a day number.
+ * Formats a day number as ISO date text.
  * @param dayNumber Days since 1970-01-01.
  * @return `YYYY-MM-DD`.
  */
@@ -471,7 +489,7 @@ export function dayText(dayNumber: number): string {
 }
 
 /**
- * Day number of ISO date text.
+ * Parses ISO date text into a day number.
  * @param text `YYYY-MM-DD`.
  * @return Days since 1970-01-01, or NaN for invalid text.
  */
@@ -481,11 +499,12 @@ export function dayNumberOf(text: string): number {
 }
 
 /**
- * Weekday of a day number (0 = Sunday … 6 = Saturday).
+ * Returns the weekday of a day number (0 = Sunday … 6 = Saturday).
  * @param dayNumber Days since 1970-01-01 (a Thursday).
  * @return Weekday.
  */
 export function weekdayOf(dayNumber: number): number {
+  // Day 0 is a Thursday (4); the outer `+ 7` keeps negative days in range.
   return (((dayNumber + 4) % 7) + 7) % 7;
 }
 
@@ -581,7 +600,7 @@ export class SessionCalendar implements BarCalendar {
   }
 
   /**
-   * Whether the session list describes a local day.
+   * Returns whether the session list describes a local day.
    * @param day Local day number.
    * @return True when listed or inside a covered window.
    */
@@ -593,7 +612,8 @@ export class SessionCalendar implements BarCalendar {
   }
 
   /**
-   * Session of a local day (list first, else the weekday rule).
+   * Returns the session of a local day: the listed one, none on a covered
+   * day without one, else the fallback or the regular weekday hours.
    * @param day Local day number.
    * @return Session or null when closed.
    */
@@ -622,7 +642,7 @@ export class SessionCalendar implements BarCalendar {
   }
 
   /**
-   * Session on a local date.
+   * Returns the session on a local date.
    * @param text Exchange-local date `YYYY-MM-DD`.
    * @return Session, or null when the market is closed.
    */
@@ -681,7 +701,8 @@ export class SessionCalendar implements BarCalendar {
   }
 
   /**
-   * Index of the last timeline session opening at or before a time.
+   * Returns the index of the last timeline session opening at or before a
+   * time (binary search; the timeline is in time order).
    * @param tsMs Time (inside the timeline).
    * @return Index or -1.
    */
@@ -702,10 +723,10 @@ export class SessionCalendar implements BarCalendar {
   }
 
   /**
-   * Latest session that opened at or before a time.
+   * Returns the latest session that opened at or before a time.
    * @param tsMs UTC epoch milliseconds.
    * @return Session.
-   * @throws {RangeError} When no session opened within the scan window.
+   * @throws `RangeError` when no session opened within the scan window.
    */
   private sessionAtOrBefore(tsMs: number): Slot {
     this.reach(tsMs);
@@ -717,10 +738,10 @@ export class SessionCalendar implements BarCalendar {
   }
 
   /**
-   * Session after another.
+   * Returns the session after another.
    * @param current Session.
    * @return Next session.
-   * @throws {RangeError} When none follows within the scan window.
+   * @throws `RangeError` when none follows within the scan window.
    */
   private next(current: Slot): Slot {
     this.materialize(current.day + MAX_SCAN_DAYS);
@@ -733,10 +754,10 @@ export class SessionCalendar implements BarCalendar {
   }
 
   /**
-   * Session before another.
+   * Returns the session before another.
    * @param current Session.
    * @return Previous session.
-   * @throws {RangeError} When none precedes within the scan window.
+   * @throws `RangeError` when none precedes within the scan window.
    */
   private previous(current: Slot): Slot {
     this.materialize(current.day - MAX_SCAN_DAYS);
@@ -749,9 +770,10 @@ export class SessionCalendar implements BarCalendar {
   }
 
   /**
-   * Session containing a time, or the next one.
+   * Returns the session containing a time, or the next one.
    * @param tsMs UTC epoch milliseconds.
    * @return Session with `closeMs > tsMs`.
+   * @throws `RangeError` when no session lies within the scan window.
    */
   private firstFrom(tsMs: number): Slot {
     const found = this.sessionAtOrBefore(tsMs);
@@ -759,9 +781,11 @@ export class SessionCalendar implements BarCalendar {
   }
 
   /**
-   * Session in progress at a time.
+   * Returns the session in progress at a time.
    * @param tsMs UTC epoch milliseconds.
    * @return Session, or null between sessions.
+   * @throws `RangeError` when no session opened within 60 days before
+   *     `tsMs`.
    */
   sessionAt(tsMs: number): TradingSession | null {
     const found = this.sessionAtOrBefore(tsMs);
@@ -769,18 +793,20 @@ export class SessionCalendar implements BarCalendar {
   }
 
   /**
-   * Session in progress at a time, or the next one to open.
+   * Returns the session in progress at a time, or the next one to open.
    * @param tsMs UTC epoch milliseconds.
    * @return Session.
+   * @throws `RangeError` when no session lies within 60 days of `tsMs`.
    */
   currentOrNext(tsMs: number): TradingSession {
     return toSession(this.firstFrom(tsMs));
   }
 
   /**
-   * First session opening strictly after a time.
+   * Returns the first session opening strictly after a time.
    * @param tsMs UTC epoch milliseconds.
    * @return Session.
+   * @throws `RangeError` when no session lies within 60 days of `tsMs`.
    */
   nextOpen(tsMs: number): TradingSession {
     const found = this.firstFrom(tsMs);
@@ -788,9 +814,11 @@ export class SessionCalendar implements BarCalendar {
   }
 
   /**
-   * Last session that closed at or before a time.
+   * Returns the last session that closed at or before a time.
    * @param tsMs UTC epoch milliseconds.
    * @return Session.
+   * @throws `RangeError` when no session lies within 60 days before
+   *     `tsMs`.
    */
   lastClosed(tsMs: number): TradingSession {
     const found = this.sessionAtOrBefore(tsMs);
@@ -799,8 +827,8 @@ export class SessionCalendar implements BarCalendar {
 
   /**
    * See `BarCalendar.isOpen`.
-   * @param tsMs Time.
-   * @return Whether in session.
+   * @param tsMs UTC epoch milliseconds.
+   * @return Whether in session; false when no session is known.
    */
   isOpen(tsMs: number): boolean {
     try {
@@ -841,7 +869,7 @@ export class SessionCalendar implements BarCalendar {
   }
 
   /**
-   * Intraday bars in a session (the last one may be short).
+   * Counts the intraday bars of a session (the last one may be short).
    * @param timeframe Intraday timeframe.
    * @param session Session.
    * @return Bar count.
@@ -853,20 +881,21 @@ export class SessionCalendar implements BarCalendar {
   }
 
   /**
-   * Grouping key of a periodic bar.
+   * Returns the grouping key of a periodic bar.
    * @param timeframe `1d`, `1w` or `1M`.
    * @param day Local day number.
    * @return Key shared by all sessions of one bar.
    */
   private periodKey(timeframe: Timeframe, day: number): number {
     if (timeframe === '1d') return day;
+    // A week is keyed by its Monday: `(weekday + 6) % 7` is days since Monday.
     if (timeframe === '1w') return day - ((weekdayOf(day) + 6) % 7);
     const date = new Date(day * DAY_MS);
     return date.getUTCFullYear() * 12 + date.getUTCMonth();
   }
 
   /**
-   * First session of the periodic bar holding a session.
+   * Returns the first session of the periodic bar holding a session.
    * @param timeframe Periodic timeframe.
    * @param session A session of the bar.
    * @return First session.
@@ -888,7 +917,7 @@ export class SessionCalendar implements BarCalendar {
   }
 
   /**
-   * Last session of the periodic bar holding a session.
+   * Returns the last session of the periodic bar holding a session.
    * @param timeframe Periodic timeframe.
    * @param session A session of the bar.
    * @return Last session.
@@ -917,6 +946,8 @@ export class SessionCalendar implements BarCalendar {
     }
     const duration = TIMEFRAME_MS[timeframe];
     const count = this.count(timeframe, found);
+    // Prints within the close grace (a closing auction) and times between
+    // sessions belong to the last bar of the session.
     const index =
       tsMs >= found.closeMs + this.hours.closeGraceMs
         ? count - 1
@@ -925,9 +956,9 @@ export class SessionCalendar implements BarCalendar {
   }
 
   /**
-   * First bar start at or after a time.
+   * Returns the first bar start at or after a time.
    * @param timeframe Bar resolution.
-   * @param tsMs Time.
+   * @param tsMs UTC epoch milliseconds.
    * @return Session and bar index (periodic: first session, index 0).
    */
   private ceil(timeframe: Timeframe, tsMs: number): [Slot, number] {
@@ -1054,8 +1085,8 @@ export class SessionCalendar implements BarCalendar {
 
 /**
  * Converts a slot to the contract session.
- * @param slot Slot.
- * @return Trading session.
+ * @param slot Materialized session.
+ * @return Trading session with its exchange-local `day`.
  */
 function toSession(slot: Slot): TradingSession {
   return {day: dayText(slot.day), open_ms: slot.openMs, close_ms: slot.closeMs};
@@ -1086,18 +1117,18 @@ export interface MarketStatus {
   session: TradingSession | null;
   /** Next session to open (after the current one when open). */
   next: TradingSession | null;
-  /** Today's session closes before the regular close. */
+  /** Whether today's session closes before the regular close. */
   earlyClose: boolean;
-  /** Today (exchange-local) is a weekday without a session. */
+  /** Whether today (exchange-local) is a weekday without a session. */
   holiday: boolean;
   /** Exchange-local date of `nowMs`. */
   localDay: string;
 }
 
 /**
- * Market status of a calendar at a time.
+ * Returns the market status of a calendar at a time.
  * @param calendar Calendar.
- * @param nowMs Clock.
+ * @param nowMs Current time, UTC epoch milliseconds.
  * @return Status (always open for `24x7`).
  */
 export function marketStatus(
