@@ -11,7 +11,7 @@ from joseph_execution.domain import ids
 
 
 class SystemClock:
-    """Wall clock."""
+    """Wall clock in UTC epoch milliseconds."""
 
     def now_ms(self) -> int:
         """Returns UTC epoch milliseconds."""
@@ -22,14 +22,17 @@ class ManualClock:
     """Controllable clock for tests.
 
     Attributes:
-        current_ms: Current time.
+        current_ms: Current time, UTC epoch milliseconds; tests may also set
+            it directly.
     """
 
     def __init__(self, start_ms: int = 1_795_000_000_000) -> None:
         """Initializes the clock.
 
         Args:
-            start_ms: Start time.
+            start_ms: Start time, UTC epoch milliseconds (the default is
+                2026-11-18 11:06:40 UTC, a fixed instant for reproducible
+                tests).
         """
         self.current_ms = start_ms
 
@@ -41,7 +44,7 @@ class ManualClock:
         """Advances the clock.
 
         Args:
-            delta_ms: Non-negative delta.
+            delta_ms: Non-negative delta in milliseconds.
 
         Returns:
             New time.

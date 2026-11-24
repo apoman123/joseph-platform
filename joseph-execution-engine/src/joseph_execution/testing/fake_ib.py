@@ -6,7 +6,11 @@
 It mirrors the ``ib_async`` behaviours the adapter depends on: trades are
 live-updated objects, placement errors mark the trade ``Cancelled`` with
 the error code in its log, cancels go through ``PendingCancel``, and
-events are ``eventkit``-style objects with ``connect``/``emit``.
+events are ``eventkit``-style objects with ``connect``/``emit``. Attribute
+and method names are ``ib_async``'s own camelCase names because the adapter
+calls them. Deviations: contracts qualify with made-up ``conId`` values,
+commissions are always in USD, and the test drivers (``execute`` and the
+public attributes) script what a real gateway would decide.
 """
 
 from __future__ import annotations
@@ -16,6 +20,7 @@ import datetime
 from collections.abc import Callable
 from typing import Any
 
+# Fixed execution time, so fills are reproducible.
 _EPOCH = datetime.datetime(2026, 11, 23, tzinfo=datetime.UTC)
 
 
@@ -66,11 +71,11 @@ class FakeContract:
     """
 
     symbol: str
-    primaryExchange: str = ""  # noqa: N815
-    secType: str = "STK"  # noqa: N815
+    primaryExchange: str = ""  # noqa: N815 - ib_async attribute name read by the adapter.
+    secType: str = "STK"  # noqa: N815 - ib_async attribute name read by the adapter.
     exchange: str = "SMART"
     currency: str = "USD"
-    conId: int = 0  # noqa: N815
+    conId: int = 0  # noqa: N815 - ib_async attribute name read by the adapter.
 
 
 @dataclasses.dataclass
@@ -93,17 +98,17 @@ class FakeOrder:
     """
 
     action: str = ""
-    totalQuantity: float = 0.0  # noqa: N815
-    orderType: str = ""  # noqa: N815
+    totalQuantity: float = 0.0  # noqa: N815 - ib_async attribute name read by the adapter.
+    orderType: str = ""  # noqa: N815 - ib_async attribute name read by the adapter.
     tif: str = ""
-    outsideRth: bool = False  # noqa: N815
-    orderRef: str = ""  # noqa: N815
+    outsideRth: bool = False  # noqa: N815 - ib_async attribute name read by the adapter.
+    orderRef: str = ""  # noqa: N815 - ib_async attribute name read by the adapter.
     account: str = ""
     transmit: bool = True
-    lmtPrice: Any = None  # noqa: N815
-    auxPrice: Any = None  # noqa: N815
-    orderId: int = 0  # noqa: N815
-    permId: int = 0  # noqa: N815
+    lmtPrice: Any = None  # noqa: N815 - ib_async attribute name read by the adapter.
+    auxPrice: Any = None  # noqa: N815 - ib_async attribute name read by the adapter.
+    orderId: int = 0  # noqa: N815 - ib_async attribute name read by the adapter.
+    permId: int = 0  # noqa: N815 - ib_async attribute name read by the adapter.
 
 
 @dataclasses.dataclass
@@ -133,7 +138,7 @@ class FakeLogEntry:
 
     status: str
     message: str = ""
-    errorCode: int = 0  # noqa: N815
+    errorCode: int = 0  # noqa: N815 - ib_async attribute name read by the adapter.
 
 
 @dataclasses.dataclass
@@ -149,7 +154,7 @@ class FakeTrade:
 
     contract: FakeContract
     order: FakeOrder
-    orderStatus: FakeOrderStatus  # noqa: N815
+    orderStatus: FakeOrderStatus  # noqa: N815 - ib_async attribute name read by the adapter.
     log: list[FakeLogEntry] = dataclasses.field(default_factory=list)
 
 
@@ -168,13 +173,13 @@ class FakeExecution:
         time: Execution time.
     """
 
-    execId: str  # noqa: N815
-    acctNumber: str  # noqa: N815
+    execId: str  # noqa: N815 - ib_async attribute name read by the adapter.
+    acctNumber: str  # noqa: N815 - ib_async attribute name read by the adapter.
     shares: float
     price: float
-    orderRef: str  # noqa: N815
-    orderId: int  # noqa: N815
-    lastLiquidity: int = 2  # noqa: N815
+    orderRef: str  # noqa: N815 - ib_async attribute name read by the adapter.
+    orderId: int  # noqa: N815 - ib_async attribute name read by the adapter.
+    lastLiquidity: int = 2  # noqa: N815 - ib_async attribute name read by the adapter.
     time: datetime.datetime = _EPOCH
 
 
@@ -188,7 +193,7 @@ class FakeCommission:
         currency: Currency.
     """
 
-    execId: str = ""  # noqa: N815
+    execId: str = ""  # noqa: N815 - ib_async attribute name read by the adapter.
     commission: float = 0.0
     currency: str = ""
 
@@ -206,7 +211,7 @@ class FakeFill:
 
     contract: FakeContract
     execution: FakeExecution
-    commissionReport: FakeCommission  # noqa: N815
+    commissionReport: FakeCommission  # noqa: N815 - ib_async attribute name read by the adapter.
     time: datetime.datetime = _EPOCH
 
 
@@ -224,7 +229,7 @@ class FakePosition:
     account: str
     contract: FakeContract
     position: float
-    avgCost: float  # noqa: N815
+    avgCost: float  # noqa: N815 - ib_async attribute name read by the adapter.
 
 
 @dataclasses.dataclass
@@ -248,11 +253,18 @@ class FakeIB:
     """Fake ``ib_async.IB`` (see the module docstring).
 
     Attributes:
+        orderStatusEvent: Emitted with the trade on every status change.
+        execDetailsEvent: Emitted with ``(trade, fill)`` per execution.
+        commissionReportEvent: Emitted with ``(trade, fill, report)``.
+        errorEvent: Emitted with ``(order_id, code, message, contract)``.
+        disconnectedEvent: Emitted by ``disconnect``.
         managed: Accounts of the login.
         connect_failures: Connection attempts that fail before success.
         ack: Status after placement (``None`` keeps PendingSubmit).
         reject_next: ``(code, message)`` rejecting the next placement.
-        cancel_mode: ``ok``, ``error`` (10148) or ``hold``.
+        cancel_mode: ``ok`` (cancelled with error 202), ``error`` (error
+            10148, the order stays PendingCancel) or ``hold`` (stays
+            PendingCancel without events).
         unknown_symbols: Symbols that cannot be qualified.
         summary: Account summary values.
         position_rows: Positions.
@@ -293,7 +305,7 @@ class FakeIB:
 
     # -- connection ------------------------------------------------------
 
-    def isConnected(self) -> bool:  # noqa: N802
+    def isConnected(self) -> bool:  # noqa: N802 - ib_async method name called by the adapter.
         """Whether connected.
 
         Returns:
@@ -301,12 +313,12 @@ class FakeIB:
         """
         return self._connected
 
-    async def connectAsync(  # noqa: N802, PLR0917
+    async def connectAsync(  # noqa: N802, PLR0917 - mirrors the ib_async connectAsync name and signature.
         self,
         host: str,
         port: int,
-        clientId: int,  # noqa: N803
-        timeout: float,  # noqa: ASYNC109
+        clientId: int,  # noqa: N803 - ib_async parameter name.
+        timeout: float,  # noqa: ASYNC109 - ib_async parameter, accepted and ignored.
         readonly: bool,
         account: str,
     ) -> FakeIB:
@@ -326,6 +338,7 @@ class FakeIB:
         Raises:
             ConnectionRefusedError: While failures remain.
         """
+        del timeout, readonly, account  # Unused.
         self.connects.append(
             {"host": host, "port": port, "client_id": clientId}
         )
@@ -345,7 +358,7 @@ class FakeIB:
         self.disconnectedEvent.emit()
         return "disconnected"
 
-    def managedAccounts(self) -> list[str]:  # noqa: N802
+    def managedAccounts(self) -> list[str]:  # noqa: N802 - ib_async method name called by the adapter.
         """Lists managed accounts.
 
         Returns:
@@ -353,7 +366,7 @@ class FakeIB:
         """
         return list(self.managed)
 
-    async def qualifyContractsAsync(  # noqa: N802
+    async def qualifyContractsAsync(  # noqa: N802 - ib_async method name called by the adapter.
         self, *contracts: FakeContract
     ) -> list[FakeContract | None]:
         """Qualifies contracts.
@@ -362,7 +375,8 @@ class FakeIB:
             *contracts: Contracts.
 
         Returns:
-            Contracts with conIds, ``None`` for unknown symbols.
+            The same contracts, mutated with a ``conId``, in order; ``None``
+            for unknown symbols.
         """
         result: list[FakeContract | None] = []
         for contract in contracts:
@@ -375,10 +389,14 @@ class FakeIB:
 
     # -- orders ------------------------------------------------------------
 
-    def placeOrder(  # noqa: N802
+    def placeOrder(  # noqa: N802 - ib_async method name called by the adapter.
         self, contract: FakeContract, order: FakeOrder
     ) -> FakeTrade:
         """Places or modifies an order.
+
+        An order whose ``orderId`` matches a known trade modifies it. A new
+        order gets ids and is rejected (``reject_next``), acknowledged with
+        ``ack`` or left PendingSubmit without events (``ack`` is ``None``).
 
         Args:
             contract: Contract.
@@ -429,8 +447,8 @@ class FakeIB:
         self.orderStatusEvent.emit(trade)
         self.errorEvent.emit(trade.order.orderId, code, message, None)
 
-    def cancelOrder(self, order: FakeOrder) -> FakeTrade | None:  # noqa: N802
-        """Requests cancellation.
+    def cancelOrder(self, order: FakeOrder) -> FakeTrade | None:  # noqa: N802 - ib_async method name called by the adapter.
+        """Requests cancellation (outcome set by ``cancel_mode``).
 
         Args:
             order: Order.
@@ -480,7 +498,7 @@ class FakeIB:
         """
         return [p for p in self.position_rows if p.account in ("", account)]
 
-    async def accountSummaryAsync(  # noqa: N802
+    async def accountSummaryAsync(  # noqa: N802 - ib_async method name called by the adapter.
         self, account: str = ""
     ) -> list[FakeAccountValue]:
         """Returns the account summary.
@@ -493,18 +511,18 @@ class FakeIB:
         """
         return [v for v in self.summary if v.account == account]
 
-    async def reqAllOpenOrdersAsync(self) -> list[FakeTrade]:  # noqa: N802
+    async def reqAllOpenOrdersAsync(self) -> list[FakeTrade]:  # noqa: N802 - ib_async method name called by the adapter.
         """Returns open trades.
 
         Returns:
-            Trades.
+            Every trade that is not Filled, cancelled ones included.
         """
         self.requests.append("open")
         return [t for t in self._trades if t.orderStatus.status != "Filled"]
 
-    async def reqCompletedOrdersAsync(  # noqa: N802
+    async def reqCompletedOrdersAsync(  # noqa: N802 - ib_async method name called by the adapter.
         self,
-        apiOnly: bool,  # noqa: N803
+        apiOnly: bool,  # noqa: N803 - ib_async parameter name.
     ) -> list[FakeTrade]:
         """Returns completed trades.
 
@@ -518,9 +536,9 @@ class FakeIB:
         self.requests.append("completed")
         return [t for t in self._trades if t.orderStatus.status == "Filled"]
 
-    async def reqExecutionsAsync(  # noqa: N802
+    async def reqExecutionsAsync(  # noqa: N802 - ib_async method name called by the adapter.
         self,
-        execFilter: Any = None,  # noqa: N803
+        execFilter: Any = None,  # noqa: N803 - ib_async parameter name.
     ) -> list[FakeFill]:
         """Returns executions.
 
@@ -536,7 +554,7 @@ class FakeIB:
 
     # -- test drivers ------------------------------------------------------
 
-    def execute(  # noqa: PLR0917
+    def execute(  # noqa: PLR0917 - tests pass trade, shares and price positionally.
         self,
         trade: FakeTrade,
         shares: float,

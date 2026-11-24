@@ -20,7 +20,12 @@ from joseph_execution.adapters.venues import ws
 
 
 class ManualMonotonic:
-    """A monotonic clock that only moves when told (or when slept)."""
+    """A monotonic clock that only moves when told (or when slept).
+
+    Attributes:
+        now: Current reading in seconds; tests may set it.
+        sleeps: Durations passed to ``sleep``, in call order.
+    """
 
     def __init__(self, start: float = 1_000.0) -> None:
         """Initializes the clock.
@@ -39,7 +44,8 @@ class ManualMonotonic:
         """Advances the clock instead of sleeping.
 
         Args:
-            seconds: Duration.
+            seconds: Duration; negative values are recorded but do not move
+                the clock.
         """
         self.sleeps.append(seconds)
         self.now += max(seconds, 0.0)
@@ -64,7 +70,7 @@ class FakeConnection:
     """Connection replaying a script.
 
     Attributes:
-        sent: Frames sent by the client.
+        sent: Frames sent by the client, in order.
     """
 
     def __init__(self, script: Script, clock: ManualMonotonic) -> None:
@@ -172,7 +178,7 @@ async def collect(stream: AsyncIterator[object], count: int) -> list[object]:
         count: Items wanted.
 
     Returns:
-        Items.
+        Up to ``count`` items; fewer when the stream ends first.
     """
     items: list[object] = []
     async for item in stream:

@@ -7,31 +7,36 @@ from __future__ import annotations
 
 import threading
 from collections.abc import Mapping
+from typing import TypeAlias
 
-_Key = tuple[str, tuple[tuple[str, str], ...]]
+# A metric name with its labels sorted by label name.
+_Key: TypeAlias = tuple[str, tuple[tuple[str, str], ...]]
+
+
+def _key(name: str, labels: Mapping[str, str] | None) -> _Key:
+    """Builds a metric key.
+
+    Args:
+        name: Metric name.
+        labels: Labels.
+
+    Returns:
+        Key, independent of the order of ``labels``.
+    """
+    return name, tuple(sorted((labels or {}).items()))
 
 
 class MetricsRegistry:
-    """Counters and gauges rendered in Prometheus text format."""
+    """Thread-safe counters and gauges rendered in Prometheus text format.
+
+    Names are given without the ``joseph_`` prefix that ``render`` adds.
+    """
 
     def __init__(self) -> None:
         """Initializes empty metrics."""
         self._counters: dict[_Key, float] = {}
         self._gauges: dict[_Key, float] = {}
         self._lock = threading.Lock()
-
-    @staticmethod
-    def _key(name: str, labels: Mapping[str, str] | None) -> _Key:
-        """Builds a metric key.
-
-        Args:
-            name: Metric name.
-            labels: Labels.
-
-        Returns:
-            Key.
-        """
-        return name, tuple(sorted((labels or {}).items()))
 
     def increment(
         self, name: str, labels: Mapping[str, str] | None = None
@@ -43,7 +48,7 @@ class MetricsRegistry:
             labels: Labels.
         """
         with self._lock:
-            key = self._key(name, labels)
+            key = _key(name, labels)
             self._counters[key] = self._counters.get(key, 0.0) + 1.0
 
     def gauge(
@@ -60,7 +65,7 @@ class MetricsRegistry:
             labels: Labels.
         """
         with self._lock:
-            self._gauges[self._key(name, labels)] = value
+            self._gauges[_key(name, labels)] = value
 
     def value(
         self, name: str, labels: Mapping[str, str] | None = None
@@ -72,9 +77,9 @@ class MetricsRegistry:
             labels: Labels.
 
         Returns:
-            Value (0 when absent).
+            The counter's value, else the gauge's, else 0.
         """
-        key = self._key(name, labels)
+        key = _key(name, labels)
         with self._lock:
             return self._counters.get(key, self._gauges.get(key, 0.0))
 
@@ -82,7 +87,10 @@ class MetricsRegistry:
         """Renders all metrics in Prometheus text exposition format.
 
         Returns:
-            Text.
+            Text ending in a newline. The alerting metrics
+            ``order_unknown_total``, ``risk_block_total`` and
+            ``reconcile_lag_ms`` are always present (0 until first set), so
+            scrapers and alert rules see them before the first event.
         """
         lines: list[str] = []
         with self._lock:

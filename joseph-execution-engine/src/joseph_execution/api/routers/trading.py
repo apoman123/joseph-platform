@@ -16,6 +16,8 @@ from joseph_execution.domain import errors
 from joseph_execution.domain import identity
 from joseph_execution.domain import intents
 
+# Shared parameter default; a module constant keeps calls out of argument
+# defaults (ruff B008).
 _Principal = fastapi.Depends(auth.principal)
 
 
@@ -27,6 +29,10 @@ def _request(body: schemas.IntentBody) -> intents.OrderIntentRequest:
 
     Returns:
         Domain request.
+
+    Raises:
+        ExecutionError: ``VALIDATION_FAILED`` when the body violates the
+            request's structural invariants.
     """
     return intents.OrderIntentRequest.from_contract(body.model_dump())
 
@@ -38,16 +44,65 @@ def _idempotency(header: str | None) -> str:
         header: Header value.
 
     Returns:
-        Key.
+        Key, unchanged.
 
     Raises:
-        ExecutionError: ``VALIDATION_FAILED`` when missing.
+        ExecutionError: ``VALIDATION_FAILED`` when missing or empty.
     """
     if not header:
         raise errors.ExecutionError(
             "VALIDATION_FAILED", "Idempotency-Key header is required"
         )
     return header
+
+
+def _states(state: str) -> list[enums.OrderState]:
+    """Parses the ``state`` query parameter of the order list.
+
+    Route docstrings become OpenAPI descriptions, so the route delegates
+    this to keep its own docstring (and the generated document) stable.
+
+    Args:
+        state: Comma-separated order states; empty items are ignored.
+
+    Returns:
+        The states, in the given order.
+
+    Raises:
+        ExecutionError: ``VALIDATION_FAILED`` for an unknown state.
+    """
+    try:
+        return [enums.OrderState(s) for s in state.split(",") if s]
+    except ValueError as err:
+        raise errors.ExecutionError(
+            "VALIDATION_FAILED", "unknown order state"
+        ) from err
+
+
+async def _close_request(
+    request: fastapi.Request,
+    principal: identity.Principal,
+    position_id: str,
+    body: schemas.CloseBody,
+) -> intents.OrderIntentRequest:
+    """Builds a reduce-only close request for a position.
+
+    Args:
+        request: Request.
+        principal: Caller.
+        position_id: Position.
+        body: Close body.
+
+    Returns:
+        Domain request.
+    """
+    return await auth.api(request).oms.close_request(
+        principal,
+        position_id,
+        decimals.to_decimal(body.fraction),
+        enums.OrderType(body.order_type),
+        decimals.to_optional(body.limit_price),
+    )
 
 
 def build_router() -> fastapi.APIRouter:
@@ -122,14 +177,7 @@ def build_router() -> fastapi.APIRouter:
         Returns:
             Contract ``OrderList``.
         """
-        states = None
-        if state:
-            try:
-                states = [enums.OrderState(s) for s in state.split(",") if s]
-            except ValueError as err:
-                raise errors.ExecutionError(
-                    "VALIDATION_FAILED", "unknown order state"
-                ) from err
+        states = _states(state) if state else None
         items = auth.api(request).oms.list_orders(principal, account_id, states)
         return {"orders": [o.to_contract() for o in items]}
 
@@ -200,31 +248,6 @@ def build_router() -> fastapi.APIRouter:
             principal, account_id
         )
         return {"positions": items}
-
-    async def _close_request(
-        request: fastapi.Request,
-        principal: identity.Principal,
-        position_id: str,
-        body: schemas.CloseBody,
-    ) -> intents.OrderIntentRequest:
-        """Builds a close request.
-
-        Args:
-            request: Request.
-            principal: Caller.
-            position_id: Position.
-            body: Close body.
-
-        Returns:
-            Domain request.
-        """
-        return await auth.api(request).oms.close_request(
-            principal,
-            position_id,
-            decimals.to_decimal(body.fraction),
-            enums.OrderType(body.order_type),
-            decimals.to_optional(body.limit_price),
-        )
 
     @router.post("/positions/{position_id}/close-preview")
     async def close_preview(
