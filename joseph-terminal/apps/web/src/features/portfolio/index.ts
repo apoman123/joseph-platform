@@ -6,8 +6,8 @@
 
 /**
  * @fileoverview Portfolio feature: positions, open orders, executions,
- * order history, audit log and risk controls as bottom-panel tabs, all
- * backed by one shared read model.
+ * order history, audit log, risk controls and accounts as bottom-panel
+ * tabs, all backed by one shared read model.
  */
 
 import type {Disposer} from '@joseph/feature-registry';
@@ -32,7 +32,7 @@ import {PositionsView} from './positions-view';
  * Binds a view component to the runtime as a slot view.
  * @param component View component.
  * @param runtime Portfolio runtime.
- * @param extra Extra props.
+ * @param extra Props of the view beyond context and runtime.
  * @return Slot view.
  */
 function bind<P extends ActivityViewProps>(
@@ -41,11 +41,13 @@ function bind<P extends ActivityViewProps>(
   extra: Omit<P, keyof ActivityViewProps>
 ): WebView {
   /**
-   * Slot view rendering a portfolio tab.
+   * Renders a portfolio tab with the slot's context.
    * @param props Slot props.
    * @return Element.
    */
   function PortfolioSlot(props: WebSlotProps) {
+    // `extra` plus context and runtime is exactly `P`; TypeScript cannot
+    // prove that for an `Omit` of a generic.
     return createElement(component, {...(extra as P), ctx: props.ctx, runtime});
   }
   return PortfolioSlot;

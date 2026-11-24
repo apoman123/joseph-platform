@@ -48,9 +48,10 @@ export interface PositionsViewProps {
 }
 
 /**
- * Formats an optional decimal with grouping.
+ * Formats an optional decimal string with thousands separators, without
+ * passing it through a float.
  * @param value Decimal string or null.
- * @return Text.
+ * @return Text, or `—` when missing.
  */
 function num(value: string | null | undefined): string {
   return value ? groupThousands(value) : '—';
@@ -89,7 +90,8 @@ function PreviewChecks({preview}: {preview: OrderPreview}): ReactNode {
 }
 
 /**
- * Dialog that previews and confirms a reduce-only close.
+ * Renders the dialog that previews and confirms a reduce-only close of 25,
+ * 50, 75 or 100 % of a position.
  * @param props Context, runtime, position and close handler.
  * @return Dialog element.
  */
@@ -104,6 +106,8 @@ function CloseDialog({
   const [key, setKey] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  // Canonical ids are `venue:type:symbol`. The position carries no lot size,
+  // so the precision of its quantity stands in for the step.
   const symbol = position.instrument_id.split(':')[2] ?? '';
   const plan = planClose(
     position,
@@ -132,6 +136,9 @@ function CloseDialog({
     void load('1');
     // eslint-disable-next-line react-hooks/exhaustive-deps -- loads the full-close preview once, when the dialog opens; later fraction changes reload from the input handler.
   }, []);
+  // One idempotency key per previewed close: a retry after an error resends
+  // the same key, so the engine places at most one order; choosing another
+  // fraction (`load`) starts a new key.
   const confirm = async () => {
     if (!preview) return;
     const idempotency = key ?? randomKey();
@@ -201,7 +208,8 @@ function CloseDialog({
 }
 
 /**
- * Two-step reverse dialog.
+ * Renders the two-step reverse: a reduce-only full close, then, once the
+ * position is confirmed flat, an order opening the opposite side.
  * @param props Context, runtime, position and close handler.
  * @return Dialog element.
  */
@@ -221,6 +229,8 @@ function ReverseDialog({
   const [error, setError] = useState<string | null>(
     'error' in started ? started.error : null
   );
+  // One idempotency key per step for the dialog's lifetime, so a retried
+  // step can never be sent twice.
   const [keys] = useState(() => ({close: randomKey(), open: randomKey()}));
 
   useEffect(() => {
@@ -348,8 +358,8 @@ function ReverseDialog({
 }
 
 /**
- * Renders the positions table.
- * @param props Props.
+ * Renders the positions table with close and reverse actions.
+ * @param props Feature context and portfolio runtime.
  * @return Element.
  */
 export function PositionsView({ctx, runtime}: PositionsViewProps): ReactNode {

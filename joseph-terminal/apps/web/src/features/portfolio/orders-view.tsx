@@ -45,9 +45,10 @@ export interface OrdersViewProps {
 }
 
 /**
- * Formats an optional decimal with grouping.
+ * Formats an optional decimal string with thousands separators, without
+ * passing it through a float.
  * @param value Decimal string or null.
- * @return Text.
+ * @return Text, or `—` when missing.
  */
 function num(value: string | null | undefined): string {
   return value ? groupThousands(value) : '—';
@@ -64,9 +65,9 @@ export function describeOrder(order: Order): string {
 }
 
 /**
- * Renders open orders or order history.
- * @param props Props.
- * @return Table element.
+ * Renders open orders (with a confirmed cancel) or order history.
+ * @param props Feature context, portfolio runtime and which list to show.
+ * @return Table element, or an empty state once loaded without orders.
  */
 export function OrdersView({ctx, runtime, mode}: OrdersViewProps): ReactNode {
   const state = useStore(runtime.state);
@@ -151,6 +152,7 @@ export function OrdersView({ctx, runtime, mode}: OrdersViewProps): ReactNode {
                   </td>
                   <td>
                     <SideText side={order.side} />
+                    {/* SL is the attached stop-loss, TP the take-profit. */}
                     {order.role !== 'PRIMARY' && (
                       <span className="j-muted">
                         {' '}
@@ -170,6 +172,7 @@ export function OrdersView({ctx, runtime, mode}: OrdersViewProps): ReactNode {
                   </td>
                   <td className="j-num">{num(order.quantity_base)}</td>
                   <td className="j-num">{num(order.filled_base)}</td>
+                  {/* The fill price once filled, else the order's price. */}
                   <td className="j-num">
                     {num(
                       order.avg_fill_price ??

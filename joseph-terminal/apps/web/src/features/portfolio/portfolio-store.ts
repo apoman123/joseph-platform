@@ -28,7 +28,7 @@ import {errorMessage} from '../trading/ui/hooks';
 
 /** Portfolio read model. */
 export interface PortfolioState {
-  /** Accounts. */
+  /** Connected accounts of the tenant. */
   accounts: readonly AccountSummary[];
   /** Orders newest first. */
   orders: readonly Order[];
@@ -40,7 +40,10 @@ export interface PortfolioState {
   killSwitches: readonly KillSwitchState[];
   /** Audit events and chain validity. */
   audit: AuditEventList | null;
-  /** Last load error. */
+  /**
+   * Message of the last failed refresh, or null after a success; the other
+   * fields keep the last loaded values.
+   */
   error: string | null;
   /** Whether the first load finished. */
   loaded: boolean;
@@ -53,8 +56,10 @@ export interface PortfolioRuntime {
   /** State store. */
   state: WritableStore<PortfolioState>;
   /**
-   * Reloads everything.
-   * @return Promise resolving when done.
+   * Reloads everything. A call during a running refresh schedules one more
+   * refresh afterwards and returns the running one.
+   * @return Promise resolving when the running refresh is done. It never
+   *     rejects: a failure is reported in `state.error`.
    */
   refresh(): Promise<void>;
   /** Stops polling and stream subscriptions. */
@@ -62,10 +67,11 @@ export interface PortfolioRuntime {
 }
 
 /**
- * Creates the portfolio runtime.
+ * Creates the portfolio runtime and starts refreshing on user-stream events
+ * and on an interval.
  * @param ctx Feature context.
- * @param pollMs Refresh interval.
- * @return Runtime.
+ * @param pollMs Refresh interval in milliseconds.
+ * @return Runtime; call `dispose` to stop it.
  */
 export function createPortfolioRuntime(
   ctx: WebFeatureContext,
