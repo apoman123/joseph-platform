@@ -5,7 +5,11 @@
  */
 
 /**
- * @fileoverview System tests of the chart stack in DEMO mode.
+ * @fileoverview Browser tests of the chart stack in DEMO mode: provenance,
+ * instrument and timeframe switching, drawings with undo/redo and
+ * persistence, the four-chart layout, the light theme, the command palette,
+ * accessibility (axe) and security headers. Some tests also write the
+ * documentation screenshots.
  */
 
 import AxeBuilder from '@axe-core/playwright';
@@ -17,6 +21,7 @@ import {
   savedTools,
 } from './support';
 
+/** Folder of the documentation screenshots, relative to `apps/web`. */
 const SHOTS = 'e2e/screenshots';
 
 test('loads in DEMO mode with unmistakable provenance', async ({page}) => {
@@ -31,6 +36,7 @@ test('loads in DEMO mode with unmistakable provenance', async ({page}) => {
     page.getByText('Demo mode: synthetic prices, simulated paper broker')
   ).toBeVisible();
   await expect(page.getByTestId('order-mode')).toHaveText('Paper trading');
+  // Let fonts, canvas paints and transitions settle before the screenshot.
   await page.waitForTimeout(800);
   await page.screenshot({path: `${SHOTS}/01-terminal-demo-dark.png`});
 });
@@ -70,11 +76,14 @@ test('draws a trendline and rectangle that survive a reload, with undo and redo'
   await page.reload();
   await expect(page.locator('.terminal[data-ready="true"]')).toBeVisible();
   await expect.poll(() => savedTools(page)).toEqual(['trendline', 'rectangle']);
+  // Drawings persist; their undo history does not.
   await expect(page.getByTestId('undo')).toBeDisabled();
   const raw = await page.evaluate(
     key => localStorage.getItem(key),
     BTC_DRAWINGS_KEY
   );
+  // The drawing store's saved shape. Anchor prices must be plain decimal
+  // strings, never floats in exponent notation.
   const anchors =
     (
       JSON.parse(raw ?? '{}') as {
@@ -94,6 +103,8 @@ test('shows four synced charts and restores the layout after reload', async ({
   await page.getByTestId('layout-menu').click();
   await expect(page.getByTestId('sync-crosshair')).toBeChecked();
   await page.keyboard.press('Escape');
+  // Hover the first chart so the screenshot shows the crosshair synced on
+  // all four, then let the panes repaint.
   const box = await page.getByTestId('chart-canvas').first().boundingBox();
   if (box) {
     await page.mouse.move(box.x + box.width * 0.5, box.y + box.height * 0.5);
@@ -111,6 +122,7 @@ test('toggles the daylight theme', async ({page}) => {
   await expect(
     page.locator('[data-testid^="chart-pane-"] canvas').first()
   ).toBeVisible();
+  // The charts repaint in the new theme's colours; let them settle.
   await page.waitForTimeout(800);
   await page.screenshot({path: `${SHOTS}/04-terminal-light.png`});
   await page.getByTestId('theme-toggle').click();

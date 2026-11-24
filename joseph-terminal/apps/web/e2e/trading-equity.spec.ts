@@ -10,7 +10,8 @@
  * validates TWSE board lots and intraday odd lots (limit DAY only), the tick
  * ladder, the daily price limit, the account's order types and time in
  * force, and market orders while the exchange is closed; US shares on IBKR
- * offer DAY/GTC/IOC and outside RTH; a published rate has no ticket; the
+ * (Interactive Brokers) offer DAY/GTC/IOC and outside RTH (regular trading
+ * hours); a published rate has no ticket; the
  * Accounts tab shows routing, server-side credential state, settled cash
  * and Cathay awaiting its API SDK.
  */
@@ -18,13 +19,15 @@
 import {expect, test, type Page} from '@playwright/test';
 import {loadTerminal, openPanel, ticket} from './trading-helpers';
 
+/** Folder of the documentation screenshots, relative to `apps/web`. */
 const SHOTS = 'e2e/screenshots';
 
 /** Saturday 2026-11-28 12:00 Taipei (Friday 23:00 New York): all closed. */
 const SATURDAY = new Date('2026-11-28T04:00:00Z');
 
 /**
- * Picks an instrument from the selector of the active chart.
+ * Picks an instrument from the selector of the active chart and waits for
+ * its candles.
  * @param page Page.
  * @param query Search text.
  * @param option Option name pattern.
@@ -36,6 +39,8 @@ async function pick(page: Page, query: string, option: RegExp): Promise<void> {
   await expect(page.getByText('Loading candles…')).toHaveCount(0);
 }
 
+// A fixed Saturday clock keeps every exchange closed, so the closed-market
+// rules and notices are the same on every run.
 test.beforeEach(async ({page}) => {
   await page.clock.setFixedTime(SATURDAY);
 });
@@ -48,7 +53,8 @@ test('validates TWSE lots, ladder, limits and closed-market orders', async ({
   await openPanel(page, 'Order ticket');
   const t = ticket(page);
   const account = t.getByRole('combobox', {name: 'Account'});
-  // TWSE routes to the TWD paper account; switch to the SinoPac simulation.
+  // TWSE routes to the TWD paper account; switch to the SinoPac simulation
+  // only after that routing ran, or it would override the choice.
   await expect(account).toHaveValue('acct-twd-paper-demo');
   await account.selectOption('acct-sinopac-demo');
   await expect(t.getByTestId('account-status')).toContainText(
@@ -121,6 +127,7 @@ test('validates TWSE lots, ladder, limits and closed-market orders', async ({
     'Place paper limit buy 350 shares (odd lot) 9901 at 585 TWD'
   );
   await expect(t.getByRole('button', {name: 'Live'})).toBeDisabled();
+  // Let the panel settle (transitions, repaint) before the screenshot.
   await page.waitForTimeout(300);
   await page.screenshot({path: `${SHOTS}/38-equity-ticket-twse.png`});
 });
@@ -173,6 +180,7 @@ test('routes US shares to the paper or IBKR account with DAY and outside RTH', a
   await expect(t.getByTestId('confirm-order')).toHaveText(
     'Place paper limit buy 100 shares ACME at 182.40 USD'
   );
+  // Let the panel settle (transitions, repaint) before the screenshot.
   await page.waitForTimeout(300);
   await page.screenshot({path: `${SHOTS}/39-equity-ticket-ibkr.png`});
   // A Taiwan broker account does not route US listings.
@@ -213,6 +221,7 @@ test('a published rate has no ticket and accounts show their state', async ({
   const cathay = table.getByTestId('account-row-acct-cathay-demo');
   await expect(cathay).toContainText('Awaiting API SDK');
   await expect(cathay).toContainText('No trading API yet');
+  // Let the panel settle (transitions, repaint) before the screenshot.
   await page.waitForTimeout(300);
   await page.screenshot({path: `${SHOTS}/40-broker-accounts.png`});
 });

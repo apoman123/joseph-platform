@@ -5,11 +5,16 @@
  */
 
 /**
- * @fileoverview Browser → real engines: market data and backend AOIs render,
- * seconds bars and true delta come from the engine, engine-backed drawings
- * read engine series, a paper order placed in the ticket reaches the
- * execution engine, and the strategy builder validates against the Python
- * compiler.
+ * @fileoverview Browser → real engines: market data and backend AOIs (areas
+ * of interest) render, seconds bars and true delta come from the engine,
+ * engine-backed drawings read engine series, a paper order placed in the
+ * ticket reaches the execution engine, the strategy builder validates
+ * against the Python compiler, and notification subscriptions are stored
+ * server-side.
+ *
+ * Runs with `playwright.fullstack.config.ts`, which starts both engines and
+ * a production build of the terminal; the test backend enables only the
+ * `mock` venue.
  */
 
 import {expect, test, type Page} from '@playwright/test';
@@ -29,6 +34,7 @@ import {
   ticket,
 } from '../e2e/trading-helpers';
 
+/** Authorization header for calling the engines directly. */
 const AUTH = {Authorization: `Bearer ${TOKEN}`};
 
 /**
@@ -53,6 +59,8 @@ async function loadOnDemoVenue(page: Page): Promise<void> {
 test('an unavailable venue shows an error, never synthetic prices', async ({
   page,
 }) => {
+  // The default chart is a Binance instrument, which the test backend does
+  // not enable. `.` matches either apostrophe.
   await loadTerminal(page);
   await expect(page.getByText(/Candles didn.t load/)).toBeVisible();
   await expect(
@@ -65,6 +73,8 @@ test('an unavailable venue shows an error, never synthetic prices', async ({
 test('terminal runs on backend data, not the in-browser demo provider', async ({
   page,
 }) => {
+  // Listen before loading so the response is not missed; the engine may
+  // still be warming up, hence the long timeout.
   const aois = page.waitForResponse(
     response =>
       response.url().startsWith(`${API.NEXT_PUBLIC_MARKET_API_URL}/v1/aois`) &&
@@ -73,6 +83,7 @@ test('terminal runs on backend data, not the in-browser demo provider', async ({
     {timeout: 60_000}
   );
   await loadOnDemoVenue(page);
+  // Only the fields the test reads.
   const body = (await (await aois).json()) as {
     aois: Array<{source: string; kind: string}>;
     feed_state: string;
@@ -83,6 +94,7 @@ test('terminal runs on backend data, not the in-browser demo provider', async ({
   expect(body.feed_state).toBe('DEMO');
   await expect(page.getByText(/Demo mode: synthetic prices/)).toHaveCount(0);
   await expect(page.locator('canvas').first()).toBeVisible();
+  // Let the backend layers draw before the screenshot.
   await page.waitForTimeout(1500);
   await page.screenshot({path: 'e2e/screenshots/09-fullstack-terminal.png'});
 });

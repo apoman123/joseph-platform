@@ -5,24 +5,32 @@
  */
 
 /**
- * @fileoverview Shared helpers for terminal system tests.
+ * @fileoverview Shared helpers for the terminal's browser tests against the
+ * DEMO build: opening the terminal on clean storage, pointer input on the
+ * chart canvas (which has no DOM content to click), and reading what the
+ * drawing store saved.
  */
 
 import {expect, type Locator, type Page} from '@playwright/test';
 
-/** Storage key of BTC drawings in the default workspace. */
+/** Storage key of the DEMO BTCUSD drawings in the default workspace. */
 export const BTC_DRAWINGS_KEY = 'joseph.drawings.v1.default.mock:perp:BTCUSD';
 
 /**
- * Opens the terminal with clean storage and waits for candles.
+ * Opens the terminal and waits until it can be used: every feature is
+ * activated (`data-ready`), the first chart has mounted its canvas, and the
+ * first candles have loaded.
  * @param page Page.
- * @param options Whether to clear storage first.
+ * @param options `clear` wipes local storage before the first load of the
+ *     test; it is on when `options` is omitted.
  */
 export async function openTerminal(
   page: Page,
   options: {clear?: boolean} = {clear: true}
 ): Promise<void> {
   if (options.clear) {
+    // Init scripts run on every navigation; the session flag limits the
+    // wipe to the first load, so a reload inside the test keeps its state.
     await page.addInitScript(() => {
       if (!sessionStorage.getItem('e2e-cleared')) {
         localStorage.clear();
@@ -39,7 +47,7 @@ export async function openTerminal(
 }
 
 /**
- * Returns the first chart canvas host.
+ * Returns the element hosting the first chart's canvases.
  * @param page Page.
  * @return Locator.
  */
@@ -48,10 +56,11 @@ export function firstCanvas(page: Page): Locator {
 }
 
 /**
- * Drags across the chart between relative positions.
+ * Drags across the first chart between relative positions.
  * @param page Page.
- * @param from Start as fractions of the canvas box.
- * @param to End as fractions of the canvas box.
+ * @param from Start as `[x, y]` fractions of the canvas box.
+ * @param to End as `[x, y]` fractions of the canvas box.
+ * @throws `Error` when the canvas is not visible.
  */
 export async function dragOnChart(
   page: Page,
@@ -65,6 +74,9 @@ export async function dragOnChart(
     box.y + box.height * from[1]
   );
   await page.mouse.down();
+  // Pointer moves reach the chart only through `mouse.move`; stepping via
+  // the midpoint gives the drawing controller moves past its drag slop
+  // (and freehand samples) between press and release.
   await page.mouse.move(
     box.x + box.width * ((from[0] + to[0]) / 2),
     box.y + box.height * ((from[1] + to[1]) / 2),
@@ -77,10 +89,10 @@ export async function dragOnChart(
 }
 
 /**
- * Reads saved drawing tool ids from storage.
+ * Reads the tool ids of the saved drawings from local storage.
  * @param page Page.
- * @param key Storage key.
- * @return Tool ids.
+ * @param key Storage key; the DEMO BTCUSD drawings by default.
+ * @return Tool ids in saved order; empty when nothing is saved.
  */
 export async function savedTools(
   page: Page,
@@ -89,6 +101,7 @@ export async function savedTools(
   return page.evaluate(storageKey => {
     const raw = localStorage.getItem(storageKey);
     if (!raw) return [];
+    // The drawing store's saved shape; only the tool ids are read.
     return (
       JSON.parse(raw) as {drawings: Array<{tool_id: string}>}
     ).drawings.map(d => d.tool_id);
@@ -100,6 +113,7 @@ export async function savedTools(
  * @param page Page.
  * @param x Fraction of the width.
  * @param y Fraction of the height.
+ * @throws `Error` when the canvas is not visible.
  */
 export async function clickChart(
   page: Page,
@@ -112,10 +126,12 @@ export async function clickChart(
 }
 
 /**
- * Hovers a relative position of the first chart canvas.
+ * Hovers a relative position of the first chart canvas, in a few steps so
+ * the chart sees pointer moves (crosshair, previews).
  * @param page Page.
  * @param x Fraction of the width.
  * @param y Fraction of the height.
+ * @throws `Error` when the canvas is not visible.
  */
 export async function hoverChart(
   page: Page,
@@ -145,7 +161,7 @@ export async function armTool(
 }
 
 /**
- * Turns on the data window from the Layers menu.
+ * Turns on the data window from the Layers menu, then closes the menu.
  * @param page Page.
  */
 export async function showDataWindow(page: Page): Promise<void> {
@@ -155,7 +171,7 @@ export async function showDataWindow(page: Page): Promise<void> {
 }
 
 /**
- * Detail text of a drawing in the object list.
+ * Returns the detail text of a drawing in the object list.
  * @param page Page.
  * @param toolId Tool id.
  * @return Locator of the detail.
@@ -168,7 +184,7 @@ export function objectDetail(page: Page, toolId: string): Locator {
 }
 
 /**
- * Picks a timeframe from the "More" menu.
+ * Picks a timeframe from the "More" menu and waits for its candles.
  * @param page Page.
  * @param timeframe Timeframe id.
  */
@@ -176,6 +192,8 @@ export async function pickTimeframe(
   page: Page,
   timeframe: string
 ): Promise<void> {
+  // The class, not the text: the button shows "More" or, when the current
+  // timeframe is not a favorite, that timeframe.
   await page
     .getByRole('navigation', {name: 'Timeframe'})
     .locator('.timeframes__more')

@@ -5,18 +5,20 @@
  */
 
 /**
- * @fileoverview Browser → real market engine on session calendars.
+ * @fileoverview Browser → real market engine on session calendars (XNYS is
+ * the NYSE calendar). Runs with `playwright.fullstack.config.ts`.
  *
- * REQUIRES the market-engine branch that adds (merged in parallel):
- *   1. `GET /v1/calendars/{calendar_id}/sessions?from_ms&to_ms` → contract
- *      `SessionList` (windows up to ~400 days).
- *   2. The DEMO instrument `mock:stock:ACME` on the mock venue, on the XNYS
- *      calendar (`Instrument.calendar = "XNYS"`), with session-aligned
- *      candles (`/v1/candles`), `taker_buy_method: "classified"` bars and the
- *      order-flow series publishing `method: "trade_classification"`.
- *   3. Anchored VWAP / regression from anchors up to 50 000 bars back, and a
- *      4xx refusal with a message beyond that.
- * Verified against main e5e72f7 (engine side merged).
+ * It relies on these market-engine features:
+ *
+ * - `GET /v1/calendars/{calendar_id}/sessions?from_ms&to_ms` → contract
+ *   `SessionList` (windows up to ~400 days).
+ * - The DEMO instrument `mock:stock:ACME` on the mock venue, on the XNYS
+ *   calendar (`Instrument.calendar = "XNYS"`), with session-aligned candles
+ *   (`/v1/candles`), `taker_buy_method: "classified"` bars and the
+ *   order-flow series publishing `method: "trade_classification"`.
+ * - Anchored VWAP (volume-weighted average price) and regression from
+ *   anchors up to 50,000 bars back, and a 422 refusal with a message beyond
+ *   that.
  */
 
 import {
@@ -31,11 +33,15 @@ import {API} from '../playwright.fullstack.config';
 import {firstCanvas, showDataWindow} from '../e2e/support';
 import {loadTerminal} from '../e2e/trading-helpers';
 
+/** Base URL of the market engine under test. */
 const MARKET = API.NEXT_PUBLIC_MARKET_API_URL;
+
+/** One day in milliseconds. */
 const DAY = 86_400_000;
 
 /**
- * Loads the terminal and charts ACME from the engine's DEMO venue.
+ * Loads the terminal and charts ACME from the engine's DEMO venue, waiting
+ * for its candles.
  * @param page Page.
  */
 async function loadAcme(page: Page): Promise<void> {
@@ -70,7 +76,7 @@ test('the engine serves XNYS sessions and session-aligned ACME bars', async ({
       );
     }
   }
-  // 24x7 has no sessions.
+  // 24x7 has no sessions; an engine may also refuse the request for it.
   const crypto = await request.get(`${MARKET}/v1/calendars/24x7/sessions`, {
     params: {from_ms: from, to_ms: to},
   });
@@ -115,6 +121,7 @@ test('the engine serves XNYS sessions and session-aligned ACME bars', async ({
 test('the terminal loads sessions, labels exchange time and leaves no gaps', async ({
   page,
 }) => {
+  // Listen before loading so the terminal's session request is not missed.
   const sessions = page.waitForResponse(
     response =>
       response.url().startsWith(`${MARKET}/v1/calendars/XNYS/sessions`) &&
@@ -135,6 +142,8 @@ test('the terminal loads sessions, labels exchange time and leaves no gaps', asy
   const box = await firstCanvas(page).boundingBox();
   if (!box) throw new Error('no chart');
   const time = page.getByTestId('data-window').locator('.data-window__time');
+  // Sweep the crosshair in 3 px steps and collect the distinct bar times
+  // the data window shows: all must be NYSE session bars.
   const labels: string[] = [];
   for (let x = box.width * 0.4; x < box.width * 0.8; x += 3) {
     await page.mouse.move(box.x + x, box.y + box.height * 0.4);

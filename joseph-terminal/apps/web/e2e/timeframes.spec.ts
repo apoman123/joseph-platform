@@ -5,7 +5,7 @@
  */
 
 /**
- * @fileoverview System tests in DEMO mode for seconds and monthly bars
+ * @fileoverview Browser tests in DEMO mode for seconds and monthly bars
  * (grouped menu, typed resolutions, bar-close countdown, data window), the
  * true order-flow delta and the signal ranking by bar volume.
  */
@@ -14,11 +14,13 @@ import {expect, test, type Page} from '@playwright/test';
 import {firstCanvas, openTerminal, pickTimeframe} from './support';
 import {openPanel} from './trading-helpers';
 
+/** Folder of the documentation screenshots, relative to `apps/web`. */
 const SHOTS = 'e2e/screenshots';
 
 /**
- * Hovers the chart so the data window shows a bar.
+ * Hovers a fixed point of the first chart so the data window shows a bar.
  * @param page Page.
+ * @throws `Error` when the chart canvas is not visible.
  */
 async function hoverChart(page: Page): Promise<void> {
   const box = await firstCanvas(page).boundingBox();
@@ -43,6 +45,7 @@ test('charts seconds and monthly bars with a countdown and true delta', async ({
   await expect(data).toContainText(/\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2} UTC/);
   await expect(data).toContainText('True (taker volume)');
   await expect(data).toContainText('Buy volume');
+  // Let the panes repaint before the screenshot.
   await page.waitForTimeout(300);
   await page.screenshot({path: `${SHOTS}/24-seconds-true-delta.png`});
 

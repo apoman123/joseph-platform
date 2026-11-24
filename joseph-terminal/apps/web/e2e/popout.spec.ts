@@ -5,7 +5,7 @@
  */
 
 /**
- * @fileoverview System tests of detachable panes in DEMO mode: a chart
+ * @fileoverview Browser tests of detachable panes in DEMO mode: a chart
  * popped out into its own window follows the main window and docks again
  * when the window closes; pop-outs keep running while the main window
  * reloads and are re-adopted without a click (changes made in them
@@ -17,10 +17,12 @@ import {expect, test, type Page} from '@playwright/test';
 import {openTerminal} from './support';
 import {openPanel} from './trading-helpers';
 
+/** Folder of the documentation screenshots, relative to `apps/web`. */
 const SHOTS = 'e2e/screenshots';
 
 /**
- * Waits until a pop-out window is ready and linked to the main window.
+ * Waits until a pop-out window has activated its features (`data-ready`)
+ * and its message link to the main window reports `linked`.
  * @param popup Pop-out page.
  */
 async function expectLinked(popup: Page): Promise<void> {
@@ -37,12 +39,15 @@ async function expectLinked(popup: Page): Promise<void> {
 
 /**
  * Records, in the main window, whether the restore banner or a dormant
- * placeholder ever appears (survives reloads: registered as an init script).
+ * placeholder ever appears, even for a moment that assertions polling
+ * afterwards would miss. Registered as an init script, so it survives
+ * reloads.
  * @param page Main page.
  */
 async function watchRestoreOffers(page: Page): Promise<void> {
   await page.addInitScript(() => {
     const seen: string[] = [];
+    // A test-only global that `restoreOffers` reads back.
     (window as unknown as {restoreOffers: string[]}).restoreOffers = seen;
     new MutationObserver(() => {
       if (document.querySelector('[data-testid="detached-banner"]')) {
@@ -56,9 +61,10 @@ async function watchRestoreOffers(page: Page): Promise<void> {
 }
 
 /**
- * Restore offers recorded since the main page last loaded.
+ * Returns the restore offers recorded since the main page last loaded.
  * @param page Main page.
- * @return Recorded offers.
+ * @return `banner` and `dormant` entries, one per observed mutation; empty
+ *     when none appeared.
  */
 async function restoreOffers(page: Page): Promise<string[]> {
   return page.evaluate(
@@ -67,9 +73,9 @@ async function restoreOffers(page: Page): Promise<string[]> {
 }
 
 /**
- * Timeframe of chart-1 in the main window's saved workspace.
+ * Returns the timeframe of chart-1 in the main window's saved workspace.
  * @param page Main page.
- * @return Timeframe or null.
+ * @return Timeframe, or null when nothing is saved.
  */
 async function savedTimeframe(page: Page): Promise<string | null> {
   return page.evaluate(() => {
@@ -104,6 +110,7 @@ test('pops a chart out, follows the main window and docks again on close', async
   context,
 }) => {
   await openTerminal(page);
+  // Listen for the new window before clicking, so its event is not missed.
   const [popup] = await Promise.all([
     context.waitForEvent('page'),
     page.getByTestId('popout-chart-1').click(),
@@ -132,6 +139,7 @@ test('pops a chart out, follows the main window and docks again on close', async
   await expect(popup.locator('html')).toHaveAttribute('data-theme', 'dark');
   // Trading in the pop-out starts at Paper, like the main window.
   await expect(popup.getByTestId('order-mode')).toHaveText('Paper trading');
+  // Let both windows repaint after the theme round trip.
   await page.waitForTimeout(400);
   await page.screenshot({path: `${SHOTS}/21-detached-placeholder.png`});
   await popup.screenshot({path: `${SHOTS}/22-popout-chart.png`});
@@ -167,7 +175,9 @@ test('a pop-out survives a main-window reload and keeps its changes', async ({
     'data-state',
     'linked'
   );
-  await page.waitForTimeout(3_000); // past the reconnect probe
+  // Wait past the reload probe (`PROBE_MS`, 2.5 s): an unclaimed pane would
+  // turn dormant and offer a restore at its end.
+  await page.waitForTimeout(3_000);
   await expect(placeholder).toHaveAttribute('data-status', 'live');
   await expect(page.getByTestId('detached-banner')).toHaveCount(0);
   expect(await restoreOffers(page)).toEqual([]);
@@ -180,7 +190,8 @@ test('a pop-out survives a main-window reload and keeps its changes', async ({
   await pickPopoutTimeframe(popup, '15m');
   await expect.poll(() => savedTimeframe(page)).toBe('15m');
 
-  // Changes made while the main window is away are replayed to it.
+  // Changes made while the main window is away are replayed to it. Leaving
+  // for about:blank unloads the main window but keeps the pop-out open.
   await page.goto('about:blank');
   await expect(popup.getByTestId('popout-link')).toHaveAttribute(
     'data-state',

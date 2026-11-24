@@ -5,9 +5,10 @@
  */
 
 /**
- * @fileoverview Shared helpers for the F6 trading end-to-end specs (DEMO
- * mode). Panels are opened by their slot contribution titles, which the
- * shell renders as tabs (falling back to buttons with the same name).
+ * @fileoverview Shared helpers for the trading browser tests (DEMO mode):
+ * loading the terminal on clean storage, opening panels and previewing a
+ * paper order. Panels are opened by their slot contribution titles, which
+ * the shell renders as tabs (falling back to buttons with the same name).
  */
 
 import {expect, type Locator, type Page} from '@playwright/test';
@@ -28,20 +29,23 @@ export async function openPanel(page: Page, title: string): Promise<void> {
 }
 
 /**
- * Loads the terminal in DEMO mode and waits for the shell.
+ * Loads the terminal in DEMO mode on clean storage and waits for the shell.
  * @param page Playwright page.
  * @return Promise resolving when the order ticket feature is available.
  */
 export async function loadTerminal(page: Page): Promise<void> {
+  // Storage can be cleared only from a page on the app's origin, so the
+  // first load only provides the origin; the reload starts clean.
   await page.goto('/');
   await page.evaluate(() => {
     try {
       window.localStorage.clear();
     } catch {
-      // Storage may be unavailable; the app degrades to memory.
+      // Storage may be unavailable; the app then keeps state in memory.
     }
   });
   await page.reload();
+  // The tab appears once the trading feature has activated.
   await expect(
     page
       .getByRole('tab', {name: 'Order ticket', exact: true})
@@ -60,7 +64,8 @@ export function ticket(page: Page): Locator {
 }
 
 /**
- * Fills and previews a paper order in the ticket.
+ * Fills and previews a perpetual order in the ticket's current mode; the
+ * lot-size hint and the `Limit price` label are the perpetual ticket's.
  * @param page Playwright page.
  * @param options Order type, side, quantity and optional limit price.
  * @return Promise resolving when the preview is shown.
@@ -76,6 +81,8 @@ export async function previewOrder(
 ): Promise<void> {
   await openPanel(page, 'Order ticket');
   const t = ticket(page);
+  // The lot-size hint appears once the instrument's precision has loaded;
+  // before that the quantity cannot be sized.
   await expect(t.getByText(/Lot size/)).toBeVisible();
   await t.getByRole('button', {name: options.side, exact: true}).click();
   await t

@@ -5,9 +5,10 @@
  */
 
 /**
- * @fileoverview System tests in DEMO mode for session markets: the market
+ * @fileoverview Browser tests in DEMO mode for session markets: the market
  * picker's asset-class groups and name search, a session chart without
- * overnight or weekend gaps (`mock:stock:ACME` on XNYS), the market status
+ * overnight or weekend gaps (`mock:stock:ACME` on XNYS, the NYSE session
+ * calendar), the market status
  * badge, the Treasury yield as a % line chart without an order ticket, and
  * the classified (Lee–Ready) delta source of stock bars.
  */
@@ -22,10 +23,12 @@ import {
 } from './support';
 import {openPanel} from './trading-helpers';
 
+/** Folder of the documentation screenshots, relative to `apps/web`. */
 const SHOTS = 'e2e/screenshots';
 
 /**
- * Picks an instrument from the picker by search text.
+ * Picks an instrument from the picker by search text and waits for its
+ * candles.
  * @param page Page.
  * @param query Search text.
  * @param option Accessible name of the result.
@@ -42,10 +45,12 @@ async function pickInstrument(
 }
 
 /**
- * Sweeps the crosshair across the chart and records which bar the data
- * window shows at each x.
+ * Sweeps the crosshair across the middle of the chart in 2 px steps (finer
+ * than a bar slot) and records which bar the data window shows.
  * @param page Page.
- * @return Bars in order with the first x where each appeared.
+ * @return Bars in order, each with the first x (relative to the canvas)
+ *     where it appeared.
+ * @throws `Error` when the chart canvas is not visible.
  */
 async function sweepBars(
   page: Page
@@ -152,11 +157,13 @@ test('charts a stock by session without overnight or weekend gaps', async ({
   for (const {bar, previous, spacing} of breaks) {
     expect(previous?.label).toMatch(/15:30 ET$/);
     expect(bar.label).toMatch(/09:30 ET$/);
+    // 3 px of slack for the 2 px sweep step.
     expect(spacing).toBeLessThanOrEqual(median + 3);
   }
   // A session's last bar closes at the close (16:00, or 13:00 early).
   const last = bars.find(bar => bar.label.endsWith('15:30 ET'));
   if (!last) throw new Error('no 15:30 bar');
+  // Just inside the bar, where the sweep first showed it.
   const box = await firstCanvas(page).boundingBox();
   await page.mouse.move(
     (box?.x ?? 0) + last.x + 0.5,
@@ -195,6 +202,7 @@ test('shows stock delta as classified (Lee–Ready)', async ({page}) => {
   const data = page.getByTestId('data-window');
   await expect(data).toContainText('Classified (Lee–Ready)');
   await expect(data).toContainText(/Buy volume\s*[\d,]+ sh/);
+  // Let the crosshair and panes repaint before the screenshot.
   await page.waitForTimeout(300);
   await page.screenshot({path: `${SHOTS}/34-classified-delta.png`});
 });
@@ -221,6 +229,7 @@ test('charts the 10-year yield as a % line with no order ticket', async ({
   const ticket = page.getByTestId('order-ticket');
   await expect(ticket).toContainText(/not a tradable instrument/i);
   await expect(ticket.getByTestId('confirm-order')).toHaveCount(0);
+  // Let the panes repaint before the screenshot.
   await page.waitForTimeout(300);
   await page.screenshot({path: `${SHOTS}/33-rate-line-chart.png`});
   // Leaving the yield restores candles.
