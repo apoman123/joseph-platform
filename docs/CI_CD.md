@@ -60,7 +60,7 @@ A newer `ci-cd` run cancels an older one on the same branch or pull request, exc
 
 ### Indicator library access
 
-CI installs `joseph-smc-indicators` from the private `apoman123/PineScripts` with the fine-grained token secret `PINESCRIPTS_TOKEN`.
+CI installs the indicator library from the private `apoman123/PineScripts` with the fine-grained token secret `PINESCRIPTS_TOKEN`.
 
 - **Create** it as the account that owns the indicator library repository: *Only select repositories* → that repository, **Contents: Read-only** (Metadata is added automatically), nothing else, with an expiry (e.g. 90 days).
 - **Store** it for Actions and Dependabot from your checkout (`gh` prompts for the value):

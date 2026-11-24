@@ -2,7 +2,7 @@
 
 The market engine serves market data, perpetual screening, indicators, strategies, signals, alerts and backtests over HTTP and WebSocket (FastAPI, port 8000). This page is for developers; settings are in the [operations runbook](../docs/OPERATIONS.md#market-engine).
 
-> **Private dependency.** `uv sync` installs the indicator library `joseph-smc-indicators` from the private repository `apoman123/PineScripts` (pinned in `pyproject.toml`) and fails without read access to it ([access](../docs/OPERATIONS.md#start)).
+> **Private dependency.** `uv sync` installs the indicator library from the private repository `apoman123/PineScripts` (pinned in `pyproject.toml`) and fails without read access to it ([access](../docs/OPERATIONS.md#start)).
 
 ## Run and test
 

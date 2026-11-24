@@ -16,7 +16,7 @@ Engines store state in SQLite (`./var/*.db`) or PostgreSQL (`postgresql+psycopg:
 
 ### Indicator library access
 
-The market engine installs its indicator library `joseph-smc-indicators` from the **private** repository `apoman123/PineScripts` (`python_indicators/`, pinned `rev` in `joseph-market-engine/pyproject.toml`). Without read access it cannot be built or run; the terminal still runs alone in labelled DEMO mode, and the execution engine does not need the library. Grant read access to that repository only:
+The market engine installs its indicator library from the **private** repository `apoman123/PineScripts` (`python_indicators/`, pinned `rev` in `joseph-market-engine/pyproject.toml`). Without read access it cannot be built or run; the terminal still runs alone in labelled DEMO mode, and the execution engine does not need the library. Grant read access to that repository only:
 
 ```bash
 # either an SSH key with access to the library, in ssh-agent:

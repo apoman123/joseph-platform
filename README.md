@@ -1,6 +1,6 @@
 # Joseph trading platform
 
-Joseph is a self-hosted platform for charting, researching and trading crypto perpetuals, Taiwan and US stocks and ETFs, with US Treasury yields as reference data. It has three parts: a browser charting terminal, a market engine (data, screening, Smart Money Concepts (SMC) indicators, strategies, alerts, backtests) and an execution engine (risk gateway, order management, paper, shadow and live trading, audit, kill switch).
+Joseph is a self-hosted platform for charting, researching and trading crypto perpetuals, Taiwan and US stocks and ETFs, with US Treasury yields as reference data. It has three parts: a browser charting terminal, a market engine (data, screening, indicator plugins, strategies, alerts, backtests) and an execution engine (risk gateway, order management, paper, shadow and live trading, audit, kill switch).
 
 > **Risk disclaimer.** Joseph is research software, provided as is under the MIT licence with no warranty. Live trading can lose money. The LIVE adapters are tested only against mocked venues and fake broker clients, never with real orders. Nothing in this repository is financial advice.
 
@@ -45,7 +45,7 @@ pnpm dev   # http://localhost:3000, DEMO mode: synthetic data, clearly labelled
 
 ### Full stack
 
-> **Private dependency.** The market engine installs its indicator library, `joseph-smc-indicators`, from the private repository `apoman123/PineScripts` (`python_indicators/`, pinned to a commit in `joseph-market-engine/pyproject.toml`). Without read access to that repository the market engine cannot be built or run. The terminal (DEMO) and the execution engine do not need it.
+> **Private dependency.** The market engine installs its indicator library from the private repository `apoman123/PineScripts` (`python_indicators/`, pinned to a commit in `joseph-market-engine/pyproject.toml`). Without read access to that repository the market engine cannot be built or run. The terminal (DEMO) and the execution engine do not need it.
 
 Needs uv with Python 3.12+, Node 20+ with corepack, and read access to the library ([how](docs/OPERATIONS.md#start)).
 
@@ -109,13 +109,13 @@ These come from venues, data plans or law; code cannot remove them.
 - **Operators:** [Operations runbook](docs/OPERATIONS.md) · [Brokers](docs/BROKERS.md) · [CI/CD](docs/CI_CD.md)
 - **Contributors:** [Architecture](docs/architecture/INDEX.md) · [ADRs](docs/adr/) · [Extending](docs/EXTENDING.md) · [Coding standards](docs/standards/CODING_STANDARDS.md) · [Design decisions](docs/DESIGN_DECISIONS.md) · [Feature status](docs/FEATURE_STATUS.md)
 - **Components:** [Market engine](joseph-market-engine/README.md) · [Indicators](joseph-market-engine/src/joseph/indicators/README.md) · [Execution engine](joseph-execution-engine/README.md) · [Terminal](joseph-terminal/README.md)
-- **Reports:** [Threat model](docs/reports/THREAT_MODEL.md) · [Licensing](docs/reports/LICENSING_REPORT.md) · [Pine source](docs/reports/PINE_SOURCE_REVISION.md) · [TradingView use-case audit](docs/reports/TRADINGVIEW_USE_CASE_AUDIT.md) · [Tests](docs/reports/TEST_REPORT.md)
+- **Reports:** [Threat model](docs/reports/THREAT_MODEL.md) · [Licensing](docs/reports/LICENSING_REPORT.md) · [TradingView use-case audit](docs/reports/TRADINGVIEW_USE_CASE_AUDIT.md) · [Tests](docs/reports/TEST_REPORT.md)
 - **API contracts:** `joseph-terminal/packages/contracts/` (`schemas/`, `openapi/`, `asyncapi/`)
 
 ## Licence
 
 - **MIT** ([LICENSE](LICENSE)), copied into both engines and their images.
 - **Terminal:** `joseph-terminal/` keeps its own MIT [LICENSE](joseph-terminal/LICENSE) and [NOTICE](joseph-terminal/NOTICE) so it can become a separate repository. Charts use TradingView's Lightweight Charts (Apache-2.0); Joseph is not affiliated with TradingView.
-- **Indicator library:** the private library is not part of this repository or its licence. Its optional `premium_discount_ote` indicator is derived from a LuxAlgo script under CC BY-NC-SA 4.0: do not use the market engine commercially while that plugin is enabled.
+- **Indicator library:** the private library is not part of this repository or its licence. One optional indicator in it derives from a LuxAlgo script under CC BY-NC-SA 4.0: do not use the market engine commercially while that plugin is enabled ([which one](docs/reports/LICENSING_REPORT.md#luxalgo-derived-indicator-cc-by-nc-sa-40)).
 
 Third-party components and obligations: [licensing report](docs/reports/LICENSING_REPORT.md).

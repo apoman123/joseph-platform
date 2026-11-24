@@ -92,13 +92,12 @@ Magenta marks are yours (drawings, draft orders, rule cards); green and red show
 
 ## Indicators
 
-*Layers* toggles the engine's layers: *Daily bias*, *FVG and IFVG*, *Order and breaker blocks*, *Liquidity*, *Order flow*, *Value areas*, *Premium, discount and OTE*, *Market structure*.
+*Layers* has one layer per indicator plugin the engine serves.
 
 - ⚙ opens a layer's settings: engine inputs (validated by the engine), zone kinds, colours, markers and the *Delta % pane*.
-- *Market structure* draws swing labels (HH/HL/LH/LL/EQH/EQL) and BOS/MSS breaks.
-- The 4 newest zones per kind and side are drawn; *Show or hide ended zones* adds invalidated, swept and expired ones.
+- The 4 newest zones per kind and side are drawn; *Show or hide ended zones* adds zones that have ended.
 - The same menu toggles *Volume*, *Session breaks* and the *Data window* (OHLC, change, volume, Delta %, compared closes, study values).
-- *Premium, discount and OTE* derives from a CC BY-NC-SA 4.0 script: no commercial use while it is enabled.
+- One optional layer derives from a CC BY-NC-SA 4.0 script: no commercial use while it is enabled ([licensing](reports/LICENSING_REPORT.md#luxalgo-derived-indicator-cc-by-nc-sa-40)).
 
 ### Delta
 
@@ -123,7 +122,7 @@ Unrecorded time shows as a gap, never as invented bars.
 ## Strategies and alerts
 
 1. *Strategy* → *Start from a template* (Long A, Short B or blank).
-2. Write conditions as sentence cards in *All of* / *Any of* groups; *Negate* adds NOT, *Add alternatives* adds OR. Zones in one *range group* come from one dealing range.
+2. Write conditions as sentence cards in *All of* / *Any of* groups; *Negate* adds NOT, *Add alternatives* adds OR. Zone conditions in one *range group* must match zones of the same range.
 3. *Validate* checks on the server and points at the failing card.
 4. *Save strategy* creates an immutable version; activations never carry over to edits.
 5. Activate as **Alerts only**, **Paper trading** or **Shadow** (record only). *Automatic live* is locked: it needs an execution-engine deployment with limits, scoped consent and LIVE enabled on the server.

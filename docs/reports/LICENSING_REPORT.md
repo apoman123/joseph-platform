@@ -9,12 +9,12 @@ The licences that cover this repository and its dependencies, and the obligation
 - **Not covered:** the private `apoman123/PineScripts` library. The market engine installs it at build time, so the market-engine image contains it; CI therefore publishes both engine images only as private packages (either may also contain SinoPac's SDK).
 - **Checks:** on every push, `ci-cd.yml` runs `pnpm secrets:scan`, `pnpm licenses:check` (which also fails if `NOTICE` or `THIRD_PARTY_NOTICES.md` stops crediting Lightweight Charts) and dependency-cruiser (no browser code imports engine paths). Run them again before splitting the terminal out.
 
-## LuxAlgo-derived OTE indicator (CC BY-NC-SA 4.0)
+## LuxAlgo-derived indicator (CC BY-NC-SA 4.0)
 
-`smc_premium_discount_ote_zones.pine` and its port `smc_indicators/premium_discount_ote.py` in the external library are a **derivative work** of a LuxAlgo script licensed under CC BY-NC-SA 4.0:
+One optional indicator in the external library (its Pine script and Python port) is a **derivative work** of a LuxAlgo script licensed under CC BY-NC-SA 4.0. Its plugin's `description` in `GET /v1/indicators/plugins` says "Derived from LuxAlgo (CC BY-NC-SA 4.0)".
 
-- **Attribution:** © LuxAlgo, the licence link and a change note are kept in the module and in `python_indicators/LICENSES/`.
-- **NonCommercial:** while the `premium_discount_ote` plugin is enabled, the market engine must not be used or offered commercially.
+- **Attribution:** © LuxAlgo, the licence link and a change note are kept in the library module and in `python_indicators/LICENSES/`.
+- **NonCommercial:** while that plugin is enabled, the market engine must not be used or offered commercially.
 - **ShareAlike:** modified versions stay CC BY-NC-SA 4.0.
 - **Commercial use:** get LuxAlgo's permission, or disable the plugin (`PluginRegistry.disable`) and remove it from strategies.
 
@@ -33,5 +33,5 @@ The licences that cover this repository and its dependencies, and the obligation
 | `shioaji` 1.7 (extra `sinopac` in both engines) | SinoPac proprietary SDK (binary abi3 wheels, no licence file) | Not installed by default; governed by SinoPac's API agreement; never redistribute the wheel outside the private images |
 | IB Gateway image `ghcr.io/gnzsnz/ib-gateway` (compose profile `ibkr`) | Image scripts MIT; IB Gateway proprietary (IBKR); IBC GPL-3.0 | Runs unmodified in its own container, not linked with Joseph; IBKR terms apply |
 | TradingView Advanced Charts / Trading Platform | Proprietary | **Not used.** No code, assets or styles copied |
-| `apoman123/PineScripts` including `python_indicators/` (`joseph-smc-indicators`) | Private | Pinned git dependency of the market engine; never vendored in this repository. Plugins report `PINE_PORT_PENDING_REVIEW` |
+| `apoman123/PineScripts` including `python_indicators/` | Private | Pinned git dependency of the market engine; never vendored in this repository. Plugins report `PINE_PORT_PENDING_REVIEW` |
 | Exchange and data-provider market data | Venue and provider terms (including Alpaca, SinoPac) | Redistributing data through a hosted public terminal needs a per-source terms review |

@@ -41,7 +41,7 @@ How the built platform differs from its original, unpublished design plan (V5): 
 
 | # | Original plan | Built | Why |
 |---|---|---|---|
-| D13 | Indicators inside the market engine (`plugins/<id>`) | Algorithms live in `apoman123/PineScripts/python_indicators` as line-by-line Pine ports, pinned by commit; the engine keeps SDK adapters ([ADR 0009](adr/0009-external-indicator-library.md)). Adds a `market_structure` plugin | One source of truth per indicator ("平台歸平台，指標歸指標": the platform is a platform, indicators are indicators). A Pine change is ported once and adopted by a `rev` bump |
+| D13 | Indicators inside the market engine (`plugins/<id>`) | Algorithms live in `apoman123/PineScripts/python_indicators` as line-by-line Pine ports, pinned by commit; the engine keeps SDK adapters ([ADR 0009](adr/0009-external-indicator-library.md)) | One source of truth per indicator ("平台歸平台，指標歸指標": the platform is a platform, indicators are indicators). A Pine change is ported once and adopted by a `rev` bump |
 | D18 | CI reaches the indicator library over SSH | Fine-grained token `PINESCRIPTS_TOKEN` (Contents read-only on PineScripts) for Actions, Dependabot and image builds (BuildKit secret); local builds may use SSH | Dependabot `git` registries accept only HTTPS credentials; least privilege on one repository |
 
 ## Live trading

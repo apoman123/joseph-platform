@@ -7,7 +7,6 @@ Results of every test tier on the final code, for contributors and reviewers. En
 | Tier | Project | Result |
 |---|---|---|
 | Unit, integration, contract, architecture, property, replay, in-process system | Market engine | **1,879 passed**, 47 skipped (45 opt-in network, 1 SinoPac data test that needs keys, 1 Pine parity test awaiting TradingView exports) · 96% line coverage |
-| Unit, scenario, property, code standards | `smc_indicators` 1.1.0 | **393 passed** · ruff, `mypy --strict` clean |
 | Live venue (opt-in, public APIs) | Market engine | **44 passed**, 1 skipped (no Alpaca key), 1 deselected (SinoPac data, needs keys): five crypto venues including MEXC Protobuf and the Lighter archive, TWSE, TPEx, Nasdaq Trader, Treasury. One Binance assertion failed once at a minute boundary; the test now allows 10 s of venue lag and passed 8/8 on reruns |
 | Unit, integration, contract, architecture, security, chaos, property, in-process system | Execution engine | **1,028 passed**, 9 skipped (7 need real credentials: 5 venue testnets, IBKR paper, SinoPac simulation; 2 opt-in network) · 97% line coverage. Venues run against mocks and official signature vectors; IBKR and Shioaji against fake clients |
 | Live venue (opt-in) | Execution engine | **2 passed**: MEXC private-stream Protobuf decoding against the live public stream |
@@ -29,7 +28,7 @@ Results of every test tier on the final code, for contributors and reviewers. En
 | Check | Result |
 |---|---|
 | ruff format + ruff (Google docstrings) | Clean in both engines and system-tests |
-| `mypy --strict` | 169 files (market), 105 (execution), 15 (`smc_indicators`): no issues |
+| `mypy --strict` | 169 files (market), 105 (execution): no issues |
 | Google style tests | Pass |
 | import-linter | Market 8/8 contracts; execution 7/7 |
 | ESLint (Google TS, JSDoc), Prettier, `tsc` | 0 problems |
@@ -65,7 +64,7 @@ Results of every test tier on the final code, for contributors and reviewers. En
 | Defect | Found by | Fix |
 |---|---|---|
 | Indicator engine could read a future higher-timeframe snapshot while a series stalled | Property test | Per-series snapshot history |
-| Dealing range inverted on stale anchors | Hypothesis | Stale anchors no longer reset it |
+| An indicator range inverted on stale anchors | Hypothesis | Stale anchors no longer reset it |
 | `useStore` re-subscribed every render (endless fetch loop) | Browser test | Stable subscribe function |
 | Control envelopes could make clients drop candles | Integration test | Sequence 0 for control envelopes |
 | DEMO broker filled a reduce-only close after a partial fill | Browser + unit test | FILLED only when fully filled |

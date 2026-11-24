@@ -33,6 +33,6 @@ All **Done** except accessibility:
 - One pathway intent → risk → OMS → adapter (import-linter; positive-control live-gate test); a lost ACK never duplicates an order (chaos tests).
 - Kill switch blocks opening, allows reduce-only; tenant isolation over REST and WebSocket (unit, integration, security and system tests).
 - Editing a strategy creates a new version without live permission (version tests, consent scope hash); removing a plugin, tool or node keeps saved data.
-- Pine source recorded ([record](reports/PINE_SOURCE_REVISION.md)), licensing reviewed ([licensing](reports/LICENSING_REPORT.md)); indicators kept separate from the platform ([ADR 0009](adr/0009-external-indicator-library.md)).
+- Pine parity procedure documented ([parity exports](../joseph-market-engine/fixtures/indicators/pine_exports/README.md)), licensing reviewed ([licensing](reports/LICENSING_REPORT.md)); indicators kept separate from the platform ([ADR 0009](adr/0009-external-indicator-library.md)).
 - Signal sorting and snooze (Vitest + Playwright).
 - **Partial — accessibility:** no serious or critical axe issues, but chart canvas captions are not readable by screen readers (pane headers are).

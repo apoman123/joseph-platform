@@ -20,10 +20,10 @@ Never change indicators, strategies or the risk gateway for a venue.
 
 ## Add or change an indicator (Python)
 
-Indicator algorithms live only in the library `joseph-smc-indicators` (`python_indicators/`, package `smc_indicators`) in the private repository `apoman123/PineScripts`; this path needs access to it.
+Indicator algorithms live only in the external indicator library (`python_indicators/` in the private repository `apoman123/PineScripts`); this path needs access to it. The platform holds adapters only.
 
-1. **Library:** port the Pine script line by line into `src/smc_indicators/<module>.py` (subclass `base.Indicator`; outputs `types.Zone`, `types.Event` and `Result.values`), add `tests/test_<module>.py` (scenarios, batch equals streaming, no look-ahead) and `docs/<module>.md`. Its CI runs ruff, mypy and pytest.
-2. **Pin:** bump `rev` of `joseph-smc-indicators` in `joseph-market-engine/pyproject.toml` and run `uv lock`.
+1. **Library:** add or change the algorithm in the library, following the library's own docs and tests.
+2. **Pin:** bump the library's `rev` in `[tool.uv.sources]` of `joseph-market-engine/pyproject.toml` and run `uv lock`.
 3. **Adapter:** subclass `bridge.PackagedPlugin` in `joseph/indicators/packaged/plugins.py` (settings mirroring the Pine inputs, `_build`, `_advance`, value mapping) and list it in `default_plugins()`. The adapter holds no indicator rules.
 4. **Publish** only `Aoi`, `StructureEvent` and documented values: kinds and events in `joseph/domain/structures.py` and the JSON Schema; values in `joseph/strategy/domain/catalog.py` (`PUBLISHED_VALUES`, `AOI_KIND_PLUGIN`, `EVENT_PLUGIN`).
 5. **Test:** add a hand-derived golden scenario in `fixtures/indicators/<plugin_id>/`; `tests/unit/indicators/test_packaged_bridge.py` checks catalog consistency and library parity.
