@@ -8,14 +8,14 @@
  * @fileoverview Drawing tool plugin interface, registry and paint helpers.
  */
 
-import type {
-  BarCalendar,
-  DrawingAnchor,
-  DrawingDocument,
-  DrawingStyle,
-  Timeframe,
+import {
+  type BarCalendar,
+  Decimal,
+  type DrawingAnchor,
+  type DrawingDocument,
+  type DrawingStyle,
+  type Timeframe,
 } from '@joseph/contracts';
-import {Decimal} from '@joseph/contracts';
 import {handleAt, type Point, type Rect} from './geometry';
 import type {DrawingSeriesRequest, DrawingSeriesState} from './series';
 import type {PixelTransform} from './surface';

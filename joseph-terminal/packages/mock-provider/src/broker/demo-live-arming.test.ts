@@ -192,7 +192,7 @@ describe('DEMO live arming', () => {
     expect((await broker.getAccountSummary(id)).live_armed_until_ms).toBeNull();
     const {events} = await broker.listAuditEvents(id);
     expect(events.map(e => e.action)).toEqual(
-      Array(5).fill('live_arming.denied')
+      Array.from({length: 5}, () => 'live_arming.denied')
     );
   });
 

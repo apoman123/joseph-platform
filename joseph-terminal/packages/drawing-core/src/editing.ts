@@ -14,6 +14,7 @@ import type {DrawingDocument, DrawingStyle} from '@joseph/contracts';
 import type {DrawingStore} from './store';
 
 /** Z-order moves offered by the object list. */
+// eslint-disable-next-line @typescript-eslint/naming-convention -- "Z order" is two words: Z + Order.
 export type ZOrderMove = 'forward' | 'backward' | 'front' | 'back';
 
 /** Sequence used to give each multi-document edit its own merge key. */

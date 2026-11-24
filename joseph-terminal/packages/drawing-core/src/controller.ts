@@ -14,14 +14,14 @@
  * placeholder and are never deleted implicitly.
  */
 
-import type {
-  BarCalendar,
-  DrawingAnchor,
-  DrawingDocument,
-  InstrumentId,
-  Timeframe,
+import {
+  type BarCalendar,
+  Decimal,
+  type DrawingAnchor,
+  type DrawingDocument,
+  type InstrumentId,
+  type Timeframe,
 } from '@joseph/contracts';
-import {Decimal} from '@joseph/contracts';
 import {
   anchorFromPoint,
   anchorPoints,

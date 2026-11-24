@@ -1236,8 +1236,11 @@ export class DemoExecutionClient implements ExecutionClient {
 
   /**
    * Builds an account summary.
-   * @param accountId Account id (defaults to the crypto paper account).
-   * @return Summary.
+   * @param accountId Account id (defaults to the crypto paper account; an
+   *     unknown id also falls back to it).
+   * @return Summary; balances are null while the account is disconnected.
+   * @throws `ApiError` (404 `NOT_FOUND`) only if the DEMO account table is
+   *     empty.
    */
   private summary(accountId: string = DEMO_ACCOUNT_ID): AccountSummary {
     const spec = this.spec(accountId) ?? DEMO_ACCOUNTS[0];
@@ -2003,8 +2006,12 @@ export class DemoExecutionClient implements ExecutionClient {
   /**
    * Builds the reduce-only request that closes part of a position.
    * @param positionId Position id.
-   * @param request Close request.
+   * @param request Close request; `fraction` is the share of the position to
+   *     close, rounded down to the instrument's lot size.
    * @return Intent request.
+   * @throws `ApiError` (404 `NOT_FOUND`) when the position is unknown or flat,
+   *     or (422 `VALIDATION_FAILED`) when the fraction is zero or above 1.
+   * @throws `RangeError` when the fraction is not a decimal string.
    */
   private closeRequest(
     positionId: string,

@@ -53,7 +53,8 @@ const EXTENDED_TOOLS = [
 
 /**
  * Builds the contract validator for `DrawingDocument`.
- * @return Validation function.
+ * @return Validation function; true when the value matches the schema.
+ * @throws Error when the schemas do not define `DrawingDocument`.
  */
 function drawingValidator(): (value: unknown) => boolean {
   const dir = join(__dirname, '..', '..', 'contracts', 'schemas');

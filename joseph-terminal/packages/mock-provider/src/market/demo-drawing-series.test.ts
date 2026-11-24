@@ -36,8 +36,9 @@ const client = new DemoMarketDataClient({now: () => NOW});
 
 /**
  * Validates an `IndicatorSeries` against the contract schema.
- * @param value Candidate.
+ * @param value Candidate series.
  * @return Whether it is valid.
+ * @throws Error when the schemas do not define `IndicatorSeries`.
  */
 function validSeries(value: unknown): boolean {
   const ajv = new Ajv2020({strict: false, allErrors: true});

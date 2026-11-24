@@ -42,8 +42,9 @@ function validator(file: string, def: string): (value: unknown) => string {
 }
 
 /**
- * Loads Long A from the shared fixtures.
- * @return Definition.
+ * Loads Long A, the first valid strategy in the shared fixtures.
+ * @return Strategy definition.
+ * @throws Error when the fixture has no valid strategy.
  */
 function longA(): StrategyDefinition {
   const fixture = JSON.parse(

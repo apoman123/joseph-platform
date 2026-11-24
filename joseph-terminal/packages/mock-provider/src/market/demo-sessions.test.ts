@@ -233,9 +233,8 @@ describe('DEMO session instruments', () => {
     const snapshot = await client.getSnapshot('mock:stock:9901');
     expect(snapshot.funding).toBeNull();
     expect(Number(snapshot.last) % 1).toBe(0);
-    expect(demoSpecMatches(DEMO_INSTRUMENT_SPECS[0] ?? ({} as never), '')).toBe(
-      true
-    );
+    const first = DEMO_INSTRUMENT_SPECS[0];
+    expect(first && demoSpecMatches(first, '')).toBe(true);
     const tw = DEMO_INSTRUMENT_SPECS.find(
       s => s.instrumentId === 'mock:stock:9901'
     );

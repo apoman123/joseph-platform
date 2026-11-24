@@ -26,7 +26,6 @@ import {DrawingStore, createCommand} from './store';
 import type {
   DrawingSurface,
   PixelTransform,
-  SurfaceCanvasLayer,
   SurfaceEventMap,
   SurfacePointerEvent,
 } from './surface';
@@ -69,22 +68,18 @@ class Surface implements DrawingSurface {
   }
 
   /**
-   * Accepts a layer.
-   * @param _layer Layer.
-   * @return Disposer.
+   * Accepts any layer and ignores it.
+   * @return No-op disposer.
    */
-  addCanvasLayer(_layer: SurfaceCanvasLayer): () => void {
+  addCanvasLayer(): () => void {
     return () => undefined;
   }
 
   /** No-op repaint. */
   invalidate(): void {}
 
-  /**
-   * No-op interactivity.
-   * @param _enabled Ignored.
-   */
-  setInteractive(_enabled: boolean): void {}
+  /** Ignores interactivity changes. */
+  setInteractive(): void {}
 
   /**
    * Returns the fixed transform.

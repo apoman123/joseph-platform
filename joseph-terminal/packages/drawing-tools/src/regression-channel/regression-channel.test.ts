@@ -57,10 +57,11 @@ const CHANNEL: IndicatorSeriesPoint = {
 };
 
 /**
- * Builds a ready series state.
- * @param points Points.
- * @param asOfMs As-of time.
- * @return State.
+ * Builds a ready 1m series state for the fixture drawing.
+ * @param points Series points.
+ * @param asOfMs Response as-of time, epoch milliseconds.
+ * @return Ready series state.
+ * @throws Error when the fixture drawing yields no series request.
  */
 function ready(
   points: IndicatorSeriesPoint[],

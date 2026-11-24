@@ -12,7 +12,7 @@
  * outside RTH, closed-market rules, long-only cash and settled cash.
  */
 
-import type {OrderIntentRequest} from '@joseph/contracts';
+import type {Instrument, OrderIntentRequest} from '@joseph/contracts';
 import {describe, expect, it} from 'vitest';
 import {DemoExecutionClient} from './demo-execution-client';
 import {
@@ -172,13 +172,15 @@ describe('DEMO accounts', () => {
       await failing(client, {...crypto, account_id: DEMO_ACCOUNT_ID})
     ).toEqual([]);
     const spec = demoAccount(DEMO_TWD_ACCOUNT_ID);
-    expect(
-      spec &&
-        demoRoutingProblem(spec, {
-          instrument_id: 'x',
-          key: {venue: 'mock', market_type: 'stock'},
-        } as never)
-    ).toMatch(/does not route/);
+    // Deliberate partial mock: demoRoutingProblem reads only `key`,
+    // `calendar` and `instrument_id` of a stock with no listing exchange.
+    const unlisted = {
+      instrument_id: 'x',
+      key: {venue: 'mock', market_type: 'stock'},
+    } as unknown as Instrument;
+    expect(spec && demoRoutingProblem(spec, unlisted)).toMatch(
+      /does not route/
+    );
   });
 
   it('refuses disconnected and SDK-less broker accounts', async () => {

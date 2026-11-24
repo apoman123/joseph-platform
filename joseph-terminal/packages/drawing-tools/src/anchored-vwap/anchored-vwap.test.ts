@@ -33,10 +33,11 @@ import {anchoredVwapRequest, anchoredVwapTool as tool, vwapView} from '.';
 const DOC = makeDoc(tool, [{time_ms: 140_000, price: '120'}]);
 
 /**
- * Builds a ready series state.
- * @param points Points.
- * @param asOfMs Response as-of time.
- * @return State.
+ * Builds a ready 1m series state for the fixture drawing.
+ * @param points Series points.
+ * @param asOfMs Response as-of time, epoch milliseconds.
+ * @return Ready series state.
+ * @throws Error when the fixture drawing yields no series request.
  */
 function ready(
   points: IndicatorSeriesPoint[],
