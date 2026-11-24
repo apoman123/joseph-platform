@@ -12,12 +12,14 @@
  *
  *   p(t) = base * (1 + Σ_k A_k sin(2πt/P_k + φ_k) + 0.0006 n(t) + 0.00008 s(t))
  *
- * over ten periods P_k from 20 days down to 14 minutes with amplitudes
- * A_k = 0.045 * sqrt(P_k / 20 days) (a brownian-like spectrum), phases
- * φ_k = k * 1.7 + (base mod 7), n(t) a hashed noise term per minute and
- * s(t) a small, well-mixed noise term per second (texture for seconds
- * bars).
- * The Python engine can reproduce it exactly for fixtures.
+ * with t in epoch milliseconds, ten periods P_k from 20 days down to 14
+ * minutes, amplitudes A_k = 0.045 * sqrt(P_k / 20 days) (a Brownian-like
+ * spectrum), phases φ_k = k * 1.7 + (base mod 7), n(t) a hashed noise term
+ * per UTC minute and s(t) a small, well-mixed noise term per second
+ * (texture for seconds bars). No random seed or clock state is involved,
+ * so the Python engine can reproduce it exactly for fixtures. Prices are
+ * rounded to the instrument's tick (the ladder rung at the price) only when
+ * written into a candle.
  *
  * Candles also carry the DEMO venue's quote turnover and taker-buy volume
  * (the aggressor-bought share follows the bar's direction plus noise), so
@@ -26,7 +28,7 @@
  *
  * Session instruments (DEMO stocks, the bond ETFs and the Treasury yield)
  * only have bars inside their calendar's sessions, built with the same
- * calendar arithmetic as the engine; stock bars carry a buy volume
+ * calendar arithmetic as the engine; stock and ETF bars carry a buy volume
  * classified against quotes (`taker_buy_method: classified`), as on stock
  * exchanges, and the yield carries no volume.
  */
@@ -46,19 +48,22 @@ import {
 
 /** Synthetic instrument parameters. */
 export interface DemoInstrumentSpec {
-  /** Canonical id. */
+  /** Canonical instrument id, e.g. `mock:perp:BTCUSD`. */
   instrumentId: string;
   /** Display symbol. */
   displaySymbol: string;
   /** Base asset. */
   base: string;
-  /** Base price. */
+  /** Centre of the synthetic price path, in quote units. */
   basePrice: number;
-  /** Tick size. */
+  /**
+   * Tick size as a decimal string; the tick wherever no ladder rung
+   * applies.
+   */
   tickSize: string;
-  /** Lot size. */
+  /** Quantity step in base units, as a decimal string. */
   lotSize: string;
-  /** Typical volume per minute. */
+  /** Typical base volume per minute; 0 publishes no volume (a yield). */
   volumePerMinute: number;
   /** Product type (default `perp`). */
   marketType?: MarketType;
@@ -74,11 +79,11 @@ export interface DemoInstrumentSpec {
   localName?: string;
   /** Listing exchange of a security. */
   listingExchange?: string;
-  /** Price-dependent tick ladder. */
+  /** Price-dependent tick ladder, rungs in ascending `min_price` order. */
   tickLadder?: readonly TickStep[];
-  /** Daily price limit in percent. */
+  /** Daily price limit in percent, as a decimal string. */
   priceLimitPct?: string;
-  /** Shares per board lot. */
+  /** Shares per board lot, as a decimal string. */
   boardLot?: string;
 }
 
@@ -210,10 +215,11 @@ export const DEMO_INSTRUMENT_SPECS: readonly DemoInstrumentSpec[] = [
 ];
 
 /**
- * Tick size at a price (the ladder rung at or below it, else `tickSize`).
+ * Returns the tick size at a price: that of the highest ladder rung at or
+ * below it, else `tickSize`.
  * @param spec Instrument.
- * @param price Price.
- * @return Tick size text.
+ * @param price Price in quote units.
+ * @return Tick size as a decimal string.
  */
 export function demoTickAt(spec: DemoInstrumentSpec, price: number): string {
   let tickSize = spec.tickSize;
@@ -225,7 +231,7 @@ export function demoTickAt(spec: DemoInstrumentSpec, price: number): string {
 
 const DAY_MS = 86_400_000;
 const HOUR_MS = 3_600_000;
-/** Component periods of the synthetic path. */
+/** Periods P_k of the sine components of the synthetic path. */
 const PERIODS_MS: readonly number[] = [
   20 * DAY_MS,
   8.7 * DAY_MS,
@@ -238,13 +244,13 @@ const PERIODS_MS: readonly number[] = [
   33 * 60_000,
   14 * 60_000,
 ];
-/** Amplitude of the longest component. */
+/** Amplitude of the longest component, as a fraction of the base price. */
 const BASE_AMPLITUDE = 0.045;
 
 /**
- * Hashes an integer to [-1, 1) deterministically (xorshift-style).
- * @param seed Integer seed.
- * @return Pseudo-random value.
+ * Hashes an integer to [-1, 1] deterministically (one xorshift32 round).
+ * @param seed Integer seed; the bitwise operations truncate fractions.
+ * @return Pseudo-random value in [-1, 1].
  */
 export function hashNoise(seed: number): number {
   let x = (seed ^ 0x9e3779b9) >>> 0;
@@ -267,10 +273,10 @@ export function mixSeed(seed: number): number {
 }
 
 /**
- * Synthetic price at a time.
+ * Returns the synthetic price at a time (the formula in the file overview).
  * @param spec Instrument.
- * @param timeMs UTC ms.
- * @return Price.
+ * @param timeMs Time in epoch milliseconds (UTC).
+ * @return Price in quote units, not rounded to the tick.
  */
 export function priceAt(spec: DemoInstrumentSpec, timeMs: number): number {
   const tau = 2 * Math.PI;
@@ -289,10 +295,10 @@ export function priceAt(spec: DemoInstrumentSpec, timeMs: number): number {
 }
 
 /**
- * Rounds to the instrument tick as a decimal string.
+ * Rounds a price to the instrument's tick at that price.
  * @param spec Instrument.
- * @param value Price.
- * @return Decimal string.
+ * @param value Price in quote units.
+ * @return Rounded price as a decimal string.
  */
 function tick(spec: DemoInstrumentSpec, value: number): string {
   return Decimal.fromNumber(value, 10)
@@ -304,9 +310,11 @@ function tick(spec: DemoInstrumentSpec, value: number): string {
  * Builds one synthetic candle.
  * @param spec Instrument.
  * @param timeframe Timeframe.
- * @param startMs Bar start.
- * @param nowMs Current time (bars ending after it are not final).
- * @param calendar Session calendar of the instrument (default `24x7`).
+ * @param startMs Bar start in epoch ms, on a bar boundary of `calendar`.
+ * @param nowMs Current time in epoch ms. A bar ending after it is still
+ *     forming: it closes at the price at `nowMs` and is not final.
+ * @param calendar Session calendar that sets the bar's end (default
+ *     continuous `24x7`).
  * @return Candle with DEMO provenance.
  */
 export function demoCandle(
@@ -320,6 +328,8 @@ export function demoCandle(
   const endMs = calendar.endOf(timeframe, startMs);
   const final = endMs <= nowMs;
   const closeAt = final ? endMs - 1 : Math.max(startMs, nowMs);
+  // Open, close and the body extremes come from seven evenly spaced samples
+  // of the path; the wicks add hashed noise beyond them.
   const samples = 6;
   const prices: number[] = [];
   for (let i = 0; i <= samples; i += 1) {
@@ -338,6 +348,8 @@ export function demoCandle(
     Math.max(...prices) + wick * Math.abs(hashNoise(startMs / 1000 + 3));
   const low =
     Math.min(...prices) - wick * Math.abs(hashNoise(startMs / 1000 + 5));
+  // Volume scales with the elapsed part of the bar (at least one second for
+  // sub-minute bars, one minute otherwise).
   const minutes =
     duration < 60_000
       ? Math.max(1 / 60, (closeAt - startMs + 1) / 60_000)
@@ -359,6 +371,8 @@ export function demoCandle(
     Math.max(high, open, close) - Math.min(low, open, close),
     1e-9
   );
+  // The aggressor-bought share leans with the bar's body (close - open over
+  // the range) plus noise, clamped to 4%..96%.
   const buyShare = Math.min(
     0.96,
     Math.max(
@@ -407,11 +421,13 @@ export function demoCandle(
  * sessions: the last bar before it).
  * @param spec Instrument.
  * @param timeframe Timeframe.
- * @param limit Number of bars.
- * @param nowMs Current time.
- * @param toMs Exclusive end of the requested range (defaults to now).
+ * @param limit Number of bars; 0 or less gives an empty series.
+ * @param nowMs Current time in epoch ms; the series never goes past it.
+ * @param toMs End of the requested range in epoch ms (defaults to now). The
+ *     bar containing it is included, even when `toMs` is that bar's start.
  * @param calendar Session calendar of the instrument (default `24x7`).
- * @return Candles, oldest first.
+ * @return `limit` candles, oldest first; the newest is still forming when
+ *     it contains `nowMs`.
  */
 export function demoSeries(
   spec: DemoInstrumentSpec,

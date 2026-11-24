@@ -135,7 +135,7 @@ describe('anchored VWAP (DEMO engine)', () => {
     expect(series.points.at(-1)?.values.upper_3).toBeNull();
   });
 
-  it('computes from anchors far back (more than the old 2000 bars)', async () => {
+  it('computes from anchors far back (more than 2000 bars)', async () => {
     const anchor = LAST - 2500 * DURATION;
     const series = await client.getIndicatorSeries({
       instrumentId: 'mock:perp:BTCUSD',

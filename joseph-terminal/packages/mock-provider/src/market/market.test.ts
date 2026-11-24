@@ -42,6 +42,7 @@ describe('DemoMarketDataClient', () => {
     if (!spec) throw new Error('missing spec');
     for (let i = 0; i < 200; i += 1) {
       const c = demoCandle(spec, '1m', NOW - (NOW % 60_000) - i * 60_000, NOW);
+      // Mapping a four-element array keeps four elements.
       const [o, h, l, cl] = [c.open, c.high, c.low, c.close].map(Number) as [
         number,
         number,
@@ -112,11 +113,14 @@ describe('DemoMarketStream', () => {
           timeframe: '1m',
         },
       ],
-      env => seen.push(env.payload)
+      env => {
+        seen.push(env.payload);
+      }
     );
     vi.advanceTimersByTime(1000);
     now += 60_000;
     vi.advanceTimersByTime(1000);
+    // Every payload on a candles channel is a candle.
     const finals = seen.filter(c => (c as {is_final: boolean}).is_final);
     expect(finals).toHaveLength(1);
     off();

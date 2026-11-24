@@ -11,7 +11,8 @@
  * The mock provider stands in for the market engine, so it computes these
  * values (the browser terminal never does). Definitions:
  *
- * - Anchored VWAP: cumulative `Σ(src·v) / Σv` from the anchor bar;
+ * - Anchored VWAP (volume-weighted average price): cumulative
+ *   `Σ(src·v) / Σv` from the anchor bar, with `v` the bar's base volume;
  *   `stdev = sqrt(Σ(src²·v) / Σv − vwap²)`; band k = `vwap ± m_k·stdev`
  *   when the multiplier `m_k` is above zero, null otherwise.
  * - Regression channel: least squares of `src` against the bar index over
@@ -19,6 +20,10 @@
  *   deviation of the residuals (n − 1); channel = line ± deviations·σ;
  *   Pearson's R of price against bar index; `max_up`/`max_down` are the
  *   largest residuals above/below the line.
+ *
+ * `src` is the price source setting (open, high, low, close, hl2, hlc3 or
+ * ohlc4). Values are computed in floating point and published as decimal
+ * strings with at most 8 decimal places.
  *
  * Like the engine, anchors may lie up to 50 000 closed bars back; an older
  * anchor is refused with a validation error (the engine answers 422) whose
@@ -42,14 +47,17 @@ import {demoCandle, type DemoInstrumentSpec} from './prices';
 /** Bars back the engine computes anchored values from at most. */
 export const DEMO_SERIES_BAR_CAP = 50_000;
 
-/** Regression points computed in full after the end bar (DEMO cost cap). */
+/**
+ * Regression points filled from the first requested bar on; later points
+ * carry null values (a DEMO cost cap).
+ */
 const REGRESSION_POINT_CAP = 500;
 
 /**
- * Refusal message for an anchor beyond the cap, worded like the engine's
- * 422 (`indicators.service`).
- * @param closed Closed bars between the anchor bar and now.
- * @param timeframe Chart timeframe.
+ * Builds the refusal message for an anchor beyond the cap, worded like the
+ * engine's 422 (`indicators.service`).
+ * @param closed Closed bars from the anchor bar (included) to now.
+ * @param timeframe Chart timeframe, e.g. `5m`.
  * @return Message.
  */
 export function demoAnchorRefusal(closed: number, timeframe: string): string {
@@ -62,7 +70,7 @@ export const DEMO_DRAWING_PLUGINS: readonly string[] = [
   'regression_channel',
 ];
 
-/** Values of a bar outside the anchored window (anchor too old). */
+/** Values of a requested bar before the anchor bar. */
 const NULL_VWAP_VALUES: Readonly<Record<string, IndicatorValue>> = {
   vwap: null,
   stdev: null,
@@ -76,7 +84,7 @@ const NULL_VWAP_VALUES: Readonly<Record<string, IndicatorValue>> = {
   bars: 0,
 };
 
-/** Price sources understood by the DEMO series. */
+/** Price sources understood by the DEMO series, by Pine source name. */
 const SOURCES: Readonly<Record<string, (c: Candle) => number>> = {
   open: c => Number(c.open),
   high: c => Number(c.high),
@@ -90,21 +98,22 @@ const SOURCES: Readonly<Record<string, (c: Candle) => number>> = {
 
 /**
  * Formats a computed number as a decimal string.
- * @param value Number.
- * @return Decimal string, or null when not finite.
+ * @param value Computed value.
+ * @return Decimal string rounded to 8 decimal places, or null when the
+ *     value is not finite.
  */
-function dec(value: number): string | null {
+function decimalText(value: number): string | null {
   return Number.isFinite(value)
     ? Decimal.fromNumber(value, 8).toString()
     : null;
 }
 
 /**
- * Reads a price source.
+ * Reads the price source setting.
  * @param settings Plugin settings.
- * @param fallback Default source.
- * @return Source accessor.
- * @throws {Error} For unknown sources (the engine answers 422).
+ * @param fallback Source name used when `settings.source` is unset.
+ * @return Accessor reading that price from a candle.
+ * @throws `Error` for an unknown source (the engine answers 422).
  */
 function sourceOf(
   settings: Readonly<Record<string, unknown>>,
@@ -119,10 +128,11 @@ function sourceOf(
 /**
  * Reads a non-negative decimal-string setting.
  * @param settings Plugin settings.
- * @param key Key.
- * @param fallback Default.
- * @return Value.
- * @throws {Error} When the value is not a decimal string.
+ * @param key Setting name.
+ * @param fallback Decimal string used when the setting is unset.
+ * @return Value as a number.
+ * @throws `Error` when the value is not a non-negative decimal string (the
+ *     engine answers 422).
  */
 function decimalSetting(
   settings: Readonly<Record<string, unknown>>,
@@ -137,10 +147,14 @@ function decimalSetting(
 }
 
 /**
- * Anchored VWAP values for candles that start at the anchor bar.
+ * Computes anchored VWAP values for candles that start at the anchor bar.
  * @param candles Candles from the anchor bar on (oldest first).
- * @param settings Plugin settings (`source`, `band_1..3`).
- * @return One point per candle.
+ * @param settings Plugin settings: `source` (default `hlc3`) and the band
+ *     multipliers `band_1`, `band_2`, `band_3` (defaults 1, 0, 0; 0 turns a
+ *     band off).
+ * @return One point per candle with the cumulative values; VWAP, stdev and
+ *     bands are null while the cumulative volume is zero.
+ * @throws `Error` for an unknown source or an invalid band multiplier.
  */
 export function anchoredVwapPoints(
   candles: readonly Candle[],
@@ -169,23 +183,27 @@ export function anchoredVwapPoints(
       volume > 0
         ? Math.sqrt(Math.max(0, weightedSquares / volume - vwap * vwap))
         : NaN;
-    values.vwap = dec(vwap);
-    values.stdev = dec(stdev);
+    values.vwap = decimalText(vwap);
+    values.stdev = decimalText(stdev);
     bands.forEach((multiplier, index) => {
       const k = index + 1;
       const on = multiplier > 0 && Number.isFinite(vwap);
-      values[`upper_${k}`] = on ? dec(vwap + multiplier * stdev) : null;
-      values[`lower_${k}`] = on ? dec(vwap - multiplier * stdev) : null;
+      values[`upper_${k}`] = on ? decimalText(vwap + multiplier * stdev) : null;
+      values[`lower_${k}`] = on ? decimalText(vwap - multiplier * stdev) : null;
     });
     return {bar_start_ms: candle.start_ms, values};
   });
 }
 
 /**
- * Regression channel over candles (the first one is the anchor bar).
+ * Computes the regression channel over candles (the first one is the anchor
+ * bar).
  * @param candles Candles from `anchor_ms` through the point bar.
- * @param settings Plugin settings (`source`, `deviations`).
- * @return Point values, all null when fewer than two bars.
+ * @param settings Plugin settings: `source` (default `close`) and
+ *     `deviations`, the channel half-width in σ (default 2).
+ * @return Point values: `start`/`end` are the line at the first and last
+ *     bar. All are null (only `bars` is set) when fewer than two bars.
+ * @throws `Error` for an unknown source or invalid deviations.
  */
 export function regressionValues(
   candles: readonly Candle[],
@@ -210,6 +228,7 @@ export function regressionValues(
     bars: n,
   };
   if (n < 2) return empty;
+  // x is the bar index from the anchor (0..n-1), so its mean is (n - 1) / 2.
   const ys = candles.map(source);
   const meanX = (n - 1) / 2;
   const meanY = ys.reduce((sum, y) => sum + y, 0) / n;
@@ -239,29 +258,33 @@ export function regressionValues(
   return {
     ...empty,
     start_ms: candles[0]?.start_ms ?? null,
-    start: dec(start),
-    end: dec(end),
-    upper_start: dec(start + offset),
-    upper_end: dec(end + offset),
-    lower_start: dec(start - offset),
-    lower_end: dec(end - offset),
-    slope: dec(slope),
-    stdev: dec(sigma),
-    pearson_r: syy > 0 ? dec(sxy / Math.sqrt(sxx * syy)) : null,
-    max_up: dec(maxUp),
-    max_down: dec(maxDown),
+    start: decimalText(start),
+    end: decimalText(end),
+    upper_start: decimalText(start + offset),
+    upper_end: decimalText(end + offset),
+    lower_start: decimalText(start - offset),
+    lower_end: decimalText(end - offset),
+    slope: decimalText(slope),
+    stdev: decimalText(sigma),
+    pearson_r: syy > 0 ? decimalText(sxy / Math.sqrt(sxx * syy)) : null,
+    max_up: decimalText(maxUp),
+    max_down: decimalText(maxDown),
   };
 }
 
 /**
  * Serves a DEMO series for the drawing plugins.
  * @param spec DEMO instrument.
- * @param query Series query.
- * @param nowMs Clock.
+ * @param query Series query. `settings.anchor_ms` (an integer epoch ms) is
+ *     required; `fromMs` defaults to 199 bars before the last closed bar and
+ *     is capped at `DEMO_SERIES_BAR_CAP` bars back.
+ * @param nowMs Current time in epoch ms.
  * @param calendar Session calendar of the instrument (default `24x7`).
- * @return Series, or null when the plugin is not a drawing plugin.
- * @throws {Error} For invalid settings (the engine answers 422).
- * @throws {ApiError} When the anchor is more than 50 000 bars back.
+ * @return Series with one point per bar from `fromMs` through the last
+ *     closed bar, or null when the plugin is not a drawing plugin.
+ * @throws `Error` for invalid settings (the engine answers 422).
+ * @throws `ApiError` (422 `VALIDATION_FAILED`) when the anchor is more than
+ *     `DEMO_SERIES_BAR_CAP` closed bars back.
  */
 export function demoDrawingSeries(
   spec: DemoInstrumentSpec,

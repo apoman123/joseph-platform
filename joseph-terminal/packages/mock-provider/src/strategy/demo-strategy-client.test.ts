@@ -117,6 +117,7 @@ describe('DemoStrategyClient', () => {
     await expect(
       client.activate('discount-ote-reversal', {
         version: 1,
+        // Deliberately outside the contract type, as an untyped caller sends.
         mode: 'AUTO_LIVE' as 'PAPER',
       })
     ).rejects.toMatchObject({body: {code: 'TRADE_MODE_DISABLED'}});

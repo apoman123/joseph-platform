@@ -11,15 +11,18 @@
  * It imitates the server contract (preview tokens, idempotency, risk
  * decisions, order lifecycle, kill switch, audit chain) so features can be
  * built without a backend. It is a simulation: no order ever reaches a
- * venue, and the authoritative Risk Gateway/OMS live in the execution
- * engine.
+ * venue, and the authoritative Risk Gateway and order management system
+ * (OMS) live in the execution engine. The fill model is documented on
+ * `DemoExecutionClient`.
  *
- * Accounts: the crypto paper account plus simulated broker accounts
- * (IBKR paper for Nasdaq/NYSE/Cboe BZX, a SinoPac Shioaji simulation for TWSE and
- * TPEx, a SinoPac live account without credentials and Cathay awaiting
- * its API SDK). Orders route like the engine: IBKR trades XNYS listings,
- * Taiwan brokers XTAI listings (TWSE and TPEx). Stock orders use whole
- * shares (Taiwan board lots or odd lots), tick-ladder prices and cash, never leverage.
+ * Accounts: the USD paper account (crypto and US securities) and the TWD
+ * paper account, plus simulated broker accounts (IBKR paper for
+ * Nasdaq/NYSE/Cboe BZX, a SinoPac Shioaji simulation for TWSE and TPEx, a
+ * SinoPac live account without credentials and Cathay awaiting its API
+ * SDK). Orders route like the engine: IBKR trades XNYS listings, Taiwan
+ * brokers XTAI listings (TWSE and TPEx). Stock orders use whole shares
+ * (Taiwan board lots or odd lots), tick-ladder prices and cash, never
+ * leverage.
  *
  * LIVE: like the engine, manual LIVE orders need a server-side arming of
  * the account (`grantAccountLiveConsent` with a step-up code, here
@@ -87,23 +90,41 @@ export type DemoBrokerEvent =
   | {type: 'risk.kill_switch'; payload: KillSwitchState}
   | {type: 'account.updated'; payload: AccountSummary};
 
-/** Options of the DEMO broker. */
+/** Options of the DEMO broker; every field has a default. */
 export interface DemoBrokerOptions {
-  /** Clock (UTC ms). */
+  /** Clock in epoch milliseconds (UTC); defaults to `Date.now`. */
   now?: () => number;
-  /** Timer used for simulated latency; defaults to `setTimeout`. */
+  /**
+   * Runs a task after a delay in milliseconds; defaults to `setTimeout`.
+   * Every simulated latency (acknowledgement, fills, cancels) goes through
+   * it, so tests can step an order's lifecycle by hand.
+   */
   schedule?: (task: () => void, delayMs: number) => void;
-  /** Reference mark per instrument; defaults to static DEMO marks. */
+  /**
+   * Reference mark per instrument id, a decimal string in the quote
+   * currency, or null when there is none; defaults to `DEMO_MARKS`. It is
+   * read whenever a price is needed and never cached.
+   */
   markPrice?: (instrumentId: string) => string | null;
-  /** Delay before the simulated venue acknowledges an order. */
+  /** Delay before the simulated venue acknowledges an order, in ms (250). */
   ackDelayMs?: number;
-  /** Delay before a marketable order fills. */
+  /** Delay before each part of a marketable fill, in ms (600). */
   fillDelayMs?: number;
-  /** When set, resting limits fill at their price after this delay. */
+  /**
+   * Delay in ms after which a resting primary order fills in full at its own
+   * limit (or trigger) price as maker. Null, the default, leaves resting
+   * orders working until amended or canceled.
+   */
   restingFillDelayMs?: number | null;
-  /** Split marketable fills into two parts (exercise PARTIALLY_FILLED). */
+  /**
+   * Whether the first fill of a marketable order takes half its quantity
+   * (floored to the lot size), to exercise `PARTIALLY_FILLED`; default true.
+   */
   partialFills?: boolean;
-  /** Starting paper equity of the crypto paper account. */
+  /**
+   * Starting equity of the USD paper account (`DEMO_ACCOUNT_ID`), a decimal
+   * string in USD; default `'100000'`.
+   */
   startingEquity?: string;
   /**
    * Adds the simulated IBKR live account (`DEMO_LIVE_REHEARSAL_ACCOUNT`)
@@ -115,9 +136,9 @@ export interface DemoBrokerOptions {
 
 /** Server-side LIVE arming of one DEMO account. */
 interface LiveArming {
-  /** When it was granted. */
+  /** Grant time, epoch milliseconds (UTC). */
   grantedAtMs: number;
-  /** When it ends. */
+  /** Expiry time, epoch milliseconds (UTC). */
   expiresAtMs: number;
 }
 
@@ -126,13 +147,25 @@ const MANUAL_SOURCES: ReadonlySet<OrderIntentRequest['source']> = new Set<
   OrderIntentRequest['source']
 >(['MANUAL_TICKET', 'CHART', 'QUICK_TRADE']);
 
-/** Fee rates (DEMO). */
+/** Taker fee rate as a fraction of fill notional (0.05 %): market orders. */
 const TAKER_FEE = Decimal.parse('0.0005');
+/** Maker fee rate as a fraction of fill notional (0.02 %): all other fills. */
 const MAKER_FEE = Decimal.parse('0.0002');
+/**
+ * Market-order slippage as a fraction of the mark (0.02 %): buys fill above
+ * the mark, sells below. Previews report it as `estimated_slippage_pct`.
+ */
 const SLIPPAGE = Decimal.parse('0.0002');
+/**
+ * Notional limit, in the quote currency, of the USD paper account and of
+ * unknown accounts; the other accounts use their `maxNotional`.
+ */
 const MAX_NOTIONAL = Decimal.parse('1000000');
+/** Lifetime of a preview token, in ms. */
 const PREVIEW_TTL_MS = 30_000;
+/** Risk policy version reported in every DEMO risk decision. */
 const POLICY_VERSION = 'demo-risk-1';
+/** Order states that never change again. */
 const TERMINAL: ReadonlySet<OrderState> = new Set<OrderState>([
   'FILLED',
   'CANCELED',
@@ -142,11 +175,11 @@ const TERMINAL: ReadonlySet<OrderState> = new Set<OrderState>([
 ]);
 
 /**
- * Builds an ApiError with a contract error body.
- * @param status HTTP-like status.
- * @param code Error code.
- * @param message Message.
- * @return Error instance.
+ * Builds an `ApiError` with a contract error body, as the engine would send.
+ * @param status HTTP status the engine answers with.
+ * @param code Contract error code.
+ * @param message User-facing message.
+ * @return Error with trace id `demo`, not retryable and no field errors.
  */
 function apiError(status: number, code: ErrorCode, message: string): ApiError {
   return new ApiError(status, {
@@ -158,19 +191,60 @@ function apiError(status: number, code: ErrorCode, message: string): ApiError {
   });
 }
 
-/** Internal position record. */
+/**
+ * Internal one-way netted position of one instrument. The DEMO broker keeps
+ * one book per instrument id, owned by the account that opened it from flat.
+ */
 interface PositionBook {
-  /** Account holding the position. */
+  /** Account holding the position; reassigned when the book reopens. */
   accountId: string;
-  /** Signed quantity (positive = long). */
+  /** Signed quantity in base units (positive = long, negative = short). */
   qty: Decimal;
-  /** Average entry price. */
+  /** Average entry price in the quote currency; zero while flat. */
   entry: Decimal;
-  /** Realized PnL. */
+  /** Realized profit and loss (PnL) in the quote currency, before fees. */
   realized: Decimal;
 }
 
-/** DEMO implementation of the execution client. */
+/**
+ * DEMO implementation of the execution client.
+ *
+ * Order lifecycle and fill model (every delay goes through `schedule`):
+ *
+ * - An allowed intent creates a primary order in `SUBMITTING`. After
+ *   `ackDelayMs` the simulated venue acknowledges it (`ACKNOWLEDGED`) and
+ *   `tryFill` runs once; only an amend runs it again. Mark changes alone
+ *   never re-check a resting order, and nothing fills without a mark.
+ * - Fill price: a market order fills at the mark plus `SLIPPAGE` (buys) or
+ *   minus it (sells). A limit order is marketable when a buy limit is at or
+ *   above the mark (a sell limit at or below it) and then fills at the
+ *   better of its limit and the mark. A stop order triggers when the mark
+ *   reaches its trigger (at or above for buys, at or below for sells) and
+ *   fills at the mark, `stop_limit` included. The price is rounded to the
+ *   nearest tick of the instrument's ladder at that price.
+ * - Timing: with `partialFills` (the default) the first fill of an
+ *   acknowledged order is half the remaining quantity floored to the lot
+ *   size, after `fillDelayMs`; the rest follows after another `fillDelayMs`
+ *   at the same price. Otherwise, or when the half is zero or the whole
+ *   quantity, one fill follows after `fillDelayMs`.
+ * - An order that is not marketable rests. With `restingFillDelayMs` set, a
+ *   resting primary order fills in full at its limit (or trigger) price
+ *   after that delay, as if the market had come to it.
+ * - Fees: market orders pay `TAKER_FEE`, every other fill `MAKER_FEE`, on
+ *   the fill notional, booked in the account currency.
+ * - Reduce-only fills are clamped to the open position. An order with
+ *   nothing to reduce is canceled, and so is the remainder of one that
+ *   flattens the position.
+ * - Positions are one-way and netted per instrument (one book per
+ *   instrument id, not per account). Opposite-side fills realize PnL
+ *   against the average entry; crossing through flat reopens at the fill
+ *   price.
+ * - When a primary order with a bracket fills completely, its stop-loss
+ *   (stop-market) and take-profit (limit) children are placed as reduce-only
+ *   GTC orders for the filled quantity. They start `ACKNOWLEDGED`, fill only
+ *   when an amend makes them marketable and are canceled once the position
+ *   is flat.
+ */
 export class DemoExecutionClient implements ExecutionClient {
   private readonly now: () => number;
   private readonly schedule: (task: () => void, delayMs: number) => void;
@@ -181,32 +255,47 @@ export class DemoExecutionClient implements ExecutionClient {
   private readonly partialFills: boolean;
   private readonly startingEquity: Decimal;
   private readonly accountSpecs: readonly DemoAccountSpec[];
+  /** Starting equity per account id; PnL and fees are applied on read. */
   private readonly accountEquity = new Map<string, Decimal>();
   private readonly liveArming = new Map<string, LiveArming>();
   private readonly instruments = new Map<string, Instrument>(
     DEMO_BROKER_INSTRUMENTS.map(i => [i.instrument_id, i])
   );
   private readonly orders = new Map<string, Order>();
+  /** Fills of every account, newest first. */
   private readonly fills: Fill[] = [];
+  /** One-way position book per instrument id. */
   private readonly positions = new Map<string, PositionBook>();
+  /**
+   * Preview token to the canonical JSON of the normalized request it
+   * previewed and its expiry (epoch ms).
+   */
   private readonly previews = new Map<
     string,
     {canonical: string; expiresAt: number}
   >();
+  /**
+   * Idempotency key to the canonical JSON of the request first sent with it
+   * and the response it got.
+   */
   private readonly idempotency = new Map<
     string,
     {canonical: string; response: SubmitIntentResponse}
   >();
+  /** Kill switch state per `<scope>:<target id>`. */
   private readonly killSwitches = new Map<string, KillSwitchState>();
+  /** Hash-chained audit log, oldest first. */
   private readonly audit: AuditEvent[] = [];
   private readonly deployments = new Map<string, Deployment>();
+  /** Request of each primary order whose bracket is not placed yet. */
   private readonly pendingBrackets = new Map<string, OrderIntentRequest>();
   private readonly listeners = new Set<(event: DemoBrokerEvent) => void>();
+  /** Last number used by `nextId`; one sequence shared by every id kind. */
   private counter = 0;
 
   /**
    * Creates the DEMO broker.
-   * @param options Simulation options.
+   * @param options Simulation options; see `DemoBrokerOptions` for defaults.
    */
   constructor(options: DemoBrokerOptions = {}) {
     this.now = options.now ?? Date.now;
@@ -232,10 +321,11 @@ export class DemoExecutionClient implements ExecutionClient {
   }
 
   /**
-   * Tick size of an instrument at a price (Taiwan ladder, else tick size).
-   * @param instrument Instrument.
-   * @param price Price.
-   * @return Tick.
+   * Returns the tick size at a price: the last `tick_ladder` step whose
+   * `min_price` the price reaches (Taiwan ladders), else `tick_size`.
+   * @param instrument Instrument, or null for the default 0.01 tick.
+   * @param price Price in the quote currency.
+   * @return Tick size in the quote currency.
    */
   private tickAt(instrument: Instrument | null, price: Decimal): Decimal {
     let tick = Decimal.parse(instrument?.tick_size ?? '0.01');
@@ -251,16 +341,18 @@ export class DemoExecutionClient implements ExecutionClient {
   }
 
   /**
-   * Engine order rules for an account and instrument: order types the
-   * account lists, DAY only for exchange sessions, intraday odd lots
-   * (limit DAY, when `odd_lot`), outside RTH (when `outside_rth`), orders
-   * while the exchange is closed (market orders queue as DAY only when
-   * `queue_market_when_closed`; IOC/FOK need a session) and long-only cash
-   * accounts.
+   * Applies the engine's order rules for an account and instrument.
+   *
+   * The rules: order types the account lists; DAY only for exchange
+   * sessions; intraday odd lots (limit DAY, when `odd_lot`); outside regular
+   * trading hours (RTH, when `outside_rth`); orders while the exchange is
+   * closed (market orders queue as DAY only when `queue_market_when_closed`;
+   * IOC/FOK need a session); and no sells beyond the shares held on
+   * long-only cash accounts.
    * @param request Normalized request.
-   * @param account Account.
-   * @param instrument Instrument.
-   * @return Failing or warning checks (empty when everything passes).
+   * @param account Account the order is for.
+   * @param instrument Instrument the order trades.
+   * @return Failing and warning checks; empty when everything passes.
    */
   private securityChecks(
     request: OrderIntentRequest,
@@ -274,7 +366,7 @@ export class DemoExecutionClient implements ExecutionClient {
       message: string,
       code: ErrorCode,
       outcome: RiskCheckResult['outcome'] = 'FAIL'
-    ) =>
+    ) => {
       results.push({
         check,
         domain,
@@ -284,6 +376,7 @@ export class DemoExecutionClient implements ExecutionClient {
         observed: null,
         limit: null,
       });
+    };
     const caps = account.capabilities;
     if (!caps.order_types.includes(request.order_type)) {
       fail(
@@ -409,8 +502,8 @@ export class DemoExecutionClient implements ExecutionClient {
   }
 
   /**
-   * Whether an instrument is a cash security (stock or ETF).
-   * @param instrument Instrument.
+   * Returns whether an instrument is a cash security (stock or ETF).
+   * @param instrument Instrument, or null when unknown (not a security).
    * @return True for stocks and ETFs.
    */
   private isSecurity(instrument: Instrument | null): boolean {
@@ -419,18 +512,20 @@ export class DemoExecutionClient implements ExecutionClient {
   }
 
   /**
-   * Finds one of this broker's accounts.
+   * Finds one of this broker's accounts, the rehearsal account included
+   * when enabled.
    * @param accountId Account id.
-   * @return Spec or null.
+   * @return Spec, or null when the account is unknown.
    */
   private spec(accountId: string): DemoAccountSpec | null {
     return this.accountSpecs.find(a => a.accountId === accountId) ?? null;
   }
 
   /**
-   * End of an account's unexpired, unrevoked LIVE arming.
+   * Returns when an account's current LIVE arming expires.
    * @param accountId Account id.
-   * @return End time, or null when not armed.
+   * @return Expiry in epoch ms (UTC), or null when the account was never
+   *     armed, the arming expired or it was revoked.
    */
   private armedUntil(accountId: string): number | null {
     const arming = this.liveArming.get(accountId);
@@ -440,10 +535,11 @@ export class DemoExecutionClient implements ExecutionClient {
   }
 
   /**
-   * Whether a reduce-only request can only shrink the current position
-   * (engine `RiskContext.risk_reducing`).
-   * @param request Request.
-   * @return True for an opposite-side order no larger than the position.
+   * Returns whether a request can only shrink the current position (engine
+   * `RiskContext.risk_reducing`).
+   * @param request Order request.
+   * @return True for a reduce-only, opposite-side order no larger than the
+   *     position.
    */
   private riskReducing(request: OrderIntentRequest): boolean {
     if (!request.reduce_only) return false;
@@ -459,10 +555,13 @@ export class DemoExecutionClient implements ExecutionClient {
   }
 
   /**
-   * Mode check of a LIVE request (engine `mode.allowed`).
-   * @param request Request.
-   * @param account Account, if known.
-   * @return Check result.
+   * Runs the mode check of a LIVE request (engine `mode.allowed`).
+   * @param request LIVE order request.
+   * @param account Account, or null when unknown (the check fails).
+   * @return The `mode.permitted` result: PASS for an armed manual order or a
+   *     source that is neither manual nor a strategy (such as `EMERGENCY`),
+   *     WARN for a risk-reducing manual order while disarmed, FAIL
+   *     otherwise.
    */
   private liveModeCheck(
     request: OrderIntentRequest,
@@ -527,8 +626,8 @@ export class DemoExecutionClient implements ExecutionClient {
 
   /**
    * Subscribes to broker events (used by `DemoUserStream`).
-   * @param listener Listener.
-   * @return Unsubscribe function.
+   * @param listener Called synchronously for every event.
+   * @return Function that removes the listener.
    */
   onEvent(listener: (event: DemoBrokerEvent) => void): () => void {
     this.listeners.add(listener);
@@ -538,10 +637,11 @@ export class DemoExecutionClient implements ExecutionClient {
   }
 
   /**
-   * Publishes an event.
-   * @param event Event.
+   * Publishes an event to every listener.
+   * @param event Event to publish.
    */
   private emit(event: DemoBrokerEvent): void {
+    // Iterate a copy so a listener may unsubscribe while it is called.
     for (const listener of [...this.listeners]) {
       listener(event);
     }
@@ -549,8 +649,9 @@ export class DemoExecutionClient implements ExecutionClient {
 
   /**
    * Returns a new sequential id.
-   * @param prefix Prefix.
-   * @return Id.
+   * @param prefix Id prefix, such as `demo-ord`.
+   * @return `<prefix>-<n>`, with `n` zero-padded to six digits and shared by
+   *     every prefix.
    */
   private nextId(prefix: string): string {
     this.counter += 1;
@@ -559,11 +660,12 @@ export class DemoExecutionClient implements ExecutionClient {
 
   /**
    * Appends a hash-chained audit event.
-   * @param action Action name.
-   * @param entityType Entity type.
-   * @param entityId Entity id.
-   * @param payload JSON payload.
-   * @param accountId Account the event belongs to.
+   * @param action Action name, such as `order.submit`.
+   * @param entityType Kind of entity acted on, such as `order` or `account`.
+   * @param entityId Id of that entity.
+   * @param payload Action details, stored as JSON.
+   * @param accountId Account the event belongs to (defaults to the USD paper
+   *     account).
    */
   private record(
     action: string,
@@ -586,22 +688,28 @@ export class DemoExecutionClient implements ExecutionClient {
       payload,
       prev_hash: prevHash,
     };
+    // Like the engine's audit chain, each hash covers the previous hash and
+    // the event's canonical JSON without its own hash, so `listAuditEvents`
+    // can detect an altered event or a broken link.
     this.audit.push({...base, hash: sha256Hex(prevHash + canonicalJson(base))});
   }
 
   /**
-   * Returns the instrument or throws.
+   * Looks up an instrument the broker lists.
    * @param instrumentId Instrument id.
-   * @return Instrument.
+   * @return Instrument, or null when the broker does not list it.
    */
   private instrument(instrumentId: string): Instrument | null {
     return this.instruments.get(instrumentId) ?? null;
   }
 
   /**
-   * Rounds a request to instrument precision.
-   * @param request Request.
-   * @return Normalized copy.
+   * Rounds a request to the instrument's precision: the quantity down to the
+   * lot size, limit and trigger prices to the nearest tick of the ladder.
+   * Values that are not decimal strings are left for the risk checks.
+   * @param request Order request.
+   * @return Normalized copy without a preview token; for an unknown
+   *     instrument only the token is removed.
    */
   private normalize(request: OrderIntentRequest): OrderIntentRequest {
     const instrument = this.instrument(request.instrument_id);
@@ -626,9 +734,10 @@ export class DemoExecutionClient implements ExecutionClient {
   }
 
   /**
-   * Returns whether any engaged kill switch covers a request.
-   * @param request Request.
-   * @return Engaged switch, if any.
+   * Finds an engaged kill switch that covers a request: the global switch,
+   * its account's or its strategy version's.
+   * @param request Order request.
+   * @return The first such switch, or null when none is engaged.
    */
   private blockingSwitch(request: OrderIntentRequest): KillSwitchState | null {
     for (const state of this.killSwitches.values()) {
@@ -651,7 +760,13 @@ export class DemoExecutionClient implements ExecutionClient {
   /**
    * Evaluates DEMO risk checks for a normalized request.
    * @param request Normalized request.
-   * @return Decision and derived values.
+   * @return The risk decision (ALLOW when nothing fails, REJECT when a SIZE
+   *     check fails, BLOCK otherwise); the notional (quantity times the
+   *     reference price); the estimated fee; the margin required (the
+   *     notional, divided by the leverage for derivatives); and the
+   *     reference price (limit, else trigger, else mark; null without any).
+   * @throws `RangeError` when the limit or trigger price is not a decimal
+   *     string.
    */
   private evaluate(request: OrderIntentRequest): {
     risk: RiskDecision;
@@ -669,7 +784,9 @@ export class DemoExecutionClient implements ExecutionClient {
       code: ErrorCode | null = null,
       observed: string | null = null,
       limit: string | null = null
-    ) => checks.push({check, domain, outcome, message, code, observed, limit});
+    ) => {
+      checks.push({check, domain, outcome, message, code, observed, limit});
+    };
     const instrument = this.instrument(request.instrument_id);
     const account = this.spec(request.account_id);
     if (request.mode === 'LIVE') {
@@ -1061,9 +1178,11 @@ export class DemoExecutionClient implements ExecutionClient {
   }
 
   /**
-   * Computes available margin (equity minus margin in use).
-   * @param accountId Account.
-   * @return Available margin.
+   * Computes an account's available margin: its equity minus the mark value
+   * of its open positions (no leverage is applied).
+   * @param accountId Account id.
+   * @return Available margin in the account currency; positions without a
+   *     mark count as zero.
    */
   private availableMargin(accountId: string): Decimal {
     let used = Decimal.zero();
@@ -1076,9 +1195,10 @@ export class DemoExecutionClient implements ExecutionClient {
   }
 
   /**
-   * Computes equity including realized and unrealized PnL.
-   * @param accountId Account.
-   * @return Equity.
+   * Computes an account's equity: starting equity plus realized and
+   * unrealized PnL at the mark, minus every fee paid.
+   * @param accountId Account id.
+   * @return Equity in the account currency.
    */
   private equity(accountId: string): Decimal {
     let equity = this.accountEquity.get(accountId) ?? Decimal.zero();
@@ -1099,8 +1219,9 @@ export class DemoExecutionClient implements ExecutionClient {
   }
 
   /**
-   * Lists accounts.
-   * @return The crypto paper account first, then the broker accounts.
+   * Lists this broker's accounts.
+   * @return Summaries in table order: the USD and TWD paper accounts, the
+   *     broker accounts, then the rehearsal account when enabled.
    */
   async listAccounts(): Promise<AccountList> {
     return {
@@ -1109,9 +1230,10 @@ export class DemoExecutionClient implements ExecutionClient {
   }
 
   /**
-   * Fetches the account summary.
+   * Returns an account's summary.
    * @param accountId Account id.
-   * @return Summary.
+   * @return Summary; balances are null unless the account is `CONNECTED`.
+   * @throws `ApiError` (404 `NOT_FOUND`) when the account is unknown.
    */
   async getAccountSummary(accountId: string): Promise<AccountSummary> {
     if (!this.spec(accountId)) {
@@ -1121,14 +1243,23 @@ export class DemoExecutionClient implements ExecutionClient {
   }
 
   /**
-   * Arms manual LIVE orders on an account (engine
-   * `POST /v1/accounts/{account_id}/live-consent`): refuses paper and
-   * unverified accounts, needs the risk acknowledgement, a lifetime of at
-   * most `DEMO_LIVE_ARM_MAX_MS` and `DEMO_STEP_UP_CODE`. Every outcome is
+   * Arms manual LIVE orders on an account.
+   *
+   * Mirrors the engine's `POST /v1/accounts/{account_id}/live-consent`: it
+   * refuses paper and unverified accounts and needs the risk
+   * acknowledgement, a lifetime of at most `DEMO_LIVE_ARM_MAX_MS` and
+   * `DEMO_STEP_UP_CODE`. Grants and refusals of a known account are
    * audited.
    * @param accountId Account id.
-   * @param request Step-up code, acknowledgement and lifetime.
+   * @param request Step-up code, risk acknowledgement and lifetime in ms
+   *     (defaults to `DEMO_LIVE_ARM_MAX_MS`).
    * @return Summary with `live_armed_until_ms`.
+   * @throws `ApiError` (404 `NOT_FOUND`) when the account is unknown; (403
+   *     `TRADE_MODE_DISABLED`) for a paper account or one not enabled for
+   *     LIVE; (422 `VALIDATION_FAILED`) without the acknowledgement or with
+   *     a lifetime that is not a whole number of ms in range; (403
+   *     `STEP_UP_REQUIRED`) for a wrong step-up code; (403
+   *     `LIVE_TRADING_DISABLED`) when the account's adapter cannot trade.
    */
   async grantAccountLiveConsent(
     accountId: string,
@@ -1212,9 +1343,11 @@ export class DemoExecutionClient implements ExecutionClient {
 
   /**
    * Disarms LIVE on an account (engine `DELETE .../live-consent`).
-   * Idempotent; every call is audited.
+   *
+   * Idempotent; every call on a known account is audited.
    * @param accountId Account id.
    * @return Summary with `live_armed_until_ms` null.
+   * @throws `ApiError` (404 `NOT_FOUND`) when the account is unknown.
    */
   async revokeAccountLiveConsent(accountId: string): Promise<AccountSummary> {
     if (!this.spec(accountId)) {
@@ -1236,9 +1369,9 @@ export class DemoExecutionClient implements ExecutionClient {
 
   /**
    * Builds an account summary.
-   * @param accountId Account id (defaults to the crypto paper account; an
+   * @param accountId Account id (defaults to the USD paper account; an
    *     unknown id also falls back to it).
-   * @return Summary; balances are null while the account is disconnected.
+   * @return Summary; balances are null unless the account is `CONNECTED`.
    * @throws `ApiError` (404 `NOT_FOUND`) only if the DEMO account table is
    *     empty.
    */
@@ -1277,9 +1410,13 @@ export class DemoExecutionClient implements ExecutionClient {
   }
 
   /**
-   * Previews an order.
-   * @param request Draft.
-   * @return Preview.
+   * Previews an order: normalizes it, runs the risk checks and issues a
+   * preview token valid for `PREVIEW_TTL_MS`.
+   * @param request Order draft.
+   * @return Preview; `allowed` is false when a check fails (failed checks do
+   *     not reject). Best bid and ask are the mark.
+   * @throws `RangeError` when the limit or trigger price is not a decimal
+   *     string.
    */
   async previewOrder(request: OrderIntentRequest): Promise<OrderPreview> {
     const normalized = this.normalize(request);
@@ -1316,9 +1453,20 @@ export class DemoExecutionClient implements ExecutionClient {
 
   /**
    * Submits an intent with idempotency.
-   * @param request Intent request.
-   * @param idempotencyKey Key.
-   * @return Submission result.
+   *
+   * A repeated key with the same request replays the first response. An
+   * allowed intent creates the primary order; a blocked or rejected one is
+   * audited and returns no orders.
+   * @param request Intent request; a `preview_token`, when set, must be
+   *     unexpired and match the normalized request.
+   * @param idempotencyKey Client key that makes retries safe.
+   * @return Submission result; `replayed` is true for a repeated key.
+   * @throws `ApiError` (409 `IDEMPOTENCY_CONFLICT`) when the key was used for
+   *     a different request; (409 `PREVIEW_EXPIRED`) when the preview token
+   *     is unknown or expired; (409 `PREVIEW_REQUIRED`) when the order
+   *     changed after its preview.
+   * @throws `RangeError` when the limit or trigger price is not a decimal
+   *     string.
    */
   async submitIntent(
     request: OrderIntentRequest,
@@ -1391,11 +1539,14 @@ export class DemoExecutionClient implements ExecutionClient {
   }
 
   /**
-   * Creates an order in SUBMITTING and schedules its simulated lifecycle.
-   * @param intent Intent.
+   * Creates an order and schedules its simulated lifecycle.
+   * @param intent Intent the order belongs to.
    * @param request Normalized request.
-   * @param role Order role.
-   * @param parentId Parent order id for bracket children.
+   * @param role Order role: a `PRIMARY` order starts `SUBMITTING` and is
+   *     acknowledged after `ackDelayMs`; bracket children start
+   *     `ACKNOWLEDGED`.
+   * @param parentId Parent order id of a bracket child, null for a primary
+   *     order.
    * @return Order snapshot.
    */
   private createOrder(
@@ -1437,6 +1588,7 @@ export class DemoExecutionClient implements ExecutionClient {
     this.orders.set(order.order_id, order);
     this.emit({type: 'order.updated', payload: order});
     if (role === 'PRIMARY') {
+      // Kept until the order fills completely, when `placeBracket` reads it.
       this.pendingBrackets.set(order.order_id, request);
       this.schedule(
         () => void this.acknowledge(order.order_id),
@@ -1449,8 +1601,9 @@ export class DemoExecutionClient implements ExecutionClient {
   /**
    * Updates an order and publishes the change.
    * @param orderId Order id.
-   * @param patch Fields to change.
-   * @return Updated order, or null when absent.
+   * @param patch Fields to change; `updated_at_ms` and `version` are set
+   *     here.
+   * @return Updated order, or null when the order is unknown.
    */
   private update(orderId: string, patch: Partial<Order>): Order | null {
     const current = this.orders.get(orderId);
@@ -1467,7 +1620,8 @@ export class DemoExecutionClient implements ExecutionClient {
   }
 
   /**
-   * Simulates the venue acknowledgment.
+   * Simulates the venue acknowledgement of a submitted order, then tries to
+   * fill it. Does nothing once the order has left `SUBMITTING`.
    * @param orderId Order id.
    */
   private acknowledge(orderId: string): void {
@@ -1482,6 +1636,10 @@ export class DemoExecutionClient implements ExecutionClient {
 
   /**
    * Fills the order if it is marketable, otherwise leaves it resting.
+   *
+   * Prices, timing and the resting fill follow the fill model described on
+   * the class. Does nothing unless the order is working (`ACKNOWLEDGED` or
+   * `PARTIALLY_FILLED`) and a mark is known.
    * @param orderId Order id.
    */
   private tryFill(orderId: string): void {
@@ -1521,6 +1679,8 @@ export class DemoExecutionClient implements ExecutionClient {
     if (!price) {
       if (this.restingFillDelayMs !== null && order.role === 'PRIMARY') {
         const restingPrice = order.limit_price ?? order.trigger_price;
+        // The order may be canceled or filled before the timer fires, so
+        // the task re-reads it and fills only what is still open.
         this.schedule(() => {
           const latest = this.orders.get(orderId);
           if (
@@ -1554,6 +1714,8 @@ export class DemoExecutionClient implements ExecutionClient {
       this.partialFills && order.state === 'ACKNOWLEDGED'
         ? remaining.div(Decimal.parse('2')).floorToStep(lot)
         : remaining;
+    // Each scheduled part re-reads the order: the second part fills whatever
+    // is still open, and `applyFill` skips an order canceled in between.
     if (first.isZero() || first.eq(remaining)) {
       this.schedule(
         () => void this.applyFill(orderId, remaining, fillPrice, liquidity),
@@ -1579,11 +1741,18 @@ export class DemoExecutionClient implements ExecutionClient {
   }
 
   /**
-   * Applies a fill to an order and the position.
+   * Books one fill on an order and its position.
+   *
+   * Clamps a reduce-only quantity to the position, charges the fee, updates
+   * the order's filled quantity, average price and state, nets the position
+   * and places the bracket once a primary order is complete. Does nothing
+   * unless the order is still working.
    * @param orderId Order id.
-   * @param quantity Fill quantity.
-   * @param price Fill price.
-   * @param liquidity Maker or taker.
+   * @param quantity Fill quantity in base units, before the reduce-only
+   *     clamp.
+   * @param price Fill price in the quote currency, already on the tick
+   *     ladder.
+   * @param liquidity `taker` pays `TAKER_FEE`, `maker` pays `MAKER_FEE`.
    */
   private applyFill(
     orderId: string,
@@ -1654,6 +1823,8 @@ export class DemoExecutionClient implements ExecutionClient {
     const flattened = order.reduce_only && qty.cmp(book.qty.abs()) >= 0;
     const instrument = this.instrument(order.instrument_id);
     const tick = Decimal.parse(instrument?.tick_size ?? '0.01');
+    // The average of fills at different ticks lies between ticks: keep
+    // three more decimals than the tick.
     this.update(orderId, {
       filled_base: filled.toString(),
       avg_fill_price: avg
@@ -1670,11 +1841,17 @@ export class DemoExecutionClient implements ExecutionClient {
   }
 
   /**
-   * Updates the netted one-way position.
-   * @param order Filled order.
-   * @param qty Fill quantity.
-   * @param price Fill price.
-   * @param book Current position book.
+   * Nets a fill into the instrument's one-way position, then publishes the
+   * position and the account.
+   *
+   * A same-side fill averages the entry by quantity. An opposite-side fill
+   * realizes PnL on the closed quantity; crossing through flat reopens the
+   * position at the fill price, and going flat cancels the bracket
+   * children.
+   * @param order Order the fill belongs to.
+   * @param qty Fill quantity in base units (positive).
+   * @param price Fill price in the quote currency.
+   * @param book Position book before the fill.
    */
   private applyToPosition(
     order: Order,
@@ -1716,7 +1893,12 @@ export class DemoExecutionClient implements ExecutionClient {
   }
 
   /**
-   * Places simulated SL/TP children after the primary order filled.
+   * Places the stop-loss and take-profit children of a completely filled
+   * primary order.
+   *
+   * Each child is a reduce-only GTC order on the exit side for the filled
+   * quantity: one stop-market order at the stop-loss trigger and one limit
+   * order per take-profit level. Does nothing without a bracket.
    * @param orderId Primary order id.
    */
   private placeBracket(orderId: string): void {
@@ -1775,7 +1957,8 @@ export class DemoExecutionClient implements ExecutionClient {
   }
 
   /**
-   * Cancels resting bracket children when a position is flat.
+   * Cancels the working bracket children of an instrument whose position
+   * went flat.
    * @param instrumentId Instrument id.
    */
   private cancelChildren(instrumentId: string): void {
@@ -1795,9 +1978,14 @@ export class DemoExecutionClient implements ExecutionClient {
 
   /**
    * Converts a position book to the contract shape.
-   * @param instrumentId Instrument id.
+   *
+   * Unrealized PnL and margin use the current mark (null without one). The
+   * liquidation price is synthetic: half the entry for longs, 1.5 times it
+   * for shorts, null for cash securities.
+   * @param instrumentId Instrument the book belongs to.
    * @param book Position book.
-   * @return Position.
+   * @return Contract position; `mode` is LIVE when the owning account offers
+   *     LIVE, else PAPER.
    */
   private toPosition(instrumentId: string, book: PositionBook): Position {
     const mark = this.mark(instrumentId);
@@ -1846,7 +2034,7 @@ export class DemoExecutionClient implements ExecutionClient {
   }
 
   /**
-   * Lists non-flat positions.
+   * Lists the non-flat positions of every account.
    * @return Positions.
    */
   private positionList(): Position[] {
@@ -1857,9 +2045,9 @@ export class DemoExecutionClient implements ExecutionClient {
 
   /**
    * Lists orders.
-   * @param accountId Optional account.
-   * @param states Optional states.
-   * @return Orders, newest first.
+   * @param accountId Account to keep; every account when omitted.
+   * @param states States to keep; every state when omitted.
+   * @return Orders, newest first (equal times by descending order id).
    */
   async listOrders(
     accountId?: string,
@@ -1880,9 +2068,15 @@ export class DemoExecutionClient implements ExecutionClient {
   }
 
   /**
-   * Requests cancellation.
+   * Requests cancellation of an order.
+   *
+   * The order becomes `CANCELED` after `ackDelayMs`; fills scheduled before
+   * then are dropped, because only working orders take fills.
    * @param orderId Order id.
-   * @return Order in CANCEL_PENDING.
+   * @return Order in `CANCEL_PENDING`.
+   * @throws `ApiError` (404 `NOT_FOUND`) when the order is unknown; (409
+   *     `CONFLICT`) when it is already terminal; (409 `ORDER_UNKNOWN`) while
+   *     its state is being reconciled.
    */
   async cancelOrder(orderId: string): Promise<Order> {
     const order = this.orders.get(orderId);
@@ -1917,9 +2111,21 @@ export class DemoExecutionClient implements ExecutionClient {
 
   /**
    * Amends price or quantity with optimistic concurrency.
+   *
+   * New prices are rounded to the instrument's `tick_size` (not its ladder)
+   * and the quantity is floored to the lot size; the order is then checked
+   * for a fill again.
    * @param orderId Order id.
-   * @param request Amendment.
-   * @return Updated order.
+   * @param request Amendment; `expected_version`, when set, must equal the
+   *     order's current version.
+   * @return Updated order, as it was before the fill check.
+   * @throws `ApiError` (404 `NOT_FOUND`) when the order is unknown; (409
+   *     `CONFLICT`) when it is not working or its version changed; (403
+   *     `LIVE_NOT_ARMED`) for a LIVE order that is not reduce-only while the
+   *     account is disarmed; (422 `INVALID_LOT_SIZE`) when the new quantity
+   *     does not exceed the filled quantity.
+   * @throws `RangeError` when a new price or quantity is not a decimal
+   *     string.
    */
   async amendOrder(orderId: string, request: AmendRequest): Promise<Order> {
     const order = this.orders.get(orderId);
@@ -1980,8 +2186,8 @@ export class DemoExecutionClient implements ExecutionClient {
   }
 
   /**
-   * Lists positions.
-   * @param accountId Optional account.
+   * Lists non-flat positions.
+   * @param accountId Account to keep; every account when omitted.
    * @return Positions.
    */
   async listPositions(accountId?: string): Promise<PositionList> {
@@ -1994,7 +2200,7 @@ export class DemoExecutionClient implements ExecutionClient {
 
   /**
    * Lists fills.
-   * @param accountId Optional account.
+   * @param accountId Account to keep; every account when omitted.
    * @return Fills, newest first.
    */
   async listFills(accountId?: string): Promise<FillList> {
@@ -2006,8 +2212,8 @@ export class DemoExecutionClient implements ExecutionClient {
   /**
    * Builds the reduce-only request that closes part of a position.
    * @param positionId Position id.
-   * @param request Close request; `fraction` is the share of the position to
-   *     close, rounded down to the instrument's lot size.
+   * @param request Close request; the closed quantity is the position times
+   *     `fraction`, floored to the lot size.
    * @return Intent request.
    * @throws `ApiError` (404 `NOT_FOUND`) when the position is unknown or flat,
    *     or (422 `VALIDATION_FAILED`) when the fraction is zero or above 1.
@@ -2062,10 +2268,14 @@ export class DemoExecutionClient implements ExecutionClient {
   }
 
   /**
-   * Previews a reduce-only close.
-   * @param positionId Position id.
+   * Previews a reduce-only close of part of a position.
+   * @param positionId Position id (`demo-pos-<instrument id>`).
    * @param request Close request.
-   * @return Preview.
+   * @return Preview of the reduce-only order.
+   * @throws `ApiError` (404 `NOT_FOUND`) when the position is unknown or
+   *     flat; (422 `VALIDATION_FAILED`) when the fraction is zero or above 1.
+   * @throws `RangeError` when the fraction or limit price is not a decimal
+   *     string.
    */
   async closePositionPreview(
     positionId: string,
@@ -2075,11 +2285,16 @@ export class DemoExecutionClient implements ExecutionClient {
   }
 
   /**
-   * Closes part of a position.
-   * @param positionId Position id.
-   * @param request Close request with preview token.
-   * @param idempotencyKey Key.
+   * Submits a reduce-only order that closes part of a position.
+   * @param positionId Position id (`demo-pos-<instrument id>`).
+   * @param request Close request, with the token of its preview.
+   * @param idempotencyKey Client key that makes retries safe.
    * @return Submission result.
+   * @throws `ApiError` (404 `NOT_FOUND`) when the position is unknown or
+   *     flat; (422 `VALIDATION_FAILED`) when the fraction is zero or above
+   *     1; and the 409 errors of `submitIntent`.
+   * @throws `RangeError` when the fraction or limit price is not a decimal
+   *     string.
    */
   async closePosition(
     positionId: string,
@@ -2093,8 +2308,8 @@ export class DemoExecutionClient implements ExecutionClient {
   }
 
   /**
-   * Lists kill switches.
-   * @return States.
+   * Lists the kill switches set so far.
+   * @return States, engaged or released.
    */
   async getKillSwitches(): Promise<KillSwitchList> {
     return {switches: [...this.killSwitches.values()]};
@@ -2102,8 +2317,12 @@ export class DemoExecutionClient implements ExecutionClient {
 
   /**
    * Engages or releases a kill switch.
-   * @param request Request.
-   * @return New state.
+   *
+   * Engaging can also cancel the open orders in scope and flatten the
+   * positions of a global or account scope with `EMERGENCY` market closes.
+   * @param request Scope, target, reason and what to do on engage.
+   * @return New state of the switch.
+   * @throws `ApiError` (422 `VALIDATION_FAILED`) when the reason is blank.
    */
   async setKillSwitch(request: KillSwitchRequest): Promise<KillSwitchState> {
     if (!request.reason.trim()) {
@@ -2119,6 +2338,7 @@ export class DemoExecutionClient implements ExecutionClient {
       actor: DEMO_USER_ID,
       changed_at_ms: this.now(),
     };
+    // One state per scope and target: a release replaces the engaged state.
     this.killSwitches.set(`${request.scope}:${request.target_id ?? ''}`, state);
     this.record(
       request.engage ? 'kill_switch.engage' : 'kill_switch.release',
@@ -2165,8 +2385,9 @@ export class DemoExecutionClient implements ExecutionClient {
   /**
    * Returns whether an entity is covered by a kill switch scope.
    * @param state Kill switch.
-   * @param accountId Account id.
-   * @param strategyVersionId Strategy version, if any.
+   * @param accountId Account of the entity.
+   * @param strategyVersionId Strategy version of the entity, or null (never
+   *     in a strategy scope).
    * @return True when covered.
    */
   private inScope(
@@ -2181,9 +2402,10 @@ export class DemoExecutionClient implements ExecutionClient {
 
   /**
    * Lists audit events newest first and verifies the chain.
-   * @param accountId Optional account filter.
-   * @param limit Maximum rows.
-   * @return Events and chain validity.
+   * @param accountId Account to keep; every account when omitted.
+   * @param limit Maximum number of events; the newest are kept.
+   * @return Events and whether the whole chain, not only the returned
+   *     events, verifies.
    */
   async listAuditEvents(
     accountId?: string,
@@ -2209,7 +2431,7 @@ export class DemoExecutionClient implements ExecutionClient {
   }
 
   /**
-   * Lists deployments.
+   * Lists the deployments created so far.
    * @return Deployments.
    */
   async listDeployments(): Promise<DeploymentList> {
@@ -2218,8 +2440,9 @@ export class DemoExecutionClient implements ExecutionClient {
 
   /**
    * Creates a deployment; AUTO_LIVE waits for consent that DEMO never grants.
-   * @param request Request.
-   * @return Deployment.
+   * @param request Deployment request.
+   * @return Deployment, `ENABLED` or (for AUTO_LIVE) `PENDING_CONSENT`.
+   * @throws `ApiError` (404 `NOT_FOUND`) when the account is unknown.
    */
   async createDeployment(request: DeploymentRequest): Promise<Deployment> {
     if (!this.spec(request.account_id)) {
@@ -2250,6 +2473,7 @@ export class DemoExecutionClient implements ExecutionClient {
    * Disables a deployment.
    * @param deploymentId Deployment id.
    * @return Updated deployment.
+   * @throws `ApiError` (404 `NOT_FOUND`) when the deployment is unknown.
    */
   async disableDeployment(deploymentId: string): Promise<Deployment> {
     const deployment = this.deployments.get(deploymentId);

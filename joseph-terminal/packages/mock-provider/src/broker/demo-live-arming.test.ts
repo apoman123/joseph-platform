@@ -28,7 +28,7 @@ import {
 
 /** Wednesday 2027-01-20 15:00 UTC = 10:00 New York: NYSE is open. */
 const NY_OPEN = Date.UTC(2027, 0, 20, 15);
-/** One hour. */
+/** One hour in ms. */
 const HOUR = 3_600_000;
 
 /** Controllable clock and scheduler. */
@@ -37,8 +37,8 @@ class Sim {
   private readonly tasks: Array<() => void> = [];
 
   /**
-   * Queues a task.
-   * @param task Task.
+   * Queues a task, ignoring its delay.
+   * @param task Task to run on the next `flush`.
    */
   schedule = (task: () => void): void => {
     this.tasks.push(task);
@@ -46,11 +46,14 @@ class Sim {
 
   /**
    * Returns the simulated time.
-   * @return UTC ms.
+   * @return Epoch milliseconds (UTC).
    */
   now = (): number => this.nowMs;
 
-  /** Runs queued tasks until none are left. */
+  /**
+   * Runs queued tasks, and the tasks they queue, until none are left (at
+   * most 100 rounds).
+   */
   flush(): void {
     for (let i = 0; i < 100 && this.tasks.length; i += 1) {
       for (const task of this.tasks.splice(0)) {
@@ -77,8 +80,8 @@ function setup(liveRehearsal = true): {broker: DemoExecutionClient; sim: Sim} {
 }
 
 /**
- * A LIVE ACME order on the rehearsal account.
- * @param patch Overrides.
+ * Builds a LIVE ACME limit buy on the rehearsal account.
+ * @param patch Fields to override.
  * @return Request.
  */
 function live(patch: Partial<OrderIntentRequest> = {}): OrderIntentRequest {
@@ -99,9 +102,11 @@ function live(patch: Partial<OrderIntentRequest> = {}): OrderIntentRequest {
 }
 
 /**
- * Awaits a rejection and returns the contract error code and status.
+ * Awaits a rejection and returns the contract error status and code.
  * @param promise Call expected to fail.
  * @return `[status, code]`.
+ * @throws Error when the call succeeds; any rejection that is not an
+ *     `ApiError` is rethrown.
  */
 async function failure(promise: Promise<unknown>): Promise<[number, string]> {
   try {
@@ -114,10 +119,10 @@ async function failure(promise: Promise<unknown>): Promise<[number, string]> {
 }
 
 /**
- * Arms the rehearsal account.
+ * Arms the rehearsal account with the DEMO step-up code.
  * @param broker Broker.
- * @param durationMs Lifetime.
- * @return Summary.
+ * @param durationMs Arming lifetime in ms.
+ * @return Promise of the armed account summary.
  */
 function arm(broker: DemoExecutionClient, durationMs = HOUR) {
   return broker.grantAccountLiveConsent(DEMO_LIVE_REHEARSAL_ACCOUNT_ID, {
@@ -179,6 +184,8 @@ describe('DEMO live arming', () => {
       await failure(
         broker.grantAccountLiveConsent(id, {
           step_up_code: DEMO_STEP_UP_CODE,
+          // The contract types the field as `true`; send what a faulty
+          // client could.
           acknowledge_risk: false as true,
         })
       )
@@ -199,7 +206,7 @@ describe('DEMO live arming', () => {
   it('arms until the requested time, expires and revokes', async () => {
     const {broker, sim} = setup();
     const seen: DemoBrokerEvent[] = [];
-    broker.onEvent(event => seen.push(event));
+    broker.onEvent(event => void seen.push(event));
     const id = DEMO_LIVE_REHEARSAL_ACCOUNT_ID;
     const armed = await arm(broker, 4 * HOUR);
     expect(armed.live_armed_until_ms).toBe(NY_OPEN + 4 * HOUR);

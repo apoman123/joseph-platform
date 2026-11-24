@@ -32,8 +32,8 @@ const CLOSED = 1_800_000_000_000;
 const TWSE_OPEN = Date.UTC(2027, 0, 18, 2);
 
 /**
- * Builds a stock order.
- * @param patch Overrides.
+ * Builds a 100-share ACME DAY limit buy on the IBKR paper account.
+ * @param patch Fields to override.
  * @return Request.
  */
 function order(patch: Partial<OrderIntentRequest> = {}): OrderIntentRequest {
@@ -54,8 +54,8 @@ function order(patch: Partial<OrderIntentRequest> = {}): OrderIntentRequest {
 }
 
 /**
- * TWSE order on the SinoPac simulation account.
- * @param patch Overrides.
+ * Builds a one-board-lot TWSE limit buy on the SinoPac simulation account.
+ * @param patch Fields to override.
  * @return Request.
  */
 function twse(patch: Partial<OrderIntentRequest> = {}): OrderIntentRequest {
@@ -69,8 +69,8 @@ function twse(patch: Partial<OrderIntentRequest> = {}): OrderIntentRequest {
 }
 
 /**
- * Broker running tasks immediately.
- * @param now Clock.
+ * Builds a broker that runs scheduled tasks immediately.
+ * @param now Fixed time in epoch milliseconds (UTC).
  * @return Broker.
  */
 function broker(now = CLOSED): DemoExecutionClient {
@@ -82,10 +82,10 @@ function broker(now = CLOSED): DemoExecutionClient {
 }
 
 /**
- * Failing check ids of a preview.
+ * Previews a request and returns the ids of its failing checks.
  * @param client Broker.
  * @param request Request.
- * @return Check ids.
+ * @return Failing check ids; empty when no check fails.
  */
 async function failing(
   client: DemoExecutionClient,

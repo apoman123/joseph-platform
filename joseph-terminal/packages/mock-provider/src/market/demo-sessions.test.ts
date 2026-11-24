@@ -36,10 +36,10 @@ import {
 import {DEMO_INSTRUMENT_SPECS, demoTickAt} from './prices';
 
 /**
- * New York wall time.
- * @param date `YYYY-MM-DD`.
- * @param hour Hour.
- * @param minute Minute.
+ * Converts a New York wall time to epoch ms.
+ * @param date Local date, `YYYY-MM-DD`.
+ * @param hour Hour 0-23 (default 0).
+ * @param minute Minute 0-59 (default 0).
  * @return Epoch ms.
  */
 function ny(date: string, hour = 0, minute = 0): number {

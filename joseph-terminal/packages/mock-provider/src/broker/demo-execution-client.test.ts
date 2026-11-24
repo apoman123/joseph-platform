@@ -23,8 +23,8 @@ class ManualScheduler {
   private readonly tasks: Array<() => void> = [];
 
   /**
-   * Queues a task.
-   * @param task Task.
+   * Queues a task, ignoring its delay.
+   * @param task Task to run on the next `step` or `flush`.
    */
   schedule = (task: () => void): void => {
     this.tasks.push(task);
@@ -38,7 +38,10 @@ class ManualScheduler {
     }
   }
 
-  /** Runs tasks until the queue is empty. */
+  /**
+   * Runs tasks, and the tasks they queue, until none are left (at most 100
+   * rounds).
+   */
   flush(): void {
     for (let i = 0; i < 100 && this.tasks.length; i += 1) {
       const batch = this.tasks.splice(0);
@@ -50,8 +53,8 @@ class ManualScheduler {
 }
 
 /**
- * Builds a request for BTC.
- * @param patch Overrides.
+ * Builds a 0.01 BTC GTC limit buy on the USD paper account.
+ * @param patch Fields to override.
  * @return Request.
  */
 function request(patch: Partial<OrderIntentRequest> = {}): OrderIntentRequest {
@@ -72,8 +75,8 @@ function request(patch: Partial<OrderIntentRequest> = {}): OrderIntentRequest {
 }
 
 /**
- * Creates a broker with a manual scheduler.
- * @param partialFills Whether to split fills.
+ * Creates a broker with a manual scheduler and a fixed clock.
+ * @param partialFills Whether the first fill takes half the quantity.
  * @return Broker and scheduler.
  */
 function setup(partialFills = false): {
@@ -152,7 +155,7 @@ describe('DemoExecutionClient', () => {
     const seen: StreamEnvelope[] = [];
     stream.subscribe(
       [{channel: 'orders'}, {channel: 'positions'}, {channel: 'fills'}],
-      env => seen.push(env)
+      env => void seen.push(env)
     );
     const {orders} = await broker.submitIntent(
       request({order_type: 'market', limit_price: null}),
@@ -162,6 +165,7 @@ describe('DemoExecutionClient', () => {
     clock.flush();
     const states = seen
       .filter(e => e.type === 'order.updated')
+      // `order.updated` envelopes carry an `Order` payload.
       .map(e => (e.payload as {state: string}).state);
     expect(states).toEqual([
       'SUBMITTING',
