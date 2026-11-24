@@ -33,7 +33,7 @@ import type {
 /**
  * Builds a host with in-memory registries.
  * @param capabilities Capability names present.
- * @return Host and its parts.
+ * @return Host plus its registries and capability store, for assertions.
  */
 function makeHost(capabilities: string[] = []) {
   const commands = createCommandRegistry();
@@ -50,7 +50,8 @@ function makeHost(capabilities: string[] = []) {
     orderMode: 'PAPER',
   });
   const host: FeatureHost<string> = {
-    clients: {} as BackendClients,
+    // Deliberate partial mock: these features never call a backend client.
+    clients: {} as unknown as BackendClients,
     selection,
     select: patch => void selection.update(s => ({...s, ...patch})),
     capabilities: caps,
@@ -66,9 +67,9 @@ function makeHost(capabilities: string[] = []) {
 }
 
 /**
- * Builds a manifest.
+ * Builds a valid manifest.
  * @param id Feature id.
- * @param extra Overrides.
+ * @param extra Fields that override the defaults.
  * @return Manifest.
  */
 function manifest(

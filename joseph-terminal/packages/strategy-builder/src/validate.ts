@@ -6,9 +6,10 @@
 
 /**
  * @fileoverview Client-side structural validation mirroring
- * `strategy.schema.json` plus cross-field rules (k ≤ n, sequence windows,
- * range groups). The server's `/validate` remains authoritative; this gives
- * immediate feedback and the same JSON-pointer paths.
+ * `strategy.schema.json` plus cross-field rules (k ≤ n for a K_OF_N bias,
+ * sequence windows, range groups). The server's `/validate` remains
+ * authoritative; this gives immediate feedback and the same JSON-pointer
+ * paths.
  */
 
 import {
@@ -27,9 +28,9 @@ export interface ClientValidation {
   errors: ValidationIssue[];
   /** Non-blocking advice. */
   warnings: ValidationIssue[];
-  /** Indicator plugins the rule depends on. */
+  /** Indicator plugins the rule depends on, sorted. */
   requiredPlugins: string[];
-  /** Timeframes the rule reads. */
+  /** Timeframes the rule reads (signal timeframe included), shortest first. */
   requiredTimeframes: Timeframe[];
   /** Number of rule nodes. */
   nodeCount: number;
@@ -40,6 +41,9 @@ export interface ClientValidation {
 /** Loose JSON record. */
 type Json = Record<string, unknown>;
 
+// Allowed values for the checks below, taken from the contract schemas.
+// VENUES and INSTRUMENT_ID list only the crypto venues; the schemas' `Venue`
+// enum and instrument-id pattern also accept the stock and rate venues.
 const VENUES = ['binance', 'hyperliquid', 'lighter', 'bitget', 'mexc', 'mock'];
 const DIRECTIONS = ['LONG', 'SHORT'];
 const MODES = ['ALERT_ONLY', 'PAPER', 'SHADOW', 'AUTO_LIVE'];
@@ -100,7 +104,7 @@ function isRecord(value: unknown): value is Json {
  * @param value Value.
  * @param min Inclusive minimum.
  * @param max Inclusive maximum.
- * @return True when valid.
+ * @return True for an integer in `[min, max]`.
  */
 function isInt(value: unknown, min: number, max: number): value is number {
   return (
@@ -114,7 +118,7 @@ function isInt(value: unknown, min: number, max: number): value is number {
 /**
  * Returns whether a value is a non-negative decimal string.
  * @param value Value.
- * @return True when valid.
+ * @return True for a valid decimal string that is zero or positive.
  */
 function isNonNegDecimal(value: unknown): value is string {
   return (
@@ -126,8 +130,11 @@ function isNonNegDecimal(value: unknown): value is string {
 
 /**
  * Validates a strategy definition.
+ *
+ * Never throws: every problem becomes an error (blocking) or a warning
+ * (advice), with the JSON-pointer path of the offending value.
  * @param definition Candidate definition (any JSON).
- * @return Validation result with JSON-pointer paths.
+ * @return Validation result; `valid` is true when there are no errors.
  */
 export function validateDefinition(definition: unknown): ClientValidation {
   const errors: ValidationIssue[] = [];
@@ -758,6 +765,7 @@ export function validateDefinition(definition: unknown): ClientValidation {
         }
         return;
       default:
+        // Unreachable: unknown operators were reported above.
         return;
     }
   };
@@ -787,7 +795,8 @@ export function validateDefinition(definition: unknown): ClientValidation {
  * Finds the id of the deepest rule node on a JSON pointer.
  * @param definition Strategy definition.
  * @param pointer JSON pointer such as `/when/children/3/within_bars`.
- * @return Node id, or null when the pointer is outside `when` or id-less.
+ * @return Id of the deepest node on the path that has one, or null when the
+ *     pointer is outside `/when` or no node on the path has an id.
  */
 export function nodeIdAtPointer(
   definition: unknown,
@@ -814,11 +823,12 @@ export function nodeIdAtPointer(
 }
 
 /**
- * Converts client validation into the contract `ValidationResult` shape
+ * Validates a definition and returns the contract `ValidationResult` shape
  * (used by DEMO services; the server computes the real definition hash).
  * @param definition Candidate definition.
  * @param definitionHash Hash to report when valid, or null.
- * @return Contract validation result.
+ * @return Contract validation result; `definition_hash` is null when the
+ *     definition is invalid.
  */
 export function toValidationResult(
   definition: unknown,

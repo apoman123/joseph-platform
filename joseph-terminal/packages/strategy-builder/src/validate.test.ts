@@ -16,19 +16,21 @@ import {nodeIdAtPointer, validateDefinition} from './validate';
 
 /**
  * Builds Long A with a replaced rule tree.
- * @param when Rule tree JSON.
+ * @param when Rule tree JSON, often invalid on purpose.
  * @return Definition.
+ * @throws `Error` if the Long A template is missing.
  */
 function withWhen(when: unknown): StrategyDefinition {
   const def = STRATEGY_TEMPLATES[0]?.create();
   if (!def) throw new Error('missing template');
+  // Unchecked so tests can feed trees the validator must reject.
   return {...def, when: when as StrategyDefinition['when']};
 }
 
 /**
- * Returns error codes for a definition.
- * @param def Definition.
- * @return Codes.
+ * Returns the validation error codes of a definition.
+ * @param def Candidate definition.
+ * @return Error codes in report order.
  */
 function codes(def: unknown): string[] {
   return validateDefinition(def).errors.map(e => e.code);

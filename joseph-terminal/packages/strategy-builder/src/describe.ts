@@ -6,6 +6,9 @@
 
 /**
  * @fileoverview Plain-language rendering of rule nodes for condition cards.
+ *
+ * Event and area-of-interest (AOI) labels keep the domain abbreviations used
+ * across the editor (BOS, FVG, OB, SSL and so on).
  */
 
 import type {
@@ -110,7 +113,7 @@ export function joinWords(
  * @param bars Bars back (0 = evaluated bar only).
  * @return Text such as `on this bar` or `in the last 3 bars`.
  */
-function window(bars: number): string {
+function lookback(bars: number): string {
   if (bars === 0) return 'on this bar';
   if (bars === 1) return 'in the last bar';
   return `in the last ${bars} bars`;
@@ -118,8 +121,8 @@ function window(bars: number): string {
 
 /**
  * Describes an optional timeframe suffix.
- * @param tf Timeframe or undefined (signal timeframe).
- * @return Text such as ` on 15m` or empty.
+ * @param tf Timeframe, or undefined for the signal timeframe.
+ * @return Text such as ` on 15m`, or empty for the signal timeframe.
  */
 function onTf(tf: Timeframe | undefined): string {
   return tf ? ` on ${tf}` : '';
@@ -136,8 +139,10 @@ const MARKET_FIELDS: Readonly<Record<string, string>> = {
 
 /**
  * Describes an operand.
- * @param operand Operand.
- * @return Text such as `close` or `funding (8h %)`.
+ * @param operand Constant, candle, indicator or market operand.
+ * @return Text such as `close`, `close on 1h 2 bars ago`,
+ *     `auction_value_areas.poc` or `funding (8h %)`; `value` for an unknown
+ *     operand kind.
  */
 export function describeOperand(operand: Operand): string {
   switch (operand.kind) {
@@ -171,7 +176,8 @@ const COMPARATORS: Readonly<Record<string, string>> = {
 /**
  * Renders one node as a plain-language sentence (children not included).
  * @param node Rule node.
- * @return Sentence for the condition card.
+ * @return Sentence without a final period, such as `4h bias is bullish`;
+ *     `Unsupported condition` for an unknown operator.
  */
 export function describeNode(node: RuleNode): string {
   switch (node.op) {
@@ -184,7 +190,7 @@ export function describeNode(node: RuleNode): string {
     case 'PERSIST_FOR':
       return `True on each of the last ${node.bars} bars`;
     case 'WITHIN_BARS':
-      return `True at least once ${window(node.bars)}`;
+      return `True at least once ${lookback(node.bars)}`;
     case 'BIAS': {
       const value = node.value.toLowerCase();
       const tfs = [...node.timeframes];
@@ -220,13 +226,13 @@ export function describeNode(node: RuleNode): string {
       const quality = node.min_quality ? `, quality ≥ ${node.min_quality}` : '';
       const active =
         node.require_active === false ? ', including used AOIs' : '';
-      return `Touched ${article} ${node.side} ${kinds}${onTf(node.tf)} ${window(node.within_bars)} (${touch}${quality}${active})`;
+      return `Touched ${article} ${node.side} ${kinds}${onTf(node.tf)} ${lookback(node.within_bars)} (${touch}${quality}${active})`;
     }
     case 'AOI_OVERLAP':
       return `A ${node.side} ${joinWords(node.kinds_a.map(aoiName), 'or')} overlaps a ${joinWords(node.kinds_b.map(aoiName), 'or')}${onTf(node.tf)}`;
     case 'EVENT': {
       const name = eventName(node.name);
-      return `${name.charAt(0).toUpperCase()}${name.slice(1)} confirmed${onTf(node.tf)} ${window(node.within_bars)}`;
+      return `${name.charAt(0).toUpperCase()}${name.slice(1)} confirmed${onTf(node.tf)} ${lookback(node.within_bars)}`;
     }
     case 'SEQUENCE': {
       const steps = node.steps
@@ -266,8 +272,8 @@ function capital(text: string): string {
 /**
  * Renders a whole tree as an indented outline.
  * @param node Root node.
- * @param depth Current indentation depth.
- * @return Multi-line outline.
+ * @param depth Indentation level of `node`, two spaces per level.
+ * @return One `describeNode` line per node in pre-order, joined by `\n`.
  */
 export function describeTree(node: RuleNode, depth = 0): string {
   const pad = '  '.repeat(depth);

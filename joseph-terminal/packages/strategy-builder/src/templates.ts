@@ -5,9 +5,14 @@
  */
 
 /**
- * @fileoverview Strategy templates. Long A and Short B are the reference
- * rules from the V5 specification, identical to
- * `packages/contracts/fixtures/strategy.fixture.json`.
+ * @fileoverview Strategy templates for the "new strategy" menu.
+ *
+ * Long A and Short B are the reference rules shared with the contracts: they
+ * are identical to the first two valid examples in
+ * `packages/contracts/fixtures/strategy.fixture.json`, which a test checks.
+ * Their texts use the editor's abbreviations, among them higher timeframe
+ * (HTF), optimal trade entry (OTE), area of interest (AOI) and open interest
+ * (OI).
  */
 
 import type {Direction, StrategyDefinition} from '@joseph/contracts';
@@ -143,9 +148,10 @@ const SHORT_B: StrategyDefinition = {
 };
 
 /**
- * Creates an empty strategy that contains a single risk/reward condition.
+ * Creates a minimal alert-only strategy whose only condition is a 2R
+ * reward-to-risk minimum.
  * @param direction Strategy direction.
- * @return Definition.
+ * @return New definition with node ids `root` and `n1`.
  */
 export function blankStrategy(direction: Direction): StrategyDefinition {
   return {
@@ -173,8 +179,8 @@ export function blankStrategy(direction: Direction): StrategyDefinition {
 
 /**
  * Deep-copies a JSON value.
- * @param value JSON value.
- * @return Copy.
+ * @param value JSON-compatible value.
+ * @return Structurally equal copy that shares no objects with `value`.
  */
 function clone<T>(value: T): T {
   return JSON.parse(JSON.stringify(value)) as T;

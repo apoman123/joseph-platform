@@ -21,11 +21,14 @@ import {validateDefinition, type ClientValidation} from './validate';
 export interface ImportSuccess {
   /** Discriminator. */
   ok: true;
-  /** Imported (and possibly migrated) definition with node ids assigned. */
+  /**
+   * Imported (and possibly migrated) definition; node ids are assigned
+   * whenever `when` is a rule node.
+   */
   definition: StrategyDefinition;
-  /** Validation of the imported definition. */
+  /** Client validation of `definition`; errors do not fail the import. */
   validation: ClientValidation;
-  /** Present when a v1 config was migrated. */
+  /** Migration report when a v1 config was migrated, otherwise null. */
   migration: MigrationReport | null;
 }
 
@@ -39,8 +42,8 @@ export interface ImportFailure {
 
 /**
  * Serializes a definition for export.
- * @param definition Definition.
- * @return Pretty-printed JSON.
+ * @param definition Definition to export.
+ * @return JSON indented by two spaces, with a trailing newline.
  */
 export function exportDefinition(definition: StrategyDefinition): string {
   return `${JSON.stringify(definition, null, 2)}\n`;
@@ -48,8 +51,13 @@ export function exportDefinition(definition: StrategyDefinition): string {
 
 /**
  * Parses strategy JSON (v2 definition or starter v1 config).
+ *
+ * A v1 config is migrated with `migrateV1`. A v2 definition is accepted even
+ * when it has validation errors, so the editor can open it and show them.
  * @param text JSON text.
- * @return Import result.
+ * @return Success with the definition, its validation and any migration
+ *     report; failure for invalid JSON, a non-object, or a schema version
+ *     other than 2.
  */
 export function importDefinition(text: string): ImportSuccess | ImportFailure {
   let parsed: unknown;
@@ -79,6 +87,8 @@ export function importDefinition(text: string): ImportSuccess | ImportFailure {
     };
   }
   const validation = validateDefinition(parsed);
+  // Unchecked on purpose: `validation` lists whatever does not match the
+  // type, and the editor shows those errors instead of refusing the file.
   const definition = parsed as StrategyDefinition;
   if (
     typeof definition.when === 'object' &&
@@ -98,7 +108,7 @@ export function importDefinition(text: string): ImportSuccess | ImportFailure {
 
 /** One difference between two definitions. */
 export interface DefinitionChange {
-  /** JSON pointer of the changed value. */
+  /** JSON-pointer-style path of the changed value (keys are not escaped). */
   path: string;
   /** Kind of change. */
   kind: 'added' | 'removed' | 'changed';
@@ -110,9 +120,13 @@ export interface DefinitionChange {
 
 /**
  * Lists the differences between two definitions (e.g. two versions).
- * @param before Older definition.
- * @param after Newer definition.
- * @return Changes in document order.
+ *
+ * Objects are compared key by key and arrays index by index; any other
+ * difference, including a type change, is one `changed` entry.
+ * @param before Older definition (any JSON value).
+ * @param after Newer definition (any JSON value).
+ * @return Changes in document order: `before`'s keys first, then keys only
+ *     `after` has; empty when the values are equal.
  */
 export function diffDefinitions(
   before: unknown,

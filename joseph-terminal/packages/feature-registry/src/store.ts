@@ -24,7 +24,7 @@ export interface ReadableStore<T> {
   /**
    * Subscribes to changes (not invoked immediately).
    * @param listener Called with the new value after each change.
-   * @return Disposer.
+   * @return Disposer that unsubscribes the listener.
    */
   subscribe(listener: (value: T) => void): Disposer;
 }
@@ -62,6 +62,7 @@ export function createStore<T>(initial: T): WritableStore<T> {
     set(next) {
       if (Object.is(next, value)) return;
       value = next;
+      // Iterate over a copy so a listener may unsubscribe while notified.
       for (const listener of [...listeners]) {
         listener(value);
       }
