@@ -28,7 +28,7 @@ jobs:
     environment:
       name: ${{ inputs.environment }}
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
       # Fails fast when the chosen environment has no SSH host; the deploy
       # step selects the settings itself.
       - name: Resolve target settings

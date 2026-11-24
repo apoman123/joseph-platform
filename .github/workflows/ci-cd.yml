@@ -40,7 +40,7 @@ jobs:
       run:
         working-directory: joseph-terminal
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
       - uses: pnpm/action-setup@b906affcce14559ad1aafd4ab0e942779e9f58b1 # v4.3.0
         with:
           package_json_file: joseph-terminal/package.json
@@ -84,7 +84,7 @@ jobs:
       run:
         working-directory: joseph-terminal
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
       - uses: pnpm/action-setup@b906affcce14559ad1aafd4ab0e942779e9f58b1 # v4.3.0
         with:
           package_json_file: joseph-terminal/package.json
@@ -118,7 +118,7 @@ jobs:
       run:
         working-directory: ${{ matrix.project }}
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
       - uses: astral-sh/setup-uv@d4b2f3b6ecc6e67c4457f6d3e41ec42d3d0fcb86 # v5.4.2
         with:
           enable-cache: true
@@ -162,7 +162,7 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 20
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
       - uses: astral-sh/setup-uv@d4b2f3b6ecc6e67c4457f6d3e41ec42d3d0fcb86 # v5.4.2
         with:
           enable-cache: true
@@ -192,7 +192,7 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 30
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
       - uses: astral-sh/setup-uv@d4b2f3b6ecc6e67c4457f6d3e41ec42d3d0fcb86 # v5.4.2
         with:
           enable-cache: true
@@ -249,7 +249,7 @@ jobs:
           - image: joseph-terminal
             context: joseph-terminal
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
       # Fails early with a clear message when PINESCRIPTS_TOKEN is missing.
       - name: Indicator library access (private PineScripts)
         if: matrix.image == 'joseph-market-engine'
@@ -333,7 +333,7 @@ jobs:
       name: staging
       url: ${{ vars.STAGING_WEB_URL }}
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
       - name: Roll out sha-tagged images with docker compose
         uses: ./.github/actions/deploy
         with:
@@ -357,7 +357,7 @@ jobs:
     permissions:
       contents: write
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
       - name: Create release with generated notes and API contracts
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
@@ -381,7 +381,7 @@ jobs:
       name: production
       url: ${{ vars.PRODUCTION_WEB_URL }}
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
       - uses: ./.github/actions/deploy
         with:
           host: ${{ vars.PRODUCTION_SSH_HOST }}
