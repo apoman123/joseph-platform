@@ -7,11 +7,15 @@
 /**
  * @fileoverview Order ticket state machine and controller.
  *
- * Phases: DRAFT → PREVIEWING → PREVIEWED → CONFIRMING → SUBMITTING →
- * SUBMITTED | FAILED. Editing any input invalidates the preview, so what is
- * confirmed is always exactly what was previewed. One idempotency key is
- * minted per confirmed action and reused for retries of that same action, so
- * double clicks and network retries can never create a second order.
+ * The ticket submits an order intent only after a server preview and an
+ * explicit confirm. Phases: DRAFT → PREVIEWING → PREVIEWED → CONFIRMING →
+ * SUBMITTING → SUBMITTED | FAILED. Editing any input invalidates the
+ * preview, and the submission carries the server-normalized intent from the
+ * preview with its preview token, so what is confirmed is always exactly what
+ * was previewed. One idempotency key is minted per confirmed action and
+ * reused for retries of that same action, so the execution engine
+ * deduplicates double clicks and network retries instead of creating a
+ * second order.
  */
 
 import {
@@ -60,19 +64,22 @@ export interface TicketState {
   inputs: TicketInputs;
   /** Increments on every input change. */
   inputRevision: number;
-  /** Preview for `previewRevision`, if any. */
+  /** Server preview for `previewRevision`, or null before one arrives. */
   preview: OrderPreview | null;
-  /** Input revision the preview belongs to. */
+  /** Input revision the preview was requested for, or null without one. */
   previewRevision: number | null;
-  /** Idempotency key of the confirmed action, if one is in flight. */
+  /**
+   * Idempotency key of the confirmed action; kept after a retryable failure
+   * so a retry reuses it, null when no action is confirmed.
+   */
   idempotencyKey: string | null;
-  /** Last submission result. */
+  /** Last submission result, or null before a submission succeeds. */
   result: SubmitIntentResponse | null;
-  /** Last error. */
+  /** Last error, or null. */
   error: TicketError | null;
 }
 
-/** Ticket actions. */
+/** Actions accepted by `ticketReducer`. */
 export type TicketAction =
   | {type: 'edit'; patch: Partial<TicketInputs>}
   | {type: 'replaceInputs'; inputs: TicketInputs}
@@ -119,8 +126,9 @@ export function isBusy(state: TicketState): boolean {
 /**
  * Returns whether the current preview may be confirmed now.
  * @param state Ticket state.
- * @param nowMs Current time (UTC ms).
- * @return True when previewed, allowed, current and unexpired.
+ * @param nowMs Current time in UTC epoch milliseconds.
+ * @return True when the preview is allowed by the server, belongs to the
+ *     current inputs and has not expired.
  */
 export function canConfirm(state: TicketState, nowMs: number): boolean {
   return (
@@ -133,10 +141,11 @@ export function canConfirm(state: TicketState, nowMs: number): boolean {
 }
 
 /**
- * Pure reducer implementing the ticket state machine.
+ * Applies an action to the ticket state machine without side effects.
  * @param state Current state.
- * @param action Action.
- * @return Next state (the same object when the action is not allowed).
+ * @param action Action to apply.
+ * @return Next state, or the same object when the action is not allowed in
+ *     the current phase.
  */
 export function ticketReducer(
   state: TicketState,
@@ -252,20 +261,21 @@ export function ticketReducer(
 
 /** Availability of an order mode for the selected account. */
 export interface ModeAvailability {
-  /** Mode. */
+  /** Order mode. */
   mode: OrderMode;
   /** Whether it can be selected. */
   available: boolean;
-  /** Why not, when unavailable. */
+  /** Why not, or null when available. */
   reason: string | null;
 }
 
 /**
  * Computes which order modes the user may select.
  * LIVE requires the account's server-reported `modes` to include LIVE and
- * trading capability AVAILABLE; nothing in the browser can enable it.
+ * its trading capability status to be AVAILABLE; nothing in the browser can
+ * enable it.
  * @param account Account summary, or null when none is selected.
- * @return Availability for PAPER, SHADOW and LIVE.
+ * @return Availability for PAPER, SHADOW and LIVE, in that order.
  */
 export function modeAvailability(
   account: AccountSummary | null
@@ -309,7 +319,8 @@ export function modeAvailability(
 /**
  * Converts any thrown value into a ticket error.
  * @param err Thrown value.
- * @return Ticket error.
+ * @return The `ApiError` body's code, message and retryable flag, or a
+ *     retryable `NETWORK` error for anything else (the outcome is unknown).
  */
 export function toTicketError(err: unknown): TicketError {
   if (err instanceof ApiError) {
@@ -329,28 +340,37 @@ export function toTicketError(err: unknown): TicketError {
 
 /** Dependencies of the ticket controller. */
 export interface TicketControllerDeps {
-  /** Execution client. */
+  /** Execution client used for previews and submissions. */
   client: ExecutionClient;
-  /** Returns the current time (UTC ms). */
+  /**
+   * Returns the current time in UTC epoch milliseconds; `Date.now` by
+   * default.
+   */
   now?: () => number;
-  /** Mints idempotency keys. */
+  /** Mints idempotency keys; `randomKey` by default. */
   newKey?: () => string;
 }
 
 /**
  * Generates a random idempotency key.
- * @return UUID-like key.
+ * @return A UUID from `crypto.randomUUID`, or a `key-` prefixed random string
+ *     where that API is missing.
  */
 export function randomKey(): string {
+  // The DOM typings declare `crypto.randomUUID` as always present, but it
+  // exists only in secure contexts (HTTPS or localhost); the cast lets the
+  // code test for it.
   const cryptoApi = (globalThis as {crypto?: {randomUUID?: () => string}})
     .crypto;
   if (cryptoApi?.randomUUID) return cryptoApi.randomUUID();
+  // The key only deduplicates retries, so it needs uniqueness, not secrecy.
   return `key-${Date.now().toString(36)}-${Math.random().toString(36).slice(2)}`;
 }
 
 /**
  * Stateful controller wiring the reducer to the execution client.
- * Exposes `get`/`subscribe` so hosts can treat it as a store.
+ * Exposes `get`/`subscribe` so hosts can treat it as a store. It previews and
+ * submits only on explicit calls; chart interactions edit its inputs.
  */
 export class TicketController {
   private state: TicketState;
@@ -385,8 +405,8 @@ export class TicketController {
 
   /**
    * Subscribes to state changes.
-   * @param listener Listener.
-   * @return Unsubscribe function.
+   * @param listener Called with the new state after each change.
+   * @return Function that removes the listener.
    */
   subscribe(listener: (state: TicketState) => void): () => void {
     this.listeners.add(listener);
@@ -396,8 +416,8 @@ export class TicketController {
   }
 
   /**
-   * Applies an action and notifies listeners on change.
-   * @param action Action.
+   * Applies an action and notifies listeners when the state changes.
+   * @param action Action to apply.
    */
   dispatch(action: TicketAction): void {
     const next = ticketReducer(this.state, action);
@@ -410,8 +430,9 @@ export class TicketController {
 
   /**
    * Sets instrument precision and the reference mark price.
-   * @param instrument Instrument precision.
-   * @param mark Mark price, if known.
+   * @param instrument Instrument precision, or null while loading.
+   * @param mark Mark price used for notional and stop/target checks when the
+   *     order has no limit or trigger price, or null when unknown.
    */
   setMarket(
     instrument: InstrumentPrecision | null,
@@ -430,8 +451,8 @@ export class TicketController {
   }
 
   /**
-   * Validates current inputs.
-   * @return Build result.
+   * Validates the current inputs and builds the intent request.
+   * @return The request (null while blocking errors exist) and the issues.
    */
   build(): BuildResult {
     return buildIntentRequest(
@@ -451,8 +472,10 @@ export class TicketController {
   }
 
   /**
-   * Requests a server preview for the current inputs.
-   * @return Promise resolving when the preview settles.
+   * Requests a server preview for the current inputs. Does nothing while the
+   * inputs have blocking errors or the ticket is busy.
+   * @return Promise that resolves when the preview settles; failures become
+   *     the FAILED phase instead of a rejection.
    */
   async preview(): Promise<void> {
     const built = this.build();
@@ -473,8 +496,9 @@ export class TicketController {
   }
 
   /**
-   * Confirms and submits the previewed order exactly once.
-   * @return Promise resolving when submission settles.
+   * Confirms and submits the previewed intent once per confirmed action.
+   * @return Promise that resolves when the submission settles; failures
+   *     become the FAILED phase instead of a rejection.
    */
   async confirm(): Promise<void> {
     this.dispatch({
@@ -487,6 +511,8 @@ export class TicketController {
     if (!preview || !idempotencyKey) return;
     this.dispatch({type: 'submitStarted'});
     try {
+      // Submit the server-normalized intent, not a rebuild of the inputs, so
+      // the engine receives exactly what the user saw in the preview.
       const response = await this.deps.client.submitIntent(
         {...preview.normalized, preview_token: preview.preview_token},
         idempotencyKey

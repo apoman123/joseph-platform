@@ -7,20 +7,27 @@
 /**
  * @fileoverview Builds contract `OrderIntentRequest`s from ticket inputs.
  *
- * Quantities are floored to the lot size (rounding never increases
- * exposure) and prices are rounded to the tick size, all with exact
- * `Decimal` arithmetic. The server re-validates everything; these checks
- * exist so the user sees problems before previewing.
+ * A request is an order intent, not an order: nothing here sends it. The
+ * ticket sends it to the execution engine for a preview, and only an
+ * explicit confirm submits the previewed intent. Quantities are floored to
+ * the lot size (rounding never increases exposure) and prices are rounded to
+ * the nearest tick, all with exact `Decimal` arithmetic on the typed text;
+ * the request carries them as decimal strings. The server re-validates
+ * everything; these checks exist so the user sees problems before
+ * previewing.
  *
  * Exchange-listed stocks and ETFs follow the cash-equity rules of
- * `equity.ts` (whole shares or TWSE board/odd lots, tick ladders, daily
- * price limits, DAY/GTC, no leverage); published rates cannot be traded.
+ * `equity.ts` (whole shares, or board and odd lots on TWSE, the Taiwan Stock
+ * Exchange, and TPEx, the Taipei Exchange; tick ladders, daily price limits,
+ * the broker's time in force, no leverage); published rates cannot be
+ * traded.
  */
 
 import {
   Decimal,
   parseInstrumentId,
   type AccountSummary,
+  type Bracket,
   type Instrument,
   type IntentSource,
   type MarginMode,
@@ -30,7 +37,6 @@ import {
   type OrderType,
   type PositionEffect,
   type PriceBasis,
-  type TakeProfitSpec,
   type TimeInForce,
   type BarCalendar,
 } from '@joseph/contracts';
@@ -65,7 +71,10 @@ export interface TicketInputs {
   side: OrderSide;
   /** Order type. */
   orderType: OrderType;
-  /** Base quantity text. */
+  /**
+   * Quantity text in base units; for cash equities, whole shares, or board
+   * lots (張) when the instrument has a board lot and `lotMode` is not `odd`.
+   */
   quantity: string;
   /** Limit price text (limit and stop-limit). */
   limitPrice: string;
@@ -73,9 +82,12 @@ export interface TicketInputs {
   triggerPrice: string;
   /** Price used to trigger stop orders. */
   triggerBasis: PriceBasis;
-  /** Time in force (`DAY` only for exchange-session securities). */
+  /**
+   * Time in force; cash equities accept what the broker lists (see
+   * `equityTimeInForce`). Market orders on other venues are sent IOC.
+   */
   timeInForce: TimeInForce;
-  /** Reduce-only flag. */
+  /** Whether the order may only reduce a position; drops stop/target. */
   reduceOnly: boolean;
   /** Leverage text, empty for venue default. */
   leverage: string;
@@ -87,13 +99,16 @@ export interface TicketInputs {
   takeProfit: string;
   /** Order mode; LIVE only when the account permits it. */
   mode: OrderMode;
-  /** Position effect. */
+  /** Position effect; reduce-only orders are sent as `reduce`. */
   positionEffect: PositionEffect;
-  /** Origin of the intent. */
+  /** Origin of the intent, e.g. `MANUAL_TICKET` or `CHART`. */
   source: IntentSource;
   /** Cash equities with a board lot: whole lots (張) or odd-lot shares. */
   lotMode?: 'board' | 'odd';
-  /** IBKR: allow fills outside regular trading hours. */
+  /**
+   * Interactive Brokers (IBKR): allow fills outside regular trading hours
+   * (RTH).
+   */
   outsideRth?: boolean;
 }
 
@@ -102,7 +117,7 @@ export type IssueSeverity = 'error' | 'warning';
 
 /** A problem found in the ticket inputs. */
 export interface TicketIssue {
-  /** Input field the issue belongs to. */
+  /** Input field the issue belongs to, or `notional` for the order value. */
   field: keyof TicketInputs | 'notional';
   /** Error blocks previewing; warning is informational. */
   severity: IssueSeverity;
@@ -116,15 +131,21 @@ export interface BuildResult {
   request: OrderIntentRequest | null;
   /** Problems found (errors and warnings). */
   issues: TicketIssue[];
-  /** Normalized quantity actually sent, when parseable. */
+  /**
+   * Quantity to send (lot-floored base units, or shares for cash equities),
+   * or null when missing or invalid.
+   */
   quantity: Decimal | null;
-  /** Normalized limit price, when applicable. */
+  /** Tick-rounded limit price, or null when invalid or not needed. */
   limitPrice: Decimal | null;
-  /** Normalized trigger price, when applicable. */
+  /** Tick-rounded trigger price, or null when invalid or not needed. */
   triggerPrice: Decimal | null;
 }
 
-/** Instrument precision subset needed for rounding. */
+/**
+ * Instrument fields the ticket reads: precision and limits, trading status,
+ * names and the cash-equity rules.
+ */
 export type InstrumentPrecision = Pick<
   Instrument,
   | 'instrument_id'
@@ -158,15 +179,15 @@ export interface TicketContext {
   reference?: Decimal | null;
   /** Session calendar of the instrument (closed-market rules). */
   calendar?: BarCalendar | null;
-  /** Clock for the closed-market rules (UTC ms). */
+  /** Clock for the closed-market rules, UTC epoch ms; `Date.now()` if unset. */
   nowMs?: number;
 }
 
 /**
  * Creates default ticket inputs.
  * @param instrumentId Canonical instrument id.
- * @param accountId Account id or null.
- * @return Default inputs (paper, limit buy, GTC).
+ * @param accountId Account id, or null when none is selected.
+ * @return Empty inputs for a paper limit buy, GTC (good till canceled).
  */
 export function defaultTicketInputs(
   instrumentId: string,
@@ -195,10 +216,11 @@ export function defaultTicketInputs(
 
 /**
  * Parses optional decimal text.
- * @param text User text.
+ * @param text User text; thousands separators are allowed.
  * @return Decimal, null when empty, or undefined when invalid.
  */
 function parseOptional(text: string): Decimal | null | undefined {
+  // Users paste grouped numbers such as `95,000`; commas are separators only.
   const trimmed = text.trim().replace(/,/g, '');
   if (trimmed === '') return null;
   return Decimal.isValid(trimmed) ? Decimal.parse(trimmed) : undefined;
@@ -223,12 +245,15 @@ export function needsTriggerPrice(type: OrderType): boolean {
 }
 
 /**
- * Validates and normalizes ticket inputs into an intent request.
+ * Validates and normalizes ticket inputs into an intent request. Cash
+ * equities are delegated to `buildEquityIntentRequest`; rates always fail.
  * @param inputs Raw inputs.
  * @param instrument Instrument precision, or null while loading.
- * @param markPrice Reference mark price for notional checks, if known.
- * @param context Account and previous close (cash equities).
- * @return Request (or null) and issues.
+ * @param markPrice Mark price used for the notional and stop/target side
+ *     checks when the order has no limit or trigger price, or null.
+ * @param context Account, previous close and calendar (cash equities).
+ * @return The request (null when any error blocks it), every issue found,
+ *     and the normalized quantity and prices.
  */
 export function buildIntentRequest(
   inputs: TicketInputs,
@@ -289,6 +314,7 @@ export function buildIntentRequest(
   } else if (rawQty === undefined || rawQty.isNegative()) {
     error('quantity', 'Quantity must be a positive number.');
   } else {
+    // Flooring, not rounding: the sent quantity never exceeds the typed one.
     quantity = rawQty.floorToStep(lot);
     if (!quantity.eq(rawQty)) {
       warn(
@@ -353,6 +379,8 @@ export function buildIntentRequest(
     error('leverage', `Maximum leverage is ${instrument.max_leverage}x.`);
   }
 
+  // The expected fill price: the limit, else the trigger, else the mark (for
+  // market orders).
   const reference = limitPrice ?? triggerPrice ?? markPrice;
   if (quantity && reference && instrument.min_notional) {
     const notional = quantity.mul(reference);
@@ -411,20 +439,20 @@ export function buildIntentRequest(
   if (issues.some(issue => issue.severity === 'error') || !quantity) {
     return {...empty, quantity, limitPrice, triggerPrice};
   }
-  const bracket =
+  // A single take-profit closes the whole position (`fraction` 1).
+  const bracket: Bracket | null =
     !inputs.reduceOnly && (roundedStop || roundedTarget)
       ? {
           stop_loss: roundedStop
-            ? {trigger: roundedStop.toString(), basis: 'mark' as const}
+            ? {trigger: roundedStop.toString(), basis: 'mark'}
             : null,
           take_profit: roundedTarget
-            ? ([{trigger: roundedTarget.toString(), fraction: '1'}] as [
-                TakeProfitSpec,
-              ])
-            : ([] as []),
+            ? [{trigger: roundedTarget.toString(), fraction: '1'}]
+            : [],
         }
       : null;
   const request: OrderIntentRequest = {
+    // A missing account is an error above, so `?? ''` only satisfies the type.
     account_id: inputs.accountId ?? '',
     instrument_id: instrument.instrument_id,
     side: inputs.side,
@@ -434,6 +462,7 @@ export function buildIntentRequest(
     limit_price: limitPrice ? limitPrice.toString() : null,
     trigger_price: triggerPrice ? triggerPrice.toString() : null,
     trigger_basis: triggerPrice ? inputs.triggerBasis : null,
+    // A market order cannot rest on the book: immediate or cancel (IOC).
     time_in_force: inputs.orderType === 'market' ? 'IOC' : inputs.timeInForce,
     reduce_only: inputs.reduceOnly,
     margin_mode: inputs.marginMode,
@@ -451,14 +480,17 @@ export function buildIntentRequest(
 
 /**
  * Validates and normalizes a cash-equity order (stock or ETF): whole
- * shares or TWSE board/odd lots, tick-ladder prices inside the daily price
- * limit, broker time in force and IBKR's outside-RTH flag. No leverage,
- * reduce-only, margin or attached stop/target.
+ * shares or TWSE/TPEx board and odd lots, tick-ladder prices inside the
+ * daily price limit, broker time in force, closed-market rules and IBKR's
+ * outside-RTH flag. No leverage, reduce-only, margin or attached stop/target.
  * @param inputs Raw inputs.
- * @param instrument Instrument (with ladder, limit and board lot), or null.
- * @param markPrice Reference mark/last price, if known.
- * @param context Account and previous close.
- * @return Request (or null) and issues.
+ * @param instrument Instrument (with ladder, limit and board lot), or null
+ *     while loading.
+ * @param markPrice Last or mark price used for the notional check when the
+ *     order has no limit or trigger price, or null.
+ * @param context Account, previous close and session calendar.
+ * @return The request (null when any error blocks it), every issue found,
+ *     and the quantity in shares and the normalized prices.
  */
 export function buildEquityIntentRequest(
   inputs: TicketInputs,
@@ -644,6 +676,7 @@ export function buildEquityIntentRequest(
       quantity_base: quantity.toString(),
       limit_price: limitPrice ? limitPrice.toString() : null,
       trigger_price: triggerPrice ? triggerPrice.toString() : null,
+      // Stocks and ETFs have no mark price, so stops trigger on the last trade.
       trigger_basis: triggerPrice ? 'last' : null,
       time_in_force: inputs.timeInForce,
       reduce_only: false,
@@ -665,7 +698,7 @@ export function buildEquityIntentRequest(
 /**
  * Capitalizes the first letter.
  * @param text Text.
- * @return Capitalized text.
+ * @return The text with its first character upper-cased.
  */
 function capitalize(text: string): string {
   return text.charAt(0).toUpperCase() + text.slice(1);
@@ -691,7 +724,7 @@ export function orderTypeName(type: OrderType): string {
 /**
  * Builds the confirm-button label naming the exact action.
  * @param request Normalized request (from the preview).
- * @param instrument Instrument precision.
+ * @param instrument Instrument precision used to format quantity and prices.
  * @return Text such as `Place paper limit buy 0.010 BTC at 95,000.0`.
  */
 export function describeAction(
@@ -716,11 +749,11 @@ export function describeAction(
 }
 
 /**
- * Confirm label of a cash-equity order, e.g. `Place paper limit buy
- * 2 張 (2,000 shares) 9901 at 585 TWD`.
- * @param request Normalized request.
- * @param instrument Instrument.
- * @return Text.
+ * Builds the confirm-button label of a cash-equity order.
+ * @param request Normalized request (from the preview).
+ * @param instrument Instrument used to format lots, shares and prices.
+ * @return Text such as `Place paper limit buy 2 張 (2,000 shares) 9901 at
+ *     585 TWD`.
  */
 export function describeEquityAction(
   request: OrderIntentRequest,

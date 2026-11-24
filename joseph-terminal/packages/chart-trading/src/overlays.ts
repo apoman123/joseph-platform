@@ -9,7 +9,9 @@
  *
  * Only declarative `OverlayLayer`s are produced; the chart host renders
  * them. Unknown-outcome orders are rendered as unknown — never as
- * canceled — and user-authored drafts use the `user` tone.
+ * canceled — and user-authored drafts use the `user` tone. Draft lines show
+ * the ticket's unconfirmed inputs: dragging one only edits the ticket, and
+ * dragging a working order only proposes an amendment the user must confirm.
  */
 
 import type {OverlayLayer, PriceLineOverlay} from '@joseph/chart-core';
@@ -33,7 +35,7 @@ export const POSITIONS_LAYER_ID = 'chart-trading:positions';
 /** Layer id for the ticket draft. */
 export const DRAFT_LAYER_ID = 'chart-trading:draft';
 
-/** Order states that still rest at (or are in flight to) the venue. */
+/** Order states that still rest at, or are in flight to, the venue. */
 export const OPEN_ORDER_STATES: ReadonlySet<OrderState> = new Set<OrderState>([
   'VALIDATED',
   'RESERVED',
@@ -47,7 +49,7 @@ export const OPEN_ORDER_STATES: ReadonlySet<OrderState> = new Set<OrderState>([
 /**
  * Returns whether an order is open (non-terminal).
  * @param order Order.
- * @return True when not in a terminal state.
+ * @return True when the order is in one of `OPEN_ORDER_STATES`.
  */
 export function isOpenOrder(order: Order): boolean {
   return OPEN_ORDER_STATES.has(order.state);
@@ -81,9 +83,9 @@ export function orderStateLabel(state: OrderState): string {
 
 /** Precision needed to label lines. */
 export interface LabelPrecision {
-  /** Tick size. */
+  /** Tick size as a decimal string. */
   tickSize: string;
-  /** Lot size. */
+  /** Lot size as a decimal string. */
   lotSize: string;
 }
 
@@ -93,7 +95,8 @@ export interface LabelPrecision {
  * @param instrumentId Instrument shown on the chart.
  * @param precision Tick and lot sizes for labels.
  * @param amendable Whether the venue supports amending (enables dragging).
- * @return Overlay layer.
+ * @return Overlay layer with one line per open order of the instrument at
+ *     its limit price, or its trigger price when it has no limit.
  */
 export function buildOrderLayer(
   orders: readonly Order[],
@@ -113,6 +116,7 @@ export function buildOrderLayer(
       order.state === 'CANCEL_PENDING' ||
       order.state === 'RESERVED' ||
       order.state === 'VALIDATED';
+    // SL and TP label the stop-loss and take-profit children of a bracket.
     const role =
       order.role === 'STOP_LOSS'
         ? 'SL'
@@ -156,7 +160,8 @@ export function buildOrderLayer(
  * @param positions Positions of the account.
  * @param instrumentId Instrument shown on the chart.
  * @param precision Tick and lot sizes for labels.
- * @return Overlay layer.
+ * @return Overlay layer with entry and estimated liquidation lines of the
+ *     instrument's non-flat positions.
  */
 export function buildPositionLayer(
   positions: readonly Position[],
@@ -194,7 +199,7 @@ export function buildPositionLayer(
   return {layerId: POSITIONS_LAYER_ID, zIndex: 35, visible: true, models};
 }
 
-/** Draft line ids. */
+/** Ids of the draft lines. */
 export type DraftLineId =
   'draft-limit' | 'draft-trigger' | 'draft-sl' | 'draft-tp';
 
@@ -209,9 +214,11 @@ export const DRAFT_LINE_FIELDS: Readonly<
 };
 
 /**
- * Builds the draggable draft layer for the order ticket (user tone).
+ * Builds the draggable draft layer for the order ticket (user tone). The
+ * lines mirror unconfirmed ticket inputs; they are not orders.
  * @param inputs Ticket inputs.
- * @return Overlay layer (empty when nothing is priced).
+ * @return Overlay layer with a line per valid non-zero price the order type
+ *     uses (empty when nothing is priced).
  */
 export function buildDraftLayer(inputs: TicketInputs): OverlayLayer {
   const models: PriceLineOverlay[] = [];
@@ -244,7 +251,11 @@ export function buildDraftLayer(inputs: TicketInputs): OverlayLayer {
   return {layerId: DRAFT_LAYER_ID, zIndex: 45, visible: true, models};
 }
 
-/** Interpretation of a dragged overlay. */
+/**
+ * Interpretation of a dragged overlay: `draft` edits a ticket field, `amend`
+ * proposes a new price for a working order (still to be confirmed), and
+ * `ignore` does nothing.
+ */
 export type DragIntent =
   | {
       kind: 'draft';
@@ -264,7 +275,8 @@ export type DragIntent =
  * Interprets a drag-end on a chart-trading layer.
  * @param layerId Dragged layer id.
  * @param modelId Dragged model id.
- * @param price Display price where the drag ended.
+ * @param price Price where the drag ended, a float from the chart's price
+ *     scale.
  * @param tickSize Tick size used to round the price.
  * @param orders Current orders (for amend lookups).
  * @return What the drag means; amendments still require confirmation.
@@ -277,12 +289,16 @@ export function interpretDrag(
   orders: readonly Order[]
 ): DragIntent {
   if (!Number.isFinite(price) || price <= 0) return {kind: 'ignore'};
+  // The float becomes an exact tick-rounded decimal string before it can
+  // reach a ticket field or an amendment.
   const rounded = Decimal.fromNumber(price)
     .roundToStep(Decimal.parse(tickSize))
     .toString();
   if (layerId === DRAFT_LAYER_ID && modelId in DRAFT_LINE_FIELDS) {
     return {
       kind: 'draft',
+      // Draft models carry only `DraftLineId`s (see buildDraftLayer), and
+      // `in` does not narrow a string to the key union.
       field: DRAFT_LINE_FIELDS[modelId as DraftLineId],
       price: rounded,
     };
@@ -290,6 +306,8 @@ export function interpretDrag(
   if (layerId === ORDERS_LAYER_ID) {
     const order = orders.find(o => o.order_id === modelId);
     if (!order || !isOpenOrder(order)) return {kind: 'ignore'};
+    // The line sits at the limit price when there is one (see
+    // buildOrderLayer), so dragging a stop-limit moves its limit.
     const field = order.limit_price ? 'limit_price' : 'trigger_price';
     const from = order.limit_price ?? order.trigger_price;
     if (!from || Decimal.parse(from).eq(Decimal.parse(rounded))) {

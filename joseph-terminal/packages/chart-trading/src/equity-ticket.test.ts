@@ -17,6 +17,7 @@ import {
   createBarCalendar,
   dayNumberOf,
   zonedTimeToUtc,
+  type ExecutionClient,
   type OrderIntentRequest,
 } from '@joseph/contracts';
 import {describe, expect, it} from 'vitest';
@@ -52,11 +53,11 @@ const NY_CLOSED = zonedTimeToUtc(
 );
 
 /**
- * Ticket inputs for an instrument.
- * @param instrumentId Instrument.
- * @param accountId Account.
- * @param patch Overrides.
- * @return Inputs.
+ * Builds default ticket inputs with DAY time in force for an instrument.
+ * @param instrumentId Instrument id.
+ * @param accountId Account id.
+ * @param patch Field overrides.
+ * @return Ticket inputs.
  */
 function inputs(
   instrumentId: string,
@@ -71,9 +72,9 @@ function inputs(
 }
 
 /**
- * Messages of a build result.
+ * Returns the issue messages of a build result.
  * @param result Build result.
- * @return Messages.
+ * @return Messages in issue order.
  */
 function messages(result: ReturnType<typeof buildIntentRequest>): string[] {
   return result.issues.map(issue => issue.message);
@@ -484,19 +485,19 @@ describe('rates and the controller', () => {
 
   it('previews with the account and reference set as context', async () => {
     const seen: OrderIntentRequest[] = [];
+    const previewOnly: Pick<ExecutionClient, 'previewOrder'> = {
+      previewOrder: async (request: OrderIntentRequest) => {
+        seen.push(request);
+        throw new Error('not reached');
+      },
+    };
     const controller = new TicketController(
       inputs(TWSE_STOCK.instrument_id, SINOPAC.account_id, {
         quantity: '1',
         limitPrice: '650',
       }),
-      {
-        client: {
-          previewOrder: async (request: OrderIntentRequest) => {
-            seen.push(request);
-            throw new Error('not reached');
-          },
-        } as never,
-      }
+      // Deliberate partial mock: this test can reach only previewOrder.
+      {client: previewOnly as ExecutionClient}
     );
     controller.setMarket(TWSE_STOCK, REF);
     expect(controller.build().request?.limit_price).toBe('650');

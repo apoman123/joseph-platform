@@ -8,6 +8,9 @@
  * @fileoverview Chart context menu, cancel/close/reverse and kill-switch
  * request models.
  *
+ * Nothing here sends anything: a menu item only prefills the order ticket,
+ * and each plan holds a request body plus the plain-language summary the
+ * host shows before it sends the request.
  * Close is always reduce-only and can never flip a position. Reverse is two
  * explicit, separately confirmed steps (close → confirmed flat → open)
  * because no venue atomicity is assumed.
@@ -29,15 +32,15 @@ import {isOpenOrder} from './overlays';
 
 /** One entry of the chart trading context menu. */
 export interface ContextMenuItem {
-  /** Stable id. */
+  /** Stable id, e.g. `buy-limit`. */
   id: string;
   /** Menu label, e.g. `Buy limit at 94,980.0`. */
   label: string;
-  /** Side. */
+  /** Order side. */
   side: OrderSide;
   /** Order type. */
   orderType: Extract<OrderType, 'limit' | 'stop_market'>;
-  /** Tick-rounded price. */
+  /** Tick-rounded price as a decimal string. */
   price: string;
   /** Optional hint, e.g. that a limit would fill immediately. */
   hint: string | null;
@@ -45,10 +48,11 @@ export interface ContextMenuItem {
 
 /**
  * Builds the context menu for a right-click at a chart price.
- * @param price Display price under the pointer.
+ * @param price Price under the pointer, a float from the chart's price scale.
  * @param tickSize Instrument tick size.
- * @param mark Current mark price, if known (used for hints).
- * @return Menu items (empty when the price is invalid).
+ * @param mark Current mark price used for the hints, or null when unknown.
+ * @return Buy/sell limit and stop items, or none when the price is not a
+ *     positive finite number.
  */
 export function buildContextMenu(
   price: number,
@@ -56,6 +60,8 @@ export function buildContextMenu(
   mark: Decimal | null
 ): ContextMenuItem[] {
   if (!Number.isFinite(price) || price <= 0) return [];
+  // The pointer price is a float from screen coordinates. It becomes an
+  // exact Decimal once, rounded to the tick, so every later step is exact.
   const rounded = Decimal.fromNumber(price).roundToStep(
     Decimal.parse(tickSize)
   );
@@ -121,10 +127,11 @@ export function buildContextMenu(
 }
 
 /**
- * Converts a context-menu item into ticket inputs.
+ * Converts a context-menu item into ticket inputs; the user still previews
+ * and confirms the order in the ticket.
  * @param item Selected item.
  * @param base Current ticket inputs (account, mode, quantity are kept).
- * @return Prefilled ticket inputs.
+ * @return Prefilled ticket inputs with `CHART` as the source.
  */
 export function ticketFromMenuItem(
   item: ContextMenuItem,
@@ -142,16 +149,17 @@ export function ticketFromMenuItem(
 
 /** Whether an order can be canceled from the UI, and why not. */
 export interface CancelGuard {
-  /** Cancel permitted. */
+  /** Whether a cancel request is permitted. */
   allowed: boolean;
-  /** Explanation when not permitted. */
+  /** Explanation when not permitted, else null. */
   reason: string | null;
 }
 
 /**
  * Decides whether the UI may request cancellation of an order.
  * @param order Order.
- * @return Guard result.
+ * @return Allowed only for orders the venue has acknowledged and that are
+ *     neither final, reconciling nor already being canceled.
  */
 export function cancelGuard(order: Order): CancelGuard {
   if (!isOpenOrder(order)) {
@@ -185,9 +193,12 @@ export function cancelGuard(order: Order): CancelGuard {
 
 /** A validated close request plus its plain-language summary. */
 export interface ClosePlan {
-  /** Contract request. */
+  /** Contract request; it carries the fraction, not a quantity. */
   request: ClosePositionRequest;
-  /** Quantity that will be closed (floored to the lot). */
+  /**
+   * Expected quantity to close: position quantity × fraction, floored to the
+   * lot. The engine computes the binding quantity from the fraction.
+   */
   quantity: Decimal;
   /** Summary such as `Close 50% of long 0.020 BTC with a reduce-only market sell`. */
   summary: string;
@@ -198,9 +209,10 @@ export interface ClosePlan {
  * @param position Position to close.
  * @param fraction Fraction in (0, 1] as a decimal string.
  * @param orderType Market or limit.
- * @param lotSize Lot size.
+ * @param lotSize Lot size the expected quantity is floored to.
  * @param base Base asset symbol for the summary.
- * @param limitPrice Limit price for limit closes.
+ * @param limitPrice Limit price as a decimal string; required for limit
+ *     closes and ignored for market closes.
  * @return Plan, or an error message.
  */
 export function planClose(
@@ -252,11 +264,11 @@ export type ReverseStep =
 export interface ReversePlan {
   /** Position being reversed. */
   positionId: string;
-  /** Instrument. */
+  /** Instrument id. */
   instrumentId: string;
   /** Original side. */
   fromSide: 'long' | 'short';
-  /** Quantity to reopen on the opposite side. */
+  /** Quantity to reopen on the opposite side, as a decimal string. */
   quantity: string;
   /** Current step. */
   step: ReverseStep;
@@ -267,7 +279,7 @@ export interface ReversePlan {
 /**
  * Starts a reverse plan. Nothing is sent until each step is confirmed.
  * @param position Position to reverse.
- * @return Plan at step CLOSE.
+ * @return Plan at step CLOSE, or an error for a flat position.
  */
 export function startReverse(
   position: Position
@@ -289,7 +301,7 @@ export function startReverse(
 /**
  * Advances the reverse plan after the close was submitted.
  * @param plan Plan at step CLOSE.
- * @return Plan awaiting a confirmed flat position.
+ * @return Plan awaiting a confirmed flat position; other steps unchanged.
  */
 export function reverseCloseSubmitted(plan: ReversePlan): ReversePlan {
   if (plan.step !== 'CLOSE') return plan;
@@ -325,9 +337,10 @@ export function reversePositionUpdated(
 }
 
 /**
- * Builds ticket inputs for the opening step of a reverse.
+ * Builds ticket inputs for the opening step of a reverse; the user previews
+ * and confirms them in the ticket.
  * @param plan Plan at step OPEN.
- * @param accountId Account id.
+ * @param accountId Account the opening order uses.
  * @return Ticket inputs for a market order on the opposite side.
  */
 export function reverseOpenTicket(
@@ -344,7 +357,7 @@ export function reverseOpenTicket(
 
 /** Kill-switch form values. */
 export interface KillSwitchForm {
-  /** Scope. */
+  /** Scope of the switch. */
   scope: KillSwitchScope;
   /** Account or strategy id for scoped switches. */
   targetId: string | null;
@@ -367,9 +380,9 @@ export interface KillSwitchPlan {
 }
 
 /**
- * Validates a kill-switch form.
+ * Validates a kill-switch form and lists what it will do.
  * @param form Form values.
- * @return Plan, or an error message.
+ * @return Plan, or an error message when the reason or target is missing.
  */
 export function planKillSwitch(
   form: KillSwitchForm
@@ -412,6 +425,7 @@ export function planKillSwitch(
       scope: form.scope,
       target_id: form.scope === 'GLOBAL' ? null : form.targetId,
       engage: form.engage,
+      // Releasing the switch never cancels or flattens anything.
       cancel_open_orders: form.engage && form.cancelOpenOrders,
       flatten_positions: form.engage && form.flattenPositions,
       reason,

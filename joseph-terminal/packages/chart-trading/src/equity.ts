@@ -8,19 +8,20 @@
  * @fileoverview Cash-equity and broker rules for the order ticket.
  *
  * Exchange-listed stocks and ETFs trade through securities brokers
- * (Interactive Brokers for Nasdaq/NYSE/Cboe BZX, SinoPac Shioaji and
- * Cathay for TWSE and TPEx) or the engine's paper accounts (USD: crypto,
- * Nasdaq, NYSE, Cboe BZX; TWD: TWSE, TPEx). This module holds the pure
- * rules the ticket applies before the execution engine re-checks
- * everything, read from the account's `TradingCapabilities`: routing by
- * `tradable_venues`, time in force (DAY only for exchange sessions),
- * TWSE/TPEx tick ladders and daily
- * price limits, board lots (張) and intraday odd lots (零股, limit DAY only, when
- * `odd_lot`), IBKR's `outside_rth`, market orders while the exchange is
- * closed (`queue_market_when_closed`), long-only cash accounts, settled
- * cash, broker account status, the wording of LIVE confirmations and the
- * server-side LIVE arming of an account (`live_armed_until_ms`,
- * `LIVE_NOT_ARMED`).
+ * (Interactive Brokers, IBKR, for Nasdaq/NYSE/Cboe BZX; SinoPac Shioaji and
+ * Cathay for TWSE, the Taiwan Stock Exchange, and TPEx, the Taipei
+ * Exchange) or the engine's paper accounts (USD: crypto, Nasdaq, NYSE, Cboe
+ * BZX; TWD: TWSE, TPEx). This module holds the pure rules the ticket applies
+ * before the execution engine re-checks everything, read from the account's
+ * `TradingCapabilities`: routing by `tradable_venues`, time in force (DAY
+ * applies only to exchange sessions), TWSE/TPEx tick ladders and daily price
+ * limits, board lots (張) and intraday odd lots (零股, limit DAY only, when
+ * `odd_lot`), IBKR's `outside_rth` (outside regular trading hours, RTH),
+ * market orders while the exchange is closed (`queue_market_when_closed`),
+ * long-only cash accounts, settled cash, broker account status, the wording
+ * of LIVE confirmations and the server-side LIVE arming of an account
+ * (`live_armed_until_ms`, `LIVE_NOT_ARMED`). Prices and quantities are exact
+ * `Decimal`s throughout; nothing here sends an order.
  */
 
 import {
@@ -116,7 +117,10 @@ export const TIME_IN_FORCE_NAMES: Readonly<Record<TimeInForce, string>> = {
   POST_ONLY: 'Post only',
 };
 
-/** Instrument fields the equity rules read (all optional while loading). */
+/**
+ * Instrument fields the equity rules read; all but the id and tick size may
+ * be missing while the instrument loads.
+ */
 export type EquityInstrument = Pick<Instrument, 'instrument_id' | 'tick_size'> &
   Partial<
     Pick<
@@ -137,7 +141,7 @@ export type EquityInstrument = Pick<Instrument, 'instrument_id' | 'tick_size'> &
   > & {key?: Partial<Pick<Instrument['key'], 'quote' | 'canonical_base'>>};
 
 /**
- * Whether a venue is a securities broker.
+ * Returns whether a venue is a securities broker.
  * @param venue Trading venue.
  * @return True for `ibkr`, `sinopac` and `cathay`.
  */
@@ -146,7 +150,7 @@ export function isBroker(venue: TradingVenue): venue is Broker {
 }
 
 /**
- * Market type of an instrument id.
+ * Returns the market type of an instrument id.
  * @param instrumentId Canonical id.
  * @return Market type, or null for invalid ids.
  */
@@ -159,9 +163,9 @@ function marketTypeOf(instrumentId: string): MarketType | null {
 }
 
 /**
- * Whether an instrument is an exchange-listed cash security.
+ * Returns whether an instrument is an exchange-listed cash security.
  * @param instrumentId Canonical id.
- * @return True for stocks and ETFs.
+ * @return True for stocks and ETFs; false for other or invalid ids.
  */
 export function isCashEquityId(instrumentId: string): boolean {
   const type = marketTypeOf(instrumentId);
@@ -169,7 +173,7 @@ export function isCashEquityId(instrumentId: string): boolean {
 }
 
 /**
- * Whether an instrument is a published, non-tradable rate series.
+ * Returns whether an instrument is a published, non-tradable rate series.
  * @param instrumentId Canonical id.
  * @return True for `rate` instruments (e.g. Treasury yields).
  */
@@ -178,10 +182,10 @@ export function isRateInstrumentId(instrumentId: string): boolean {
 }
 
 /**
- * Notice shown instead of an order ticket for a rate.
+ * Returns the notice shown instead of an order ticket for a rate.
  * @param instrumentId Canonical id.
- * @param name Instrument name, when known.
- * @return Text.
+ * @param name Instrument name; the id's symbol is used when missing.
+ * @return Notice text.
  */
 export function rateNotice(instrumentId: string, name?: string | null): string {
   let label = name ?? instrumentId;
@@ -198,9 +202,10 @@ export function rateNotice(instrumentId: string, name?: string | null): string {
 // Tick ladder and price limits ---------------------------------------------
 
 /**
- * Ladder rungs sorted by their minimum price.
- * @param ladder Ladder.
- * @return Sorted rungs with valid decimals.
+ * Returns the ladder rungs sorted by their minimum price.
+ * @param ladder Ladder, or undefined when the instrument has none.
+ * @return Rungs with valid decimals, ascending; rungs with invalid text are
+ *     dropped.
  */
 function sortedLadder(ladder: readonly TickStep[] | undefined): TickStep[] {
   return (ladder ?? [])
@@ -211,26 +216,30 @@ function sortedLadder(ladder: readonly TickStep[] | undefined): TickStep[] {
 }
 
 /**
- * Tick size that applies at a price (engine `Instrument.tick_for`).
+ * Returns the tick size that applies at a price (engine
+ * `Instrument.tick_for`).
  * @param instrument Instrument with `tick_size` and optional ladder.
  * @param price Price.
- * @return Tick size.
+ * @return Tick size of the highest rung at or below the price, else the
+ *     instrument's `tick_size`.
  */
 export function tickAt(instrument: EquityInstrument, price: Decimal): Decimal {
   let tick = Decimal.parse(instrument.tick_size);
+  // Rungs ascend, so the last one at or below the price wins.
   for (const step of sortedLadder(instrument.tick_ladder)) {
     if (price.cmp(Decimal.parse(step.min_price)) >= 0) {
       tick = Decimal.parse(step.tick_size);
     }
   }
+  // A zero-tick rung would make rounding throw; fall back to the base tick.
   return tick.isZero() ? Decimal.parse(instrument.tick_size) : tick;
 }
 
 /**
- * Whether a price lies on the instrument's tick grid at that price.
+ * Returns whether a price lies on the instrument's tick grid at that price.
  * @param instrument Instrument.
  * @param price Price.
- * @return True when valid.
+ * @return True when the price is a multiple of the tick at that price.
  */
 export function isOnTickLadder(
   instrument: EquityInstrument,
@@ -240,10 +249,10 @@ export function isOnTickLadder(
 }
 
 /**
- * Rounds a price to the nearest valid ladder price.
+ * Rounds a price to the nearest valid ladder price, ties to even ticks.
  * @param instrument Instrument.
  * @param price Price.
- * @return Valid price.
+ * @return Price on the tick ladder.
  */
 export function roundToTickLadder(
   instrument: EquityInstrument,
@@ -257,10 +266,10 @@ export function roundToTickLadder(
 }
 
 /**
- * Smallest ladder price at or above a value.
+ * Returns the smallest ladder price at or above a value.
  * @param instrument Instrument.
  * @param price Value.
- * @return Price.
+ * @return Price on the ladder.
  */
 function ceilToLadder(instrument: EquityInstrument, price: Decimal): Decimal {
   const tick = tickAt(instrument, price);
@@ -269,20 +278,21 @@ function ceilToLadder(instrument: EquityInstrument, price: Decimal): Decimal {
 }
 
 /**
- * Largest ladder price at or below a value.
+ * Returns the largest ladder price at or below a value.
  * @param instrument Instrument.
  * @param price Value.
- * @return Price.
+ * @return Price on the ladder.
  */
 function floorToLadder(instrument: EquityInstrument, price: Decimal): Decimal {
   return price.floorToStep(tickAt(instrument, price));
 }
 
 /**
- * Decimal places to show for a price.
+ * Returns the number of decimal places to show for a price.
  * @param instrument Instrument.
- * @param price Price (ladder rung), or null for the base tick.
- * @return Digits.
+ * @param price Price whose ladder rung sets the precision, or null for the
+ *     base tick.
+ * @return Fraction digits of the applicable tick size.
  */
 export function priceDecimals(
   instrument: EquityInstrument,
@@ -320,11 +330,13 @@ export interface PriceLimitBand {
 }
 
 /**
- * Daily price limits: the reference ± `price_limit_pct`, limit up rounded
- * down and limit down rounded up to the ladder (TWSE, TPEx).
+ * Computes the daily price limits (TWSE, TPEx): the reference ±
+ * `price_limit_pct`, with limit up rounded down and limit down rounded up to
+ * the ladder so the band never exceeds the exchange's limits.
  * @param instrument Instrument.
- * @param reference Previous session close.
- * @return Band, or null when the instrument has no limit.
+ * @param reference Previous session close, or null when unknown.
+ * @return Band, or null when the instrument has no valid limit or the
+ *     reference is missing or zero.
  */
 export function priceLimitBand(
   instrument: EquityInstrument,
@@ -345,10 +357,10 @@ export function priceLimitBand(
 }
 
 /**
- * Whether a price is inside the band.
+ * Returns whether a price is inside the band.
  * @param band Band.
  * @param price Price.
- * @return True when allowed.
+ * @return True when the price is between the limits, inclusive.
  */
 export function withinPriceLimit(
   band: PriceLimitBand,
@@ -358,7 +370,7 @@ export function withinPriceLimit(
 }
 
 /**
- * Reference price for the next session's limits: the latest final daily
+ * Returns the reference price for the daily limits: the latest final daily
  * close (after the session) or the close before today's bar (in session).
  * @param candles Daily candles, oldest first.
  * @return Reference close, or null without data.
@@ -375,9 +387,10 @@ export function referenceClose(
 // Lots -------------------------------------------------------------------
 
 /**
- * Shares per board lot.
+ * Returns the shares per board lot.
  * @param instrument Instrument.
- * @return Lot size, or null when orders are in single shares.
+ * @return Lot size, or null when orders are in single shares (no board lot,
+ *     or a lot of 0 or 1).
  */
 export function boardLotOf(instrument: EquityInstrument): Decimal | null {
   const text = instrument.board_lot;
@@ -390,9 +403,9 @@ export function boardLotOf(instrument: EquityInstrument): Decimal | null {
 export interface EquityQuantity {
   /** Shares sent to the engine, or null when invalid. */
   shares: Decimal | null;
-  /** Board lots, when ordering whole lots. */
+  /** Board lots when ordering whole lots, else null. */
   lots: Decimal | null;
-  /** Problem, if any. */
+  /** Plain-language problem, or null when the quantity is valid. */
   error: string | null;
 }
 
@@ -401,7 +414,8 @@ export interface EquityQuantity {
  * TWSE and TPEx, whole shares elsewhere.
  * @param instrument Instrument.
  * @param mode Board or odd lot (ignored without a board lot).
- * @param text User text.
+ * @param text User text: lots in board mode, shares otherwise; thousands
+ *     separators are allowed.
  * @return Shares and lots, or an error.
  */
 export function parseEquityQuantity(
@@ -469,16 +483,16 @@ export function formatShares(
 // Accounts and brokers ------------------------------------------------------
 
 /**
- * Human name of an account's venue or broker.
+ * Returns the human name of an account's venue or broker.
  * @param venue Trading venue.
- * @return Name.
+ * @return Name such as `Interactive Brokers`.
  */
 export function tradingVenueName(venue: TradingVenue): string {
   return isBroker(venue) ? BROKER_NAMES[venue] : VENUE_NAMES[venue];
 }
 
 /**
- * Human name of an exchange venue.
+ * Returns the short name of an exchange venue.
  * @param venue Exchange venue.
  * @return Short name such as `TWSE`.
  */
@@ -487,10 +501,10 @@ function exchangeName(venue: Venue): string {
 }
 
 /**
- * Joins exchange names, e.g. `TWSE and TPEx` or `Nasdaq, NYSE and Cboe
- * BZX`.
+ * Joins exchange names into a list.
  * @param venues Exchange venues.
- * @return Text.
+ * @return Text such as `TWSE and TPEx` or `Nasdaq, NYSE and Cboe BZX`; empty
+ *     for no venues.
  */
 function exchangeList(venues: readonly Venue[]): string {
   const names = venues.map(exchangeName);
@@ -505,7 +519,7 @@ export type AccountConnection =
 
 /** Display status of a trading account. */
 export interface AccountStatusView {
-  /** Broker, when the account is a securities broker. */
+  /** Broker, or null when the account is not at a securities broker. */
   broker: Broker | null;
   /** Venue or broker name. */
   venueName: string;
@@ -515,24 +529,28 @@ export interface AccountStatusView {
   connectionText: string;
   /** Credentials (held on the server): configured, missing or unknown. */
   credentials: 'configured' | 'missing' | 'unknown';
-  /** Credentials text. */
+  /** Plain-language credentials status. */
   credentialsText: string;
-  /** Cathay is shown as awaiting the broker's API SDK. */
+  /**
+   * Whether the venue still waits for its broker API SDK: Cathay until it is
+   * connected and available, other accounts when their notes mention an SDK
+   * and trading is unavailable.
+   */
   awaitingSdk: boolean;
   /** Whether the account can take orders now (any mode). */
   canTrade: boolean;
-  /** Paper or broker simulation environment. */
+  /** Whether the account is a paper or broker simulation environment. */
   simulation: boolean;
   /** Badge tone. */
   tone: 'live' | 'sodium' | 'stale' | 'muted';
-  /** Engine notes. */
+  /** Capability notes reported by the engine. */
   notes: readonly string[];
 }
 
 /**
- * Display status of an account from what the execution engine reports.
- * Broker credentials live on the execution server (secret files); the
- * terminal only says whether the server reports them configured.
+ * Derives the display status of an account from what the execution engine
+ * reports. Broker credentials live on the execution server (secret files);
+ * the terminal only says whether the server reports them configured.
  * @param account Account summary.
  * @return Status view.
  */
@@ -545,6 +563,8 @@ export function accountStatusView(account: AccountSummary): AccountStatusView {
     broker === 'cathay'
       ? !available || account.status !== 'CONNECTED'
       : /\bsdk\b/.test(noteText) && !available;
+  // The engine has no credentials field: a disconnected account whose notes
+  // mention credentials is taken to be missing them.
   const mentionsMissing =
     /credential|api key|certificate|secret/.test(noteText) &&
     account.status === 'DISCONNECTED';
@@ -607,7 +627,7 @@ export function accountStatusView(account: AccountSummary): AccountStatusView {
 }
 
 /**
- * Settlement currencies of an account.
+ * Returns the settlement currencies of an account.
  * @param account Account.
  * @return Currencies (the account currency when none are listed).
  */
@@ -617,9 +637,9 @@ function currenciesOf(account: AccountSummary): readonly string[] {
 }
 
 /**
- * Exchange venues an account routes securities to: the engine's
- * `tradable_venues`, else the broker's exchanges, else (paper accounts)
- * the exchanges of its currency.
+ * Returns the exchange venues an account routes securities to: the
+ * engine's `tradable_venues`, else the broker's exchanges, else (paper
+ * accounts) the exchanges of its currencies.
  * @param account Account.
  * @return Exchange venues (empty for crypto venue accounts).
  */
@@ -636,10 +656,11 @@ export function accountExchanges(account: AccountSummary): readonly Venue[] {
 }
 
 /**
- * Exchanges a security belongs to: its venue for exchange listings, or the
- * exchanges of its session calendar for DEMO securities (`mock:stock:*`).
+ * Returns the exchanges a security belongs to: its venue for exchange
+ * listings, or the exchanges of its session calendar for demo securities
+ * (`mock:stock:*`).
  * @param venue Instrument venue.
- * @param calendar Instrument calendar.
+ * @param calendar Instrument calendar id, e.g. `XTAI`.
  * @return Exchange venues (empty when unknown).
  */
 function securityExchanges(venue: Venue, calendar: string): readonly Venue[] {
@@ -650,8 +671,8 @@ function securityExchanges(venue: Venue, calendar: string): readonly Venue[] {
 }
 
 /**
- * Why an account cannot trade an instrument (engine `equities.route` plus
- * the `tradable_venues` check).
+ * Explains why an account cannot trade an instrument (engine
+ * `equities.route` plus the `tradable_venues` check).
  * @param account Account.
  * @param instrumentId Instrument id.
  * @param instrument Registry entry (calendar), when loaded.
@@ -705,9 +726,11 @@ export function accountInstrumentMismatch(
  * Picks the account a ticket should use for an instrument.
  * @param accounts Accounts.
  * @param instrumentId Instrument id.
- * @param current Currently selected account id.
+ * @param current Currently selected account id, or null.
  * @param instrument Registry entry, when loaded.
- * @return Account, or null when none exists.
+ * @return The selected account if it fits, else the first fitting account
+ *     that can trade, any fitting account, the selected one or the first
+ *     one; null only when there are no accounts.
  */
 export function preferredAccount(
   accounts: readonly AccountSummary[],
@@ -731,20 +754,20 @@ export function preferredAccount(
 
 /** Time-in-force choices for an account. */
 export interface TimeInForceChoice {
-  /** Values offered, in order. */
+  /** Values offered, in display order. */
   options: TimeInForce[];
-  /** Explanation when the choice is limited. */
+  /** Explanation when the choice is limited, else null. */
   note: string | null;
 }
 
 /**
- * Time in force for a security order: DAY, GTC, IOC and FOK as the
- * account's capabilities list them (DAY applies to exchange sessions only,
- * so it is never offered for 24x7 instruments). Intraday odd lots are DAY
- * (TWSE/TPEx ROD) only.
+ * Returns the time-in-force choices for a security order: DAY, GTC
+ * (good till canceled), IOC (immediate or cancel) and FOK (fill or kill), as
+ * the account's capabilities list them. Without an account only DAY is
+ * offered. Intraday odd lots are DAY only (ROD, rest of day, on TWSE/TPEx).
  * @param account Account, or null.
  * @param lotMode Board or odd lot.
- * @return Choices.
+ * @return Choices, with a note when the account limits them.
  */
 export function equityTimeInForce(
   account: AccountSummary | null,
@@ -773,11 +796,12 @@ export function equityTimeInForce(
 }
 
 /**
- * Order types the account offers (stop orders only where listed; SinoPac
- * has none).
+ * Returns the order types the account offers (stop orders only where
+ * listed; SinoPac has none).
  * @param account Account, or null.
  * @param offered Types the ticket shows.
- * @return Types the account accepts, in the ticket's order.
+ * @return Types the account accepts, in the ticket's order; all of
+ *     `offered` without an account.
  */
 export function accountOrderTypes(
   account: AccountSummary | null,
@@ -789,10 +813,11 @@ export function accountOrderTypes(
 }
 
 /**
- * Whether the account offers the outside-RTH flag.
- * @param account Account.
+ * Returns whether the account offers the outside-RTH flag.
+ * @param account Account, or null.
  * @return `shown` for accounts listing it (and IBKR accounts); `enabled`
- *     when the capabilities set `outside_rth`.
+ *     when the capabilities set `outside_rth`; `reason` explains a shown but
+ *     disabled flag, else null.
  */
 export function outsideRthSupport(account: AccountSummary | null): {
   shown: boolean;
@@ -811,8 +836,8 @@ export function outsideRthSupport(account: AccountSummary | null): {
 }
 
 /**
- * Whether intraday odd-lot orders are available.
- * @param account Account.
+ * Returns whether intraday odd-lot orders are available.
+ * @param account Account, or null.
  * @param instrument Instrument.
  * @return True when the instrument has a board lot and the account's
  *     capabilities set `odd_lot`.
@@ -827,10 +852,10 @@ export function oddLotAvailable(
 }
 
 /**
- * Shares of an instrument the account holds long.
+ * Returns the shares of an instrument the account holds long.
  * @param account Account.
  * @param instrumentId Instrument id.
- * @return Shares (zero when none).
+ * @return Sum of long position quantities (zero when none).
  */
 export function heldShares(
   account: AccountSummary,
@@ -850,12 +875,14 @@ export function heldShares(
 }
 
 /**
- * Cash line of a cash account: settled and unsettled cash.
+ * Builds the cash line of a cash account: settled and unsettled cash.
  * @param account Account.
  * @return Text such as `Settled cash 5,000,000.00 TWD · unsettled
- *     −120,000.00 TWD`, or null when the engine reports none.
+ *     −120,000.00 TWD`, or null when the engine reports neither (a zero
+ *     unsettled amount is left out).
  */
 export function cashSummary(account: AccountSummary): string | null {
+  // Negative amounts use the typographic minus sign (U+2212).
   const money = (value: string) =>
     `${groupThousands(Decimal.parse(value).toFixed(2)).replace('-', '−')} ${account.currency}`;
   const settled =
@@ -876,10 +903,10 @@ export function cashSummary(account: AccountSummary): string | null {
  * Adds the outside-RTH flag to a security intent when it applies: only
  * when true and the account accepts it (omitted otherwise, as the schema
  * expects).
- * @param request Intent.
- * @param account Account.
+ * @param request Intent request.
+ * @param account Account, or null.
  * @param outsideRth Whether the user asked for it.
- * @return Intent.
+ * @return A copy with `outside_rth: true`, or the same request unchanged.
  */
 export function withOutsideRth(
   request: OrderIntentRequest,
@@ -894,9 +921,9 @@ export function withOutsideRth(
 // Market hours -------------------------------------------------------------
 
 /**
- * City label of a time zone, e.g. `New York`.
- * @param timeZone IANA zone.
- * @return Label.
+ * Returns the city label of a time zone.
+ * @param timeZone IANA zone such as `America/New_York`.
+ * @return Label such as `New York`.
  */
 export function zoneCity(timeZone: string): string {
   return (timeZone.split('/').at(-1) ?? timeZone).replace(/_/g, ' ');
@@ -904,7 +931,7 @@ export function zoneCity(timeZone: string): string {
 
 /**
  * Formats an instant in an exchange's time zone.
- * @param ms UTC ms.
+ * @param ms UTC epoch milliseconds.
  * @param timeZone IANA zone.
  * @return Text such as `Mon 30 Nov 09:30 New York`.
  */
@@ -924,9 +951,9 @@ export function formatExchangeTime(ms: number, timeZone: string): string {
 
 /** Market-hours notice for the ticket. */
 export interface MarketHoursNotice {
-  /** Tone. */
+  /** Display tone. */
   tone: 'info' | 'warning';
-  /** Text. */
+  /** Notice text. */
   text: string;
 }
 
@@ -936,9 +963,9 @@ export interface MarketHoursOrder {
   orderType: OrderType;
   /** Time in force. */
   timeInForce: TimeInForce;
-  /** Outside-RTH flag. */
+  /** Whether the outside-RTH flag is set. */
   outsideRth: boolean;
-  /** The account queues DAY market orders placed while closed. */
+  /** Whether the account queues DAY market orders placed while closed. */
   queueMarket?: boolean;
   /**
    * Listing exchange named in the notice (e.g. `TPEx`); defaults to the
@@ -948,10 +975,11 @@ export interface MarketHoursOrder {
 }
 
 /**
- * When the next session of a closed market opens, as text.
+ * Formats when the next session of a closed market opens.
  * @param calendar Exchange calendar.
- * @param nowMs Clock.
- * @return ` (Mon 30 Nov 09:30 New York)` or an empty string.
+ * @param nowMs Current time in UTC epoch milliseconds.
+ * @return ` (Mon 30 Nov 09:30 New York)`, or an empty string when no next
+ *     session is known.
  */
 function nextOpenText(calendar: BarCalendar, nowMs: number): string {
   const next = marketStatus(calendar, nowMs).next;
@@ -961,13 +989,13 @@ function nextOpenText(calendar: BarCalendar, nowMs: number): string {
 }
 
 /**
- * Engine rules for orders while the exchange is closed (engine
+ * Applies the engine rules for orders while the exchange is closed (engine
  * `market_session`): market orders are rejected unless the account queues
  * them (`queue_market_when_closed`) as DAY orders; IOC and FOK need an
  * open session.
  * @param calendar Instrument calendar.
- * @param nowMs Clock.
- * @param account Account.
+ * @param nowMs Current time in UTC epoch milliseconds.
+ * @param account Account, or null.
  * @param order Order type and time in force.
  * @return Blocking message, or null when the order may be sent.
  */
@@ -994,10 +1022,10 @@ export function closedMarketProblem(
 }
 
 /**
- * Market-hours notice from the instrument's session calendar: closed now
- * and when the next session opens, holidays and early closes.
+ * Builds the market-hours notice from the instrument's session calendar:
+ * closed now and when the next session opens, holidays and early closes.
  * @param calendar Session calendar.
- * @param nowMs Clock.
+ * @param nowMs Current time in UTC epoch milliseconds.
  * @param order Order details.
  * @return Notice, or null for always-open markets and regular sessions.
  */
@@ -1049,7 +1077,7 @@ export interface LiveConfirmation {
   warning: string;
   /** Label/value rows. */
   rows: ReadonlyArray<[string, string]>;
-  /** Confirm button naming the exact action. */
+  /** Confirm button label naming the exact action. */
   confirmLabel: string;
 }
 
@@ -1063,8 +1091,8 @@ export type LiveInstrument = EquityInstrument & {
  * Builds the LIVE confirmation for a previewed order.
  * @param request Normalized request from the preview.
  * @param instrument Instrument.
- * @param account Account.
- * @param notional Previewed notional, when known.
+ * @param account Account the order goes to.
+ * @param notional Previewed notional as a decimal string, or null.
  * @return Confirmation content.
  */
 export function liveConfirmation(
@@ -1147,9 +1175,9 @@ export const LIVE_ARM_DURATIONS: readonly LiveArmDuration[] = [
 export const LIVE_ARM_DEFAULT_MS = 60 * 60_000;
 
 /**
- * Label of an arming lifetime.
- * @param durationMs Lifetime.
- * @return Label such as `1 hour`.
+ * Returns the label of an arming lifetime.
+ * @param durationMs Lifetime in milliseconds.
+ * @return Label such as `1 hour`; other lifetimes in whole hours or minutes.
  */
 export function liveArmDurationLabel(durationMs: number): string {
   const known = LIVE_ARM_DURATIONS.find(d => d.ms === durationMs);
@@ -1161,8 +1189,8 @@ export function liveArmDurationLabel(durationMs: number): string {
 /**
  * Builds the account live-consent request (execution engine
  * `POST /v1/accounts/{account_id}/live-consent`).
- * @param code Step-up code as typed.
- * @param durationMs Requested lifetime.
+ * @param code Step-up (second-factor) code as typed; it is trimmed.
+ * @param durationMs Requested lifetime in milliseconds.
  * @return Request body.
  */
 export function liveArmRequest(
@@ -1177,11 +1205,11 @@ export function liveArmRequest(
 }
 
 /**
- * When the server-side LIVE arming of an account ends.
- * @param account Account summary.
- * @param nowMs Current time (UTC ms).
- * @return End of the arming, or null when the account is not armed (no
- *     arming, revoked or expired).
+ * Returns when the server-side LIVE arming of an account ends.
+ * @param account Account summary, or null.
+ * @param nowMs Current time in UTC epoch milliseconds.
+ * @return End of the arming in UTC epoch milliseconds, or null when the
+ *     account is not armed (no arming, revoked or expired).
  */
 export function liveArmedUntil(
   account: AccountSummary | null,
@@ -1192,10 +1220,11 @@ export function liveArmedUntil(
 }
 
 /**
- * Whether a risk decision blocked an order because LIVE is not armed on
- * the account (`LIVE_NOT_ARMED`).
- * @param risk Risk decision of a preview or submission.
- * @return True when a failing check carries `LIVE_NOT_ARMED`.
+ * Returns whether a risk decision blocked an order because LIVE is not
+ * armed on the account (`LIVE_NOT_ARMED`).
+ * @param risk Risk decision of a preview or submission, if any.
+ * @return True when a `LIVE_NOT_ARMED` check failed or has an unknown
+ *     outcome.
  */
 export function liveNotArmed(risk: RiskDecision | null | undefined): boolean {
   return (
@@ -1208,17 +1237,17 @@ export function liveNotArmed(risk: RiskDecision | null | undefined): boolean {
 }
 
 /**
- * Consent text shown before arming LIVE.
- * @param account Account.
- * @return Text.
+ * Returns the consent text shown before arming LIVE.
+ * @param account Account to arm.
+ * @return Consent text.
  */
 export function liveArmText(account: AccountSummary): string {
   return `Live orders from this ticket go to ${tradingVenueName(account.venue)} account "${account.label}" with real money. The execution engine arms this account until the time shown after you confirm and still checks every LIVE order (account permissions, risk limits, kill switch). You can disarm at any time.`;
 }
 
 /**
- * Whether a step-up code looks valid (6 to 8 digits).
- * @param code Code.
+ * Returns whether a step-up code looks valid (6 to 8 digits).
+ * @param code Code as typed; surrounding spaces are ignored.
  * @return True when well formed.
  */
 export function validStepUpCode(code: string): boolean {

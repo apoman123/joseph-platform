@@ -73,6 +73,8 @@ function response(request: OrderIntentRequest): SubmitIntentResponse {
  * @return Client.
  */
 function fakeClient(overrides: Partial<ExecutionClient> = {}): ExecutionClient {
+  // Deliberate partial mock: the ticket calls only previewOrder and
+  // submitIntent.
   return {
     previewOrder: vi.fn(async (req: OrderIntentRequest) => preview(req)),
     submitIntent: vi.fn(async (req: OrderIntentRequest) => response(req)),

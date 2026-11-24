@@ -7,7 +7,8 @@
 /**
  * @fileoverview Position-sizing and reward/risk helpers for the ticket.
  *
- * These are display aids. The server-side Risk Gateway computes the binding
+ * These are display aids for the ticket, computed with exact `Decimal`
+ * arithmetic. The execution engine's Risk Gateway computes the binding
  * verdict for every intent.
  */
 
@@ -29,9 +30,13 @@ export interface RiskSizingInput {
 
 /**
  * Computes the base quantity that risks `riskPct` of equity at the stop.
- * The result is floored to the lot size so it never exceeds the budget.
+ * The result is floored to the lot size so the loss at the stop never
+ * exceeds the budget.
  * @param input Sizing input.
- * @return Quantity, or null when the stop distance is zero.
+ * @return Base quantity, or null when the stop equals the entry or
+ *     `riskPct` is negative.
+ * @throws `RangeError` when `lotSize` is not positive (from
+ *     `Decimal.floorToStep`).
  */
 export function quantityFromRisk(input: RiskSizingInput): Decimal | null {
   const distance = input.entry.sub(input.stop).abs();
@@ -45,7 +50,7 @@ export function quantityFromRisk(input: RiskSizingInput): Decimal | null {
  * @param quantity Base quantity.
  * @param entry Entry price.
  * @param stop Stop price.
- * @return Quote-currency risk.
+ * @return Loss in quote currency (never negative).
  */
 export function riskAmount(
   quantity: Decimal,
@@ -56,12 +61,13 @@ export function riskAmount(
 }
 
 /**
- * Computes reward-to-risk for a planned trade.
+ * Computes the reward-to-risk ratio of a planned trade.
  * @param side Entry side.
  * @param entry Entry price.
  * @param stop Stop-loss price.
  * @param target Take-profit price.
- * @return R multiple, or null when the setup is inconsistent.
+ * @return Reward divided by risk (the R multiple), or null when the stop is
+ *     not on the losing side of the entry or the target is on it.
  */
 export function rewardToRisk(
   side: OrderSide,

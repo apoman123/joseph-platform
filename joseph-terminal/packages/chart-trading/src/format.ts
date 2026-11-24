@@ -7,8 +7,9 @@
 /**
  * @fileoverview Display formatting for prices, quantities and percentages.
  *
- * Formatting works on decimal strings so displayed values match exactly what
- * would be sent in an order; `number` is never used to build these strings.
+ * Prices and quantities are formatted from decimal strings with `Decimal`, so
+ * the displayed value matches exactly what an intent would carry; they never
+ * pass through `number`. Only timestamps and ages are numbers.
  */
 
 import {Decimal, stepDecimals} from '@joseph/contracts';
@@ -22,16 +23,18 @@ export function groupThousands(text: string): string {
   const negative = text.startsWith('-');
   const body = negative ? text.slice(1) : text;
   const [whole = '0', fraction] = body.split('.');
+  // Matches each position inside the integer part that is followed by a
+  // multiple of three digits up to its end.
   const grouped = whole.replace(/\B(?=(\d{3})+(?!\d))/g, ',');
   return `${negative ? '-' : ''}${grouped}${fraction === undefined ? '' : `.${fraction}`}`;
 }
 
 /**
  * Formats a decimal string with the precision implied by a step size.
- * @param value Decimal string or null.
+ * @param value Decimal string, or null or undefined when missing.
  * @param step Tick or lot size, e.g. `0.1`.
- * @param fallback Text for missing values.
- * @return Grouped fixed-point text, e.g. `95,000.0`.
+ * @param fallback Text for missing or invalid values.
+ * @return Grouped fixed-point text, e.g. `95,000.0`, rounded half-even.
  */
 export function formatStep(
   value: string | null | undefined,
@@ -44,10 +47,10 @@ export function formatStep(
 
 /**
  * Formats a decimal string with a fixed number of fraction digits.
- * @param value Decimal string or null.
+ * @param value Decimal string, or null or undefined when missing.
  * @param digits Fraction digits.
- * @param fallback Text for missing values.
- * @return Grouped fixed-point text.
+ * @param fallback Text for missing or invalid values.
+ * @return Grouped fixed-point text, rounded half-even.
  */
 export function formatFixed(
   value: string | null | undefined,
@@ -60,9 +63,10 @@ export function formatFixed(
 
 /**
  * Formats a percentage decimal string with an explicit sign.
- * @param value Percent value as a decimal string (e.g. `-1.234`).
+ * @param value Percent value as a decimal string (e.g. `-1.234`), or null or
+ *     undefined when missing.
  * @param digits Fraction digits.
- * @return Text such as `+1.23%` or `—`.
+ * @return Text such as `+1.23%`, or `—` for missing or invalid values.
  */
 export function formatSignedPct(
   value: string | null | undefined,
@@ -76,8 +80,10 @@ export function formatSignedPct(
 
 /**
  * Formats a compact USD amount, e.g. `$52.3M`.
- * @param value Decimal string or null.
- * @return Compact text or `—`.
+ * @param value Decimal string, or null or undefined when missing.
+ * @return Text such as `$52.3M` (one decimal with a `K`, `M` or `B`
+ *     suffix), whole dollars below $1,000, or `—` for missing or invalid
+ *     values.
  */
 export function formatCompactUsd(value: string | null | undefined): string {
   if (value == null || !Decimal.isValid(value)) return '—';
