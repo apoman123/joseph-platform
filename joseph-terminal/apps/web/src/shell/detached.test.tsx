@@ -27,8 +27,8 @@ const DEMO = {
 };
 
 /**
- * Fake window actions.
- * @return Actions with spies.
+ * Returns fake window actions.
+ * @return Actions whose methods are spies.
  */
 function fakeWindows(): WindowActions {
   return {

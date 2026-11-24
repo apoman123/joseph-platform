@@ -25,17 +25,17 @@ import {formatUtcTime} from './format';
 export interface ReplayBarProps {
   /** Replay state. */
   state: ReplayState;
-  /** Visible bar count. */
+  /** Number of bars shown (up to the cursor). */
   shown: number;
-  /** Total bar count. */
+  /** Number of bars loaded. */
   total: number;
   /** Whether the cursor is on the newest bar. */
   atEnd: boolean;
-  /** Steps by bars. */
+  /** Steps by a number of bars (negative steps back). */
   onStep: (delta: number) => void;
   /** Toggles playback. */
   onPlayPause: () => void;
-  /** Cycles speed. */
+  /** Cycles the playback speed. */
   onSpeed: () => void;
   /** Starts at the default lookback. */
   onStartDefault: () => void;
@@ -44,9 +44,11 @@ export interface ReplayBarProps {
 }
 
 /**
- * Replay controls.
+ * Renders the replay controls as a labelled `role="toolbar"`. Icon buttons
+ * carry `aria-label`s. Stepping is disabled while playing, stepping forward
+ * also at the newest bar.
  * @param props Props.
- * @return Toolbar.
+ * @return Toolbar element.
  */
 export function ReplayBar({
   state,

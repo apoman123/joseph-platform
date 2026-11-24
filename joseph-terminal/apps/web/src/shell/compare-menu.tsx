@@ -28,7 +28,9 @@ export interface CompareMenuProps {
 }
 
 /**
- * Compare menu body.
+ * Renders the compare menu body: the compared symbols, a search box and
+ * the results as a `role="listbox"` of buttons. Results that are this
+ * chart, already compared or over the limit are disabled.
  * @param props Props.
  * @return Menu content.
  */
@@ -38,6 +40,7 @@ export function CompareMenu({chart}: CompareMenuProps): ReactElement {
   const [results, setResults] = useState<Instrument[]>([]);
   const [error, setError] = useState<string | null>(null);
   const current: readonly string[] = chart.compare ?? [];
+  // Search after a 180 ms pause in typing, from two characters on.
   useEffect(() => {
     const q = query.trim();
     if (q.length < 2) {

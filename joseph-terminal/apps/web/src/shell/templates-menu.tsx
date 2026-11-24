@@ -26,7 +26,8 @@ export interface TemplatesMenuProps {
 }
 
 /**
- * Templates menu body.
+ * Renders the templates menu body: a save form and the saved templates.
+ * Saving reports invalid names inline; applying closes the menu.
  * @param props Props.
  * @return Menu content.
  */

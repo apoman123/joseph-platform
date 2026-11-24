@@ -21,12 +21,12 @@ import {
   type WorkspaceDocument,
 } from '@joseph/contracts';
 import type {ChartPort} from '@joseph/chart-core';
-import type {
-  DrawingController,
-  DrawingSeriesSync,
-  DrawingStore,
+import {
+  ToolRegistry,
+  type DrawingController,
+  type DrawingSeriesSync,
+  type DrawingStore,
 } from '@joseph/drawing-core';
-import {ToolRegistry} from '@joseph/drawing-core';
 import {
   BrowserStorage,
   FeatureRegistry,
@@ -73,45 +73,47 @@ export const CONTRACT_VERSION = 1;
 
 /** Toast message. */
 export interface Toast {
-  /** Unique id. */
+  /** Id, increasing per runtime; used to dismiss the toast. */
   id: number;
-  /** Text. */
+  /** Text shown to the user. */
   message: string;
-  /** Tone. */
+  /** Tone; sets the accent color. */
   tone: 'info' | 'success' | 'warning' | 'error';
 }
 
 /** Point shared between charts for crosshair sync. */
 export interface SyncedPoint {
-  /** Source chart. */
+  /** Chart the pointer is over; it ignores its own broadcast. */
   sourceChartId: string;
-  /** Time and price, or null when the pointer left the chart. */
+  /** Time (UTC ms) and price, or null when the pointer left the chart. */
   point: {timeMs: number; price: number} | null;
 }
 
-/** Simple broadcast channel. */
+/** In-memory publish/subscribe channel without a current value. */
 export interface Broadcast<T> {
   /**
-   * Publishes a value.
-   * @param value Value.
+   * Delivers a value synchronously to every current subscriber.
+   * @param value Value to deliver.
    */
   emit(value: T): void;
   /**
-   * Subscribes.
-   * @param handler Handler.
-   * @return Disposer.
+   * Subscribes a handler to later values.
+   * @param handler Called with each emitted value.
+   * @return Function that unsubscribes the handler.
    */
   subscribe(handler: (value: T) => void): Disposer;
 }
 
 /**
  * Creates a broadcast channel.
- * @return Channel.
+ * @return Channel with no subscribers.
  */
 export function createBroadcast<T>(): Broadcast<T> {
   const handlers = new Set<(value: T) => void>();
   return {
     emit(value) {
+      // Iterate a copy: a handler may unsubscribe (or subscribe) while the
+      // value is being delivered.
       for (const handler of [...handlers]) {
         handler(value);
       }
@@ -135,7 +137,7 @@ export interface DrawingSession {
   series: Map<string, DrawingSeriesSync>;
   /** Armed tool id (null = pointer). */
   activeTool: WritableStore<string | null>;
-  /** Magnet snapping. */
+  /** Whether magnet snapping to bar prices is on (saved per browser). */
   magnet: WritableStore<boolean>;
   /** Bumped whenever history availability may have changed. */
   revision: WritableStore<number>;
@@ -155,7 +157,7 @@ export interface DrawingSelection {
 export interface IndicatorSettingsRequest {
   /** Chart whose layer is configured. */
   chartId: string;
-  /** Plugin id. */
+  /** Indicator plugin id, e.g. `order_flow_pressure`. */
   pluginId: string;
 }
 
@@ -167,22 +169,22 @@ export interface WindowActions {
    * Opens a pane in another window. Call from a click handler: browsers
    * block windows opened without a user gesture.
    * @param ref Pane to detach.
-   * @param title Human title.
+   * @param title Title shown in placeholders and messages.
    */
   detach(ref: DetachedPaneRef, title: string): void;
   /**
    * Closes the pane's window and shows the pane here again.
-   * @param key Pane key.
+   * @param key Pane key (`paneKey` of its reference).
    */
   redock(key: string): void;
   /**
    * Brings the pane's window to the front.
-   * @param key Pane key.
+   * @param key Pane key (`paneKey` of its reference).
    */
   focus(key: string): void;
   /**
    * Re-opens a remembered pane's window (from a click).
-   * @param key Pane key.
+   * @param key Pane key (`paneKey` of its reference).
    */
   reopen(key: string): void;
   /** Re-opens every remembered pane without a window (from a click). */
@@ -212,7 +214,7 @@ export interface RuntimeOptions {
 export interface TerminalRuntime {
   /** Window role. */
   role: 'main' | 'popout';
-  /** Configuration. */
+  /** Build-time configuration. */
   config: TerminalConfig;
   /** Backend clients. */
   clients: BackendClients;
@@ -221,44 +223,48 @@ export interface TerminalRuntime {
    * generated in DEMO), shared by charts, replay, drawings and features.
    */
   calendars: SessionCalendarCache;
-  /** Capabilities. */
+  /** Capabilities the clients provide; features require them by name. */
   capabilities: WritableStore<CapabilitySet>;
   /** Browser storage (safe when blocked). */
   storage: KeyValueStorage;
   /** Workspace document. */
   workspace: ReadableStore<WorkspaceDocument>;
   /**
-   * Applies a workspace action.
-   * @param action Action.
+   * Applies a workspace action (a pop-out also forwards it to the main
+   * window).
+   * @param action Action to apply.
    */
   dispatch(action: WorkspaceAction): void;
-  /** Selected trading account. */
+  /** Selected trading account id, or null before one is chosen. */
   account: WritableStore<string | null>;
   /** Selected order mode. LIVE is never the default. */
   orderMode: WritableStore<OrderMode>;
-  /** Derived selection read model. */
+  /**
+   * Selection read model derived from the active chart, account, order mode
+   * and replay state; it changes only when one of its fields does.
+   */
   selection: ReadableStore<TerminalSelection>;
-  /** Command registry. */
+  /** Command registry (palette, hotkeys, menus). */
   commands: CommandRegistry;
-  /** Hotkeys. */
+  /** Hotkey bindings to commands. */
   hotkeys: HotkeyHost;
-  /** UI slots. */
+  /** UI slots that features contribute views to. */
   slots: SlotRegistry<WebView>;
-  /** Chart overlay layers. */
+  /** Chart overlay layer providers. */
   chartLayers: ChartLayerHost;
-  /** Event bus. */
+  /** Event bus between features. */
   events: EventBus;
-  /** Notifier. */
+  /** Shows toasts (at most four at a time, each for 6 s). */
   notifier: Notifier;
   /** Feature registry. */
   registry: FeatureRegistry<WebView>;
-  /** Drawing tools. */
+  /** Registered drawing tools. */
   tools: ToolRegistry;
-  /** Drawing session. */
+  /** Drawing state shared by panes and the toolbar. */
   drawing: DrawingSession;
-  /** Toasts. */
+  /** Toasts on screen, oldest first. */
   toasts: WritableStore<readonly Toast[]>;
-  /** Theme. */
+  /** Color theme (saved per browser). */
   theme: WritableStore<'dark' | 'light'>;
   /** Command palette state. */
   palette: WritableStore<PaletteState>;
@@ -275,7 +281,7 @@ export interface TerminalRuntime {
   replay: WritableStore<Readonly<Record<string, ReplayState>>>;
   /** Mounted chart ports per chart id (screenshots, data window). */
   charts: Map<string, ChartPort>;
-  /** Whether the data window is shown on charts. */
+  /** Whether the data window is shown on charts (saved per browser). */
   dataWindow: WritableStore<boolean>;
   /** Open indicator settings dialog, if any. */
   indicatorSettings: WritableStore<IndicatorSettingsRequest | null>;
@@ -307,7 +313,8 @@ export interface PanelRequest {
 
 /**
  * Creates storage that works even when browser storage is blocked.
- * @return Storage.
+ * @return Local storage in the browser, memory storage during server
+ *     rendering.
  */
 function createStorage(): KeyValueStorage {
   if (typeof window === 'undefined') return new MemoryStorage();
@@ -316,19 +323,20 @@ function createStorage(): KeyValueStorage {
 
 /**
  * Reads the saved theme.
- * @param storage Storage.
- * @return Theme.
+ * @param storage Browser storage.
+ * @return Saved theme; dark unless light was saved.
  */
 function savedTheme(storage: KeyValueStorage): 'dark' | 'light' {
   return storage.getItem('joseph.theme') === 'light' ? 'light' : 'dark';
 }
 
 /**
- * Creates the runtime and registers features (not yet activated).
- * @param features Features to compose.
- * @param config Optional configuration override (tests).
+ * Creates the runtime and registers features.
+ * @param features Returns the features to register, given the runtime.
+ * @param config Configuration; defaults to the build-time one (tests pass
+ *     their own).
  * @param options Window role (main or pop-out) and pop-out wiring.
- * @return Runtime.
+ * @return Runtime whose features are registered but not yet activated.
  */
 export function createRuntime(
   features: (runtime: TerminalRuntime) => readonly WebFeature[],
@@ -356,6 +364,7 @@ export function createRuntime(
     market.getSessions?.bind(market) ?? null
   );
   const repository = new WorkspaceRepository(storage);
+  // Workspace writes are debounced by 400 ms.
   const autosaver = createAutosaver(repository, 400);
   const defaultInstrument: InstrumentId = config.demo
     ? 'mock:perp:BTCUSD'
@@ -392,6 +401,8 @@ export function createRuntime(
   const refreshSelection = () => {
     const next = deriveSelection();
     const current = selection.get();
+    // `Object.keys` widens to `string[]`; `next` was built with exactly the
+    // `TerminalSelection` keys.
     const changed = (Object.keys(next) as Array<keyof TerminalSelection>).some(
       key => next[key] !== current[key]
     );
@@ -421,6 +432,7 @@ export function createRuntime(
     notify(message, tone = 'info') {
       toastSeq += 1;
       const id = toastSeq;
+      // Keep at most four toasts; each disappears after 6 s.
       toasts.update(list => [...list.slice(-3), {id, message, tone}]);
       setTimeout(
         () => void toasts.update(list => list.filter(t => t.id !== id)),
@@ -452,6 +464,7 @@ export function createRuntime(
     chartLayers,
     events,
     notifier,
+    // Assigned right below, before `features(runtime)` can read it.
     registry: undefined as unknown as FeatureRegistry<WebView>,
     panelRequest: createStore<PanelRequest | null>(null),
     tools: new ToolRegistry(),

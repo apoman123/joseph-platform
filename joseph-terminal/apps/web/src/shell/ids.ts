@@ -12,9 +12,11 @@
 export const ids = {
   /**
    * Returns a new random id.
-   * @return Id string.
+   * @return A UUID, or a time-and-random id where `randomUUID` is missing.
    */
   next(): string {
+    // `randomUUID` exists only in secure contexts (HTTPS or localhost); the
+    // fallback is unique enough for client-side document ids.
     if (typeof crypto !== 'undefined' && 'randomUUID' in crypto) {
       return crypto.randomUUID();
     }

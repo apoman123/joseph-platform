@@ -5,7 +5,15 @@
  */
 
 /**
- * @fileoverview Renders feature contributions for UI slots.
+ * @fileoverview Renders feature contributions for UI slots: inline items
+ * (top bar, status bar, chart menu), single panels (pop-out windows) and
+ * the tabbed side and bottom docks.
+ *
+ * A dock is a labelled region with a `role="tablist"` of tabs wired to
+ * their `role="tabpanel"` (`aria-controls`, `aria-labelledby`). Its
+ * collapse button reports `aria-expanded`; its resize handle is a
+ * `Splitter`. Each contribution renders inside an error boundary, so one
+ * failing panel shows a notice and the others keep working.
  */
 
 'use client';
@@ -43,8 +51,8 @@ class SlotBoundary extends Component<
 
   /**
    * Captures the error message.
-   * @param error Thrown error.
-   * @return State update.
+   * @param error Value the contribution threw.
+   * @return State update with the message.
    */
   static getDerivedStateFromError(error: unknown) {
     return {error: error instanceof Error ? error.message : 'Unknown error'};
@@ -52,8 +60,8 @@ class SlotBoundary extends Component<
 
   /**
    * Logs the error for diagnostics.
-   * @param error Error.
-   * @param info React info.
+   * @param error Value the contribution threw.
+   * @param info React error info with the component stack.
    */
   override componentDidCatch(error: unknown, info: ErrorInfo): void {
     console.error(
@@ -64,7 +72,7 @@ class SlotBoundary extends Component<
   }
 
   /**
-   * Renders children or a notice.
+   * Renders the children, or an alert notice after an error.
    * @return Content.
    */
   override render() {
@@ -83,7 +91,7 @@ class SlotBoundary extends Component<
 /**
  * Renders one contribution with its feature context.
  * @param props Contribution.
- * @return View.
+ * @return View, or null when its feature has no context.
  */
 function ContributionView({item}: {item: SlotContribution<WebView>}) {
   const runtime = useRuntime();
@@ -100,7 +108,8 @@ function ContributionView({item}: {item: SlotContribution<WebView>}) {
 }
 
 /**
- * One contribution of a slot by id (pop-out windows show a single panel).
+ * Renders one contribution of a slot by id (pop-out windows show a single
+ * panel).
  * @param props Slot and contribution id.
  * @return View, or a notice while the contribution is not registered.
  */
@@ -126,7 +135,8 @@ export function SlotPanelView({
 }
 
 /**
- * Body of the selected tab: its view, or a placeholder while detached.
+ * Renders the body of the selected tab: its view, or a placeholder while
+ * the panel is detached.
  * @param props Slot and contribution.
  * @return Tab body.
  */
@@ -151,9 +161,9 @@ function TabBody({
 }
 
 /**
- * Inline contributions (toolbar, status bar).
+ * Renders the inline contributions of a slot (toolbar, status bar).
  * @param props Slot.
- * @return Items.
+ * @return Items in the slot's order (`order`, then id).
  */
 export function SlotInline({slot}: {slot: UiSlot}): ReactElement {
   const runtime = useRuntime();
@@ -167,15 +177,15 @@ export function SlotInline({slot}: {slot: UiSlot}): ReactElement {
   );
 }
 
-/** Dock size limits in pixels. */
+/** Dock size limits and the CSS default, in pixels. */
 const DOCK_LIMITS = {
   side: {min: 260, max: 720, fallback: 340},
   bottom: {min: 120, max: 560, fallback: 220},
 } as const;
 
 /**
- * Reads a saved dock size.
- * @param raw Stored text.
+ * Reads a saved dock size, clamped to the dock's limits.
+ * @param raw Stored text, or null when nothing is saved.
  * @param orientation Dock orientation.
  * @return Size in pixels, or null for the CSS default.
  */
@@ -190,9 +200,10 @@ export function savedDockSize(
 }
 
 /**
- * Tabbed panel host (side panel or bottom panel).
+ * Renders a tabbed dock (side panel or bottom panel). The selected tab,
+ * collapsed state and size are saved under `storagePrefix`.
  * @param props Slot, labels and collapse behaviour.
- * @return Panel.
+ * @return Dock element.
  */
 export function SlotTabs({
   slot,
@@ -228,6 +239,7 @@ export function SlotTabs({
   const sizeRef = useRef(size);
   sizeRef.current = size;
   const limits = DOCK_LIMITS[orientation];
+  // Dragging stops at 60% of the viewport (or the dock's maximum).
   const viewportMax =
     typeof window === 'undefined'
       ? limits.max
@@ -286,6 +298,8 @@ export function SlotTabs({
           testId={`resize-${slot}`}
           className={`panel__resize panel__resize--${orientation}`}
           onDrag={delta => {
+            // The docks sit right and bottom, so dragging toward the
+            // charts (a negative delta) grows them.
             const next = clampDock(
               (sizeRef.current ?? limits.fallback) - delta,
               limits.min,

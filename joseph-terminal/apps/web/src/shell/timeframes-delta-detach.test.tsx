@@ -59,7 +59,7 @@ async function demoRuntime(): Promise<TerminalRuntime> {
 }
 
 /**
- * Venue list publishing only some timeframes.
+ * Returns a venue list whose DEMO venue publishes only some timeframes.
  * @return Venue status list.
  */
 function restrictedVenues(): VenueStatusList {
@@ -307,8 +307,8 @@ describe('data window', () => {
 
 describe('detached panes in the main window', () => {
   /**
-   * Fake window actions.
-   * @return Actions with spies.
+   * Returns fake window actions.
+   * @return Actions whose methods are spies.
    */
   function fakeWindows(): WindowActions {
     return {

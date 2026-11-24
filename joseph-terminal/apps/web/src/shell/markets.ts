@@ -56,8 +56,8 @@ export const GROUP_VENUES: Readonly<Record<MarketGroup, readonly string[]>> = {
 };
 
 /**
- * Group of an instrument.
- * @param instrument Registry entry.
+ * Returns the picker group of an instrument.
+ * @param instrument Registry entry (its id, asset class and calendar).
  * @return Market group.
  */
 export function marketGroupOf(
@@ -72,7 +72,7 @@ export function marketGroupOf(
 }
 
 /**
- * Product type of an instrument id.
+ * Returns the product type of an instrument id.
  * @param instrumentId Canonical id.
  * @return Market type, or null for invalid ids.
  */
@@ -85,7 +85,8 @@ export function marketTypeOf(instrumentId: InstrumentId): MarketType | null {
 }
 
 /**
- * Whether an instrument is a published rate (a yield, not tradable).
+ * Returns whether an instrument is a published rate (a yield, not
+ * tradable).
  * @param instrumentId Canonical id.
  * @return True for market type `rate`.
  */
@@ -94,7 +95,7 @@ export function isRateInstrument(instrumentId: InstrumentId): boolean {
 }
 
 /**
- * Whether an instrument is a cash security (stock or ETF).
+ * Returns whether an instrument is a cash security (stock or ETF).
  * @param instrumentId Canonical id.
  * @return True for stocks and ETFs.
  */
@@ -114,7 +115,7 @@ const TYPE_LABELS: Readonly<Record<MarketType, string>> = {
 };
 
 /**
- * Label of a market type.
+ * Returns the label of a market type.
  * @param type Market type.
  * @return Label such as `ETF`.
  */
@@ -123,11 +124,14 @@ export function marketTypeLabel(type: MarketType): string {
 }
 
 /**
- * Ranks an instrument against search text: exact symbol, symbol prefix,
- * symbol or base contains, then the English or local (e.g. Chinese) name.
+ * Ranks an instrument against search text. Symbol, venue market id and
+ * canonical base are compared case-insensitively, then the English or
+ * local (e.g. Chinese) name.
  * @param instrument Registry entry.
  * @param query Search text.
- * @return Rank (lower is better), or null when it does not match.
+ * @return Rank, lower is better: 0 exact symbol, 1 symbol prefix, 2 symbol
+ *     contains, 3 for an empty query, 4 name prefix, 5 name contains; null
+ *     when it does not match.
  */
 export function searchRank(
   instrument: Pick<
@@ -163,7 +167,7 @@ export interface VenueAccess {
 }
 
 /**
- * Formats a data delay.
+ * Formats a data delay, rounded to whole hours, minutes or seconds.
  * @param ms Delay in milliseconds.
  * @return Text such as `Delayed 15 min`.
  */
@@ -174,7 +178,7 @@ export function delayLabel(ms: number): string {
 }
 
 /**
- * Data-access flags from a venue's capabilities.
+ * Returns the data-access flags of a venue's capabilities.
  * @param capabilities Venue capabilities (null while unknown).
  * @return Flags (none while unknown).
  */
@@ -186,6 +190,8 @@ export function venueAccess(
   const missing =
     capabilities.requires_credentials === true &&
     capabilities.credentials_configured === false;
+  // US stock venues get their data from Alpaca, so the message names the
+  // key the operator has to configure.
   const provider =
     capabilities.venue === 'nasdaq' ||
     capabilities.venue === 'nyse' ||

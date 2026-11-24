@@ -40,7 +40,7 @@ const DEMO = {
 
 /**
  * Creates and activates a DEMO runtime.
- * @param extra Extra features.
+ * @param extra Features registered after the composed ones.
  * @return Runtime.
  */
 async function demoRuntime(extra: WebFeature[] = []): Promise<TerminalRuntime> {

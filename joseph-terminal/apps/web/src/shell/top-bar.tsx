@@ -8,6 +8,11 @@
  * @fileoverview Top bar: brand, instrument, timeframes, chart style,
  * indicator layers, layout and sync, provenance, order mode, theme and the
  * command palette.
+ *
+ * Selects have visually hidden labels; icon-only buttons carry an
+ * `aria-label` (replay and screenshot also name their hotkey in the
+ * tooltip); toggles report their state through `aria-pressed`. Menus open
+ * in popovers (see `Popover`).
  */
 
 'use client';
@@ -46,7 +51,7 @@ import {SlotInline} from './slot-host';
 import {TemplatesMenu} from './templates-menu';
 import {TimeframeControl} from './timeframe-menu';
 
-/** Chart type labels. */
+/** Chart types in menu order, with their labels. */
 const CHART_TYPES: ReadonlyArray<[ChartType, string]> = [
   ['candles', 'Candles'],
   ['bars', 'Bars'],
@@ -55,14 +60,14 @@ const CHART_TYPES: ReadonlyArray<[ChartType, string]> = [
   ['heikin_ashi', 'Heikin Ashi'],
 ];
 
-/** Price scale labels. */
+/** Price scale modes in menu order, with their labels. */
 const SCALES: ReadonlyArray<[PriceScaleMode, string]> = [
   ['linear', 'Linear'],
   ['log', 'Logarithmic'],
   ['percent', 'Percent'],
 ];
 
-/** Layout options. */
+/** Layouts with their accessible names and icons. */
 const LAYOUTS: ReadonlyArray<[LayoutId, string, typeof Square]> = [
   ['1', 'One chart', Square],
   ['2h', 'Two charts side by side', Columns2],
@@ -71,7 +76,7 @@ const LAYOUTS: ReadonlyArray<[LayoutId, string, typeof Square]> = [
   ['8', 'Eight charts', LayoutGrid],
 ];
 
-/** Severity order used to summarize provenance across panes. */
+/** Feed states from worst to best, to summarize provenance across panes. */
 const SEVERITY: readonly FeedState[] = [
   'UNAVAILABLE',
   'STALE',
@@ -83,9 +88,9 @@ const SEVERITY: readonly FeedState[] = [
 ];
 
 /**
- * Summarizes the worst provenance across visible panes.
- * @param states Feed state per chart.
- * @return Worst state.
+ * Returns the worst provenance across visible panes.
+ * @param states Feed state per chart id.
+ * @return Worst state; `CONNECTING` when no pane reported one.
  */
 export function worstFeedState(
   states: Readonly<Record<string, FeedState>>
@@ -98,8 +103,8 @@ export function worstFeedState(
 }
 
 /**
- * Top bar component.
- * @return Header.
+ * Renders the top bar for the active chart.
+ * @return Header element.
  */
 export function TopBar(): ReactElement {
   const runtime = useRuntime();
@@ -137,6 +142,7 @@ export function TopBar(): ReactElement {
         id="chart-type"
         className="j-select topbar__select"
         value={chart.chart_type}
+        // The options are exactly `CHART_TYPES`.
         onChange={e =>
           void runtime.dispatch({
             type: 'setChartType',
@@ -158,6 +164,7 @@ export function TopBar(): ReactElement {
         id="price-scale"
         className="j-select topbar__select topbar__select--narrow"
         value={chart.price_scale}
+        // The options are exactly `SCALES`.
         onChange={e =>
           void runtime.dispatch({
             type: 'setPriceScale',

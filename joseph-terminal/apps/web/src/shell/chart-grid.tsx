@@ -6,6 +6,11 @@
 
 /**
  * @fileoverview Chart grid for 1/2/4/8 layouts plus the chart context menu.
+ *
+ * Splitters between the tracks resize them by pointer or arrow keys (see
+ * `Splitter`); sizes are saved per layout in the workspace. The context
+ * menu is a `role="menu"` of `menuitem` buttons; Escape or any press
+ * outside it closes it.
  */
 
 'use client';
@@ -37,9 +42,10 @@ import {Splitter} from './splitter';
 export const GRID_PANEL_KEY = 'shell.grid';
 
 /**
- * Chart context menu (copy price, horizontal line, feature items).
+ * Renders the chart context menu (copy price, horizontal line, feature
+ * items) at the pointer.
  * @param props Menu request, runtime and close callback.
- * @return Menu.
+ * @return Menu element.
  */
 export function ChartContextMenu({
   menu,
@@ -55,6 +61,8 @@ export function ChartContextMenu({
       className="j-menu chart-menu"
       role="menu"
       aria-label="Chart actions"
+      // The menu point is relative to the canvas, which sits below the
+      // 40px pane header inside the positioned grid cell.
       style={{left: menu.x, top: menu.y + 40}}
       onPointerDown={event => void event.stopPropagation()}
     >
@@ -69,6 +77,8 @@ export function ChartContextMenu({
         className="j-menu__item"
         onClick={() => {
           if (menu.price !== null) {
+            // The clipboard is missing outside secure contexts and may be
+            // refused; copying is best effort.
             void navigator.clipboard
               ?.writeText(String(menu.price))
               .catch(() => undefined);
@@ -97,7 +107,7 @@ export function ChartContextMenu({
 }
 
 /**
- * Human title of a chart pane (window titles, placeholders).
+ * Returns the title of a chart pane (window titles, placeholders).
  * @param chart Chart state.
  * @return Text such as `BTCUSD 5m`.
  */
@@ -106,8 +116,9 @@ export function chartTitle(chart: ChartState): string {
 }
 
 /**
- * One grid cell: the chart pane, or a placeholder while it is detached.
- * @param props Chart, activity, runtime and the menu callback.
+ * Renders one grid cell: the chart pane, or a placeholder while it is
+ * detached.
+ * @param props Chart, whether it is active, runtime and the menu callback.
  * @return Pane or placeholder.
  */
 function ChartSlot({
@@ -146,14 +157,16 @@ function ChartSlot({
 }
 
 /**
- * Chart grid.
- * @return Grid.
+ * Renders the chart grid of the workspace layout.
+ * @return Grid element.
  */
 export function ChartGrid(): ReactElement {
   const runtime = useRuntime();
   const workspace = useStore(runtime.workspace);
   const charts = visibleCharts(workspace);
   const gridRef = useRef<HTMLDivElement>(null);
+  // Saved sizes are untrusted; `gridSizesFor` validates them and falls back
+  // to equal tracks.
   const savedSizes = (
     workspace.panels as Record<string, unknown> | undefined
   )?.[GRID_PANEL_KEY] as Record<string, unknown> | undefined;
@@ -161,6 +174,7 @@ export function ChartGrid(): ReactElement {
     workspace.layout,
     savedSizes?.[workspace.layout]
   );
+  // Sizes while a splitter moves; the workspace is written once on commit.
   const [dragging, setDragging] = useState<GridSizes | null>(null);
   const draggingRef = useRef<GridSizes | null>(null);
   const sizes = dragging ?? committed;
@@ -177,6 +191,7 @@ export function ChartGrid(): ReactElement {
     const extent = axis === 'cols' ? box?.width : box?.height;
     if (!extent) return;
     const base = draggingRef.current ?? committed;
+    // Track sizes are fractions of the grid, so pixels are scaled by it.
     const next = {
       ...base,
       [axis]: resizeTracks(base[axis], index, deltaPx / extent),
@@ -190,6 +205,7 @@ export function ChartGrid(): ReactElement {
     if (value) commit(value);
     else setDragging(null);
   };
+  // Positions of the inner track edges, as fractions of the grid.
   const boundaries = (tracks: readonly number[]) =>
     tracks
       .slice(0, -1)
@@ -233,6 +249,7 @@ export function ChartGrid(): ReactElement {
           min={0}
           max={100}
           className="chart-grid__splitter"
+          // Centres the 6px handle on the track edge.
           style={{left: `calc(${at * 100}% - 3px)`}}
           testId={`grid-splitter-col-${index}`}
           onDrag={delta => void resize('cols', index, delta)}
@@ -248,6 +265,7 @@ export function ChartGrid(): ReactElement {
           min={0}
           max={100}
           className="chart-grid__splitter"
+          // Centres the 6px handle on the track edge.
           style={{top: `calc(${at * 100}% - 3px)`}}
           testId={`grid-splitter-row-${index}`}
           onDrag={delta => void resize('rows', index, delta)}
@@ -262,6 +280,8 @@ export function ChartGrid(): ReactElement {
         >
           <ChartSlot
             chart={chart}
+            // The first visible chart stands in for an active chart that
+            // the layout does not show.
             active={
               chart.chart_id === workspace.active_chart_id ||
               (index === 0 &&

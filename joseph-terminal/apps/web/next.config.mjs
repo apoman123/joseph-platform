@@ -6,15 +6,17 @@
 
 /**
  * @fileoverview Next.js configuration: transpiles workspace packages and
- * sets security headers (CSP without eval in production).
+ * sets security headers, including a Content Security Policy (CSP) that
+ * allows `eval` only in development.
  */
 
 import path from 'node:path';
 import {fileURLToPath} from 'node:url';
 
 /**
- * Collects origins (http and ws) the browser may connect to.
- * @return {string} Space-separated CSP source list.
+ * Collects the origins (HTTP and WebSocket) of the configured engines, which
+ * the browser may connect to.
+ * @return {string} Space-separated CSP source list; empty in DEMO mode.
  */
 function connectSources() {
   const urls = [
@@ -34,8 +36,16 @@ function connectSources() {
   return [...origins].join(' ');
 }
 
+/** Whether this is a development build (`next dev`). */
 const isDev = process.env.NODE_ENV !== 'production';
 
+/**
+ * Content Security Policy header value. Inline scripts are allowed for the
+ * theme boot script in the root layout and the scripts Next.js inlines;
+ * inline styles for React `style` attributes. Development builds also need
+ * `eval` (webpack's development bundles) and WebSocket connections for hot
+ * reloading.
+ */
 const csp = [
   "default-src 'self'",
   `script-src 'self' 'unsafe-inline'${isDev ? " 'unsafe-eval'" : ''}`,

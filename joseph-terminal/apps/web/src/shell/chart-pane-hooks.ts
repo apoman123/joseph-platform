@@ -35,7 +35,7 @@ import type {TerminalRuntime} from '../composition/runtime';
 import {toChartBar} from './chart-bars';
 import {isRateInstrument} from './markets';
 
-/** Refresh interval of study and comparison data. */
+/** Refresh interval of live study and comparison data (30 s). */
 const REFRESH_MS = 30_000;
 
 /** Line colors of compared instruments (distinct from bid/ask/course). */
@@ -45,19 +45,19 @@ export const COMPARE_COLORS: readonly string[] = [
   '#b49cff',
 ];
 
-/** Values by bar start time. */
+/** Values by bar start time (UTC ms). */
 export type ValueByTime = ReadonlyMap<number, number>;
 
 /**
  * Reads a CSS custom property from the document root.
- * @param name Property name.
- * @return Value.
+ * @param name Property name, e.g. `--chart-text`.
+ * @return Computed value; empty when the property is not set.
  */
 function cssVar(name: string): string {
   return getComputedStyle(document.documentElement).getPropertyValue(name);
 }
 
-/** Engine delta bars by bar start time. */
+/** Engine delta bars by bar start time (UTC ms). */
 export type DeltaByTime = ReadonlyMap<number, DeltaBar>;
 
 /** State of the Delta % pane. */
@@ -71,8 +71,8 @@ export interface DeltaPaneState {
 }
 
 /**
- * Whether a chart shows the order-flow Delta % pane. Published rates
- * (yields) have no volume, so they never show it.
+ * Returns whether a chart shows the order-flow Delta % pane. Published
+ * rates (yields) have no volume, so they never show it.
  * @param chart Chart state.
  * @return True when the layer is visible and its pane is not hidden.
  */
@@ -87,10 +87,11 @@ export function deltaPaneShown(chart: ChartState): boolean {
 /**
  * Keeps the order-flow Delta % pane in sync with `/v1/indicators/series`.
  * A failed request shows an empty pane that says why, never invented bars.
+ * Live charts refresh every 30 s; a replayed chart fetches once.
  * @param port Chart port (null before mount).
  * @param chart Chart state.
- * @param runtime Runtime.
- * @param atMs Replay point-in-time, or null when live.
+ * @param runtime Runtime whose market client is asked.
+ * @param atMs Replay point-in-time (UTC ms), or null when live.
  * @return Pane state for the data window.
  */
 export function useDeltaPane(
@@ -100,6 +101,8 @@ export function useDeltaPane(
   atMs: number | null
 ): DeltaPaneState {
   const shown = deltaPaneShown(chart);
+  // Serialized so the effects re-run when the settings' content changes,
+  // not their object identity.
   const settingsKey = JSON.stringify(
     layerSettings(chart, 'order_flow_pressure')
   );
@@ -184,24 +187,26 @@ export function useDeltaPane(
   return {shown, bars, error};
 }
 
-/** One compared instrument with its latest close change. */
+/** One compared instrument with its closes. */
 export interface CompareEntry {
   /** Instrument id. */
   instrumentId: InstrumentId;
-  /** Line color. */
+  /** Line color, from `COMPARE_COLORS`. */
   color: string;
   /** Closes by bar start. */
   values: ValueByTime;
-  /** Error when candles could not be loaded. */
+  /** Why candles could not be loaded, or null when they were. */
   error: string | null;
 }
 
 /**
- * Loads comparison candles and overlays them on the chart.
- * @param port Chart port.
- * @param chart Chart state.
- * @param runtime Runtime.
- * @param labels Display symbol per instrument id.
+ * Loads comparison candles every 30 s and overlays them on the chart. A
+ * failed instrument keeps its entry with the error and is left off the
+ * chart.
+ * @param port Chart port (null before mount).
+ * @param chart Chart state; `compare` lists the instruments.
+ * @param runtime Runtime whose market client is asked.
+ * @param labels Returns the display symbol of an instrument id.
  * @return Entries for the legend and data window.
  */
 export function useCompare(
@@ -235,6 +240,7 @@ export function useCompare(
       ).then(results => {
         if (!alive) return;
         const next: CompareEntry[] = results.map((result, i) => {
+          // `results` lines up with `list`, the split `chart.compare` ids.
           const instrumentId = list[i] as InstrumentId;
           const color = COMPARE_COLORS[i % COMPARE_COLORS.length] ?? '#f2b544';
           if (result.status === 'rejected') {
@@ -277,8 +283,8 @@ export function useCompare(
       alive = false;
       clearInterval(timer);
     };
-    // `labels` is read once per load; the legend re-renders separately.
-  }, [port, key, timeframe, runtime]); // eslint-disable-line react-hooks/exhaustive-deps
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- `labels` is read once per load; a new labels function must not restart the polling
+  }, [port, key, timeframe, runtime]);
   return entries;
 }
 
@@ -286,10 +292,10 @@ export function useCompare(
  * Draws session separators while the chart option is on: UTC calendar
  * boundaries for 24x7 markets, every trading session (in exchange time)
  * for session markets.
- * @param port Chart port.
+ * @param port Chart port (null before mount).
  * @param enabled Whether separators are shown.
- * @param bars Bars currently displayed.
- * @param timeframe Chart timeframe accessor.
+ * @param bars Bars currently displayed (read on every repaint).
+ * @param timeframe Chart timeframe.
  * @param timeZone Exchange time zone (`UTC` for 24x7 markets).
  */
 export function useSessionSeparators(

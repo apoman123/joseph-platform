@@ -5,6 +5,12 @@
 
 /*
  * Terminal shell layout and pieces. Uses tokens.css roles only.
+ *
+ * Stacking order (z-index), lowest first: sticky table headers 1, pane
+ * overlays and the stale notice 2, provenance ribbon 3, data window 4,
+ * splitters and the drawing style bar 6, chart context menu 20, popovers
+ * 50, drawing tool flyouts 60, toasts 90, command palette and modal dialogs
+ * 100.
  */
 
 *,
@@ -44,6 +50,7 @@ kbd {
   text-align: center;
 }
 
+/* Visually hidden, still read by screen readers. */
 .sr-only {
   border: 0;
   clip: rect(0, 0, 0, 0);
@@ -78,18 +85,20 @@ kbd {
       --statusbar-height
     );
   height: 100dvh;
+  /* `hidden` is the fallback for browsers without `clip`; `clip` also stops
+     focus from scrolling the whole frame sideways. */
   overflow: hidden;
-  /* `clip` also stops focus from scrolling the whole frame sideways. */
   overflow: clip;
 }
 
+/* The side panel spans both rows; the bottom panel sits under the toolbar
+   and the charts. */
 .terminal__body {
   display: grid;
-  grid-template-areas:
-    'tools charts side'
-    'bottom bottom side';
-  grid-template-columns: var(--toolbar-width) minmax(0, 1fr) auto;
-  grid-template-rows: minmax(0, 1fr) auto;
+  grid-template:
+    'tools charts side' minmax(0, 1fr)
+    'bottom bottom side' auto
+    / var(--toolbar-width) minmax(0, 1fr) auto;
   min-height: 0;
 }
 
@@ -430,7 +439,8 @@ kbd {
   width: 20px;
 }
 
-/* Chart grid */
+/* Chart grid. The 1px gap lets the background show as pane dividers. Track
+   sizes the splitters set arrive as an inline grid template. */
 .chart-grid {
   background: var(--fathom);
   display: grid;
@@ -464,7 +474,9 @@ kbd {
   min-width: 0;
 }
 
-/* Pane */
+/* Pane: header (row 1), replay bar (row 2, only while replaying) and the
+   chart canvas (row 3). The pane is a size container so its header can
+   shed detail in narrow multi-chart layouts. */
 .pane {
   background: var(--chart-bg);
   container-type: inline-size;
@@ -475,6 +487,7 @@ kbd {
   position: relative;
 }
 
+/* The active pane is outlined only when there is more than one. */
 .chart-grid:not(.chart-grid--1) .pane--active {
   box-shadow: inset 0 0 0 1px var(--haze-dim);
 }
@@ -555,6 +568,9 @@ kbd {
   position: relative;
 }
 
+/* Messages over the chart start below the pane header (40px tall). They let
+   pointer events through, so the chart stays usable; only their cards take
+   clicks. */
 .pane__overlay {
   display: grid;
   inset: 40px 0 0;
@@ -571,6 +587,7 @@ kbd {
   pointer-events: auto;
 }
 
+/* Above the time axis and left of the price axis. */
 .pane__stale {
   bottom: 36px;
   left: var(--space-3);
@@ -579,7 +596,8 @@ kbd {
   z-index: 2;
 }
 
-/* Provenance ribbon: the signature element. */
+/* Provenance ribbon: the signature element. Its pattern encodes the feed
+   state (solid live, dashed polled, dotted replay, hatched demo). */
 .ribbon {
   height: 3px;
   left: 0;
@@ -651,7 +669,7 @@ kbd {
   font-variant-numeric: tabular-nums;
 }
 
-/* Chart context menu */
+/* Chart context menu, placed at the pointer by an inline style. */
 .chart-menu {
   position: absolute;
   z-index: 20;
@@ -953,6 +971,7 @@ kbd {
   font-variation-settings: 'wdth' 112;
 }
 
+/* stylelint-disable-next-line selector-no-qualifying-type -- `a:not(.j-btn)` is a type selector with a negation (links that are not styled as buttons), not a class qualified by a type */
 .static-page a:not(.j-btn) {
   color: var(--info);
 }
@@ -968,9 +987,12 @@ kbd {
   }
 
   .terminal__body {
-    grid-template-areas: 'tools' 'charts' 'side' 'bottom';
-    grid-template-columns: minmax(0, 1fr);
-    grid-template-rows: auto minmax(360px, 62vh) auto auto;
+    grid-template:
+      'tools' auto
+      'charts' minmax(360px, 62vh)
+      'side' auto
+      'bottom' auto
+      / minmax(0, 1fr);
   }
 
   .drawbar {
@@ -998,17 +1020,21 @@ kbd {
     width: auto;
   }
 
+  /* Four and eight charts fall back to a 2 x 2 track template. */
   .chart-grid--4,
   .chart-grid--8 {
+    /* stylelint-disable-next-line declaration-no-important -- beats the inline grid template that chart-grid.tsx sets from the splitter track sizes */
     grid-template: repeat(2, minmax(0, 1fr)) / repeat(2, minmax(0, 1fr)) !important;
   }
 
+  /* The stacked layout has fixed tracks, so nothing can be resized. */
   .chart-grid__splitter,
   .panel__resize {
     display: none;
   }
 
   .panel--side {
+    /* stylelint-disable-next-line declaration-no-important -- beats the inline width that slot-host.tsx sets from the saved dock size */
     width: auto !important;
   }
 
@@ -1049,7 +1075,9 @@ kbd {
   }
 }
 
-/* Splitters: docks and chart-grid tracks. */
+/* Splitters: docks and chart-grid tracks. Each is a 6px handle centred on
+   the border it moves. `touch-action: none` hands touch drags to the
+   pointer handlers instead of scrolling the page. */
 .splitter {
   background: transparent;
   position: absolute;
@@ -1077,6 +1105,7 @@ kbd {
   outline-offset: -2px;
 }
 
+/* Anchors the dock's resize handle on its inner edge. */
 .panel {
   position: relative;
 }
@@ -1118,6 +1147,8 @@ kbd {
   color: var(--chalk);
 }
 
+/* Fixed, placed from the trigger's viewport position, so the scrolling
+   toolbar does not clip it. */
 .drawbar__flyout {
   animation: popover-in var(--duration-fast) var(--ease-out);
   min-width: 210px;
@@ -1182,7 +1213,8 @@ kbd {
   width: 16px;
 }
 
-/* Data window. */
+/* Data window. Slightly translucent over the chart; it never takes the
+   pointer, so the crosshair keeps tracking underneath. */
 .data-window {
   background: color-mix(in srgb, var(--hull) 92%, transparent);
   border: 1px solid var(--fathom);
@@ -1268,7 +1300,7 @@ kbd {
   cursor: crosshair;
 }
 
-/* Floating drawing style editor. */
+/* Floating drawing style editor, centred just below the pane header. */
 .style-bar {
   align-items: center;
   background: var(--hull);
@@ -1507,6 +1539,8 @@ kbd {
   padding: var(--space-3) var(--space-4) var(--space-4);
 }
 
+/* Sticks to the bottom of the scrolling body; the negative offset covers
+   the body's bottom padding, so no field shows below the buttons. */
 .dialog__foot {
   background: var(--hull);
   bottom: calc(-1 * var(--space-4));
@@ -1633,6 +1667,8 @@ kbd {
 }
 
 /* Market picker groups and session markets (exchange calendars). */
+
+/* Widens the picker defined above for the market group tabs. */
 .instrument-search {
   width: 440px;
 }
@@ -1754,6 +1790,7 @@ kbd {
   padding-left: 5px;
 }
 
+/* Narrow panes keep the open/closed state and drop its detail. */
 @container (max-width: 760px) {
   .market-status__detail,
   .market-status__notice {

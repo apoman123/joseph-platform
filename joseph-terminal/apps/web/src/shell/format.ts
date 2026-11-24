@@ -7,6 +7,10 @@
 /**
  * @fileoverview Display formatting helpers (display only; never used to
  * compute order parameters).
+ *
+ * Missing or invalid values format as an em dash (`—`). `formatDecimal`,
+ * `formatNumber` and `formatPct` write negatives with the typographic minus
+ * (U+2212), which is as wide as `+` in tabular figures.
  */
 
 import {
@@ -25,10 +29,11 @@ import {
 import {zoneAbbreviation} from '@joseph/chart-core';
 
 /**
- * Formats a decimal string with grouping and fixed digits.
- * @param value Decimal string or null.
+ * Formats a decimal string with thousands separators and fixed digits,
+ * rounding with `Decimal` (no floating-point error).
+ * @param value Decimal string, or null/undefined when missing.
  * @param digits Fraction digits.
- * @return Text or an em dash for missing values.
+ * @return Text, or an em dash for missing or invalid values.
  */
 export function formatDecimal(
   value: string | null | undefined,
@@ -38,6 +43,7 @@ export function formatDecimal(
   const fixed = Decimal.parse(value).toFixed(digits);
   const [whole = '0', fraction] = fixed.split('.');
   const negative = whole.startsWith('-');
+  // A comma before every run of three digits that ends the whole part.
   const grouped = (negative ? whole.slice(1) : whole).replace(
     /\B(?=(\d{3})+(?!\d))/g,
     ','
@@ -46,10 +52,10 @@ export function formatDecimal(
 }
 
 /**
- * Formats a price using the instrument tick precision.
- * @param value Price.
- * @param tickSize Tick size.
- * @return Text.
+ * Formats a price with as many decimals as the tick size has (at most 8).
+ * @param value Price as a decimal string.
+ * @param tickSize Tick size, or null for 2 decimals.
+ * @return Text, or an em dash for missing or invalid values.
  */
 export function formatPrice(
   value: string | null | undefined,
@@ -62,10 +68,10 @@ export function formatPrice(
 }
 
 /**
- * Formats a number for display.
- * @param value Number.
+ * Formats a number with thousands separators and fixed digits.
+ * @param value Number, or null/undefined when missing.
  * @param digits Fraction digits.
- * @return Text.
+ * @return Text, or an em dash for missing or non-finite values.
  */
 export function formatNumber(
   value: number | null | undefined,
@@ -81,9 +87,9 @@ export function formatNumber(
 }
 
 /**
- * Formats large USD amounts compactly (e.g. `$5.75B`).
+ * Formats a USD amount compactly with two decimals (e.g. `$5.75B`).
  * @param value Decimal string.
- * @return Text.
+ * @return Text, or an em dash for missing or invalid values.
  */
 export function formatUsdCompact(value: string | null | undefined): string {
   if (value == null || !Decimal.isValid(value)) return '—';
@@ -101,10 +107,10 @@ export function formatUsdCompact(value: string | null | undefined): string {
 }
 
 /**
- * Formats a signed percent.
- * @param value Decimal string percent.
- * @param digits Digits.
- * @return Text like `+1.25%`.
+ * Formats a signed percent; zero gets a `+`.
+ * @param value Percent as a decimal string (`1.25` for 1.25%).
+ * @param digits Fraction digits.
+ * @return Text like `+1.25%`, or an em dash for missing or invalid values.
  */
 export function formatPct(
   value: string | null | undefined,
@@ -117,9 +123,9 @@ export function formatPct(
 
 /**
  * Formats a UTC time of day.
- * @param ms UTC ms.
- * @param seconds Include seconds.
- * @return `HH:MM[:SS] UTC`.
+ * @param ms Instant, UTC ms.
+ * @param seconds Whether to include seconds.
+ * @return `HH:MM[:SS] UTC`, or an em dash when missing.
  */
 export function formatUtcTime(
   ms: number | null | undefined,
@@ -130,9 +136,9 @@ export function formatUtcTime(
 }
 
 /**
- * Formats an age in compact units.
+ * Formats an age in compact units, rounded to the nearest unit.
  * @param ms Age in ms.
- * @return Text like `42 s` or `3 min`.
+ * @return Text like `now`, `42 s` or `3 min`.
  */
 export function formatAge(ms: number): string {
   if (ms < 1000) return 'now';
@@ -158,12 +164,15 @@ const MONTH_NAMES = [
 ];
 
 /**
- * ISO-like text of an instant in a time zone (`YYYY-MM-DDTHH:MM:SS`).
- * @param ms UTC ms.
+ * Returns ISO-like text of an instant in a time zone.
+ * @param ms Instant, UTC ms.
  * @param timeZone IANA time zone.
- * @return Local text (no zone suffix).
+ * @return Local wall time as `YYYY-MM-DDTHH:MM:SS.sssZ`; the `Z` is
+ *     meaningless here and callers slice it off.
  */
 function zonedIso(ms: number, timeZone: string): string {
+  // The wall-clock fields are re-encoded as if they were UTC, so
+  // `toISOString` prints them unchanged.
   const p = zonedParts(ms, timeZone);
   return new Date(
     Date.UTC(p.year, p.month - 1, p.day, p.hour, p.minute, p.second)
@@ -171,9 +180,9 @@ function zonedIso(ms: number, timeZone: string): string {
 }
 
 /**
- * Exchange time zone of a calendar, or null for `24x7` (UTC labels).
- * @param calendar Session calendar.
- * @return Time zone or null.
+ * Returns the exchange time zone of a calendar.
+ * @param calendar Session calendar, or null/undefined for UTC.
+ * @return Time zone, or null for `24x7` calendars (labelled in UTC).
  */
 function exchangeZone(calendar: BarCalendar | null | undefined): string | null {
   return calendar && !calendar.continuous ? calendar.timeZone : null;
@@ -258,7 +267,7 @@ export function formatBarClose(
 /**
  * Formats a non-negative amount compactly (`950`, `12.4K`, `1.2M`, `3.4B`).
  * @param value Decimal string or number.
- * @return Text, or an em dash when missing.
+ * @return Text, or an em dash when missing or not a number.
  */
 export function formatCompact(
   value: string | number | null | undefined
@@ -290,11 +299,13 @@ export type DisplayInstrument = Pick<
   Partial<Pick<Instrument, 'tick_ladder' | 'board_lot' | 'calendar' | 'key'>>;
 
 /**
- * Tick size at a price (TWSE-style ladders), else the instrument tick.
+ * Returns the tick size at a price: the ladder rung with the highest
+ * `min_price` not above the price (TWSE-style ladders), else the
+ * instrument tick.
  * @param tickSize Instrument tick size.
- * @param ladder Price-dependent ticks (may be empty).
+ * @param ladder Price-dependent ticks, in any order (may be empty).
  * @param price Price.
- * @return Tick size text.
+ * @return Tick size as a decimal string.
  */
 export function tickAt(
   tickSize: string,
@@ -312,13 +323,13 @@ export function tickAt(
 }
 
 /**
- * Tick that gives the price axis enough precision for a price range: the
- * finest ladder tick between `low` and `high` (the instrument tick without
- * a ladder).
+ * Returns the tick that gives the price axis enough precision for a price
+ * range: the finest ladder tick between `low` and `high` (the instrument
+ * tick without a ladder).
  * @param instrument Instrument.
  * @param low Lowest price in view.
  * @param high Highest price in view.
- * @return Tick size text.
+ * @return Tick size as a decimal string.
  */
 export function displayTickSize(
   instrument: DisplayInstrument,
@@ -364,7 +375,8 @@ export function formatInstrumentPrice(
 }
 
 /**
- * Shares per board lot when volumes are shown in lots (TWSE/TPEx 張).
+ * Returns the shares per board lot when volumes are shown in lots
+ * (TWSE/TPEx 張).
  * @param instrument Instrument, or null while loading.
  * @return Board lot, or null when volumes are shown in shares or units.
  */

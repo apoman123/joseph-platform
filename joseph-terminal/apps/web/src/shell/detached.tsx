@@ -37,7 +37,7 @@ const STATUS_TEXT: Readonly<Record<DetachedStatus, string>> = {
 };
 
 /**
- * Detached pane for a reference, with its current status.
+ * Returns the detached pane for a reference, with its current status.
  * @param ref Pane reference.
  * @return Pane and status, or null when docked.
  */
@@ -53,9 +53,10 @@ export function useDetached(
 }
 
 /**
- * Icon button that opens a pane in another window.
- * @param props Pane and title.
- * @return Button, or nothing when windows can't be linked.
+ * Renders the icon button that opens a pane in another window. Its
+ * `aria-label` names the pane.
+ * @param props Pane, title and test id.
+ * @return Button, or null when windows can't be linked.
  */
 export function PopOutButton({
   pane,
@@ -84,7 +85,9 @@ export function PopOutButton({
 }
 
 /**
- * Placeholder shown where a detached pane used to be.
+ * Renders the placeholder shown where a detached pane used to be: a
+ * labelled region, `aria-busy` while its window opens or reconnects, with
+ * the status in a `role="status"` line and the window actions as buttons.
  * @param props Pane, status and size variant.
  * @return Placeholder.
  */
@@ -157,10 +160,10 @@ export function DetachedPlaceholder({
 }
 
 /**
- * Banner offering to restore windows remembered from the saved layout (a
- * browser restart closed them). Hidden while a reloaded main window waits
- * for windows that kept running.
- * @return Banner, or nothing when every detached pane has a window.
+ * Renders the banner offering to restore windows remembered from the saved
+ * layout (a browser restart closed them). Hidden while a reloaded main
+ * window waits for windows that kept running.
+ * @return Banner region, or null when every detached pane has a window.
  */
 export function DetachedBanner(): ReactElement | null {
   const runtime = useRuntime();

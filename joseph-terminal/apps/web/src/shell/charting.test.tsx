@@ -12,6 +12,7 @@
  */
 
 import type {ChartBar} from '@joseph/chart-core';
+import type {DrawingDocument} from '@joseph/contracts';
 import {createDrawing, createCommand, DrawingStore} from '@joseph/drawing-core';
 import {activeChart, layerSettings, layerStyle} from '@joseph/terminal-shell';
 import {
@@ -380,9 +381,9 @@ describe('DataWindow', () => {
 });
 
 /**
- * Seeds a store with one drawing.
- * @param runtime Runtime.
- * @param toolId Tool.
+ * Seeds a store with one drawing and registers it for chart-1.
+ * @param runtime Runtime to register the store with.
+ * @param toolId Tool id of the drawing.
  * @return Store and drawing id.
  */
 function seed(runtime: TerminalRuntime, toolId: string) {
@@ -465,12 +466,12 @@ describe('drawing editing UI', () => {
       })
     );
     expect(store.find(id)).toBeUndefined();
-    expect(
-      describeDrawing(runtime, {
-        ...(store.get().drawings[0] ?? {}),
-        tool_id: 'gone',
-      } as never).name
-    ).toBe('Unsupported (gone)');
+    // Deliberately malformed: a drawing whose tool is not registered.
+    const orphan = {
+      ...(store.get().drawings[0] ?? {}),
+      tool_id: 'gone',
+    } as unknown as DrawingDocument;
+    expect(describeDrawing(runtime, orphan).name).toBe('Unsupported (gone)');
   });
 
   it('groups toolbar tools and restores saved dock sizes within limits', async () => {

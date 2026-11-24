@@ -35,9 +35,10 @@ export type WebFeatureContext = FeatureContext<WebView>;
 export type WebFeature = TerminalFeature<WebView>;
 
 /**
- * Subscribes a component to a store.
+ * Subscribes a component to a store; the component re-renders when the
+ * value changes.
  * @param store Observable store.
- * @return The current value; re-renders on change.
+ * @return The current value.
  */
 export function useStore<T>(store: ReadableStore<T>): T {
   // A stable subscribe function per store: React re-subscribes whenever
