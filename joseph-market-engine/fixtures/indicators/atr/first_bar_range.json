@@ -1,0 +1,23 @@
+{
+  "plugin_id": "atr",
+  "timeframe": "5m",
+  "settings": {
+    "length": 1,
+    "tick_size": "0.01"
+  },
+  "description": "One bar (H 13, L 9) with length 1: the first true range is high - low = 4, so ATR = 4.",
+  "bars": [
+    [
+      "10",
+      "13",
+      "9",
+      "11",
+      "1"
+    ]
+  ],
+  "expect": {
+    "final_values": {
+      "atr": "4"
+    }
+  }
+}

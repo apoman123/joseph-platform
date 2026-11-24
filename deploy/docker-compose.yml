@@ -1,0 +1,186 @@
+# Joseph platform: market engine, execution engine and terminal.
+#   Local:   docker compose -f deploy/docker-compose.yml --env-file deploy/.env up --build
+#   Server:  IMAGE_TAG=sha-<commit> docker compose -f deploy/docker-compose.yml --env-file deploy/.env pull && ... up -d
+#   IBKR:    add --profile ibkr to also run IB Gateway (docs/BROKERS.md)
+# Images default to GHCR; `--build` builds them from this checkout instead.
+name: joseph
+
+# Settings both engines read. Passing JOSEPH_DEV_TOKENS (even empty)
+# replaces the execution engine's built-in development token.
+x-engine-env: &engine-env
+  JOSEPH_ENV: ${JOSEPH_ENV:-development}
+  JOSEPH_DEV_TOKENS: ${JOSEPH_DEV_TOKENS:-}
+  # Shared token of the engine-to-engine /internal calls; compose refuses
+  # to start without it.
+  JOSEPH_SERVICE_TOKEN: ${JOSEPH_SERVICE_TOKEN:?set JOSEPH_SERVICE_TOKEN in deploy/.env}
+  JOSEPH_CORS_ORIGINS: ${JOSEPH_CORS_ORIGINS:-http://localhost:3000}
+
+services:
+  market:
+    image: ${IMAGE_REGISTRY:-ghcr.io/joseph}/joseph-market-engine:${IMAGE_TAG:-latest}
+    build:
+      context: ../joseph-market-engine
+      # Optional token for plugin requirements on a private git host.
+      secrets: [plugin_git_token]
+      args:
+        # "--extra sinopac" for SinoPac Shioaji data (JOSEPH_TW_DATA_SOURCE).
+        UV_EXTRAS: ${MARKET_UV_EXTRAS:-}
+        # Indicator plugin packages (pip requirements); empty: built-ins.
+        PLUGIN_REQUIREMENTS: ${MARKET_PLUGIN_REQUIREMENTS:-}
+        IMAGE_LICENSES: ${MARKET_IMAGE_LICENSES:-MIT}
+    restart: unless-stopped
+    environment:
+      <<: *engine-env
+      JOSEPH_EXECUTION_URL: http://execution:8100
+      JOSEPH_ENABLED_VENUES: ${JOSEPH_ENABLED_VENUES:-binance,hyperliquid,lighter,bitget,mexc,twse,tpex,nasdaq,nyse,cboe,treasury,mock}
+      JOSEPH_DEMO_ONLY: ${JOSEPH_DEMO_ONLY:-false}
+      JOSEPH_DATABASE_URL: ${JOSEPH_MARKET_DATABASE_URL:-sqlite:////app/var/market.db}
+      # Indicator plugins: entry points to load ("*", "none" or names),
+      # plugin ids to disable, and ids that must load or startup fails.
+      JOSEPH_INDICATOR_PLUGIN_PACKAGES: ${JOSEPH_INDICATOR_PLUGIN_PACKAGES:-*}
+      JOSEPH_INDICATOR_PLUGINS_DISABLED: ${JOSEPH_INDICATOR_PLUGINS_DISABLED:-}
+      JOSEPH_INDICATOR_PLUGINS_REQUIRED: ${JOSEPH_INDICATOR_PLUGINS_REQUIRED:-}
+      # US stocks (nasdaq/nyse/cboe) need an Alpaca market-data key.
+      JOSEPH_ALPACA_KEY_ID: ${JOSEPH_ALPACA_KEY_ID:-}
+      JOSEPH_ALPACA_SECRET_KEY: ${JOSEPH_ALPACA_SECRET_KEY:-}
+      JOSEPH_ALPACA_FEED: ${JOSEPH_ALPACA_FEED:-iex}
+      # Taiwan intraday: twse (official, keyless) or sinopac (Shioaji).
+      JOSEPH_TW_DATA_SOURCE: ${JOSEPH_TW_DATA_SOURCE:-twse}
+      # Paths under /run/joseph-secrets (the JOSEPH_SECRETS_DIR mount).
+      JOSEPH_SINOPAC_API_KEY_FILE: ${JOSEPH_SINOPAC_API_KEY_FILE:-}
+      JOSEPH_SINOPAC_SECRET_KEY_FILE: ${JOSEPH_SINOPAC_SECRET_KEY_FILE:-}
+      JOSEPH_MEXC_WS_FORMAT: ${JOSEPH_MEXC_WS_FORMAT:-protobuf}
+      JOSEPH_TRADE_RECORDING: ${JOSEPH_TRADE_RECORDING:-true}
+      JOSEPH_TRADE_BAR_RETENTION_DAYS: ${JOSEPH_TRADE_BAR_RETENTION_DAYS:-30}
+      JOSEPH_TRADE_ARCHIVE_URL: ${JOSEPH_TRADE_ARCHIVE_URL:-}
+      JOSEPH_BINANCE_ARCHIVE: ${JOSEPH_BINANCE_ARCHIVE:-true}
+      JOSEPH_BITGET_ARCHIVE: ${JOSEPH_BITGET_ARCHIVE:-true}
+      JOSEPH_LIGHTER_ARCHIVE: ${JOSEPH_LIGHTER_ARCHIVE:-true}
+      JOSEPH_TELEGRAM_BOT_TOKEN: ${JOSEPH_TELEGRAM_BOT_TOKEN:-}
+      JOSEPH_LINE_CHANNEL_TOKEN: ${JOSEPH_LINE_CHANNEL_TOKEN:-}
+      JOSEPH_WEBHOOK_SECRET: ${JOSEPH_WEBHOOK_SECRET:-}
+      JOSEPH_SMTP_HOST: ${JOSEPH_SMTP_HOST:-}
+      JOSEPH_SMTP_FROM: ${JOSEPH_SMTP_FROM:-}
+      JOSEPH_SMTP_USERNAME: ${JOSEPH_SMTP_USERNAME:-}
+      JOSEPH_SMTP_PASSWORD: ${JOSEPH_SMTP_PASSWORD:-}
+    volumes:
+      - market-data:/app/var
+      - ${JOSEPH_SECRETS_DIR:-./secrets}:/run/joseph-secrets:ro
+    ports: ["${MARKET_PORT:-8000}:8000"]
+
+  execution:
+    image: ${IMAGE_REGISTRY:-ghcr.io/joseph}/joseph-execution-engine:${IMAGE_TAG:-latest}
+    build:
+      context: ../joseph-execution-engine
+      args:
+        # e.g. "--extra ibkr --extra sinopac" to include the broker SDKs.
+        UV_EXTRAS: ${EXECUTION_UV_EXTRAS:-}
+    restart: unless-stopped
+    depends_on:
+      market: {condition: service_healthy}
+    environment:
+      <<: *engine-env
+      JOSEPH_MARKET_GATEWAY: http
+      JOSEPH_MARKET_URL: http://market:8000
+      JOSEPH_DATABASE_URL: ${JOSEPH_EXECUTION_DATABASE_URL:-sqlite:////app/var/execution.db}
+      # Empty vault key: refused unless JOSEPH_ENV=development, which uses
+      # a per-process key (stored credentials are lost on restart). Empty
+      # preview secret: a per-process key. Empty TOTP secret: every step-up
+      # fails, so no LIVE arming or AUTO_LIVE consent.
+      JOSEPH_VAULT_MASTER_KEY: ${JOSEPH_VAULT_MASTER_KEY:-}
+      JOSEPH_PREVIEW_SECRET: ${JOSEPH_PREVIEW_SECRET:-}
+      JOSEPH_STEP_UP_TOTP_SECRET: ${JOSEPH_STEP_UP_TOTP_SECRET:-}
+      JOSEPH_LIVE_ARM_MAX_MS: ${JOSEPH_LIVE_ARM_MAX_MS:-28800000}
+      # Global LIVE gate: on by default in this deployment (off in code).
+      # A LIVE order still needs a verified account, an ALLOW from the Risk
+      # Gateway (which also applies kill switches and the emergency halt)
+      # and step-up: a preview and an armed account for manual orders, a
+      # consent for AUTO_LIVE ones.
+      JOSEPH_LIVE_TRADING_ENABLED: ${JOSEPH_LIVE_TRADING_ENABLED:-true}
+      JOSEPH_EMERGENCY_HALT: ${JOSEPH_EMERGENCY_HALT:-false}
+      JOSEPH_VENUE_SANDBOX: ${JOSEPH_VENUE_SANDBOX:-}
+      JOSEPH_VENUE_URLS: ${JOSEPH_VENUE_URLS:-}
+      JOSEPH_VENUE_TIMEOUT_S: ${JOSEPH_VENUE_TIMEOUT_S:-10}
+      JOSEPH_VENUE_MARKET_SLIPPAGE_BPS: ${JOSEPH_VENUE_MARKET_SLIPPAGE_BPS:-50}
+      JOSEPH_LIVE_STREAMS: ${JOSEPH_LIVE_STREAMS:-true}
+      # Securities brokers (docs/BROKERS.md). Secrets only via *_FILE paths
+      # under /run/joseph-secrets (the JOSEPH_SECRETS_DIR mount).
+      JOSEPH_EQUITY_CLOSED_MARKET_ORDERS: ${JOSEPH_EQUITY_CLOSED_MARKET_ORDERS:-reject}
+      JOSEPH_PAPER_TWD_STARTING_CASH: ${JOSEPH_PAPER_TWD_STARTING_CASH:-3000000}
+      JOSEPH_TWD_LIMIT_FACTOR: ${JOSEPH_TWD_LIMIT_FACTOR:-30}
+      JOSEPH_IBKR_ENABLED: ${JOSEPH_IBKR_ENABLED:-false}
+      JOSEPH_IBKR_HOST: ${JOSEPH_IBKR_HOST:-ib-gateway}
+      JOSEPH_IBKR_PORT: ${JOSEPH_IBKR_PORT:-4004}
+      JOSEPH_IBKR_PAPER: ${JOSEPH_IBKR_PAPER:-true}
+      JOSEPH_IBKR_CLIENT_ID: ${JOSEPH_IBKR_CLIENT_ID:-17}
+      JOSEPH_IBKR_SHORT_SELLING: ${JOSEPH_IBKR_SHORT_SELLING:-false}
+      JOSEPH_IBKR_READONLY: ${JOSEPH_IBKR_READONLY:-false}
+      JOSEPH_SINOPAC_ENABLED: ${JOSEPH_SINOPAC_ENABLED:-false}
+      JOSEPH_SINOPAC_SIMULATION: ${JOSEPH_SINOPAC_SIMULATION:-true}
+      JOSEPH_SINOPAC_API_KEY_FILE: ${JOSEPH_SINOPAC_API_KEY_FILE:-}
+      JOSEPH_SINOPAC_SECRET_KEY_FILE: ${JOSEPH_SINOPAC_SECRET_KEY_FILE:-}
+      JOSEPH_SINOPAC_CA_PATH: ${JOSEPH_SINOPAC_CA_PATH:-}
+      JOSEPH_SINOPAC_CA_PASSWORD_FILE: ${JOSEPH_SINOPAC_CA_PASSWORD_FILE:-}
+      JOSEPH_SINOPAC_PERSON_ID_FILE: ${JOSEPH_SINOPAC_PERSON_ID_FILE:-}
+    volumes:
+      - execution-data:/app/var
+      - ${JOSEPH_SECRETS_DIR:-./secrets}:/run/joseph-secrets:ro
+    ports: ["${EXECUTION_PORT:-8100}:8100"]
+
+  web:
+    image: ${IMAGE_REGISTRY:-ghcr.io/joseph}/joseph-terminal:${IMAGE_TAG:-latest}
+    build:
+      context: ../joseph-terminal
+      args:
+        NEXT_PUBLIC_MARKET_API_URL: ${PUBLIC_MARKET_API_URL:-http://localhost:8000}
+        NEXT_PUBLIC_MARKET_WS_URL: ${PUBLIC_MARKET_WS_URL:-ws://localhost:8000}
+        NEXT_PUBLIC_EXECUTION_API_URL: ${PUBLIC_EXECUTION_API_URL:-http://localhost:8100}
+        NEXT_PUBLIC_EXECUTION_WS_URL: ${PUBLIC_EXECUTION_WS_URL:-ws://localhost:8100}
+        NEXT_PUBLIC_DEV_TOKEN: ${PUBLIC_DEV_TOKEN:-}
+    restart: unless-stopped
+    depends_on:
+      market: {condition: service_healthy}
+      execution: {condition: service_healthy}
+    ports: ["${WEB_PORT:-3000}:3000"]
+
+  # Optional (--profile ibkr): IB Gateway with IBC, image gnzsnz/ib-gateway
+  # (MIT; IBC is GPL-3.0 and runs unmodified in its own container). The
+  # IBKR login comes only from deploy/.env and a password file; the
+  # gateway's API is reachable only on the compose network (paper 4004,
+  # live 4003, relayed to the gateway's 4002/4001).
+  ib-gateway:
+    profiles: [ibkr]
+    image: ${IB_GATEWAY_IMAGE:-ghcr.io/gnzsnz/ib-gateway:10.50.1h}
+    restart: unless-stopped
+    environment:
+      TWS_USERID: ${IBKR_USERNAME:-}
+      TWS_PASSWORD_FILE: /run/secrets/ibkr_password
+      TRADING_MODE: ${IBKR_TRADING_MODE:-paper}
+      READ_ONLY_API: ${IBKR_READ_ONLY_API:-no}
+      TWOFA_TIMEOUT_ACTION: restart
+      RELOGIN_AFTER_TWOFA_TIMEOUT: "yes"
+      AUTO_RESTART_TIME: ${IBKR_AUTO_RESTART_TIME:-11:45 PM}
+      EXISTING_SESSION_DETECTED_ACTION: primary
+      TIME_ZONE: America/New_York
+      TZ: America/New_York
+      # A path under /run/joseph-secrets (the JOSEPH_SECRETS_DIR mount);
+      # empty turns VNC off.
+      VNC_SERVER_PASSWORD_FILE: ${IBKR_VNC_PASSWORD_FILE:-}
+    volumes:
+      - ${JOSEPH_SECRETS_DIR:-./secrets}:/run/joseph-secrets:ro
+    secrets: [ibkr_password]
+    # VNC (only when a VNC password file is set) for the first two-factor
+    # (2FA) login; bound to the host's loopback, so reach it over SSH.
+    ports: ["127.0.0.1:${IBKR_VNC_PORT:-5900}:5900"]
+
+# Engine data under /app/var (SQLite databases by default): `down` keeps
+# these volumes, `down -v` deletes them.
+volumes:
+  market-data:
+  execution-data:
+
+secrets:
+  plugin_git_token:
+    environment: PLUGIN_GIT_TOKEN
+  ibkr_password:
+    file: ${IBKR_PASSWORD_FILE:-./secrets/ibkr_password}

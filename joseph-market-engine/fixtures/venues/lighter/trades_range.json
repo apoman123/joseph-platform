@@ -1,0 +1,150 @@
+{
+ "code": 200,
+ "next_cursor": "eyJpbmRleCI6NDIxNjUxNTQzOTR9",
+ "trades": [
+  {
+   "block_height": 398124111,
+   "is_maker_ask": true,
+   "market_id": 1,
+   "price": "61080.4",
+   "size": "0.00098",
+   "timestamp": 1795348769819,
+   "trade_id": 42165189376,
+   "tx_hash": "807b0bf80d9c0de4f2de45567dc04cba69d0026e73f3caca1389f206c298ec51b31365b8bc068249",
+   "type": "trade",
+   "usd_amount": "59.858792"
+  },
+  {
+   "block_height": 398124110,
+   "is_maker_ask": false,
+   "market_id": 1,
+   "price": "61077.9",
+   "size": "0.00020",
+   "timestamp": 1795348769615,
+   "trade_id": 42165189259,
+   "tx_hash": "6937105f83bebd6e3c16adab4f2fea380f86f50162d0e84e68e99a33e918f1977b917fb2cb71ca2d",
+   "type": "trade",
+   "usd_amount": "12.215580"
+  },
+  {
+   "block_height": 398124109,
+   "is_maker_ask": false,
+   "market_id": 1,
+   "price": "61077.9",
+   "size": "0.01997",
+   "timestamp": 1795348769407,
+   "trade_id": 42165189053,
+   "tx_hash": "ef3209a5c1333eda17dcc6fe67170de875a6763b279202ac16528e39ae377086819f823b0dc01316",
+   "type": "trade",
+   "usd_amount": "1219.725663"
+  },
+  {
+   "block_height": 398124108,
+   "is_maker_ask": false,
+   "market_id": 1,
+   "price": "61077.9",
+   "size": "0.00169",
+   "timestamp": 1795348769234,
+   "trade_id": 42165188931,
+   "tx_hash": "4d9a5562113d1ab14727b2db23f3a9d785c8f3b3eff2db92edfae74523fd420a753a93029b679acd",
+   "type": "trade",
+   "usd_amount": "103.221651"
+  },
+  {
+   "block_height": 398124107,
+   "is_maker_ask": true,
+   "market_id": 1,
+   "price": "61080.9",
+   "size": "0.00163",
+   "timestamp": 1795348769037,
+   "trade_id": 42165188715,
+   "tx_hash": "a4d929edd5963dc9a3707cb3de632870e42c000fc85e450af2209746de6a01fdf23e9d7886550afc",
+   "type": "trade",
+   "usd_amount": "99.561867"
+  },
+  {
+   "block_height": 398124103,
+   "is_maker_ask": false,
+   "market_id": 1,
+   "price": "61077.7",
+   "size": "0.00340",
+   "timestamp": 1795348768535,
+   "trade_id": 42165188087,
+   "tx_hash": "e099418b666d5cc70215839d40b88e33608ff2c83d7143d68fc87676f20ec19a117a0c546a728e46",
+   "type": "trade",
+   "usd_amount": "207.664180"
+  },
+  {
+   "block_height": 398124101,
+   "is_maker_ask": false,
+   "market_id": 1,
+   "price": "61080.8",
+   "size": "0.00082",
+   "timestamp": 1795348768297,
+   "trade_id": 42165187767,
+   "tx_hash": "00000024161b85ae000001a203202629000000000000000000000000000000000000000000000000",
+   "type": "trade",
+   "usd_amount": "50.086256"
+  },
+  {
+   "block_height": 398124101,
+   "is_maker_ask": false,
+   "market_id": 1,
+   "price": "61080.8",
+   "size": "0.00636",
+   "timestamp": 1795348768297,
+   "trade_id": 42165187766,
+   "tx_hash": "7f713d011192d339cd60c2b618f565c19040967abfeb00e1e4e2d6451b39a199da7858dfbb3efe06",
+   "type": "trade",
+   "usd_amount": "388.473888"
+  },
+  {
+   "block_height": 398124089,
+   "is_maker_ask": false,
+   "market_id": 1,
+   "price": "61082.5",
+   "size": "0.00001",
+   "timestamp": 1795348766867,
+   "trade_id": 42165185561,
+   "tx_hash": "00000024161b6db4000001a203202093000000000000000000000000000000000000000000000000",
+   "type": "trade",
+   "usd_amount": "0.610825"
+  },
+  {
+   "block_height": 398124088,
+   "is_maker_ask": true,
+   "market_id": 1,
+   "price": "61085.9",
+   "size": "0.00004",
+   "timestamp": 1795348766732,
+   "trade_id": 42165185381,
+   "tx_hash": "00000024161b6bc3000001a20320200c000000000000000000000000000000000000000000000000",
+   "type": "trade",
+   "usd_amount": "2.443436"
+  },
+  {
+   "block_height": 398124086,
+   "is_maker_ask": true,
+   "market_id": 1,
+   "price": "61086.0",
+   "size": "0.00080",
+   "timestamp": 1795348766481,
+   "trade_id": 42165185011,
+   "tx_hash": "00000024161b680a000001a203201f11000000000000000000000000000000000000000000000000",
+   "type": "trade",
+   "usd_amount": "48.868800"
+  },
+  {
+   "block_height": 398124086,
+   "is_maker_ask": true,
+   "market_id": 1,
+   "price": "61085.0",
+   "size": "0.00020",
+   "timestamp": 1795348766481,
+   "trade_id": 42165185010,
+   "tx_hash": "f8b10092dc965624da0aca93f29dbe3111304103a6d839d6a71b02d2b609ff8b0c2553632ed8efcb",
+   "type": "trade",
+   "usd_amount": "12.217000"
+  }
+ ]
+}

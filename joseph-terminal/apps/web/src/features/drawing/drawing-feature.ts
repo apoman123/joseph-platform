@@ -1,0 +1,187 @@
+/**
+ * @license
+ * Copyright 2026 Joseph Terminal contributors
+ * SPDX-License-Identifier: MIT
+ */
+
+/**
+ * @fileoverview Drawing features: history/selection commands and one
+ * removable feature per drawing tool.
+ */
+
+import type {ToolPlugin} from '@joseph/drawing-core';
+import {FIRST_PARTY_TOOLS} from '@joseph/drawing-tools';
+import {createElement} from 'react';
+import type {TerminalRuntime} from '../../composition/runtime';
+import type {WebFeature} from '../../shell/react-bindings';
+import {ObjectsPanel} from './objects-panel';
+import {bindDefaultHotkeys} from '../shell/shell-features';
+import {shellManifest} from '../shell/manifest';
+
+/**
+ * Returns the active chart's drawing controller.
+ * @param runtime Runtime.
+ * @return Controller, or undefined while the chart has not mounted one.
+ */
+function activeController(runtime: TerminalRuntime) {
+  return runtime.drawing.controllers.get(runtime.selection.get().chartId);
+}
+
+/**
+ * Creates the core drawing feature: undo/redo, cancel, delete, magnet and
+ * pointer commands with their default hotkeys, and the Objects side panel.
+ * @param runtime Runtime.
+ * @return Feature.
+ */
+export function drawingFeature(runtime: TerminalRuntime): WebFeature {
+  return {
+    manifest: shellManifest(
+      'drawing',
+      'Drawing',
+      'Drawing history, selection and snapping.',
+      {
+        uiSlots: ['drawing-toolbar', 'side-panel'],
+        removal: {
+          notes:
+            'Saved drawings stay in storage and reload when the feature returns.',
+        },
+      }
+    ),
+    activate(ctx) {
+      // These commands change drawings outside React; a new revision tells
+      // the toolbar and the object list to re-read.
+      const bump = () => void runtime.drawing.revision.update(n => n + 1);
+      const store = () =>
+        runtime.drawing.stores.get(runtime.selection.get().chartId);
+      const commands = [
+        {
+          id: 'drawing.undo',
+          title: 'Undo drawing change',
+          run: () => {
+            store()?.undo();
+            bump();
+          },
+        },
+        {
+          id: 'drawing.redo',
+          title: 'Redo drawing change',
+          run: () => {
+            store()?.redo();
+            bump();
+          },
+        },
+        {
+          id: 'drawing.cancel',
+          title: 'Cancel drawing or clear selection',
+          run: () => {
+            activeController(runtime)?.handleKey('Escape');
+          },
+        },
+        {
+          id: 'drawing.delete',
+          title: 'Delete selected drawing',
+          run: () => {
+            activeController(runtime)?.handleKey('Delete');
+            bump();
+          },
+        },
+        {
+          id: 'drawing.magnet',
+          title: 'Toggle magnet snapping to candles',
+          run: () => {
+            runtime.drawing.magnet.update(on => !on);
+          },
+        },
+        {
+          id: 'drawing.pointer',
+          title: 'Use the pointer',
+          run: () => {
+            for (const controller of runtime.drawing.controllers.values()) {
+              controller.setTool(null);
+            }
+            runtime.drawing.activeTool.set(null);
+          },
+        },
+      ];
+      for (const command of commands) {
+        ctx.commands.register(command);
+      }
+      bindDefaultHotkeys(
+        (combo, id) => ctx.hotkeys.bind(combo, id),
+        commands.map(c => c.id)
+      );
+      /**
+       * Renders the object list; it reads the shell runtime, not slot props.
+       * @return Element.
+       */
+      function ObjectsSlot() {
+        return createElement(ObjectsPanel, {runtime});
+      }
+      return ctx.slots.contribute('side-panel', {
+        id: 'drawing.objects',
+        title: 'Objects',
+        order: 40,
+        icon: 'shapes',
+        view: ObjectsSlot,
+      });
+    },
+  };
+}
+
+/**
+ * Creates a removable feature for one drawing tool: it registers the tool
+ * and its command and hotkey, and disarms the tool when removed.
+ * @param runtime Runtime.
+ * @param tool Tool plugin.
+ * @return Feature.
+ */
+export function toolFeature(
+  runtime: TerminalRuntime,
+  tool: ToolPlugin
+): WebFeature {
+  const id = `drawing.tool.${tool.manifest.id}`;
+  return {
+    manifest: shellManifest(
+      id,
+      tool.manifest.displayName,
+      `${tool.manifest.displayName} drawing tool.`,
+      {
+        uiSlots: ['drawing-toolbar'],
+        dependencies: ['drawing'],
+        removal: {
+          notes: `Saved ${tool.manifest.displayName.toLowerCase()} drawings are kept and shown as unsupported placeholders until the tool returns.`,
+        },
+      }
+    ),
+    activate(ctx) {
+      const unregister = runtime.tools.register(tool);
+      ctx.commands.register({
+        id,
+        title: `Draw ${tool.manifest.displayName.toLowerCase()}`,
+        run: () => {
+          runtime.drawing.activeTool.set(tool.manifest.id);
+          activeController(runtime)?.setTool(tool.manifest.id);
+        },
+      });
+      bindDefaultHotkeys(
+        (combo, commandId) => ctx.hotkeys.bind(combo, commandId),
+        [id]
+      );
+      return () => {
+        if (runtime.drawing.activeTool.get() === tool.manifest.id) {
+          runtime.drawing.activeTool.set(null);
+        }
+        unregister();
+      };
+    },
+  };
+}
+
+/**
+ * Creates one tool feature per first-party drawing tool.
+ * @param runtime Runtime.
+ * @return Features, in the tools' registry order.
+ */
+export function toolFeatures(runtime: TerminalRuntime): WebFeature[] {
+  return FIRST_PARTY_TOOLS.map(tool => toolFeature(runtime, tool));
+}

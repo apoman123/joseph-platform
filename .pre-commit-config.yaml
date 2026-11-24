@@ -1,0 +1,34 @@
+# Fast local checks before each commit (`pipx install pre-commit && pre-commit install`).
+# The full suite runs in CI on every push.
+repos:
+  - repo: local
+    hooks:
+      - id: ruff-market
+        name: ruff (market engine)
+        entry: bash -c 'cd joseph-market-engine && uv run ruff format src tests scripts && uv run ruff check --fix src tests scripts'
+        language: system
+        files: ^joseph-market-engine/.*\.py$
+        pass_filenames: false
+      - id: ruff-execution
+        name: ruff (execution engine)
+        entry: bash -c 'cd joseph-execution-engine && uv run ruff format src tests scripts && uv run ruff check --fix src tests scripts'
+        language: system
+        files: ^joseph-execution-engine/.*\.py$
+        pass_filenames: false
+      - id: terminal-format-lint
+        name: prettier + eslint (terminal)
+        entry: bash -c 'cd joseph-terminal && pnpm format --log-level warn && pnpm lint'
+        language: system
+        files: ^joseph-terminal/(.*\.(ts|tsx|mjs|cjs|css)|(.*/)?(package|tsconfig[^/]*)\.json)$
+        pass_filenames: false
+      - id: contracts
+        name: contracts are regenerated
+        entry: bash -c 'cd joseph-terminal && pnpm contracts:check'
+        language: system
+        files: ^joseph-terminal/packages/contracts/schemas/
+        pass_filenames: false
+      - id: secret-scan
+        name: secret scan
+        entry: bash -c 'cd joseph-terminal && pnpm secrets:scan'
+        language: system
+        pass_filenames: false

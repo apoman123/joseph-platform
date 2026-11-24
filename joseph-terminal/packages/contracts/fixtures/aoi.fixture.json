@@ -1,0 +1,183 @@
+{
+  "schema": "indicators.schema.json",
+  "definition": "AoiRecord",
+  "valid": [
+    {
+      "schema_version": 1,
+      "type": "aoi.updated",
+      "instrument_id": "binance:perp:BTCUSDT",
+      "timeframe": "5m",
+      "aoi_id": "pivot-3f1c2a9b0d4e",
+      "source": "pivot_points",
+      "kind": "PIVOT_S1",
+      "side": "bullish",
+      "state": "active",
+      "lower": "93600",
+      "upper": "93600",
+      "created_at_ms": 1795219200000,
+      "confirmed_at_ms": 1795219500000,
+      "invalidated_at_ms": null,
+      "as_of_ms": 1795253100000,
+      "quality_score": null,
+      "group_id": null,
+      "end_reason": null,
+      "indicator_version": "1.0.0",
+      "method": "pine_parity",
+      "meta": {
+        "period": "1d"
+      }
+    },
+    {
+      "schema_version": 1,
+      "type": "aoi.updated",
+      "instrument_id": "binance:perp:BTCUSDT",
+      "timeframe": "5m",
+      "aoi_id": "zone-8d2e61f0b7a4",
+      "source": "example_zones",
+      "kind": "EXAMPLE_ZONE",
+      "side": "bearish",
+      "state": "invalidated",
+      "lower": "94700",
+      "upper": "94800",
+      "created_at_ms": 1795252800000,
+      "confirmed_at_ms": 1795253100000,
+      "invalidated_at_ms": 1795254000000,
+      "as_of_ms": 1795254000000,
+      "quality_score": 76,
+      "group_id": "group-1h-9",
+      "end_reason": "broken",
+      "indicator_version": "1.0.0",
+      "method": "pine_parity",
+      "meta": {
+        "mid": "94750"
+      }
+    }
+  ],
+  "invalid": [
+    {
+      "schema_version": 1,
+      "type": "aoi.updated",
+      "instrument_id": "binance:perp:BTCUSDT",
+      "timeframe": "5m",
+      "aoi_id": "pivot-3f1c2a9b0d4e",
+      "source": "pivot_points",
+      "kind": "PIVOT_S1",
+      "side": "bullish",
+      "state": "active",
+      "lower": "93600",
+      "upper": "93600",
+      "created_at_ms": 1795219200000,
+      "confirmed_at_ms": 1795219500000,
+      "invalidated_at_ms": null,
+      "as_of_ms": 1795253100000,
+      "quality_score": 140,
+      "group_id": null,
+      "end_reason": null,
+      "indicator_version": "1.0.0",
+      "method": "pine_parity",
+      "meta": {
+        "period": "1d"
+      }
+    },
+    {
+      "schema_version": 1,
+      "type": "aoi.updated",
+      "instrument_id": "binance:perp:BTCUSDT",
+      "timeframe": "5m",
+      "aoi_id": "pivot-3f1c2a9b0d4e",
+      "source": "pivot_points",
+      "kind": "PIVOT_S1",
+      "side": "bullish",
+      "state": "active",
+      "lower": "abc",
+      "upper": "93600",
+      "created_at_ms": 1795219200000,
+      "confirmed_at_ms": 1795219500000,
+      "invalidated_at_ms": null,
+      "as_of_ms": 1795253100000,
+      "quality_score": null,
+      "group_id": null,
+      "end_reason": null,
+      "indicator_version": "1.0.0",
+      "method": "pine_parity",
+      "meta": {
+        "period": "1d"
+      }
+    },
+    {
+      "schema_version": 1,
+      "type": "aoi.updated",
+      "instrument_id": "binance:perp:BTCUSDT",
+      "timeframe": "5m",
+      "aoi_id": "pivot-3f1c2a9b0d4e",
+      "source": "pivot_points",
+      "kind": "pivot_s1",
+      "side": "bullish",
+      "state": "active",
+      "lower": "93600",
+      "upper": "93600",
+      "created_at_ms": 1795219200000,
+      "confirmed_at_ms": 1795219500000,
+      "invalidated_at_ms": null,
+      "as_of_ms": 1795253100000,
+      "quality_score": null,
+      "group_id": null,
+      "end_reason": null,
+      "indicator_version": "1.0.0",
+      "method": "pine_parity",
+      "meta": {
+        "period": "1d"
+      }
+    },
+    {
+      "schema_version": 1,
+      "type": "aoi.updated",
+      "instrument_id": "binance:perp:BTCUSDT",
+      "timeframe": "5m",
+      "aoi_id": "zone-8d2e61f0b7a4",
+      "source": "example_zones",
+      "kind": "EXAMPLE_ZONE",
+      "side": "bearish",
+      "state": "invalidated",
+      "lower": "94700",
+      "upper": "94800",
+      "created_at_ms": 1795252800000,
+      "confirmed_at_ms": 1795253100000,
+      "invalidated_at_ms": 1795254000000,
+      "as_of_ms": 1795254000000,
+      "quality_score": 76,
+      "group_id": "group-1h-9",
+      "end_reason": "Broken out",
+      "indicator_version": "1.0.0",
+      "method": "pine_parity",
+      "meta": {
+        "mid": "94750"
+      }
+    },
+    {
+      "schema_version": 1,
+      "type": "aoi.updated",
+      "instrument_id": "binance:perp:BTCUSDT",
+      "timeframe": "5m",
+      "aoi_id": "zone-8d2e61f0b7a4",
+      "source": "example_zones",
+      "kind": "EXAMPLE_ZONE",
+      "side": "bearish",
+      "state": "ended",
+      "lower": "94700",
+      "upper": "94800",
+      "created_at_ms": 1795252800000,
+      "confirmed_at_ms": 1795253100000,
+      "invalidated_at_ms": 1795254000000,
+      "as_of_ms": 1795254000000,
+      "quality_score": 76,
+      "group_id": "group-1h-9",
+      "end_reason": "broken",
+      "indicator_version": "1.0.0",
+      "method": "pine_parity",
+      "meta": {
+        "mid": "94750"
+      }
+    }
+  ]
+}

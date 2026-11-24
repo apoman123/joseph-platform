@@ -1,0 +1,42 @@
+[
+ {
+  "adjustedFundingRateCap": "0.02000000",
+  "adjustedFundingRateFloor": "-0.02000000",
+  "disclaimer": false,
+  "fundingIntervalHours": 4,
+  "symbol": "GTCUSDT",
+  "updateTime": 1791950460152
+ },
+ {
+  "adjustedFundingRateCap": "0.02000000",
+  "adjustedFundingRateFloor": "-0.02000000",
+  "disclaimer": false,
+  "fundingIntervalHours": 4,
+  "symbol": "LPTUSDT",
+  "updateTime": 1752854309429
+ },
+ {
+  "adjustedFundingRateCap": "0.02000000",
+  "adjustedFundingRateFloor": "-0.02000000",
+  "disclaimer": false,
+  "fundingIntervalHours": 4,
+  "symbol": "TRBUSDT",
+  "updateTime": 1697703073725
+ },
+ {
+  "adjustedFundingRateCap": "0.02000000",
+  "adjustedFundingRateFloor": "-0.02000000",
+  "disclaimer": false,
+  "fundingIntervalHours": 4,
+  "symbol": "ARKUSDT",
+  "updateTime": 1793131260156
+ },
+ {
+  "adjustedFundingRateCap": "0.02000000",
+  "adjustedFundingRateFloor": "-0.02000000",
+  "disclaimer": false,
+  "fundingIntervalHours": 4,
+  "symbol": "IMXUSDT",
+  "updateTime": 1698143630481
+ }
+]

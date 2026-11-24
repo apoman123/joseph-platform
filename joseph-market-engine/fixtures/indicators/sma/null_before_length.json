@@ -1,0 +1,45 @@
+{
+  "plugin_id": "sma",
+  "timeframe": "5m",
+  "settings": {
+    "length": 5,
+    "source": "close",
+    "tick_size": "0.01"
+  },
+  "description": "Four bars with length 5: fewer than length closes exist, so the SMA is still null.",
+  "bars": [
+    [
+      "10",
+      "10",
+      "10",
+      "10",
+      "1"
+    ],
+    [
+      "11",
+      "11",
+      "11",
+      "11",
+      "1"
+    ],
+    [
+      "12",
+      "12",
+      "12",
+      "12",
+      "1"
+    ],
+    [
+      "13",
+      "13",
+      "13",
+      "13",
+      "1"
+    ]
+  ],
+  "expect": {
+    "final_values": {
+      "sma": null
+    }
+  }
+}

@@ -1,0 +1,122 @@
+# Layering contracts, run by tests/architecture/test_layering.py through
+# lint-imports. include_external_packages lets a contract forbid
+# third-party frameworks as well as project modules.
+[importlinter]
+root_package = joseph_execution
+include_external_packages = True
+
+[importlinter:contract:domain-pure]
+name = Domain depends only on the standard library
+type = forbidden
+source_modules =
+    joseph_execution.domain
+forbidden_modules =
+    joseph_execution.ports
+    joseph_execution.risk
+    joseph_execution.oms
+    joseph_execution.accounts
+    joseph_execution.reconciliation
+    joseph_execution.audit
+    joseph_execution.adapters
+    joseph_execution.api
+    joseph_execution.platform
+    joseph_execution.bootstrap
+    fastapi
+    starlette
+    pydantic
+    sqlalchemy
+    httpx
+    websockets
+    uvicorn
+    cryptography
+
+[importlinter:contract:ports-on-domain]
+name = Ports depend on the domain only
+type = forbidden
+source_modules =
+    joseph_execution.ports
+forbidden_modules =
+    joseph_execution.risk
+    joseph_execution.oms
+    joseph_execution.accounts
+    joseph_execution.reconciliation
+    joseph_execution.audit
+    joseph_execution.adapters
+    joseph_execution.api
+    joseph_execution.platform
+    joseph_execution.bootstrap
+    fastapi
+    starlette
+    pydantic
+    sqlalchemy
+    httpx
+    websockets
+    cryptography
+
+[importlinter:contract:core-framework-free]
+name = Risk, OMS, accounts, reconciliation and audit never import adapters, API, platform or frameworks
+type = forbidden
+source_modules =
+    joseph_execution.risk
+    joseph_execution.oms
+    joseph_execution.accounts
+    joseph_execution.reconciliation
+    joseph_execution.audit
+forbidden_modules =
+    joseph_execution.adapters
+    joseph_execution.api
+    joseph_execution.platform
+    joseph_execution.bootstrap
+    fastapi
+    starlette
+    pydantic
+    sqlalchemy
+    httpx
+    websockets
+    cryptography
+
+[importlinter:contract:risk-is-pure-policy]
+name = The Risk Gateway does not depend on the OMS or accounts
+type = forbidden
+source_modules =
+    joseph_execution.risk
+forbidden_modules =
+    joseph_execution.oms
+    joseph_execution.accounts
+    joseph_execution.reconciliation
+
+[importlinter:contract:adapters-cannot-bypass-risk]
+name = Adapters never import the OMS, Risk Gateway, services or API
+type = forbidden
+source_modules =
+    joseph_execution.adapters
+forbidden_modules =
+    joseph_execution.oms
+    joseph_execution.risk
+    joseph_execution.accounts
+    joseph_execution.reconciliation
+    joseph_execution.api
+    joseph_execution.bootstrap
+
+[importlinter:contract:api-without-adapters]
+name = The API layer never imports adapters (only bootstrap wires both)
+type = forbidden
+source_modules =
+    joseph_execution.api
+forbidden_modules =
+    joseph_execution.adapters
+    joseph_execution.bootstrap
+
+[importlinter:contract:platform-infrastructure-only]
+name = Platform infrastructure does not depend on application services
+type = forbidden
+source_modules =
+    joseph_execution.platform
+forbidden_modules =
+    joseph_execution.risk
+    joseph_execution.oms
+    joseph_execution.accounts
+    joseph_execution.reconciliation
+    joseph_execution.adapters
+    joseph_execution.api
+    joseph_execution.bootstrap

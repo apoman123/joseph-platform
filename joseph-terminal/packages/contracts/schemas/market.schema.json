@@ -1,0 +1,1065 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://schemas.joseph.local/v1/market.schema.json",
+  "title": "JosephMarket",
+  "description": "Canonical market-data contracts: instruments, candles, trades, books, funding, open interest, snapshots, feed health and venue capabilities.",
+  "$defs": {
+    "InstrumentKey": {
+      "title": "InstrumentKey",
+      "description": "Structured identity of a tradable contract. Never key solely on a symbol such as BTCUSDT.",
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "venue",
+        "market_type",
+        "venue_market_id",
+        "canonical_base",
+        "quote",
+        "settlement",
+        "instrument_version"
+      ],
+      "properties": {
+        "venue": {
+          "$ref": "common.schema.json#/$defs/Venue"
+        },
+        "market_type": {
+          "$ref": "common.schema.json#/$defs/MarketType"
+        },
+        "venue_market_id": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 64
+        },
+        "canonical_base": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 32
+        },
+        "quote": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 16
+        },
+        "settlement": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 16
+        },
+        "instrument_version": {
+          "type": "integer",
+          "minimum": 1
+        }
+      }
+    },
+    "InstrumentStatus": {
+      "title": "InstrumentStatus",
+      "type": "string",
+      "enum": [
+        "TRADING",
+        "HALTED",
+        "PRE_LAUNCH",
+        "DELISTED",
+        "UNKNOWN"
+      ]
+    },
+    "AssetClass": {
+      "title": "AssetClass",
+      "description": "Asset class used to select qualification thresholds.",
+      "type": "string",
+      "enum": [
+        "CRYPTO",
+        "RWA",
+        "EQUITY",
+        "BOND",
+        "UNKNOWN"
+      ]
+    },
+    "TickStep": {
+      "title": "TickStep",
+      "description": "One rung of a price-dependent tick ladder: prices at or above min_price move in tick_size steps.",
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["min_price", "tick_size"],
+      "properties": {
+        "min_price": {"$ref": "common.schema.json#/$defs/NonNegativeDecimalString"},
+        "tick_size": {"$ref": "common.schema.json#/$defs/NonNegativeDecimalString"}
+      }
+    },
+    "BuyVolumeMethod": {
+      "title": "BuyVolumeMethod",
+      "description": "Origin of a bar's buy volume. `taker`: the venue's aggressor flag (true delta). `classified`: trades classified against the prevailing quote (Lee-Ready / quote rule) on markets that publish no aggressor side, such as stock exchanges.",
+      "type": "string",
+      "enum": ["taker", "classified"]
+    },
+    "Instrument": {
+      "title": "Instrument",
+      "description": "Venue instrument with precision and contract metadata.",
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "instrument_id",
+        "key",
+        "display_symbol",
+        "tick_size",
+        "lot_size",
+        "min_qty",
+        "contract_multiplier",
+        "linear",
+        "status",
+        "asset_class",
+        "source",
+        "as_of_ms"
+      ],
+      "properties": {
+        "instrument_id": {
+          "$ref": "common.schema.json#/$defs/InstrumentId"
+        },
+        "key": {
+          "$ref": "#/$defs/InstrumentKey"
+        },
+        "display_symbol": {
+          "type": "string"
+        },
+        "tick_size": {
+          "$ref": "common.schema.json#/$defs/NonNegativeDecimalString"
+        },
+        "lot_size": {
+          "$ref": "common.schema.json#/$defs/NonNegativeDecimalString"
+        },
+        "min_qty": {
+          "$ref": "common.schema.json#/$defs/NonNegativeDecimalString"
+        },
+        "max_qty": {
+          "oneOf": [
+            {
+              "$ref": "common.schema.json#/$defs/NonNegativeDecimalString"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "min_notional": {
+          "oneOf": [
+            {
+              "$ref": "common.schema.json#/$defs/NonNegativeDecimalString"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "contract_multiplier": {
+          "$ref": "common.schema.json#/$defs/NonNegativeDecimalString"
+        },
+        "linear": {
+          "type": "boolean"
+        },
+        "status": {
+          "$ref": "#/$defs/InstrumentStatus"
+        },
+        "funding_interval_hours": {
+          "type": [
+            "number",
+            "null"
+          ],
+          "exclusiveMinimum": 0
+        },
+        "max_leverage": {
+          "oneOf": [
+            {
+              "$ref": "common.schema.json#/$defs/NonNegativeDecimalString"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "asset_class": {
+          "$ref": "#/$defs/AssetClass"
+        },
+        "source": {
+          "type": "string"
+        },
+        "as_of_ms": {
+          "$ref": "common.schema.json#/$defs/TimestampMs"
+        },
+        "calendar": {
+          "description": "Session calendar that defines bar boundaries and market hours (default 24x7).",
+          "$ref": "common.schema.json#/$defs/CalendarId"
+        },
+        "listing_exchange": {
+          "description": "Exchange that lists a security, e.g. `Nasdaq`, `NYSE Arca`, `Cboe BZX`, `TWSE`, `TPEx`; null for crypto.",
+          "type": ["string", "null"]
+        },
+        "tick_ladder": {
+          "description": "Price-dependent ticks (TWSE, TPEx). Empty when tick_size applies at every price.",
+          "type": "array",
+          "items": {"$ref": "#/$defs/TickStep"}
+        },
+        "price_limit_pct": {
+          "description": "Daily price limit from the reference price in percent (TWSE and TPEx 10); null when unlimited.",
+          "oneOf": [{"$ref": "common.schema.json#/$defs/NonNegativeDecimalString"}, {"type": "null"}]
+        },
+        "board_lot": {
+          "description": "Shares per board lot (TWSE and TPEx 1000); null when orders are in single units.",
+          "oneOf": [{"$ref": "common.schema.json#/$defs/NonNegativeDecimalString"}, {"type": "null"}]
+        },
+        "name": {
+          "description": "Issuer or series name in English, e.g. `Taiwan Semiconductor Manufacturing` or `US 10-Year Treasury par yield`; null when the venue publishes none (crypto).",
+          "type": ["string", "null"],
+          "maxLength": 200
+        },
+        "local_name": {
+          "description": "Name in the listing market's language, e.g. `台積電` on TWSE, `環球晶` on TPEx; null when none.",
+          "type": ["string", "null"],
+          "maxLength": 200
+        }
+      }
+    },
+    "SessionList": {
+      "title": "SessionList",
+      "description": "Trading sessions of a calendar overlapping [from_ms, to_ms). Empty for 24x7 markets, which never close.",
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["calendar", "sessions", "from_ms", "to_ms"],
+      "properties": {
+        "calendar": {"$ref": "common.schema.json#/$defs/CalendarId"},
+        "sessions": {"type": "array", "items": {"$ref": "common.schema.json#/$defs/TradingSession"}},
+        "from_ms": {"$ref": "common.schema.json#/$defs/TimestampMs"},
+        "to_ms": {"$ref": "common.schema.json#/$defs/TimestampMs"}
+      }
+    },
+    "InstrumentList": {
+      "title": "InstrumentList",
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "instruments",
+        "as_of_ms"
+      ],
+      "properties": {
+        "instruments": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/Instrument"
+          }
+        },
+        "as_of_ms": {
+          "$ref": "common.schema.json#/$defs/TimestampMs"
+        }
+      }
+    },
+    "Candle": {
+      "title": "Candle",
+      "description": "OHLCV bar over the half-open interval [start_ms, end_ms). Only is_final bars may confirm signals. Corrections increment revision.",
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "instrument_id",
+        "timeframe",
+        "start_ms",
+        "end_ms",
+        "open",
+        "high",
+        "low",
+        "close",
+        "base_volume",
+        "is_final",
+        "revision",
+        "source",
+        "feed_state",
+        "received_at_ms"
+      ],
+      "properties": {
+        "instrument_id": {
+          "$ref": "common.schema.json#/$defs/InstrumentId"
+        },
+        "timeframe": {
+          "$ref": "common.schema.json#/$defs/Timeframe"
+        },
+        "start_ms": {
+          "$ref": "common.schema.json#/$defs/TimestampMs"
+        },
+        "end_ms": {
+          "$ref": "common.schema.json#/$defs/TimestampMs"
+        },
+        "open": {
+          "$ref": "common.schema.json#/$defs/DecimalString"
+        },
+        "high": {
+          "$ref": "common.schema.json#/$defs/DecimalString"
+        },
+        "low": {
+          "$ref": "common.schema.json#/$defs/DecimalString"
+        },
+        "close": {
+          "$ref": "common.schema.json#/$defs/DecimalString"
+        },
+        "base_volume": {
+          "$ref": "common.schema.json#/$defs/NonNegativeDecimalString"
+        },
+        "quote_turnover": {
+          "oneOf": [
+            {
+              "$ref": "common.schema.json#/$defs/NonNegativeDecimalString"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "trade_count": {
+          "type": [
+            "integer",
+            "null"
+          ],
+          "minimum": 0
+        },
+        "taker_buy_base_volume": {
+          "description": "Base volume of trades whose aggressor bought (venue-published or summed from the venue's public trades). Enables true volume delta; null when the venue publishes neither.",
+          "oneOf": [
+            {
+              "$ref": "common.schema.json#/$defs/NonNegativeDecimalString"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "taker_buy_method": {
+          "description": "How taker_buy_base_volume was obtained; null when it is null.",
+          "oneOf": [{"$ref": "#/$defs/BuyVolumeMethod"}, {"type": "null"}]
+        },
+        "is_final": {
+          "type": "boolean"
+        },
+        "revision": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "source": {
+          "type": "string",
+          "description": "Origin such as `binance.rest`, `binance.ws`, `replay`, `mock`."
+        },
+        "feed_state": {
+          "$ref": "common.schema.json#/$defs/FeedState"
+        },
+        "received_at_ms": {
+          "$ref": "common.schema.json#/$defs/TimestampMs"
+        },
+        "event_ts_ms": {
+          "oneOf": [
+            {
+              "$ref": "common.schema.json#/$defs/TimestampMs"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        }
+      }
+    },
+    "TimeGap": {
+      "title": "TimeGap",
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "from_ms",
+        "to_ms"
+      ],
+      "properties": {
+        "from_ms": {
+          "$ref": "common.schema.json#/$defs/TimestampMs"
+        },
+        "to_ms": {
+          "$ref": "common.schema.json#/$defs/TimestampMs"
+        }
+      }
+    },
+    "CandleBatch": {
+      "title": "CandleBatch",
+      "description": "Historical candles response with provenance and detected gaps.",
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "schema_version",
+        "instrument_id",
+        "timeframe",
+        "candles",
+        "feed_state",
+        "source",
+        "as_of_ms",
+        "complete",
+        "gaps"
+      ],
+      "properties": {
+        "schema_version": {
+          "const": 1
+        },
+        "instrument_id": {
+          "$ref": "common.schema.json#/$defs/InstrumentId"
+        },
+        "timeframe": {
+          "$ref": "common.schema.json#/$defs/Timeframe"
+        },
+        "candles": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/Candle"
+          }
+        },
+        "feed_state": {
+          "$ref": "common.schema.json#/$defs/FeedState"
+        },
+        "source": {
+          "type": "string"
+        },
+        "as_of_ms": {
+          "$ref": "common.schema.json#/$defs/TimestampMs"
+        },
+        "complete": {
+          "type": "boolean"
+        },
+        "gaps": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/TimeGap"
+          }
+        }
+      }
+    },
+    "Trade": {
+      "title": "Trade",
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "instrument_id",
+        "trade_id",
+        "venue_event_ts_ms",
+        "received_at_ms",
+        "price",
+        "base_quantity",
+        "aggressor_side",
+        "is_aggregated"
+      ],
+      "properties": {
+        "instrument_id": {
+          "$ref": "common.schema.json#/$defs/InstrumentId"
+        },
+        "trade_id": {
+          "type": "string"
+        },
+        "venue_event_ts_ms": {
+          "$ref": "common.schema.json#/$defs/TimestampMs"
+        },
+        "received_at_ms": {
+          "$ref": "common.schema.json#/$defs/TimestampMs"
+        },
+        "price": {
+          "$ref": "common.schema.json#/$defs/DecimalString"
+        },
+        "base_quantity": {
+          "$ref": "common.schema.json#/$defs/NonNegativeDecimalString"
+        },
+        "quote_quantity": {
+          "oneOf": [
+            {
+              "$ref": "common.schema.json#/$defs/NonNegativeDecimalString"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "aggressor_side": {
+          "type": "string",
+          "enum": [
+            "buy",
+            "sell",
+            "unknown"
+          ]
+        },
+        "is_aggregated": {
+          "type": "boolean"
+        }
+      }
+    },
+    "BookLevel": {
+      "title": "BookLevel",
+      "description": "[price, base_quantity] pair.",
+      "type": "array",
+      "prefixItems": [
+        {
+          "$ref": "common.schema.json#/$defs/DecimalString"
+        },
+        {
+          "$ref": "common.schema.json#/$defs/NonNegativeDecimalString"
+        }
+      ],
+      "minItems": 2,
+      "maxItems": 2,
+      "tsType": "[string, string]"
+    },
+    "OrderBook": {
+      "title": "OrderBook",
+      "description": "Order book built from a snapshot plus validated increments. A stale book must never price real slippage.",
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "instrument_id",
+        "snapshot_ts_ms",
+        "received_at_ms",
+        "bids",
+        "asks",
+        "depth",
+        "stale",
+        "source"
+      ],
+      "properties": {
+        "instrument_id": {
+          "$ref": "common.schema.json#/$defs/InstrumentId"
+        },
+        "venue_sequence": {
+          "type": [
+            "integer",
+            "null"
+          ]
+        },
+        "snapshot_ts_ms": {
+          "$ref": "common.schema.json#/$defs/TimestampMs"
+        },
+        "received_at_ms": {
+          "$ref": "common.schema.json#/$defs/TimestampMs"
+        },
+        "bids": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/BookLevel"
+          }
+        },
+        "asks": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/BookLevel"
+          }
+        },
+        "depth": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "stale": {
+          "type": "boolean"
+        },
+        "source": {
+          "type": "string"
+        },
+        "checksum_verified": {
+          "type": [
+            "boolean",
+            "null"
+          ]
+        }
+      }
+    },
+    "FundingKind": {
+      "title": "FundingKind",
+      "type": "string",
+      "enum": [
+        "PREDICTED",
+        "SETTLED"
+      ]
+    },
+    "Funding": {
+      "title": "Funding",
+      "description": "Funding rate. normalized_8h_pct = rate * 100 * 8 / interval_hours, for comparison only.",
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "instrument_id",
+        "rate",
+        "interval_hours",
+        "normalized_8h_pct",
+        "kind",
+        "effective_time_ms",
+        "source",
+        "as_of_ms"
+      ],
+      "properties": {
+        "instrument_id": {
+          "$ref": "common.schema.json#/$defs/InstrumentId"
+        },
+        "rate": {
+          "$ref": "common.schema.json#/$defs/DecimalString"
+        },
+        "interval_hours": {
+          "type": "number",
+          "exclusiveMinimum": 0
+        },
+        "normalized_8h_pct": {
+          "$ref": "common.schema.json#/$defs/DecimalString"
+        },
+        "kind": {
+          "$ref": "#/$defs/FundingKind"
+        },
+        "effective_time_ms": {
+          "$ref": "common.schema.json#/$defs/TimestampMs"
+        },
+        "next_funding_ms": {
+          "oneOf": [
+            {
+              "$ref": "common.schema.json#/$defs/TimestampMs"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "source": {
+          "type": "string"
+        },
+        "as_of_ms": {
+          "$ref": "common.schema.json#/$defs/TimestampMs"
+        }
+      }
+    },
+    "OpenInterest": {
+      "title": "OpenInterest",
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "instrument_id",
+        "base_quantity",
+        "notional_usd",
+        "source",
+        "as_of_ms"
+      ],
+      "properties": {
+        "instrument_id": {
+          "$ref": "common.schema.json#/$defs/InstrumentId"
+        },
+        "base_quantity": {
+          "$ref": "common.schema.json#/$defs/NonNegativeDecimalString"
+        },
+        "notional_usd": {
+          "$ref": "common.schema.json#/$defs/NonNegativeDecimalString"
+        },
+        "mark_price": {
+          "oneOf": [
+            {
+              "$ref": "common.schema.json#/$defs/DecimalString"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "source": {
+          "type": "string"
+        },
+        "as_of_ms": {
+          "$ref": "common.schema.json#/$defs/TimestampMs"
+        }
+      }
+    },
+    "MarketSnapshot": {
+      "title": "MarketSnapshot",
+      "description": "Latest market state for one instrument. Mark, last and index are separate fields; missing values are null, never zero.",
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "instrument_id",
+        "feed_state",
+        "source",
+        "as_of_ms",
+        "data_age_ms",
+        "stale"
+      ],
+      "properties": {
+        "instrument_id": {
+          "$ref": "common.schema.json#/$defs/InstrumentId"
+        },
+        "last": {
+          "oneOf": [
+            {
+              "$ref": "common.schema.json#/$defs/DecimalString"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "mark": {
+          "oneOf": [
+            {
+              "$ref": "common.schema.json#/$defs/DecimalString"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "index": {
+          "oneOf": [
+            {
+              "$ref": "common.schema.json#/$defs/DecimalString"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "best_bid": {
+          "oneOf": [
+            {
+              "$ref": "common.schema.json#/$defs/DecimalString"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "best_ask": {
+          "oneOf": [
+            {
+              "$ref": "common.schema.json#/$defs/DecimalString"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "spread_pct": {
+          "oneOf": [
+            {
+              "$ref": "common.schema.json#/$defs/DecimalString"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "turnover_24h_quote": {
+          "oneOf": [
+            {
+              "$ref": "common.schema.json#/$defs/NonNegativeDecimalString"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "volume_24h_base": {
+          "oneOf": [
+            {
+              "$ref": "common.schema.json#/$defs/NonNegativeDecimalString"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "change_24h_pct": {
+          "oneOf": [
+            {
+              "$ref": "common.schema.json#/$defs/DecimalString"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "funding": {
+          "oneOf": [
+            {
+              "$ref": "#/$defs/Funding"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "open_interest": {
+          "oneOf": [
+            {
+              "$ref": "#/$defs/OpenInterest"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "feed_state": {
+          "$ref": "common.schema.json#/$defs/FeedState"
+        },
+        "source": {
+          "type": "string"
+        },
+        "as_of_ms": {
+          "$ref": "common.schema.json#/$defs/TimestampMs"
+        },
+        "data_age_ms": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "stale": {
+          "type": "boolean"
+        }
+      }
+    },
+    "Transport": {
+      "title": "Transport",
+      "type": "string",
+      "enum": [
+        "NATIVE_WS",
+        "REST_POLL",
+        "REPLAY",
+        "MOCK",
+        "NONE"
+      ]
+    },
+    "FeedHealth": {
+      "title": "FeedHealth",
+      "description": "Observable health of one venue feed. Fallbacks are always visible here.",
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "venue",
+        "state",
+        "feed_mode",
+        "feed_state",
+        "transport",
+        "reconnects",
+        "gaps_detected",
+        "as_of_ms"
+      ],
+      "properties": {
+        "venue": {
+          "$ref": "common.schema.json#/$defs/Venue"
+        },
+        "state": {
+          "$ref": "common.schema.json#/$defs/HealthState"
+        },
+        "feed_mode": {
+          "$ref": "common.schema.json#/$defs/FeedMode"
+        },
+        "feed_state": {
+          "$ref": "common.schema.json#/$defs/FeedState"
+        },
+        "transport": {
+          "$ref": "#/$defs/Transport"
+        },
+        "last_message_ms": {
+          "oneOf": [
+            {
+              "$ref": "common.schema.json#/$defs/TimestampMs"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "lag_ms": {
+          "type": [
+            "integer",
+            "null"
+          ],
+          "minimum": 0
+        },
+        "reconnects": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "gaps_detected": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "last_error": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "as_of_ms": {
+          "$ref": "common.schema.json#/$defs/TimestampMs"
+        }
+      }
+    },
+    "MarketDataCapabilities": {
+      "title": "MarketDataCapabilities",
+      "description": "Market-data features a venue adapter actually implements. Unsupported is false, never faked.",
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "rest_history",
+        "native_ws_candles",
+        "native_ws_trades",
+        "native_ws_book",
+        "book_snapshot",
+        "open_interest",
+        "funding",
+        "trades_history"
+      ],
+      "properties": {
+        "rest_history": {
+          "type": "boolean"
+        },
+        "native_ws_candles": {
+          "type": "boolean"
+        },
+        "native_ws_trades": {
+          "type": "boolean"
+        },
+        "native_ws_book": {
+          "type": "boolean"
+        },
+        "book_snapshot": {
+          "type": "boolean"
+        },
+        "open_interest": {
+          "type": "boolean"
+        },
+        "funding": {
+          "type": "boolean"
+        },
+        "trades_history": {
+          "type": "boolean"
+        },
+        "taker_volume": {
+          "description": "The venue's klines (1m and above) carry taker_buy_base_volume, so true delta is available on every timeframe. Seconds bars built from trades (trade_built_timeframes) carry it on every venue regardless of this flag.",
+          "type": "boolean"
+        },
+        "trade_delta": {
+          "description": "1m-and-above bars fully covered by recorded public trades carry a true delta summed from the trades' aggressor side, although the venue's klines carry none.",
+          "type": "boolean"
+        },
+        "classified_delta": {
+          "description": "The market publishes no aggressor side (stock exchanges); buy volume is classified from trades against the prevailing quote (taker_buy_method = classified).",
+          "type": "boolean"
+        }
+      }
+    },
+    "VenueCapabilities": {
+      "title": "VenueCapabilities",
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "venue",
+        "display_name",
+        "market_types",
+        "market_data",
+        "timeframes",
+        "notes",
+        "docs_url"
+      ],
+      "properties": {
+        "venue": {
+          "$ref": "common.schema.json#/$defs/Venue"
+        },
+        "display_name": {
+          "type": "string"
+        },
+        "market_types": {
+          "type": "array",
+          "items": {
+            "$ref": "common.schema.json#/$defs/MarketType"
+          }
+        },
+        "market_data": {
+          "$ref": "#/$defs/MarketDataCapabilities"
+        },
+        "timeframes": {
+          "type": "array",
+          "items": {
+            "$ref": "common.schema.json#/$defs/Timeframe"
+          }
+        },
+        "trade_built_timeframes": {
+          "description": "Subset of timeframes the engine builds from the venue's public trade stream (seconds bars), because the venue publishes no such klines. History is limited to what the venue's trade history endpoint returns.",
+          "type": "array",
+          "items": {
+            "$ref": "common.schema.json#/$defs/Timeframe"
+          }
+        },
+        "aggregated_timeframes": {
+          "description": "Subset of timeframes the engine aggregates from a shorter native timeframe that tiles it exactly (e.g. 1M from 1d where the venue publishes no monthly bars).",
+          "type": "array",
+          "items": {"$ref": "common.schema.json#/$defs/Timeframe"}
+        },
+        "calendar": {
+          "description": "Session calendar of the venue's instruments.",
+          "$ref": "common.schema.json#/$defs/CalendarId"
+        },
+        "data_delay_ms": {
+          "description": "Delay of the data this deployment is entitled to (e.g. 900000 on a free consolidated feed); null when real time.",
+          "type": ["integer", "null"],
+          "minimum": 0
+        },
+        "requires_credentials": {
+          "description": "The data source needs an API key (e.g. Alpaca for Nasdaq/NYSE).",
+          "type": "boolean"
+        },
+        "credentials_configured": {
+          "description": "Whether that key is configured on this deployment (true when none is required).",
+          "type": "boolean"
+        },
+        "notes": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        },
+        "docs_url": {
+          "type": "string"
+        },
+        "verified_at_ms": {
+          "oneOf": [
+            {
+              "$ref": "common.schema.json#/$defs/TimestampMs"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        }
+      }
+    },
+    "VenueStatus": {
+      "title": "VenueStatus",
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "capabilities",
+        "health"
+      ],
+      "properties": {
+        "capabilities": {
+          "$ref": "#/$defs/VenueCapabilities"
+        },
+        "health": {
+          "$ref": "#/$defs/FeedHealth"
+        }
+      }
+    },
+    "VenueStatusList": {
+      "title": "VenueStatusList",
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "venues",
+        "as_of_ms"
+      ],
+      "properties": {
+        "venues": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/VenueStatus"
+          }
+        },
+        "as_of_ms": {
+          "$ref": "common.schema.json#/$defs/TimestampMs"
+        }
+      }
+    }
+  }
+}

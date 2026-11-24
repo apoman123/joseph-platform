@@ -1,0 +1,140 @@
+{
+  "schema": "execution.schema.json",
+  "definition": "OrderIntentRequest",
+  "valid": [
+    {
+      "account_id": "acct-paper-01",
+      "instrument_id": "hyperliquid:perp:BTC",
+      "side": "buy",
+      "position_effect": "open",
+      "order_type": "limit",
+      "quantity_base": "0.01",
+      "limit_price": "95000.0",
+      "trigger_price": null,
+      "trigger_basis": null,
+      "time_in_force": "GTC",
+      "reduce_only": false,
+      "margin_mode": "isolated",
+      "leverage": "2",
+      "bracket": {
+        "stop_loss": {
+          "trigger": "94500",
+          "basis": "mark"
+        },
+        "take_profit": [
+          {
+            "trigger": "96000",
+            "fraction": "1.0"
+          }
+        ]
+      },
+      "mode": "PAPER",
+      "source": "MANUAL_TICKET",
+      "strategy_version_id": null,
+      "signal_id": null,
+      "expires_at_ms": null,
+      "preview_token": null
+    }
+  ],
+  "invalid": [
+    {
+      "account_id": "acct-paper-01",
+      "instrument_id": "hyperliquid:perp:BTC",
+      "side": "buy",
+      "position_effect": "open",
+      "order_type": "limit",
+      "quantity_base": 0.01,
+      "limit_price": "95000.0",
+      "trigger_price": null,
+      "trigger_basis": null,
+      "time_in_force": "GTC",
+      "reduce_only": false,
+      "margin_mode": "isolated",
+      "leverage": "2",
+      "bracket": {
+        "stop_loss": {
+          "trigger": "94500",
+          "basis": "mark"
+        },
+        "take_profit": [
+          {
+            "trigger": "96000",
+            "fraction": "1.0"
+          }
+        ]
+      },
+      "mode": "PAPER",
+      "source": "MANUAL_TICKET",
+      "strategy_version_id": null,
+      "signal_id": null,
+      "expires_at_ms": null,
+      "preview_token": null
+    },
+    {
+      "account_id": "acct-paper-01",
+      "instrument_id": "hyperliquid:perp:BTC",
+      "side": "buy",
+      "position_effect": "open",
+      "order_type": "limit",
+      "quantity_base": "0.01",
+      "limit_price": "95000.0",
+      "trigger_price": null,
+      "trigger_basis": null,
+      "time_in_force": "GTC",
+      "reduce_only": false,
+      "margin_mode": "isolated",
+      "leverage": "2",
+      "bracket": {
+        "stop_loss": {
+          "trigger": "94500",
+          "basis": "mark"
+        },
+        "take_profit": [
+          {
+            "trigger": "96000",
+            "fraction": "1.0"
+          }
+        ]
+      },
+      "mode": "YOLO",
+      "source": "MANUAL_TICKET",
+      "strategy_version_id": null,
+      "signal_id": null,
+      "expires_at_ms": null,
+      "preview_token": null
+    },
+    {
+      "account_id": "acct-paper-01",
+      "instrument_id": "hyperliquid:perp:BTC",
+      "side": "buy",
+      "position_effect": "open",
+      "order_type": "limit",
+      "quantity_base": "-1",
+      "limit_price": "95000.0",
+      "trigger_price": null,
+      "trigger_basis": null,
+      "time_in_force": "GTC",
+      "reduce_only": false,
+      "margin_mode": "isolated",
+      "leverage": "2",
+      "bracket": {
+        "stop_loss": {
+          "trigger": "94500",
+          "basis": "mark"
+        },
+        "take_profit": [
+          {
+            "trigger": "96000",
+            "fraction": "1.0"
+          }
+        ]
+      },
+      "mode": "PAPER",
+      "source": "MANUAL_TICKET",
+      "strategy_version_id": null,
+      "signal_id": null,
+      "expires_at_ms": null,
+      "preview_token": null
+    }
+  ]
+}

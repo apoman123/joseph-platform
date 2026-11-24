@@ -1,0 +1,308 @@
+/*
+ * Copyright 2026 Joseph Terminal contributors
+ * SPDX-License-Identifier: MIT
+ */
+
+/* Strategy builder. User-authored rule cards carry the course (magenta) edge. */
+.panel {
+  grid-template-rows: auto auto auto 1fr;
+}
+
+.grow {
+  flex: 1;
+}
+
+.version {
+  color: var(--haze);
+  font-size: var(--text-sm);
+}
+
+.toolbar {
+  align-items: center;
+  border-bottom: 1px solid var(--fathom);
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-2);
+  padding: var(--space-2) var(--space-3);
+}
+
+.template {
+  flex: 1;
+  min-width: 160px;
+}
+
+.body {
+  align-content: start;
+  display: grid;
+  gap: var(--space-4);
+}
+
+.sectionTitle {
+  color: var(--chalk);
+  font-size: var(--text-md);
+  font-weight: 600;
+  margin: 0 0 var(--space-2);
+  padding: 0;
+}
+
+.settings {
+  border: 0;
+  display: grid;
+  gap: var(--space-2);
+  margin: 0;
+  padding: 0;
+}
+
+.row2 {
+  display: grid;
+  gap: var(--space-2);
+  grid-template-columns: 1fr 1fr;
+}
+
+.checks {
+  border: 0;
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-1) var(--space-3);
+  margin: 0;
+  padding: 0;
+}
+
+.checks legend {
+  margin-bottom: var(--space-1);
+  width: 100%;
+}
+
+.tree {
+  display: grid;
+  gap: var(--space-2);
+}
+
+.group,
+.wrapper {
+  background: var(--abyss);
+  border: 1px solid var(--fathom);
+  border-left: 2px solid var(--course);
+  border-radius: var(--radius-control);
+  display: grid;
+  gap: var(--space-2);
+  padding: var(--space-2);
+}
+
+.root {
+  border-left-width: 3px;
+}
+
+.groupHeader {
+  align-items: center;
+  display: flex;
+  flex-wrap: wrap;
+  font-size: var(--text-sm);
+  gap: var(--space-2);
+}
+
+.children {
+  display: grid;
+  gap: var(--space-2);
+  padding-left: var(--space-2);
+}
+
+.card {
+  background: var(--hull);
+  border: 1px solid var(--fathom-soft);
+  border-left: 2px solid var(--course);
+  border-radius: var(--radius-control);
+  display: grid;
+  gap: var(--space-2);
+  padding: var(--space-2);
+}
+
+.cardHeader {
+  align-items: center;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 2px var(--space-1);
+}
+/* The plain-language summary always gets the full card width; controls
+   wrap onto their own row so narrow side panels never squeeze the text. */
+.summary {
+  color: var(--chalk);
+  flex: 1 1 100%;
+  font-size: var(--text-md);
+  line-height: 1.4;
+  min-width: 0;
+}
+/* Actions join the header's wrapping row; Remove stays at the far end so
+   the destructive control is never next to Negate. */
+.cardActions {
+  display: contents;
+}
+
+.cardActions > button:last-child {
+  margin-left: auto;
+}
+
+.issues {
+  display: grid;
+  gap: 2px;
+  list-style: none;
+  margin: 0;
+  padding: 0;
+}
+
+.fields {
+  border-top: 1px solid var(--fathom-soft);
+  display: grid;
+  gap: var(--space-2);
+  grid-template-columns: repeat(auto-fill, minmax(140px, 1fr));
+  padding-top: var(--space-2);
+}
+
+.fields > fieldset,
+.fields > ol {
+  grid-column: 1 / -1;
+}
+
+.small {
+  width: 64px;
+}
+
+.add {
+  position: relative;
+}
+
+.addMenu {
+  left: 0;
+  margin-top: 2px;
+  max-height: 320px;
+  overflow: auto;
+  position: absolute;
+  top: 100%;
+  z-index: 10;
+}
+
+.menuGroup {
+  display: grid;
+}
+
+.menuCategory {
+  color: var(--haze-dim);
+  font-size: var(--text-xs);
+  padding: var(--space-1) var(--space-2) 2px;
+}
+
+.steps {
+  display: grid;
+  gap: var(--space-1);
+  margin: 0;
+  padding-left: var(--space-4);
+}
+
+.steps li {
+  align-items: flex-end;
+  display: flex;
+  gap: var(--space-2);
+}
+
+.operand {
+  border: 0;
+  display: grid;
+  gap: var(--space-1);
+  margin: 0;
+  padding: 0;
+}
+
+.summaryBlock summary {
+  color: var(--haze);
+  cursor: pointer;
+  font-size: var(--text-sm);
+}
+
+.outline {
+  color: var(--chalk);
+  font: inherit;
+  font-size: var(--text-sm);
+  margin: var(--space-2) 0 0;
+  white-space: pre-wrap;
+}
+
+.jsonTab,
+.backtest,
+.versions,
+.report {
+  display: grid;
+  gap: var(--space-2);
+}
+
+.code {
+  font-family: ui-monospace, monospace;
+  font-size: var(--text-xs);
+  height: auto;
+  line-height: 1.5;
+  padding: var(--space-2);
+  resize: vertical;
+}
+
+.assumptions,
+.diff {
+  color: var(--haze);
+  font-size: var(--text-sm);
+  margin: var(--space-1) 0 0;
+  padding-left: var(--space-4);
+}
+
+.metrics {
+  display: grid;
+  gap: var(--space-2);
+  grid-template-columns: repeat(3, 1fr);
+}
+
+.metric {
+  display: grid;
+  gap: 2px;
+}
+
+.lock {
+  border: 1px dashed var(--fathom);
+  border-radius: var(--radius-control);
+  color: var(--haze);
+  display: flex;
+  font-size: var(--text-sm);
+  gap: var(--space-2);
+  padding: var(--space-2) var(--space-3);
+}
+
+.lock p {
+  margin: 0;
+}
+
+.versionList {
+  display: grid;
+  gap: var(--space-2);
+  list-style: none;
+  margin: 0;
+  padding: 0;
+}
+
+.versionRow {
+  border: 1px solid var(--fathom-soft);
+  border-radius: var(--radius-control);
+  display: grid;
+  gap: var(--space-1);
+  padding: var(--space-2);
+}
+
+.versionHead,
+.inline {
+  align-items: center;
+  display: flex;
+  gap: var(--space-2);
+}
+
+.srOnly {
+  clip: rect(0 0 0 0);
+  height: 1px;
+  overflow: hidden;
+  position: absolute;
+  width: 1px;
+}

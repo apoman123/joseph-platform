@@ -1,0 +1,42 @@
+# Nightly checks against the live public venue APIs. These depend on the
+# exchanges, so they run on a schedule instead of blocking pushes.
+name: nightly
+
+on:
+  schedule:
+    # 01:41 UTC daily; GitHub's scheduler is busiest, and may delay runs,
+    # at the top of the hour.
+    - cron: '41 1 * * *'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  venues:
+    name: Live venue contract tests and probe
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    defaults:
+      run:
+        working-directory: joseph-market-engine
+    steps:
+      - uses: actions/checkout@v7
+      - uses: astral-sh/setup-uv@d4b2f3b6ecc6e67c4457f6d3e41ec42d3d0fcb86 # v5.4.2
+        with:
+          enable-cache: true
+          cache-dependency-glob: joseph-market-engine/uv.lock
+      - run: uv sync --frozen
+      - name: Network tests (Binance, Hyperliquid, Lighter, Bitget, MEXC)
+        env:
+          JOSEPH_NETWORK_TESTS: '1'
+        run: uv run pytest tests/network
+      # Runs after failed network tests too, to show which venue is down.
+      - name: Connectivity probe
+        if: always()
+        run: uv run python scripts/probe_venues.py | tee probe.jsonl
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: venue-probe
+          path: joseph-market-engine/probe.jsonl

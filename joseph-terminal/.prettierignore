@@ -1,0 +1,20 @@
+node_modules
+.next
+coverage
+playwright-report
+test-results
+pnpm-lock.yaml
+packages/contracts/src/generated
+
+# Contract documents (JSON Schemas, OpenAPI and AsyncAPI) and fixtures are
+# shared with the engines and keep their own layout.
+packages/contracts/schemas
+packages/contracts/openapi
+packages/contracts/asyncapi
+packages/contracts/fixtures
+
+# Not formatted yet: these packages are being refactored separately. Run
+# `prettier --write` on them and remove these lines once that work lands.
+packages/contracts/tsconfig.json
+packages/feature-registry/tsconfig.json
+packages/strategy-builder/tsconfig.json

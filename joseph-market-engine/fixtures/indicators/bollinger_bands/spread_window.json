@@ -1,0 +1,78 @@
+{
+  "plugin_id": "bollinger_bands",
+  "timeframe": "5m",
+  "settings": {
+    "length": 8,
+    "source": "close",
+    "mult": "2",
+    "tick_size": "0.01"
+  },
+  "description": "Closes 2, 4, 4, 4, 5, 5, 7, 9 with length 8: basis = 40 / 8 = 5; squared deviations 9, 1, 1, 1, 0, 0, 4, 16 sum to 32, population variance 32 / 8 = 4, stdev 2, dev = 2 * 2 = 4. Upper 9, lower 1, bandwidth (9 - 1) / 5 * 100 = 160, percent_b (9 - 1) / (9 - 1) = 1.",
+  "bars": [
+    [
+      "2",
+      "2",
+      "2",
+      "2",
+      "1"
+    ],
+    [
+      "4",
+      "4",
+      "4",
+      "4",
+      "1"
+    ],
+    [
+      "4",
+      "4",
+      "4",
+      "4",
+      "1"
+    ],
+    [
+      "4",
+      "4",
+      "4",
+      "4",
+      "1"
+    ],
+    [
+      "5",
+      "5",
+      "5",
+      "5",
+      "1"
+    ],
+    [
+      "5",
+      "5",
+      "5",
+      "5",
+      "1"
+    ],
+    [
+      "7",
+      "7",
+      "7",
+      "7",
+      "1"
+    ],
+    [
+      "9",
+      "9",
+      "9",
+      "9",
+      "1"
+    ]
+  ],
+  "expect": {
+    "final_values": {
+      "basis": "5",
+      "upper": "9",
+      "lower": "1",
+      "bandwidth": "160",
+      "percent_b": "1"
+    }
+  }
+}

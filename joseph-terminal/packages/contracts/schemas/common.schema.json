@@ -1,0 +1,186 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://schemas.joseph.local/v1/common.schema.json",
+  "title": "JosephCommon",
+  "description": "Shared primitive types for every Joseph contract. Money, prices and quantities are decimal strings; timestamps are UTC epoch milliseconds.",
+  "$defs": {
+    "DecimalString": {
+      "title": "DecimalString",
+      "description": "Exact decimal number encoded as a string. Never an IEEE-754 float.",
+      "type": "string",
+      "pattern": "^-?(0|[1-9][0-9]*)(\\.[0-9]+)?$",
+      "maxLength": 64
+    },
+    "NonNegativeDecimalString": {
+      "title": "NonNegativeDecimalString",
+      "description": "Exact non-negative decimal number encoded as a string.",
+      "type": "string",
+      "pattern": "^(0|[1-9][0-9]*)(\\.[0-9]+)?$",
+      "maxLength": 64
+    },
+    "TimestampMs": {
+      "title": "TimestampMs",
+      "description": "UTC epoch milliseconds.",
+      "type": "integer",
+      "minimum": 0
+    },
+    "Venue": {
+      "title": "Venue",
+      "description": "Market venue identifier: a crypto venue, a securities exchange (`twse` Taiwan Stock Exchange, `tpex` Taipei Exchange mainboard, `nasdaq`, `nyse`, `cboe` Cboe BZX; `nyse` also covers NYSE Arca and NYSE American listings, `cboe` lists GOVT and many other ETFs) or a rate publisher (`treasury`, US Treasury yield curves). `mock` is the synthetic DEMO venue and is never tradable live.",
+      "type": "string",
+      "enum": ["binance", "hyperliquid", "lighter", "bitget", "mexc", "twse", "tpex", "nasdaq", "nyse", "cboe", "treasury", "mock"]
+    },
+    "Broker": {
+      "title": "Broker",
+      "description": "Securities broker that executes orders on exchange venues: `ibkr` (Interactive Brokers: nasdaq, nyse, cboe), `sinopac` (SinoPac Shioaji: twse, tpex), `cathay` (Cathay Securities: twse, tpex).",
+      "type": "string",
+      "enum": ["ibkr", "sinopac", "cathay"]
+    },
+    "TradingVenue": {
+      "title": "TradingVenue",
+      "description": "Where an account trades: a crypto venue (orders go to the venue itself) or a securities broker.",
+      "type": "string",
+      "enum": ["binance", "hyperliquid", "lighter", "bitget", "mexc", "ibkr", "sinopac", "cathay", "mock"]
+    },
+    "CalendarId": {
+      "title": "CalendarId",
+      "description": "Session calendar. `24x7` markets never close and use UTC-aligned bars. Exchange calendars align intraday bars to the session open (the last bar of a session is cut at the close), make a daily bar one session and weekly/monthly bars the sessions of an ISO week/calendar month in exchange time. XTAI: TWSE and TPEx 09:00-13:30 Asia/Taipei. XNYS: NYSE/Nasdaq/Cboe 09:30-16:00 America/New_York with early closes. USBOND: US Treasury market business days 08:00-17:00 America/New_York.",
+      "type": "string",
+      "enum": ["24x7", "XTAI", "XNYS", "USBOND"]
+    },
+    "TradingSession": {
+      "title": "TradingSession",
+      "description": "One trading session [open_ms, close_ms).",
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["day", "open_ms", "close_ms"],
+      "properties": {
+        "day": {"type": "string", "format": "date", "description": "Exchange-local trading date."},
+        "open_ms": {"$ref": "#/$defs/TimestampMs"},
+        "close_ms": {"$ref": "#/$defs/TimestampMs"}
+      }
+    },
+    "MarketType": {
+      "title": "MarketType",
+      "description": "Product type at the venue. `stock` and `etf` are exchange-listed cash securities; `rate` is a published, non-tradable rate series (Treasury par and real yields, in percent).",
+      "type": "string",
+      "enum": ["perp", "spot", "future", "stock", "etf", "rate"]
+    },
+    "InstrumentId": {
+      "title": "InstrumentId",
+      "description": "Canonical venue-scoped instrument id `{venue}:{market_type}:{venue_market_id}`, e.g. `binance:perp:BTCUSDT`, `hyperliquid:perp:BTC`, `twse:stock:2330`, `tpex:etf:00679B`, `nasdaq:etf:TLT`, `cboe:etf:GOVT` or `treasury:rate:UST10Y`. The same base asset on two venues is two instruments.",
+      "type": "string",
+      "pattern": "^(binance|hyperliquid|lighter|bitget|mexc|twse|tpex|nasdaq|nyse|cboe|treasury|mock):(perp|spot|future|stock|etf|rate):[A-Za-z0-9._/-]{1,64}$"
+    },
+    "Timeframe": {
+      "title": "Timeframe",
+      "description": "Candle resolution. Boundaries are UTC-aligned half-open intervals [start_ms, end_ms). Case matters: 1m is one minute, 1M one calendar month (starts on the 1st 00:00 UTC, 28-31 days). Seconds bars are built by the engine from the venue's public trades.",
+      "type": "string",
+      "enum": ["1s", "5s", "15s", "30s", "1m", "3m", "5m", "15m", "30m", "1h", "2h", "4h", "6h", "12h", "1d", "1w", "1M"]
+    },
+    "FeedMode": {
+      "title": "FeedMode",
+      "description": "Requested market-data transport policy.",
+      "type": "string",
+      "enum": ["AUTO", "NATIVE_WS", "REST_POLL", "EXTERNAL_VENDOR", "REPLAY"]
+    },
+    "FeedState": {
+      "title": "FeedState",
+      "description": "Observed provenance of data shown to users. DEMO is synthetic and must never be presented as live.",
+      "type": "string",
+      "enum": ["LIVE", "POLL", "REPLAY", "STALE", "DEMO", "UNAVAILABLE", "CONNECTING"]
+    },
+    "HealthState": {
+      "title": "HealthState",
+      "description": "Health of a feed, adapter or account connection.",
+      "type": "string",
+      "enum": ["HEALTHY", "DEGRADED", "STALE", "UNAVAILABLE"]
+    },
+    "Direction": {
+      "title": "Direction",
+      "description": "Strategy trade direction.",
+      "type": "string",
+      "enum": ["LONG", "SHORT"]
+    },
+    "ZoneSide": {
+      "title": "ZoneSide",
+      "description": "Directional bias of a structure or area of interest.",
+      "type": "string",
+      "enum": ["bullish", "bearish", "neutral"]
+    },
+    "ExecutionMode": {
+      "title": "ExecutionMode",
+      "description": "Strategy activation mode. Saving a rule never implies AUTO_LIVE.",
+      "type": "string",
+      "enum": ["ALERT_ONLY", "PAPER", "SHADOW", "AUTO_LIVE"]
+    },
+    "OrderMode": {
+      "title": "OrderMode",
+      "description": "Mode of an individual order intent. LIVE is disabled by default and fails closed.",
+      "type": "string",
+      "enum": ["PAPER", "SHADOW", "LIVE"]
+    },
+    "ErrorCode": {
+      "title": "ErrorCode",
+      "description": "Actionable machine-readable error code shown to users.",
+      "type": "string",
+      "enum": [
+        "MARKET_STALE",
+        "MISSING_DATA",
+        "ORDER_UNKNOWN",
+        "INSUFFICIENT_MARGIN",
+        "RISK_LIMIT",
+        "VENUE_UNAVAILABLE",
+        "AUTH_SCOPE_MISSING",
+        "UNAUTHENTICATED",
+        "FORBIDDEN",
+        "STEP_UP_REQUIRED",
+        "INVALID_TICK_SIZE",
+        "INVALID_LOT_SIZE",
+        "MIN_NOTIONAL",
+        "TRADE_MODE_DISABLED",
+        "LIVE_TRADING_DISABLED",
+        "LIVE_NOT_ARMED",
+        "KILL_SWITCH_ENGAGED",
+        "DUPLICATE_INTENT",
+        "IDEMPOTENCY_CONFLICT",
+        "PREVIEW_REQUIRED",
+        "PREVIEW_EXPIRED",
+        "POSITION_UNKNOWN",
+        "UNSUPPORTED",
+        "UNSUPPORTED_ORDER_TYPE",
+        "VALIDATION_FAILED",
+        "NOT_FOUND",
+        "CONFLICT",
+        "RATE_LIMITED",
+        "INTERNAL"
+      ]
+    },
+    "FieldError": {
+      "title": "FieldError",
+      "description": "Validation failure for one request field.",
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["field", "message"],
+      "properties": {
+        "field": {"type": "string"},
+        "message": {"type": "string"}
+      }
+    },
+    "ErrorResponse": {
+      "title": "ErrorResponse",
+      "description": "Uniform error body for every REST endpoint.",
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["code", "message", "trace_id", "retryable", "field_errors"],
+      "properties": {
+        "code": {"$ref": "#/$defs/ErrorCode"},
+        "message": {"type": "string"},
+        "trace_id": {"type": "string"},
+        "retryable": {"type": "boolean"},
+        "field_errors": {"type": "array", "items": {"$ref": "#/$defs/FieldError"}},
+        "source_status": {"type": ["string", "null"]}
+      }
+    }
+  }
+}

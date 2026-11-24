@@ -1,0 +1,91 @@
+/*
+ * Copyright 2026 Joseph Terminal contributors
+ * SPDX-License-Identifier: MIT
+ */
+
+/* Screener layout. */
+.grow {
+  flex: 1;
+}
+
+.body {
+  align-content: start;
+  display: grid;
+  gap: var(--space-3);
+}
+
+.filters {
+  display: grid;
+  gap: var(--space-2);
+  grid-template-columns: 1fr 1fr;
+}
+
+.scroll {
+  overflow-x: auto;
+}
+
+.row {
+  cursor: pointer;
+}
+
+.pass .mark {
+  color: var(--bid);
+}
+
+.fail {
+  color: var(--ask);
+}
+
+.missing {
+  color: var(--sodium);
+}
+
+.mark {
+  display: inline-block;
+  font-size: var(--text-xs);
+  margin-left: 3px;
+  text-align: center;
+  width: 12px;
+}
+
+.tag {
+  margin-left: 4px;
+}
+
+.detail td {
+  background: var(--abyss);
+  height: auto;
+  padding: var(--space-2);
+  white-space: normal;
+}
+
+.reasons {
+  color: var(--haze);
+  display: grid;
+  font-size: var(--text-sm);
+  gap: 2px;
+  margin: 0;
+  padding-left: var(--space-4);
+}
+
+.footnote {
+  color: var(--haze-dim);
+  font-size: var(--text-xs);
+  margin: 0;
+}
+
+.presets {
+  display: grid;
+  gap: var(--space-2);
+}
+
+.presetForm {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-2);
+}
+
+.presetForm input {
+  flex: 1;
+  min-width: 120px;
+}

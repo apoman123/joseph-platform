@@ -1,0 +1,30 @@
+{
+  "plugin_id": "volume_delta",
+  "timeframe": "5m",
+  "instrument_id": "mock:stock:ACME",
+  "start_ms": 1794839400000,
+  "settings": {},
+  "description": "Exchange buy volume classified from trades against the quote (6th field 50, 7th field classified) on the XNYS session open bar: volume 200, buy 50, sell 150, delta -100, delta_pct -100 / 200 * 100 = -50, labelled trade_classification rather than taker volume.",
+  "bars": [
+    [
+      "50",
+      "51",
+      "49",
+      "50",
+      "200",
+      "50",
+      "classified"
+    ]
+  ],
+  "expect": {
+    "final_values": {
+      "delta_pct": "-50",
+      "delta": "-100",
+      "buy_volume": "50",
+      "sell_volume": "150",
+      "method": "trade_classification",
+      "coverage_pct": "100",
+      "intrabar_count": 0
+    }
+  }
+}

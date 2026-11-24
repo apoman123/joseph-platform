@@ -1,0 +1,8 @@
+packages:
+  - apps/*
+  - packages/*
+
+# Lock only versions published at least 3 days ago (minutes). Dependabot
+# applies the same cooldown, and its pnpm refuses a lockfile that holds a
+# younger version; it also gives the registry time to pull bad releases.
+minimumReleaseAge: 4320

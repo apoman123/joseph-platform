@@ -1,0 +1,110 @@
+[
+ {
+  "collateralToken": 0,
+  "universe": [
+   {
+    "marginTableId": 56,
+    "maxLeverage": 40,
+    "name": "BTC",
+    "szDecimals": 5
+   },
+   {
+    "marginTableId": 55,
+    "maxLeverage": 25,
+    "name": "ETH",
+    "szDecimals": 4
+   },
+   {
+    "marginTableId": 5,
+    "maxLeverage": 5,
+    "name": "ATOM",
+    "szDecimals": 2
+   },
+   {
+    "isDelisted": true,
+    "marginTableId": 20,
+    "maxLeverage": 20,
+    "name": "MATIC",
+    "szDecimals": 1
+   },
+   {
+    "isDelisted": true,
+    "marginTableId": 20,
+    "maxLeverage": 20,
+    "name": "MATIC",
+    "szDecimals": 1
+   }
+  ]
+ },
+ [
+  {
+   "dayBaseVlm": "113384.3346499998",
+   "dayNtlVlm": "6599452424.107172966",
+   "funding": "-0.0000057114",
+   "impactPxs": [
+    "59780.0",
+    "59781.0"
+   ],
+   "markPx": "59782.0",
+   "midPx": "59780.5",
+   "openInterest": "37552.1251",
+   "oraclePx": "59814.0",
+   "premium": "-0.0005517103",
+   "prevDayPx": "59680.0"
+  },
+  {
+   "dayBaseVlm": "1362490.6808000007",
+   "dayNtlVlm": "2203970845.3805303574",
+   "funding": "-0.0000123391",
+   "impactPxs": [
+    "1677.63",
+    "1677.8"
+   ],
+   "markPx": "1677.8",
+   "midPx": "1677.75",
+   "openInterest": "588565.8139999999",
+   "oraclePx": "1678.88",
+   "premium": "-0.000643286",
+   "prevDayPx": "1653.2"
+  },
+  {
+   "dayBaseVlm": "316604.8800000002",
+   "dayNtlVlm": "377330.9316860001",
+   "funding": "-0.0000225522",
+   "impactPxs": [
+    "1.1791",
+    "1.1821"
+   ],
+   "markPx": "1.1803",
+   "midPx": "1.1801",
+   "openInterest": "3054530.7799999998",
+   "oraclePx": "1.183",
+   "premium": "-0.0007607777",
+   "prevDayPx": "1.2172"
+  },
+  {
+   "dayBaseVlm": "0.0",
+   "dayNtlVlm": "0.0",
+   "funding": "0.0",
+   "impactPxs": null,
+   "markPx": "0.37621",
+   "midPx": null,
+   "openInterest": "0.0",
+   "oraclePx": "0.3754",
+   "premium": null,
+   "prevDayPx": "0.37621"
+  },
+  {
+   "dayBaseVlm": "0.0",
+   "dayNtlVlm": "0.0",
+   "funding": "0.0",
+   "impactPxs": null,
+   "markPx": "0.37621",
+   "midPx": null,
+   "openInterest": "0.0",
+   "oraclePx": "0.3754",
+   "premium": null,
+   "prevDayPx": "0.37621"
+  }
+ ]
+]

@@ -1,0 +1,617 @@
+# Copyright 2026 apoman123
+# SPDX-License-Identifier: MIT
+
+"""Environment-driven configuration for the market engine.
+
+All settings come from ``JOSEPH_*`` environment variables so the same build
+runs in development, CI and production; ``Settings`` lists each variable
+with its default and unit. Secrets never appear in ``Settings.__repr__``,
+which masks the tokens and keys it shows and leaves the others out. The
+SinoPac keys may also come from secret files (``NAME_FILE``, see
+``secret_value``) and are registered for log redaction.
+"""
+
+from __future__ import annotations
+
+import dataclasses
+import os
+import pathlib
+from collections.abc import Mapping
+
+from joseph.domain import identity
+from joseph.domain import instruments
+from joseph.platform import redaction
+
+_DEFAULT_CORS = "http://localhost:3000,http://127.0.0.1:3000"
+_ALL_VENUES = ",".join(venue.value for venue in instruments.Venue)
+
+
+@dataclasses.dataclass(frozen=True, slots=True)
+class DevToken:
+    """Static bearer token mapped to a principal (development only).
+
+    Attributes:
+        token: Opaque bearer token text.
+        tenant_id: Tenant the token authenticates as.
+        user_id: User the token authenticates as.
+    """
+
+    token: str
+    tenant_id: str
+    user_id: str
+
+    def __repr__(self) -> str:
+        """Returns a representation with the token redacted."""
+        return (
+            f"DevToken(token='***', tenant_id={self.tenant_id!r}, "
+            f"user_id={self.user_id!r})"
+        )
+
+    def principal(self) -> identity.Principal:
+        """Builds the principal this token authenticates.
+
+        Returns:
+            Principal with read/write strategy scopes.
+        """
+        return identity.Principal(
+            tenant_id=self.tenant_id,
+            user_id=self.user_id,
+            scopes=frozenset(
+                {"market:read", "strategy:read", "strategy:write"}
+            ),
+        )
+
+
+def parse_dev_tokens(raw: str) -> tuple[DevToken, ...]:
+    """Parses ``token:tenant:user`` entries separated by commas.
+
+    Args:
+        raw: Value of ``JOSEPH_DEV_TOKENS``.
+
+    Returns:
+        Parsed tokens in input order; empty entries are skipped.
+
+    Raises:
+        ValueError: If an entry does not have exactly three parts.
+    """
+    tokens: list[DevToken] = []
+    for entry in (part.strip() for part in raw.split(",")):
+        if not entry:
+            continue
+        pieces = entry.split(":")
+        if len(pieces) != 3 or not all(pieces):
+            raise ValueError(
+                "JOSEPH_DEV_TOKENS entries must be token:tenant:user"
+            )
+        tokens.append(DevToken(pieces[0], pieces[1], pieces[2]))
+    return tuple(tokens)
+
+
+def _bool(value: str | None, default: bool) -> bool:
+    """Parses a boolean environment value.
+
+    Args:
+        value: Raw value or ``None``.
+        default: Value used when unset or empty.
+
+    Returns:
+        True for ``1``, ``true``, ``yes`` or ``on`` (any case, surrounding
+        spaces ignored); False for any other non-empty value.
+    """
+    if value is None or value == "":
+        return default
+    return value.strip().lower() in {"1", "true", "yes", "on"}
+
+
+def secret_value(source: Mapping[str, str], name: str) -> str | None:
+    """Reads a secret from ``NAME`` or the file named by ``NAME_FILE``.
+
+    ``NAME`` wins when both are set. The value is registered for log
+    redaction.
+
+    Args:
+        source: Environment mapping.
+        name: Variable name, for example ``JOSEPH_SINOPAC_API_KEY``.
+
+    Returns:
+        Value (stripped), or ``None`` when unset.
+
+    Raises:
+        ValueError: When ``NAME_FILE`` points to an unreadable file (the
+            message names the variable, never the value).
+    """
+    value = (source.get(name) or "").strip()
+    path = source.get(f"{name}_FILE")
+    if not value and path:
+        try:
+            value = pathlib.Path(path).read_text(encoding="utf-8").strip()
+        except OSError as err:
+            raise ValueError(f"{name}_FILE is not readable") from err
+    if not value:
+        return None
+    redaction.register_secret(value)
+    return value
+
+
+TW_DATA_SOURCES = ("twse", "sinopac")
+"""Values of ``JOSEPH_TW_DATA_SOURCE``."""
+
+
+def _names(raw: str) -> tuple[str, ...]:
+    """Splits a comma-separated list of names.
+
+    Args:
+        raw: Variable value.
+
+    Returns:
+        The stripped, non-empty names in order.
+    """
+    return tuple(name.strip() for name in raw.split(",") if name.strip())
+
+
+def _tw_data_source(value: str) -> str:
+    """Validates ``JOSEPH_TW_DATA_SOURCE``.
+
+    Args:
+        value: Raw value.
+
+    Returns:
+        ``twse`` or ``sinopac``.
+
+    Raises:
+        ValueError: For another value.
+    """
+    choice = value.strip().lower() or "twse"
+    if choice not in TW_DATA_SOURCES:
+        raise ValueError("JOSEPH_TW_DATA_SOURCE must be twse or sinopac")
+    return choice
+
+
+def _bounded(
+    source: Mapping[str, str], name: str, default: int, low: int, high: int
+) -> int:
+    """Reads an integer setting clamped into ``[low, high]``.
+
+    Args:
+        source: Environment mapping.
+        name: Variable name.
+        default: Value when unset.
+        low: Smallest value.
+        high: Largest value.
+
+    Returns:
+        Clamped value.
+
+    Raises:
+        ValueError: If the value is not an integer.
+    """
+    return min(high, max(low, int(source.get(name, str(default)))))
+
+
+_ALPACA_FEEDS = frozenset({"iex", "sip", "delayed_sip"})
+
+
+def _alpaca_feed(value: str) -> str:
+    """Validates ``JOSEPH_ALPACA_FEED``.
+
+    Args:
+        value: Raw value.
+
+    Returns:
+        ``iex``, ``sip`` or ``delayed_sip``.
+
+    Raises:
+        ValueError: For another value.
+    """
+    feed = value.strip().lower() or "iex"
+    if feed not in _ALPACA_FEEDS:
+        raise ValueError("JOSEPH_ALPACA_FEED must be iex, sip or delayed_sip")
+    return feed
+
+
+_MEXC_WS_FORMATS = frozenset({"protobuf", "json"})
+
+
+def _mexc_ws_format(value: str) -> str:
+    """Validates ``JOSEPH_MEXC_WS_FORMAT``.
+
+    Args:
+        value: Raw value.
+
+    Returns:
+        ``protobuf`` (default) or ``json``.
+
+    Raises:
+        ValueError: For another value.
+    """
+    fmt = value.strip().lower() or "protobuf"
+    if fmt not in _MEXC_WS_FORMATS:
+        raise ValueError("JOSEPH_MEXC_WS_FORMAT must be protobuf or json")
+    return fmt
+
+
+@dataclasses.dataclass(frozen=True)
+class Settings:
+    """Market-engine settings.
+
+    ``from_env`` reads each field from the environment variable named in
+    its entry below; an unset variable gives the stated default. Values
+    marked "at least" or "clamped" are adjusted into range by ``from_env``
+    only; constructing ``Settings`` directly applies no bounds. Lists are
+    comma-separated, and booleans are true for ``1``, ``true``, ``yes`` or
+    ``on`` (any case) and false for any other non-empty value.
+
+    Attributes:
+        dev_tokens: Development bearer tokens, ``JOSEPH_DEV_TOKENS``, as
+            ``token:tenant:user`` entries. Default none, which makes every
+            protected route answer 401.
+        service_token: Bearer token sent to the execution engine when
+            forwarding signals, ``JOSEPH_SERVICE_TOKEN``. Default none,
+            which disables forwarding.
+        execution_url: Base URL of the execution engine,
+            ``JOSEPH_EXECUTION_URL``; a trailing ``/`` is removed. Default
+            ``http://localhost:8100``.
+        cors_origins: Allowed browser origins, ``JOSEPH_CORS_ORIGINS``.
+            Default ``http://localhost:3000`` and
+            ``http://127.0.0.1:3000``.
+        database_url: SQLAlchemy URL for durable state,
+            ``JOSEPH_DATABASE_URL``. Default ``sqlite:///./var/market.db``.
+        enabled_venues: Venues whose adapters are constructed,
+            ``JOSEPH_ENABLED_VENUES`` (contract venue ids, any case).
+            Default every venue.
+        demo_only: When true only the mock venue is enabled,
+            ``JOSEPH_DEMO_ONLY``. Default false.
+        replay_dir: Directory of JSONL candle files for the replay adapter,
+            ``JOSEPH_REPLAY_DIR``. Default none (no replay source).
+        http_timeout_s: Timeout of venue and outbound HTTP requests, in
+            seconds, ``JOSEPH_HTTP_TIMEOUT_S``. Default 10.
+        poll_interval_s: REST polling interval of polled feeds, in
+            seconds, ``JOSEPH_POLL_INTERVAL_S``. Default 5, at least 1.
+        snapshot_stale_after_ms: Age at which snapshots and feeds are
+            flagged stale, in milliseconds,
+            ``JOSEPH_SNAPSHOT_STALE_AFTER_MS``. Default 30000.
+        stream_retention: Envelopes the stream hub keeps, across all
+            channels, for clients resuming with ``last_sequence``,
+            ``JOSEPH_STREAM_RETENTION``. Default 2000.
+        top_n: Qualification candidates per venue, ranked by 24h quote
+            turnover, ``JOSEPH_QUALIFICATION_TOP_N``. Default 50.
+        coingecko_enabled: Whether CoinGecko trending heat bonuses are
+            fetched, ``JOSEPH_COINGECKO_ENABLED``. Default false.
+        pipeline_enabled: Whether the live signal pipeline runs,
+            ``JOSEPH_PIPELINE_ENABLED``. Default true.
+        pipeline_interval_s: Time between live pipeline passes, in seconds,
+            ``JOSEPH_PIPELINE_INTERVAL_S``. Default 10, at least 1.
+        pipeline_max_instruments: Instruments per venue for universes
+            without explicit instruments,
+            ``JOSEPH_PIPELINE_MAX_INSTRUMENTS``. Default 10.
+        forward_signals: Whether entry signals of PAPER/SHADOW/AUTO_LIVE
+            strategies are forwarded to the execution engine (also needs
+            ``service_token``), ``JOSEPH_FORWARD_SIGNALS``. Default true.
+        alert_interval_s: Time between alert outbox passes, in seconds,
+            ``JOSEPH_ALERT_INTERVAL_S``. Default 2, at least 0.5.
+        max_anchored_bars: Hard cap of chart bars an anchored study
+            (anchored VWAP, anchored regression) computes from its anchor
+            to now, ``JOSEPH_MAX_ANCHORED_BARS``. Default 50000, at least
+            2000.
+        indicator_plugin_packages: Indicator plugin packages to load,
+            ``JOSEPH_INDICATOR_PLUGIN_PACKAGES``: ``*`` for every installed
+            entry point of the ``joseph.indicator_plugins`` group, ``none``
+            for none, or comma-separated entry-point names. Default ``*``.
+            The built-in indicators always load.
+        indicator_plugins_disabled: Indicator plugin ids to register but
+            disable, ``JOSEPH_INDICATOR_PLUGINS_DISABLED`` (built-ins
+            included); strategies that use them report the plugin as
+            unavailable. Default none.
+        indicator_plugins_required: Indicator plugin ids that must load and
+            stay enabled, else startup fails,
+            ``JOSEPH_INDICATOR_PLUGINS_REQUIRED``. Default none.
+        telegram_bot_token: Telegram bot token (secret),
+            ``JOSEPH_TELEGRAM_BOT_TOKEN``. Default none (channel off).
+        line_channel_token: LINE Messaging API channel token (secret),
+            ``JOSEPH_LINE_CHANNEL_TOKEN``. Default none (channel off).
+        webhook_secret: HMAC secret for outbound webhooks (secret),
+            ``JOSEPH_WEBHOOK_SECRET``. Default none (channel off).
+        smtp_host: SMTP host for e-mail alerts, ``JOSEPH_SMTP_HOST``.
+            Default none; e-mail is off unless both this and ``smtp_from``
+            are set.
+        smtp_port: SMTP port, ``JOSEPH_SMTP_PORT``. Default 587.
+        smtp_from: Sender address, ``JOSEPH_SMTP_FROM``. Default none.
+        smtp_username: SMTP username, ``JOSEPH_SMTP_USERNAME``. Default
+            none.
+        smtp_password: SMTP password (secret), ``JOSEPH_SMTP_PASSWORD``.
+            Default none.
+        alpaca_key_id: Alpaca API key id for US exchange data (secret),
+            ``JOSEPH_ALPACA_KEY_ID``. Default none.
+        alpaca_secret_key: Alpaca API secret (secret),
+            ``JOSEPH_ALPACA_SECRET_KEY``. Default none.
+        alpaca_feed: Alpaca stock feed, ``iex``, ``sip`` or
+            ``delayed_sip`` (any case), ``JOSEPH_ALPACA_FEED``. Default
+            ``iex``.
+        alpaca_seconds_history_ms: Longest seconds-bar history built on
+            demand from Alpaca trades and quotes, in milliseconds,
+            ``JOSEPH_ALPACA_SECONDS_HISTORY_MS``. Default 1800000 (30
+            minutes).
+        trade_recording: Whether public trades are recorded (seconds
+            history across restarts, true delta on covered bars),
+            ``JOSEPH_TRADE_RECORDING``. Default true.
+        trade_bar_retention_days: Recorded trades kept, in days (fractions
+            allowed), ``JOSEPH_TRADE_BAR_RETENTION_DAYS``. Default 30, at
+            least 1.
+        trade_record_instruments: Canonical ids of instruments recorded
+            permanently, ``JOSEPH_TRADE_RECORD_INSTRUMENTS``. Default none.
+        trade_record_max_instruments: Instruments recorded live at once,
+            ``JOSEPH_TRADE_RECORD_MAX_INSTRUMENTS``. Default 16, at least
+            0.
+        trade_backfill_max_calls: REST trade-history calls per backfill,
+            ``JOSEPH_TRADE_BACKFILL_MAX_CALLS``. Default 20, at least 0.
+        trade_archive_url: SQLAlchemy URL of the trade archive,
+            ``JOSEPH_TRADE_ARCHIVE_URL``. Default none, which stores it in
+            ``database_url``.
+        binance_archive: Whether Binance seconds history older than the
+            REST window is imported from data.binance.vision,
+            ``JOSEPH_BINANCE_ARCHIVE``. Default true.
+        binance_archive_dir: Cache directory of verified archive files,
+            ``JOSEPH_BINANCE_ARCHIVE_DIR``. Default
+            ``./var/binance-vision``.
+        bitget_archive: Whether Bitget seconds history is imported from
+            its public trade archive (verified against 1D klines),
+            ``JOSEPH_BITGET_ARCHIVE``. Default true.
+        bitget_archive_dir: Cache directory of downloaded Bitget parts,
+            ``JOSEPH_BITGET_ARCHIVE_DIR``. Default ``./var/bitget-archive``.
+        mexc_ws_format: MEXC futures WebSocket push format, ``protobuf``
+            or ``json`` (any case), ``JOSEPH_MEXC_WS_FORMAT``. Default
+            ``protobuf``; MEXC's deadline for migrating off JSON market
+            data is 2026-12-01 10:00 UTC.
+        lighter_archive: Whether Lighter seconds history is imported from
+            the AWS Public Blockchain Data trade archive (remote range
+            reads, verified against 1d candles, nothing cached on disk),
+            ``JOSEPH_LIGHTER_ARCHIVE``. Default true.
+        tw_data_source: Market data of TWSE and TPEx, ``twse`` (the
+            exchanges' official sources) or ``sinopac`` (SinoPac Shioaji
+            bars, ticks and books, falling back to the official sources),
+            any case, ``JOSEPH_TW_DATA_SOURCE``. Default ``twse``.
+        sinopac_api_key: Shioaji API key (secret),
+            ``JOSEPH_SINOPAC_API_KEY`` or the file named by
+            ``JOSEPH_SINOPAC_API_KEY_FILE``. Default none.
+        sinopac_secret_key: Shioaji secret key (secret),
+            ``JOSEPH_SINOPAC_SECRET_KEY`` or the file named by
+            ``JOSEPH_SINOPAC_SECRET_KEY_FILE``. Default none.
+        sinopac_max_symbols: Codes streamed from Shioaji at once (each
+            uses a tick and a bid/ask subscription; Shioaji allows 200),
+            ``JOSEPH_SINOPAC_MAX_SYMBOLS``. Default 60, clamped to 1..100.
+        sinopac_intraday_ticks_calls: Tick-history queries spent per day
+            during trading hours (Shioaji allows 10),
+            ``JOSEPH_SINOPAC_INTRADAY_TICKS_CALLS``. Default 8, clamped to
+            0..10.
+        sinopac_intraday_kbars_calls: Kbar queries spent per day during
+            trading hours (Shioaji allows 270),
+            ``JOSEPH_SINOPAC_INTRADAY_KBARS_CALLS``. Default 200, clamped
+            to 0..270.
+        sinopac_seconds_history_days: Trading sessions of tick history read
+            for seconds bars and trades, counting back from the newest,
+            ``JOSEPH_SINOPAC_SECONDS_HISTORY_DAYS``. Default 5, clamped to
+            0..30.
+    """
+
+    dev_tokens: tuple[DevToken, ...] = ()
+    service_token: str | None = None
+    execution_url: str = "http://localhost:8100"
+    cors_origins: tuple[str, ...] = tuple(_DEFAULT_CORS.split(","))
+    database_url: str = "sqlite:///./var/market.db"
+    enabled_venues: tuple[instruments.Venue, ...] = tuple(instruments.Venue)
+    demo_only: bool = False
+    replay_dir: str | None = None
+    http_timeout_s: float = 10.0
+    poll_interval_s: float = 5.0
+    snapshot_stale_after_ms: int = 30_000
+    stream_retention: int = 2_000
+    top_n: int = 50
+    coingecko_enabled: bool = False
+    pipeline_enabled: bool = True
+    pipeline_interval_s: float = 10.0
+    pipeline_max_instruments: int = 10
+    forward_signals: bool = True
+    alert_interval_s: float = 2.0
+    max_anchored_bars: int = 50_000
+    indicator_plugin_packages: str = "*"
+    indicator_plugins_disabled: tuple[str, ...] = ()
+    indicator_plugins_required: tuple[str, ...] = ()
+    telegram_bot_token: str | None = None
+    line_channel_token: str | None = None
+    webhook_secret: str | None = None
+    smtp_host: str | None = None
+    smtp_port: int = 587
+    smtp_from: str | None = None
+    smtp_username: str | None = None
+    smtp_password: str | None = None
+    alpaca_key_id: str | None = None
+    alpaca_secret_key: str | None = None
+    alpaca_feed: str = "iex"
+    alpaca_seconds_history_ms: int = 1_800_000
+    trade_recording: bool = True
+    trade_bar_retention_days: float = 30.0
+    trade_record_instruments: tuple[str, ...] = ()
+    trade_record_max_instruments: int = 16
+    trade_backfill_max_calls: int = 20
+    trade_archive_url: str | None = None
+    binance_archive: bool = True
+    binance_archive_dir: str = "./var/binance-vision"
+    bitget_archive: bool = True
+    bitget_archive_dir: str = "./var/bitget-archive"
+    mexc_ws_format: str = "protobuf"
+    lighter_archive: bool = True
+    tw_data_source: str = "twse"
+    sinopac_api_key: str | None = None
+    sinopac_secret_key: str | None = None
+    sinopac_max_symbols: int = 60
+    sinopac_intraday_ticks_calls: int = 8
+    sinopac_intraday_kbars_calls: int = 200
+    sinopac_seconds_history_days: int = 5
+
+    def __repr__(self) -> str:
+        """Returns a representation with secrets redacted."""
+        return (
+            f"Settings(dev_tokens=<{len(self.dev_tokens)} redacted>, "
+            f"service_token={"'***'" if self.service_token else None}, "
+            f"execution_url={self.execution_url!r}, "
+            f"cors_origins={self.cors_origins!r}, "
+            f"database_url={self.database_url!r}, "
+            f"enabled_venues={[v.value for v in self.active_venues]!r}, "
+            f"demo_only={self.demo_only!r}, "
+            f"indicator_plugin_packages={self.indicator_plugin_packages!r}, "
+            f"tw_data_source={self.tw_data_source!r}, "
+            f"sinopac_api_key={"'***'" if self.sinopac_api_key else None}, "
+            f"sinopac_secret_key="
+            f"{"'***'" if self.sinopac_secret_key else None})"
+        )
+
+    @property
+    def active_venues(self) -> tuple[instruments.Venue, ...]:
+        """The venues to construct: only the mock venue when ``demo_only``."""
+        if self.demo_only:
+            return (instruments.Venue.MOCK,)
+        return self.enabled_venues
+
+    @classmethod
+    def from_env(cls, env: Mapping[str, str] | None = None) -> Settings:
+        """Builds settings from environment variables.
+
+        Args:
+            env: Mapping to read; defaults to ``os.environ``.
+
+        Returns:
+            Parsed settings.
+
+        Raises:
+            ValueError: If a value is malformed: an unknown venue or
+                choice, a number that does not parse, a bad dev token
+                entry or an unreadable secret file.
+        """
+        source = os.environ if env is None else env
+        venues = tuple(
+            instruments.Venue(name.strip().lower())
+            for name in source.get("JOSEPH_ENABLED_VENUES", _ALL_VENUES).split(
+                ","
+            )
+            if name.strip()
+        )
+        return cls(
+            dev_tokens=parse_dev_tokens(source.get("JOSEPH_DEV_TOKENS", "")),
+            service_token=source.get("JOSEPH_SERVICE_TOKEN") or None,
+            execution_url=source.get(
+                "JOSEPH_EXECUTION_URL", "http://localhost:8100"
+            ).rstrip("/"),
+            cors_origins=tuple(
+                origin.strip()
+                for origin in source.get(
+                    "JOSEPH_CORS_ORIGINS", _DEFAULT_CORS
+                ).split(",")
+                if origin.strip()
+            ),
+            database_url=source.get(
+                "JOSEPH_DATABASE_URL", "sqlite:///./var/market.db"
+            ),
+            enabled_venues=venues,
+            demo_only=_bool(source.get("JOSEPH_DEMO_ONLY"), False),
+            replay_dir=source.get("JOSEPH_REPLAY_DIR") or None,
+            http_timeout_s=float(source.get("JOSEPH_HTTP_TIMEOUT_S", "10")),
+            poll_interval_s=max(
+                1.0, float(source.get("JOSEPH_POLL_INTERVAL_S", "5"))
+            ),
+            snapshot_stale_after_ms=int(
+                source.get("JOSEPH_SNAPSHOT_STALE_AFTER_MS", "30000")
+            ),
+            stream_retention=int(source.get("JOSEPH_STREAM_RETENTION", "2000")),
+            top_n=int(source.get("JOSEPH_QUALIFICATION_TOP_N", "50")),
+            coingecko_enabled=_bool(
+                source.get("JOSEPH_COINGECKO_ENABLED"), False
+            ),
+            pipeline_enabled=_bool(source.get("JOSEPH_PIPELINE_ENABLED"), True),
+            pipeline_interval_s=max(
+                1.0, float(source.get("JOSEPH_PIPELINE_INTERVAL_S", "10"))
+            ),
+            pipeline_max_instruments=int(
+                source.get("JOSEPH_PIPELINE_MAX_INSTRUMENTS", "10")
+            ),
+            forward_signals=_bool(source.get("JOSEPH_FORWARD_SIGNALS"), True),
+            alert_interval_s=max(
+                0.5, float(source.get("JOSEPH_ALERT_INTERVAL_S", "2"))
+            ),
+            max_anchored_bars=max(
+                2_000, int(source.get("JOSEPH_MAX_ANCHORED_BARS", "50000"))
+            ),
+            indicator_plugin_packages=(
+                source.get("JOSEPH_INDICATOR_PLUGIN_PACKAGES", "").strip()
+                or "*"
+            ),
+            indicator_plugins_disabled=_names(
+                source.get("JOSEPH_INDICATOR_PLUGINS_DISABLED", "")
+            ),
+            indicator_plugins_required=_names(
+                source.get("JOSEPH_INDICATOR_PLUGINS_REQUIRED", "")
+            ),
+            telegram_bot_token=source.get("JOSEPH_TELEGRAM_BOT_TOKEN") or None,
+            line_channel_token=source.get("JOSEPH_LINE_CHANNEL_TOKEN") or None,
+            webhook_secret=source.get("JOSEPH_WEBHOOK_SECRET") or None,
+            smtp_host=source.get("JOSEPH_SMTP_HOST") or None,
+            smtp_port=int(source.get("JOSEPH_SMTP_PORT", "587")),
+            smtp_from=source.get("JOSEPH_SMTP_FROM") or None,
+            smtp_username=source.get("JOSEPH_SMTP_USERNAME") or None,
+            smtp_password=source.get("JOSEPH_SMTP_PASSWORD") or None,
+            alpaca_key_id=source.get("JOSEPH_ALPACA_KEY_ID") or None,
+            alpaca_secret_key=source.get("JOSEPH_ALPACA_SECRET_KEY") or None,
+            alpaca_feed=_alpaca_feed(source.get("JOSEPH_ALPACA_FEED", "iex")),
+            alpaca_seconds_history_ms=int(
+                source.get("JOSEPH_ALPACA_SECONDS_HISTORY_MS", "1800000")
+            ),
+            trade_recording=_bool(source.get("JOSEPH_TRADE_RECORDING"), True),
+            trade_bar_retention_days=max(
+                1.0,
+                float(source.get("JOSEPH_TRADE_BAR_RETENTION_DAYS", "30")),
+            ),
+            trade_record_instruments=tuple(
+                value.strip()
+                for value in source.get(
+                    "JOSEPH_TRADE_RECORD_INSTRUMENTS", ""
+                ).split(",")
+                if value.strip()
+            ),
+            trade_record_max_instruments=max(
+                0, int(source.get("JOSEPH_TRADE_RECORD_MAX_INSTRUMENTS", "16"))
+            ),
+            trade_backfill_max_calls=max(
+                0, int(source.get("JOSEPH_TRADE_BACKFILL_MAX_CALLS", "20"))
+            ),
+            trade_archive_url=source.get("JOSEPH_TRADE_ARCHIVE_URL") or None,
+            binance_archive=_bool(source.get("JOSEPH_BINANCE_ARCHIVE"), True),
+            binance_archive_dir=source.get(
+                "JOSEPH_BINANCE_ARCHIVE_DIR", "./var/binance-vision"
+            ),
+            bitget_archive=_bool(source.get("JOSEPH_BITGET_ARCHIVE"), True),
+            bitget_archive_dir=source.get(
+                "JOSEPH_BITGET_ARCHIVE_DIR", "./var/bitget-archive"
+            ),
+            mexc_ws_format=_mexc_ws_format(
+                source.get("JOSEPH_MEXC_WS_FORMAT", "protobuf")
+            ),
+            lighter_archive=_bool(source.get("JOSEPH_LIGHTER_ARCHIVE"), True),
+            tw_data_source=_tw_data_source(
+                source.get("JOSEPH_TW_DATA_SOURCE", "twse")
+            ),
+            sinopac_api_key=secret_value(source, "JOSEPH_SINOPAC_API_KEY"),
+            sinopac_secret_key=secret_value(
+                source, "JOSEPH_SINOPAC_SECRET_KEY"
+            ),
+            sinopac_max_symbols=_bounded(
+                source, "JOSEPH_SINOPAC_MAX_SYMBOLS", 60, 1, 100
+            ),
+            sinopac_intraday_ticks_calls=_bounded(
+                source, "JOSEPH_SINOPAC_INTRADAY_TICKS_CALLS", 8, 0, 10
+            ),
+            sinopac_intraday_kbars_calls=_bounded(
+                source, "JOSEPH_SINOPAC_INTRADAY_KBARS_CALLS", 200, 0, 270
+            ),
+            sinopac_seconds_history_days=_bounded(
+                source, "JOSEPH_SINOPAC_SECONDS_HISTORY_DAYS", 5, 0, 30
+            ),
+        )

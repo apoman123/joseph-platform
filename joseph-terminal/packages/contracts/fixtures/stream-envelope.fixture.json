@@ -1,0 +1,172 @@
+{
+  "schema": "stream.schema.json",
+  "definition": "StreamEnvelope",
+  "valid": [
+    {
+      "type": "signal.created",
+      "event_id": "0193f0a0-0000-7000-8000-000000000002",
+      "schema_version": 1,
+      "sequence": 1234,
+      "event_ts_ms": 1795253400120,
+      "correlation_id": null,
+      "channel": "signals",
+      "payload": {
+        "signal_id": "0193f0a0-0000-7000-8000-000000000001",
+        "dedupe_key": "tenant-01|ema-trend-long:v3|binance:perp:BTCUSDT|LONG|setup-1|ENTRY_CONFIRMED",
+        "tenant_id": "tenant-01",
+        "strategy_id": "ema-trend-long",
+        "strategy_version_id": "ema-trend-long:v3",
+        "setup_id": "setup-1",
+        "instrument_id": "binance:perp:BTCUSDT",
+        "direction": "LONG",
+        "timeframe": "15m",
+        "kind": "ENTRY_CONFIRMED",
+        "setup_state": "FIRED",
+        "severity": "ENTRY",
+        "bar_start_ms": 1795252500000,
+        "bar_close_ms": 1795253400000,
+        "evaluated_at_ms": 1795253400120,
+        "inputs_snapshot_hash": "sha256:0000000000000000000000000000000000000000000000000000000000000000",
+        "rule_version": "sha256:1111111111111111111111111111111111111111111111111111111111111111",
+        "evaluator_version": "2.0.0",
+        "indicator_versions": {
+          "ema": "1.0.0",
+          "rsi": "1.0.0",
+          "volume_delta": "1.0.0"
+        },
+        "reason_tree": {
+          "node_path": "/when",
+          "node_id": "root",
+          "op": "ALL",
+          "result": "TRUE",
+          "detail": "4 of 4 conditions true",
+          "evidence": {},
+          "children": [
+            {
+              "node_path": "/when/children/0",
+              "node_id": "cross",
+              "op": "CROSSES",
+              "result": "TRUE",
+              "detail": "close crossed above ema.ema",
+              "evidence": {
+                "left": "94790",
+                "right": "94752.4"
+              },
+              "children": []
+            },
+            {
+              "node_path": "/when/children/1",
+              "node_id": "htf",
+              "op": "COMPARE",
+              "result": "TRUE",
+              "detail": "rsi.rsi on 1h 58.31 gt 50",
+              "evidence": {
+                "left": "58.31",
+                "right": "50"
+              },
+              "children": []
+            }
+          ]
+        },
+        "aoi_ids": [],
+        "group_ids": [],
+        "entry_price": "94790",
+        "stop_price": "94430",
+        "target_price": "95870",
+        "rr": "2.95",
+        "risk_evaluation": {
+          "status": "PASS",
+          "reasons": []
+        },
+        "mode": "PAPER",
+        "data_source": "LIVE",
+        "revision": 0,
+        "message": "ema-trend-long fired on binance:perp:BTCUSDT 15m"
+      }
+    }
+  ],
+  "invalid": [
+    {
+      "type": "signal.created",
+      "event_id": "0193f0a0-0000-7000-8000-000000000002",
+      "schema_version": 2,
+      "sequence": 1234,
+      "event_ts_ms": 1795253400120,
+      "correlation_id": null,
+      "channel": "signals",
+      "payload": {
+        "signal_id": "0193f0a0-0000-7000-8000-000000000001",
+        "dedupe_key": "tenant-01|ema-trend-long:v3|binance:perp:BTCUSDT|LONG|setup-1|ENTRY_CONFIRMED",
+        "tenant_id": "tenant-01",
+        "strategy_id": "ema-trend-long",
+        "strategy_version_id": "ema-trend-long:v3",
+        "setup_id": "setup-1",
+        "instrument_id": "binance:perp:BTCUSDT",
+        "direction": "LONG",
+        "timeframe": "15m",
+        "kind": "ENTRY_CONFIRMED",
+        "setup_state": "FIRED",
+        "severity": "ENTRY",
+        "bar_start_ms": 1795252500000,
+        "bar_close_ms": 1795253400000,
+        "evaluated_at_ms": 1795253400120,
+        "inputs_snapshot_hash": "sha256:0000000000000000000000000000000000000000000000000000000000000000",
+        "rule_version": "sha256:1111111111111111111111111111111111111111111111111111111111111111",
+        "evaluator_version": "2.0.0",
+        "indicator_versions": {
+          "ema": "1.0.0",
+          "rsi": "1.0.0",
+          "volume_delta": "1.0.0"
+        },
+        "reason_tree": {
+          "node_path": "/when",
+          "node_id": "root",
+          "op": "ALL",
+          "result": "TRUE",
+          "detail": "4 of 4 conditions true",
+          "evidence": {},
+          "children": [
+            {
+              "node_path": "/when/children/0",
+              "node_id": "cross",
+              "op": "CROSSES",
+              "result": "TRUE",
+              "detail": "close crossed above ema.ema",
+              "evidence": {
+                "left": "94790",
+                "right": "94752.4"
+              },
+              "children": []
+            },
+            {
+              "node_path": "/when/children/1",
+              "node_id": "htf",
+              "op": "COMPARE",
+              "result": "TRUE",
+              "detail": "rsi.rsi on 1h 58.31 gt 50",
+              "evidence": {
+                "left": "58.31",
+                "right": "50"
+              },
+              "children": []
+            }
+          ]
+        },
+        "aoi_ids": [],
+        "group_ids": [],
+        "entry_price": "94790",
+        "stop_price": "94430",
+        "target_price": "95870",
+        "rr": "2.95",
+        "risk_evaluation": {
+          "status": "PASS",
+          "reasons": []
+        },
+        "mode": "PAPER",
+        "data_source": "LIVE",
+        "revision": 0,
+        "message": "ema-trend-long fired on binance:perp:BTCUSDT 15m"
+      }
+    }
+  ]
+}

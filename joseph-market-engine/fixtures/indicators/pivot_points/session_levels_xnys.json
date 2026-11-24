@@ -1,0 +1,150 @@
+{
+  "plugin_id": "pivot_points",
+  "instrument_id": "mock:stock:ACME",
+  "timeframe": "1h",
+  "start_ms": 1794839400000,
+  "settings": {
+    "tick_size": "0.01"
+  },
+  "description": "ACME on XNYS, 1h bars from the Mon 2026-11-16 09:30 New York open (7 bars per session). The 11-16 session bar (H 52, L 41, C 45) closes at 16:00 with bar 6, but its levels apply from the 11-17 09:30 open, so they are published on bar 7 and confirmed at its 10:30 close: P = 138 / 3 = 46, R1 = 92 - 41 = 51, S1 = 92 - 52 = 40, R2 = 46 + 11 = 57, S2 = 35, R3 = 52 + 2 x 5 = 62, S3 = 41 - 2 x 6 = 29. Bar 7 (44-47) tests P on the bar that publishes it; bar 8 (45-52) tests R1.",
+  "bars": [
+    [
+      "44",
+      "46",
+      "43",
+      "45",
+      "10"
+    ],
+    [
+      "45",
+      "52",
+      "44",
+      "50",
+      "10"
+    ],
+    [
+      "50",
+      "51",
+      "47",
+      "48",
+      "10"
+    ],
+    [
+      "48",
+      "49",
+      "41",
+      "42",
+      "10"
+    ],
+    [
+      "42",
+      "45",
+      "42",
+      "44",
+      "10"
+    ],
+    [
+      "44",
+      "47",
+      "43",
+      "46",
+      "10"
+    ],
+    [
+      "46",
+      "46",
+      "44",
+      "45",
+      "10"
+    ],
+    [
+      "45",
+      "47",
+      "44",
+      "46",
+      "10"
+    ],
+    [
+      "46",
+      "52",
+      "45",
+      "51",
+      "10"
+    ]
+  ],
+  "aux": {
+    "6": {
+      "1d": [
+        [
+          "1794839400000",
+          "44",
+          "52",
+          "41",
+          "45",
+          "100"
+        ]
+      ]
+    },
+    "7": {
+      "1d": [
+        [
+          "1794839400000",
+          "44",
+          "52",
+          "41",
+          "45",
+          "100"
+        ]
+      ]
+    },
+    "8": {
+      "1d": [
+        [
+          "1794839400000",
+          "44",
+          "52",
+          "41",
+          "45",
+          "100"
+        ]
+      ]
+    }
+  },
+  "expect": {
+    "final_values": {
+      "p": "46",
+      "r1": "51",
+      "r2": "57",
+      "r3": "62",
+      "s1": "40",
+      "s2": "35",
+      "s3": "29",
+      "period_start_ms": 1794925800000
+    },
+    "final_aois": [
+      {
+        "kind": "PIVOT_P",
+        "state": "tested",
+        "lower": "46",
+        "created_at_ms": 1794925800000,
+        "confirmed_at_ms": 1794929400000
+      },
+      {
+        "kind": "PIVOT_R1",
+        "state": "tested",
+        "lower": "51"
+      },
+      {
+        "kind": "PIVOT_S1",
+        "state": "active",
+        "lower": "40",
+        "confirmed_at_ms": 1794929400000
+      },
+      {
+        "kind": "PIVOT_R2",
+        "state": "active",
+        "lower": "57"
+      }
+    ]
+  }
+}

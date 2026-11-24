@@ -1,0 +1,43 @@
+{
+  "plugin_id": "bollinger_bands",
+  "timeframe": "5m",
+  "settings": {
+    "length": 3,
+    "source": "close",
+    "mult": "2",
+    "tick_size": "0.01"
+  },
+  "description": "Closes 5, 5, 5 with length 3: basis 5 and standard deviation 0, so both bands equal the basis, bandwidth = 0 / 5 * 100 = 0 and percent_b is null (the bands coincide).",
+  "bars": [
+    [
+      "5",
+      "5",
+      "5",
+      "5",
+      "1"
+    ],
+    [
+      "5",
+      "5",
+      "5",
+      "5",
+      "1"
+    ],
+    [
+      "5",
+      "5",
+      "5",
+      "5",
+      "1"
+    ]
+  ],
+  "expect": {
+    "final_values": {
+      "basis": "5",
+      "upper": "5",
+      "lower": "5",
+      "bandwidth": "0",
+      "percent_b": null
+    }
+  }
+}

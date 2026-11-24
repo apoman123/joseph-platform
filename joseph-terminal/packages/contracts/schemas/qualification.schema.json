@@ -1,0 +1,91 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://schemas.joseph.local/v1/qualification.schema.json",
+  "title": "JosephQualification",
+  "description": "Qualification filter results for perpetual futures and exchange-listed securities (stocks, ETFs). Strict comparators: a value equal to the threshold fails. Missing data is INSUFFICIENT_DATA, never qualified. Listed securities have no open interest or funding: those gates are omitted and funding risk is NOT_APPLICABLE. Rate series (treasury:rate:*) are never screened.",
+  "$defs": {
+    "QualificationStatus": {
+      "title": "QualificationStatus",
+      "type": "string",
+      "enum": ["QUALIFIED", "REJECTED", "INSUFFICIENT_DATA"]
+    },
+    "RiskTag": {
+      "title": "RiskTag",
+      "type": "string",
+      "enum": ["WATCH", "HIGH_RISK"]
+    },
+    "FundingRisk": {
+      "title": "FundingRisk",
+      "description": "UNKNOWN: funding applies but is unavailable. NOT_APPLICABLE: the instrument has no funding (exchange-listed securities).",
+      "type": "string",
+      "enum": ["NORMAL", "WATCH", "HIGH_RISK", "UNKNOWN", "NOT_APPLICABLE"]
+    },
+    "GateName": {
+      "title": "GateName",
+      "type": "string",
+      "enum": ["TURNOVER_24H", "OPEN_INTEREST_USD", "TURNOVER_OI_RATIO", "SPREAD_PCT", "SLIPPAGE_50K_PCT"]
+    },
+    "GateResult": {
+      "title": "GateResult",
+      "description": "One hard gate with the observed value, threshold and outcome. passed=null means the value was missing or stale.",
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["gate", "observed", "threshold", "comparator", "passed", "unit", "reason"],
+      "properties": {
+        "gate": {"$ref": "#/$defs/GateName"},
+        "observed": {"oneOf": [{"$ref": "common.schema.json#/$defs/DecimalString"}, {"type": "null"}]},
+        "threshold": {"$ref": "common.schema.json#/$defs/DecimalString"},
+        "comparator": {"type": "string", "enum": ["gt", "lt"]},
+        "passed": {"type": ["boolean", "null"]},
+        "unit": {"type": "string", "enum": ["USD", "TWD", "ratio", "pct"], "description": "Currency of turnover thresholds is the listing currency (TWD on TWSE)."},
+        "as_of_ms": {"oneOf": [{"$ref": "common.schema.json#/$defs/TimestampMs"}, {"type": "null"}]},
+        "reason": {"type": "string"}
+      }
+    },
+    "FundingAssessment": {
+      "title": "FundingAssessment",
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["normalized_8h_pct", "risk"],
+      "properties": {
+        "normalized_8h_pct": {"oneOf": [{"$ref": "common.schema.json#/$defs/DecimalString"}, {"type": "null"}]},
+        "interval_hours": {"type": ["number", "null"]},
+        "risk": {"$ref": "#/$defs/FundingRisk"}
+      }
+    },
+    "QualificationRecord": {
+      "title": "QualificationRecord",
+      "description": "Qualification of one exact venue instrument.",
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["instrument_id", "venue", "status", "risk_tags", "gates", "funding", "asset_class", "policy_version", "as_of_ms", "reasons"],
+      "properties": {
+        "instrument_id": {"$ref": "common.schema.json#/$defs/InstrumentId"},
+        "venue": {"$ref": "common.schema.json#/$defs/Venue"},
+        "display_symbol": {"type": "string"},
+        "status": {"$ref": "#/$defs/QualificationStatus"},
+        "risk_tags": {"type": "array", "items": {"$ref": "#/$defs/RiskTag"}},
+        "gates": {"type": "array", "items": {"$ref": "#/$defs/GateResult"}},
+        "funding": {"$ref": "#/$defs/FundingAssessment"},
+        "asset_class": {"$ref": "market.schema.json#/$defs/AssetClass"},
+        "heat_score": {"type": ["number", "null"]},
+        "rank": {"type": ["integer", "null"], "minimum": 1},
+        "policy_version": {"type": "string"},
+        "as_of_ms": {"$ref": "common.schema.json#/$defs/TimestampMs"},
+        "reasons": {"type": "array", "items": {"type": "string"}}
+      }
+    },
+    "QualificationReport": {
+      "title": "QualificationReport",
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["policy_version", "as_of_ms", "records"],
+      "properties": {
+        "policy_version": {"type": "string"},
+        "as_of_ms": {"$ref": "common.schema.json#/$defs/TimestampMs"},
+        "venue": {"oneOf": [{"$ref": "common.schema.json#/$defs/Venue"}, {"type": "null"}]},
+        "records": {"type": "array", "items": {"$ref": "#/$defs/QualificationRecord"}}
+      }
+    }
+  }
+}

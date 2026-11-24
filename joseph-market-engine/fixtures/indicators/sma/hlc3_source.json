@@ -1,0 +1,31 @@
+{
+  "plugin_id": "sma",
+  "timeframe": "5m",
+  "settings": {
+    "length": 2,
+    "source": "hlc3",
+    "tick_size": "0.01"
+  },
+  "description": "Source hlc3 with length 2. Bar 0 (H 13, L 7, C 10): (13 + 7 + 10) / 3 = 10. Bar 1 (H 14, L 8, C 11): (14 + 8 + 11) / 3 = 11. SMA = (10 + 11) / 2 = 10.5.",
+  "bars": [
+    [
+      "10",
+      "13",
+      "7",
+      "10",
+      "1"
+    ],
+    [
+      "10",
+      "14",
+      "8",
+      "11",
+      "1"
+    ]
+  ],
+  "expect": {
+    "final_values": {
+      "sma": "10.5"
+    }
+  }
+}

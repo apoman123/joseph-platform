@@ -1,0 +1,59 @@
+{
+  "plugin_id": "regression_channel",
+  "timeframe": "5m",
+  "settings": {
+    "length": 3,
+    "source": "close",
+    "deviations": "2",
+    "tick_size": "0.01"
+  },
+  "description": "Rolling window of 3 over closes 10, 12, 14, 13 (flat bars): the last window is 12, 14, 13 at x = 0..2, starting at bar 1. Mean x 1, mean y 13, Sxy = 1, Sxx = 2, Syy = 2: slope 0.5, line 12.5 -> 13.5, Pearson r = 1 / sqrt(2 * 2) = 0.5. Residuals -0.5, 1, -0.5: sample stdev sqrt(1.5 / 2) = 0.866025, bands +/- 2 sigma = 1.732051. max_up = 14 - 13 = 1, max_down = 12.5 - 12 = 0.5.",
+  "bars": [
+    [
+      "10",
+      "10",
+      "10",
+      "10",
+      "1"
+    ],
+    [
+      "12",
+      "12",
+      "12",
+      "12",
+      "1"
+    ],
+    [
+      "14",
+      "14",
+      "14",
+      "14",
+      "1"
+    ],
+    [
+      "13",
+      "13",
+      "13",
+      "13",
+      "1"
+    ]
+  ],
+  "expect": {
+    "final_values": {
+      "start_ms": 1794787500000,
+      "start": "12.5",
+      "end": "13.5",
+      "slope": "0.5",
+      "stdev": "0.866025",
+      "upper_start": "14.232051",
+      "lower_start": "10.767949",
+      "upper_end": "15.232051",
+      "lower_end": "11.767949",
+      "pearson_r": "0.5",
+      "max_up": "1",
+      "max_down": "0.5",
+      "bars": 3,
+      "anchor_in_window": true
+    }
+  }
+}

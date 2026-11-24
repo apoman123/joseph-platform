@@ -1,0 +1,50 @@
+# Fails when an image reference can be pulled anonymously from GHCR, or
+# when GHCR cannot be asked.
+#
+# The engine images may contain software this repository cannot
+# redistribute: the market image any indicator plugin packages installed
+# at build time (each under its own licence), and engines built with
+# broker extras SinoPac's SDK. Their GHCR packages therefore stay private
+# even though the repository is public.
+# GHCR answers an anonymous manifest request with 200 for a public package
+# and 401, 403 or 404 for a private or missing one; on any other answer
+# GHCR is asked up to three times, then the check fails closed.
+name: Private image check
+description: Fails when a GHCR image can be pulled without credentials.
+
+inputs:
+  image:
+    description: Image reference, e.g. ghcr.io/owner/name:tag.
+    required: true
+
+runs:
+  using: composite
+  steps:
+    - shell: bash
+      env:
+        IMAGE: ${{ inputs.image }}
+      run: |
+        set -euo pipefail
+        ref="${IMAGE#ghcr.io/}"
+        repo="${ref%:*}"
+        tag="${ref##*:}"
+        accept='application/vnd.oci.image.index.v1+json, application/vnd.docker.distribution.manifest.list.v2+json, application/vnd.oci.image.manifest.v1+json, application/vnd.docker.distribution.manifest.v2+json'
+        for attempt in 1 2 3; do
+          token="$(curl -sS -m 20 "https://ghcr.io/token?scope=repository:${repo}:pull" \
+            | python3 -c 'import json,sys; print(json.load(sys.stdin).get("token", ""))' || true)"
+          code="$(curl -sS -m 20 -o /dev/null -w '%{http_code}' \
+            -H "Authorization: Bearer ${token}" -H "Accept: ${accept}" \
+            "https://ghcr.io/v2/${repo}/manifests/${tag}" || true)"
+          case "${code}" in
+            200)
+              echo "::error title=Public engine image::${IMAGE} can be pulled anonymously. Set the package to private (your GitHub profile > Packages > ${repo#*/} > Package settings > Change visibility) and re-run."
+              exit 1 ;;
+            401|403|404)
+              echo "${IMAGE}: not anonymously pullable (HTTP ${code})."
+              exit 0 ;;
+          esac
+          echo "GHCR answered HTTP ${code}; retrying (${attempt}/3)."
+          sleep 5
+        done
+        echo "::error title=GHCR unreachable::Could not confirm that ${IMAGE} is private."
+        exit 1

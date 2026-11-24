@@ -1,0 +1,1825 @@
+/*
+ * Copyright 2026 Joseph Terminal contributors
+ * SPDX-License-Identifier: MIT
+ */
+
+/*
+ * Terminal shell layout and pieces. Uses tokens.css roles only.
+ *
+ * Stacking order (z-index), lowest first: sticky table headers 1, pane
+ * overlays and the stale notice 2, provenance ribbon 3, data window 4,
+ * splitters and the drawing style bar 6, chart context menu 20, popovers
+ * 50, drawing tool flyouts 60, toasts 90, command palette and modal dialogs
+ * 100.
+ */
+
+*,
+*::before,
+*::after {
+  box-sizing: border-box;
+}
+
+html,
+body {
+  background: var(--abyss);
+  color: var(--chalk);
+  font-family: var(--font-ui);
+  font-size: var(--text-md);
+  -webkit-font-smoothing: antialiased;
+  height: 100%;
+  line-height: 1.4;
+  margin: 0;
+}
+
+button,
+input,
+select {
+  font: inherit;
+}
+
+kbd {
+  border: 1px solid var(--fathom);
+  border-radius: var(--radius-control);
+  color: var(--haze);
+  display: inline-block;
+  font-family: var(--font-ui);
+  font-size: var(--text-xs);
+  line-height: 16px;
+  min-width: 18px;
+  padding: 0 4px;
+  text-align: center;
+}
+
+/* Visually hidden, still read by screen readers. */
+.sr-only {
+  border: 0;
+  clip: rect(0, 0, 0, 0);
+  height: 1px;
+  margin: -1px;
+  overflow: hidden;
+  padding: 0;
+  position: absolute;
+  white-space: nowrap;
+  width: 1px;
+}
+
+.j-badge--connecting {
+  color: var(--haze);
+}
+
+/* Boot */
+.boot {
+  align-items: center;
+  color: var(--haze);
+  display: flex;
+  gap: var(--space-3);
+  height: 100dvh;
+  justify-content: center;
+}
+
+/* Frame */
+.terminal {
+  background: var(--abyss);
+  display: grid;
+  grid-template-rows: var(--header-height) minmax(0, 1fr) var(
+      --statusbar-height
+    );
+  height: 100dvh;
+  /* `hidden` is the fallback for browsers without `clip`; `clip` also stops
+     focus from scrolling the whole frame sideways. */
+  overflow: hidden;
+  overflow: clip;
+}
+
+/* The side panel spans both rows; the bottom panel sits under the toolbar
+   and the charts. */
+.terminal__body {
+  display: grid;
+  grid-template:
+    'tools charts side' minmax(0, 1fr)
+    'bottom bottom side' auto
+    / var(--toolbar-width) minmax(0, 1fr) auto;
+  min-height: 0;
+}
+
+.terminal__charts {
+  grid-area: charts;
+  min-height: 0;
+  min-width: 0;
+}
+
+/* Top bar */
+.topbar {
+  align-items: center;
+  background: var(--hull);
+  border-bottom: 1px solid var(--fathom);
+  display: flex;
+  gap: var(--space-2);
+  min-width: 0;
+  padding: 0 var(--space-3);
+}
+
+.brand {
+  align-items: center;
+  display: flex;
+  gap: var(--space-2);
+  margin-right: var(--space-2);
+}
+
+.brand__mark {
+  background: var(--chalk);
+  border-radius: var(--radius-control);
+  color: var(--abyss);
+  display: grid;
+  font-variation-settings: 'wdth' 125;
+  font-weight: 800;
+  height: 24px;
+  place-items: center;
+  width: 24px;
+}
+
+.brand__word {
+  font-size: var(--text-lg);
+  font-variation-settings: 'wdth' 125;
+  font-weight: 700;
+  letter-spacing: 0.02em;
+}
+
+.topbar__divider {
+  background: var(--fathom);
+  height: 20px;
+  width: 1px;
+}
+
+.topbar__spacer {
+  flex: 1;
+}
+
+.topbar__select {
+  min-width: 112px;
+  width: auto;
+}
+
+.topbar__select--narrow {
+  min-width: 104px;
+}
+
+.instrument-trigger {
+  align-items: center;
+  background: var(--abyss);
+  border: 1px solid var(--fathom);
+  border-radius: var(--radius-control);
+  color: var(--chalk);
+  cursor: pointer;
+  display: inline-flex;
+  gap: var(--space-2);
+  height: 30px;
+  padding: 0 var(--space-3);
+}
+
+.instrument-trigger:hover {
+  border-color: var(--haze-dim);
+}
+
+.instrument-trigger__symbol {
+  font-size: var(--text-lg);
+  font-variation-settings: 'wdth' 108;
+  font-weight: 650;
+}
+
+.instrument-trigger__venue {
+  color: var(--haze);
+  font-size: var(--text-sm);
+  /* The crowded top bar must not wrap the venue under the symbol. */
+  white-space: nowrap;
+}
+
+.timeframes {
+  align-items: center;
+  border: 1px solid var(--fathom);
+  border-radius: var(--radius-control);
+  display: inline-flex;
+}
+
+.timeframes > .popover {
+  display: flex;
+}
+
+.timeframes__item {
+  background: transparent;
+  border: 0;
+  border-right: 1px solid var(--fathom-soft);
+  color: var(--haze);
+  cursor: pointer;
+  font-size: var(--text-sm);
+  font-variant-numeric: tabular-nums;
+  height: 28px;
+  padding: 0 9px;
+}
+
+.timeframes__item:hover {
+  color: var(--chalk);
+}
+
+.timeframes__item[aria-pressed='true'] {
+  background: var(--swell-strong);
+  color: var(--chalk);
+}
+
+.timeframes__more {
+  border-right: 0;
+}
+
+.tf-grid {
+  display: grid;
+  gap: 2px;
+  min-width: 140px;
+}
+
+.tf-grid__row {
+  align-items: center;
+  display: flex;
+}
+
+.tf-grid__row .j-menu__item {
+  flex: 1;
+}
+
+.tf-grid__row .j-menu__item[aria-pressed='true'] {
+  background: var(--swell);
+  color: var(--chalk);
+}
+
+.palette-trigger {
+  gap: 4px;
+}
+
+/* Popovers */
+.popover {
+  position: relative;
+}
+
+.popover > .j-btn {
+  gap: 6px;
+}
+
+.popover__panel {
+  animation: popover-in var(--duration-fast) var(--ease-out);
+  left: 0;
+  position: absolute;
+  top: calc(100% + 6px);
+  z-index: 50;
+}
+
+.popover__panel--right {
+  left: auto;
+  right: 0;
+}
+
+@keyframes popover-in {
+  from {
+    opacity: 0;
+    transform: translateY(-4px);
+  }
+}
+
+.layers-menu,
+.layout-menu {
+  display: grid;
+  gap: 2px;
+  min-width: 240px;
+  padding: var(--space-1);
+}
+
+.layers-menu__note {
+  color: var(--haze);
+  font-size: var(--text-sm);
+  margin: 2px 6px 6px;
+  max-width: 32ch;
+}
+
+.layers-menu__item {
+  border-radius: var(--radius-control);
+  padding: 5px 6px;
+}
+
+.layers-menu__item:hover {
+  background: var(--swell);
+}
+
+.layout-menu__grid {
+  display: flex;
+  gap: var(--space-1);
+  padding: 2px;
+}
+
+/* Instrument search */
+.instrument-search {
+  display: grid;
+  gap: var(--space-2);
+  max-width: calc(100vw - 32px);
+  padding: var(--space-1);
+  width: 380px;
+}
+
+.instrument-search__field {
+  align-items: center;
+  display: flex;
+  position: relative;
+}
+
+.instrument-search__field svg {
+  color: var(--haze);
+  left: 9px;
+  position: absolute;
+}
+
+.instrument-search__field .j-input {
+  padding-left: 28px;
+}
+
+.instrument-search__results {
+  list-style: none;
+  margin: 0;
+  max-height: 320px;
+  overflow-y: auto;
+  padding: 0;
+}
+
+.instrument-search__empty {
+  padding: var(--space-2);
+}
+
+.instrument-option {
+  display: grid;
+  grid-template-areas:
+    'symbol meta'
+    'id id';
+  grid-template-columns: auto 1fr;
+  height: auto;
+  padding: 6px 8px;
+  row-gap: 1px;
+  width: 100%;
+}
+
+.instrument-option__symbol {
+  font-weight: 600;
+  grid-area: symbol;
+}
+
+.instrument-option__meta {
+  color: var(--haze-dim);
+  font-size: var(--text-xs);
+  grid-area: meta;
+  justify-self: end;
+}
+
+.instrument-option__id {
+  color: var(--haze);
+  font-size: var(--text-xs);
+  font-variant-numeric: tabular-nums;
+  font-variation-settings: 'wdth' var(--width-condensed);
+  grid-area: id;
+}
+
+/* Drawing toolbar */
+.drawbar {
+  align-items: center;
+  background: var(--hull);
+  border-right: 1px solid var(--fathom);
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  grid-area: tools;
+  overflow-y: auto;
+  padding: 6px 0;
+  scrollbar-width: none;
+}
+
+.drawbar__group {
+  align-items: center;
+  display: flex;
+  flex-direction: column;
+}
+
+.drawbar__btn {
+  background: transparent;
+  border: 0;
+  border-radius: var(--radius-control);
+  color: var(--haze);
+  cursor: pointer;
+  display: grid;
+  flex: none;
+  height: 32px;
+  place-items: center;
+  width: 32px;
+}
+
+.drawbar__btn:hover:not(:disabled) {
+  background: var(--swell);
+  color: var(--chalk);
+}
+
+.drawbar__btn[aria-pressed='true'] {
+  background: var(--course-soft);
+  color: var(--course);
+}
+
+.drawbar__btn:disabled {
+  cursor: default;
+  opacity: 0.35;
+}
+
+.drawbar__sep {
+  background: var(--fathom);
+  display: block;
+  flex: none;
+  height: 1px;
+  margin: 4px 0;
+  width: 20px;
+}
+
+/* Chart grid. The 1px gap lets the background show as pane dividers. Track
+   sizes the splitters set arrive as an inline grid template. */
+.chart-grid {
+  background: var(--fathom);
+  display: grid;
+  gap: 1px;
+  height: 100%;
+  position: relative;
+}
+
+.chart-grid--1 {
+  grid-template: minmax(0, 1fr) / minmax(0, 1fr);
+}
+
+.chart-grid--2h {
+  grid-template: minmax(0, 1fr) / repeat(2, minmax(0, 1fr));
+}
+
+.chart-grid--2v {
+  grid-template: repeat(2, minmax(0, 1fr)) / minmax(0, 1fr);
+}
+
+.chart-grid--4 {
+  grid-template: repeat(2, minmax(0, 1fr)) / repeat(2, minmax(0, 1fr));
+}
+
+.chart-grid--8 {
+  grid-template: repeat(2, minmax(0, 1fr)) / repeat(4, minmax(0, 1fr));
+}
+
+.chart-grid__cell {
+  min-height: 0;
+  min-width: 0;
+}
+
+/* Pane: header (row 1), replay bar (row 2, only while replaying) and the
+   chart canvas (row 3). The pane is a size container so its header can
+   shed detail in narrow multi-chart layouts. */
+.pane {
+  background: var(--chart-bg);
+  container-type: inline-size;
+  display: grid;
+  grid-template-rows: auto auto minmax(0, 1fr);
+  height: 100%;
+  min-height: 0;
+  position: relative;
+}
+
+/* The active pane is outlined only when there is more than one. */
+.chart-grid:not(.chart-grid--1) .pane--active {
+  box-shadow: inset 0 0 0 1px var(--haze-dim);
+}
+
+.pane__header {
+  align-items: center;
+  border-bottom: 1px solid var(--fathom-soft);
+  display: flex;
+  gap: var(--space-3);
+  min-width: 0;
+  overflow: hidden;
+  padding: 9px var(--space-3) 6px;
+  white-space: nowrap;
+}
+
+.pane__title {
+  align-items: center;
+  display: flex;
+  gap: 6px;
+}
+
+.pane__symbol {
+  font-size: var(--text-lg);
+  font-variation-settings: 'wdth' 112;
+  font-weight: 650;
+  letter-spacing: 0.01em;
+}
+
+.pane__chip {
+  border: 1px solid var(--fathom);
+  border-radius: var(--radius-control);
+  color: var(--haze);
+  font-size: var(--text-xs);
+  line-height: 18px;
+  padding: 0 6px;
+}
+
+.pane__ohlc {
+  display: flex;
+  font-size: var(--text-sm);
+  gap: var(--space-3);
+  margin: 0;
+}
+
+.pane__ohlc div {
+  display: flex;
+  gap: 3px;
+}
+
+.pane__ohlc dt {
+  color: var(--haze-dim);
+}
+
+.pane__ohlc dd {
+  margin: 0;
+}
+
+.pane__meta {
+  align-items: center;
+  display: flex;
+  gap: var(--space-2);
+  margin-left: auto;
+}
+
+.pane__asof {
+  color: var(--haze-dim);
+  font-size: var(--text-xs);
+}
+
+.pane__header {
+  grid-row: 1;
+}
+
+.pane__canvas {
+  grid-row: 3;
+  min-height: 0;
+  min-width: 0;
+  position: relative;
+}
+
+/* Messages over the chart. Their grid row makes the chart canvas's row
+   their containing block, so they start below the pane header and, while
+   replaying, the replay bar. They let pointer events through, so the chart
+   stays usable; only their cards take clicks. */
+.pane__overlay {
+  display: grid;
+  grid-row: 3;
+  inset: 0;
+  place-items: center;
+  pointer-events: none;
+  position: absolute;
+  z-index: 2;
+}
+
+.pane__overlay .j-empty {
+  background: var(--hull);
+  border: 1px solid var(--fathom);
+  border-radius: var(--radius-dialog);
+  pointer-events: auto;
+}
+
+/* Above the time axis and left of the price axis. */
+.pane__stale {
+  bottom: 36px;
+  left: var(--space-3);
+  position: absolute;
+  right: 80px;
+  z-index: 2;
+}
+
+/* Provenance ribbon: the signature element. Its pattern encodes the feed
+   state (solid live, dashed polled, dotted replay, hatched demo). */
+.ribbon {
+  height: 3px;
+  left: 0;
+  pointer-events: none;
+  position: absolute;
+  right: 0;
+  top: 0;
+  z-index: 3;
+}
+
+.ribbon--live {
+  background: var(--bid);
+}
+
+.ribbon--poll {
+  background: repeating-linear-gradient(
+    90deg,
+    var(--sodium) 0 10px,
+    transparent 10px 16px
+  );
+}
+
+.ribbon--replay {
+  background: radial-gradient(circle, var(--replay) 1.3px, transparent 1.6px) 0
+    50% / 6px 3px repeat-x;
+}
+
+.ribbon--stale {
+  background: var(--ask);
+}
+
+.ribbon--unavailable {
+  background: repeating-linear-gradient(
+    90deg,
+    var(--ask) 0 4px,
+    transparent 4px 8px
+  );
+}
+
+.ribbon--demo {
+  background: repeating-linear-gradient(
+    -45deg,
+    var(--haze-dim) 0 3px,
+    transparent 3px 7px
+  );
+  border-bottom: 1px solid var(--fathom);
+  height: 6px;
+}
+
+.ribbon--connecting {
+  animation: ribbon-pulse 1.4s ease-in-out infinite;
+  background: var(--haze-dim);
+}
+
+@keyframes ribbon-pulse {
+  50% {
+    opacity: 0.3;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .ribbon--connecting,
+  .popover__panel {
+    animation: none;
+  }
+}
+
+.provenance-badge {
+  font-variant-numeric: tabular-nums;
+}
+
+/* Chart context menu, placed at the pointer by an inline style. */
+.chart-menu {
+  position: absolute;
+  z-index: 20;
+}
+
+.chart-menu__price {
+  color: var(--haze);
+  font-size: var(--text-sm);
+  margin: 0;
+  padding: 4px 8px 6px;
+}
+
+/* Panels */
+.panel {
+  background: var(--hull);
+  display: grid;
+  grid-template-rows: auto minmax(0, 1fr);
+  min-height: 0;
+  min-width: 0;
+}
+
+.panel--side {
+  border-left: 1px solid var(--fathom);
+  grid-area: side;
+  width: var(--side-panel-width);
+}
+
+.panel--side.panel--collapsed {
+  width: 40px;
+}
+
+.panel--bottom {
+  border-top: 1px solid var(--fathom);
+  grid-area: bottom;
+  height: var(--bottom-panel-height);
+}
+
+.panel--collapsed {
+  grid-template-rows: auto;
+}
+
+.panel--bottom.panel--collapsed {
+  height: 36px;
+}
+
+.panel__tabs {
+  align-items: center;
+  padding: 0 var(--space-1);
+}
+
+.panel__tabs .j-tab {
+  align-items: center;
+  display: inline-flex;
+  gap: 6px;
+}
+
+.panel__collapse {
+  flex: none;
+  margin-left: auto;
+}
+
+.panel__body {
+  min-height: 0;
+}
+
+.panel--side .panel__body {
+  padding: var(--space-3);
+}
+
+/* Market panel */
+.market-panel {
+  display: grid;
+  gap: var(--space-3);
+}
+
+.market-panel__head {
+  align-items: flex-start;
+  display: flex;
+  gap: var(--space-2);
+  justify-content: space-between;
+}
+
+.market-panel__head h2 {
+  font-size: var(--text-xl);
+  font-variation-settings: 'wdth' 112;
+  font-weight: 650;
+  margin: 0;
+}
+
+.market-panel__head p {
+  font-size: var(--text-sm);
+  margin: 2px 0 0;
+}
+
+.market-panel__sub {
+  color: var(--haze);
+  font-size: var(--text-sm);
+  font-weight: 500;
+  margin: var(--space-1) 0 0;
+}
+
+.kv {
+  display: grid;
+  margin: 0;
+}
+
+.kv__row {
+  border-bottom: 1px solid var(--fathom-soft);
+  display: flex;
+  gap: var(--space-3);
+  justify-content: space-between;
+  padding: 5px 0;
+}
+
+.kv__row dt {
+  color: var(--haze);
+}
+
+.kv__row dd {
+  margin: 0;
+  min-width: 0;
+  overflow: hidden;
+  text-align: right;
+  text-overflow: ellipsis;
+}
+
+/* Status bar */
+.statusbar {
+  align-items: center;
+  background: var(--hull);
+  border-top: 1px solid var(--fathom);
+  color: var(--haze);
+  display: flex;
+  font-size: var(--text-xs);
+  gap: var(--space-4);
+  min-width: 0;
+  overflow: hidden;
+  padding: 0 var(--space-3);
+  white-space: nowrap;
+}
+
+.statusbar a {
+  color: var(--haze);
+  text-decoration: none;
+}
+
+.statusbar a:hover {
+  color: var(--chalk);
+  text-decoration: underline;
+}
+
+.statusbar__item {
+  align-items: center;
+  display: inline-flex;
+  gap: var(--space-3);
+}
+
+.statusbar__grow {
+  flex: 1;
+}
+
+.statusbar__demo {
+  background: repeating-linear-gradient(
+      -45deg,
+      var(--haze-dim) 0 2px,
+      transparent 2px 5px
+    )
+    left center / 10px 10px no-repeat;
+  color: var(--chalk);
+  padding-left: 14px;
+}
+
+.venue-dot {
+  align-items: center;
+  display: inline-flex;
+  gap: 5px;
+}
+
+.venue-dot::before {
+  background: var(--haze-dim);
+  border-radius: 50%;
+  content: '';
+  height: 7px;
+  width: 7px;
+}
+
+.venue-dot--live::before {
+  background: var(--bid);
+}
+
+.venue-dot--poll::before {
+  background: var(--sodium);
+}
+
+.venue-dot--replay::before {
+  background: var(--replay);
+}
+
+.venue-dot--stale::before,
+.venue-dot--unavailable::before {
+  background: var(--ask);
+}
+
+.venue-dot--demo::before {
+  background: repeating-linear-gradient(
+    -45deg,
+    var(--haze) 0 1px,
+    transparent 1px 3px
+  );
+  border: 1px solid var(--haze);
+}
+
+/* Toasts */
+.toasts {
+  bottom: calc(var(--statusbar-height) + var(--space-3));
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+  max-width: min(380px, calc(100vw - 32px));
+  position: fixed;
+  right: var(--space-4);
+  z-index: 90;
+}
+
+.toast {
+  background: var(--hull);
+  border: 1px solid var(--fathom);
+  border-left: 3px solid var(--info);
+  border-radius: var(--radius-control);
+  box-shadow: var(--shadow-float);
+  padding: var(--space-2) var(--space-3);
+}
+
+.toast--success {
+  border-left-color: var(--bid);
+}
+
+.toast--warning {
+  border-left-color: var(--sodium);
+}
+
+.toast--error {
+  border-left-color: var(--ask);
+}
+
+/* Command palette */
+.palette-backdrop {
+  background: rgba(3, 10, 15, 0.55);
+  display: flex;
+  inset: 0;
+  justify-content: center;
+  padding-top: 12vh;
+  position: fixed;
+  z-index: 100;
+}
+
+.palette {
+  align-self: flex-start;
+  padding: var(--space-2);
+  width: min(560px, calc(100vw - 32px));
+}
+
+.palette__input {
+  font-size: var(--text-lg);
+  height: 38px;
+}
+
+.palette__list {
+  list-style: none;
+  margin: var(--space-2) 0 0;
+  max-height: 50vh;
+  overflow-y: auto;
+  padding: 0;
+}
+
+.palette__item {
+  justify-content: space-between;
+  width: 100%;
+}
+
+.palette__item[aria-selected='true'] {
+  background: var(--swell);
+}
+
+.palette__empty {
+  padding: var(--space-2);
+}
+
+/* Static pages */
+.static-page {
+  line-height: 1.6;
+  margin: 10vh auto;
+  max-width: 68ch;
+  padding: 0 var(--space-4);
+}
+
+.static-page h1 {
+  font-size: var(--text-2xl);
+  font-variation-settings: 'wdth' 112;
+}
+
+/* stylelint-disable-next-line selector-no-qualifying-type -- `a:not(.j-btn)` is a type selector with a negation (links that are not styled as buttons), not a class qualified by a type */
+.static-page a:not(.j-btn) {
+  color: var(--info);
+}
+
+/* Narrow screens: stack everything; charts keep most of the height. */
+@media (max-width: 900px) {
+  .terminal {
+    overflow-y: auto;
+  }
+
+  .topbar {
+    overflow-x: auto;
+  }
+
+  .terminal__body {
+    grid-template:
+      'tools' auto
+      'charts' minmax(360px, 62vh)
+      'side' auto
+      'bottom' auto
+      / minmax(0, 1fr);
+  }
+
+  .drawbar {
+    border-bottom: 1px solid var(--fathom);
+    border-right: 0;
+    flex-direction: row;
+    overflow-x: auto;
+    padding: 0 var(--space-2);
+  }
+
+  .drawbar__group {
+    flex-direction: row;
+  }
+
+  .drawbar__sep {
+    height: 20px;
+    margin: 0 4px;
+    width: 1px;
+  }
+
+  .panel--side,
+  .panel--side.panel--collapsed {
+    border-left: 0;
+    border-top: 1px solid var(--fathom);
+    width: auto;
+  }
+
+  /* Four and eight charts fall back to a 2 x 2 track template. */
+  .chart-grid--4,
+  .chart-grid--8 {
+    /* stylelint-disable-next-line declaration-no-important -- beats the inline grid template that chart-grid.tsx sets from the splitter track sizes */
+    grid-template: repeat(2, minmax(0, 1fr)) / repeat(2, minmax(0, 1fr)) !important;
+  }
+
+  /* The stacked layout has fixed tracks, so nothing can be resized. */
+  .chart-grid__splitter,
+  .panel__resize {
+    display: none;
+  }
+
+  .panel--side {
+    /* stylelint-disable-next-line declaration-no-important -- beats the inline width that slot-host.tsx sets from the saved dock size */
+    width: auto !important;
+  }
+
+  .pane__ohlc {
+    display: none;
+  }
+}
+
+/* Panel header: tablist plus a separate collapse control. */
+.panel__head {
+  align-items: center;
+  border-bottom: 1px solid var(--fathom);
+  display: flex;
+  min-width: 0;
+  padding: 0 var(--space-1);
+}
+
+.panel__head .j-tabs {
+  border-bottom: 0;
+  flex: 1;
+  min-width: 0;
+}
+
+/* Narrow panes (multi-chart layouts): provenance stays, detail yields. */
+@container (max-width: 720px) {
+  .pane__asof {
+    display: none;
+  }
+}
+
+@container (max-width: 600px) {
+  .pane__ohlc {
+    display: none;
+  }
+
+  .pane__chip:first-of-type {
+    display: none;
+  }
+}
+
+/* Splitters: docks and chart-grid tracks. Each is a 6px handle centred on
+   the border it moves. `touch-action: none` hands touch drags to the
+   pointer handlers instead of scrolling the page. */
+.splitter {
+  background: transparent;
+  position: absolute;
+  touch-action: none;
+  z-index: 6;
+}
+
+.splitter--vertical {
+  bottom: 0;
+  cursor: col-resize;
+  top: 0;
+  width: 6px;
+}
+
+.splitter--horizontal {
+  cursor: row-resize;
+  height: 6px;
+  left: 0;
+  right: 0;
+}
+
+.splitter:hover,
+.splitter:focus-visible {
+  background: var(--haze-dim);
+  outline-offset: -2px;
+}
+
+/* Anchors the dock's resize handle on its inner edge. */
+.panel {
+  position: relative;
+}
+
+.panel__resize--side {
+  left: -3px;
+}
+
+.panel__resize--bottom {
+  top: -3px;
+}
+
+/* Drawing toolbar groups with flyouts. */
+.drawbar__slot {
+  align-items: center;
+  display: flex;
+  position: relative;
+}
+
+.drawbar__more {
+  background: transparent;
+  border: 0;
+  border-radius: 2px;
+  bottom: 2px;
+  color: var(--haze-dim);
+  cursor: pointer;
+  display: grid;
+  height: 14px;
+  padding: 0;
+  place-items: center;
+  position: absolute;
+  right: -7px;
+  width: 12px;
+}
+
+.drawbar__more:hover,
+.drawbar__more[aria-expanded='true'] {
+  background: var(--swell);
+  color: var(--chalk);
+}
+
+/* Fixed, placed from the trigger's viewport position, so the scrolling
+   toolbar does not clip it. */
+.drawbar__flyout {
+  animation: popover-in var(--duration-fast) var(--ease-out);
+  min-width: 210px;
+  position: fixed;
+  z-index: 60;
+}
+
+.drawbar__option {
+  width: 100%;
+}
+
+.drawbar__option[aria-checked='true'] {
+  color: var(--course);
+}
+
+.drawbar__option kbd {
+  margin-left: auto;
+}
+
+/* Pane header extras. */
+.pane__chip--button {
+  background: transparent;
+  cursor: pointer;
+  font: inherit;
+  font-size: var(--text-xs);
+}
+
+.pane__chip--button:hover {
+  color: var(--chalk);
+}
+
+.pane__feed {
+  background: transparent;
+  border: 1px solid var(--fathom);
+  border-radius: var(--radius-control);
+  color: var(--haze);
+  font-size: var(--text-xs);
+  height: 20px;
+  padding: 0 4px;
+}
+
+.pane__compare {
+  align-items: center;
+  border: 1px solid;
+  border-radius: var(--radius-control);
+  display: inline-flex;
+  font-size: var(--text-xs);
+  gap: 2px;
+  line-height: 18px;
+  padding: 0 2px 0 6px;
+}
+
+.pane__compare button {
+  background: transparent;
+  border: 0;
+  color: inherit;
+  cursor: pointer;
+  display: grid;
+  height: 16px;
+  padding: 0;
+  place-items: center;
+  width: 16px;
+}
+
+/* Data window. Slightly translucent over the chart; it never takes the
+   pointer, so the crosshair keeps tracking underneath. Its grid row makes
+   the chart canvas's row its containing block, so it starts below the pane
+   header and, while replaying, the replay bar. `top` then clears the first
+   layer caption, which chart-core paints on a plate 6-22px below the top of
+   the plot (`paintCaptions`), with a 4px gap. */
+.data-window {
+  background: color-mix(in srgb, var(--hull) 92%, transparent);
+  border: 1px solid var(--fathom);
+  border-radius: var(--radius-control);
+  font-size: var(--text-xs);
+  grid-row: 3;
+  left: var(--space-3);
+  min-width: 168px;
+  padding: 6px 8px;
+  pointer-events: none;
+  position: absolute;
+  top: 26px;
+  z-index: 4;
+}
+
+.data-window__time {
+  color: var(--haze);
+  margin: 0 0 4px;
+}
+
+.data-window dl {
+  display: grid;
+  gap: 1px;
+  margin: 0;
+}
+
+.data-window dl div {
+  display: flex;
+  gap: var(--space-3);
+  justify-content: space-between;
+}
+
+.data-window dt {
+  color: var(--haze-dim);
+}
+
+.data-window dd {
+  margin: 0;
+}
+
+/* Replay controls. */
+.replay-bar {
+  align-items: center;
+  background: var(--hull);
+  border-bottom: 1px solid var(--replay);
+  display: flex;
+  flex-wrap: wrap;
+  font-size: var(--text-sm);
+  gap: 6px;
+  grid-row: 2;
+  padding: 4px var(--space-3);
+}
+
+.replay-bar .j-btn {
+  gap: 4px;
+}
+
+.replay-bar__badge {
+  background: var(--replay);
+  border-radius: var(--radius-control);
+  color: var(--abyss);
+  font-size: var(--text-xs);
+  font-weight: 700;
+  letter-spacing: 0.04em;
+  padding: 0 6px;
+  text-transform: uppercase;
+}
+
+.replay-bar__hint,
+.replay-bar__note {
+  color: var(--haze);
+}
+
+.replay-bar__note {
+  font-size: var(--text-xs);
+  margin-left: auto;
+}
+
+.replay-bar__pos {
+  color: var(--chalk);
+}
+
+.pane__canvas[data-replay='select'] {
+  cursor: crosshair;
+}
+
+/* Floating drawing style editor, centred 6px below the top of the chart.
+   Its grid row makes the chart canvas's row its containing block, so it
+   starts below the pane header and, while replaying, the replay bar. */
+.style-bar {
+  align-items: center;
+  background: var(--hull);
+  border: 1px solid var(--fathom);
+  border-radius: var(--radius-dialog);
+  box-shadow: var(--shadow-float);
+  display: flex;
+  flex-wrap: wrap;
+  font-size: var(--text-sm);
+  gap: 6px;
+  grid-row: 3;
+  left: 50%;
+  max-width: calc(100% - 24px);
+  padding: 4px 6px;
+  position: absolute;
+  top: 6px;
+  transform: translateX(-50%);
+  z-index: 6;
+}
+
+.style-bar__name {
+  color: var(--haze);
+  padding: 0 4px;
+}
+
+.style-bar__swatches {
+  align-items: center;
+  display: flex;
+  gap: 3px;
+}
+
+.style-bar__swatch {
+  border: 1px solid var(--fathom);
+  border-radius: 50%;
+  cursor: pointer;
+  height: 16px;
+  padding: 0;
+  width: 16px;
+}
+
+.style-bar__swatch[aria-pressed='true'] {
+  box-shadow:
+    0 0 0 2px var(--hull),
+    0 0 0 3px var(--chalk);
+}
+
+.style-bar__custom input {
+  background: transparent;
+  border: 0;
+  height: 20px;
+  padding: 0;
+  width: 22px;
+}
+
+.style-bar .j-select {
+  font-size: var(--text-sm);
+  height: 24px;
+}
+
+.style-bar__text {
+  height: 24px;
+  width: 140px;
+}
+
+.style-bar__sep {
+  background: var(--fathom);
+  height: 18px;
+  width: 1px;
+}
+
+.style-bar__inputs {
+  align-items: center;
+  border-left: 1px solid var(--fathom);
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  padding-left: 6px;
+}
+
+.style-bar__field {
+  align-items: center;
+  display: inline-flex;
+  gap: 4px;
+}
+
+.style-bar__label {
+  color: var(--haze);
+  font-size: var(--text-xs);
+}
+
+/* Top bar menus. */
+.tf-custom {
+  border-bottom: 1px solid var(--fathom);
+  display: grid;
+  gap: 4px;
+  margin-bottom: 4px;
+  padding: 4px 4px 8px;
+}
+
+.tf-custom__row {
+  display: flex;
+  gap: 4px;
+}
+
+.tf-custom__row .j-input {
+  width: 96px;
+}
+
+.tf-custom__help,
+.tf-custom__error {
+  font-size: var(--text-xs);
+  margin: 0;
+  max-width: 180px;
+}
+
+.tf-custom__help {
+  color: var(--haze-dim);
+}
+
+.tf-custom__error {
+  color: var(--ask);
+}
+
+.layers-menu__row {
+  align-items: center;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 2px 6px;
+}
+
+.layers-menu__row .layers-menu__item {
+  flex: 1;
+}
+
+.layers-menu__sub {
+  color: var(--haze);
+  font-size: var(--text-sm);
+  order: 3;
+  padding-left: 26px;
+  width: 100%;
+}
+
+.compare-menu,
+.templates-menu {
+  display: grid;
+  gap: 6px;
+  padding: 4px;
+  width: 280px;
+}
+
+.compare-menu__list,
+.compare-menu__results,
+.templates-menu__list {
+  display: grid;
+  gap: 2px;
+  list-style: none;
+  margin: 0;
+  padding: 0;
+}
+
+.compare-menu__list li,
+.templates-menu__list li {
+  align-items: center;
+  display: flex;
+  gap: 6px;
+  justify-content: space-between;
+}
+
+.templates-menu__list .j-menu__item {
+  flex: 1;
+}
+
+.compare-menu__results .j-menu__item {
+  justify-content: space-between;
+  width: 100%;
+}
+
+.compare-menu__results .j-menu__item:disabled {
+  cursor: default;
+  opacity: 0.55;
+}
+
+.templates-menu__form {
+  display: flex;
+  gap: 6px;
+}
+
+.templates-menu__form .j-input {
+  flex: 1;
+}
+
+.templates-menu__empty {
+  margin: 0;
+  padding: 4px;
+}
+
+/* Modal dialogs. */
+.dialog-backdrop {
+  background: rgba(3, 10, 15, 0.55);
+  display: grid;
+  inset: 0;
+  padding: var(--space-4);
+  place-items: center;
+  position: fixed;
+  z-index: 100;
+}
+
+.dialog {
+  background: var(--hull);
+  border: 1px solid var(--fathom);
+  border-radius: var(--radius-dialog);
+  box-shadow: var(--shadow-float);
+  display: grid;
+  grid-template-rows: auto minmax(0, 1fr);
+  max-height: min(720px, calc(100dvh - 48px));
+  width: min(520px, calc(100vw - 32px));
+}
+
+.dialog__head {
+  align-items: center;
+  border-bottom: 1px solid var(--fathom);
+  display: flex;
+  justify-content: space-between;
+  padding: var(--space-3) var(--space-4);
+}
+
+.dialog__head h2 {
+  font-size: var(--text-lg);
+  font-variation-settings: 'wdth' 112;
+  margin: 0;
+}
+
+.dialog__body {
+  display: grid;
+  gap: var(--space-3);
+  overflow-y: auto;
+  padding: var(--space-3) var(--space-4) var(--space-4);
+}
+
+/* Sticks to the bottom of the scrolling body; the negative offset covers
+   the body's bottom padding, so no field shows below the buttons. */
+.dialog__foot {
+  background: var(--hull);
+  bottom: calc(-1 * var(--space-4));
+  display: flex;
+  gap: var(--space-2);
+  padding: var(--space-3) 0 0;
+  position: sticky;
+}
+
+.dialog__spacer {
+  flex: 1;
+}
+
+.indicator-dialog__group {
+  border: 1px solid var(--fathom-soft);
+  border-radius: var(--radius-control);
+  display: grid;
+  gap: var(--space-2);
+  margin: 0;
+  padding: var(--space-2) var(--space-3) var(--space-3);
+}
+
+.indicator-dialog__group legend {
+  color: var(--haze);
+  font-size: var(--text-sm);
+  padding: 0 4px;
+}
+
+.indicator-dialog__field {
+  display: grid;
+  gap: 3px;
+}
+
+.indicator-dialog__help,
+.indicator-dialog__error {
+  font-size: var(--text-xs);
+  margin: 0;
+}
+
+.indicator-dialog__help {
+  color: var(--haze-dim);
+}
+
+.indicator-dialog__error {
+  color: var(--ask);
+}
+
+.indicator-dialog__kind {
+  align-items: center;
+  display: flex;
+  gap: var(--space-2);
+  justify-content: space-between;
+}
+
+.indicator-dialog__kind input[type='color'] {
+  background: transparent;
+  border: 1px solid var(--fathom);
+  border-radius: var(--radius-control);
+  height: 22px;
+  padding: 0;
+  width: 28px;
+}
+
+/* Object list. */
+.objects {
+  display: grid;
+  gap: 1px;
+  list-style: none;
+  margin: 0;
+  padding: 0;
+}
+
+.objects__row {
+  align-items: center;
+  border-radius: var(--radius-control);
+  display: flex;
+  gap: 2px;
+}
+
+.objects__row[aria-current='true'] {
+  background: var(--course-soft);
+}
+
+.objects__select {
+  align-items: center;
+  background: transparent;
+  border: 0;
+  color: var(--chalk);
+  cursor: pointer;
+  display: flex;
+  flex: 1;
+  font: inherit;
+  gap: 6px;
+  height: 30px;
+  min-width: 0;
+  overflow: hidden;
+  padding: 0 6px;
+  text-align: left;
+}
+
+.objects__swatch {
+  border-radius: 50%;
+  flex: none;
+  height: 8px;
+  width: 8px;
+}
+
+.objects__name {
+  flex: none;
+}
+
+.objects__detail {
+  flex: 1;
+  font-size: var(--text-xs);
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.objects__hint {
+  font-size: var(--text-xs);
+  margin: var(--space-2) 0 0;
+}
+
+/* Market picker groups and session markets (exchange calendars). */
+
+/* Widens the picker defined above for the market group tabs. */
+.instrument-search {
+  width: 440px;
+}
+
+.instrument-search__groups {
+  border: 1px solid var(--fathom);
+  border-radius: var(--radius-control);
+  display: flex;
+  flex-wrap: wrap;
+  gap: 2px;
+  padding: 2px;
+}
+
+.instrument-search__group {
+  align-items: center;
+  background: transparent;
+  border: 0;
+  border-radius: calc(var(--radius-control) - 1px);
+  color: var(--haze);
+  cursor: pointer;
+  display: inline-flex;
+  font: inherit;
+  font-size: var(--text-sm);
+  gap: 4px;
+  height: 24px;
+  padding: 0 8px;
+}
+
+.instrument-search__group:hover {
+  color: var(--chalk);
+}
+
+.instrument-search__group[aria-selected='true'] {
+  background: var(--swell-strong);
+  color: var(--chalk);
+}
+
+.instrument-search__count {
+  color: var(--haze-dim);
+  font-size: var(--text-xs);
+  font-variant-numeric: tabular-nums;
+}
+
+.instrument-search__section {
+  display: grid;
+}
+
+.instrument-search__heading {
+  color: var(--haze-dim);
+  font-size: var(--text-xs);
+  font-weight: 600;
+  letter-spacing: 0.04em;
+  padding: var(--space-2) 8px 2px;
+  text-transform: uppercase;
+}
+
+.instrument-search__results .instrument-option {
+  column-gap: var(--space-2);
+  grid-template-areas:
+    'symbol badges meta'
+    'name name name'
+    'id id id';
+  grid-template-columns: auto 1fr auto;
+}
+
+.instrument-option__badges {
+  align-items: center;
+  display: inline-flex;
+  flex-wrap: wrap;
+  gap: 3px;
+  grid-area: badges;
+}
+
+.instrument-option__badges .j-badge {
+  font-size: 10px;
+  height: 16px;
+  padding: 0 4px;
+}
+
+.instrument-option__name {
+  color: var(--chalk);
+  font-size: var(--text-xs);
+  grid-area: name;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.market-status {
+  align-items: center;
+  display: inline-flex;
+  gap: 5px;
+  white-space: nowrap;
+}
+
+.market-status__dot {
+  background: var(--haze-dim);
+  border-radius: 50%;
+  height: 6px;
+  width: 6px;
+}
+
+.market-status--open {
+  border-color: var(--bid);
+  color: var(--bid);
+}
+
+.market-status--open .market-status__dot {
+  background: var(--bid);
+}
+
+.market-status__detail {
+  color: var(--haze);
+}
+
+.market-status__notice {
+  border-left: 1px solid var(--fathom);
+  color: var(--sodium);
+  padding-left: 5px;
+}
+
+/* Narrow panes keep the open/closed state and drop its detail. */
+@container (max-width: 760px) {
+  .market-status__detail,
+  .market-status__notice {
+    display: none;
+  }
+}
+
+.market-panel__name {
+  color: var(--chalk);
+  font-size: var(--text-sm);
+  margin: 2px 0 0;
+}
+
+.pane__chip--warning {
+  border-color: var(--sodium);
+  color: var(--sodium);
+}
+
+.pane__chip--danger {
+  border-color: var(--ask);
+  color: var(--ask);
+}

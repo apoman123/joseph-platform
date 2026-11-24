@@ -1,0 +1,1359 @@
+{
+  "plugins": [
+    {
+      "plugin_id": "sma",
+      "indicator_version": "1.0.0",
+      "schema_version": 2,
+      "display_name": "SMA",
+      "description": "Simple moving average: the mean of the source price over the last length bars.",
+      "timeframes": [
+        "1s",
+        "5s",
+        "15s",
+        "30s",
+        "1m",
+        "3m",
+        "5m",
+        "15m",
+        "30m",
+        "1h",
+        "2h",
+        "4h",
+        "6h",
+        "12h",
+        "1d",
+        "1w",
+        "1M"
+      ],
+      "warmup_bars": 20,
+      "required_streams": [
+        "candles:chart"
+      ],
+      "input_schema": {
+        "$schema": "https://json-schema.org/draft/2020-12/schema",
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "length": {
+            "description": "Number of bars.",
+            "type": "integer",
+            "default": 20,
+            "minimum": 1,
+            "maximum": 5000
+          },
+          "source": {
+            "description": "Price the study is computed from.",
+            "type": "string",
+            "enum": [
+              "close",
+              "open",
+              "high",
+              "low",
+              "hl2",
+              "hlc3",
+              "ohlc4"
+            ],
+            "default": "close"
+          },
+          "tick_size": {
+            "description": "Symbol tick size. 0 = filled from the instrument, else inferred from the first bar's price precision.",
+            "type": "string",
+            "pattern": "^-?(0|[1-9][0-9]*)(\\.[0-9]+)?$",
+            "default": "0",
+            "minimum": "0"
+          }
+        }
+      },
+      "output_kinds": [],
+      "output_events": [],
+      "output_values": [
+        {
+          "key": "sma",
+          "type": "decimal",
+          "unit": "price",
+          "description": "Simple moving average."
+        }
+      ],
+      "display": {
+        "layer": true,
+        "default_visible": false,
+        "z_index": 40,
+        "show_events": true,
+        "kinds": [],
+        "events": [],
+        "plots": [
+          {
+            "value": "sma",
+            "label": "SMA",
+            "pane": "price",
+            "render": "line",
+            "tone": "accent",
+            "color": null,
+            "line_style": "solid",
+            "line_width": 1
+          }
+        ],
+        "panes": [],
+        "end_reasons": []
+      },
+      "licensing_status": "CLEAN_ROOM_FROM_SPEC",
+      "parity_status": "SPEC_ONLY"
+    },
+    {
+      "plugin_id": "ema",
+      "indicator_version": "1.0.0",
+      "schema_version": 2,
+      "display_name": "EMA",
+      "description": "Exponential moving average of the source price, alpha = 2 / (length + 1), seeded with the first source value.",
+      "timeframes": [
+        "1s",
+        "5s",
+        "15s",
+        "30s",
+        "1m",
+        "3m",
+        "5m",
+        "15m",
+        "30m",
+        "1h",
+        "2h",
+        "4h",
+        "6h",
+        "12h",
+        "1d",
+        "1w",
+        "1M"
+      ],
+      "warmup_bars": 20,
+      "required_streams": [
+        "candles:chart"
+      ],
+      "input_schema": {
+        "$schema": "https://json-schema.org/draft/2020-12/schema",
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "length": {
+            "description": "Number of bars.",
+            "type": "integer",
+            "default": 20,
+            "minimum": 1,
+            "maximum": 5000
+          },
+          "source": {
+            "description": "Price the study is computed from.",
+            "type": "string",
+            "enum": [
+              "close",
+              "open",
+              "high",
+              "low",
+              "hl2",
+              "hlc3",
+              "ohlc4"
+            ],
+            "default": "close"
+          },
+          "tick_size": {
+            "description": "Symbol tick size. 0 = filled from the instrument, else inferred from the first bar's price precision.",
+            "type": "string",
+            "pattern": "^-?(0|[1-9][0-9]*)(\\.[0-9]+)?$",
+            "default": "0",
+            "minimum": "0"
+          }
+        }
+      },
+      "output_kinds": [],
+      "output_events": [],
+      "output_values": [
+        {
+          "key": "ema",
+          "type": "decimal",
+          "unit": "price",
+          "description": "Exponential moving average."
+        }
+      ],
+      "display": {
+        "layer": true,
+        "default_visible": true,
+        "z_index": 45,
+        "show_events": true,
+        "kinds": [],
+        "events": [],
+        "plots": [
+          {
+            "value": "ema",
+            "label": "EMA",
+            "pane": "price",
+            "render": "line",
+            "tone": "accent",
+            "color": null,
+            "line_style": "solid",
+            "line_width": 1
+          }
+        ],
+        "panes": [],
+        "end_reasons": []
+      },
+      "licensing_status": "CLEAN_ROOM_FROM_SPEC",
+      "parity_status": "SPEC_ONLY"
+    },
+    {
+      "plugin_id": "anchored_vwap",
+      "indicator_version": "2.0.0",
+      "schema_version": 2,
+      "display_name": "VWAP",
+      "description": "Volume-weighted average price from a session, week, month or a chosen bar, with up to three standard-deviation bands.",
+      "timeframes": [
+        "1s",
+        "5s",
+        "15s",
+        "30s",
+        "1m",
+        "3m",
+        "5m",
+        "15m",
+        "30m",
+        "1h",
+        "2h",
+        "4h",
+        "6h",
+        "12h",
+        "1d",
+        "1w",
+        "1M"
+      ],
+      "warmup_bars": 1,
+      "required_streams": [
+        "candles:chart"
+      ],
+      "input_schema": {
+        "$schema": "https://json-schema.org/draft/2020-12/schema",
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "anchor": {
+            "description": "Reset period (session or UTC day, week, month) or a fixed anchor bar (time).",
+            "type": "string",
+            "enum": [
+              "session",
+              "week",
+              "month",
+              "time"
+            ],
+            "default": "session"
+          },
+          "anchor_ms": {
+            "description": "Anchor time (UTC ms) when anchor is time.",
+            "type": "integer",
+            "default": 0,
+            "minimum": 0,
+            "maximum": 4102444800000
+          },
+          "source": {
+            "description": "Price the study is computed from.",
+            "type": "string",
+            "enum": [
+              "close",
+              "hl2",
+              "hlc3",
+              "ohlc4"
+            ],
+            "default": "hlc3"
+          },
+          "band_1": {
+            "description": "Band 1 width in standard deviations (0 hides it).",
+            "type": "string",
+            "pattern": "^-?(0|[1-9][0-9]*)(\\.[0-9]+)?$",
+            "default": "1",
+            "minimum": "0",
+            "maximum": "10"
+          },
+          "band_2": {
+            "description": "Band 2 width in standard deviations (0 hides it).",
+            "type": "string",
+            "pattern": "^-?(0|[1-9][0-9]*)(\\.[0-9]+)?$",
+            "default": "0",
+            "minimum": "0",
+            "maximum": "10"
+          },
+          "band_3": {
+            "description": "Band 3 width in standard deviations (0 hides it).",
+            "type": "string",
+            "pattern": "^-?(0|[1-9][0-9]*)(\\.[0-9]+)?$",
+            "default": "0",
+            "minimum": "0",
+            "maximum": "10"
+          },
+          "tick_size": {
+            "description": "Symbol tick size. 0 = filled from the instrument, else inferred from the first bar's price precision.",
+            "type": "string",
+            "pattern": "^-?(0|[1-9][0-9]*)(\\.[0-9]+)?$",
+            "default": "0",
+            "minimum": "0"
+          }
+        }
+      },
+      "output_kinds": [],
+      "output_events": [],
+      "output_values": [
+        {
+          "key": "vwap",
+          "type": "decimal",
+          "unit": "price",
+          "description": "Volume-weighted average price since the anchor."
+        },
+        {
+          "key": "stdev",
+          "type": "decimal",
+          "unit": "price",
+          "description": "Volume-weighted standard deviation of the source."
+        },
+        {
+          "key": "upper_1",
+          "type": "decimal",
+          "unit": "price",
+          "description": "Upper 1 band (null when its multiplier is 0)."
+        },
+        {
+          "key": "lower_1",
+          "type": "decimal",
+          "unit": "price",
+          "description": "Lower 1 band (null when its multiplier is 0)."
+        },
+        {
+          "key": "upper_2",
+          "type": "decimal",
+          "unit": "price",
+          "description": "Upper 2 band (null when its multiplier is 0)."
+        },
+        {
+          "key": "lower_2",
+          "type": "decimal",
+          "unit": "price",
+          "description": "Lower 2 band (null when its multiplier is 0)."
+        },
+        {
+          "key": "upper_3",
+          "type": "decimal",
+          "unit": "price",
+          "description": "Upper 3 band (null when its multiplier is 0)."
+        },
+        {
+          "key": "lower_3",
+          "type": "decimal",
+          "unit": "price",
+          "description": "Lower 3 band (null when its multiplier is 0)."
+        },
+        {
+          "key": "anchor_ms",
+          "type": "timestamp_ms",
+          "unit": "none",
+          "description": "Open time of the bar the average started at."
+        },
+        {
+          "key": "bars",
+          "type": "integer",
+          "unit": "bars",
+          "description": "Bars since the anchor bar, counting the current one."
+        },
+        {
+          "key": "anchor_in_window",
+          "type": "boolean",
+          "unit": "none",
+          "description": "False when the anchor bar was not computed (every value is then null)."
+        }
+      ],
+      "display": {
+        "layer": true,
+        "default_visible": false,
+        "z_index": 50,
+        "show_events": true,
+        "kinds": [],
+        "events": [],
+        "plots": [
+          {
+            "value": "vwap",
+            "label": "VWAP",
+            "pane": "price",
+            "render": "line",
+            "tone": "accent",
+            "color": null,
+            "line_style": "solid",
+            "line_width": 1
+          },
+          {
+            "value": "upper_1",
+            "label": "Upper 1",
+            "pane": "price",
+            "render": "line",
+            "tone": "neutral",
+            "color": null,
+            "line_style": "dashed",
+            "line_width": 1
+          },
+          {
+            "value": "lower_1",
+            "label": "Lower 1",
+            "pane": "price",
+            "render": "line",
+            "tone": "neutral",
+            "color": null,
+            "line_style": "dashed",
+            "line_width": 1
+          },
+          {
+            "value": "upper_2",
+            "label": "Upper 2",
+            "pane": "price",
+            "render": "line",
+            "tone": "neutral",
+            "color": null,
+            "line_style": "dashed",
+            "line_width": 1
+          },
+          {
+            "value": "lower_2",
+            "label": "Lower 2",
+            "pane": "price",
+            "render": "line",
+            "tone": "neutral",
+            "color": null,
+            "line_style": "dashed",
+            "line_width": 1
+          },
+          {
+            "value": "upper_3",
+            "label": "Upper 3",
+            "pane": "price",
+            "render": "line",
+            "tone": "neutral",
+            "color": null,
+            "line_style": "dashed",
+            "line_width": 1
+          },
+          {
+            "value": "lower_3",
+            "label": "Lower 3",
+            "pane": "price",
+            "render": "line",
+            "tone": "neutral",
+            "color": null,
+            "line_style": "dashed",
+            "line_width": 1
+          }
+        ],
+        "panes": [],
+        "end_reasons": []
+      },
+      "licensing_status": "CLEAN_ROOM_FROM_SPEC",
+      "parity_status": "SPEC_ONLY"
+    },
+    {
+      "plugin_id": "regression_channel",
+      "indicator_version": "2.0.0",
+      "schema_version": 2,
+      "display_name": "Regression channel",
+      "description": "Least-squares trend line with standard-deviation bands and Pearson's R, rolling or from an anchor bar.",
+      "timeframes": [
+        "1s",
+        "5s",
+        "15s",
+        "30s",
+        "1m",
+        "3m",
+        "5m",
+        "15m",
+        "30m",
+        "1h",
+        "2h",
+        "4h",
+        "6h",
+        "12h",
+        "1d",
+        "1w",
+        "1M"
+      ],
+      "warmup_bars": 100,
+      "required_streams": [
+        "candles:chart"
+      ],
+      "input_schema": {
+        "$schema": "https://json-schema.org/draft/2020-12/schema",
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "length": {
+            "description": "Bars in the rolling window (ignored with an anchor).",
+            "type": "integer",
+            "default": 100,
+            "minimum": 2,
+            "maximum": 5000
+          },
+          "anchor_ms": {
+            "description": "Anchor time (UTC ms); 0 uses the rolling window.",
+            "type": "integer",
+            "default": 0,
+            "minimum": 0,
+            "maximum": 4102444800000
+          },
+          "source": {
+            "description": "Price the study is computed from.",
+            "type": "string",
+            "enum": [
+              "close",
+              "hl2",
+              "hlc3",
+              "ohlc4"
+            ],
+            "default": "close"
+          },
+          "deviations": {
+            "description": "Band width in standard deviations.",
+            "type": "string",
+            "pattern": "^-?(0|[1-9][0-9]*)(\\.[0-9]+)?$",
+            "default": "2",
+            "minimum": "0",
+            "maximum": "10"
+          },
+          "tick_size": {
+            "description": "Symbol tick size. 0 = filled from the instrument, else inferred from the first bar's price precision.",
+            "type": "string",
+            "pattern": "^-?(0|[1-9][0-9]*)(\\.[0-9]+)?$",
+            "default": "0",
+            "minimum": "0"
+          }
+        }
+      },
+      "output_kinds": [],
+      "output_events": [],
+      "output_values": [
+        {
+          "key": "start_ms",
+          "type": "timestamp_ms",
+          "unit": "none",
+          "description": "Open time of the oldest bar of the fit."
+        },
+        {
+          "key": "start",
+          "type": "decimal",
+          "unit": "price",
+          "description": "Line value at the oldest bar."
+        },
+        {
+          "key": "end",
+          "type": "decimal",
+          "unit": "price",
+          "description": "Line value at the current bar."
+        },
+        {
+          "key": "upper_start",
+          "type": "decimal",
+          "unit": "price",
+          "description": "Upper band at the oldest bar."
+        },
+        {
+          "key": "upper_end",
+          "type": "decimal",
+          "unit": "price",
+          "description": "Upper band at the current bar."
+        },
+        {
+          "key": "lower_start",
+          "type": "decimal",
+          "unit": "price",
+          "description": "Lower band at the oldest bar."
+        },
+        {
+          "key": "lower_end",
+          "type": "decimal",
+          "unit": "price",
+          "description": "Lower band at the current bar."
+        },
+        {
+          "key": "slope",
+          "type": "decimal",
+          "unit": "price",
+          "description": "Slope of the line, price per bar."
+        },
+        {
+          "key": "stdev",
+          "type": "decimal",
+          "unit": "price",
+          "description": "Sample standard deviation of the residuals."
+        },
+        {
+          "key": "pearson_r",
+          "type": "decimal",
+          "unit": "ratio",
+          "description": "Pearson's correlation of price and bar index."
+        },
+        {
+          "key": "max_up",
+          "type": "decimal",
+          "unit": "price",
+          "description": "Largest high above the line."
+        },
+        {
+          "key": "max_down",
+          "type": "decimal",
+          "unit": "price",
+          "description": "Largest low below the line."
+        },
+        {
+          "key": "bars",
+          "type": "integer",
+          "unit": "bars",
+          "description": "Bars in the fit."
+        },
+        {
+          "key": "anchor_in_window",
+          "type": "boolean",
+          "unit": "none",
+          "description": "False when the anchor bar was not computed (every value is then null)."
+        }
+      ],
+      "display": {
+        "layer": false,
+        "default_visible": false,
+        "z_index": 50,
+        "show_events": true,
+        "kinds": [],
+        "events": [],
+        "plots": [],
+        "panes": [],
+        "end_reasons": []
+      },
+      "licensing_status": "CLEAN_ROOM_FROM_SPEC",
+      "parity_status": "SPEC_ONLY"
+    },
+    {
+      "plugin_id": "bollinger_bands",
+      "indicator_version": "1.0.0",
+      "schema_version": 2,
+      "display_name": "Bollinger Bands",
+      "description": "Simple moving average of the source price with bands mult population standard deviations above and below it.",
+      "timeframes": [
+        "1s",
+        "5s",
+        "15s",
+        "30s",
+        "1m",
+        "3m",
+        "5m",
+        "15m",
+        "30m",
+        "1h",
+        "2h",
+        "4h",
+        "6h",
+        "12h",
+        "1d",
+        "1w",
+        "1M"
+      ],
+      "warmup_bars": 20,
+      "required_streams": [
+        "candles:chart"
+      ],
+      "input_schema": {
+        "$schema": "https://json-schema.org/draft/2020-12/schema",
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "length": {
+            "description": "Number of bars.",
+            "type": "integer",
+            "default": 20,
+            "minimum": 1,
+            "maximum": 5000
+          },
+          "source": {
+            "description": "Price the study is computed from.",
+            "type": "string",
+            "enum": [
+              "close",
+              "open",
+              "high",
+              "low",
+              "hl2",
+              "hlc3",
+              "ohlc4"
+            ],
+            "default": "close"
+          },
+          "mult": {
+            "description": "Band distance from the basis in standard deviations.",
+            "type": "string",
+            "pattern": "^-?(0|[1-9][0-9]*)(\\.[0-9]+)?$",
+            "default": "2",
+            "minimum": "0.001",
+            "maximum": "50"
+          },
+          "tick_size": {
+            "description": "Symbol tick size. 0 = filled from the instrument, else inferred from the first bar's price precision.",
+            "type": "string",
+            "pattern": "^-?(0|[1-9][0-9]*)(\\.[0-9]+)?$",
+            "default": "0",
+            "minimum": "0"
+          }
+        }
+      },
+      "output_kinds": [],
+      "output_events": [],
+      "output_values": [
+        {
+          "key": "basis",
+          "type": "decimal",
+          "unit": "price",
+          "description": "Simple moving average of the source price."
+        },
+        {
+          "key": "upper",
+          "type": "decimal",
+          "unit": "price",
+          "description": "Basis plus mult standard deviations."
+        },
+        {
+          "key": "lower",
+          "type": "decimal",
+          "unit": "price",
+          "description": "Basis minus mult standard deviations."
+        },
+        {
+          "key": "bandwidth",
+          "type": "decimal",
+          "unit": "percent",
+          "description": "Band width as a percentage of the basis; null when the basis is 0."
+        },
+        {
+          "key": "percent_b",
+          "type": "decimal",
+          "unit": "ratio",
+          "description": "Position of the source price between the bands (0 at the lower band, 1 at the upper band); null when the bands coincide."
+        }
+      ],
+      "display": {
+        "layer": true,
+        "default_visible": false,
+        "z_index": 30,
+        "show_events": true,
+        "kinds": [],
+        "events": [],
+        "plots": [
+          {
+            "value": "basis",
+            "label": "Basis",
+            "pane": "price",
+            "render": "line",
+            "tone": "accent",
+            "color": null,
+            "line_style": "solid",
+            "line_width": 1
+          },
+          {
+            "value": "upper",
+            "label": "Upper",
+            "pane": "price",
+            "render": "line",
+            "tone": "neutral",
+            "color": null,
+            "line_style": "solid",
+            "line_width": 1
+          },
+          {
+            "value": "lower",
+            "label": "Lower",
+            "pane": "price",
+            "render": "line",
+            "tone": "neutral",
+            "color": null,
+            "line_style": "solid",
+            "line_width": 1
+          }
+        ],
+        "panes": [],
+        "end_reasons": []
+      },
+      "licensing_status": "CLEAN_ROOM_FROM_SPEC",
+      "parity_status": "SPEC_ONLY"
+    },
+    {
+      "plugin_id": "rsi",
+      "indicator_version": "1.0.0",
+      "schema_version": 2,
+      "display_name": "RSI",
+      "description": "Relative strength index from Wilder moving averages of gains and losses, seeded with their simple average; 100 when there are no losses, 0 when there are no gains.",
+      "timeframes": [
+        "1s",
+        "5s",
+        "15s",
+        "30s",
+        "1m",
+        "3m",
+        "5m",
+        "15m",
+        "30m",
+        "1h",
+        "2h",
+        "4h",
+        "6h",
+        "12h",
+        "1d",
+        "1w",
+        "1M"
+      ],
+      "warmup_bars": 15,
+      "required_streams": [
+        "candles:chart"
+      ],
+      "input_schema": {
+        "$schema": "https://json-schema.org/draft/2020-12/schema",
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "length": {
+            "description": "Number of bars.",
+            "type": "integer",
+            "default": 14,
+            "minimum": 1,
+            "maximum": 500
+          },
+          "source": {
+            "description": "Price the study is computed from.",
+            "type": "string",
+            "enum": [
+              "close",
+              "open",
+              "high",
+              "low",
+              "hl2",
+              "hlc3",
+              "ohlc4"
+            ],
+            "default": "close"
+          }
+        }
+      },
+      "output_kinds": [],
+      "output_events": [],
+      "output_values": [
+        {
+          "key": "rsi",
+          "type": "decimal",
+          "unit": "none",
+          "description": "Relative strength index, 0 to 100."
+        }
+      ],
+      "display": {
+        "layer": true,
+        "default_visible": false,
+        "z_index": 50,
+        "show_events": true,
+        "kinds": [],
+        "events": [],
+        "plots": [
+          {
+            "value": "rsi",
+            "label": "RSI",
+            "pane": "rsi",
+            "render": "line",
+            "tone": "accent",
+            "color": null,
+            "line_style": "solid",
+            "line_width": 1
+          }
+        ],
+        "panes": [
+          {
+            "id": "rsi",
+            "title": "RSI",
+            "precision": 2,
+            "levels": [
+              {
+                "value": 70,
+                "label": "70",
+                "tone": "muted",
+                "line_style": "dotted"
+              },
+              {
+                "value": 50,
+                "label": "50",
+                "tone": "muted",
+                "line_style": "dotted"
+              },
+              {
+                "value": 30,
+                "label": "30",
+                "tone": "muted",
+                "line_style": "dotted"
+              }
+            ]
+          }
+        ],
+        "end_reasons": []
+      },
+      "licensing_status": "CLEAN_ROOM_FROM_SPEC",
+      "parity_status": "SPEC_ONLY"
+    },
+    {
+      "plugin_id": "atr",
+      "indicator_version": "1.0.0",
+      "schema_version": 2,
+      "display_name": "ATR",
+      "description": "Average true range: Wilder moving average of the true range, seeded with its simple average; the first true range is high minus low.",
+      "timeframes": [
+        "1s",
+        "5s",
+        "15s",
+        "30s",
+        "1m",
+        "3m",
+        "5m",
+        "15m",
+        "30m",
+        "1h",
+        "2h",
+        "4h",
+        "6h",
+        "12h",
+        "1d",
+        "1w",
+        "1M"
+      ],
+      "warmup_bars": 14,
+      "required_streams": [
+        "candles:chart"
+      ],
+      "input_schema": {
+        "$schema": "https://json-schema.org/draft/2020-12/schema",
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "length": {
+            "description": "Number of bars.",
+            "type": "integer",
+            "default": 14,
+            "minimum": 1,
+            "maximum": 500
+          },
+          "tick_size": {
+            "description": "Symbol tick size. 0 = filled from the instrument, else inferred from the first bar's price precision.",
+            "type": "string",
+            "pattern": "^-?(0|[1-9][0-9]*)(\\.[0-9]+)?$",
+            "default": "0",
+            "minimum": "0"
+          }
+        }
+      },
+      "output_kinds": [],
+      "output_events": [],
+      "output_values": [
+        {
+          "key": "atr",
+          "type": "decimal",
+          "unit": "price",
+          "description": "Average true range."
+        }
+      ],
+      "display": {
+        "layer": true,
+        "default_visible": false,
+        "z_index": 50,
+        "show_events": true,
+        "kinds": [],
+        "events": [],
+        "plots": [
+          {
+            "value": "atr",
+            "label": "ATR",
+            "pane": "atr",
+            "render": "line",
+            "tone": "accent",
+            "color": null,
+            "line_style": "solid",
+            "line_width": 1
+          }
+        ],
+        "panes": [
+          {
+            "id": "atr",
+            "title": "ATR",
+            "precision": 4,
+            "levels": []
+          }
+        ],
+        "end_reasons": []
+      },
+      "licensing_status": "CLEAN_ROOM_FROM_SPEC",
+      "parity_status": "SPEC_ONLY"
+    },
+    {
+      "plugin_id": "volume_delta",
+      "indicator_version": "1.0.0",
+      "schema_version": 2,
+      "display_name": "Volume delta",
+      "description": "Buy minus sell volume of each bar as a percentage of its volume: venue taker volume or classified trades when available, otherwise an estimate from intrabar candle direction.",
+      "timeframes": [
+        "1s",
+        "5s",
+        "15s",
+        "30s",
+        "1m",
+        "3m",
+        "5m",
+        "15m",
+        "30m",
+        "1h",
+        "2h",
+        "4h",
+        "6h",
+        "12h",
+        "1d",
+        "1w",
+        "1M"
+      ],
+      "warmup_bars": 1,
+      "required_streams": [
+        "candles:chart",
+        "intrabars:1m"
+      ],
+      "input_schema": {
+        "$schema": "https://json-schema.org/draft/2020-12/schema",
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "delta_source": {
+            "description": "auto: true delta from venue taker volume when available, else the estimate; estimate: always the intrabar estimate.",
+            "type": "string",
+            "enum": [
+              "auto",
+              "estimate"
+            ],
+            "default": "auto"
+          },
+          "intrabar_tf": {
+            "description": "Lower timeframe used for the estimate.",
+            "type": "string",
+            "enum": [
+              "auto",
+              "1s",
+              "5s",
+              "15s",
+              "1m",
+              "3m",
+              "5m",
+              "15m"
+            ],
+            "default": "auto"
+          },
+          "min_intrabars": {
+            "description": "Intrabars required.",
+            "type": "integer",
+            "default": 5,
+            "minimum": 1,
+            "maximum": 100
+          },
+          "min_coverage": {
+            "description": "Share of chart volume the intrabars must cover.",
+            "type": "string",
+            "pattern": "^-?(0|[1-9][0-9]*)(\\.[0-9]+)?$",
+            "default": "0.8",
+            "minimum": "0.5",
+            "maximum": "1"
+          }
+        }
+      },
+      "output_kinds": [],
+      "output_events": [],
+      "output_values": [
+        {
+          "key": "delta_pct",
+          "type": "decimal",
+          "unit": "percent",
+          "description": "Delta as a percentage of the covered volume."
+        },
+        {
+          "key": "delta",
+          "type": "decimal",
+          "unit": "volume",
+          "description": "Buy volume minus sell volume."
+        },
+        {
+          "key": "buy_volume",
+          "type": "decimal",
+          "unit": "volume",
+          "description": "Buy volume."
+        },
+        {
+          "key": "sell_volume",
+          "type": "decimal",
+          "unit": "volume",
+          "description": "Sell volume."
+        },
+        {
+          "key": "method",
+          "type": "string",
+          "unit": "none",
+          "description": "How buy and sell volume were obtained.",
+          "choices": [
+            "taker_volume",
+            "trade_classification",
+            "candle_direction"
+          ]
+        },
+        {
+          "key": "coverage_pct",
+          "type": "decimal",
+          "unit": "percent",
+          "description": "Share of the bar volume the method covered."
+        },
+        {
+          "key": "intrabar_count",
+          "type": "integer",
+          "unit": "none",
+          "description": "Intrabars used by the estimate."
+        }
+      ],
+      "display": {
+        "layer": true,
+        "default_visible": true,
+        "z_index": 70,
+        "show_events": true,
+        "kinds": [],
+        "events": [],
+        "plots": [
+          {
+            "value": "delta_pct",
+            "label": "Delta %",
+            "pane": "delta",
+            "render": "histogram",
+            "tone": "sign",
+            "color": null,
+            "line_style": "solid",
+            "line_width": 1
+          }
+        ],
+        "panes": [
+          {
+            "id": "delta",
+            "title": "Delta %",
+            "precision": 2,
+            "levels": [
+              {
+                "value": 0,
+                "label": "0",
+                "tone": "muted",
+                "line_style": "dotted"
+              }
+            ]
+          }
+        ],
+        "end_reasons": []
+      },
+      "licensing_status": "CLEAN_ROOM_FROM_SPEC",
+      "parity_status": "SPEC_ONLY"
+    },
+    {
+      "plugin_id": "pivot_points",
+      "indicator_version": "1.0.0",
+      "schema_version": 2,
+      "display_name": "Pivot points",
+      "description": "Classic floor pivot levels P, R1 to R3 and S1 to S3 from the previous period's high, low and close.",
+      "timeframes": [
+        "1m",
+        "3m",
+        "5m",
+        "15m",
+        "30m",
+        "1h",
+        "2h",
+        "4h",
+        "6h",
+        "12h",
+        "1d",
+        "1w"
+      ],
+      "warmup_bars": 1,
+      "required_streams": [
+        "aux:1d",
+        "candles:chart"
+      ],
+      "input_schema": {
+        "$schema": "https://json-schema.org/draft/2020-12/schema",
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "period": {
+            "description": "Period whose high, low and close set the levels.",
+            "type": "string",
+            "enum": [
+              "1d",
+              "1w",
+              "1M"
+            ],
+            "default": "1d"
+          },
+          "tick_size": {
+            "description": "Symbol tick size. 0 = filled from the instrument, else inferred from the first bar's price precision.",
+            "type": "string",
+            "pattern": "^-?(0|[1-9][0-9]*)(\\.[0-9]+)?$",
+            "default": "0",
+            "minimum": "0"
+          }
+        }
+      },
+      "output_kinds": [
+        "PIVOT_P",
+        "PIVOT_R1",
+        "PIVOT_R2",
+        "PIVOT_R3",
+        "PIVOT_S1",
+        "PIVOT_S2",
+        "PIVOT_S3"
+      ],
+      "output_events": [],
+      "output_values": [
+        {
+          "key": "p",
+          "type": "decimal",
+          "unit": "price",
+          "description": "Pivot (H + L + C) / 3."
+        },
+        {
+          "key": "r1",
+          "type": "decimal",
+          "unit": "price",
+          "description": "Resistance 1, 2P - L."
+        },
+        {
+          "key": "r2",
+          "type": "decimal",
+          "unit": "price",
+          "description": "Resistance 2, P + (H - L)."
+        },
+        {
+          "key": "r3",
+          "type": "decimal",
+          "unit": "price",
+          "description": "Resistance 3, H + 2(P - L)."
+        },
+        {
+          "key": "s1",
+          "type": "decimal",
+          "unit": "price",
+          "description": "Support 1, 2P - H."
+        },
+        {
+          "key": "s2",
+          "type": "decimal",
+          "unit": "price",
+          "description": "Support 2, P - (H - L)."
+        },
+        {
+          "key": "s3",
+          "type": "decimal",
+          "unit": "price",
+          "description": "Support 3, L - 2(H - P)."
+        },
+        {
+          "key": "period_start_ms",
+          "type": "timestamp_ms",
+          "unit": "none",
+          "description": "Start of the period the levels apply to."
+        }
+      ],
+      "display": {
+        "layer": true,
+        "default_visible": true,
+        "z_index": 20,
+        "show_events": true,
+        "kinds": [
+          {
+            "kind": "PIVOT_P",
+            "label": "P",
+            "render": "level",
+            "tone": "neutral",
+            "color": null,
+            "fill_opacity": null,
+            "line_style": "dashed",
+            "midline": false,
+            "pending_until_ended": false
+          },
+          {
+            "kind": "PIVOT_R1",
+            "label": "R1",
+            "render": "level",
+            "tone": "down",
+            "color": null,
+            "fill_opacity": null,
+            "line_style": "dashed",
+            "midline": false,
+            "pending_until_ended": false
+          },
+          {
+            "kind": "PIVOT_R2",
+            "label": "R2",
+            "render": "level",
+            "tone": "down",
+            "color": null,
+            "fill_opacity": null,
+            "line_style": "dashed",
+            "midline": false,
+            "pending_until_ended": false
+          },
+          {
+            "kind": "PIVOT_R3",
+            "label": "R3",
+            "render": "level",
+            "tone": "down",
+            "color": null,
+            "fill_opacity": null,
+            "line_style": "dashed",
+            "midline": false,
+            "pending_until_ended": false
+          },
+          {
+            "kind": "PIVOT_S1",
+            "label": "S1",
+            "render": "level",
+            "tone": "up",
+            "color": null,
+            "fill_opacity": null,
+            "line_style": "dashed",
+            "midline": false,
+            "pending_until_ended": false
+          },
+          {
+            "kind": "PIVOT_S2",
+            "label": "S2",
+            "render": "level",
+            "tone": "up",
+            "color": null,
+            "fill_opacity": null,
+            "line_style": "dashed",
+            "midline": false,
+            "pending_until_ended": false
+          },
+          {
+            "kind": "PIVOT_S3",
+            "label": "S3",
+            "render": "level",
+            "tone": "up",
+            "color": null,
+            "fill_opacity": null,
+            "line_style": "dashed",
+            "midline": false,
+            "pending_until_ended": false
+          }
+        ],
+        "events": [],
+        "plots": [],
+        "panes": [],
+        "end_reasons": []
+      },
+      "licensing_status": "CLEAN_ROOM_FROM_SPEC",
+      "parity_status": "SPEC_ONLY"
+    }
+  ]
+}

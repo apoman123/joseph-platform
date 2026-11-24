@@ -1,0 +1,37 @@
+{
+  "plugin_id": "atr",
+  "timeframe": "5m",
+  "settings": {
+    "length": 2,
+    "tick_size": "0.01"
+  },
+  "description": "Length 2 (alpha 0.5). Bar 0 (H 12, L 8): TR 4. Bar 1 (H 11, L 9, previous close 10): max(2, 1, 1) = 2; seed (4 + 2) / 2 = 3. Bar 2 gaps up (H 22, L 19, previous close 10): max(3, 12, 9) = 12; ATR = 0.5 * 12 + 0.5 * 3 = 7.5.",
+  "bars": [
+    [
+      "10",
+      "12",
+      "8",
+      "10",
+      "1"
+    ],
+    [
+      "10",
+      "11",
+      "9",
+      "10",
+      "1"
+    ],
+    [
+      "20",
+      "22",
+      "19",
+      "21",
+      "1"
+    ]
+  ],
+  "expect": {
+    "final_values": {
+      "atr": "7.5"
+    }
+  }
+}

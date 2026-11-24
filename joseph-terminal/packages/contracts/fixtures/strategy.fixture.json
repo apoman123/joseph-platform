@@ -1,0 +1,606 @@
+{
+  "schema": "strategy.schema.json",
+  "definition": "StrategyDefinition",
+  "valid": [
+    {
+      "schema_version": 2,
+      "strategy_id": "ema-trend-long",
+      "name": "EMA trend (long): close crosses above the EMA, 1h RSI above 50",
+      "direction": "LONG",
+      "signal_timeframe": "15m",
+      "universe": {
+        "qualification": "QUALIFIED_ONLY",
+        "venues": [
+          "binance",
+          "hyperliquid"
+        ]
+      },
+      "when": {
+        "op": "ALL",
+        "id": "root",
+        "children": [
+          {
+            "op": "CROSSES",
+            "id": "cross",
+            "left": {
+              "kind": "candle",
+              "field": "close"
+            },
+            "right": {
+              "kind": "indicator",
+              "plugin_id": "ema",
+              "field": "ema"
+            },
+            "direction": "ABOVE"
+          },
+          {
+            "op": "COMPARE",
+            "id": "htf",
+            "left": {
+              "kind": "indicator",
+              "plugin_id": "rsi",
+              "tf": "1h",
+              "field": "rsi"
+            },
+            "cmp": "gt",
+            "right": {
+              "kind": "const",
+              "value": "50"
+            }
+          },
+          {
+            "op": "COMPARE",
+            "id": "flow",
+            "left": {
+              "kind": "indicator",
+              "plugin_id": "volume_delta",
+              "field": "delta_pct"
+            },
+            "cmp": "gt",
+            "right": {
+              "kind": "const",
+              "value": "0"
+            }
+          },
+          {
+            "op": "RISK_REWARD",
+            "id": "rr",
+            "min_rr": "2.0"
+          }
+        ]
+      },
+      "risk": {
+        "min_rr": "2.0",
+        "stop_model": "ATR",
+        "stop_buffer_atr": "1.5",
+        "target_model": "FIXED_R",
+        "fixed_r": "3",
+        "fee_bps_estimate": "5"
+      },
+      "notification": {
+        "cooldown_bars": 12,
+        "once_per_aoi": false,
+        "emit": [
+          "ENTRY_CONFIRMED",
+          "ENTRY_BLOCKED"
+        ],
+        "channels": [
+          "UI"
+        ]
+      },
+      "setup": {
+        "expire_after_bars": 24
+      },
+      "data_policy": {
+        "max_data_age_ms": 120000,
+        "allow_rest_poll": true
+      },
+      "execution_mode": "PAPER"
+    },
+    {
+      "schema_version": 2,
+      "strategy_id": "rsi-reversion-short",
+      "name": "RSI reversion (short): RSI falls back below 70 after a close above the upper Bollinger Band",
+      "direction": "SHORT",
+      "signal_timeframe": "5m",
+      "universe": {
+        "qualification": "QUALIFIED_ONLY",
+        "venues": [
+          "binance",
+          "bitget"
+        ]
+      },
+      "when": {
+        "op": "ALL",
+        "children": [
+          {
+            "op": "CROSSES",
+            "left": {
+              "kind": "indicator",
+              "plugin_id": "rsi",
+              "field": "rsi"
+            },
+            "right": {
+              "kind": "const",
+              "value": "70"
+            },
+            "direction": "BELOW"
+          },
+          {
+            "op": "WITHIN_BARS",
+            "bars": 3,
+            "child": {
+              "op": "COMPARE",
+              "left": {
+                "kind": "candle",
+                "field": "close"
+              },
+              "cmp": "gt",
+              "right": {
+                "kind": "indicator",
+                "plugin_id": "bollinger_bands",
+                "field": "upper"
+              }
+            }
+          },
+          {
+            "op": "NOT",
+            "child": {
+              "op": "COMPARE",
+              "left": {
+                "kind": "market",
+                "field": "oi_change_pct"
+              },
+              "cmp": "lt",
+              "right": {
+                "kind": "const",
+                "value": "-5"
+              }
+            }
+          }
+        ]
+      },
+      "risk": {
+        "min_rr": "1.5",
+        "stop_model": "SWING",
+        "stop_buffer_atr": "0.5",
+        "target_model": "FIXED_R",
+        "fixed_r": "2"
+      },
+      "notification": {
+        "cooldown_bars": 12,
+        "once_per_aoi": false
+      },
+      "execution_mode": "ALERT_ONLY"
+    },
+    {
+      "schema_version": 2,
+      "strategy_id": "pivot-bounce-long",
+      "name": "Pivot bounce (long): S1 or S2 touch in the first two US session hours",
+      "direction": "LONG",
+      "signal_timeframe": "5m",
+      "universe": {
+        "qualification": "ANY",
+        "venues": [
+          "nasdaq",
+          "nyse"
+        ]
+      },
+      "when": {
+        "op": "ALL",
+        "children": [
+          {
+            "op": "AOI_TOUCH",
+            "kinds": [
+              "PIVOT_S1",
+              "PIVOT_S2"
+            ],
+            "side": "bullish",
+            "within_bars": 3,
+            "touch": "WICK"
+          },
+          {
+            "op": "TIME_WINDOW",
+            "time_zone": "America/New_York",
+            "windows": [
+              {
+                "start": "09:30",
+                "end": "11:30"
+              }
+            ],
+            "weekdays": [
+              1,
+              2,
+              3,
+              4,
+              5
+            ]
+          },
+          {
+            "op": "STATE",
+            "plugin_id": "volume_delta",
+            "timeframes": [
+              "5m"
+            ],
+            "where": [
+              {
+                "field": "method",
+                "any_of": [
+                  "taker_volume",
+                  "trade_classification"
+                ]
+              }
+            ]
+          },
+          {
+            "op": "RISK_REWARD",
+            "min_rr": "1.5"
+          }
+        ]
+      },
+      "risk": {
+        "min_rr": "1.5",
+        "stop_model": "AOI_INVALIDATION",
+        "stop_buffer_atr": "0.2",
+        "target_model": "NEAREST_AOI",
+        "target_kinds": [
+          "PIVOT_P",
+          "PIVOT_R1"
+        ]
+      },
+      "notification": {
+        "cooldown_bars": 6,
+        "once_per_aoi": true
+      },
+      "execution_mode": "ALERT_ONLY"
+    }
+  ],
+  "invalid": [
+    {
+      "schema_version": 2,
+      "strategy_id": "ema-trend-long",
+      "name": "EMA trend (long): close crosses above the EMA, 1h RSI above 50",
+      "direction": "LONG",
+      "signal_timeframe": "15m",
+      "universe": {
+        "qualification": "QUALIFIED_ONLY",
+        "venues": [
+          "binance",
+          "hyperliquid"
+        ]
+      },
+      "when": {
+        "op": "EVAL",
+        "code": "__import__('os')"
+      },
+      "risk": {
+        "min_rr": "2.0",
+        "stop_model": "ATR",
+        "stop_buffer_atr": "1.5",
+        "target_model": "FIXED_R",
+        "fixed_r": "3",
+        "fee_bps_estimate": "5"
+      },
+      "notification": {
+        "cooldown_bars": 12,
+        "once_per_aoi": false,
+        "emit": [
+          "ENTRY_CONFIRMED",
+          "ENTRY_BLOCKED"
+        ],
+        "channels": [
+          "UI"
+        ]
+      },
+      "setup": {
+        "expire_after_bars": 24
+      },
+      "data_policy": {
+        "max_data_age_ms": 120000,
+        "allow_rest_poll": true
+      },
+      "execution_mode": "PAPER"
+    },
+    {
+      "schema_version": 2,
+      "strategy_id": "Bad Id!",
+      "name": "EMA trend (long): close crosses above the EMA, 1h RSI above 50",
+      "direction": "LONG",
+      "signal_timeframe": "15m",
+      "universe": {
+        "qualification": "QUALIFIED_ONLY",
+        "venues": [
+          "binance",
+          "hyperliquid"
+        ]
+      },
+      "when": {
+        "op": "ALL",
+        "id": "root",
+        "children": [
+          {
+            "op": "CROSSES",
+            "id": "cross",
+            "left": {
+              "kind": "candle",
+              "field": "close"
+            },
+            "right": {
+              "kind": "indicator",
+              "plugin_id": "ema",
+              "field": "ema"
+            },
+            "direction": "ABOVE"
+          },
+          {
+            "op": "COMPARE",
+            "id": "htf",
+            "left": {
+              "kind": "indicator",
+              "plugin_id": "rsi",
+              "tf": "1h",
+              "field": "rsi"
+            },
+            "cmp": "gt",
+            "right": {
+              "kind": "const",
+              "value": "50"
+            }
+          },
+          {
+            "op": "COMPARE",
+            "id": "flow",
+            "left": {
+              "kind": "indicator",
+              "plugin_id": "volume_delta",
+              "field": "delta_pct"
+            },
+            "cmp": "gt",
+            "right": {
+              "kind": "const",
+              "value": "0"
+            }
+          },
+          {
+            "op": "RISK_REWARD",
+            "id": "rr",
+            "min_rr": "2.0"
+          }
+        ]
+      },
+      "risk": {
+        "min_rr": "2.0",
+        "stop_model": "ATR",
+        "stop_buffer_atr": "1.5",
+        "target_model": "FIXED_R",
+        "fixed_r": "3",
+        "fee_bps_estimate": "5"
+      },
+      "notification": {
+        "cooldown_bars": 12,
+        "once_per_aoi": false,
+        "emit": [
+          "ENTRY_CONFIRMED",
+          "ENTRY_BLOCKED"
+        ],
+        "channels": [
+          "UI"
+        ]
+      },
+      "setup": {
+        "expire_after_bars": 24
+      },
+      "data_policy": {
+        "max_data_age_ms": 120000,
+        "allow_rest_poll": true
+      },
+      "execution_mode": "PAPER"
+    },
+    {
+      "schema_version": 2,
+      "strategy_id": "ema-trend-long",
+      "name": "EMA trend (long): close crosses above the EMA, 1h RSI above 50",
+      "direction": "LONG",
+      "signal_timeframe": "15m",
+      "universe": {
+        "qualification": "QUALIFIED_ONLY",
+        "venues": [
+          "binance",
+          "hyperliquid"
+        ]
+      },
+      "when": {
+        "op": "ALL",
+        "children": []
+      },
+      "risk": {
+        "min_rr": "2.0",
+        "stop_model": "ATR",
+        "stop_buffer_atr": "1.5",
+        "target_model": "FIXED_R",
+        "fixed_r": "3",
+        "fee_bps_estimate": "5"
+      },
+      "notification": {
+        "cooldown_bars": 12,
+        "once_per_aoi": false,
+        "emit": [
+          "ENTRY_CONFIRMED",
+          "ENTRY_BLOCKED"
+        ],
+        "channels": [
+          "UI"
+        ]
+      },
+      "setup": {
+        "expire_after_bars": 24
+      },
+      "data_policy": {
+        "max_data_age_ms": 120000,
+        "allow_rest_poll": true
+      },
+      "execution_mode": "PAPER"
+    },
+    {
+      "schema_version": 2,
+      "strategy_id": "pivot-bounce-long",
+      "name": "Pivot bounce (long): S1 or S2 touch in the first two US session hours",
+      "direction": "LONG",
+      "signal_timeframe": "5m",
+      "universe": {
+        "qualification": "ANY",
+        "venues": [
+          "nasdaq",
+          "nyse"
+        ]
+      },
+      "when": {
+        "op": "ALL",
+        "children": [
+          {
+            "op": "AOI_TOUCH",
+            "kinds": [
+              "pivot_s1"
+            ],
+            "side": "bullish",
+            "within_bars": 3,
+            "touch": "WICK"
+          },
+          {
+            "op": "TIME_WINDOW",
+            "time_zone": "America/New_York",
+            "windows": [
+              {
+                "start": "09:30",
+                "end": "11:30"
+              }
+            ],
+            "weekdays": [
+              1,
+              2,
+              3,
+              4,
+              5
+            ]
+          },
+          {
+            "op": "STATE",
+            "plugin_id": "volume_delta",
+            "timeframes": [
+              "5m"
+            ],
+            "where": [
+              {
+                "field": "method",
+                "any_of": [
+                  "taker_volume",
+                  "trade_classification"
+                ]
+              }
+            ]
+          },
+          {
+            "op": "RISK_REWARD",
+            "min_rr": "1.5"
+          }
+        ]
+      },
+      "risk": {
+        "min_rr": "1.5",
+        "stop_model": "AOI_INVALIDATION",
+        "stop_buffer_atr": "0.2",
+        "target_model": "NEAREST_AOI",
+        "target_kinds": [
+          "PIVOT_P",
+          "PIVOT_R1"
+        ]
+      },
+      "notification": {
+        "cooldown_bars": 6,
+        "once_per_aoi": true
+      },
+      "execution_mode": "ALERT_ONLY"
+    },
+    {
+      "schema_version": 2,
+      "strategy_id": "pivot-bounce-long",
+      "name": "Pivot bounce (long): S1 or S2 touch in the first two US session hours",
+      "direction": "LONG",
+      "signal_timeframe": "5m",
+      "universe": {
+        "qualification": "ANY",
+        "venues": [
+          "nasdaq",
+          "nyse"
+        ]
+      },
+      "when": {
+        "op": "ALL",
+        "children": [
+          {
+            "op": "AOI_TOUCH",
+            "kinds": [
+              "PIVOT_S1",
+              "PIVOT_S2"
+            ],
+            "side": "bullish",
+            "within_bars": 3,
+            "touch": "WICK"
+          },
+          {
+            "op": "TIME_WINDOW",
+            "time_zone": "America/New_York",
+            "windows": [
+              {
+                "start": "9:30",
+                "end": "11:30"
+              }
+            ],
+            "weekdays": [
+              1,
+              2,
+              3,
+              4,
+              5
+            ]
+          },
+          {
+            "op": "STATE",
+            "plugin_id": "volume_delta",
+            "timeframes": [
+              "5m"
+            ],
+            "where": [
+              {
+                "field": "method",
+                "any_of": [
+                  "taker_volume",
+                  "trade_classification"
+                ]
+              }
+            ]
+          },
+          {
+            "op": "RISK_REWARD",
+            "min_rr": "1.5"
+          }
+        ]
+      },
+      "risk": {
+        "min_rr": "1.5",
+        "stop_model": "AOI_INVALIDATION",
+        "stop_buffer_atr": "0.2",
+        "target_model": "NEAREST_AOI",
+        "target_kinds": [
+          "PIVOT_P",
+          "PIVOT_R1"
+        ]
+      },
+      "notification": {
+        "cooldown_bars": 6,
+        "once_per_aoi": true
+      },
+      "execution_mode": "ALERT_ONLY"
+    }
+  ]
+}

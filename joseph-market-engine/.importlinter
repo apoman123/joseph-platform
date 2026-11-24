@@ -1,0 +1,140 @@
+# Layering contracts, run by tests/architecture/test_layering.py through
+# lint-imports. include_external_packages lets a contract forbid
+# third-party frameworks as well as project modules.
+[importlinter]
+root_package = joseph
+include_external_packages = True
+
+[importlinter:contract:shared-domain-pure]
+name = Shared domain kernel depends only on the standard library
+type = forbidden
+source_modules =
+    joseph.domain
+forbidden_modules =
+    joseph.platform
+    joseph.market_data
+    joseph.screening
+    joseph.indicators
+    joseph.strategy
+    joseph.signals
+    joseph.alerts
+    joseph.backtest
+    joseph.api
+    fastapi
+    pydantic
+    sqlalchemy
+    httpx
+    websockets
+    uvicorn
+    pyarrow
+
+[importlinter:contract:context-domains-pure]
+name = Bounded-context domain layers never import frameworks or infrastructure
+type = forbidden
+source_modules =
+    joseph.market_data.domain
+    joseph.screening.domain
+    joseph.strategy.domain
+    joseph.signals.domain
+    joseph.alerts.domain
+forbidden_modules =
+    joseph.platform
+    joseph.api
+    fastapi
+    sqlalchemy
+    httpx
+    websockets
+    uvicorn
+    pyarrow
+
+[importlinter:contract:builtin-indicators-pure]
+name = Built-in indicators depend only on the SDK and the domain
+type = forbidden
+source_modules =
+    joseph.indicators.builtin
+forbidden_modules =
+    joseph.platform
+    joseph.market_data
+    joseph.api
+    joseph.pipeline
+    joseph.strategy
+    fastapi
+    sqlalchemy
+    httpx
+    websockets
+    uvicorn
+    pyarrow
+
+[importlinter:contract:market-data-upstream]
+name = Market data does not depend on downstream contexts
+type = forbidden
+source_modules =
+    joseph.market_data
+forbidden_modules =
+    joseph.screening
+    joseph.indicators
+    joseph.strategy
+    joseph.signals
+    joseph.alerts
+    joseph.backtest
+    joseph.api
+
+[importlinter:contract:indicators-upstream-of-strategy]
+name = Indicators do not depend on strategy, signals, alerts, adapters or API
+type = forbidden
+source_modules =
+    joseph.indicators
+forbidden_modules =
+    joseph.market_data.adapters
+    joseph.screening
+    joseph.strategy
+    joseph.signals
+    joseph.alerts
+    joseph.backtest
+    joseph.api
+
+[importlinter:contract:strategy-no-adapters]
+name = Strategy, signals and alerts core never import venue adapters or the API
+type = forbidden
+source_modules =
+    joseph.strategy
+    joseph.signals
+    joseph.alerts.domain
+    joseph.alerts.app
+    joseph.backtest
+forbidden_modules =
+    joseph.market_data.adapters
+    joseph.api
+
+[importlinter:contract:api-is-outermost]
+name = Only bootstrap may import the API layer
+type = forbidden
+source_modules =
+    joseph.domain
+    joseph.platform
+    joseph.market_data
+    joseph.screening
+    joseph.indicators
+    joseph.strategy
+    joseph.signals
+    joseph.alerts
+    joseph.backtest
+    joseph.pipeline
+forbidden_modules =
+    joseph.api
+    joseph.bootstrap
+
+# Direct imports only: application services the pipeline calls (such as
+# market_data.app.service) import adapters themselves.
+[importlinter:contract:pipeline-uses-ports]
+name = The signal pipeline orchestrates through application ports, not adapters
+type = forbidden
+allow_indirect_imports = True
+source_modules =
+    joseph.pipeline
+forbidden_modules =
+    joseph.market_data.adapters
+    joseph.screening.adapters
+    joseph.alerts.adapters
+    joseph.strategy.adapters
+    joseph.signals.adapters

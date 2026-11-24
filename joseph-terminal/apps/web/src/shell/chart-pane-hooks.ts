@@ -1,0 +1,330 @@
+/**
+ * @license
+ * Copyright 2026 Joseph Terminal contributors
+ * SPDX-License-Identifier: MIT
+ */
+
+/**
+ * @fileoverview Chart pane hooks for the volume delta pane (Delta %),
+ * comparison overlays and session separators. Each hook owns its
+ * subscriptions and removes what it added when the inputs change.
+ */
+
+'use client';
+import {
+  createSessionSeparatorLayer,
+  themeFromCss,
+  type ChartBar,
+  type ChartPort,
+  type CompareSeriesSpec,
+} from '@joseph/chart-core';
+import type {
+  ChartState,
+  IndicatorSeries,
+  InstrumentId,
+} from '@joseph/contracts';
+import {
+  DELTA_PANE_ID,
+  DELTA_PLUGIN_ID,
+  DELTA_STUDY_ID,
+  deltaBarsFromSeries,
+  deltaStudyFromSeries,
+  type DeltaBar,
+} from '@joseph/indicator-viz';
+import {
+  layerSettings,
+  layerStyle,
+  layerVisible,
+  paneShown,
+} from '@joseph/terminal-shell';
+import {useEffect, useMemo, useState, type MutableRefObject} from 'react';
+import type {TerminalRuntime} from '../composition/runtime';
+import {toChartBar} from './chart-bars';
+import {indicatorPlugins} from './indicator-plugins';
+import {isRateInstrument} from './markets';
+import {useStore} from './react-bindings';
+
+/** Refresh interval of live study and comparison data (30 s). */
+const REFRESH_MS = 30_000;
+
+/** Line colors of compared instruments (distinct from bid/ask/course). */
+export const COMPARE_COLORS: readonly string[] = [
+  '#f2b544',
+  '#5ab0f0',
+  '#b49cff',
+];
+
+/** Values by bar start time (UTC ms). */
+export type ValueByTime = ReadonlyMap<number, number>;
+
+/**
+ * Reads a CSS custom property from the document root.
+ * @param name Property name, e.g. `--chart-text`.
+ * @return Computed value; empty when the property is not set.
+ */
+function cssVar(name: string): string {
+  return getComputedStyle(document.documentElement).getPropertyValue(name);
+}
+
+/** Engine delta bars by bar start time (UTC ms). */
+export type DeltaByTime = ReadonlyMap<number, DeltaBar>;
+
+/** State of the Delta % pane. */
+export interface DeltaPaneState {
+  /** Whether the pane is requested by the chart's settings. */
+  shown: boolean;
+  /** Delta %, method (true/estimate) and volumes by bar start. */
+  bars: DeltaByTime;
+  /** Why the series is unavailable, if it is. */
+  error: string | null;
+}
+
+/**
+ * Returns whether a chart shows the volume delta (Delta %) pane. Published
+ * rates (yields) have no volume, so they never show it.
+ * @param chart Chart state.
+ * @return True when the layer is visible and its pane is not hidden.
+ */
+export function deltaPaneShown(chart: ChartState): boolean {
+  return (
+    !isRateInstrument(chart.instrument_id) &&
+    layerVisible(chart, DELTA_PLUGIN_ID) &&
+    paneShown(layerStyle(chart, DELTA_PLUGIN_ID), DELTA_PANE_ID)
+  );
+}
+
+/**
+ * Keeps the volume delta pane in sync with `/v1/indicators/series`.
+ * A failed request shows an empty pane that says why, never invented bars.
+ * Live charts refresh every 30 s; a replayed chart fetches once.
+ * @param port Chart port (null before mount).
+ * @param chart Chart state.
+ * @param runtime Runtime whose plugin catalogue and market client are used.
+ * @param atMs Replay point-in-time (UTC ms), or null when live.
+ * @return Pane state for the data window.
+ */
+export function useDeltaPane(
+  port: ChartPort | null,
+  chart: ChartState,
+  runtime: TerminalRuntime,
+  atMs: number | null
+): DeltaPaneState {
+  const plugins = useStore(indicatorPlugins(runtime));
+  // An engine that does not publish the plugin (disabled by configuration)
+  // gets no pane; while the catalogue loads the pane is requested as usual.
+  const shown =
+    deltaPaneShown(chart) &&
+    (plugins === null || plugins.some(p => p.plugin_id === DELTA_PLUGIN_ID));
+  // Serialized so the effects re-run when the settings' content changes,
+  // not their object identity.
+  const settingsKey = JSON.stringify(layerSettings(chart, DELTA_PLUGIN_ID));
+  const [series, setSeries] = useState<IndicatorSeries | null>(null);
+  const [error, setError] = useState<string | null>(null);
+  const {instrument_id: instrumentId, timeframe} = chart;
+  const live = atMs === null;
+  // Fetch: values are point-in-time per bar, so replay reuses one fetch.
+  useEffect(() => {
+    setSeries(null);
+    setError(null);
+    if (!shown) return;
+    let alive = true;
+    const inputs = JSON.parse(settingsKey) as Record<string, unknown> | null;
+    const load = () => {
+      runtime.clients.market
+        .getIndicatorSeries({
+          instrumentId,
+          timeframe,
+          pluginId: DELTA_PLUGIN_ID,
+          ...(inputs ? {settings: inputs} : {}),
+        })
+        .then(next => {
+          if (!alive) return;
+          setSeries(next);
+          setError(null);
+        })
+        .catch((failure: unknown) => {
+          if (!alive) return;
+          setError(
+            failure instanceof Error ? failure.message : 'request failed'
+          );
+        });
+    };
+    load();
+    const timer = live ? setInterval(load, REFRESH_MS) : null;
+    return () => {
+      alive = false;
+      if (timer) clearInterval(timer);
+    };
+  }, [shown, instrumentId, timeframe, settingsKey, live, runtime]);
+  // Render: apply the replay cursor to the latest series.
+  const spec = useMemo(() => {
+    if (!shown) return null;
+    if (series && series.instrument_id === instrumentId) {
+      return deltaStudyFromSeries(series, {atMs});
+    }
+    if (error) {
+      return {
+        id: DELTA_STUDY_ID,
+        title: 'Delta %',
+        style: 'histogram' as const,
+        points: [],
+        caption: `unavailable: ${error}`,
+      };
+    }
+    return null;
+  }, [shown, series, error, instrumentId, atMs]);
+  useEffect(() => {
+    if (!port) return;
+    if (spec) port.setStudyPane(spec);
+    else port.removeStudyPane(DELTA_STUDY_ID);
+  }, [port, spec]);
+  useEffect(
+    () => () => {
+      port?.removeStudyPane(DELTA_STUDY_ID);
+    },
+    [port]
+  );
+  const bars = useMemo(
+    () =>
+      new Map(
+        shown && series && series.instrument_id === instrumentId
+          ? deltaBarsFromSeries(series, atMs).map(bar => [bar.timeMs, bar])
+          : []
+      ),
+    [shown, series, instrumentId, atMs]
+  );
+  return {shown, bars, error};
+}
+
+/** One compared instrument with its closes. */
+export interface CompareEntry {
+  /** Instrument id. */
+  instrumentId: InstrumentId;
+  /** Line color, from `COMPARE_COLORS`. */
+  color: string;
+  /** Closes by bar start. */
+  values: ValueByTime;
+  /** Why candles could not be loaded, or null when they were. */
+  error: string | null;
+}
+
+/**
+ * Loads comparison candles every 30 s and overlays them on the chart. A
+ * failed instrument keeps its entry with the error and is left off the
+ * chart.
+ * @param port Chart port (null before mount).
+ * @param chart Chart state; `compare` lists the instruments.
+ * @param runtime Runtime whose market client is asked.
+ * @param labels Returns the display symbol of an instrument id.
+ * @return Entries for the legend and data window.
+ */
+export function useCompare(
+  port: ChartPort | null,
+  chart: ChartState,
+  runtime: TerminalRuntime,
+  labels: (instrumentId: InstrumentId) => string
+): readonly CompareEntry[] {
+  const ids = chart.compare ?? [];
+  const key = ids.join('|');
+  const {timeframe} = chart;
+  const [entries, setEntries] = useState<readonly CompareEntry[]>([]);
+  useEffect(() => {
+    if (!port) return;
+    const list = key ? key.split('|') : [];
+    if (list.length === 0) {
+      port.setCompareSeries([]);
+      setEntries([]);
+      return;
+    }
+    let alive = true;
+    const load = () => {
+      void Promise.allSettled(
+        list.map(id =>
+          runtime.clients.market.getCandles({
+            instrumentId: id,
+            timeframe,
+            limit: 500,
+          })
+        )
+      ).then(results => {
+        if (!alive) return;
+        const next: CompareEntry[] = results.map((result, i) => {
+          // `results` lines up with `list`, the split `chart.compare` ids.
+          const instrumentId = list[i] as InstrumentId;
+          const color = COMPARE_COLORS[i % COMPARE_COLORS.length] ?? '#f2b544';
+          if (result.status === 'rejected') {
+            return {
+              instrumentId,
+              color,
+              values: new Map(),
+              error:
+                result.reason instanceof Error
+                  ? result.reason.message
+                  : 'Candles unavailable',
+            };
+          }
+          const bars: ChartBar[] = result.value.candles.map(toChartBar);
+          return {
+            instrumentId,
+            color,
+            values: new Map(bars.map(b => [b.timeMs, b.close])),
+            error: null,
+          };
+        });
+        const specs: CompareSeriesSpec[] = next
+          .filter(entry => entry.error === null)
+          .map(entry => ({
+            id: entry.instrumentId,
+            label: labels(entry.instrumentId),
+            color: entry.color,
+            points: [...entry.values].map(([timeMs, value]) => ({
+              timeMs,
+              value,
+            })),
+          }));
+        port.setCompareSeries(specs);
+        setEntries(next);
+      });
+    };
+    load();
+    const timer = setInterval(load, REFRESH_MS);
+    return () => {
+      alive = false;
+      clearInterval(timer);
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- `labels` is read once per load; a new labels function must not restart the polling
+  }, [port, key, timeframe, runtime]);
+  return entries;
+}
+
+/**
+ * Draws session separators while the chart option is on: UTC calendar
+ * boundaries for 24x7 markets, every trading session (in exchange time)
+ * for session markets.
+ * @param port Chart port (null before mount).
+ * @param enabled Whether separators are shown.
+ * @param bars Bars currently displayed (read on every repaint).
+ * @param timeframe Chart timeframe.
+ * @param timeZone Exchange time zone (`UTC` for 24x7 markets).
+ */
+export function useSessionSeparators(
+  port: ChartPort | null,
+  enabled: boolean,
+  bars: MutableRefObject<readonly ChartBar[]>,
+  timeframe: ChartState['timeframe'],
+  timeZone = 'UTC'
+): void {
+  useEffect(() => {
+    if (!port || !enabled) return;
+    const theme = themeFromCss(cssVar);
+    return port.addCanvasLayer(
+      createSessionSeparatorLayer({
+        times: () => bars.current.map(bar => bar.timeMs),
+        timeframe: () => timeframe,
+        timeZone: () => timeZone,
+        color: () => theme.text,
+        fontFamily: () => theme.fontFamily,
+      })
+    );
+  }, [port, enabled, bars, timeframe, timeZone]);
+}

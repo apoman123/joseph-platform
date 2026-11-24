@@ -1,0 +1,24 @@
+{
+  "plugin_id": "ema",
+  "timeframe": "5m",
+  "settings": {
+    "length": 3,
+    "source": "close",
+    "tick_size": "0.01"
+  },
+  "description": "One bar closing at 10: the EMA is seeded with the first source value, so EMA = 10 from the first bar.",
+  "bars": [
+    [
+      "10",
+      "10",
+      "10",
+      "10",
+      "1"
+    ]
+  ],
+  "expect": {
+    "final_values": {
+      "ema": "10"
+    }
+  }
+}

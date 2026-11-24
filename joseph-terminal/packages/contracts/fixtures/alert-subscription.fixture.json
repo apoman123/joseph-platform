@@ -1,0 +1,94 @@
+{
+  "schema": "signal.schema.json",
+  "definition": "AlertSubscription",
+  "valid": [
+    {
+      "subscription_id": "phone-telegram",
+      "channel": "TELEGRAM",
+      "target": "123456789",
+      "kinds": [
+        "ENTRY_CONFIRMED"
+      ],
+      "min_severity": "ENTRY",
+      "strategy_ids": [],
+      "enabled": true,
+      "quiet_hours": {
+        "start": "23:00",
+        "end": "07:00",
+        "tz": "Asia/Taipei",
+        "bypass_severities": [
+          "CRITICAL"
+        ]
+      }
+    },
+    {
+      "subscription_id": "ops-hook",
+      "channel": "WEBHOOK",
+      "target": "https://hooks.example.com/joseph",
+      "kinds": [
+        "ENTRY_CONFIRMED"
+      ],
+      "min_severity": "ENTRY",
+      "strategy_ids": [],
+      "enabled": true,
+      "quiet_hours": null
+    }
+  ],
+  "invalid": [
+    {
+      "subscription_id": "phone-telegram",
+      "channel": "SMS",
+      "target": "123456789",
+      "kinds": [
+        "ENTRY_CONFIRMED"
+      ],
+      "min_severity": "ENTRY",
+      "strategy_ids": [],
+      "enabled": true,
+      "quiet_hours": {
+        "start": "23:00",
+        "end": "07:00",
+        "tz": "Asia/Taipei",
+        "bypass_severities": [
+          "CRITICAL"
+        ]
+      }
+    },
+    {
+      "subscription_id": "phone-telegram",
+      "channel": "TELEGRAM",
+      "target": "123456789",
+      "kinds": [
+        "ENTRY_CONFIRMED"
+      ],
+      "min_severity": "ENTRY",
+      "strategy_ids": [],
+      "enabled": true,
+      "quiet_hours": {
+        "start": "25:00",
+        "end": "07:00",
+        "tz": "UTC"
+      }
+    },
+    {
+      "subscription_id": "phone-telegram",
+      "channel": "TELEGRAM",
+      "target": "123456789",
+      "kinds": [
+        "ENTRY_CONFIRMED"
+      ],
+      "min_severity": "ENTRY",
+      "strategy_ids": [],
+      "enabled": true,
+      "quiet_hours": {
+        "start": "23:00",
+        "end": "07:00",
+        "tz": "Asia/Taipei",
+        "bypass_severities": [
+          "CRITICAL"
+        ]
+      },
+      "bot_token": "secret"
+    }
+  ]
+}

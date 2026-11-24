@@ -1,0 +1,44 @@
+{
+  "plugin_id": "rsi",
+  "timeframe": "5m",
+  "settings": {
+    "length": 3,
+    "source": "close"
+  },
+  "description": "Closes 13, 12, 11, 10 with length 3: gains 0, 0, 0 and losses 1, 1, 1, so the average gain is 0 and RSI = 0.",
+  "bars": [
+    [
+      "13",
+      "13",
+      "13",
+      "13",
+      "1"
+    ],
+    [
+      "12",
+      "12",
+      "12",
+      "12",
+      "1"
+    ],
+    [
+      "11",
+      "11",
+      "11",
+      "11",
+      "1"
+    ],
+    [
+      "10",
+      "10",
+      "10",
+      "10",
+      "1"
+    ]
+  ],
+  "expect": {
+    "final_values": {
+      "rsi": "0"
+    }
+  }
+}

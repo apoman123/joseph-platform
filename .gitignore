@@ -1,0 +1,9 @@
+.DS_Store
+*.log
+.env
+deploy/.env
+# Broker secret files (IBKR password, Shioaji keys, CA).
+deploy/secrets/
+
+# Claude Code agent worktrees
+.claude/worktrees/

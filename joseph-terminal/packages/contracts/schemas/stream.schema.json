@@ -1,0 +1,74 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://schemas.joseph.local/v1/stream.schema.json",
+  "title": "JosephStream",
+  "description": "WebSocket envelopes. Clients resume with last_sequence. The server sends snapshot_required, and the client refetches REST snapshots, when last_sequence is older than the retention window or newer than the newest buffered sequence (the server restarted, so its sequences began again at 0).",
+  "$defs": {
+    "StreamEventType": {
+      "title": "StreamEventType",
+      "type": "string",
+      "enum": [
+        "candle.updated", "aoi.updated", "aoi.removed", "structure.event", "feed.health", "qualification.changed",
+        "signal.created", "signal.updated",
+        "order.updated", "fill.created", "position.updated", "account.updated", "risk.kill_switch",
+        "subscribed", "snapshot_required", "heartbeat", "error"
+      ]
+    },
+    "StreamEnvelope": {
+      "title": "StreamEnvelope",
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["type", "event_id", "schema_version", "sequence", "event_ts_ms", "payload"],
+      "properties": {
+        "type": {"$ref": "#/$defs/StreamEventType"},
+        "event_id": {"type": "string"},
+        "schema_version": {"const": 1},
+        "sequence": {"type": "integer", "minimum": 0, "description": "Monotonic per connection stream (market) or per tenant (user)."},
+        "event_ts_ms": {"$ref": "common.schema.json#/$defs/TimestampMs"},
+        "correlation_id": {"type": ["string", "null"]},
+        "channel": {"type": ["string", "null"], "description": "Channel key, e.g. `candles:binance:perp:BTCUSDT:5m`."},
+        "payload": {"type": "object"}
+      }
+    },
+    "ChannelName": {
+      "title": "ChannelName",
+      "type": "string",
+      "enum": ["candles", "aois", "feed_health", "qualification", "signals", "orders", "fills", "positions", "account", "risk"]
+    },
+    "ChannelSpec": {
+      "title": "ChannelSpec",
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["channel"],
+      "properties": {
+        "channel": {"$ref": "#/$defs/ChannelName"},
+        "instrument_id": {"$ref": "common.schema.json#/$defs/InstrumentId"},
+        "timeframe": {"$ref": "common.schema.json#/$defs/Timeframe"},
+        "account_id": {"type": "string"},
+        "feed_mode": {"$ref": "common.schema.json#/$defs/FeedMode"}
+      }
+    },
+    "ClientMessage": {
+      "title": "ClientMessage",
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["action"],
+      "properties": {
+        "action": {"type": "string", "enum": ["subscribe", "unsubscribe", "ping"]},
+        "channels": {"type": "array", "items": {"$ref": "#/$defs/ChannelSpec"}},
+        "last_sequence": {"type": ["integer", "null"], "minimum": 0}
+      }
+    },
+    "SnapshotRequiredPayload": {
+      "title": "SnapshotRequiredPayload",
+      "description": "Payload of snapshot_required: the resume point cannot be replayed, because last_sequence is older than the retention window or newer than the newest buffered sequence (a server restart). The client refetches REST snapshots of the listed channels.",
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["reason", "channels"],
+      "properties": {
+        "reason": {"type": "string", "description": "Human-readable cause, e.g. that the resume point is older than retention or that the server restarted."},
+        "channels": {"type": "array", "items": {"type": "string"}}
+      }
+    }
+  }
+}

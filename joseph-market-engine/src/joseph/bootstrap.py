@@ -1,0 +1,756 @@
+# Copyright 2026 apoman123
+# SPDX-License-Identifier: MIT
+
+"""Dependency-injection composition root for the market engine.
+
+Wires adapters to ports. This is the only module allowed to import the API
+layer and concrete adapters together. Run with::
+
+    uv run uvicorn joseph.bootstrap:create_application --factory --port 8000
+
+Wiring overview:
+
+* market data → ``MarketDataService`` (also the indicator ``CandleSource``);
+* indicators → ``IndicatorQueryService`` + ``/v1/indicators``, ``/v1/aois``;
+* strategies → ``StrategyVersionService`` (SQL) + ``StrategyRuntime``;
+* live path → ``LiveSignalPipeline`` (closed candles → engine → runtime);
+* signals → ``AlertDispatcher`` → durable outbox → ``OutboxWorker`` senders
+  (UI stream, Telegram, LINE, e-mail, webhook, execution forwarder);
+* backtests → ``EngineFrameProvider`` (same engine and evaluator as live).
+"""
+
+from __future__ import annotations
+
+import dataclasses
+import smtplib
+from collections.abc import Callable
+from collections.abc import Mapping
+from collections.abc import Sequence
+
+import fastapi
+import httpx
+import sqlalchemy as sa
+
+from joseph.alerts.adapters import channels as alert_channels
+from joseph.alerts.adapters import sql as alerts_sql
+from joseph.alerts.app import dispatcher as alert_dispatcher
+from joseph.alerts.app import ports as alert_ports
+from joseph.alerts.app import subscriptions as alert_subscriptions
+from joseph.alerts.domain import model as alert_model
+from joseph.api import app as api_app
+from joseph.api import deps
+from joseph.api.routers import alerts as alerts_router
+from joseph.api.routers import backtests as backtests_router
+from joseph.api.routers import indicators as indicators_router
+from joseph.api.routers import signals as signals_router
+from joseph.api.routers import strategies as strategies_router
+from joseph.backtest import runner as backtest_runner
+from joseph.backtest import service as backtest_service
+from joseph.domain import clock as clock_lib
+from joseph.domain import events
+from joseph.domain import instruments
+from joseph.domain import market
+from joseph.indicators import catalog
+from joseph.indicators import discovery
+from joseph.indicators import service as indicator_service
+from joseph.indicators.sdk import registry as plugin_registry
+from joseph.market_data.adapters import alpaca
+from joseph.market_data.adapters import bar_archive_sql
+from joseph.market_data.adapters import binance_vision
+from joseph.market_data.adapters import bitget_archive
+from joseph.market_data.adapters import factory
+from joseph.market_data.adapters import lighter_archive
+from joseph.market_data.adapters import mexc
+from joseph.market_data.adapters import replay as replay_lib
+from joseph.market_data.adapters import sinopac
+from joseph.market_data.adapters import trade_archive_sql
+from joseph.market_data.adapters import ws
+from joseph.market_data.app import candle_store
+from joseph.market_data.app import derived_bars
+from joseph.market_data.app import feed_router
+from joseph.market_data.app import ports
+from joseph.market_data.app import registry
+from joseph.market_data.app import service as market_service
+from joseph.market_data.app import trade_recorder
+from joseph.market_data.domain import candles as candle_rules
+from joseph.market_data.domain import health
+from joseph.pipeline import frames as pipeline_frames
+from joseph.pipeline import live as pipeline_live
+from joseph.pipeline import market_context
+from joseph.pipeline import qualification as pipeline_qualification
+from joseph.pipeline import ticks as pipeline_ticks
+from joseph.platform import auth
+from joseph.platform import bus
+from joseph.platform import config
+from joseph.platform import db
+from joseph.platform import metrics as metrics_lib
+from joseph.platform import redaction
+from joseph.platform import streaming
+from joseph.screening.adapters import coingecko
+from joseph.screening.app import service as screening_service
+from joseph.signals.adapters import sql as signals_sql
+from joseph.signals.app import service as signal_service
+from joseph.strategy.adapters import sql as strategy_sql
+from joseph.strategy.app import runtime as strategy_runtime
+from joseph.strategy.app import version_service
+from joseph.strategy.domain import catalog as strategy_catalog
+
+
+@dataclasses.dataclass
+class SignalStack:
+    """Indicator, strategy, signal, alert and backtest services.
+
+    Attributes:
+        plugins: Indicator plugin registry.
+        indicator_queries: Point-in-time indicator query service.
+        versions: Strategy version service.
+        signals: Signal history service.
+        runtime: Strategy runtime.
+        gate: Qualification gate shared by runtime and pipeline.
+        market_context: Market context recorder.
+        frame_provider: Engine-backed frame provider.
+        backtests: Backtest service.
+        dispatcher: Alert dispatcher (runtime publisher).
+        outbox_worker: Alert delivery worker.
+        subscriptions: Alert subscription service.
+        pipeline: Live signal pipeline.
+        http_client: HTTP client used by alert senders.
+    """
+
+    plugins: plugin_registry.PluginRegistry
+    indicator_queries: indicator_service.IndicatorQueryService
+    versions: version_service.StrategyVersionService
+    signals: signal_service.SignalService
+    runtime: strategy_runtime.StrategyRuntime
+    gate: pipeline_qualification.CachedQualificationGate
+    market_context: market_context.SnapshotMarketContext
+    frame_provider: pipeline_frames.EngineFrameProvider
+    backtests: backtest_service.BacktestService
+    dispatcher: alert_dispatcher.AlertDispatcher
+    outbox_worker: alert_dispatcher.OutboxWorker
+    subscriptions: alert_subscriptions.SubscriptionService
+    pipeline: pipeline_live.LiveSignalPipeline
+    http_client: httpx.AsyncClient
+
+
+@dataclasses.dataclass
+class Container:
+    """Every wired service of the market engine.
+
+    Attributes:
+        settings: Settings.
+        clock: Time source.
+        adapters: Market-data adapter per enabled venue.
+        registry: Instrument registry.
+        store: Candle store.
+        router: Feed router.
+        market_data: Market-data service (also the indicator CandleSource).
+        qualification: Qualification service.
+        stream_hub: Resumable stream hub (publish ``aois``/``signals`` here).
+        event_bus: In-process domain-event bus.
+        engine: SQLAlchemy engine.
+        outbox: Transactional outbox.
+        inbox: Idempotent-consumer inbox.
+        authenticator: Bearer-token authenticator.
+        metrics: Metrics registry.
+        replay: Optional replay source.
+        signal_stack: Indicator/strategy/signal/alert services.
+        closers: Close hooks that ``aclose`` runs last, before disposing of
+            the database engine; a hook may return an awaitable, which is
+            awaited.
+        recorder: Optional public-trade recorder.
+    """
+
+    settings: config.Settings
+    clock: clock_lib.Clock
+    adapters: dict[instruments.Venue, ports.MarketDataPort]
+    registry: registry.InstrumentRegistry
+    store: candle_store.CandleStore
+    router: feed_router.FeedRouter
+    market_data: market_service.MarketDataService
+    qualification: screening_service.QualificationService
+    stream_hub: streaming.StreamHub
+    event_bus: bus.EventBus
+    engine: sa.Engine
+    outbox: db.OutboxRepository
+    inbox: db.InboxRepository
+    authenticator: auth.TokenAuthenticator
+    metrics: metrics_lib.MetricsRegistry
+    replay: replay_lib.ReplaySource | None = None
+    signal_stack: SignalStack | None = None
+    closers: list[Callable[[], object]] = dataclasses.field(
+        default_factory=list
+    )
+    recorder: trade_recorder.TradeRecorder | None = None
+
+    async def astart(self) -> None:
+        """Starts the background workers.
+
+        Starts the trade recorder, the alert outbox worker and, when
+        ``pipeline_enabled`` is set, the live signal pipeline. Each creates
+        asyncio tasks, so this runs inside the app's event loop (the
+        FastAPI lifespan). Feed sessions are not started here: the feed
+        router opens them on demand (``FeedRouter.acquire``).
+        """
+        if self.recorder is not None:
+            self.recorder.start()
+        stack = self.signal_stack
+        if stack is None:
+            return
+        stack.outbox_worker.start(self.settings.alert_interval_s)
+        if self.settings.pipeline_enabled:
+            stack.pipeline.start()
+
+    async def aclose(self) -> None:
+        """Stops workers and feeds and closes network resources.
+
+        Producers stop before what they use: the pipeline (which queues
+        alerts) before the outbox worker that delivers them, the worker
+        before the HTTP client of its senders, the feed sessions and the
+        trade recorder before the adapters they read from, and the database
+        engine last.
+        """
+        stack = self.signal_stack
+        if stack is not None:
+            await stack.pipeline.stop()
+            await stack.outbox_worker.stop()
+            await stack.http_client.aclose()
+        await self.router.close()
+        if self.recorder is not None:
+            await self.recorder.stop()
+        for adapter in self.adapters.values():
+            await adapter.close()
+        for closer in self.closers:
+            result = closer()
+            if hasattr(result, "__await__"):
+                await result
+        self.engine.dispose()
+
+
+def build_container(
+    settings: config.Settings | None = None,
+    *,
+    clock: clock_lib.Clock | None = None,
+    http_client: httpx.AsyncClient | None = None,
+    connect: ws.ConnectFn = ws.default_connect,
+) -> Container:
+    """Builds and wires every market-engine service.
+
+    Args:
+        settings: Settings (read from the environment when omitted).
+        clock: Time source (system clock when omitted).
+        http_client: Optional HTTP client shared by the venue adapters
+            (tests inject respx-backed ones); alert senders use their own.
+        connect: WebSocket connector.
+
+    Returns:
+        Container.
+    """
+    settings = settings or config.Settings.from_env()
+    clock = clock or clock_lib.SystemClock()
+    metrics = metrics_lib.standard_registry()
+    engine = db.create_engine(settings.database_url)
+    archive_engine = (
+        db.create_engine(settings.trade_archive_url)
+        if settings.trade_archive_url
+        else None
+    )
+    # Only the TWSE and TPEx adapters keep recorded minutes in a bar archive.
+    exchange = {instruments.Venue.TWSE, instruments.Venue.TPEX}
+    raw_adapters = factory.build_adapters(
+        settings.active_venues,
+        clock,
+        timeout_s=settings.http_timeout_s,
+        client=http_client,
+        connect=connect,
+        alpaca_config=alpaca.AlpacaConfig(
+            key_id=settings.alpaca_key_id,
+            secret_key=settings.alpaca_secret_key,
+            feed=alpaca.Feed(settings.alpaca_feed),
+            seconds_history_ms=settings.alpaca_seconds_history_ms,
+        ),
+        mexc_ws_format=mexc.WsFormat(settings.mexc_ws_format),
+        sinopac_config=sinopac_config(settings),
+        bar_archive=(
+            bar_archive_sql.SqlBarArchive(archive_engine or engine)
+            if exchange & set(settings.active_venues)
+            else None
+        ),
+    )
+    recorder = _trade_recorder(
+        settings, raw_adapters, clock, archive_engine or engine
+    )
+    adapters = derived_bars.wrap(raw_adapters, clock, recorder=recorder)
+    hub = streaming.StreamHub(clock, retention=settings.stream_retention)
+    event_bus = bus.EventBus()
+    # A series must hold an anchored study's whole window (anchor to now).
+    store = candle_store.CandleStore(
+        max_bars_per_series=max(20_000, settings.max_anchored_bars + 1_000)
+    )
+    replay = (
+        replay_lib.ReplaySource(settings.replay_dir)
+        if settings.replay_dir
+        else None
+    )
+    reconnects = metrics.gauge(
+        "joseph_feed_reconnects", "Reconnects of the venue's worst feed."
+    )
+    lag = metrics.gauge("joseph_feed_lag_ms", "Last message age per feed.")
+    revisions = metrics.counter(
+        "joseph_candle_revisions_total", "Final candles revised by the venue."
+    )
+
+    async def on_candle(
+        session: feed_router.FeedSession,
+        candle: market.Candle,
+        action: candle_rules.MergeAction,
+    ) -> None:
+        """Publishes candle updates and audits revisions.
+
+        Also marks the instrument as in use for the trade recorder. A
+        revised final candle increments the revision counter and publishes
+        a ``candle.revised`` domain event.
+
+        Args:
+            session: Producing session.
+            candle: Stored candle.
+            action: Merge outcome.
+        """
+        if recorder is not None:
+            recorder.touch(candle.instrument_id)
+        hub.publish(
+            streaming.candle_channel(
+                str(candle.instrument_id),
+                candle.timeframe.value,
+                session.mode.value,
+            ),
+            "candle.updated",
+            candle.to_contract(),
+        )
+        if action is candle_rules.MergeAction.REVISED:
+            revisions.inc(venue=candle.instrument_id.venue.value)
+            await event_bus.publish(
+                events.DomainEvent(
+                    event_type="candle.revised",
+                    payload=candle.to_contract(),
+                    idempotency_key=(
+                        f"{candle.instrument_id}|{candle.timeframe.value}|"
+                        f"{candle.start_ms}|{candle.revision}"
+                    ),
+                    ts_ms=clock.now_ms(),
+                )
+            )
+
+    async def on_health(feed: health.FeedHealth) -> None:
+        """Publishes feed health changes and updates the feed gauges.
+
+        Args:
+            feed: Health snapshot.
+        """
+        reconnects.set(feed.reconnects, venue=feed.venue.value)
+        if feed.lag_ms is not None:
+            lag.set(feed.lag_ms, venue=feed.venue.value)
+        hub.publish("feed_health", "feed.health", feed.to_contract())
+
+    router = feed_router.FeedRouter(
+        adapters,
+        store,
+        clock,
+        replay=replay,
+        on_candle=on_candle,
+        on_health=on_health,
+        poll_interval_s=settings.poll_interval_s,
+        stale_after_ms=settings.snapshot_stale_after_ms,
+    )
+    instrument_registry = registry.InstrumentRegistry(adapters)
+    market_data = market_service.MarketDataService(
+        adapters,
+        instrument_registry,
+        store,
+        router,
+        clock,
+        replay=replay,
+        stale_after_ms=settings.snapshot_stale_after_ms,
+        max_refresh_bars=settings.max_anchored_bars + 10_000,
+        recorded=recorder,
+    )
+    trending = (
+        coingecko.CoinGeckoTrending() if settings.coingecko_enabled else None
+    )
+    qualification = screening_service.QualificationService(
+        adapters,
+        clock,
+        top_n=settings.top_n,
+        trending=trending,
+    )
+    container = Container(
+        settings=settings,
+        clock=clock,
+        adapters=adapters,
+        registry=instrument_registry,
+        store=store,
+        router=router,
+        market_data=market_data,
+        qualification=qualification,
+        stream_hub=hub,
+        event_bus=event_bus,
+        engine=engine,
+        outbox=db.OutboxRepository(engine),
+        inbox=db.InboxRepository(engine),
+        authenticator=auth.TokenAuthenticator(settings.dev_tokens),
+        metrics=metrics,
+        replay=replay,
+        recorder=recorder,
+    )
+    if archive_engine is not None:
+        container.closers.append(archive_engine.dispose)
+    if trending is not None:
+        container.closers.append(trending.close)
+    container.signal_stack = build_signal_stack(container)
+    return container
+
+
+def sinopac_config(settings: config.Settings) -> sinopac.SinopacConfig | None:
+    """Builds the Shioaji market-data settings of TWSE and TPEx.
+
+    Args:
+        settings: Settings.
+
+    Returns:
+        Settings when ``JOSEPH_TW_DATA_SOURCE=sinopac`` (without credentials
+        the source stays disabled and says so), else ``None``.
+    """
+    if settings.tw_data_source != "sinopac":
+        return None
+    return sinopac.SinopacConfig(
+        api_key=settings.sinopac_api_key,
+        secret_key=settings.sinopac_secret_key,
+        max_symbols=settings.sinopac_max_symbols,
+        intraday_ticks_calls=settings.sinopac_intraday_ticks_calls,
+        intraday_kbars_calls=settings.sinopac_intraday_kbars_calls,
+        seconds_history_days=settings.sinopac_seconds_history_days,
+    )
+
+
+def _trade_recorder(
+    settings: config.Settings,
+    adapters: Mapping[instruments.Venue, ports.MarketDataPort],
+    clock: clock_lib.Clock,
+    archive_engine: sa.Engine,
+) -> trade_recorder.TradeRecorder | None:
+    """Builds the public-trade recorder and its archive.
+
+    Args:
+        settings: Settings.
+        adapters: Raw venue adapters.
+        clock: Time source.
+        archive_engine: Engine of ``trade_archive_url`` (else of
+            ``database_url``).
+
+    Returns:
+        Recorder, or ``None`` when recording is disabled or no real venue
+        is enabled.
+    """
+    real = [v for v in adapters if v is not instruments.Venue.MOCK]
+    if not settings.trade_recording or not real:
+        return None
+    day_archives: list[trade_recorder.DayArchive] = []
+    if settings.binance_archive and instruments.Venue.BINANCE in adapters:
+        day_archives.append(
+            binance_vision.BinanceVision(settings.binance_archive_dir)
+        )
+    if settings.bitget_archive and instruments.Venue.BITGET in adapters:
+        day_archives.append(
+            bitget_archive.BitgetArchive(settings.bitget_archive_dir)
+        )
+    if settings.lighter_archive and instruments.Venue.LIGHTER in adapters:
+        day_archives.append(lighter_archive.LighterArchive())
+    return trade_recorder.TradeRecorder(
+        adapters,
+        trade_archive_sql.SqlTradeArchive(archive_engine),
+        clock,
+        trade_recorder.RecorderSettings(
+            retention_ms=int(settings.trade_bar_retention_days * 86_400_000),
+            max_instruments=settings.trade_record_max_instruments,
+            backfill_max_calls=settings.trade_backfill_max_calls,
+            always=tuple(
+                instruments.InstrumentId.parse(value)
+                for value in settings.trade_record_instruments
+            ),
+        ),
+        day_archives=day_archives,
+    )
+
+
+def _channel_policy(
+    repository: strategy_sql.SqlStrategyRepository,
+) -> Callable[[str, str], frozenset[str]]:
+    """Builds the per-version channel policy from stored definitions.
+
+    Args:
+        repository: Strategy repository.
+
+    Returns:
+        Policy returning the channels a strategy version opted into.
+    """
+
+    def policy(tenant_id: str, strategy_version_id: str) -> frozenset[str]:
+        """Returns the version's notification channels (UI by default).
+
+        Args:
+            tenant_id: Owning tenant.
+            strategy_version_id: ``<strategy_id>:v<n>``.
+
+        Returns:
+            Channel names.
+        """
+        strategy_id, _, number = strategy_version_id.rpartition(":v")
+        # A malformed id or an unknown version still gets UI delivery.
+        try:
+            version = repository.get(tenant_id, strategy_id, int(number))
+        except (ValueError, LookupError):
+            return frozenset({"UI"})
+        if version is None:
+            return frozenset({"UI"})
+        chosen = version.definition.notification.channels
+        # Accepts enum members as well as plain channel names.
+        names = {str(getattr(c, "value", c)) for c in chosen or ()}
+        return frozenset(names or {"UI"})
+
+    return policy
+
+
+def _senders(
+    settings: config.Settings,
+    hub: streaming.StreamHub,
+    client: httpx.AsyncClient,
+) -> Mapping[alert_model.Channel, alert_ports.ChannelSender]:
+    """Builds alert senders for every configured channel.
+
+    Args:
+        settings: Settings (channel credentials).
+        hub: Stream hub for UI delivery.
+        client: Shared HTTP client.
+
+    Returns:
+        Sender per channel; unconfigured channels are absent and their
+        deliveries dead-letter with a clear reason.
+    """
+
+    async def ui_sink(tenant_id: str, payload: Mapping[str, object]) -> None:
+        """Publishes a signal on the tenant-scoped ``signals`` channel.
+
+        Args:
+            tenant_id: Tenant.
+            payload: Contract ``Signal``.
+        """
+        hub.publish(
+            "signals", "signal.created", dict(payload), tenant_id=tenant_id
+        )
+
+    senders: dict[alert_model.Channel, alert_ports.ChannelSender] = {
+        alert_model.Channel.UI: alert_channels.UiSender(ui_sink),
+    }
+    if settings.telegram_bot_token:
+        senders[alert_model.Channel.TELEGRAM] = alert_channels.TelegramSender(
+            client, settings.telegram_bot_token
+        )
+    if settings.line_channel_token:
+        senders[alert_model.Channel.LINE] = alert_channels.LineSender(
+            client, settings.line_channel_token
+        )
+    if settings.webhook_secret:
+        senders[alert_model.Channel.WEBHOOK] = alert_channels.WebhookSender(
+            client, settings.webhook_secret
+        )
+    if settings.smtp_host and settings.smtp_from:
+        host, port = settings.smtp_host, settings.smtp_port
+
+        def smtp_factory() -> smtplib.SMTP:
+            """Opens an SMTP connection.
+
+            Returns:
+                Connected SMTP client.
+            """
+            return smtplib.SMTP(host, port, timeout=10)
+
+        senders[alert_model.Channel.EMAIL] = alert_channels.EmailSender(
+            smtp_factory,
+            settings.smtp_from,
+            username=settings.smtp_username,
+            password=settings.smtp_password,
+        )
+    if settings.service_token:
+        senders[alert_model.Channel.EXECUTION] = (
+            alert_channels.ExecutionForwarder(
+                client, settings.execution_url, settings.service_token
+            )
+        )
+    return senders
+
+
+def build_signal_stack(container: Container) -> SignalStack:
+    """Wires indicators, strategies, signals, alerts and backtests.
+
+    Creates the strategy, signal and alert tables when they are missing, and
+    an HTTP client for the alert senders that ``Container.aclose`` closes.
+
+    Args:
+        container: Market-data container.
+
+    Returns:
+        Signal stack.
+    """
+    settings, clock, engine = (
+        container.settings,
+        container.clock,
+        container.engine,
+    )
+    strategy_sql.create_schema(engine)
+    signals_sql.create_schema(engine)
+    alerts_sql.create_schema(engine)
+    plugins, _ = catalog.build_registry(
+        discovery.DiscoveryConfig(
+            packages=settings.indicator_plugin_packages,
+            disabled=settings.indicator_plugins_disabled,
+            required=settings.indicator_plugins_required,
+        )
+    )
+    vocabulary = strategy_catalog.Vocabulary.from_plugin_infos(
+        plugins.infos(include_unavailable=True), plugins.ids()
+    )
+    repository = strategy_sql.SqlStrategyRepository(engine)
+    versions = version_service.StrategyVersionService(
+        repository, clock, vocabulary=vocabulary
+    )
+    signals = signal_service.SignalService(
+        signals_sql.SqlSignalRepository(engine)
+    )
+    http_client = httpx.AsyncClient(timeout=settings.http_timeout_s)
+    outbox = alerts_sql.SqlOutbox(engine)
+    subscription_repo = alerts_sql.SqlSubscriptionRepository(engine)
+    senders = _senders(settings, container.stream_hub, http_client)
+    dispatcher = alert_dispatcher.AlertDispatcher(
+        outbox,
+        subscription_repo,
+        clock,
+        strategy_channels=_channel_policy(repository),
+        ui_enabled=True,
+        forward_execution=bool(
+            settings.forward_signals and settings.service_token
+        ),
+    )
+    worker = alert_dispatcher.OutboxWorker(
+        outbox,
+        senders,
+        clock,
+    )
+    gate = pipeline_qualification.CachedQualificationGate(
+        container.qualification, clock
+    )
+    context = market_context.SnapshotMarketContext()
+    runtime = strategy_runtime.StrategyRuntime(
+        repository=repository,
+        signals=signals,
+        checkpoints=strategy_sql.SqlCheckpointRepository(engine),
+        clock=clock,
+        publisher=dispatcher,
+        qualification=gate,
+        market=context,
+        vocabulary=vocabulary,
+    )
+    tick_sizes = pipeline_ticks.RegistryTickSizes(container.registry, clock)
+    provider = pipeline_frames.EngineFrameProvider(
+        container.market_data, plugins, tick_sizes=tick_sizes
+    )
+    pipeline = pipeline_live.LiveSignalPipeline(
+        runtime,
+        provider,
+        container.market_data,
+        gate=gate,
+        context=context,
+        clock=clock,
+        interval_s=settings.pipeline_interval_s,
+        max_instruments_per_venue=settings.pipeline_max_instruments,
+    )
+    backtests = backtest_service.BacktestService(
+        versions,
+        backtest_runner.BacktestRunner(provider, vocabulary=vocabulary),
+    )
+    return SignalStack(
+        plugins=plugins,
+        indicator_queries=indicator_service.IndicatorQueryService(
+            container.market_data,
+            plugins,
+            clock,
+            indicator_service.QueryConfig(
+                max_anchored_bars=settings.max_anchored_bars
+            ),
+            tick_sizes=tick_sizes,
+        ),
+        versions=versions,
+        signals=signals,
+        runtime=runtime,
+        gate=gate,
+        market_context=context,
+        frame_provider=provider,
+        backtests=backtests,
+        dispatcher=dispatcher,
+        outbox_worker=worker,
+        subscriptions=alert_subscriptions.SubscriptionService(
+            subscription_repo, [channel.value for channel in senders]
+        ),
+        pipeline=pipeline,
+        http_client=http_client,
+    )
+
+
+def signal_routers(stack: SignalStack) -> list[fastapi.APIRouter]:
+    """Builds the routers of the signal stack.
+
+    Args:
+        stack: Signal stack.
+
+    Returns:
+        Indicator, strategy, signal, backtest and alert-subscription routers.
+    """
+    return [
+        indicators_router.build_router(stack.indicator_queries, stack.plugins),
+        strategies_router.build_router(
+            versions=stack.versions, get_principal=deps.get_principal
+        ),
+        signals_router.build_router(
+            signals=stack.signals, get_principal=deps.get_principal
+        ),
+        backtests_router.build_router(
+            backtests=stack.backtests, get_principal=deps.get_principal
+        ),
+        alerts_router.build_router(
+            service=stack.subscriptions, get_principal=deps.get_principal
+        ),
+    ]
+
+
+def create_application(
+    container: Container | None = None,
+    extra_routers: Sequence[fastapi.APIRouter] = (),
+) -> fastapi.FastAPI:
+    """Builds the ASGI app (uvicorn ``--factory`` entry point).
+
+    Configures secret-redacting logging first. The signal-stack routers are
+    mounted before ``extra_routers``.
+
+    Args:
+        container: Optional pre-built container (built from the environment
+            when omitted).
+        extra_routers: Additional routers to mount.
+
+    Returns:
+        FastAPI application.
+    """
+    redaction.configure_logging()
+    built = container or build_container()
+    routers = list(extra_routers)
+    if built.signal_stack is not None:
+        routers = signal_routers(built.signal_stack) + routers
+    return api_app.create_app(built, routers)

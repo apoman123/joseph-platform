@@ -1,0 +1,68 @@
+{
+  "name": "joseph-terminal-monorepo",
+  "version": "0.5.0",
+  "private": true,
+  "description": "Joseph Terminal: open-source multi-venue charting and trading terminal (public repository).",
+  "license": "MIT",
+  "packageManager": "pnpm@10.34.9",
+  "engines": {
+    "node": ">=20.19"
+  },
+  "type": "module",
+  "scripts": {
+    "dev": "pnpm --filter @joseph/web dev",
+    "build": "pnpm --filter @joseph/web build",
+    "start": "pnpm --filter @joseph/web start",
+    "typecheck": "pnpm -r --parallel typecheck",
+    "lint": "eslint . --max-warnings=0 && stylelint \"**/*.css\" --max-warnings=0",
+    "format": "prettier --write \"**/*.{ts,tsx,mjs,cjs,css}\" \"**/{package,tsconfig*}.json\"",
+    "format:check": "prettier --check \"**/*.{ts,tsx,mjs,cjs,css}\" \"**/{package,tsconfig*}.json\"",
+    "test": "vitest run",
+    "test:coverage": "vitest run --coverage",
+    "test:e2e": "pnpm --filter @joseph/web test:e2e",
+    "contracts:gen": "node packages/contracts/scripts/generate-types.mjs",
+    "contracts:check": "node packages/contracts/scripts/generate-types.mjs --check",
+    "arch:check": "depcruise --config .dependency-cruiser.cjs apps packages",
+    "secrets:scan": "node scripts/secret-scan.mjs",
+    "licenses:check": "node scripts/license-check.mjs",
+    "ci": "pnpm contracts:check && pnpm lint && pnpm typecheck && pnpm test && pnpm arch:check && pnpm secrets:scan && pnpm licenses:check && pnpm build",
+    "test:e2e:fullstack": "pnpm --filter @joseph/web test:e2e:fullstack"
+  },
+  "devDependencies": {
+    "@axe-core/playwright": "4.14.0",
+    "@eslint-community/eslint-plugin-eslint-comments": "4.8.1",
+    "@eslint/js": "9.39.5",
+    "@playwright/test": "1.63.0",
+    "@testing-library/dom": "10.4.2",
+    "@testing-library/jest-dom": "6.10.0",
+    "@testing-library/react": "16.3.3",
+    "@testing-library/user-event": "14.6.13",
+    "@types/node": "22.20.5",
+    "@types/react": "19.2.18",
+    "@types/react-dom": "19.2.7",
+    "@vitejs/plugin-react": "4.7.0",
+    "@vitest/coverage-v8": "3.2.7",
+    "ajv": "8.20.0",
+    "ajv-formats": "3.0.1",
+    "dependency-cruiser": "16.10.4",
+    "eslint": "9.39.5",
+    "eslint-plugin-jsdoc": "50.8.0",
+    "eslint-plugin-react-hooks": "5.2.0",
+    "jsdom": "26.1.0",
+    "json-schema-to-typescript": "15.0.4",
+    "prettier": "3.10.1",
+    "stylelint": "17.16.0",
+    "stylelint-order": "8.1.3",
+    "typescript": "5.9.3",
+    "typescript-eslint": "8.73.0",
+    "vitest": "3.2.7"
+  },
+  "pnpm": {
+    "onlyBuiltDependencies": [
+      "esbuild"
+    ],
+    "overrides": {
+      "postcss": "8.5.33"
+    }
+  }
+}

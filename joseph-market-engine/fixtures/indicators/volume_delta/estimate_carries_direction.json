@@ -1,0 +1,113 @@
+{
+  "plugin_id": "volume_delta",
+  "timeframe": "5m",
+  "settings": {},
+  "description": "Estimate from 1m intrabars (auto on a 5m chart). Bar 0: up 10, flat at the previous close 20 (keeps up), down 5, flat 10 and 5 (keep down): buy 30, sell 20, delta 20%. Bar 1 starts with a flat intrabar at bar 0's last close, so it keeps bar 0's last direction (down) across the chart bars: sell 30; then up 10, flat 5 (keeps up), down 5, up 10. Buy 25, sell 35, covered 60 of a 60 bar volume: delta -10, delta % = -10 / 60 x 100 = -16.67, coverage 100%.",
+  "bars": [
+    [
+      "100",
+      "101",
+      "100",
+      "100",
+      "50"
+    ],
+    [
+      "100",
+      "103",
+      "100",
+      "103",
+      "60"
+    ]
+  ],
+  "intrabars": {
+    "0": {
+      "1m": [
+        [
+          "100",
+          "101",
+          "100",
+          "101",
+          "10"
+        ],
+        [
+          "101",
+          "101",
+          "101",
+          "101",
+          "20"
+        ],
+        [
+          "101",
+          "101",
+          "100",
+          "100",
+          "5"
+        ],
+        [
+          "100",
+          "100",
+          "100",
+          "100",
+          "10"
+        ],
+        [
+          "100",
+          "100",
+          "100",
+          "100",
+          "5"
+        ]
+      ]
+    },
+    "1": {
+      "1m": [
+        [
+          "100",
+          "100",
+          "100",
+          "100",
+          "30"
+        ],
+        [
+          "100",
+          "102",
+          "100",
+          "102",
+          "10"
+        ],
+        [
+          "102",
+          "102",
+          "102",
+          "102",
+          "5"
+        ],
+        [
+          "102",
+          "102",
+          "101",
+          "101",
+          "5"
+        ],
+        [
+          "101",
+          "103",
+          "101",
+          "103",
+          "10"
+        ]
+      ]
+    }
+  },
+  "expect": {
+    "final_values": {
+      "delta_pct": "-16.67",
+      "delta": "-10",
+      "buy_volume": "25",
+      "sell_volume": "35",
+      "method": "candle_direction",
+      "coverage_pct": "100",
+      "intrabar_count": 5
+    }
+  }
+}

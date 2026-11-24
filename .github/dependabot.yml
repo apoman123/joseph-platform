@@ -1,0 +1,26 @@
+version: 2
+updates:
+  - package-ecosystem: npm
+    directory: /joseph-terminal
+    schedule: {interval: weekly}
+    open-pull-requests-limit: 10
+    groups:
+      dev-tooling:
+        dependency-type: development
+      react-next:
+        patterns: ['react', 'react-dom', 'next', '@types/react*']
+  - package-ecosystem: uv
+    directory: /joseph-market-engine
+    schedule: {interval: weekly}
+  - package-ecosystem: uv
+    directory: /joseph-execution-engine
+    schedule: {interval: weekly}
+  - package-ecosystem: uv
+    directory: /system-tests
+    schedule: {interval: monthly}
+  - package-ecosystem: docker
+    directories: [/joseph-market-engine, /joseph-execution-engine, /joseph-terminal]
+    schedule: {interval: weekly}
+  - package-ecosystem: github-actions
+    directories: [/, /.github/actions/deploy]
+    schedule: {interval: weekly}

@@ -1,0 +1,35 @@
+{
+  "plugin_id": "volume_delta",
+  "timeframe": "5m",
+  "settings": {},
+  "description": "True delta from the venue's taker buy volume (6th field of each bar). Bar 0: volume 100, buy 75, sell 25, delta_pct (75 - 25) / 100 * 100 = 50. Bar 1: volume 40, buy 10, sell 40 - 10 = 30, delta 10 - 30 = -20, delta_pct -20 / 40 * 100 = -50. No intrabars are used, so intrabar_count is 0 and coverage is 100.",
+  "bars": [
+    [
+      "100",
+      "101",
+      "99",
+      "100",
+      "100",
+      "75"
+    ],
+    [
+      "100",
+      "100",
+      "98",
+      "99",
+      "40",
+      "10"
+    ]
+  ],
+  "expect": {
+    "final_values": {
+      "delta_pct": "-50",
+      "delta": "-20",
+      "buy_volume": "10",
+      "sell_volume": "30",
+      "method": "taker_volume",
+      "coverage_pct": "100",
+      "intrabar_count": 0
+    }
+  }
+}

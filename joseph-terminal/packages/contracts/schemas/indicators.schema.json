@@ -1,0 +1,1088 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://schemas.joseph.local/v1/indicators.schema.json",
+  "title": "JosephIndicators",
+  "description": "Backend-authoritative indicator outputs. The terminal renders these records; it never recomputes trading signals.",
+  "$defs": {
+    "AoiKind": {
+      "title": "AoiKind",
+      "description": "AOI kind, declared by the publishing plugin in `IndicatorPluginInfo.output_kinds`; unique across installed plugins.",
+      "type": "string",
+      "pattern": "^[A-Z][A-Z0-9_]{0,47}$"
+    },
+    "AoiState": {
+      "title": "AoiState",
+      "description": "Lifecycle of an AOI. `active` and `tested` are live; `invalidated` and `expired` have ended, optionally with a plugin-defined `end_reason`.",
+      "type": "string",
+      "enum": [
+        "active",
+        "tested",
+        "invalidated",
+        "expired"
+      ]
+    },
+    "EndReason": {
+      "title": "EndReason",
+      "description": "Plugin-defined, display-only reason why an AOI ended, labelled by the plugin's `PluginDisplay.end_reasons`.",
+      "type": "string",
+      "pattern": "^[a-z][a-z0-9_]{0,31}$"
+    },
+    "IndicatorMethod": {
+      "title": "IndicatorMethod",
+      "description": "`pine_parity` reproduces the reference Pine semantics; `trade` uses venue trades with a published aggressor side (true delta); `trade_classification` uses trades classified against the quote (Lee-Ready / quote rule) on stock exchanges that publish no aggressor side, an estimate distinct from true delta. Neither trade method is ever presented as parity.",
+      "type": "string",
+      "enum": [
+        "pine_parity",
+        "trade",
+        "trade_classification"
+      ]
+    },
+    "AoiRecord": {
+      "title": "AoiRecord",
+      "description": "Versioned presentation record of an area of interest. Lines use lower == upper.",
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "schema_version",
+        "type",
+        "instrument_id",
+        "timeframe",
+        "aoi_id",
+        "source",
+        "kind",
+        "side",
+        "state",
+        "lower",
+        "upper",
+        "created_at_ms",
+        "confirmed_at_ms",
+        "as_of_ms",
+        "indicator_version",
+        "method"
+      ],
+      "properties": {
+        "schema_version": {
+          "const": 1
+        },
+        "type": {
+          "type": "string",
+          "enum": [
+            "aoi.updated"
+          ]
+        },
+        "instrument_id": {
+          "$ref": "common.schema.json#/$defs/InstrumentId"
+        },
+        "timeframe": {
+          "$ref": "common.schema.json#/$defs/Timeframe"
+        },
+        "aoi_id": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 128
+        },
+        "source": {
+          "type": "string",
+          "description": "Indicator plugin id."
+        },
+        "kind": {
+          "$ref": "#/$defs/AoiKind"
+        },
+        "side": {
+          "$ref": "common.schema.json#/$defs/ZoneSide"
+        },
+        "state": {
+          "$ref": "#/$defs/AoiState"
+        },
+        "lower": {
+          "$ref": "common.schema.json#/$defs/DecimalString"
+        },
+        "upper": {
+          "$ref": "common.schema.json#/$defs/DecimalString"
+        },
+        "created_at_ms": {
+          "$ref": "common.schema.json#/$defs/TimestampMs",
+          "description": "Start of the bar where the structure originates."
+        },
+        "confirmed_at_ms": {
+          "$ref": "common.schema.json#/$defs/TimestampMs",
+          "description": "Close time of the bar that confirmed the structure. Never earlier than it could be known."
+        },
+        "invalidated_at_ms": {
+          "oneOf": [
+            {
+              "$ref": "common.schema.json#/$defs/TimestampMs"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "as_of_ms": {
+          "$ref": "common.schema.json#/$defs/TimestampMs"
+        },
+        "quality_score": {
+          "type": [
+            "integer",
+            "null"
+          ],
+          "minimum": 0,
+          "maximum": 100
+        },
+        "group_id": {
+          "type": [
+            "string",
+            "null"
+          ],
+          "maxLength": 128,
+          "description": "Plugin-defined id of the structure the AOI belongs to; `IN_ZONE` groups bind on it."
+        },
+        "end_reason": {
+          "description": "Why a non-live AOI ended; null while it is live or when the plugin gives no reason.",
+          "oneOf": [
+            {
+              "$ref": "#/$defs/EndReason"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "indicator_version": {
+          "type": "string"
+        },
+        "method": {
+          "$ref": "#/$defs/IndicatorMethod"
+        },
+        "meta": {
+          "type": "object"
+        }
+      }
+    },
+    "StructureEventName": {
+      "title": "StructureEventName",
+      "description": "Event name, declared by the publishing plugin in `IndicatorPluginInfo.output_events`. `AOI_INVALIDATED` and `AOI_EXPIRED` are reserved for any plugin; several plugins may publish one name.",
+      "type": "string",
+      "pattern": "^[A-Z][A-Z0-9_]{0,47}$"
+    },
+    "StructureEvent": {
+      "title": "StructureEvent",
+      "description": "Indicator event confirmed at a closed bar.",
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "event_id",
+        "instrument_id",
+        "timeframe",
+        "source",
+        "name",
+        "bar_start_ms",
+        "confirmed_at_ms"
+      ],
+      "properties": {
+        "event_id": {
+          "type": "string"
+        },
+        "instrument_id": {
+          "$ref": "common.schema.json#/$defs/InstrumentId"
+        },
+        "timeframe": {
+          "$ref": "common.schema.json#/$defs/Timeframe"
+        },
+        "source": {
+          "type": "string"
+        },
+        "name": {
+          "$ref": "#/$defs/StructureEventName"
+        },
+        "bar_start_ms": {
+          "$ref": "common.schema.json#/$defs/TimestampMs"
+        },
+        "confirmed_at_ms": {
+          "$ref": "common.schema.json#/$defs/TimestampMs"
+        },
+        "price": {
+          "oneOf": [
+            {
+              "$ref": "common.schema.json#/$defs/DecimalString"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "aoi_id": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "score": {
+          "type": [
+            "integer",
+            "null"
+          ],
+          "minimum": 0,
+          "maximum": 100
+        },
+        "meta": {
+          "type": "object"
+        }
+      }
+    },
+    "IndicatorValue": {
+      "title": "IndicatorValue",
+      "description": "Scalar indicator output. Decimals are strings.",
+      "type": [
+        "string",
+        "integer",
+        "boolean",
+        "null"
+      ]
+    },
+    "DataQuality": {
+      "title": "DataQuality",
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "feed_state",
+        "missing_bars"
+      ],
+      "properties": {
+        "feed_state": {
+          "$ref": "common.schema.json#/$defs/FeedState"
+        },
+        "missing_bars": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "coverage_pct": {
+          "oneOf": [
+            {
+              "$ref": "common.schema.json#/$defs/DecimalString"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        }
+      }
+    },
+    "IndicatorSnapshot": {
+      "title": "IndicatorSnapshot",
+      "description": "State of one indicator plugin on one instrument/timeframe as of a closed bar.",
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "schema_version",
+        "instrument_id",
+        "timeframe",
+        "plugin_id",
+        "indicator_version",
+        "method",
+        "as_of_ms",
+        "bar_start_ms",
+        "aois",
+        "events",
+        "values",
+        "warmup_complete",
+        "data_quality"
+      ],
+      "properties": {
+        "schema_version": {
+          "const": 1
+        },
+        "instrument_id": {
+          "$ref": "common.schema.json#/$defs/InstrumentId"
+        },
+        "timeframe": {
+          "$ref": "common.schema.json#/$defs/Timeframe"
+        },
+        "plugin_id": {
+          "type": "string"
+        },
+        "indicator_version": {
+          "type": "string"
+        },
+        "method": {
+          "$ref": "#/$defs/IndicatorMethod"
+        },
+        "as_of_ms": {
+          "$ref": "common.schema.json#/$defs/TimestampMs"
+        },
+        "bar_start_ms": {
+          "$ref": "common.schema.json#/$defs/TimestampMs"
+        },
+        "aois": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/AoiRecord"
+          }
+        },
+        "events": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/StructureEvent"
+          }
+        },
+        "values": {
+          "type": "object",
+          "additionalProperties": {
+            "$ref": "#/$defs/IndicatorValue"
+          },
+          "description": "Published values, keyed as declared in the plugin's `output_values`."
+        },
+        "warmup_complete": {
+          "type": "boolean"
+        },
+        "data_quality": {
+          "$ref": "#/$defs/DataQuality"
+        }
+      }
+    },
+    "IndicatorSnapshotList": {
+      "title": "IndicatorSnapshotList",
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "snapshots",
+        "as_of_ms"
+      ],
+      "properties": {
+        "snapshots": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/IndicatorSnapshot"
+          }
+        },
+        "as_of_ms": {
+          "$ref": "common.schema.json#/$defs/TimestampMs"
+        }
+      }
+    },
+    "AoiList": {
+      "title": "AoiList",
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "instrument_id",
+        "timeframe",
+        "aois",
+        "as_of_ms",
+        "feed_state"
+      ],
+      "properties": {
+        "instrument_id": {
+          "$ref": "common.schema.json#/$defs/InstrumentId"
+        },
+        "timeframe": {
+          "$ref": "common.schema.json#/$defs/Timeframe"
+        },
+        "aois": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/AoiRecord"
+          }
+        },
+        "events": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/StructureEvent"
+          }
+        },
+        "as_of_ms": {
+          "$ref": "common.schema.json#/$defs/TimestampMs"
+        },
+        "feed_state": {
+          "$ref": "common.schema.json#/$defs/FeedState"
+        }
+      }
+    },
+    "LicensingStatus": {
+      "title": "LicensingStatus",
+      "type": "string",
+      "enum": [
+        "CLEAN_ROOM_FROM_SPEC",
+        "PINE_PORT_REVIEWED",
+        "PINE_PORT_PENDING_REVIEW"
+      ]
+    },
+    "ParityStatus": {
+      "title": "ParityStatus",
+      "type": "string",
+      "enum": [
+        "SPEC_ONLY",
+        "GOLDEN_VERIFIED"
+      ]
+    },
+    "PluginId": {
+      "title": "PluginId",
+      "description": "Indicator plugin id: lower snake case, unique across installed plugins.",
+      "type": "string",
+      "pattern": "^[a-z][a-z0-9_]{0,63}$"
+    },
+    "ValueSpec": {
+      "title": "ValueSpec",
+      "description": "One value a plugin publishes in `IndicatorSnapshot.values` and `IndicatorSeriesPoint.values`. Every published value may be null (for example before warm-up). `choices` is only allowed for string values.",
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "key",
+        "type",
+        "unit",
+        "description"
+      ],
+      "properties": {
+        "key": {
+          "type": "string",
+          "pattern": "^[a-z][a-z0-9_]{0,63}$"
+        },
+        "type": {
+          "description": "JSON form of the value: `decimal` is a decimal string, `timestamp_ms` an integer UTC ms time.",
+          "type": "string",
+          "enum": [
+            "decimal",
+            "integer",
+            "boolean",
+            "string",
+            "timestamp_ms"
+          ]
+        },
+        "unit": {
+          "type": "string",
+          "enum": [
+            "price",
+            "percent",
+            "ratio",
+            "volume",
+            "bars",
+            "none"
+          ]
+        },
+        "description": {
+          "type": "string"
+        },
+        "choices": {
+          "description": "Closed set of values of a string value; any string when empty or omitted.",
+          "type": "array",
+          "maxItems": 32,
+          "items": {
+            "type": "string"
+          }
+        }
+      },
+      "not": {
+        "required": [
+          "type",
+          "choices"
+        ],
+        "properties": {
+          "type": {
+            "not": {
+              "const": "string"
+            }
+          },
+          "choices": {
+            "minItems": 1
+          }
+        }
+      }
+    },
+    "DisplayTone": {
+      "title": "DisplayTone",
+      "description": "Colour role resolved by the terminal theme: `side` follows the AOI side, `sign` the sign of the plotted value (histograms only), `up` and `down` are the bullish and bearish colours, `accent` the user accent. Events may not use `side` or `sign`.",
+      "type": "string",
+      "enum": [
+        "side",
+        "sign",
+        "up",
+        "down",
+        "neutral",
+        "accent",
+        "warning",
+        "muted"
+      ]
+    },
+    "LineStyle": {
+      "title": "LineStyle",
+      "type": "string",
+      "enum": [
+        "solid",
+        "dashed",
+        "dotted"
+      ]
+    },
+    "HexColor": {
+      "title": "HexColor",
+      "description": "Default colour as `#RRGGBB`; user colours take precedence.",
+      "type": "string",
+      "pattern": "^#[0-9a-fA-F]{6}$"
+    },
+    "KindStyle": {
+      "title": "KindStyle",
+      "description": "How the terminal draws AOIs of one kind. `box` fills [lower, upper] from `created_at_ms`; `level` draws a line at `lower`.",
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "kind",
+        "label",
+        "render"
+      ],
+      "properties": {
+        "kind": {
+          "$ref": "#/$defs/AoiKind"
+        },
+        "label": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 32
+        },
+        "render": {
+          "type": "string",
+          "enum": [
+            "box",
+            "level"
+          ]
+        },
+        "tone": {
+          "$ref": "#/$defs/DisplayTone"
+        },
+        "color": {
+          "oneOf": [
+            {
+              "$ref": "#/$defs/HexColor"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "fill_opacity": {
+          "type": [
+            "number",
+            "null"
+          ],
+          "minimum": 0,
+          "maximum": 1
+        },
+        "line_style": {
+          "oneOf": [
+            {
+              "$ref": "#/$defs/LineStyle"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "midline": {
+          "type": "boolean",
+          "default": false
+        },
+        "pending_until_ended": {
+          "description": "Draws live AOIs as pending (dashed) until they end.",
+          "type": "boolean",
+          "default": false
+        }
+      },
+      "not": {
+        "required": [
+          "tone"
+        ],
+        "properties": {
+          "tone": {
+            "const": "sign"
+          }
+        }
+      }
+    },
+    "EventStyle": {
+      "title": "EventStyle",
+      "description": "How the terminal draws events of one name: a marker on the bar, a segment at `price`, both, or nothing.",
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "name",
+        "label",
+        "render"
+      ],
+      "properties": {
+        "name": {
+          "$ref": "#/$defs/StructureEventName"
+        },
+        "label": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 32
+        },
+        "render": {
+          "type": "string",
+          "enum": [
+            "marker",
+            "segment",
+            "marker_and_segment",
+            "none"
+          ]
+        },
+        "position": {
+          "type": "string",
+          "enum": [
+            "above",
+            "below",
+            "at"
+          ],
+          "default": "above"
+        },
+        "shape": {
+          "type": "string",
+          "enum": [
+            "arrow-up",
+            "arrow-down",
+            "circle",
+            "square"
+          ],
+          "default": "circle"
+        },
+        "tone": {
+          "$ref": "#/$defs/DisplayTone"
+        },
+        "color": {
+          "oneOf": [
+            {
+              "$ref": "#/$defs/HexColor"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "time_meta": {
+          "description": "`meta` key holding a UTC ms time: markers sit on that bar and segments start there.",
+          "type": [
+            "string",
+            "null"
+          ],
+          "pattern": "^[a-z][a-z0-9_]{0,63}$"
+        },
+        "line_style": {
+          "oneOf": [
+            {
+              "$ref": "#/$defs/LineStyle"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        }
+      },
+      "not": {
+        "required": [
+          "tone"
+        ],
+        "properties": {
+          "tone": {
+            "enum": [
+              "side",
+              "sign"
+            ]
+          }
+        }
+      }
+    },
+    "PlotStyle": {
+      "title": "PlotStyle",
+      "description": "One published value drawn as a line or histogram, on the price pane or a pane the plugin declares.",
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "value",
+        "label",
+        "pane",
+        "render"
+      ],
+      "properties": {
+        "value": {
+          "description": "Key declared in `output_values`.",
+          "type": "string",
+          "pattern": "^[a-z][a-z0-9_]{0,63}$"
+        },
+        "label": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 32
+        },
+        "pane": {
+          "description": "`price`, or the id of a declared `PaneStyle`.",
+          "type": "string",
+          "pattern": "^(price|[a-z][a-z0-9_]{0,31})$"
+        },
+        "render": {
+          "type": "string",
+          "enum": [
+            "line",
+            "histogram"
+          ]
+        },
+        "tone": {
+          "$ref": "#/$defs/DisplayTone"
+        },
+        "color": {
+          "oneOf": [
+            {
+              "$ref": "#/$defs/HexColor"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "line_style": {
+          "$ref": "#/$defs/LineStyle"
+        },
+        "line_width": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 4,
+          "default": 1
+        }
+      },
+      "not": {
+        "required": [
+          "render",
+          "tone"
+        ],
+        "properties": {
+          "render": {
+            "const": "line"
+          },
+          "tone": {
+            "const": "sign"
+          }
+        }
+      }
+    },
+    "PaneLevel": {
+      "title": "PaneLevel",
+      "description": "Horizontal reference line in a study pane.",
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "value",
+        "label"
+      ],
+      "properties": {
+        "value": {
+          "type": "number"
+        },
+        "label": {
+          "type": "string",
+          "maxLength": 16
+        },
+        "tone": {
+          "$ref": "#/$defs/DisplayTone"
+        },
+        "line_style": {
+          "$ref": "#/$defs/LineStyle"
+        }
+      },
+      "not": {
+        "required": [
+          "tone"
+        ],
+        "properties": {
+          "tone": {
+            "const": "sign"
+          }
+        }
+      }
+    },
+    "PaneStyle": {
+      "title": "PaneStyle",
+      "description": "Study pane below the price pane.",
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "id",
+        "title"
+      ],
+      "properties": {
+        "id": {
+          "description": "Pane id, unique within the plugin; `price` is reserved.",
+          "type": "string",
+          "pattern": "^[a-z][a-z0-9_]{0,31}$",
+          "not": {
+            "const": "price"
+          }
+        },
+        "title": {
+          "type": "string",
+          "maxLength": 48
+        },
+        "precision": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 8,
+          "default": 2
+        },
+        "levels": {
+          "type": "array",
+          "maxItems": 8,
+          "items": {
+            "$ref": "#/$defs/PaneLevel"
+          }
+        }
+      }
+    },
+    "EndReasonStyle": {
+      "title": "EndReasonStyle",
+      "description": "Label shown for AOIs that ended with one `end_reason`.",
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "reason",
+        "label"
+      ],
+      "properties": {
+        "reason": {
+          "$ref": "#/$defs/EndReason"
+        },
+        "label": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 32
+        }
+      }
+    },
+    "PluginDisplay": {
+      "title": "PluginDisplay",
+      "description": "Display hints the terminal renders a plugin from. Styled kinds must be declared in `output_kinds`, styled events in `output_events` (or be reserved), plotted values in `output_values`; the engine rejects a plugin that breaks these rules. Kinds and events without a style use the terminal defaults.",
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "layer",
+        "default_visible",
+        "z_index",
+        "show_events",
+        "kinds",
+        "events",
+        "plots",
+        "panes",
+        "end_reasons"
+      ],
+      "properties": {
+        "layer": {
+          "description": "Listed in the Layers menu and drawn on the chart; false for plugins used only by drawing tools or strategies.",
+          "type": "boolean"
+        },
+        "default_visible": {
+          "description": "Shown on charts that have no saved layer state.",
+          "type": "boolean"
+        },
+        "z_index": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 100
+        },
+        "show_events": {
+          "description": "Event markers are drawn by default.",
+          "type": "boolean"
+        },
+        "kinds": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/KindStyle"
+          }
+        },
+        "events": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/EventStyle"
+          }
+        },
+        "plots": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/PlotStyle"
+          }
+        },
+        "panes": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/PaneStyle"
+          }
+        },
+        "end_reasons": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/EndReasonStyle"
+          }
+        }
+      }
+    },
+    "IndicatorPluginInfo": {
+      "title": "IndicatorPluginInfo",
+      "description": "Metadata of one installed indicator plugin: what it computes, the AOI kinds, events and values it publishes, and how the terminal displays it.",
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "plugin_id",
+        "indicator_version",
+        "schema_version",
+        "display_name",
+        "description",
+        "timeframes",
+        "warmup_bars",
+        "required_streams",
+        "input_schema",
+        "output_kinds",
+        "output_events",
+        "output_values",
+        "display",
+        "licensing_status",
+        "parity_status"
+      ],
+      "properties": {
+        "plugin_id": {
+          "$ref": "#/$defs/PluginId"
+        },
+        "indicator_version": {
+          "type": "string"
+        },
+        "schema_version": {
+          "type": "integer",
+          "minimum": 1
+        },
+        "display_name": {
+          "type": "string"
+        },
+        "description": {
+          "type": "string"
+        },
+        "timeframes": {
+          "type": "array",
+          "items": {
+            "$ref": "common.schema.json#/$defs/Timeframe"
+          }
+        },
+        "warmup_bars": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "required_streams": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        },
+        "input_schema": {
+          "type": "object"
+        },
+        "output_kinds": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/AoiKind"
+          }
+        },
+        "output_events": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/StructureEventName"
+          }
+        },
+        "output_values": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/ValueSpec"
+          }
+        },
+        "display": {
+          "$ref": "#/$defs/PluginDisplay"
+        },
+        "licensing_status": {
+          "$ref": "#/$defs/LicensingStatus"
+        },
+        "parity_status": {
+          "$ref": "#/$defs/ParityStatus"
+        }
+      }
+    },
+    "IndicatorPluginList": {
+      "title": "IndicatorPluginList",
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "plugins"
+      ],
+      "properties": {
+        "plugins": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/IndicatorPluginInfo"
+          }
+        }
+      }
+    },
+    "IndicatorSeriesPoint": {
+      "title": "IndicatorSeriesPoint",
+      "description": "Published values of one plugin on one closed bar.",
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "bar_start_ms",
+        "values"
+      ],
+      "properties": {
+        "bar_start_ms": {
+          "$ref": "common.schema.json#/$defs/TimestampMs"
+        },
+        "values": {
+          "type": "object",
+          "additionalProperties": {
+            "$ref": "#/$defs/IndicatorValue"
+          }
+        }
+      }
+    },
+    "IndicatorSeries": {
+      "title": "IndicatorSeries",
+      "description": "Per-bar values of one plugin (e.g. volume delta for a sub-pane). Values are point-in-time: each point is what the plugin published when that bar closed.",
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "instrument_id",
+        "timeframe",
+        "plugin_id",
+        "indicator_version",
+        "points",
+        "as_of_ms",
+        "feed_state"
+      ],
+      "properties": {
+        "instrument_id": {
+          "$ref": "common.schema.json#/$defs/InstrumentId"
+        },
+        "timeframe": {
+          "$ref": "common.schema.json#/$defs/Timeframe"
+        },
+        "plugin_id": {
+          "type": "string"
+        },
+        "indicator_version": {
+          "type": "string"
+        },
+        "points": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/IndicatorSeriesPoint"
+          }
+        },
+        "as_of_ms": {
+          "$ref": "common.schema.json#/$defs/TimestampMs"
+        },
+        "feed_state": {
+          "$ref": "common.schema.json#/$defs/FeedState"
+        }
+      }
+    }
+  }
+}
