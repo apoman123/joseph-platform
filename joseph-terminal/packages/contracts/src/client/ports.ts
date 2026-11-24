@@ -92,7 +92,7 @@ export interface CandleQuery {
   limit?: number;
 }
 
-/** Query for indicator snapshots or AOIs on one series. */
+/** Query for indicator snapshots or areas of interest (AOIs) on one series. */
 export interface SeriesQuery {
   /** Canonical instrument id. */
   instrumentId: string;

@@ -33,6 +33,7 @@ import {schemaErrors} from './testing/schema';
 /**
  * Returns the Long A template with ids.
  * @return Definition.
+ * @throws `Error` if the Long A template is missing.
  */
 function longA(): StrategyDefinition {
   const def = STRATEGY_TEMPLATES[0]?.create();
@@ -42,8 +43,8 @@ function longA(): StrategyDefinition {
 
 /**
  * Collects all node ids.
- * @param root Root.
- * @return Ids in pre-order.
+ * @param root Root node.
+ * @return Ids in pre-order, `?` for a node without one.
  */
 function ids(root: RuleNode): string[] {
   const out: string[] = [];

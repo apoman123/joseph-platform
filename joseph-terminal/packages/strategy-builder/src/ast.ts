@@ -7,14 +7,15 @@
 /**
  * @fileoverview Immutable editing operations on the Rule AST.
  *
- * Every node carries a stable `id` so the editor, the server's reason tree
- * and validation messages can refer to the same node across edits. All
- * operations return a new tree and never mutate their input.
+ * Edits address nodes by their stable `id` (see `ensureIds`), so the editor,
+ * the server's reason tree and validation messages can refer to the same
+ * node across edits. All operations return a new tree and never mutate their
+ * input.
  */
 
 import type {RuleNode} from '@joseph/contracts';
 
-/** Group nodes with a `children` array. */
+/** Group nodes (ALL, ANY) with a `children` array. */
 export type GroupNode = Extract<RuleNode, {op: 'ALL' | 'ANY'}>;
 
 /** Wrapper nodes with a single `child`. */
@@ -37,8 +38,8 @@ export class AstEditError extends Error {
 
 /**
  * Returns whether a node is an ALL/ANY group.
- * @param node Node.
- * @return True for groups.
+ * @param node Node to test.
+ * @return True for ALL and ANY.
  */
 export function isGroup(node: RuleNode): node is GroupNode {
   return node.op === 'ALL' || node.op === 'ANY';
@@ -46,7 +47,7 @@ export function isGroup(node: RuleNode): node is GroupNode {
 
 /**
  * Returns whether a node wraps a single child.
- * @param node Node.
+ * @param node Node to test.
  * @return True for NOT, PERSIST_FOR and WITHIN_BARS.
  */
 export function isWrapper(node: RuleNode): node is WrapperNode {
@@ -57,7 +58,7 @@ export function isWrapper(node: RuleNode): node is WrapperNode {
 
 /**
  * Lists a node's direct children.
- * @param node Node.
+ * @param node Node to inspect.
  * @return Children in order (empty for leaves).
  */
 export function childrenOf(node: RuleNode): readonly RuleNode[] {
@@ -71,6 +72,8 @@ export function childrenOf(node: RuleNode): readonly RuleNode[] {
  * @param node Group or wrapper node.
  * @param children Replacement children.
  * @return Updated node.
+ * @throws `AstEditError` when a group would be left empty, a wrapper would
+ *     not get exactly one child, or `node` is a leaf.
  */
 function withChildren(node: RuleNode, children: readonly RuleNode[]): RuleNode {
   if (isGroup(node)) {
@@ -94,7 +97,8 @@ function withChildren(node: RuleNode, children: readonly RuleNode[]): RuleNode {
 /**
  * Visits every node depth-first (pre-order).
  * @param root Root node.
- * @param visit Callback receiving node, depth and JSON-pointer-style path.
+ * @param visit Callback receiving the node, its depth (1 for the root) and
+ *     its JSON-pointer-style path relative to the root (`''` for the root).
  */
 export function walk(
   root: RuleNode,
@@ -119,7 +123,7 @@ export interface NodeLocation {
   node: RuleNode;
   /** Parent node, or null for the root. */
   parent: RuleNode | null;
-  /** Index among the parent's children. */
+  /** Index among the parent's children (0 for the root). */
   index: number;
   /** JSON-pointer path relative to the root (`''` for the root). */
   path: string;
@@ -160,11 +164,14 @@ export function findNode(root: RuleNode, id: string): NodeLocation | null {
 
 /**
  * Replaces the node with `id` using `update`.
+ *
+ * Ancestors are copied only along the changed path; untouched subtrees keep
+ * their identity.
  * @param root Root node.
  * @param id Node id.
- * @param update Produces the replacement.
+ * @param update Produces the replacement; its `AstEditError`s propagate.
  * @return New root.
- * @throws {AstEditError} If the id does not exist.
+ * @throws `AstEditError` when no node has the id.
  */
 function updateNode(
   root: RuleNode,
@@ -192,7 +199,8 @@ function updateNode(
 /**
  * Returns the next free node id (`n1`, `n2`, ...).
  * @param root Root node.
- * @return Unused id.
+ * @return `n<k>`, where k is one more than the highest `n<number>` id in the
+ *     tree.
  */
 export function nextNodeId(root: RuleNode): string {
   let max = 0;
@@ -205,6 +213,9 @@ export function nextNodeId(root: RuleNode): string {
 
 /**
  * Assigns ids to every node that lacks one, keeping existing ids.
+ *
+ * The first occurrence of a duplicated id keeps it; later ones get a fresh
+ * `n<k>` id.
  * @param root Root node.
  * @return Tree where every node has a unique id.
  */
@@ -226,7 +237,7 @@ export function ensureIds(root: RuleNode): RuleNode {
     let id = node.id;
     if (!id || seen.has(id)) id = fresh();
     seen.add(id);
-    const base = {...node, id} as RuleNode;
+    const base: RuleNode = {...node, id};
     const children = childrenOf(base);
     return children.length ? withChildren(base, children.map(step)) : base;
   };
@@ -237,7 +248,8 @@ export function ensureIds(root: RuleNode): RuleNode {
  * Gives a new subtree ids that do not collide with `root`.
  * @param root Existing tree.
  * @param node Subtree to insert.
- * @return Subtree with fresh ids.
+ * @return Subtree whose missing or colliding ids are replaced by fresh
+ *     `n<k>` ids; other ids are kept.
  */
 function freshIds(root: RuleNode, node: RuleNode): RuleNode {
   const used = new Set<string>();
@@ -254,7 +266,7 @@ function freshIds(root: RuleNode, node: RuleNode): RuleNode {
       id = `n${counter}`;
     }
     used.add(id);
-    const base = {...n, id} as RuleNode;
+    const base: RuleNode = {...n, id};
     const children = childrenOf(base);
     return children.length ? withChildren(base, children.map(step)) : base;
   };
@@ -268,7 +280,8 @@ function freshIds(root: RuleNode, node: RuleNode): RuleNode {
  * @param child New condition (ids are assigned if missing or colliding).
  * @param index Insertion index; appends when omitted.
  * @return New root.
- * @throws {AstEditError} If the parent is not a group or the group is full.
+ * @throws `AstEditError` when no node has `parentId`, the parent is not a
+ *     group, or the group already holds 32 conditions.
  */
 export function addChild(
   root: RuleNode,
@@ -297,8 +310,9 @@ export function addChild(
  * @param root Root node.
  * @param id Node id.
  * @return New root.
- * @throws {AstEditError} For the root, a wrapper's only child or a group's
- *     last condition.
+ * @throws `AstEditError` for an unknown id, the root, a child whose parent
+ *     has no id (call `ensureIds` first), a wrapper's only child or a
+ *     group's last condition.
  */
 export function removeNode(root: RuleNode, id: string): RuleNode {
   const location = findNode(root, id);
@@ -330,8 +344,10 @@ export function removeNode(root: RuleNode, id: string): RuleNode {
  * Replaces a condition, keeping its id.
  * @param root Root node.
  * @param id Node id.
- * @param node Replacement.
+ * @param node Replacement; its own id is ignored, and missing or colliding
+ *     ids in its subtree are replaced by fresh ones.
  * @return New root.
+ * @throws `AstEditError` when no node has the id.
  */
 export function replaceNode(
   root: RuleNode,
@@ -344,12 +360,15 @@ export function replaceNode(
 
 /**
  * Sets (or clears with `undefined`) one field of a node.
+ *
+ * The value is not checked; run `validateDefinition` on the result.
  * @param root Root node.
  * @param id Node id.
  * @param field Field name.
  * @param value New value; `undefined` deletes the field.
  * @return New root.
- * @throws {AstEditError} When changing `op`, `id`, `children` or `child`.
+ * @throws `AstEditError` when changing `op`, `id`, `children` or `child`,
+ *     or when no node has the id.
  */
 export function setField(
   root: RuleNode,
@@ -366,6 +385,8 @@ export function setField(
     const copy: Record<string, unknown> = {...node};
     if (value === undefined) delete copy[field];
     else copy[field] = value;
+    // Unchecked by design: callers edit one wire field at a time and
+    // validation reports any resulting schema error.
     return copy as unknown as RuleNode;
   });
 }
@@ -375,7 +396,8 @@ export function setField(
  * @param root Root node.
  * @param id Node id.
  * @param op Wrapper kind.
- * @return New root.
+ * @return New root; the wrapper gets the id from `nextNodeId`.
+ * @throws `AstEditError` when no node has the id.
  */
 export function wrapNode(
   root: RuleNode,
@@ -394,8 +416,9 @@ export function wrapNode(
  * Replaces a single-child group or wrapper with its child.
  * @param root Root node.
  * @param id Node id.
- * @return New root.
- * @throws {AstEditError} When the node has more than one child or none.
+ * @return New root (the child itself when `id` is the root).
+ * @throws `AstEditError` for an unknown id, or when the node has more than
+ *     one child or none.
  */
 export function unwrapNode(root: RuleNode, id: string): RuleNode {
   const location = findNode(root, id);
@@ -416,9 +439,11 @@ export function unwrapNode(root: RuleNode, id: string): RuleNode {
  * @param root Root node.
  * @param id Node id to move.
  * @param targetParentId Destination group id.
- * @param index Destination index.
+ * @param index Destination index, clamped to the group's bounds.
  * @return New root.
- * @throws {AstEditError} When moving a node into its own subtree.
+ * @throws `AstEditError` for an unknown `id` or `targetParentId`, a move
+ *     into the node's own subtree or into a non-group, and for the removals
+ *     `removeNode` refuses (for example a group's last condition).
  */
 export function moveNode(
   root: RuleNode,
@@ -461,8 +486,9 @@ export function moveNode(
  * Moves a condition up or down within its group.
  * @param root Root node.
  * @param id Node id.
- * @param delta 1 for up, +1 for down.
- * @return New root (unchanged at the boundaries).
+ * @param delta `-1` moves the node up, `+1` moves it down.
+ * @return New root; `root` itself when the node is first (up) or last
+ *     (down), unknown, or not inside a group with an id.
  */
 export function shiftNode(root: RuleNode, id: string, delta: -1 | 1): RuleNode {
   const location = findNode(root, id);

@@ -5,8 +5,14 @@
  */
 
 /**
- * @fileoverview Production dependency license allowlist check, plus a
- * guard that the Lightweight Charts attribution is shipped.
+ * @fileoverview License check for the terminal's production dependencies
+ * (`pnpm licenses:check`, run in CI).
+ *
+ * Every package that `pnpm licenses list --prod` reports must have a license
+ * on `ALLOWED` or match a reviewed entry in `EXCEPTIONS`, and both
+ * docs/THIRD_PARTY_NOTICES.md and NOTICE must carry the TradingView
+ * Lightweight Charts attribution that its Apache-2.0 license requires. Exits
+ * with status 1 and lists each problem otherwise.
  */
 
 import {execFileSync} from 'node:child_process';
@@ -14,7 +20,10 @@ import {existsSync, readFileSync} from 'node:fs';
 import {join} from 'node:path';
 import {fileURLToPath} from 'node:url';
 
+/** The joseph-terminal directory, the parent of this script's folder. */
 const ROOT = join(fileURLToPath(new URL('.', import.meta.url)), '..');
+
+/** SPDX identifiers accepted without review. */
 const ALLOWED = new Set([
   'MIT',
   'ISC',
@@ -30,8 +39,9 @@ const ALLOWED = new Set([
 ]);
 
 /**
- * Reviewed exceptions: server-side only, never shipped in the browser bundle.
- * Each entry needs a written justification.
+ * Reviewed exceptions for packages whose name starts with `prefix`: they are
+ * used on the server only and never shipped in the browser bundle. Each entry
+ * carries the justification that the check prints.
  */
 const EXCEPTIONS = [
   {
@@ -42,10 +52,14 @@ const EXCEPTIONS = [
 ];
 
 /**
- * Whether an SPDX expression is acceptable (every OR-branch alternative or
- * every AND-term must be allowed).
- * @param {string} expression SPDX license expression.
- * @return {boolean} True when allowed.
+ * Returns whether an SPDX license expression is acceptable: a single allowed
+ * identifier, an `OR` with at least one acceptable alternative, or an `AND`
+ * whose terms are all acceptable.
+ *
+ * Parentheses are dropped and `OR` is split first, so `AND` binds tighter, as
+ * in SPDX; a parenthesized `OR` inside an `AND` is not grouped.
+ * @param {string} expression SPDX license expression, e.g. `(MIT OR CC0-1.0)`.
+ * @return {boolean} True when the expression is acceptable.
  */
 function allowed(expression) {
   const clean = expression.replace(/[()]/g, '').trim();

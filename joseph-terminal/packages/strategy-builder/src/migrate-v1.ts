@@ -6,9 +6,13 @@
 
 /**
  * @fileoverview Migration from the starter's v1 `StrategyConfig` to Rule AST
- * v2. Meaning is preserved condition by condition; anything that cannot be
+ * v2 (`schema_version: 2`).
+ *
+ * Meaning is preserved condition by condition; anything that cannot be
  * expressed exactly is reported, never silently dropped, and the resulting
- * strategy is always ALERT_ONLY.
+ * strategy is always ALERT_ONLY. v1 field names are camelCase (`htfBias`:
+ * higher-timeframe bias, `aoiAny`: area-of-interest kinds, `minRR`: minimum
+ * reward-to-risk ratio).
  */
 
 import type {
@@ -98,6 +102,7 @@ const ZONES: Readonly<Record<string, 'DISCOUNT' | 'PREMIUM' | 'OTE'>> = {
   ote: 'OTE',
 };
 
+/** Timeframes a v1 config could name; anything else falls back to 5m. */
 const V1_TIMEFRAMES: readonly Timeframe[] = [
   '1m',
   '3m',
@@ -130,7 +135,8 @@ export function isStrategyConfigV1(value: unknown): value is StrategyConfigV1 {
 /**
  * Converts a v1 id into a v2 strategy slug.
  * @param id v1 id.
- * @return Slug matching `^[a-z0-9][a-z0-9-]{0,62}$`.
+ * @return Slug matching `^[a-z0-9][a-z0-9-]{0,62}$`, or `migrated-strategy`
+ *     when nothing usable remains.
  */
 function slug(id: string): string {
   const dashed = id.toLowerCase().replace(/[^a-z0-9-]+/g, '-');
@@ -150,8 +156,9 @@ function slug(id: string): string {
 
 /**
  * Formats a v1 number as a decimal string.
- * @param value Number.
- * @return Decimal text.
+ * @param value v1 number.
+ * @return Decimal text rounded to 8 decimal places, or `2` (the v1 default
+ *     minimum reward-to-risk) when the number is not finite.
  */
 function decimalText(value: number): string {
   return Number.isFinite(value) ? String(Number(value.toFixed(8))) : '2';
@@ -159,8 +166,11 @@ function decimalText(value: number): string {
 
 /**
  * Migrates a v1 config to a v2 definition.
+ *
+ * Never throws: unsupported content goes to `report.unmapped`. Node ids are
+ * `root` for the top-level ALL group and `n1`, `n2`, ... for its conditions.
  * @param config v1 config.
- * @return Definition and report.
+ * @return Definition (always ALERT_ONLY) and the migration report.
  */
 export function migrateV1(config: StrategyConfigV1): MigrationResult {
   const report: MigrationReport = {mapped: [], assumptions: [], unmapped: []};
@@ -236,6 +246,7 @@ export function migrateV1(config: StrategyConfigV1): MigrationResult {
     children.push({
       op: 'AOI_TOUCH',
       id: id(),
+      // 1 to 8 kinds here, as the tuple type requires.
       kinds: kinds.slice(0, 8) as AoiTouchNode['kinds'],
       side,
       within_bars: Math.max(
@@ -276,6 +287,7 @@ export function migrateV1(config: StrategyConfigV1): MigrationResult {
       op: 'SEQUENCE',
       id: id(),
       within_bars: Math.max(windowBars, steps.length),
+      // 2 to 8 steps here, as the tuple type requires.
       steps: steps as SequenceNode['steps'],
     });
     report.mapped.push(
@@ -319,6 +331,7 @@ export function migrateV1(config: StrategyConfigV1): MigrationResult {
     when: {
       op: 'ALL',
       id: 'root',
+      // Never empty: the RISK_REWARD condition is always added.
       children: children as [RuleNode, ...RuleNode[]],
     },
     risk: {

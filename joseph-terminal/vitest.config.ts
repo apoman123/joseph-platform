@@ -5,7 +5,9 @@
  */
 
 /**
- * @fileoverview Root Vitest configuration with one project per test tier.
+ * @fileoverview Root Vitest configuration with one project per test tier:
+ * `packages` and `web` run unit tests in jsdom, `architecture` runs the
+ * boundary and contract tests in Node.
  */
 
 import react from '@vitejs/plugin-react';

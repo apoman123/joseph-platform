@@ -16,7 +16,7 @@
 /** Matches the contract `DecimalString` pattern. */
 const DECIMAL_PATTERN = /^-?(0|[1-9][0-9]*)(\.[0-9]+)?$/;
 
-/** Maximum fractional digits produced by division helpers. */
+/** Fractional digits `div` keeps before removing trailing zeros. */
 const DIVISION_SCALE = 18;
 
 /**
@@ -34,10 +34,10 @@ export class Decimal {
   ) {}
 
   /**
-   * Parses a contract decimal string.
+   * Parses a contract decimal string, ignoring surrounding whitespace.
    * @param text Decimal text such as `"94700.5"`.
    * @return The parsed decimal.
-   * @throws {RangeError} If the text is not a valid DecimalString.
+   * @throws `RangeError` if the text is not a valid `DecimalString`.
    */
   static parse(text: string): Decimal {
     const trimmed = text.trim();
@@ -52,12 +52,19 @@ export class Decimal {
   }
 
   /**
-   * Converts a finite JavaScript number using its shortest round-trip text.
-   * Intended for pointer/chart coordinates, never for user-typed quantities.
-   * @param value Finite number.
-   * @param maxScale Maximum fractional digits to keep (rounded half-even).
+   * Converts a finite JavaScript number, rounded to `maxScale` fractional
+   * digits by `Number.prototype.toFixed`, with trailing zeros removed.
+   *
+   * `toFixed` rounds the exact binary value to the nearest digit (a tie goes
+   * away from zero), so a small `maxScale` hides float noise such as
+   * `0.1 + 0.2`. Intended for pointer/chart coordinates, never for user-typed
+   * quantities.
+   * @param value Finite number, less than 1e21 in magnitude.
+   * @param maxScale Maximum fractional digits to keep, 0 or more; values
+   *     above 20 count as 20.
    * @return The decimal.
-   * @throws {RangeError} If the value is not finite.
+   * @throws `RangeError` if the value is not finite, or is 1e21 or more in
+   *     magnitude (`toFixed` then returns exponent notation).
    */
   static fromNumber(value: number, maxScale = 12): Decimal {
     if (!Number.isFinite(value)) {
@@ -85,8 +92,9 @@ export class Decimal {
   }
 
   /**
-   * Rescales to at least `scale` fractional digits without losing value.
-   * @param scale Target scale (>= current scale).
+   * Returns this value with `scale` fractional digits, or itself when it
+   * already has at least that many.
+   * @param scale Target number of fractional digits.
    * @return Equivalent decimal with the requested scale.
    */
   private withScale(scale: number): Decimal {
@@ -130,13 +138,16 @@ export class Decimal {
   }
 
   /**
-   * Divides by another decimal, truncating toward zero at 18 digits.
+   * Divides by another decimal, truncating toward zero at 18 fractional
+   * digits.
    * @param other Non-zero divisor.
    * @return The quotient.
-   * @throws {RangeError} On division by zero.
+   * @throws `RangeError` on division by zero.
    */
   div(other: Decimal): Decimal {
     if (other.units === 0n) throw new RangeError('Division by zero');
+    // (a / 10^sa) / (b / 10^sb) = a * 10^sb / (b * 10^sa); the extra
+    // 10^DIVISION_SCALE makes the integer quotient carry that many digits.
     const numerator = this.units * 10n ** BigInt(DIVISION_SCALE + other.scale);
     const denominator = other.units * 10n ** BigInt(this.scale);
     return new Decimal(numerator / denominator, DIVISION_SCALE).normalize();
@@ -145,7 +156,8 @@ export class Decimal {
   /**
    * Compares with another decimal.
    * @param other Value to compare against.
-   * @return -1, 0 or 1.
+   * @return -1 when this value is less than `other`, 0 when equal, 1 when
+   *     greater.
    */
   cmp(other: Decimal): -1 | 0 | 1 {
     const scale = Math.max(this.scale, other.scale);
@@ -193,13 +205,15 @@ export class Decimal {
    * Use for quantities so rounding never increases exposure.
    * @param step Positive increment such as a lot size.
    * @return Largest multiple of `step` that is <= this value.
-   * @throws {RangeError} If `step` is not positive.
+   * @throws `RangeError` if `step` is not positive.
    */
   floorToStep(step: Decimal): Decimal {
     if (step.units <= 0n) throw new RangeError('Step must be positive');
     const scale = Math.max(this.scale, step.scale);
     const value = this.withScale(scale).units;
     const increment = step.withScale(scale).units;
+    // BigInt division truncates toward zero; an inexact negative value needs
+    // one more step down to floor.
     let multiples = value / increment;
     if (value < 0n && value % increment !== 0n) multiples -= 1n;
     return new Decimal(multiples * increment, scale).normalize();
@@ -210,7 +224,7 @@ export class Decimal {
    * Use for limit and trigger prices.
    * @param step Positive increment such as a tick size.
    * @return Nearest multiple of `step`.
-   * @throws {RangeError} If `step` is not positive.
+   * @throws `RangeError` if `step` is not positive.
    */
   roundToStep(step: Decimal): Decimal {
     const floor = this.floorToStep(step);
@@ -226,7 +240,7 @@ export class Decimal {
 
   /**
    * Checks whether the value is an exact multiple of `step`.
-   * @param step Positive increment.
+   * @param step Increment; a non-positive step is never matched.
    * @return True when aligned to the increment.
    */
   isMultipleOf(step: Decimal): boolean {
@@ -265,7 +279,7 @@ export class Decimal {
 
   /**
    * Formats with a fixed number of fractional digits (half-even rounding).
-   * @param digits Fractional digits to show.
+   * @param digits Fractional digits to show, 0 or more.
    * @return Fixed-point text for display.
    */
   toFixed(digits: number): string {
@@ -295,7 +309,9 @@ export class Decimal {
 /**
  * Returns the number of fractional digits implied by a step such as `0.01`.
  * @param step Tick or lot size string.
- * @return Count of fractional digits (0 for integer steps).
+ * @return Count of fractional digits, ignoring trailing zeros (0 for integer
+ *     steps).
+ * @throws `RangeError` if `step` is not a valid `DecimalString`.
  */
 export function stepDecimals(step: string): number {
   return Decimal.parse(step).normalize().scale;

@@ -6,7 +6,8 @@
 
 /**
  * @fileoverview Catalog of rule nodes for the "add condition" menu, with
- * default factories and the indicator plugin each node depends on.
+ * default factories, and the indicator plugin behind each area-of-interest
+ * (AOI) kind and structure event.
  */
 
 import type {
@@ -40,7 +41,7 @@ export interface CatalogEntry {
   /**
    * Creates a default node for the strategy direction.
    * @param direction Strategy direction.
-   * @param signalTf Signal timeframe.
+   * @param signalTf Signal timeframe (TF); the built-in entries ignore it.
    * @return New node without an id.
    */
   create(direction: Direction, signalTf: Timeframe): RuleNode;
@@ -62,31 +63,31 @@ export const NODE_CATALOG: readonly CatalogEntry[] = [
     title: 'All of',
     description: 'Every condition inside must be true.',
     category: 'Logic',
-    create: (d, tf) => ({op: 'ALL', children: [defaultLeaf(d, tf)]}),
+    create: d => ({op: 'ALL', children: [defaultLeaf(d)]}),
   },
   {
     op: 'ANY',
     title: 'Any of',
     description: 'At least one condition inside must be true.',
     category: 'Logic',
-    create: (d, tf) => ({op: 'ANY', children: [defaultLeaf(d, tf)]}),
+    create: d => ({op: 'ANY', children: [defaultLeaf(d)]}),
   },
   {
     op: 'NOT',
     title: 'Not',
     description: 'The condition inside must be false.',
     category: 'Logic',
-    create: (d, tf) => ({op: 'NOT', child: defaultLeaf(d, tf)}),
+    create: d => ({op: 'NOT', child: defaultLeaf(d)}),
   },
   {
     op: 'WITHIN_BARS',
     title: 'Within bars',
     description: 'The condition was true on at least one recent bar.',
     category: 'Logic',
-    create: (d, tf) => ({
+    create: d => ({
       op: 'WITHIN_BARS',
       bars: 3,
-      child: defaultLeaf(d, tf),
+      child: defaultLeaf(d),
     }),
   },
   {
@@ -94,10 +95,10 @@ export const NODE_CATALOG: readonly CatalogEntry[] = [
     title: 'Persists for',
     description: 'The condition stayed true on every recent bar.',
     category: 'Logic',
-    create: (d, tf) => ({
+    create: d => ({
       op: 'PERSIST_FOR',
       bars: 3,
-      child: defaultLeaf(d, tf),
+      child: defaultLeaf(d),
     }),
   },
   {
@@ -233,12 +234,11 @@ export const NODE_CATALOG: readonly CatalogEntry[] = [
 ];
 
 /**
- * Default leaf used when creating groups.
+ * Returns the default child of a new group or wrapper.
  * @param direction Strategy direction.
- * @param _signalTf Signal timeframe (unused).
- * @return A higher-timeframe bias node matching the direction.
+ * @return A 4h bias node matching the direction.
  */
-function defaultLeaf(direction: Direction, _signalTf: Timeframe): RuleNode {
+function defaultLeaf(direction: Direction): RuleNode {
   return {
     op: 'BIAS',
     timeframes: ['4h'],
@@ -256,7 +256,7 @@ export function catalogEntry(op: string): CatalogEntry | undefined {
   return NODE_CATALOG.find(entry => entry.op === op);
 }
 
-/** Plugin that produces each AOI kind. */
+/** Indicator plugin that produces each AOI kind. */
 export const AOI_KIND_PLUGIN: Readonly<Record<AoiKind, string>> = {
   FVG: 'fvg_ifvg',
   IFVG: 'fvg_ifvg',
@@ -281,7 +281,10 @@ export const AOI_KIND_PLUGIN: Readonly<Record<AoiKind, string>> = {
   SWING_LOW: 'market_structure',
 };
 
-/** Plugin that emits each structure event (null = any plugin). */
+/**
+ * Indicator plugin that emits each structure event (null: any plugin may emit
+ * it, so the event adds no plugin dependency).
+ */
 export const EVENT_PLUGIN: Readonly<Record<StructureEventName, string | null>> =
   {
     BOS_BULL: 'daily_bias',
@@ -313,6 +316,9 @@ export const EVENT_PLUGIN: Readonly<Record<StructureEventName, string | null>> =
     SWING_EQH: 'market_structure',
     SWING_EQL: 'market_structure',
   };
+
+// `Object.keys` returns `string[]`; the keys are exactly the records' typed
+// keys, in the literal order above, which is the display order.
 
 /** All AOI kinds in display order. */
 export const AOI_KINDS: readonly AoiKind[] = Object.keys(

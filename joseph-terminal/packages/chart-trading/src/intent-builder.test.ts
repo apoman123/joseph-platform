@@ -5,7 +5,8 @@
  */
 
 /**
- * @fileoverview Unit and property tests for the intent builder.
+ * @fileoverview Unit and property tests for the intent builder, its confirm
+ * labels and the risk helpers.
  */
 
 import {Decimal} from '@joseph/contracts';
@@ -136,6 +137,7 @@ describe('buildIntentRequest', () => {
   });
 
   it('never increases the typed quantity (property)', () => {
+    // A fixed-seed linear congruential generator keeps failures reproducible.
     let seed = 7;
     const next = () => {
       seed = (seed * 1103515245 + 12345) % 2147483648;

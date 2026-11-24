@@ -7,9 +7,20 @@
 /**
  * @fileoverview Maps backend indicator records to chart overlay models.
  *
- * Render-only: every value comes from the Python engine's `AoiRecord`,
- * `StructureEvent` and `IndicatorSnapshot` outputs. Nothing here derives a
- * trading signal from candles.
+ * Render-only: every value comes from the Python engine's `AoiRecord` (area
+ * of interest, AOI), `StructureEvent` and `IndicatorSnapshot` outputs.
+ * Nothing here derives a trading signal from candles. Zones become boxes,
+ * level kinds become rays from their creation time, and structure events
+ * become bar markers plus, for breaks, a line from the broken pivot. Prices
+ * stay contract decimal strings.
+ *
+ * Kinds and labels use the engine's abbreviations: FVG/IFVG (fair value
+ * gap, inverse FVG), OB (order block), OTE (optimal trade entry), BSL/SSL
+ * (buy-side/sell-side liquidity), EQH/EQL (equal highs/lows), VAH/POC/VAL
+ * (value area high, point of control, value area low), PDH/PDL (previous
+ * day high/low), BOS (break of structure), CHoCH (change of character), MSS
+ * (market structure shift) and HH/HL/LH/LL (higher high, higher low, lower
+ * high, lower low).
  */
 
 import type {
@@ -43,7 +54,10 @@ export const PLUGIN_NAMES: Readonly<Record<string, string>> = {
   market_structure: 'Market structure',
 };
 
-/** Paint order per plugin (zones below lines below markers). */
+/**
+ * Paint order of each plugin's layer (higher on top): wide premium and
+ * discount zones lowest, structure and order flow highest.
+ */
 const PLUGIN_Z: Readonly<Record<string, number>> = {
   premium_discount_ote: 10,
   auction_value_areas: 20,
@@ -55,7 +69,7 @@ const PLUGIN_Z: Readonly<Record<string, number>> = {
   order_flow_pressure: 70,
 };
 
-/** AOI kinds drawn as horizontal levels rather than zones. */
+/** AOI kinds drawn as horizontal levels (rays at `lower`) rather than zones. */
 const LEVEL_KINDS: ReadonlySet<AoiKind> = new Set([
   'BSL',
   'SSL',
@@ -72,13 +86,13 @@ const LEVEL_KINDS: ReadonlySet<AoiKind> = new Set([
   'SWING_LOW',
 ]);
 
-/** Kinds that are pending levels (drawn dashed until broken). */
+/** Level kinds drawn with pending styling until they end (are broken). */
 const PENDING_KINDS: ReadonlySet<AoiKind> = new Set([
   'SWING_HIGH',
   'SWING_LOW',
 ]);
 
-/** Fill opacity per zone kind. */
+/** Fill opacity per zone kind (0.1 for kinds not listed). */
 const FILL: Partial<Record<AoiKind, number>> = {
   FVG: 0.14,
   IFVG: 0.1,
@@ -111,8 +125,9 @@ export interface VizSettings {
   /** Show invalidated/swept/expired zones as faded outlines. */
   showEnded: boolean;
   /**
-   * Most recently confirmed zones drawn per plugin, kind and side (0 = all).
-   * Display-only decluttering; strategies still evaluate every zone.
+   * Most recently confirmed zones drawn per plugin, kind and side (0 or less
+   * draws all; unset uses DEFAULT_MAX_ZONES_PER_KIND). Display-only
+   * decluttering; strategies still evaluate every zone.
    */
   maxZonesPerKind?: number;
 }
@@ -133,7 +148,7 @@ export const DEFAULT_VIZ_SETTINGS: VizSettings = {
 };
 
 /**
- * Whether an AOI state means the zone no longer reacts to price.
+ * Returns whether an AOI's state means the zone no longer reacts to price.
  * @param aoi AOI record.
  * @return True for inverted, swept, invalidated and expired.
  */
@@ -142,7 +157,8 @@ export function isEnded(aoi: AoiRecord): boolean {
 }
 
 /**
- * Tone for an AOI.
+ * Returns the overlay tone of an AOI: muted once ended, else by kind, then
+ * by side.
  * @param aoi AOI record.
  * @return Overlay tone.
  */
@@ -157,9 +173,11 @@ export function aoiTone(aoi: AoiRecord): OverlayTone {
 }
 
 /**
- * Short label for an AOI.
+ * Returns a short label for an AOI: name, quality score, the last four
+ * characters of its range id and any non-active state.
  * @param aoi AOI record.
- * @return Label such as `FVG 76` or `OTE (range 9f3a)`.
+ * @return Label such as `FVG 76`, `OTE (range 9f3a)` or
+ *     `FVG 76, invalidated`.
  */
 export function aoiLabel(aoi: AoiRecord): string {
   const names: Partial<Record<AoiKind, string>> = {
@@ -182,7 +200,10 @@ export function aoiLabel(aoi: AoiRecord): string {
 }
 
 /**
- * Maps one AOI to an overlay model.
+ * Maps one AOI to an overlay model. Level kinds become a ray at `lower`
+ * from `created_at_ms`; other kinds become a box from `created_at_ms` to
+ * `invalidated_at_ms` (open to the right while unset). Ended AOIs are
+ * dotted and faint, tested zones lighter.
  * @param aoi AOI record.
  * @return Box or ray model.
  */
@@ -303,9 +324,9 @@ const EVENT_MARKERS: Partial<
 };
 
 /**
- * Short marker text of an event name, if the event is drawn as a marker.
+ * Returns the short marker text of an event name.
  * @param name Event name.
- * @return Marker text or null.
+ * @return Marker text, or null when the event is not drawn as a marker.
  */
 export function markerText(name: StructureEventName): string | null {
   return EVENT_MARKERS[name]?.text ?? null;
@@ -337,19 +358,24 @@ const SWING_EVENTS: ReadonlySet<StructureEventName> = new Set([
  * @return Pivot bar start (UTC ms) or null.
  */
 export function eventPivotMs(event: StructureEvent): number | null {
+  // The contract types `meta` as an open object (`{}`); read it as a record
+  // and check the value's type below.
   const pivot = (event.meta as Record<string, unknown> | undefined)
     ?.pivot_time_ms;
   return typeof pivot === 'number' && Number.isFinite(pivot) ? pivot : null;
 }
 
 /**
- * Maps a structure event to a marker, if it has one.
+ * Maps a structure event to a marker on its bar; swing labels sit on the
+ * pivot bar when the engine sent one.
  * @param event Structure event.
- * @return Marker or null.
+ * @return Marker, or null when the event has no marker style.
  */
 export function eventToMarker(event: StructureEvent): MarkerOverlay | null {
   const style = EVENT_MARKERS[event.name];
   if (!style) return null;
+  // The market-structure plugin names a change of character a market
+  // structure shift (MSS); other plugins keep `CHoCH`.
   const mss =
     event.source === 'market_structure' &&
     (event.name === 'CHOCH_BULL' || event.name === 'CHOCH_BEAR');
@@ -366,13 +392,16 @@ export function eventToMarker(event: StructureEvent): MarkerOverlay | null {
 /**
  * Maps a break event to the line from the broken pivot to the break bar.
  * @param event Structure event.
- * @return Line-shaped box, or null without pivot time or price.
+ * @return Line-shaped box, or null for a non-break event, a missing price
+ *     or a pivot time that is missing or not before the break bar.
  */
 export function eventToBreakLine(event: StructureEvent): BoxOverlay | null {
   if (!BREAK_EVENTS.has(event.name) || !event.price) return null;
   const pivot = eventPivotMs(event);
   if (pivot === null || pivot >= event.bar_start_ms) return null;
   const bullish = event.name.endsWith('_BULL');
+  // A zero-height box is a segment with both ends fixed in time; a price
+  // line could only run from the pivot to the right edge.
   return {
     kind: 'box',
     id: `${event.event_id}:line`,
@@ -391,7 +420,8 @@ export function eventToBreakLine(event: StructureEvent): BoxOverlay | null {
  * @param model Overlay model.
  * @param key AOI kind or event name.
  * @param colors Configured colors.
- * @return Model, colored when configured.
+ * @return A colored copy when a valid `#rrggbb` color is configured,
+ *     otherwise the model itself.
  */
 function colored<T extends OverlayModel>(
   model: T,
@@ -412,20 +442,20 @@ export interface IndicatorLayerInput {
   aois: readonly AoiRecord[];
   /** Structure events (from `/v1/aois` or snapshots). */
   events: readonly StructureEvent[];
-  /** Backend as-of time. */
+  /** Time (UTC ms) the backend computed the records, shown in captions. */
   asOfMs: number;
   /** Provenance of the backend data. */
   feedState: FeedState;
   /** User settings. */
   settings: VizSettings;
-  /** Replay point-in-time; captions then say `replay`. */
+  /** Replay time (UTC ms); when set, captions show it and say `replay`. */
   atMs?: number | null;
 }
 
 /**
- * Human label for a feed state in captions.
+ * Returns the caption label of a feed state.
  * @param state Feed state.
- * @return Label.
+ * @return Label such as `live` or `demo data`.
  */
 export function feedStateLabel(state: FeedState): string {
   const labels: Record<FeedState, string> = {
@@ -460,10 +490,12 @@ export function limitPerKind(
   }
   const kept = new Set<AoiRecord>();
   for (const list of groups.values()) {
-    [...list]
+    const newest = [...list]
       .sort((a, b) => b.confirmed_at_ms - a.confirmed_at_ms)
-      .slice(0, max)
-      .forEach(aoi => kept.add(aoi));
+      .slice(0, max);
+    for (const aoi of newest) {
+      kept.add(aoi);
+    }
   }
   return aois.filter(aoi => kept.has(aoi));
 }
@@ -473,7 +505,8 @@ export function limitPerKind(
  * instrument are dropped, so a venue switch can never show the previous
  * venue's zones.
  * @param input Records and settings.
- * @return Layers keyed `indicator-viz:{plugin_id}`.
+ * @return Layers keyed `indicator-viz:{plugin_id}`, one for each plugin
+ *     with at least one model to draw, each with a provenance caption.
  */
 export function buildIndicatorLayers(
   input: IndicatorLayerInput

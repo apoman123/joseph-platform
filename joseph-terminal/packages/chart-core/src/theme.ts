@@ -83,8 +83,8 @@ export function toneColor(theme: ChartTheme, tone: OverlayTone): string {
 
 /**
  * Adds alpha to a `#rrggbb` color.
- * @param color Hex color.
- * @param alpha Opacity 0..1.
+ * @param color CSS color; only `#rrggbb` (any case) is converted.
+ * @param alpha Opacity 0..1 (clamped).
  * @return `rgba(...)` string, or the input when not a 6-digit hex.
  */
 export function withAlpha(color: string, alpha: number): string {

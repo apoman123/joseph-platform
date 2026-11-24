@@ -5,7 +5,8 @@
  */
 
 /**
- * @fileoverview Feature extension API (V5 §3.4 / §10).
+ * @fileoverview Feature extension API: the contract between the terminal
+ * shell and the features it composes.
  *
  * Features are vetted modules composed at build time. Each declares a
  * manifest, activates against a `FeatureContext` and returns a disposer that
@@ -36,7 +37,18 @@ export type UiSlot =
   | 'status-bar'
   | 'workspace';
 
-/** Feature lifecycle (V5 §10.1). */
+/**
+ * Feature lifecycle state.
+ *
+ * - `UNAVAILABLE`: cannot run: declared so, a dependency is missing, cyclic
+ *   or not active yet, a required capability is missing, the contract
+ *   version differs, or activation failed.
+ * - `DISABLED`: declared off, turned off by the user, or not activated yet.
+ * - `ENABLED`: active.
+ * - `DEPRECATED`: active, with a planned removal (see `RemovalPlan`).
+ * - `REMOVED`: never activates; its removal notes say what happened to
+ *   saved data.
+ */
 export type FeatureLifecycle =
   'UNAVAILABLE' | 'DISABLED' | 'ENABLED' | 'DEPRECATED' | 'REMOVED';
 
@@ -130,21 +142,22 @@ export interface CommandRegistry {
   /**
    * Registers a command.
    * @param command Command specification.
-   * @return Disposer.
-   * @throws {Error} If the id is already registered.
+   * @return Disposer that unregisters the command.
+   * @throws `Error` when the id is already registered.
    */
   register(command: CommandSpec): Disposer;
   /**
    * Executes a command by id.
    * @param id Command id.
    * @param args Optional argument.
-   * @return Promise resolving when the command finishes.
-   * @throws {Error} If the command does not exist.
+   * @return Promise resolving when the command finishes; it rejects with
+   *     the command's own error, or with an `Error` when the command does
+   *     not exist.
    */
   execute(id: string, args?: unknown): Promise<void>;
   /**
    * Lists registered commands.
-   * @return Command specs.
+   * @return Command specs sorted by title.
    */
   list(): readonly CommandSpec[];
 }
@@ -153,9 +166,10 @@ export interface CommandRegistry {
 export interface HotkeyRegistry {
   /**
    * Binds a key combo to a command.
-   * @param combo Normalized combo.
+   * @param combo Key combo; it is normalized, so `Ctrl+K` equals `mod+k`.
    * @param commandId Command to run.
-   * @return Disposer.
+   * @return Disposer that removes the binding.
+   * @throws `Error` when the combo is already bound.
    */
   bind(combo: string, commandId: string): Disposer;
 }
@@ -166,13 +180,14 @@ export interface SlotRegistry<TView> {
    * Contributes UI to a slot.
    * @param slot Slot name.
    * @param contribution Contribution.
-   * @return Disposer.
+   * @return Disposer that removes the contribution.
+   * @throws `Error` when the slot already has a contribution with that id.
    */
   contribute(slot: UiSlot, contribution: SlotContribution<TView>): Disposer;
   /**
-   * Observes a slot's contributions, sorted by `order`.
+   * Observes a slot's contributions.
    * @param slot Slot name.
-   * @return Store of contributions.
+   * @return Store of contributions sorted by `order`, then by id.
    */
   observe(slot: UiSlot): ReadableStore<ReadonlyArray<SlotContribution<TView>>>;
 }
@@ -212,7 +227,8 @@ export interface TerminalEventMap {
 /** Typed event bus. */
 export interface EventBus {
   /**
-   * Publishes an event.
+   * Publishes an event to every handler; a throwing handler does not stop
+   * the others.
    * @param type Event type.
    * @param payload Event payload.
    */
@@ -223,8 +239,8 @@ export interface EventBus {
   /**
    * Subscribes to an event.
    * @param type Event type.
-   * @param handler Handler.
-   * @return Disposer.
+   * @param handler Called with each payload of that type.
+   * @return Disposer that unsubscribes the handler.
    */
   on<K extends keyof TerminalEventMap>(
     type: K,
@@ -253,7 +269,10 @@ export interface TerminalSelection {
   replay?: boolean;
 }
 
-/** Capabilities known to the shell: `demo`, `market`, `strategy`, `execution`, `user-stream`, `venue:<id>:<capability>`. */
+/**
+ * Capabilities known to the shell: `demo`, `market`, `strategy`,
+ * `execution`, `user-stream`, `venue:<id>:<capability>`.
+ */
 export interface CapabilitySet {
   /** Capability names present. */
   readonly names: ReadonlySet<string>;
@@ -276,14 +295,17 @@ export interface Notifier {
 export interface FeatureSettingsStore {
   /**
    * Reads settings, migrating older versions via the provided migrator.
-   * @param fallback Defaults when nothing is stored.
-   * @param migrate Converts a stored value of an older version.
+   * @param fallback Returned when nothing usable is stored: no value, a
+   *     newer version, an older version without `migrate`, or a `migrate`
+   *     that throws.
+   * @param migrate Converts a stored value of an older version; its result
+   *     is written back under the current version.
    * @return Settings value.
    */
   read<T>(fallback: T, migrate?: (stored: unknown, version: number) => T): T;
   /**
    * Writes settings tagged with the manifest's settings version.
-   * @param value Settings value.
+   * @param value JSON-compatible settings value.
    */
   write<T>(value: T): void;
 }
@@ -313,7 +335,7 @@ export interface FeatureContext<TView> {
   readonly featureId: string;
   /** Injected backend clients (HTTP or DEMO). */
   readonly clients: BackendClients;
-  /** Shared selection (read) plus a narrow writer for selection intents. */
+  /** Shared selection (read-only; request changes with `select`). */
   readonly selection: ReadableStore<TerminalSelection>;
   /**
    * Requests a selection change (e.g. clicking a watchlist row).
@@ -353,7 +375,8 @@ export interface TerminalFeature<TView> {
   readonly manifest: FeatureManifest;
   /**
    * Activates the feature.
-   * @param ctx Context.
+   * @param ctx Scoped context; the registry also disposes every registration
+   *     made through it when the feature deactivates.
    * @return Disposer (mandatory) removing everything the feature registered.
    */
   activate(ctx: FeatureContext<TView>): Disposer | Promise<Disposer>;

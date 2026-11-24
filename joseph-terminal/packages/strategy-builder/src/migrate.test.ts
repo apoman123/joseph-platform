@@ -36,8 +36,8 @@ const STARTER: StrategyConfigV1 = {
 
 /**
  * Collects nodes by operator.
- * @param root Root.
- * @return Map from op to nodes.
+ * @param root Root node.
+ * @return Map from operator to its nodes in pre-order.
  */
 function byOp(root: RuleNode): Map<string, RuleNode[]> {
   const out = new Map<string, RuleNode[]>();

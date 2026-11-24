@@ -98,9 +98,9 @@ interface ActiveFeature<TView> {
 }
 
 /**
- * Lifecycle states that never activate.
+ * Returns whether a declared lifecycle state never activates.
  * @param lifecycle Declared lifecycle.
- * @return True when the feature must stay inactive.
+ * @return True for DISABLED, REMOVED and UNAVAILABLE.
  */
 function isInactiveLifecycle(lifecycle: FeatureLifecycle): boolean {
   return (
@@ -116,6 +116,8 @@ export class FeatureRegistry<TView> {
   private readonly active = new Map<string, ActiveFeature<TView>>();
   private readonly userDisabled = new Set<string>();
   private readonly statusStore = createStore<readonly FeatureStatus[]>([]);
+  /** Activation error message per feature id, until it activates. */
+  private readonly failures = new Map<string, string>();
 
   /**
    * Creates the registry.
@@ -138,7 +140,8 @@ export class FeatureRegistry<TView> {
   /**
    * Registers a feature (build-time composition).
    * @param feature Feature to register.
-   * @throws {Error} If the id is already registered or the manifest is invalid.
+   * @throws `Error` when the manifest lacks an id, a version or removal
+   *     notes, or the id is already registered.
    */
   register(feature: TerminalFeature<TView>): void {
     const {id, version, removal} = feature.manifest;
@@ -154,8 +157,10 @@ export class FeatureRegistry<TView> {
   }
 
   /**
-   * Registers several features.
+   * Registers several features in order.
    * @param features Features to register.
+   * @throws `Error` from `register` for the first invalid or duplicate
+   *     feature; the features before it stay registered.
    */
   registerAll(features: ReadonlyArray<TerminalFeature<TView>>): void {
     for (const feature of features) {
@@ -172,7 +177,7 @@ export class FeatureRegistry<TView> {
   }
 
   /**
-   * Whether a feature is currently active.
+   * Returns whether a feature is currently active.
    * @param id Feature id.
    * @return True when active.
    */
@@ -337,6 +342,9 @@ export class FeatureRegistry<TView> {
 
   /**
    * Activates one feature if it is eligible and not active.
+   *
+   * An activation error is caught: the feature's registrations so far are
+   * disposed and the error message becomes its status reason.
    * @param id Feature id.
    * @return True when the feature is active afterwards.
    */
@@ -368,8 +376,6 @@ export class FeatureRegistry<TView> {
     return true;
   }
 
-  private readonly failures = new Map<string, string>();
-
   /**
    * Deactivates a feature and, first, every active feature depending on it.
    * @param id Feature id.
@@ -395,6 +401,9 @@ export class FeatureRegistry<TView> {
 
   /**
    * Turns a feature on or off at runtime (user preference).
+   *
+   * Turning off also deactivates its dependants; turning on runs
+   * `activateAll`, so dependants that were waiting start too.
    * @param id Feature id.
    * @param enabled Desired state.
    * @return Resolves when the change is applied.
@@ -411,8 +420,9 @@ export class FeatureRegistry<TView> {
   }
 
   /**
-   * Re-evaluates eligibility (e.g. after capabilities change): deactivates
-   * features that became blocked and activates newly eligible ones.
+   * Re-evaluates eligibility after capabilities change: deactivates active
+   * features whose required capabilities are gone, then activates every
+   * newly eligible one.
    * @return Resolves when done.
    */
   async refresh(): Promise<void> {
@@ -435,8 +445,11 @@ export class FeatureRegistry<TView> {
 
   /**
    * Builds a context whose registrations are tracked for disposal.
+   *
+   * On first use it also creates the host's shared session calendar cache
+   * when the host did not provide one.
    * @param feature Feature being activated.
-   * @param tracked Sink for disposers.
+   * @param tracked Sink for idempotent disposers of every registration.
    * @return Scoped context.
    */
   private scopedContext(
@@ -445,7 +458,9 @@ export class FeatureRegistry<TView> {
   ): FeatureContext<TView> {
     const host = this.host;
     if (!host.calendars) {
-      // Hosts without a market client (tests) get regular hours only.
+      // One cache shared by all features. Hosts without a market client
+      // (tests pass partial clients, hence the optional chaining) get
+      // regular hours only.
       const market = host.clients?.market as
         BackendClients['market'] | undefined;
       host.calendars = new SessionCalendarCache(
@@ -556,9 +571,10 @@ function describeError(error: unknown): string {
 }
 
 /**
- * Returns whether a lifecycle never activates (exported for hosts/tests).
- * @param lifecycle Lifecycle.
- * @return True when inactive.
+ * Returns whether a declared lifecycle state never activates (exported for
+ * hosts and tests).
+ * @param lifecycle Declared lifecycle.
+ * @return True for DISABLED, REMOVED and UNAVAILABLE.
  */
 export function lifecycleIsInactive(lifecycle: FeatureLifecycle): boolean {
   return isInactiveLifecycle(lifecycle);

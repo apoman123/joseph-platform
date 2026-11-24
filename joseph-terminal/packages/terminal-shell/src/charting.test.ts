@@ -47,7 +47,7 @@ import {
 } from './workspace';
 
 /**
- * Creates a fresh workspace.
+ * Creates a fresh single-chart workspace on `mock:perp:BTCUSD` 5m.
  * @return Workspace document.
  */
 function workspace() {
@@ -59,23 +59,23 @@ function workspace() {
   });
 }
 
-/** Map-backed storage. */
+/** In-memory `WorkspaceStorage` backed by a map. */
 class MapStorage {
   readonly map = new Map<string, string>();
 
   /**
-   * Reads a key.
-   * @param key Key.
-   * @return Value or null.
+   * Reads a stored string.
+   * @param key Storage key.
+   * @return Stored text, or null when absent.
    */
   getItem(key: string): string | null {
     return this.map.get(key) ?? null;
   }
 
   /**
-   * Writes a key.
-   * @param key Key.
-   * @param value Value.
+   * Stores a string.
+   * @param key Storage key.
+   * @param value Text to store.
    */
   setItem(key: string, value: string): void {
     this.map.set(key, value);

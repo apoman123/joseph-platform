@@ -101,7 +101,7 @@ describe('delta method per bar', () => {
 });
 
 describe('classified (Lee–Ready) delta', () => {
-  const STOCK = seriesOf([
+  const stockSeries = seriesOf([
     {
       delta_pct: '8',
       method: 'trade_classification',
@@ -116,7 +116,7 @@ describe('classified (Lee–Ready) delta', () => {
     expect(DELTA_METHOD_LABELS.classified).toBe('Classified (Lee–Ready)');
     expect(DELTA_METHOD_LABELS.true).toBe('True (taker volume)');
     expect(DELTA_METHOD_LABELS.estimate).toBe('Estimate');
-    const [classified, estimate] = deltaBarsFromSeries(STOCK);
+    const [classified, estimate] = deltaBarsFromSeries(stockSeries);
     expect(classified).toMatchObject({
       method: 'classified',
       buyVolume: '540',
@@ -126,7 +126,7 @@ describe('classified (Lee–Ready) delta', () => {
   });
 
   it('draws classified columns between true and estimate opacity', () => {
-    const study = deltaStudyFromSeries(STOCK);
+    const study = deltaStudyFromSeries(stockSeries);
     expect(study.points.map(p => p.opacity)).toEqual([
       CLASSIFIED_DELTA_OPACITY,
       ESTIMATE_DELTA_OPACITY,

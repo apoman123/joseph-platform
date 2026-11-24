@@ -240,9 +240,9 @@ describe('channel protocol', () => {
     const atMain: PopoutMessage[] = [];
     const atPopout: PopoutMessage[] = [];
     const atStranger: PopoutMessage[] = [];
-    main.on(msg => atMain.push(msg));
-    popout.on(msg => atPopout.push(msg));
-    stranger.on(msg => atStranger.push(msg));
+    main.on(msg => void atMain.push(msg));
+    popout.on(msg => void atPopout.push(msg));
+    stranger.on(msg => void atStranger.push(msg));
     main.send({type: 'theme', theme: 'light'});
     popout.send({
       type: 'action',
@@ -268,7 +268,7 @@ describe('trailing throttle', () => {
     let clock = 0;
     const sent: Array<number | null> = [];
     const throttle = createTrailingThrottle<number | null>(
-      v => sent.push(v),
+      v => void sent.push(v),
       40,
       () => clock
     );

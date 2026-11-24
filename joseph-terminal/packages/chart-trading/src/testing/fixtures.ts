@@ -5,7 +5,8 @@
  */
 
 /**
- * @fileoverview Shared test fixtures for chart-trading unit tests.
+ * @fileoverview Shared fixtures for the chart-trading unit tests: demo
+ * instruments, accounts (paper and broker), orders, positions and previews.
  */
 
 import type {
@@ -16,7 +17,7 @@ import type {
 } from '@joseph/contracts';
 import type {InstrumentPrecision} from '../intent-builder';
 
-/** BTC demo instrument precision. */
+/** BTC perpetual on the mock venue. */
 export const BTC: InstrumentPrecision = {
   instrument_id: 'mock:perp:BTCUSD',
   display_symbol: 'BTCUSD',

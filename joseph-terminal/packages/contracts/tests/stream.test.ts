@@ -16,7 +16,7 @@ import {
   type WebSocketLike,
 } from '../src/client/stream';
 
-/** Controllable fake socket. */
+/** Fake socket that records sent frames and lets a test fire its events. */
 class FakeSocket implements WebSocketLike {
   readyState = 0;
   sent: string[] = [];
@@ -27,7 +27,7 @@ class FakeSocket implements WebSocketLike {
 
   /**
    * Records a frame.
-   * @param data Frame.
+   * @param data JSON text of a client message.
    */
   send(data: string): void {
     this.sent.push(data);
@@ -46,8 +46,8 @@ class FakeSocket implements WebSocketLike {
   }
 
   /**
-   * Delivers an envelope.
-   * @param envelope Envelope.
+   * Delivers an envelope as a JSON text frame.
+   * @param envelope Envelope fields to send.
    */
   deliver(envelope: Partial<StreamEnvelope>): void {
     this.onmessage?.({data: JSON.stringify(envelope)});
@@ -55,9 +55,9 @@ class FakeSocket implements WebSocketLike {
 }
 
 /**
- * Builds an envelope.
- * @param sequence Sequence number.
- * @param extra Overrides.
+ * Builds a `candle.updated` envelope on the mock BTCUSD 5m candle channel.
+ * @param sequence Sequence number; the event id is `e<sequence>`.
+ * @param extra Fields that override the defaults.
  * @return Envelope.
  */
 function envelope(

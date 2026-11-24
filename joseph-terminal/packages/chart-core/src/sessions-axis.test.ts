@@ -30,10 +30,10 @@ const NY = 'America/New_York';
 const XNYS = createBarCalendar('XNYS');
 
 /**
- * New York wall time.
- * @param date `YYYY-MM-DD`.
- * @param hour Hour.
- * @param minute Minute.
+ * Converts a New York wall-clock time to UTC.
+ * @param date Calendar date `YYYY-MM-DD`.
+ * @param hour Hour (0-23).
+ * @param minute Minute (0-59).
  * @return Epoch ms.
  */
 function ny(date: string, hour = 0, minute = 0): number {
@@ -72,8 +72,8 @@ describe('session-aware time index', () => {
     expect(index.toLogical(ny('2026-11-24', 10))).toBe(13 + 1.5);
     expect(index.toTime(13 + 1.5)).toBe(ny('2026-11-24', 10));
     expect(index.snap(ny('2026-11-24', 10, 10))).toBe(ny('2026-11-24', 9, 30));
-    // Thursday after Thanksgiving week's Wednesday: the fallback calendar
-    // has no holidays, so Thursday 09:30 is 3 sessions after Monday.
+    // 2026-11-26 is Thanksgiving, but the fallback calendar has no
+    // holidays, so Thursday 09:30 is three sessions after Monday 09:30.
     expect(index.toTime(7 + 21)).toBe(ny('2026-11-26', 9, 30));
   });
 

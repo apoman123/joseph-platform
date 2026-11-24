@@ -21,14 +21,15 @@ import {describe, expect, it} from 'vitest';
 import {replayAsOfMs} from './replay';
 import {barCountdown, msUntilBarClose} from './timeframes';
 
+// New York Stock Exchange calendar (market identifier code XNYS).
 const XNYS = createBarCalendar('XNYS');
 
 /**
- * New York wall time.
- * @param date `YYYY-MM-DD`.
- * @param hour Hour.
- * @param minute Minute.
- * @return Epoch ms.
+ * Converts a New York wall-clock time to UTC.
+ * @param date Calendar date, `YYYY-MM-DD`.
+ * @param hour Hour of the day, 0 to 23.
+ * @param minute Minute of the hour.
+ * @return UTC epoch ms.
  */
 function ny(date: string, hour = 0, minute = 0): number {
   return zonedTimeToUtc(

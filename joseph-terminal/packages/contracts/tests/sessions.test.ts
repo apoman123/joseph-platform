@@ -41,34 +41,38 @@ const NY = 'America/New_York';
 const TPE = 'Asia/Taipei';
 
 /**
- * UTC ms of a wall time in a zone.
- * @param zone Time zone.
- * @param date `YYYY-MM-DD`.
- * @param hour Hour.
- * @param minute Minute.
- * @return Epoch ms.
+ * Returns the UTC instant of a wall time in a time zone.
+ * @param zone IANA time zone.
+ * @param date Local date `YYYY-MM-DD`.
+ * @param hour Local hour 0-23.
+ * @param minute Local minute.
+ * @return UTC epoch milliseconds.
  */
 function at(zone: string, date: string, hour = 0, minute = 0): number {
   return zonedTimeToUtc(dayNumberOf(date), hour * 60 + minute, zone);
 }
 
 /**
- * New York wall time.
- * @param date `YYYY-MM-DD`.
- * @param hour Hour.
- * @param minute Minute.
- * @return Epoch ms.
+ * Returns the UTC instant of a New York wall time.
+ * @param date Local date `YYYY-MM-DD`.
+ * @param hour Local hour 0-23.
+ * @param minute Local minute.
+ * @return UTC epoch milliseconds.
  */
-const ny = (date: string, hour = 0, minute = 0) => at(NY, date, hour, minute);
+function ny(date: string, hour = 0, minute = 0): number {
+  return at(NY, date, hour, minute);
+}
 
 /**
- * Taipei wall time.
- * @param date `YYYY-MM-DD`.
- * @param hour Hour.
- * @param minute Minute.
- * @return Epoch ms.
+ * Returns the UTC instant of a Taipei wall time.
+ * @param date Local date `YYYY-MM-DD`.
+ * @param hour Local hour 0-23.
+ * @param minute Local minute.
+ * @return UTC epoch milliseconds.
  */
-const tpe = (date: string, hour = 0, minute = 0) => at(TPE, date, hour, minute);
+function tpe(date: string, hour = 0, minute = 0): number {
+  return at(TPE, date, hour, minute);
+}
 
 /** NYSE closures and early closes in the test windows (engine schedule). */
 const NYSE_CLOSED = [
@@ -87,6 +91,7 @@ const NYSE_CLOSED = [
   '2027-02-15',
   '2027-03-26',
 ];
+/** NYSE early closes in the test window, in minutes after local midnight. */
 const NYSE_EARLY: Readonly<Record<string, number>> = {
   '2026-11-27': 13 * 60,
   '2026-12-24': 13 * 60,
@@ -110,13 +115,13 @@ const BOND_CLOSED = [
 ];
 
 /**
- * Builds a session list for a range of days.
- * @param id Calendar.
- * @param from First date.
- * @param to Last date (inclusive).
- * @param closed Closed weekdays.
- * @param early Early closes (minutes after midnight).
- * @return Calendar covering the range.
+ * Builds a calendar from a session list covering a range of days.
+ * @param id Exchange calendar.
+ * @param from First local date `YYYY-MM-DD`.
+ * @param to Last local date (inclusive).
+ * @param closed Weekdays without a session (holidays).
+ * @param early Early closes by date, in minutes after local midnight.
+ * @return Calendar whose list covers the whole range.
  */
 function listCalendar(
   id: ExchangeCalendarId,
@@ -396,9 +401,10 @@ describe('instrument calendars', () => {
 });
 
 /**
- * Deterministic PRNG (mulberry32).
- * @param seed Seed.
- * @return Generator of [0, 1).
+ * Returns a deterministic pseudo-random number generator (mulberry32), so
+ * property-test failures reproduce.
+ * @param seed Any integer; equal seeds give equal sequences.
+ * @return A function returning the next number in [0, 1).
  */
 function prng(seed: number): () => number {
   let a = seed >>> 0;
@@ -411,6 +417,7 @@ function prng(seed: number): () => number {
   };
 }
 
+/** Timeframes the round-trip property test draws from. */
 const ROUND_TRIP_TFS: readonly Timeframe[] = [
   '1m',
   '5m',

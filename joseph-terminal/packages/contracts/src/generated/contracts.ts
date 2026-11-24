@@ -1,4 +1,10 @@
 /**
+ * @license
+ * Copyright 2026 Joseph Terminal contributors
+ * SPDX-License-Identifier: MIT
+ */
+
+/**
  * @fileoverview GENERATED FILE - DO NOT EDIT.
  * Source: packages/contracts/schemas/*.schema.json
  * Regenerate with `pnpm contracts:gen`.

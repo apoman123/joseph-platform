@@ -5,8 +5,11 @@
  */
 
 /**
- * @fileoverview Module boundary rules for the public terminal (V5 §10
- * "Architecture tests must fail when ...").
+ * @fileoverview dependency-cruiser rules for the terminal's module
+ * boundaries, run by `pnpm arch:check` and tests/architecture.
+ *
+ * Each `forbidden` rule's `comment` says what the boundary protects. A
+ * violation of an `error` rule fails both checks; `warn` rules only report.
  */
 
 /** @type {import('dependency-cruiser').IConfiguration} */

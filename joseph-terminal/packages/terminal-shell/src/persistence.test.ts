@@ -67,10 +67,12 @@ const DRAWINGS: WorkspaceExportDrawings[] = [
 ];
 
 /**
- * Validates a value against a contract definition.
+ * Validates a value against a contract definition, loading every contract
+ * schema so cross-file references resolve.
  * @param definition Definition name in workspace.schema.json.
  * @param value Candidate.
  * @return Validation errors (empty when valid).
+ * @throws `Error` when workspace.schema.json has no such definition.
  */
 function contractErrors(definition: string, value: unknown): unknown[] {
   const ajv = new Ajv2020({strict: false, allErrors: true});
@@ -131,6 +133,8 @@ describe('workspace export files', () => {
   });
 
   it('accepts files with drawings beyond the 64 KB document limit', () => {
+    // The assertion is safe: the indexed fixture entries exist, but the
+    // compiler types the spreads as possibly undefined.
     const heavy = [
       {
         ...DRAWINGS[0],

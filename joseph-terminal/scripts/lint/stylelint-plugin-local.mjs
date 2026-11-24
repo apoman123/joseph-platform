@@ -32,9 +32,11 @@ const messages = ruleMessages(RULE_NAME, {
 });
 
 /**
- * Checks (and with `--fix` repairs) the licence header of a stylesheet.
+ * Returns the visitor that checks (and with `--fix` repairs) the licence
+ * header of a stylesheet.
  * @param {boolean} primary `true` to enable the rule.
- * @return {import('stylelint').RuleBase} The PostCSS root visitor.
+ * @return {ReturnType<import('stylelint').RuleBase>} The PostCSS root
+ *     visitor; it reports one problem per file.
  */
 function licenseHeaderRule(primary) {
   return (root, result) => {
@@ -62,6 +64,8 @@ function licenseHeaderRule(primary) {
           first.remove();
         }
         const next = root.first;
+        // PostCSS prints a comment as `/*` + left + text + right + `*/`, so
+        // these raws reproduce CSS_HEADER exactly.
         root.prepend({
           text: `* ${COPYRIGHT_LINE}\n * ${SPDX_LINE}`,
           raws: {before: '', left: '\n ', right: '\n '},

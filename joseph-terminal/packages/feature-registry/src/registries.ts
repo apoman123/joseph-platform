@@ -59,7 +59,11 @@ const MODIFIERS = ['shift', 'alt', 'mod'] as const;
 
 /**
  * Normalizes a combo such as `Ctrl+Shift+Z` to `shift+mod+z`.
- * `ctrl`, `meta`, `cmd` and `mod` all map to `mod`.
+ *
+ * Case and spaces around `+` are ignored; `ctrl`, `control`, `meta`, `cmd`,
+ * `command` and `mod` map to `mod`, `option` to `alt`, and `esc` to
+ * `escape`. Modifiers come first in the order shift, alt, mod; if several
+ * non-modifier keys are given, the last one wins.
  * @param combo Human-entered combo.
  * @return Canonical combo.
  */
@@ -103,8 +107,8 @@ export interface KeyEventLike {
 
 /**
  * Converts a keyboard event to a normalized combo.
- * @param event Keyboard event.
- * @return Canonical combo.
+ * @param event Keyboard event; Ctrl and Meta both count as `mod`.
+ * @return Canonical combo, with the space bar as `space`.
  */
 export function comboFromEvent(event: KeyEventLike): string {
   const parts: string[] = [];
@@ -118,12 +122,14 @@ export function comboFromEvent(event: KeyEventLike): string {
 }
 
 /**
- * Whether a keyboard event originates from a text-entry element.
+ * Returns whether a keyboard event target is a text-entry element.
  * @param target Event target.
  * @return True for inputs, textareas, selects and contenteditable nodes.
  */
 export function isTypingTarget(target: EventTarget | null): boolean {
   if (!target || typeof target !== 'object') return false;
+  // Duck-typed rather than `instanceof HTMLElement`, so the check also works
+  // with plain test objects and outside a DOM realm.
   const element = target as {
     tagName?: string;
     isContentEditable?: boolean;
@@ -142,18 +148,20 @@ export interface HotkeyHost extends HotkeyRegistry {
   /**
    * Handles a keydown event.
    * @param event Keyboard event.
-   * @return True when a binding ran (callers should preventDefault).
+   * @return True when a binding started its command (callers should then
+   *     call `preventDefault`).
    */
   handle(event: KeyEventLike): boolean;
   /**
    * Lists current bindings.
-   * @return Map of combo to command id.
+   * @return Live read-only map from normalized combo to command id.
    */
   bindings(): ReadonlyMap<string, string>;
 }
 
 /**
  * Creates a hotkey registry bound to a command registry.
+ *
  * Combos are ignored while the user types into a field, except `escape`.
  * @param commands Command registry used to execute bindings.
  * @return Hotkey host.
@@ -176,6 +184,9 @@ export function createHotkeyRegistry(commands: CommandRegistry): HotkeyHost {
       if (isTypingTarget(event.target) && combo !== 'escape') return false;
       const commandId = bindings.get(combo);
       if (!commandId) return false;
+      // Keydown handling is synchronous and has no one to report to; a
+      // failing or since-removed command must not become an unhandled
+      // rejection.
       void commands.execute(commandId).catch(() => undefined);
       return true;
     },
@@ -228,6 +239,9 @@ export function createSlotRegistry<TView>(): SlotRegistry<TView> {
  * @return Event bus.
  */
 export function createEventBus(): EventBus {
+  // Handlers of every event type share one map, so they are stored with an
+  // erased payload type; `on` files each under its own type, which makes the
+  // casts in `emit` and `on` safe.
   const handlers = new Map<string, Set<(payload: never) => void>>();
   return {
     emit(type, payload) {
@@ -264,6 +278,9 @@ interface SettingsEnvelope {
 
 /**
  * Creates a versioned per-feature settings store.
+ *
+ * Settings live under the key `joseph.settings.<featureId>` as a
+ * `{version, value}` envelope.
  * @param storage Storage port.
  * @param featureId Owning feature id.
  * @param version Current settings schema version.
@@ -327,7 +344,7 @@ export interface ChartLayerHost extends ChartLayerRegistry {
 
 /**
  * Creates a chart layer registry.
- * @return Chart layer host.
+ * @return Chart layer host; providers are kept in registration order.
  */
 export function createChartLayerRegistry(): ChartLayerHost {
   const providers = createStore<readonly ChartLayerProvider[]>([]);

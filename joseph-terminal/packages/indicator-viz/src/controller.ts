@@ -39,7 +39,9 @@ export class IndicatorLayerController {
   constructor(private readonly sink: OverlaySink) {}
 
   /**
-   * Renders the latest records.
+   * Renders the latest records. A new instrument or timeframe first removes
+   * every shown layer; otherwise layers that are no longer built are
+   * removed and the rest are set.
    * @param input Records and settings.
    * @return Layers applied.
    */
@@ -68,7 +70,7 @@ export class IndicatorLayerController {
   }
 
   /**
-   * Layer ids currently shown.
+   * Returns the ids of the layers currently shown.
    * @return Ids.
    */
   layerIds(): string[] {

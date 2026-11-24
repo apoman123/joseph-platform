@@ -18,12 +18,12 @@ import {TimeIndex} from './time-index';
 import {heikinAshiBar, toHeikinAshi} from './transforms/heikin-ashi';
 
 /**
- * Builds a bar.
- * @param i Bar index (minute).
- * @param o Open.
- * @param h High.
- * @param l Low.
- * @param c Close.
+ * Builds a final one-minute bar with volume 1.
+ * @param i Minute index; the bar starts `i` minutes after the epoch.
+ * @param o Opening price.
+ * @param h Highest price.
+ * @param l Lowest price.
+ * @param c Closing price.
  * @return Bar.
  */
 function bar(i: number, o: number, h: number, l: number, c: number): ChartBar {

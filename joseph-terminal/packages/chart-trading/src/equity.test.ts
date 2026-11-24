@@ -85,11 +85,11 @@ function d(text: string): Decimal {
 }
 
 /**
- * New York wall time.
- * @param date `YYYY-MM-DD`.
- * @param hour Hour.
- * @param minute Minute.
- * @return UTC ms.
+ * Converts a New York wall-clock time to UTC epoch milliseconds.
+ * @param date Local date as `YYYY-MM-DD`.
+ * @param hour Local hour (0-23).
+ * @param minute Local minute.
+ * @return UTC epoch milliseconds.
  */
 function ny(date: string, hour = 0, minute = 0): number {
   return zonedTimeToUtc(
@@ -527,7 +527,9 @@ describe('order capabilities', () => {
     expect(
       outsideRthSupport(brokerAccount('ibkr', {}, {outside_rth: false}))
     ).toMatchObject({shown: true, enabled: false});
-    const request = {account_id: 'a'} as OrderIntentRequest;
+    // Deliberate partial request: withOutsideRth only copies it.
+    const partial: Partial<OrderIntentRequest> = {account_id: 'a'};
+    const request = partial as OrderIntentRequest;
     expect(withOutsideRth(request, brokerAccount('ibkr'), true)).toEqual({
       account_id: 'a',
       outside_rth: true,

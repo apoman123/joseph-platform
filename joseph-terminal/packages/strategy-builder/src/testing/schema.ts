@@ -15,6 +15,7 @@ import Ajv2020 from 'ajv/dist/2020';
 import addFormats from 'ajv-formats';
 
 const SCHEMA_DIR = join(__dirname, '..', '..', '..', 'contracts', 'schemas');
+// The `$id` prefix shared by every contract schema.
 const BASE = 'https://schemas.joseph.local/v1/';
 
 /**
@@ -37,9 +38,10 @@ const AJV = buildAjv();
 /**
  * Validates a value against a contract definition.
  * @param schemaFile Schema file name, e.g. `strategy.schema.json`.
- * @param definition Definition name, e.g. `StrategyDefinition`.
+ * @param definition Definition name under `$defs`, e.g. `StrategyDefinition`.
  * @param value Value to validate.
- * @return Error messages (empty when valid).
+ * @return Error messages as `<instance path> <message>` (empty when valid).
+ * @throws `Error` when the schema file has no such definition.
  */
 export function schemaErrors(
   schemaFile: string,
