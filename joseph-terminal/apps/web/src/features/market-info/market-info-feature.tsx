@@ -36,22 +36,23 @@ import {
 import {marketTypeLabel} from '../../shell/markets';
 import {shellManifest} from '../shell/manifest';
 
-/** Snapshot refresh interval. */
+/** Snapshot refresh interval in milliseconds. */
 const REFRESH_MS = 5_000;
 
 /** Panel data. */
 interface MarketData {
-  /** Snapshot. */
+  /** Latest snapshot, or null while loading or when none arrived. */
   snapshot: MarketSnapshot | null;
-  /** Instrument specs. */
+  /** Registry entry, or null while loading or when it is not listed. */
   instrument: Instrument | null;
-  /** Error. */
+  /** Message of the last failed snapshot request, or null. */
   error: string | null;
 }
 
 /**
- * Definition-list row.
- * @param props Label and value.
+ * Renders a definition-list row. Values use tabular figures unless `plain`;
+ * `tone` adds a colour class such as `j-pos`.
+ * @param props Label, value, tone and plain flag.
  * @return Row.
  */
 function Row({
@@ -75,7 +76,7 @@ function Row({
 
 /**
  * Formats minutes after midnight as `HH:MM`.
- * @param minutes Minutes.
+ * @param minutes Minutes after midnight.
  * @return Text.
  */
 function clock(minutes: number): string {
@@ -88,7 +89,7 @@ function clock(minutes: number): string {
  * `NT$2.31B`, or `1.20M EUR`).
  * @param value Decimal string.
  * @param currency Quote currency.
- * @return Text.
+ * @return Text, or `—` when the value is missing or invalid.
  */
 export function formatMoneyCompact(
   value: string | null | undefined,
@@ -106,6 +107,7 @@ export function formatMoneyCompact(
  * @return Text, or the plain tick size without a ladder.
  */
 export function tickDescription(instrument: Instrument): string {
+  // `Number` only orders the steps; the text keeps the decimal strings.
   const ladder = [...(instrument.tick_ladder ?? [])].sort(
     (a, b) => Number(a.min_price) - Number(b.min_price)
   );
@@ -158,6 +160,7 @@ export function marketInfoFeature(
             selection.instrumentId
           );
           setData({snapshot: null, instrument: null, error: null});
+          // A failed registry lookup only leaves the specs as dashes.
           ctx.clients.market
             .listInstruments({venue, q: venueMarketId})
             .then(list => {

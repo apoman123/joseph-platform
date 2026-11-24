@@ -21,14 +21,15 @@ import {shellManifest} from '../shell/manifest';
 /**
  * Returns the active chart's drawing controller.
  * @param runtime Runtime.
- * @return Controller or undefined.
+ * @return Controller, or undefined while the chart has not mounted one.
  */
 function activeController(runtime: TerminalRuntime) {
   return runtime.drawing.controllers.get(runtime.selection.get().chartId);
 }
 
 /**
- * Core drawing feature (undo/redo, cancel, delete, magnet).
+ * Creates the core drawing feature: undo/redo, cancel, delete, magnet and
+ * pointer commands with their default hotkeys, and the Objects side panel.
  * @param runtime Runtime.
  * @return Feature.
  */
@@ -47,6 +48,8 @@ export function drawingFeature(runtime: TerminalRuntime): WebFeature {
       }
     ),
     activate(ctx) {
+      // These commands change drawings outside React; a new revision tells
+      // the toolbar and the object list to re-read.
       const bump = () => void runtime.drawing.revision.update(n => n + 1);
       const store = () =>
         runtime.drawing.stores.get(runtime.selection.get().chartId);
@@ -126,7 +129,8 @@ export function drawingFeature(runtime: TerminalRuntime): WebFeature {
 }
 
 /**
- * Wraps a drawing tool as a removable feature.
+ * Creates a removable feature for one drawing tool: it registers the tool
+ * and its command and hotkey, and disarms the tool when removed.
  * @param runtime Runtime.
  * @param tool Tool plugin.
  * @return Feature.
@@ -174,9 +178,9 @@ export function toolFeature(
 }
 
 /**
- * Features for every first-party tool.
+ * Creates one tool feature per first-party drawing tool.
  * @param runtime Runtime.
- * @return Features.
+ * @return Features, in the tools' registry order.
  */
 export function toolFeatures(runtime: TerminalRuntime): WebFeature[] {
   return FIRST_PARTY_TOOLS.map(tool => toolFeature(runtime, tool));
