@@ -15,6 +15,8 @@ import datetime
 import decimal
 import io
 from collections.abc import Sequence
+from typing import Any
+from typing import TypeAlias
 
 import httpx
 import pyarrow as pa
@@ -41,7 +43,7 @@ _ETAG = '"etag-1"'
 _BOOKS_URL = f"{lighter.REST_URL}/orderBooks"
 _CANDLES_URL = f"{lighter.REST_URL}/candles"
 
-Row = tuple[int, int, int, int | None, int, int, bool | None, str]
+Row: TypeAlias = tuple[int, int, int, int | None, int, int, bool | None, str]
 """``(id, ms into the day, market_id, public index, price, size,
 is_maker_ask, trade_type)``."""
 
@@ -93,18 +95,21 @@ _BOOKS = {
     ],
 }
 
-Written = list[tuple[list[market.Candle], list[recorded_trades.Interval]]]
+Written: TypeAlias = list[
+    tuple[list[market.Candle], list[recorded_trades.Interval]]
+]
+"""Each sink write in call order: ``(aggregates, covered intervals)``."""
 
 
 def _table(rows: Sequence[Row], drop: Sequence[str] = ()) -> pa.Table:
     """Builds archive rows in the real file's column order.
 
     Args:
-        rows: Rows.
-        drop: Columns left out.
+        rows: Archive rows, laid out as ``Row``.
+        drop: Column names to leave out.
 
     Returns:
-        Table.
+        A table with the archive's columns except ``drop``.
     """
     columns: dict[str, tuple[pa.DataType, list[object]]] = {
         "id": (pa.int64(), [r[0] for r in rows]),
@@ -134,12 +139,12 @@ def _parquet(
 
     Args:
         groups: Rows of each row group.
-        drop: Columns left out.
+        drop: Column names to leave out.
         statistics: Whether column statistics are written.
         padding: Bytes of key-value metadata (to grow the footer).
 
     Returns:
-        File bytes.
+        The Parquet file's bytes.
     """
     tables = [_table(rows, drop) for rows in groups]
     schema = tables[0].schema
@@ -168,7 +173,7 @@ class _Server:
         """Initializes the double.
 
         Args:
-            data: File bytes.
+            data: Bytes of the file it serves.
         """
         self.data = data
         self.etag = _ETAG
@@ -179,7 +184,8 @@ class _Server:
         """Serves one range request.
 
         Args:
-            request: Request.
+            request: Request with a ``Range`` header (``bytes=a-b`` or a
+                suffix ``bytes=-n``).
 
         Returns:
             HTTP 206 with the range, or 412 for a stale ``If-Match``.
@@ -206,21 +212,20 @@ class _Server:
         )
 
 
-def _archive(**kwargs: object) -> lighter_archive.LighterArchive:
+def _archive(**kwargs: Any) -> lighter_archive.LighterArchive:
     """Builds an archive client on an injected HTTP client.
 
     Args:
-        **kwargs: Constructor overrides.
+        **kwargs: ``LighterArchive`` keyword arguments that override the
+            defaults.
 
     Returns:
-        Client.
+        A client with ``coalesce_gap=0`` unless overridden, so every range
+        request covers only the column chunks it needs.
     """
-    values: dict[str, object] = {"coalesce_gap": 0}
+    values: dict[str, Any] = {"coalesce_gap": 0}
     values.update(kwargs)
-    return lighter_archive.LighterArchive(
-        client=httpx.AsyncClient(),
-        **values,  # type: ignore[arg-type]
-    )
+    return lighter_archive.LighterArchive(client=httpx.AsyncClient(), **values)
 
 
 def _routes(
@@ -232,10 +237,10 @@ def _routes(
     """Serves the file, the market list and the 1d candle.
 
     Args:
-        router: respx router.
-        archive: Client (for the day URL).
-        server: File double.
-        candles: Candle rows.
+        router: respx router to register the routes on.
+        archive: Client whose day URL serves the file.
+        server: Double that serves the file.
+        candles: Rows of the ``1d`` candle reply.
     """
     router.get(archive.url(_DAY)).mock(side_effect=server)
     router.get(_BOOKS_URL).mock(return_value=httpx.Response(200, json=_BOOKS))
@@ -250,10 +255,10 @@ def _sink(written: Written) -> lighter_archive.ArchiveSink:
     """Returns a sink that records writes.
 
     Args:
-        written: Destination list.
+        written: List that each write is appended to.
 
     Returns:
-        Sink.
+        A sink that appends ``(rows, covered)`` to ``written``.
     """
 
     def sink(
@@ -262,8 +267,8 @@ def _sink(written: Written) -> lighter_archive.ArchiveSink:
         """Records one write.
 
         Args:
-            rows: Aggregates.
-            covered: Coverage.
+            rows: Aggregates of the write.
+            covered: Intervals the write covers.
         """
         written.append((rows, covered))
 
@@ -276,12 +281,13 @@ def _chunks(
     """Returns the byte ranges of some column chunks of a file.
 
     Args:
-        data: File bytes.
-        group: Row group.
-        names: Columns.
+        data: Parquet file bytes.
+        group: Row group index.
+        names: Column names.
 
     Returns:
-        Ranges.
+        The ``(start, end)`` byte range of each named column chunk, in
+        ``names`` order.
     """
     meta = pq.read_metadata(io.BytesIO(data))
     order = meta.schema.to_arrow_schema().names
@@ -297,11 +303,11 @@ def _touched(fetched: Sequence[tuple[int, int]], span: tuple[int, int]) -> bool:
     """Checks whether any fetched range overlaps a span.
 
     Args:
-        fetched: Fetched ranges.
-        span: Span.
+        fetched: ``(start, end)`` byte ranges the server served.
+        span: ``(start, end)`` byte range to look for.
 
     Returns:
-        True on overlap.
+        True when any fetched range overlaps ``span``.
     """
     return any(a < span[1] and span[0] < b for a, b in fetched)
 
@@ -342,8 +348,8 @@ async def test_import_reads_only_needed_chunks_and_archives_the_day() -> None:
         """Writes into the store and records the write.
 
         Args:
-            rows: Aggregates.
-            covered: Coverage.
+            rows: Aggregates of the write.
+            covered: Intervals the write covers.
         """
         written.append((rows, covered))
         store.put(_BTC, rows, covered)
@@ -596,21 +602,6 @@ async def test_a_large_footer_is_completed_with_a_second_read() -> None:
     assert remote.metadata.num_rows == len(_MIXED)
 
 
-def _replies(
-    first: httpx.Response, *rest: httpx.Response
-) -> list[httpx.Response]:
-    """Lists scripted responses.
-
-    Args:
-        first: First response.
-        *rest: Following responses.
-
-    Returns:
-        Responses.
-    """
-    return [first, *rest]
-
-
 @pytest.mark.parametrize(
     ("reply", "message"),
     [
@@ -676,10 +667,10 @@ async def test_transport_errors_changes_and_short_ranges_fail_the_day() -> None:
             """Serves the footer, then reports a new ETag.
 
             Args:
-                request: Request.
+                request: Range request.
 
             Returns:
-                Response.
+                The range of the file as it was before the change.
             """
             response = changed(request)
             changed.etag = '"etag-2"'
@@ -694,10 +685,10 @@ async def test_transport_errors_changes_and_short_ranges_fail_the_day() -> None:
             """Serves the footer whole and column ranges one byte short.
 
             Args:
-                request: Request.
+                request: Range request.
 
             Returns:
-                Response.
+                The footer range, or a column range missing its last byte.
             """
             response = short(request)
             if len(short.ranges) == 1:

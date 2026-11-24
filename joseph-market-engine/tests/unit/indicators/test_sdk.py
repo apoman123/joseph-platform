@@ -70,21 +70,26 @@ def test_state_codec_rejects_unknown_types() -> None:
         state_codec.dump(object())
 
 
+class _FutureSchema(packaged.FvgIfvgPlugin):
+    """Plugin declaring an unsupported schema version.
+
+    Attributes:
+        PLUGIN_ID: Registry id, distinct from the parent's.
+        SCHEMA_VERSION: Plugin schema version, outside the supported set.
+    """
+
+    PLUGIN_ID = "future"
+    SCHEMA_VERSION = 99
+
+
 def test_registry_rejects_duplicates_and_bad_versions() -> None:
     """Duplicate ids and unsupported schema versions are refused."""
     registry = registry_lib.PluginRegistry()
     registry.register(packaged.FvgIfvgPlugin())
     with pytest.raises(errors.ConflictError):
         registry.register(packaged.FvgIfvgPlugin())
-
-    class FutureSchema(packaged.FvgIfvgPlugin):
-        """Plugin declaring an unsupported schema version."""
-
-        PLUGIN_ID = "future"
-        SCHEMA_VERSION = 99
-
     with pytest.raises(errors.UnsupportedError):
-        registry.register(FutureSchema())
+        registry.register(_FutureSchema())
 
 
 def test_removed_plugin_keeps_metadata_and_fails_actionably() -> None:
@@ -129,7 +134,7 @@ def test_default_registry_has_the_ten_plugins() -> None:
 
 
 def test_plugins_reject_bars_from_other_series() -> None:
-    """Headers refuse foreign, non-final or non-increasing bars."""
+    """Plugins refuse a repeated bar and a non-final bar."""
     plugin = packaged.FvgIfvgPlugin()
     state = plugin.initialize(testing.DEFAULT_INSTRUMENT, M5, None)
     candle = testing.make_candle(M5, testing.DEFAULT_START_MS, 1, 2, 0.5, 1.5)

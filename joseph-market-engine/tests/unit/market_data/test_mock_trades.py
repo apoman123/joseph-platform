@@ -7,6 +7,7 @@ from __future__ import annotations
 
 import datetime
 from collections.abc import Callable
+from typing import TypeAlias
 
 import hypothesis
 import pytest
@@ -24,7 +25,7 @@ _NOW = 1_795_278_000_000 + 37_500
 _BTC = instruments.InstrumentId.parse("mock:perp:BTCUSD")
 _ETH = instruments.InstrumentId.parse("mock:perp:ETHUSD")
 _M1 = timeframes.Timeframe.M1
-Validate = Callable[[str, str, object], None]
+Validate: TypeAlias = Callable[[str, str, object], None]
 
 
 @hypothesis.settings(max_examples=60, deadline=None)
@@ -130,11 +131,7 @@ async def test_demo_trade_stream_follows_the_clock() -> None:
     clock = clock_lib.ManualClock(_NOW)
 
     async def tick(_: float) -> None:
-        """Advances the clock five seconds per sleep.
-
-        Args:
-            _: Ignored delay.
-        """
+        """Advances the clock five seconds per sleep, whatever the delay."""
         clock.advance(5_000)
 
     adapter = mock.MockAdapter(clock, sleep=tick)
@@ -149,15 +146,11 @@ async def test_demo_trade_stream_follows_the_clock() -> None:
 
 
 async def test_demo_seconds_stream_emits_final_and_flat_bars() -> None:
-    """The DEMO seconds stream behaves like a venue trade stream."""
+    """The DEMO 1s stream emits a final bar every second, flat ones included."""
     clock = clock_lib.ManualClock(_NOW)
 
     async def tick(_: float) -> None:
-        """Advances the clock one second per sleep.
-
-        Args:
-            _: Ignored delay.
-        """
+        """Advances the clock one second per sleep, whatever the delay."""
         clock.advance(1_000)
 
     adapter = mock.MockAdapter(clock, sleep=tick)

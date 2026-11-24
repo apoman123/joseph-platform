@@ -17,7 +17,8 @@ def engine() -> sa.Engine:
     """Provides a fresh in-memory SQLite engine shared across threads.
 
     Returns:
-        Engine.
+        A new engine. ``StaticPool`` hands every connection the same
+        in-memory database, which would otherwise vanish per connection.
     """
     return sa.create_engine(
         "sqlite+pysqlite:///:memory:",
@@ -31,6 +32,6 @@ def manual_clock() -> clock.ManualClock:
     """Provides a controllable clock.
 
     Returns:
-        Clock at 2026-11-20 00:00 UTC.
+        A manual clock at 2026-11-20 00:00 UTC.
     """
     return clock.ManualClock(1_795_132_800_000)

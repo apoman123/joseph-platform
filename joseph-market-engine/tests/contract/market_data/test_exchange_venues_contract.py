@@ -6,11 +6,10 @@
 TWSE (OpenAPI, STOCK_DAY, holiday schedules, MIS), TPEx (OpenAPI,
 tradingStock, tradingDate, MIS ``otc_`` channels after the close), the
 Nasdaq Trader symbol directory and the Treasury CSVs were captured live on
-2026-11-23;
-Alpaca responses are hand-written from its documentation (no key on the
-build host, see ``fixtures/venues/alpaca/README.md``). Every produced
-object must validate against the JSON contracts and follow the instrument's
-session calendar.
+2026-11-23. The Alpaca responses are written by hand from its documentation
+(see ``fixtures/venues/alpaca/README.md``). Every produced object must
+validate against the JSON contracts and follow the instrument's session
+calendar.
 """
 
 from __future__ import annotations
@@ -25,6 +24,7 @@ from collections.abc import AsyncIterator
 from collections.abc import Callable
 from collections.abc import Iterator
 from typing import Any
+from typing import TypeAlias
 
 import httpx
 import pytest
@@ -41,11 +41,12 @@ from joseph.market_data.adapters import factory
 from joseph.market_data.adapters import tpex
 from joseph.market_data.adapters import treasury
 from joseph.market_data.adapters import twse
+from joseph.market_data.adapters import ws
 from joseph.market_data.app import ports
 from joseph.market_data.app import registry
 from joseph.market_data.domain import candles as candle_rules
 
-Validate = Callable[[str, str, object], None]
+Validate: TypeAlias = Callable[[str, str, object], None]
 _D = decimal.Decimal
 _TF = timeframes.Timeframe
 _FIXTURES = pathlib.Path(__file__).resolve().parents[3] / "fixtures" / "venues"
@@ -72,7 +73,7 @@ def _load(venue: str, name: str) -> Any:
     """Reads a JSON fixture.
 
     Args:
-        venue: Venue directory.
+        venue: Venue directory under ``fixtures/venues``.
         name: File name without extension.
 
     Returns:
@@ -82,7 +83,12 @@ def _load(venue: str, name: str) -> Any:
 
 
 class _Frames:
-    """Replays WebSocket frames, then idles."""
+    """Replays WebSocket frames, then idles.
+
+    Attributes:
+        frames: Frames still to deliver, oldest first.
+        sent: Frames the adapter sent, in order.
+    """
 
     def __init__(self, frames: list[str]) -> None:
         """Initializes the connection.
@@ -97,15 +103,15 @@ class _Frames:
         """Records a sent frame.
 
         Args:
-            message: Frame.
+            message: Frame payload.
         """
         self.sent.append(message)
 
     async def recv(self) -> str:
-        """Returns the next frame or idles.
+        """Returns the next frame, or idles for an hour once none are left.
 
         Returns:
-            Frame.
+            The next frame; an empty string only after the idle wait.
         """
         if self.frames:
             return self.frames.pop(0)
@@ -115,15 +121,15 @@ class _Frames:
 
 def _connector(
     frames: list[str], opened: list[_Frames] | None = None
-) -> Callable[[str], object]:
-    """Builds a connector replaying frames.
+) -> ws.ConnectFn:
+    """Builds a connector whose every connection replays ``frames``.
 
     Args:
-        frames: Frames.
-        opened: Optional list receiving each opened connection.
+        frames: Frames each connection delivers.
+        opened: List that receives each opened connection, or None.
 
     Returns:
-        Connector.
+        The connect function.
     """
 
     @contextlib.asynccontextmanager
@@ -134,7 +140,7 @@ def _connector(
             url: Ignored URL.
 
         Yields:
-            Connection.
+            A new replaying connection.
         """
         del url
         connection = _Frames(frames)
@@ -157,19 +163,19 @@ def _adapter(
 
     Args:
         venue: Venue.
-        clock: Clock.
-        keys: Alpaca configuration.
-        frames: WebSocket frames.
-        opened: Receives opened connections.
+        clock: Clock the adapter reads.
+        keys: Alpaca keys, or None to leave Alpaca unconfigured.
+        frames: WebSocket frames each connection replays, or None for none.
+        opened: List that receives each opened connection, or None.
 
     Returns:
-        Adapter.
+        The adapter the factory builds for ``venue``.
     """
     return factory.build_adapters(
         [venue],
         clock,
         client=httpx.AsyncClient(),
-        connect=_connector(frames or [], opened),  # type: ignore[arg-type]
+        connect=_connector(frames or [], opened),
         alpaca_config=keys,
     )[venue]
 
@@ -178,8 +184,11 @@ def _adapter(
 def _restore_xtai() -> Iterator[None]:
     """Restores runtime XTAI closures after each test.
 
+    Tests that refresh the TWSE or TPEx calendar add closures to the shared
+    ``sessions.XTAI`` calendar.
+
     Yields:
-        Nothing.
+        None, while the test runs.
     """
     saved = set(sessions.XTAI._extra_closures)
     yield
@@ -249,7 +258,7 @@ async def test_registry_search_matches_local_and_english_names(
 async def test_twse_daily_history_is_session_aligned(
     venue_api: respx.Router, contract_validate: Validate
 ) -> None:
-    """STOCK_DAY rows become final XTAI daily bars in shares."""
+    """STOCK_DAY rows become final XTAI daily bars; MIS adds the live bar."""
     del venue_api
     adapter = _adapter(instruments.Venue.TWSE, clock_lib.ManualClock(_TWSE_MS))
     start = int(datetime.datetime(2026, 11, 1, tzinfo=_TPE).timestamp() * 1000)
@@ -764,7 +773,7 @@ async def test_tpex_schedule_lists_the_xtai_closures(
 async def test_tpex_refuses_what_it_does_not_have(
     venue_api: respx.Router,
 ) -> None:
-    """Seconds bars, streams, trades, funding and OI are unsupported."""
+    """Seconds bars, trade streams, trades, funding and OI are unsupported."""
     del venue_api
     adapter = _adapter(instruments.Venue.TPEX, clock_lib.ManualClock(_TPEX_MS))
     with pytest.raises(errors.UnsupportedError):
@@ -1005,7 +1014,7 @@ async def test_alpaca_snapshots_and_unsupported_parts(
 async def test_alpaca_stream_delivers_bars_trades_and_halts(
     venue_api: respx.Router, contract_validate: Validate
 ) -> None:
-    """One authenticated connection streams bars, revisions and statuses."""
+    """An authenticated stream subscribes statuses and delivers bar updates."""
     del venue_api
     frames = _load("alpaca", "ws_frames")["frames"]
     opened: list[_Frames] = []
@@ -1015,7 +1024,7 @@ async def test_alpaca_stream_delivers_bars_trades_and_halts(
     )
     stream = adapter.stream_candles(_AAPL, _TF.M1)
     seen = [await asyncio.wait_for(anext(stream), 5) for _ in range(3)]
-    await stream.aclose()  # type: ignore[attr-defined]
+    await stream.aclose()  # type: ignore[attr-defined]  # stream_candles is typed AsyncIterator; its generator has aclose()
     for candle in seen:
         contract_validate("market.schema.json", "Candle", candle.to_contract())
     assert [c.start_ms - _US_OPEN for c in seen] == [300_000, 300_000, 360_000]
@@ -1041,12 +1050,12 @@ async def test_alpaca_trade_and_seconds_streams(
     adapter = _adapter(instruments.Venue.NASDAQ, clock, frames=frames)
     trades = adapter.stream_trades(_AAPL)
     first = await asyncio.wait_for(anext(trades), 5)
-    await trades.aclose()  # type: ignore[attr-defined]
+    await trades.aclose()  # type: ignore[attr-defined]  # stream_trades is typed AsyncIterator; its generator has aclose()
     assert first.aggressor_side is market.AggressorSide.UNKNOWN
     adapter = _adapter(instruments.Venue.NASDAQ, clock, frames=frames)
     bars = adapter.stream_candles(_AAPL, _TF.S1)
     candle = await asyncio.wait_for(anext(bars), 5)
-    await bars.aclose()  # type: ignore[attr-defined]
+    await bars.aclose()  # type: ignore[attr-defined]  # stream_candles is typed AsyncIterator; its generator has aclose()
     # The first streamed trade's second is partial and never emitted.
     assert candle.start_ms == _US_OPEN + 1_000
     assert candle.taker_buy_base_volume == _D(200)
@@ -1070,7 +1079,7 @@ async def test_alpaca_status_marks_halts(venue_api: respx.Router) -> None:
         if listed["AAPL"].status is instruments.InstrumentStatus.HALTED:
             break
         await asyncio.sleep(0.01)
-    await stream.aclose()  # type: ignore[attr-defined]
+    await stream.aclose()  # type: ignore[attr-defined]  # stream_candles is typed AsyncIterator; its generator has aclose()
     assert listed["AAPL"].status is instruments.InstrumentStatus.HALTED
 
 
@@ -1079,8 +1088,11 @@ async def test_alpaca_stream_auth_failure_is_reported(
 ) -> None:
     """A rejected key ends the stream with a clear error."""
     del venue_api
-    errors_ = _load("alpaca", "ws_errors")
-    frames = [_load("alpaca", "ws_frames")["frames"][0], errors_["auth_failed"]]
+    ws_errors = _load("alpaca", "ws_errors")
+    frames = [
+        _load("alpaca", "ws_frames")["frames"][0],
+        ws_errors["auth_failed"],
+    ]
     adapter = _adapter(
         instruments.Venue.NASDAQ,
         clock_lib.ManualClock(_ALPACA_MS),

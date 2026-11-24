@@ -137,37 +137,37 @@ def test_quote_book_returns_the_quote_strictly_before() -> None:
     assert book.prevailing(1_795_185_000_500) == (None, None)
 
 
+def _trade(i: int, price: float, conditions: list[str]) -> dict[str, Any]:
+    """Builds a one-share Alpaca trade on IEX ("V"), tape C.
+
+    Args:
+        i: Trade id, also the second of 2026-11-20T14:30 (single digit).
+        price: Trade price.
+        conditions: Alpaca sale-condition codes; "I" marks an odd lot.
+
+    Returns:
+        The trade in Alpaca's REST shape.
+    """
+    return {
+        "i": i,
+        "x": "V",
+        "p": price,
+        "s": 1,
+        "c": conditions,
+        "t": f"2026-11-20T14:30:0{i}Z",
+        "z": "C",
+    }
+
+
 def test_classify_keeps_odd_lots_out_of_the_tick_reference() -> None:
     """Odd lots are classified but do not move the tick-test price."""
     book = alpaca.QuoteBook()
     classifier = classification.LeeReadyClassifier()
-
-    def trade(i: int, price: float, conditions: list[str]) -> dict[str, Any]:
-        """Builds an Alpaca trade.
-
-        Args:
-            i: Trade id.
-            price: Price.
-            conditions: Conditions.
-
-        Returns:
-            Trade.
-        """
-        return {
-            "i": i,
-            "x": "V",
-            "p": price,
-            "s": 1,
-            "c": conditions,
-            "t": f"2026-11-20T14:30:0{i}Z",
-            "z": "C",
-        }
-
     rows = alpaca.classify(
         [
-            trade(1, 10.0, ["@"]),
-            trade(2, 10.5, ["@", "I"]),
-            trade(3, 10.2, ["@"]),
+            _trade(1, 10.0, ["@"]),
+            _trade(2, 10.5, ["@", "I"]),
+            _trade(3, 10.2, ["@"]),
         ],
         book,
         classifier,
@@ -262,7 +262,8 @@ class _Script:
     """Scripted stream connection.
 
     Attributes:
-        sent: Frames sent by the client.
+        frames: Frames or errors still to deliver, in order.
+        sent: Decoded JSON frames sent by the client.
     """
 
     def __init__(self, frames: list[str | BaseException]) -> None:
@@ -278,7 +279,7 @@ class _Script:
         """Records a frame.
 
         Args:
-            message: Frame.
+            message: JSON frame sent by the client.
         """
         self.sent.append(json.loads(message))
 
@@ -286,7 +287,8 @@ class _Script:
         """Delivers the next frame, raises a scripted error or idles.
 
         Returns:
-            Frame.
+            The next scripted frame; once the script is empty it idles for an
+            hour and then returns an empty string.
 
         Raises:
             BaseException: Scripted connection errors.
@@ -306,11 +308,11 @@ def _connector(
     """Builds a connector that plays one script per connection.
 
     Args:
-        scripts: Frames per connection.
+        scripts: Frames per connection; each connection pops the first.
         opened: Receives each connection.
 
     Returns:
-        Connector.
+        An async context manager factory taking the stream URL.
     """
 
     @contextlib.asynccontextmanager
@@ -321,7 +323,7 @@ def _connector(
             url: Ignored.
 
         Yields:
-            Connection.
+            The scripted connection.
 
         Raises:
             OSError: When the scripts are exhausted.
@@ -336,6 +338,15 @@ def _connector(
     return connect
 
 
+async def _no_sleep(seconds: float) -> None:
+    """Skips reconnect backoff.
+
+    Args:
+        seconds: Ignored.
+    """
+    del seconds
+
+
 _OK = [
     '[{"T":"success","msg":"connected"}]',
     '[{"T":"success","msg":"authenticated"}]',
@@ -346,15 +357,18 @@ async def _next(sub: Any) -> tuple[str, Any]:
     """Waits for the next non-frame event.
 
     Args:
-        sub: Subscription.
+        sub: Stream subscription whose queue is read.
 
     Returns:
-        Event.
+        The ``(kind, payload)`` event.
+
+    Raises:
+        TimeoutError: No event arrived within 5 seconds.
     """
     while True:
-        event = await asyncio.wait_for(sub.queue.get(), 5)
+        event: tuple[str, Any] = await asyncio.wait_for(sub.queue.get(), 5)
         if event[0] != "frame":
-            return event  # type: ignore[no-any-return]
+            return event
 
 
 async def test_stream_multiplexes_reconnects_and_tracks_status() -> None:
@@ -370,20 +384,11 @@ async def test_stream_multiplexes_reconnects_and_tracks_status() -> None:
         ],
         [*_OK, '[{"T":"s","S":"AAPL","sc":"T"},{"T":"x","S":"AAPL"}]'],
     ]
-
-    async def no_sleep(seconds: float) -> None:
-        """Skips backoff.
-
-        Args:
-            seconds: Ignored.
-        """
-        del seconds
-
     stream = alpaca.AlpacaStream(
         _KEYS,
         clock_lib.ManualClock(0),
         _connector(scripts, opened),
-        sleep=no_sleep,
+        sleep=_no_sleep,
     )
     assert stream.url.endswith("/v2/iex")
     first = await stream.subscribe("AAPL", ["statuses", "trades"])
@@ -405,20 +410,11 @@ async def test_stream_multiplexes_reconnects_and_tracks_status() -> None:
 async def test_stream_gives_up_after_repeated_failures() -> None:
     """Refused connections end in an error event."""
     opened: list[_Script] = []
-
-    async def no_sleep(seconds: float) -> None:
-        """Skips backoff.
-
-        Args:
-            seconds: Ignored.
-        """
-        del seconds
-
     stream = alpaca.AlpacaStream(
         _KEYS,
         clock_lib.ManualClock(0),
         _connector([], opened),
-        sleep=no_sleep,
+        sleep=_no_sleep,
         max_failures=2,
     )
     sub = await stream.subscribe("AAPL", ["trades"])
@@ -467,7 +463,7 @@ def alpaca_api(
         exchange_routes: Installer of the exchange fixture routes.
 
     Yields:
-        Router.
+        The respx router serving the fixtures.
     """
     with respx.mock(assert_all_called=False) as router:
         exchange_routes(router)
@@ -483,12 +479,13 @@ def _nasdaq(
     """Builds a Nasdaq adapter over the fixtures.
 
     Args:
-        clock: Clock.
+        clock: Clock for the adapter.
         cfg: Alpaca configuration.
-        scripts: Stream frames per connection.
+        scripts: Stream frames per connection; None plays the fixture frames
+            on a single connection.
 
     Returns:
-        Adapter.
+        The Nasdaq Alpaca adapter.
     """
     adapter = factory.build_adapters(
         [instruments.Venue.NASDAQ],
@@ -512,12 +509,12 @@ async def test_daily_and_weekly_streams_follow_daily_bars(
         _AAPL, timeframes.Timeframe.D1, tracker
     )
     seen = [await asyncio.wait_for(anext(stream), 5) for _ in range(2)]
-    await stream.aclose()  # type: ignore[attr-defined]
+    await stream.aclose()  # type: ignore[attr-defined]  # stream_candles is typed AsyncIterator; its generator has aclose()
     assert seen[0].source == "alpaca.rest" and seen[1].source == "alpaca.ws"
     assert not seen[1].is_final
     weeks = _nasdaq(clock).stream_candles(_AAPL, timeframes.Timeframe.W1)
     week = await asyncio.wait_for(anext(weeks), 5)
-    await weeks.aclose()  # type: ignore[attr-defined]
+    await weeks.aclose()  # type: ignore[attr-defined]  # stream_candles is typed AsyncIterator; its generator has aclose()
     assert week.timeframe is timeframes.Timeframe.W1 and not week.is_final
 
 
@@ -533,7 +530,7 @@ async def test_aggregated_minute_stream_and_reconnect(
     first = await asyncio.wait_for(anext(stream), 5)
     assert first.start_ms == _US_OPEN + 300_000 and not first.is_final
     second = await asyncio.wait_for(anext(stream), 5)
-    await stream.aclose()  # type: ignore[attr-defined]
+    await stream.aclose()  # type: ignore[attr-defined]  # stream_candles is typed AsyncIterator; its generator has aclose()
     assert second.start_ms == first.start_ms
 
 
@@ -549,7 +546,7 @@ async def test_seconds_stream_resets_and_finalizes_on_idle(
     seen = [await asyncio.wait_for(anext(stream), 10)]
     while not seen[-1].is_final and len(seen) < 10:
         seen.append(await asyncio.wait_for(anext(stream), 10))
-    await stream.aclose()  # type: ignore[attr-defined]
+    await stream.aclose()  # type: ignore[attr-defined]  # stream_candles is typed AsyncIterator; its generator has aclose()
     assert not seen[0].is_final and seen[-1].is_final
 
 
@@ -579,7 +576,7 @@ async def test_delayed_feed_and_empty_windows(alpaca_api: respx.Router) -> None:
 async def test_trades_limit_snapshot_shapes_and_ids(
     alpaca_api: respx.Router,
 ) -> None:
-    """Trade limits, wrapped snapshots and unknown snapshots are handled."""
+    """Trade limits apply, ids follow the directory, unknown snapshots raise."""
     clock = clock_lib.ManualClock(_NOW)
     adapter = _nasdaq(clock)
     assert str(adapter.instrument_id("QQQ")) == "nasdaq:stock:QQQ"
@@ -622,21 +619,12 @@ async def test_wrapped_snapshot_bodies_are_accepted(
 async def test_stream_retries_when_auth_never_completes() -> None:
     """A handshake without authentication is retried, then reported."""
     opened: list[_Script] = []
-
-    async def no_sleep(seconds: float) -> None:
-        """Skips backoff.
-
-        Args:
-            seconds: Ignored.
-        """
-        del seconds
-
     silent = [_OK[0], '[{"T":"x"}]', '[{"T":"y"}]']
     stream = alpaca.AlpacaStream(
         _KEYS,
         clock_lib.ManualClock(0),
         _connector([list(silent), list(silent)], opened),
-        sleep=no_sleep,
+        sleep=_no_sleep,
         max_failures=2,
     )
     await stream._send_subscription("subscribe", {"bars": ["A"]})
@@ -653,6 +641,39 @@ _M1 = timeframes.Timeframe.M1
 _US_CLOSE = _SESSION.close_ms
 _UNPACED = (1_000.0, 1_000)
 """Request pacing for budget tests (they count requests, not seconds)."""
+
+
+def _traded(minute_ms: int) -> bool:
+    """Checks whether a session minute had trades in the quiet API.
+
+    Args:
+        minute_ms: Minute start, epoch milliseconds.
+
+    Returns:
+        False for every third minute of the session, True otherwise.
+    """
+    return (minute_ms - _US_OPEN) // 60_000 % 3 != 2
+
+
+def _rest_bar(ts_ms: int) -> dict[str, Any]:
+    """Builds an Alpaca REST bar with unit prices and 100 shares.
+
+    Args:
+        ts_ms: Bar time, epoch milliseconds.
+
+    Returns:
+        The bar in Alpaca's REST shape.
+    """
+    return {
+        "t": alpaca.rfc3339(ts_ms),
+        "o": 1,
+        "h": 1,
+        "l": 1,
+        "c": 1,
+        "v": 100,
+        "n": 1,
+        "vw": 1,
+    }
 
 
 class _QuietApi:
@@ -679,55 +700,22 @@ class _QuietApi:
         self.bars: list[tuple[int, dict[str, str]]] = []
         self.trades: list[dict[str, Any]] = []
 
-    @staticmethod
-    def traded(minute_ms: int) -> bool:
-        """Checks whether a minute had trades.
-
-        Args:
-            minute_ms: Minute start.
-
-        Returns:
-            False for every third minute of the session.
-        """
-        return (minute_ms - _US_OPEN) // 60_000 % 3 != 2
-
-    @staticmethod
-    def _bar(ts_ms: int) -> dict[str, Any]:
-        """Builds an Alpaca bar.
-
-        Args:
-            ts_ms: Bar time.
-
-        Returns:
-            Bar object.
-        """
-        return {
-            "t": alpaca.rfc3339(ts_ms),
-            "o": 1,
-            "h": 1,
-            "l": 1,
-            "c": 1,
-            "v": 100,
-            "n": 1,
-            "vw": 1,
-        }
-
     def _minutes(self, start: int, last: int) -> list[dict[str, Any]]:
         """Lists the session minutes with trades.
 
         Args:
-            start: Inclusive start.
-            last: Inclusive end.
+            start: Inclusive start, epoch milliseconds.
+            last: Inclusive end, epoch milliseconds.
 
         Returns:
-            Bars.
+            One bar per traded session minute in the window.
         """
         rows = []
         for day in sessions.XNYS.sessions(start, last + 1):
             minute = max(day.open_ms, -(-start // 60_000) * 60_000)
             while minute < min(day.close_ms, last + 1):
-                if self.traded(minute):
-                    rows.append(self._bar(minute))
+                if _traded(minute):
+                    rows.append(_rest_bar(minute))
                 minute += 60_000
         return rows
 
@@ -736,7 +724,7 @@ class _QuietApi:
 
         Args:
             start: First date (ISO).
-            last: Inclusive end.
+            last: Inclusive end, epoch milliseconds.
 
         Returns:
             Bars stamped at New York midnight.
@@ -754,18 +742,20 @@ class _QuietApi:
             if sessions.XNYS.session(day) and day != datetime.date(
                 2026, 11, 18
             ):
-                rows.append(self._bar(midnight))
+                rows.append(_rest_bar(midnight))
             day += datetime.timedelta(days=1)
         return rows
 
     def __call__(self, request: httpx.Request) -> httpx.Response:
-        """Serves bars, trades and quotes.
+        """Serves bars, trades and (always empty) quotes.
+
+        Bar requests are recorded in ``bars`` and paged by ``page``.
 
         Args:
-            request: Request.
+            request: Request to one of the AAPL data endpoints.
 
         Returns:
-            Response.
+            The JSON page for the request.
         """
         params = dict(request.url.params)
         last = alpaca.rfc3339_ms(params["end"])
@@ -820,10 +810,10 @@ def quiet_api(
             """Delegates to the newest API.
 
             Args:
-                request: Request.
+                request: Request to an AAPL data endpoint.
 
             Returns:
-                Response.
+                The newest API's response.
             """
             return apis[-1](request)
 
@@ -833,13 +823,13 @@ def quiet_api(
         exchange_routes(router)
 
         def make(clock: clock_lib.ManualClock) -> _QuietApi:
-            """Creates the API for a clock.
+            """Creates the API for a clock; it serves all later requests.
 
             Args:
-                clock: Clock.
+                clock: Clock that stamps the API's requests.
 
             Returns:
-                API.
+                The new API.
             """
             apis.append(_QuietApi(clock))
             return apis[-1]
@@ -853,19 +843,19 @@ def _market_data(
     """Builds the market-data service over one Alpaca adapter.
 
     Args:
-        adapter: Adapter.
-        clock: Clock.
+        adapter: Nasdaq adapter.
+        clock: Clock shared by the router and the service.
 
     Returns:
-        Service.
+        The service with a fresh candle store.
     """
     adapters = {instruments.Venue.NASDAQ: adapter}
     store = candle_store.CandleStore()
     return service_lib.MarketDataService(
-        adapters,  # type: ignore[arg-type]
-        registry.InstrumentRegistry(adapters),  # type: ignore[arg-type]
+        adapters,
+        registry.InstrumentRegistry(adapters),
         store,
-        feed_router.FeedRouter(adapters, store, clock),  # type: ignore[arg-type]
+        feed_router.FeedRouter(adapters, store, clock),
         clock,
     )
 
@@ -886,7 +876,7 @@ async def test_quiet_minutes_cost_no_repeat_requests(
         assert batch.complete and len(batch.candles) == 260
         await svc.get_candles(_AAPL, _M1, _US_OPEN, _US_CLOSE)
     assert len(api.bars) == 1
-    # The same burst with dense-bar handling (the old behavior) re-requests
+    # With dense-bar handling (SPARSE_BARS off) the same burst re-requests
     # from the first quiet minute on every call.
     monkeypatch.setattr(alpaca.AlpacaAdapter, "SPARSE_BARS", False)
     dense_api = quiet_api(clock)
@@ -979,13 +969,13 @@ async def test_seconds_history_reads_the_closing_print(
     api = quiet_api(clock)
 
     def trade(i: int, ts_ms: int, price: float, conditions: list[str]) -> None:
-        """Adds a served trade.
+        """Adds a Nasdaq ("Q") trade of ``100 * i`` shares to the API.
 
         Args:
             i: Trade id.
-            ts_ms: Trade time.
-            price: Price.
-            conditions: Sale conditions.
+            ts_ms: Trade time, epoch milliseconds.
+            price: Trade price.
+            conditions: Alpaca sale-condition codes.
         """
         api.trades.append(
             {
@@ -1018,45 +1008,45 @@ async def test_seconds_history_reads_the_closing_print(
     assert pending.covered == ((window[0], _US_CLOSE - 1_000),)
 
 
+def _bar_frame(minute: int) -> str:
+    """Builds a stream frame holding one AAPL minute bar (``b`` message).
+
+    Args:
+        minute: Minutes after the 2026-11-20 open.
+
+    Returns:
+        The JSON frame.
+    """
+    ts = alpaca.rfc3339(_US_OPEN + minute * 60_000)
+    return json.dumps(
+        [
+            {
+                "T": "b",
+                "S": "AAPL",
+                "t": ts,
+                "o": 1,
+                "h": 1,
+                "l": 1,
+                "c": 1,
+                "v": 10,
+                "n": 1,
+                "vw": 1,
+            }
+        ]
+    )
+
+
 async def test_minute_stream_proves_quiet_minutes_between_bars(
     alpaca_api: respx.Router,
 ) -> None:
     """Consecutive ``b`` messages cover the minutes between; a drop resets."""
     del alpaca_api
-
-    def bar(minute: int) -> str:
-        """Builds a ``b`` frame.
-
-        Args:
-            minute: Minutes after the open.
-
-        Returns:
-            Frame.
-        """
-        ts = alpaca.rfc3339(_US_OPEN + minute * 60_000)
-        return json.dumps(
-            [
-                {
-                    "T": "b",
-                    "S": "AAPL",
-                    "t": ts,
-                    "o": 1,
-                    "h": 1,
-                    "l": 1,
-                    "c": 1,
-                    "v": 10,
-                    "n": 1,
-                    "vw": 1,
-                }
-            ]
-        )
-
     drop = websockets.ConnectionClosedError(None, None)
     adapter = _nasdaq(
         clock_lib.ManualClock(_NOW),
         scripts=[
-            [*_OK, bar(0), bar(1), bar(3), drop],
-            [*_OK, bar(9), bar(10)],
+            [*_OK, _bar_frame(0), _bar_frame(1), _bar_frame(3), drop],
+            [*_OK, _bar_frame(9), _bar_frame(10)],
         ],
     )
     stream = adapter.stream_candle_coverage(_AAPL, _M1)
@@ -1066,7 +1056,7 @@ async def test_minute_stream_proves_quiet_minutes_between_bars(
         update = await asyncio.wait_for(anext(stream), 5)
         spans.extend(update.covered)
         starts.extend(c.start_ms for c in update.candles)
-    await stream.aclose()  # type: ignore[attr-defined]
+    await stream.aclose()  # type: ignore[attr-defined]  # stream_candle_coverage is typed AsyncIterator; its generator has aclose()
     minute = 60_000
     assert spans == [
         (_US_OPEN + minute, _US_OPEN + 2 * minute),
@@ -1127,5 +1117,5 @@ async def test_seconds_stream_covers_only_what_frames_prove(
     # Idle ticks finalize bars but prove nothing new.
     clock.current_ms += 30_000
     ticked = await asyncio.wait_for(anext(stream), 5)
-    await stream.aclose()  # type: ignore[attr-defined]
+    await stream.aclose()  # type: ignore[attr-defined]  # stream_candle_coverage is typed AsyncIterator; its generator has aclose()
     assert ticked.candles and ticked.covered == ()

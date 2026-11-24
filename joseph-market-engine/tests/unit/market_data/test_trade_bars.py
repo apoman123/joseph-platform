@@ -36,19 +36,20 @@ def _trade(
     quote: str | None = None,
     aggregated: bool = False,
 ) -> market.Trade:
-    """Builds a trade.
+    """Builds a trade of ``_ID``.
 
     Args:
-        trade_id: Trade id.
-        ts: Venue time.
-        price: Price.
-        qty: Base quantity.
+        trade_id: Venue trade id, converted with ``str``.
+        ts: Venue event time in epoch milliseconds, also the receive time.
+        price: Price as a decimal string.
+        qty: Base quantity as a decimal string.
         side: Aggressor side.
-        quote: Optional quote quantity.
-        aggregated: Whether the venue aggregates fills.
+        quote: Quote quantity as a decimal string, or ``None`` when the venue
+            sends none.
+        aggregated: Whether the venue aggregates fills into this trade.
 
     Returns:
-        Trade.
+        The trade.
     """
     return market.Trade(
         instrument_id=_ID,
@@ -66,14 +67,14 @@ def _trade(
 def _builder(
     timeframe: timeframes.Timeframe = _S1, retention: int = 300
 ) -> trade_bars.TradeBarBuilder:
-    """Builds a builder with coverage from ``_T0``.
+    """Builds a bar builder whose first segment starts at ``_T0``.
 
     Args:
-        timeframe: Seconds resolution.
-        retention: Retention in bars.
+        timeframe: Seconds timeframe of the bars.
+        retention: Bars kept for late trades behind the newest one.
 
     Returns:
-        Builder.
+        The builder.
     """
     builder = trade_bars.TradeBarBuilder(
         _ID, timeframe, source="binance.trades", retention_bars=retention
@@ -89,7 +90,7 @@ def _latest(candles: list[market.Candle]) -> dict[int, market.Candle]:
         candles: Emitted candles in order.
 
     Returns:
-        Bars by start.
+        The last observation of each bar, keyed by bar start.
     """
     out: dict[int, market.Candle] = {}
     for candle in candles:
@@ -126,7 +127,7 @@ def test_bar_aggregates_ohlcv_quote_taker_and_count() -> None:
 
 
 def test_unknown_aggressor_or_aggregation_nulls_fields() -> None:
-    """Unknown sides null the taker volume; aggregated fills the count."""
+    """Unknown sides null the taker volume; aggregated fills null the count."""
     builder = _builder()
     bar = builder.add(
         [
@@ -175,7 +176,7 @@ def test_clock_finalization_needs_proven_delivery() -> None:
 
 
 def test_duplicates_are_ignored() -> None:
-    """A repeated trade id changes nothing."""
+    """A repeated trade id changes nothing and is counted as a duplicate."""
     builder = _builder()
     first = builder.add([_trade(1, _T0 + 100, "100", "1")], _T0 + 200)
     assert builder.add([_trade(1, _T0 + 100, "100", "1")], _T0 + 300) == []
@@ -211,7 +212,7 @@ def test_late_trade_inside_flat_run_becomes_real_bar() -> None:
 
 
 def test_trades_beyond_retention_or_coverage_are_dropped() -> None:
-    """Too-late trades and trades before the coverage start are counted."""
+    """Trades behind the retention or before coverage are dropped, counted."""
     builder = _builder(retention=5)
     builder.add([_trade(1, _T0 + 10_000, "100", "1")], _T0 + 10_100)
     assert builder.add([_trade(2, _T0 + 1_000, "99", "1")], _T0 + 10_200) == []
@@ -248,7 +249,7 @@ def test_segment_break_never_bridges_and_discards_open_bar() -> None:
 
 
 def test_builder_rejects_bad_inputs() -> None:
-    """Minute timeframes and foreign instruments are programming errors."""
+    """Minute timeframes, zero retention and foreign trades raise ValueError."""
     with pytest.raises(ValueError, match="seconds"):
         trade_bars.TradeBarBuilder(_ID, timeframes.Timeframe.M1, source="x")
     with pytest.raises(ValueError, match="retention"):
@@ -268,7 +269,7 @@ def test_builder_rejects_bad_inputs() -> None:
 
 
 def test_bars_from_coverage_finality_and_partial_edges() -> None:
-    """Bars end-covered are final; the straddling bar is open."""
+    """Covered bars are final, the end bar open, a partial first bar dropped."""
     trades = (
         _trade(1, _T0 + 1_200, "100", "1"),
         _trade(2, _T0 + 2_500, "101", "1"),
@@ -326,6 +327,9 @@ _SIDES = strategies.sampled_from([_BUY, _SELL])
 @strategies.composite
 def _trade_lists(draw: strategies.DrawFn) -> list[market.Trade]:
     """Draws trades with distinct times inside 40 seconds of ``_T0``.
+
+    ``strategies.composite`` turns this into a factory: ``_trade_lists()`` is
+    the Hypothesis strategy.
 
     Args:
         draw: Hypothesis draw function.

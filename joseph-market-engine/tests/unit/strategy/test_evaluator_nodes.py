@@ -1,7 +1,7 @@
 # Copyright 2026 apoman123
 # SPDX-License-Identifier: MIT
 
-"""Node-by-node semantics of the tri-state evaluator."""
+"""Unit tests for the tri-state evaluator's semantics, node by node."""
 
 from __future__ import annotations
 
@@ -9,6 +9,7 @@ import datetime
 import decimal
 from collections.abc import Callable
 from collections.abc import Sequence
+from typing import TypeAlias
 
 import pytest
 
@@ -23,8 +24,8 @@ from joseph.strategy.testing import frames as frame_testing
 
 T = tristate.TriState
 TF = timeframes.Timeframe
-Make = Callable[..., ast.StrategyDefinition]
-Plan = Callable[[ast.StrategyDefinition], compiler.CompiledStrategy]
+Make: TypeAlias = Callable[..., ast.StrategyDefinition]
+Plan: TypeAlias = Callable[[ast.StrategyDefinition], compiler.CompiledStrategy]
 _RISK = {
     "min_rr": "0",
     "stop_model": "SWING",
@@ -41,11 +42,12 @@ def plan_for(
     """Compiles a single-node rule with a neutral risk model.
 
     Args:
-        make_definition: Definition builder.
-        compile_plan: Compiler.
+        make_definition: Definition builder fixture.
+        compile_plan: Compiler fixture.
 
     Returns:
-        ``plan_for(node, **overrides)``.
+        ``plan_for(node, **overrides)``, which compiles a definition whose
+        ``when`` is ``node``; ``risk`` defaults to a neutral model.
     """
 
     def build(
@@ -54,11 +56,11 @@ def plan_for(
         """Builds the plan.
 
         Args:
-            node: Root node.
-            **overrides: Definition overrides.
+            node: Root rule node.
+            **overrides: Definition field overrides.
 
         Returns:
-            Plan.
+            The compiled strategy.
         """
         overrides.setdefault("risk", _RISK)
         return compile_plan(make_definition(when=node, **overrides))
@@ -78,17 +80,17 @@ def _series(
     specs: dict[int, frame_testing.BarSpec] | None = None,
     feeds: dict[int, quality.FeedState] | None = None,
 ) -> list[structures.BarFrame]:
-    """Builds a frame series.
+    """Builds a frame series of flat, live bars.
 
     Args:
         count: Number of bars.
-        snapshots: Snapshots per bar.
-        events: Events per bar.
-        specs: OHLC overrides per bar.
-        feeds: Feed state overrides per bar.
+        snapshots: Builds the snapshots of bar ``i``; none by default.
+        events: Builds the events of bar ``i``; none by default.
+        specs: OHLC overrides by bar index.
+        feeds: Feed state overrides by bar index.
 
     Returns:
-        Frames.
+        Frames 0 to ``count - 1`` of one series.
     """
     factory = frame_testing.FrameFactory()
     return [
@@ -111,14 +113,14 @@ def _result(
     """Evaluates and returns the root result.
 
     Args:
-        plan: Plan.
-        frames: Frames.
+        plan: Compiled strategy.
+        frames: Frames, oldest first.
         **kwargs: Extra ``evaluate`` arguments.
 
     Returns:
-        Truth value.
+        The root node's tri-state result.
     """
-    return evaluator.evaluate(plan, frames, **kwargs).result  # type: ignore[arg-type]
+    return evaluator.evaluate(plan, frames, **kwargs).result  # type: ignore[arg-type]  # extras are typed object; tests pass evaluate's real types
 
 
 # --------------------------------------------------------------------- BIAS
@@ -134,10 +136,10 @@ def _bias_snaps(
     Args:
         trends: Trend per timeframe (``None`` omits the snapshot).
         last_event: Published last event.
-        warm: Warm-up flag.
+        warm: Whether the snapshots report warm-up complete.
 
     Returns:
-        Builder.
+        A builder of each bar's daily_bias snapshots.
     """
 
     def build(
@@ -146,11 +148,11 @@ def _bias_snaps(
         """Builds snapshots for one bar.
 
         Args:
-            factory: Factory.
+            factory: Frame factory of the series.
             index: Bar index.
 
         Returns:
-            Snapshots.
+            The bar's snapshots.
         """
         return [
             factory.snapshot(
@@ -250,35 +252,35 @@ def test_bias_require_bos(
     )
 
 
+def _future_snaps(
+    factory: frame_testing.FrameFactory, index: int
+) -> list[structures.IndicatorSnapshot]:
+    """Builds a 4h bias snapshot stamped one 4h bar after the frame close.
+
+    Args:
+        factory: Frame factory of the series.
+        index: Bar index.
+
+    Returns:
+        The bar's look-ahead snapshot.
+    """
+    return [
+        factory.snapshot(
+            "daily_bias",
+            TF.H4,
+            index,
+            as_of_ms=factory.close(index) + TF.H4.duration_ms,
+            values={"trend": "BULLISH"},
+        )
+    ]
+
+
 def test_snapshot_from_the_future_is_rejected(
     plan_for: Callable[..., compiler.CompiledStrategy],
 ) -> None:
     """A snapshot stamped after the frame close is never read."""
     plan = plan_for({"op": "BIAS", "timeframes": ["4h"], "value": "BULLISH"})
-
-    def future(
-        factory: frame_testing.FrameFactory, index: int
-    ) -> list[structures.IndicatorSnapshot]:
-        """Builds a look-ahead snapshot.
-
-        Args:
-            factory: Factory.
-            index: Bar index.
-
-        Returns:
-            Snapshots.
-        """
-        return [
-            factory.snapshot(
-                "daily_bias",
-                TF.H4,
-                index,
-                as_of_ms=factory.close(index) + TF.H4.duration_ms,
-                values={"trend": "BULLISH"},
-            )
-        ]
-
-    evaluation = evaluator.evaluate(plan, _series(2, future))
+    evaluation = evaluator.evaluate(plan, _series(2, _future_snaps))
     assert evaluation.result is T.UNKNOWN
     assert "LOOKAHEAD_REJECTED" in evaluation.data_flags
 
@@ -299,23 +301,24 @@ def _range_snaps(
     Args:
         range_id: Range id.
         with_aois: Publish zone AOIs (else values only).
-        per_bar_range: Range id overrides per bar.
+        per_bar_range: Range id overrides by bar index.
 
     Returns:
-        Builder.
+        A builder of each bar's premium_discount_ote snapshot: range 80-120,
+        discount 80-100, OTE 88-95, equilibrium 99-101.
     """
 
     def build(
         factory: frame_testing.FrameFactory, index: int
     ) -> list[structures.IndicatorSnapshot]:
-        """Builds one snapshot.
+        """Builds the dealing-range snapshot of one bar.
 
         Args:
-            factory: Factory.
+            factory: Frame factory of the series.
             index: Bar index.
 
         Returns:
-            Snapshots.
+            The bar's snapshots.
         """
         rid = (per_bar_range or {}).get(index, range_id)
         aois = []
@@ -507,33 +510,37 @@ def _fvg_snaps(
         upper: FVG upper bound.
         confirmed_index: Bar whose close confirmed the FVG.
         quality_score: FVG score.
-        state: FVG state.
-        invalidated_at_index: Bar whose close invalidated it.
+        state: FVG state from ``invalidated_at_index`` on (from the start
+            when that is None); ACTIVE before it.
+        invalidated_at_index: Bar whose close invalidated it, or None.
         include_ob: Also publish an empty order-block snapshot.
 
     Returns:
-        Builder.
+        A builder of each bar's snapshots; the bullish FVG ``fvg-a``
+        appears from ``confirmed_index`` on.
     """
 
     def build(
         factory: frame_testing.FrameFactory, index: int
     ) -> list[structures.IndicatorSnapshot]:
-        """Builds snapshots.
+        """Builds the snapshots of one bar.
 
         Args:
-            factory: Factory.
+            factory: Frame factory of the series.
             index: Bar index.
 
         Returns:
-            Snapshots.
+            The bar's snapshots.
         """
         aois = []
         if index >= confirmed_index:
-            invalidated = (
-                None
-                if invalidated_at_index is None
-                else factory.close(invalidated_at_index)
-            )
+            aoi_state = state
+            invalidated_at_ms = None
+            if invalidated_at_index is not None:
+                if index >= invalidated_at_index:
+                    invalidated_at_ms = factory.close(invalidated_at_index)
+                else:
+                    aoi_state = structures.AoiState.ACTIVE
             aois.append(
                 factory.aoi(
                     "FVG",
@@ -543,18 +550,8 @@ def _fvg_snaps(
                     confirmed_index=confirmed_index,
                     aoi_id="fvg-a",
                     quality_score=quality_score,
-                    state=(
-                        state
-                        if invalidated_at_index is None
-                        or index >= invalidated_at_index
-                        else structures.AoiState.ACTIVE
-                    ),
-                    invalidated_at_ms=(
-                        invalidated
-                        if invalidated_at_index is not None
-                        and index >= invalidated_at_index
-                        else None
-                    ),
+                    state=aoi_state,
+                    invalidated_at_ms=invalidated_at_ms,
                 )
             )
         snaps = [factory.snapshot("fvg_ifvg", TF.M5, index, aois=aois)]
@@ -715,51 +712,47 @@ def test_touch_with_missing_source_is_unknown(
     assert _result(plan, with_ob) is T.TRUE
 
 
+def _overlap_snaps(
+    factory: frame_testing.FrameFactory, index: int
+) -> list[structures.IndicatorSnapshot]:
+    """Builds an FVG at 92-94 and an OB at 93.5-96 that overlap.
+
+    Args:
+        factory: Frame factory of the series.
+        index: Bar index.
+
+    Returns:
+        The bar's snapshots.
+    """
+    return [
+        factory.snapshot(
+            "fvg_ifvg",
+            TF.M5,
+            index,
+            aois=[factory.aoi("FVG", "bullish", "92", "94", confirmed_index=0)],
+        ),
+        factory.snapshot(
+            "order_breaker_blocks",
+            TF.M5,
+            index,
+            aois=[
+                factory.aoi("OB", "bullish", "93.5", "96", confirmed_index=0)
+            ],
+        ),
+    ]
+
+
 def test_overlap(plan_for: Callable[..., compiler.CompiledStrategy]) -> None:
     """AOI_OVERLAP finds intersecting zones of the two kind sets."""
-
-    def snaps(
-        factory: frame_testing.FrameFactory, index: int
-    ) -> list[structures.IndicatorSnapshot]:
-        """Builds FVG and OB snapshots that overlap.
-
-        Args:
-            factory: Factory.
-            index: Bar index.
-
-        Returns:
-            Snapshots.
-        """
-        return [
-            factory.snapshot(
-                "fvg_ifvg",
-                TF.M5,
-                index,
-                aois=[
-                    factory.aoi("FVG", "bullish", "92", "94", confirmed_index=0)
-                ],
-            ),
-            factory.snapshot(
-                "order_breaker_blocks",
-                TF.M5,
-                index,
-                aois=[
-                    factory.aoi(
-                        "OB", "bullish", "93.5", "96", confirmed_index=0
-                    )
-                ],
-            ),
-        ]
-
     overlap = {
         "op": "AOI_OVERLAP",
         "kinds_a": ["FVG"],
         "kinds_b": ["OB"],
         "side": "bullish",
     }
-    assert _result(plan_for(overlap), _series(2, snaps)) is T.TRUE
+    assert _result(plan_for(overlap), _series(2, _overlap_snaps)) is T.TRUE
     strict = {**overlap, "min_overlap_pct": "50"}
-    assert _result(plan_for(strict), _series(2, snaps)) is T.FALSE
+    assert _result(plan_for(strict), _series(2, _overlap_snaps)) is T.FALSE
 
 
 # ------------------------------------------------------- EVENT / SEQUENCE
@@ -768,14 +761,14 @@ def test_overlap(plan_for: Callable[..., compiler.CompiledStrategy]) -> None:
 def _flow_snaps(
     factory: frame_testing.FrameFactory, index: int
 ) -> list[structures.IndicatorSnapshot]:
-    """Builds liquidity and order-flow snapshots.
+    """Builds empty liquidity-sweep and order-flow snapshots.
 
     Args:
-        factory: Factory.
+        factory: Frame factory of the series.
         index: Bar index.
 
     Returns:
-        Snapshots.
+        The bar's snapshots.
     """
     return [
         factory.snapshot("liquidity_sweeps", TF.M5, index),
@@ -791,10 +784,10 @@ def _events_at(
     """Returns an event builder.
 
     Args:
-        spec: Event names per bar.
+        spec: Event names by bar index.
 
     Returns:
-        Builder.
+        A builder of each bar's events.
     """
 
     def build(
@@ -803,11 +796,11 @@ def _events_at(
         """Builds events for one bar.
 
         Args:
-            factory: Factory.
+            factory: Frame factory of the series.
             index: Bar index.
 
         Returns:
-            Events.
+            The bar's events.
         """
         return [factory.event(name, index) for name in spec.get(index, [])]
 
@@ -837,6 +830,43 @@ def test_event_with_short_history_is_unknown(
     assert _result(plan, _series(3, _flow_snaps)) is T.UNKNOWN
 
 
+def _h1_bias_snaps(
+    factory: frame_testing.FrameFactory, index: int
+) -> list[structures.IndicatorSnapshot]:
+    """Builds a 1h bias snapshot.
+
+    Args:
+        factory: Frame factory of the series.
+        index: Bar index.
+
+    Returns:
+        The bar's snapshots.
+    """
+    return [
+        factory.snapshot(
+            "daily_bias",
+            TF.H1,
+            index,
+            as_of_ms=TF.H1.floor(factory.close(index)),
+        )
+    ]
+
+
+def _m5_bos_events(
+    factory: frame_testing.FrameFactory, index: int
+) -> list[structures.StructureEvent]:
+    """Builds a 5m BOS event on bar 1 (the wrong timeframe for 1h rules).
+
+    Args:
+        factory: Frame factory of the series.
+        index: Bar index.
+
+    Returns:
+        The bar's events.
+    """
+    return [factory.event("BOS_BULL", index)] if index == 1 else []
+
+
 def test_event_timeframe_filter(
     plan_for: Callable[..., compiler.CompiledStrategy],
 ) -> None:
@@ -844,43 +874,7 @@ def test_event_timeframe_filter(
     plan = plan_for(
         {"op": "EVENT", "name": "BOS_BULL", "tf": "1h", "within_bars": 0}
     )
-
-    def snaps(
-        factory: frame_testing.FrameFactory, index: int
-    ) -> list[structures.IndicatorSnapshot]:
-        """Builds a 1h bias snapshot.
-
-        Args:
-            factory: Factory.
-            index: Bar index.
-
-        Returns:
-            Snapshots.
-        """
-        return [
-            factory.snapshot(
-                "daily_bias",
-                TF.H1,
-                index,
-                as_of_ms=TF.H1.floor(factory.close(index)),
-            )
-        ]
-
-    def events(
-        factory: frame_testing.FrameFactory, index: int
-    ) -> list[structures.StructureEvent]:
-        """Builds a 5m BOS event (wrong timeframe).
-
-        Args:
-            factory: Factory.
-            index: Bar index.
-
-        Returns:
-            Events.
-        """
-        return [factory.event("BOS_BULL", index)] if index == 1 else []
-
-    assert _result(plan, _series(2, snaps, events)) is T.FALSE
+    assert _result(plan, _series(2, _h1_bias_snaps, _m5_bos_events)) is T.FALSE
 
 
 _SEQ = {
@@ -932,6 +926,28 @@ def test_sequence_unknown_when_window_has_bad_bar(
 # ---------------------------------------------------------- operands
 
 
+def _delta_snaps(
+    factory: frame_testing.FrameFactory, index: int
+) -> list[structures.IndicatorSnapshot]:
+    """Builds an order-flow snapshot with a delta of -25.5 %.
+
+    Args:
+        factory: Frame factory of the series.
+        index: Bar index.
+
+    Returns:
+        The bar's snapshots.
+    """
+    return [
+        factory.snapshot(
+            "order_flow_pressure",
+            TF.M5,
+            index,
+            values={"delta_pct": "-25.5"},
+        )
+    ]
+
+
 def test_compare_candle_and_indicator(
     plan_for: Callable[..., compiler.CompiledStrategy],
 ) -> None:
@@ -958,29 +974,7 @@ def test_compare_candle_and_indicator(
             "right": {"kind": "const", "value": "-20"},
         }
     )
-
-    def snaps(
-        factory: frame_testing.FrameFactory, index: int
-    ) -> list[structures.IndicatorSnapshot]:
-        """Builds an order-flow snapshot.
-
-        Args:
-            factory: Factory.
-            index: Bar index.
-
-        Returns:
-            Snapshots.
-        """
-        return [
-            factory.snapshot(
-                "order_flow_pressure",
-                TF.M5,
-                index,
-                values={"delta_pct": "-25.5"},
-            )
-        ]
-
-    assert _result(flow, _series(2, snaps)) is T.TRUE
+    assert _result(flow, _series(2, _delta_snaps)) is T.TRUE
     assert _result(flow, _series(2)) is T.UNKNOWN
 
 
@@ -1109,7 +1103,7 @@ def test_persist_and_within(
 
 
 def test_session_windows_follow_new_york_dst() -> None:
-    """The same New York wall time maps to different UTC hours."""
+    """Session windows are New York times, so DST moves their UTC hours."""
     winter = int(
         datetime.datetime(2026, 1, 15, 13, 30, tzinfo=datetime.UTC).timestamp()
         * 1000
@@ -1211,7 +1205,7 @@ def test_gap_makes_lookback_unknown(
 def test_extra_history_does_not_change_results(
     plan_for: Callable[..., compiler.CompiledStrategy],
 ) -> None:
-    """Only the plan window is read."""
+    """History beyond the plan window changes neither result nor trace."""
     plan = plan_for(_SEQ)
     frames = _series(
         150,
@@ -1227,7 +1221,7 @@ def test_extra_history_does_not_change_results(
 def test_invalid_frame_sequences_raise(
     plan_for: Callable[..., compiler.CompiledStrategy],
 ) -> None:
-    """Callers must pass ordered frames of one series."""
+    """Unordered, empty or mixed-instrument frames raise ValueError."""
     plan = plan_for(_SEQ)
     frames = _series(3, _flow_snaps)
     with pytest.raises(ValueError):

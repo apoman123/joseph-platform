@@ -5,6 +5,7 @@
 
 from __future__ import annotations
 
+import asyncio
 from collections.abc import Sequence
 
 import fastapi
@@ -27,7 +28,11 @@ BTC = str(testing.DEFAULT_INSTRUMENT)
 
 
 class _Source:
-    """In-memory candle source recording requested windows."""
+    """In-memory candle source recording requested windows.
+
+    Attributes:
+        requests: ``(timeframe, start_ms, end_ms)`` of every request, in order.
+    """
 
     def __init__(self, data: dict[TF, list[market.Candle]]) -> None:
         """Stores candles.
@@ -45,16 +50,17 @@ class _Source:
         start_ms: int,
         end_ms: int,
     ) -> Sequence[market.Candle]:
-        """Returns candles for the default instrument only.
+        """Returns candles for the default instrument and records the request.
 
         Args:
-            instrument_id: Instrument.
-            timeframe: Timeframe.
-            start_ms: Window start.
-            end_ms: Window end.
+            instrument_id: Requested instrument.
+            timeframe: Timeframe to serve.
+            start_ms: Window start, inclusive, epoch ms.
+            end_ms: Window end, exclusive, epoch ms.
 
         Returns:
-            Candles (empty for other instruments).
+            The stored candles starting in the window; empty for any other
+            instrument.
         """
         self.requests.append((timeframe, start_ms, end_ms))
         if instrument_id != testing.DEFAULT_INSTRUMENT:
@@ -68,10 +74,10 @@ class _Source:
 
 @pytest.fixture(scope="module")
 def data() -> dict[TF, list[market.Candle]]:
-    """Builds 1m/5m/1h data.
+    """Builds 1m/5m/1h data, shared by the module's tests.
 
     Returns:
-        Candles per timeframe.
+        Candles per timeframe, aggregated from one 1m walk.
     """
     m1 = testing.random_walk(2400, seed=31)
     return {
@@ -86,10 +92,10 @@ def client(data: dict[TF, list[market.Candle]]) -> testclient.TestClient:
     """Builds an app with the router and a minimal error mapping.
 
     Args:
-        data: Candles.
+        data: Candles per timeframe to serve.
 
     Returns:
-        Test client.
+        A client for the app; its clock is at the end of the 1m data.
     """
     registry = catalog.build_default_registry()
     query = service.IndicatorQueryService(
@@ -161,7 +167,7 @@ def test_aois_are_point_in_time(
 
 
 def test_invalid_parameters_are_rejected(client: testclient.TestClient) -> None:
-    """Bad ids/timeframes/plugins map to validation errors."""
+    """Bad ids and timeframes fail validation; unknown plugins are 404."""
     bad_tf = client.get("/v1/aois", params={"instrument_id": BTC, "tf": "7m"})
     assert bad_tf.status_code == 400
     assert bad_tf.json()["code"] == "VALIDATION_FAILED"
@@ -194,8 +200,6 @@ def test_service_requests_bounded_windows(
         clock.ManualClock(data[TF.M1][-1].end_ms),
         service.QueryConfig(lookback_bars=200, intrabar_lookback_bars=30),
     )
-    import asyncio  # noqa: PLC0415 - local to keep fixtures sync.
-
     asyncio.run(
         query.snapshots(
             testing.DEFAULT_INSTRUMENT, TF.M5, ["order_flow_pressure"]

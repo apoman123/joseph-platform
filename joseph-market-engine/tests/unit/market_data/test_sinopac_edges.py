@@ -8,6 +8,7 @@ from __future__ import annotations
 import asyncio
 import datetime
 import decimal
+import itertools
 import json
 import logging
 import pathlib
@@ -45,7 +46,7 @@ def _local(day: datetime.date, *hms: int) -> datetime.datetime:
         *hms: Hour, minute, second and microsecond.
 
     Returns:
-        Naive datetime.
+        The naive Taipei wall time.
     """
     stamp = datetime.datetime(day.year, day.month, day.day, *hms, tzinfo=_TPE)
     return stamp.replace(tzinfo=None)  # Shioaji streams naive Taipei time.
@@ -59,23 +60,23 @@ def _ms(day: datetime.date, *hms: int) -> int:
         *hms: Hour, minute, second and microsecond.
 
     Returns:
-        Milliseconds.
+        UTC epoch milliseconds.
     """
     return int(_local(day, *hms).replace(tzinfo=_TPE).timestamp() * 1000)
 
 
 class _Http:
-    """``VenueHttp`` stand-in answering one MIS path.
+    """Scripted ``VenueHttp`` stand-in.
 
     Attributes:
-        answers: Response per path.
+        answers: Body, or a callable of the query parameters, per path.
     """
 
     def __init__(self, answers: dict[str, Any] | None = None) -> None:
         """Initializes the stub.
 
         Args:
-            answers: Response per path.
+            answers: Body, or a callable of the query parameters, per path.
         """
         self.answers = answers or {}
 
@@ -83,11 +84,11 @@ class _Http:
         """Returns the scripted answer of a path.
 
         Args:
-            path: Path.
-            params: Query parameters.
+            path: Request path.
+            params: Query parameters, passed to a callable answer.
 
         Returns:
-            Scripted body.
+            The scripted body, or the callable answer's result.
 
         Raises:
             errors.VenueUnavailableError: For unscripted paths.
@@ -102,19 +103,19 @@ class _Http:
 
 
 async def _inline(fn: Callable[[], Any]) -> Any:
-    """Runs an SDK call on the loop.
+    """Runs an SDK call on the loop (tests need no thread).
 
     Args:
-        fn: Call.
+        fn: Zero-argument SDK call.
 
     Returns:
-        Its result.
+        The call's result.
     """
     return fn()
 
 
 async def _blocked(seconds: float) -> None:
-    """Parks the MIS recorder.
+    """Parks the MIS recorder for good (tests drive it by hand).
 
     Args:
         seconds: Ignored.
@@ -127,20 +128,20 @@ def _mis_answer(clock: clock_lib.Clock) -> Callable[[Any], dict[str, Any]]:
     """Builds an MIS answer for 2330 at the clock's time.
 
     Args:
-        clock: Clock.
+        clock: Clock that stamps the record.
 
     Returns:
-        Answer function.
+        A callable answer for ``_Http``.
     """
 
     def answer(params: Any) -> dict[str, Any]:
-        """Returns one record.
+        """Returns one 2330 record.
 
         Args:
-            params: Query.
+            params: Ignored query parameters.
 
         Returns:
-            Body.
+            An MIS body stamped with the clock's time.
         """
         del params
         now = clock.now_ms()
@@ -178,7 +179,7 @@ def _build(
 
     Args:
         clock: Clock.
-        fake: Fake SDK.
+        fake: Fake SDK (a fresh one by default).
         archive: Optional bar archive.
         **config: ``SinopacConfig`` overrides.
 
@@ -198,9 +199,9 @@ def _build(
         (_FIXTURES / "twse" / "stock_day_2330.json").read_text("utf-8")
     )
     adapter = twse.TwseAdapter(
-        _Http(),  # type: ignore[arg-type]
-        _Http({"/rwd/zh/afterTrading/STOCK_DAY": stock_day}),  # type: ignore[arg-type]
-        _Http({"/stock/api/getStockInfo.jsp": _mis_answer(clock)}),  # type: ignore[arg-type]
+        _Http(),  # type: ignore[arg-type]  # _Http fakes only get() and close() of VenueHttp
+        _Http({"/rwd/zh/afterTrading/STOCK_DAY": stock_day}),  # type: ignore[arg-type]  # _Http fakes only get() and close() of VenueHttp
+        _Http({"/stock/api/getStockInfo.jsp": _mis_answer(clock)}),  # type: ignore[arg-type]  # _Http fakes only get() and close() of VenueHttp
         clock,
         sleep=_blocked,
         sinopac=source,
@@ -230,12 +231,12 @@ def _tick(
 
     Args:
         at: Naive Taipei time.
-        price: Price.
-        lots: Lots.
+        price: Price as a decimal string.
+        lots: Lots the tick traded.
         total: Day lots through the tick.
 
     Returns:
-        Tick.
+        A buyer-initiated tick with a fixed day open, high and low.
     """
     return fake_shioaji.FakeTick(
         "2330", at, price, lots, total, 1, open="99", high="101", low="98"
@@ -249,7 +250,7 @@ def _book(at: datetime.datetime) -> fake_shioaji.FakeBidAsk:
         at: Naive Taipei time.
 
     Returns:
-        Update.
+        An update with one bid and one ask level.
     """
     return fake_shioaji.FakeBidAsk("2330", at, ["100"], [3], ["100.5"], [2])
 
@@ -266,12 +267,12 @@ async def _read(
     """Pushes input once the stream waits, then reads updates.
 
     Args:
-        stream: Stream.
-        push: Feeds the fake SDK.
+        stream: Stream to read.
+        push: Feeds the fake SDK once, before the first read.
         count: Updates to read.
 
     Returns:
-        Updates.
+        The ``count`` updates in stream order.
     """
     task = asyncio.ensure_future(anext(stream))
     await _settle()
@@ -283,7 +284,13 @@ async def _read(
 
 
 class _BrokenArchive:
-    """Bar archive whose every call fails."""
+    """Bar archive whose every call fails.
+
+    Attributes:
+        minutes: Fails like ``put``.
+        coverage: Fails like ``put``.
+        prune: Fails like ``put``.
+    """
 
     def put(self, *args: object) -> None:
         """Fails.
@@ -372,9 +379,9 @@ async def test_history_paths_survive_archive_and_source_failures(
         _ID, _S1, _ms(_DAY, 12), _ms(_DAY, 13)
     )
     assert ahead.candles == () and ahead.complete
+    off, _ = _build(clock)
+    off._sinopac = None
     with pytest.raises(errors.UnsupportedError):
-        off, _ = _build(clock)
-        off._sinopac = None
         await off._trade_history(_ID, 0, 1, 1)
     for item in (adapter, unarchived):
         await item.close()
@@ -393,7 +400,8 @@ async def test_today_degrades_when_queries_fail(
         _ID, _M1, session.open_ms, clock.now_ms()
     )  # Subscribes.
     fake.push_tick(_tick(_local(_DAY, 10, 0, 40), "100", 1, 151))
-    fake.push_tick(_tick(_local(_DAY, 10, 0, 50), "100", 1, 160))  # Gap.
+    # The day volume jumps from 151 to 160 lots: a gap.
+    fake.push_tick(_tick(_local(_DAY, 10, 0, 50), "100", 1, 160))
     fake.push_tick(_tick(_local(_DAY, 10, 1, 10), "101", 2, 162))
     fake.push_bidask(_book(_local(_DAY, 10, 2, 10)))
     await _settle()
@@ -447,7 +455,7 @@ async def test_streams_idle_reseed_and_prune(
         lambda: fake.push_tick(_tick(_local(_DAY, 10, 1, 5), "101", 1, 152)),
         count=2,
     )
-    live = [c for update in updates for c in update.candles]
+    live = list(itertools.chain.from_iterable(u.candles for u in updates))
     assert [(c.start_ms, c.is_final) for c in live] == [
         (_ms(_DAY, 10, 1), False)
     ]
@@ -470,13 +478,12 @@ async def test_streams_idle_reseed_and_prune(
         lambda: fake.push_tick(_tick(_local(_DAY, 10, 1, 30), "101", 1, 160)),
         count=3,
     )
-    assert all(
-        c.start_ms != _ms(_DAY, 10, 1, 30) for u in gap for c in u.candles
-    )
+    gap_candles = itertools.chain.from_iterable(u.candles for u in gap)
+    assert all(c.start_ms != _ms(_DAY, 10, 1, 30) for c in gap_candles)
     clock.advance(3 * 86_400_000)
     await _read(minutes, lambda: fake.push_bidask(_book(_local(_DAY, 10, 2))))
     for stream in (minutes, seconds, days):
-        await stream.aclose()  # type: ignore[attr-defined]
+        await stream.aclose()  # type: ignore[union-attr]  # the ports type the streams as AsyncIterator; the generators have aclose()
     await adapter.close()
 
 

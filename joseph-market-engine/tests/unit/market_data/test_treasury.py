@@ -27,10 +27,10 @@ def _ms(year: int, month: int, day: int, hour: int = 12) -> int:
     """Returns a New York wall time in epoch milliseconds.
 
     Args:
-        year: Year.
-        month: Month.
-        day: Day.
-        hour: Hour.
+        year: Calendar year.
+        month: Month, 1-12.
+        day: Day of the month.
+        hour: Hour of the day, New York time.
 
     Returns:
         Epoch milliseconds.
@@ -95,10 +95,11 @@ def test_daily_bars_skip_non_session_dates() -> None:
 
 
 class _Csv:
-    """Scripted CSV source counting requests.
+    """Scripted ``VenueHttp`` stand-in that serves one CSV per year.
 
     Attributes:
-        calls: Requested years.
+        bodies: CSV text per year; tests change it to publish new days.
+        calls: Every year requested, in order.
     """
 
     def __init__(self, bodies: dict[int, str]) -> None:
@@ -111,14 +112,14 @@ class _Csv:
         self.calls: list[int] = []
 
     async def get_text(self, path: str, params: dict[str, Any]) -> str:
-        """Returns the CSV of the requested year.
+        """Records the requested year and returns its CSV.
 
         Args:
-            path: Path containing the year.
-            params: Query parameters.
+            path: Request path whose second-to-last segment is the year.
+            params: Query parameters (ignored).
 
         Returns:
-            CSV text.
+            The year's scripted CSV, or a header-only CSV for other years.
         """
         del params
         year = int(path.split("/")[-2])
@@ -136,7 +137,7 @@ async def test_current_year_is_polled_until_the_new_day_appears() -> None:
     """The year is re-read every 15 minutes while a day is due, else rarely."""
     clock = clock_lib.ManualClock(_ms(2026, 11, 20, 18) + 60_000)
     source = _Csv({2026: _HEADER + "11/19/2026,4.90\n"})
-    adapter = treasury.TreasuryAdapter(source, clock)  # type: ignore[arg-type]
+    adapter = treasury.TreasuryAdapter(source, clock)  # type: ignore[arg-type]  # _Csv stands in for VenueHttp
     first = await adapter._year(treasury.NOMINAL, 2026)
     assert max(first) == datetime.date(2026, 11, 19)
     clock.advance(60_000)
@@ -159,7 +160,7 @@ async def test_past_years_are_read_once_when_complete() -> None:
     """A finished year is cached; one read before year end is refreshed."""
     clock = clock_lib.ManualClock(_ms(2025, 12, 30, 20))
     source = _Csv({2025: _HEADER + "12/30/2025,4.10\n"})
-    adapter = treasury.TreasuryAdapter(source, clock)  # type: ignore[arg-type]
+    adapter = treasury.TreasuryAdapter(source, clock)  # type: ignore[arg-type]  # _Csv stands in for VenueHttp
     await adapter._year(treasury.NOMINAL, 2025)
     clock.current_ms = _ms(2026, 1, 5, 20)
     source.bodies[2025] = _HEADER + "12/31/2025,4.12\n12/30/2025,4.10\n"
@@ -172,9 +173,9 @@ async def test_past_years_are_read_once_when_complete() -> None:
 
 
 async def test_snapshot_without_recent_values_is_missing_data() -> None:
-    """A series without values in two years has no snapshot."""
+    """A series without values in two years has no snapshot or candles."""
     clock = clock_lib.ManualClock(_ms(2026, 11, 23))
-    adapter = treasury.TreasuryAdapter(_Csv({}), clock)  # type: ignore[arg-type]
+    adapter = treasury.TreasuryAdapter(_Csv({}), clock)  # type: ignore[arg-type]  # _Csv stands in for VenueHttp
     with pytest.raises(errors.MissingDataError):
         await adapter.fetch_snapshot(
             instruments.InstrumentId.parse("treasury:rate:UST10Y")

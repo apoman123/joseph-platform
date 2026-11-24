@@ -6,6 +6,7 @@
 from __future__ import annotations
 
 import dataclasses
+from collections.abc import AsyncIterator
 from collections.abc import Callable
 
 import pytest
@@ -18,6 +19,7 @@ from joseph.platform import streaming
 from joseph.signals.app import ports as signal_ports
 from joseph.strategy.domain import ast
 
+# 30 s after a 5m boundary, so advancing 5 minutes closes exactly one bar.
 _T0 = 1_795_000_000_000 - (1_795_000_000_000 % 300_000) + 30_000
 _BTC = "mock:perp:BTCUSD"
 _PRINCIPAL = identity.Principal(tenant_id="tenant-a", user_id="user-a")
@@ -27,10 +29,10 @@ def _always_true(strategy_id: str) -> dict[str, object]:
     """Builds a strategy whose condition holds on every closed bar.
 
     Args:
-        strategy_id: Slug.
+        strategy_id: Strategy slug.
 
     Returns:
-        Strategy definition dict.
+        A contract strategy definition for DEMO venues in ALERT_ONLY mode.
     """
     return {
         "schema_version": 2,
@@ -63,11 +65,16 @@ def _always_true(strategy_id: str) -> dict[str, object]:
 
 
 @pytest.fixture
-async def stack() -> tuple[bootstrap.Container, clock_lib.ManualClock]:
+async def stack() -> AsyncIterator[
+    tuple[bootstrap.Container, clock_lib.ManualClock]
+]:
     """Builds a DEMO-only container on an in-memory database.
 
-    Returns:
-        Container and its manual clock.
+    The background pipeline is off; tests drive it with ``run_once``.
+
+    Yields:
+        The container and its manual clock; the container closes after the
+        test.
     """
     settings = dataclasses.replace(
         config.Settings(),
@@ -85,7 +92,7 @@ async def _activate(container: bootstrap.Container) -> None:
     """Creates and activates the always-true strategy on BTC.
 
     Args:
-        container: Container.
+        container: Container whose signal stack stores the strategy.
     """
     assert container.signal_stack is not None
     versions = container.signal_stack.versions
@@ -114,7 +121,7 @@ async def test_new_closed_bar_fires_once_and_reaches_ui_stream(
     stack: tuple[bootstrap.Container, clock_lib.ManualClock],
     contract_validate: Callable[[str, str, object], None],
 ) -> None:
-    """A bar closing after activation produces one signal, delivered once."""
+    """A new closed bar signals once and reaches only its tenant's UI stream."""
     container, clock = stack
     await _activate(container)
     assert container.signal_stack is not None

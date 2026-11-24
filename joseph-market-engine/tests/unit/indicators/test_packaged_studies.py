@@ -1,7 +1,7 @@
 # Copyright 2026 apoman123
 # SPDX-License-Identifier: MIT
 
-"""Adapters added with library 1.1: true delta and the native studies."""
+"""Unit tests for true order-flow delta and the native packaged studies."""
 
 from __future__ import annotations
 

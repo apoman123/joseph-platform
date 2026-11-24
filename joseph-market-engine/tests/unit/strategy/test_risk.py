@@ -1,7 +1,11 @@
 # Copyright 2026 apoman123
 # SPDX-License-Identifier: MIT
 
-"""Unit tests for the projected stop/target/reward-to-risk model."""
+"""Unit tests for the projected stop/target/reward-to-risk model.
+
+AOI is an area of interest, here a fair value gap (FVG); BSL and SSL are
+buy-side and sell-side liquidity pools; ATR is Wilder's average true range.
+"""
 
 from __future__ import annotations
 
@@ -29,10 +33,11 @@ def _definition(
 
     Args:
         direction: ``LONG`` or ``SHORT``.
-        **risk_fields: Risk model fields.
+        **risk_fields: Risk model fields that override the default AOI
+            invalidation stop, nearest-liquidity target and 2R minimum.
 
     Returns:
-        Definition.
+        The parsed definition.
     """
     raw = copy.deepcopy(
         fixtures.strategy_definitions()[fixtures.LONG_A].to_contract()
@@ -53,15 +58,17 @@ def _frames(
     close: str = "100",
     pools: Sequence[tuple[str, str]] = (("BSL", "110"), ("SSL", "90")),
 ) -> list[structures.BarFrame]:
-    """Builds frames with constant 2-point ranges and liquidity pools.
+    """Builds 5m frames with constant 2-point ranges and liquidity pools.
 
     Args:
         count: Number of frames.
-        close: Close of the last bar.
-        pools: ``(kind, level)`` liquidity lines.
+        close: Open and close of the last bar, whose range is one point
+            either side; earlier bars span 99-101 around 100.
+        pools: ``(kind, level)`` liquidity lines in every frame's
+            ``liquidity_sweeps`` snapshot.
 
     Returns:
-        Frames.
+        The frames in bar order.
     """
     factory = frame_testing.FrameFactory()
     result = []
@@ -90,16 +97,16 @@ def _frames(
 def _touch(
     lower: str, upper: str, side: str = "bullish", close_index: int = 19
 ) -> risk.TouchedAoi:
-    """Builds a touched AOI.
+    """Builds a touched FVG.
 
     Args:
-        lower: Lower bound.
-        upper: Upper bound.
-        side: AOI side.
-        close_index: Touching bar index.
+        lower: Lower bound of the zone.
+        upper: Upper bound of the zone.
+        side: ``bullish`` or ``bearish``.
+        close_index: Index of the bar whose close touched the zone.
 
     Returns:
-        Touch.
+        The touch; the FVG's id is ``fvg-<lower>``.
     """
     factory = frame_testing.FrameFactory()
     aoi = factory.aoi(
@@ -163,7 +170,7 @@ def test_atr_buffer_widens_the_stop() -> None:
 
 
 def test_swing_and_atr_stops_and_fixed_r() -> None:
-    """Swing and ATR stop models with fixed-R targets."""
+    """Swing and ATR stops put fixed-R targets at R multiples of the risk."""
     swing = risk.assess(
         _definition(stop_model="SWING", target_model="FIXED_R", fixed_r="3"),
         _frames(),
@@ -199,7 +206,7 @@ def test_not_computable_cases(
     pools: tuple[tuple[str, str], ...],
     reason: str,
 ) -> None:
-    """Missing inputs leave rr empty with an explanation."""
+    """Missing inputs leave the ratio empty, with the reason recorded."""
     assessment = risk.assess(_definition(), _frames(pools=pools), touched)
     assert assessment.rr is None
     assert not assessment.computable

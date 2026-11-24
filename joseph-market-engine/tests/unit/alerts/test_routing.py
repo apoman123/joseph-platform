@@ -21,16 +21,16 @@ def _signal(
     tenant: str = "t1",
     strategy_id: str = "long-a",
 ) -> signal_domain.Signal:
-    """Builds a minimal signal.
+    """Builds a minimal LONG signal for the BTCUSDT perpetual.
 
     Args:
-        kind: Signal kind.
-        mode: Strategy mode.
-        tenant: Tenant.
-        strategy_id: Strategy slug.
+        kind: Signal kind; a key of ``SEVERITY_BY_KIND``.
+        mode: Strategy mode, such as ``PAPER`` or ``ALERT_ONLY``.
+        tenant: Owning tenant id.
+        strategy_id: Strategy slug; the version id is ``{strategy_id}:v1``.
 
     Returns:
-        Signal.
+        A live-data signal on setup ``s1`` that cites AOI ``fvg-1``.
     """
     key = f"{tenant}|{strategy_id}:v1|*|binance:perp:BTCUSDT|LONG|s1|{kind}"
     return signal_domain.Signal(
@@ -68,14 +68,14 @@ def _signal(
 
 
 def _sub(channel: model.Channel, **kwargs: object) -> model.Subscription:
-    """Builds a subscription.
+    """Builds an enabled tenant ``t1`` subscription with no filters.
 
     Args:
-        channel: Channel.
-        **kwargs: Field overrides.
+        channel: Delivery channel; it also names the id and target.
+        **kwargs: ``Subscription`` field overrides.
 
     Returns:
-        Subscription.
+        The subscription.
     """
     fields: dict[str, object] = {
         "subscription_id": f"sub-{channel.value}",
@@ -84,7 +84,7 @@ def _sub(channel: model.Channel, **kwargs: object) -> model.Subscription:
         "target": f"target-{channel.value}",
     }
     fields.update(kwargs)
-    return model.Subscription(**fields)  # type: ignore[arg-type]
+    return model.Subscription(**fields)  # type: ignore[arg-type]  # overrides are typed object; each test passes the field's real type
 
 
 _NOW = 1_795_133_100_200
@@ -92,7 +92,7 @@ _ALL = frozenset({"UI", "TELEGRAM", "LINE", "EMAIL", "WEBHOOK"})
 
 
 def test_routes_matching_subscriptions_and_ui() -> None:
-    """Subscribed channels allowed by the strategy receive the signal."""
+    """Matching subscriptions and the UI receive the signal, UI first."""
     result = model.route(
         _signal(),
         [_sub(C.TELEGRAM), _sub(C.LINE)],
@@ -131,13 +131,13 @@ def test_strategy_channel_policy_is_enforced() -> None:
 def test_subscription_filters(
     sub_kwargs: dict[str, object], delivered: bool
 ) -> None:
-    """Kind, severity, strategy, enabled and tenant filters apply."""
+    """Kind, severity, strategy, enabled and tenant filters decide delivery."""
     result = model.route(_signal(), [_sub(C.EMAIL, **sub_kwargs)], _ALL, _NOW)
     assert bool(result.deliveries) is delivered
 
 
 def test_quiet_hours_spanning_midnight_in_local_time() -> None:
-    """Quiet hours use the subscriber's zone and may wrap past midnight."""
+    """Quiet hours use the local zone, wrap past midnight, spare webhooks."""
     quiet = model.QuietHours(
         start=datetime.time(22, 0), end=datetime.time(7, 0), tz="Asia/Taipei"
     )
@@ -155,30 +155,33 @@ def test_quiet_hours_spanning_midnight_in_local_time() -> None:
     sent = model.route(_signal(), [sub], _ALL, noon_taipei)
     assert len(sent.deliveries) == 1
     webhook = model.route(
-        _signal(), [_sub(C.WEBHOOK, quiet_hours=quiet)], _ALL, midnight_taipei
+        _signal(),
+        [_sub(C.WEBHOOK, quiet_hours=quiet)],
+        _ALL,
+        midnight_taipei,
     )
     assert len(webhook.deliveries) == 1
 
 
+def _forwarded(sig: signal_domain.Signal) -> bool:
+    """Checks whether routing forwards a signal to execution.
+
+    Args:
+        sig: Signal to route with execution forwarding on.
+
+    Returns:
+        True when routing creates an EXECUTION delivery.
+    """
+    result = model.route(sig, [], _ALL, _NOW, forward_execution=True)
+    return any(d.channel is C.EXECUTION for d in result.deliveries)
+
+
 def test_execution_forwarding_only_for_tradable_entries() -> None:
-    """Only ENTRY_CONFIRMED of PAPER/SHADOW/AUTO_LIVE strategies go out."""
-
-    def forwarded(sig: signal_domain.Signal) -> bool:
-        """Checks whether a signal is forwarded.
-
-        Args:
-            sig: Signal.
-
-        Returns:
-            True when an EXECUTION delivery is created.
-        """
-        result = model.route(sig, [], _ALL, _NOW, forward_execution=True)
-        return any(d.channel is C.EXECUTION for d in result.deliveries)
-
-    assert forwarded(_signal(mode="PAPER"))
-    assert forwarded(_signal(mode="SHADOW"))
-    assert not forwarded(_signal(mode="ALERT_ONLY"))
-    assert not forwarded(_signal(kind="ENTRY_BLOCKED"))
+    """Only ENTRY_CONFIRMED signals of tradable modes go to execution."""
+    assert _forwarded(_signal(mode="PAPER"))
+    assert _forwarded(_signal(mode="SHADOW"))
+    assert not _forwarded(_signal(mode="ALERT_ONLY"))
+    assert not _forwarded(_signal(kind="ENTRY_BLOCKED"))
 
 
 def test_idempotency_key_and_delivery_id_are_stable() -> None:
@@ -205,7 +208,7 @@ def test_backoff_and_redaction() -> None:
 
 
 def test_format_text_carries_trace_fields() -> None:
-    """Messages name the exact instrument, version and AOIs."""
+    """Message text names the instrument, version, AOIs and UTC time."""
     text = model.format_text(_signal().to_contract())
     assert "binance:perp:BTCUSDT" in text
     assert "long-a:v1" in text

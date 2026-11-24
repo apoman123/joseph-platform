@@ -37,7 +37,7 @@ def _capture(name: str) -> dict[str, Any]:
         name: File name without extension.
 
     Returns:
-        Parsed fixture.
+        The fixture's parsed JSON object.
     """
     data: dict[str, Any] = json.loads(
         (_FIXTURES / f"{name}.json").read_text(encoding="utf-8")
@@ -110,7 +110,7 @@ def _transcribed(name: str) -> set[tuple[str, int, str, str]]:
 
 
 def test_transcribed_messages_match_the_vendored_proto_files() -> None:
-    """Every transcribed field has the official name, number, type, label."""
+    """Transcribed fields keep the official name, number, type and label."""
     blocks = _official_blocks()
     for name in mexc_protobuf.MESSAGES:
         official = _official_fields(blocks[("message", name)])
@@ -213,9 +213,9 @@ def test_captured_kline_pushes_decode_with_the_interval_name() -> None:
 def test_deals_batches_decode_every_deal() -> None:
     """A ``deals`` (2006) batch yields one JSON deal per entry."""
     wrapper = mexc_protobuf.SCHEMA.message_class("ContractWrapper")()
-    wrapper.channel = "push.deal"  # type: ignore[attr-defined]
+    wrapper.channel = "push.deal"  # type: ignore[attr-defined]  # message class is built at runtime from the schema
     for number in (1, 2):
-        deal = wrapper.deals.deals.add()  # type: ignore[attr-defined]
+        deal = wrapper.deals.deals.add()  # type: ignore[attr-defined]  # message class is built at runtime from the schema
         deal.p, deal.v, deal.t, deal.ts, deal.i = "1.5", "3", number, 9, number
     decoded = mexc_protobuf.decode(wrapper.SerializeToString())
     assert decoded == {
@@ -230,7 +230,7 @@ def test_deals_batches_decode_every_deal() -> None:
 def test_presence_follows_proto3_rules() -> None:
     """Unset optionals are absent; implicit scalars carry defaults."""
     kline = mexc_protobuf.SCHEMA.message_class("WsKLine")()
-    kline.interval = 99  # type: ignore[attr-defined]
+    kline.interval = 99  # type: ignore[attr-defined]  # message class is built at runtime from the schema
     parsed = mexc_protobuf.SCHEMA.parse("WsKLine", kline.SerializeToString())
     assert parsed == {
         "symbol": "",

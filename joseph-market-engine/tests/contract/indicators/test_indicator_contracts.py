@@ -1,19 +1,21 @@
 # Copyright 2026 apoman123
 # SPDX-License-Identifier: MIT
 
-"""Every indicator output conforms to indicators.schema.json."""
+"""Contract tests: indicator outputs conform to indicators.schema.json."""
 
 from __future__ import annotations
 
 import asyncio
 from collections.abc import Callable
 from collections.abc import Sequence
+from typing import TypeAlias
 
 import pytest
 
 from joseph.domain import clock
 from joseph.domain import instruments
 from joseph.domain import market
+from joseph.domain import structures
 from joseph.domain import timeframes
 from joseph.indicators import catalog
 from joseph.indicators import service
@@ -21,7 +23,7 @@ from joseph.indicators import testing
 from joseph.indicators.sdk import engine as engine_lib
 
 TF = timeframes.Timeframe
-Validate = Callable[[str, str, object], None]
+Validate: TypeAlias = Callable[[str, str, object], None]
 SCHEMA = "indicators.schema.json"
 
 
@@ -47,12 +49,12 @@ class _Source:
 
         Args:
             instrument_id: Ignored (single instrument).
-            timeframe: Timeframe.
-            start_ms: Window start.
-            end_ms: Window end.
+            timeframe: Timeframe to serve.
+            start_ms: Window start, inclusive, epoch ms.
+            end_ms: Window end, exclusive, epoch ms.
 
         Returns:
-            Candles.
+            The stored candles that start inside the window.
         """
         del instrument_id
         return [
@@ -63,11 +65,11 @@ class _Source:
 
 
 @pytest.fixture(scope="module")
-def frames() -> list:  # type: ignore[type-arg]
-    """Runs all plugins on 5m and 1h over synthetic data.
+def frames() -> list[structures.BarFrame]:
+    """Runs every plugin on 5m, and daily bias also on 1h, over a random walk.
 
     Returns:
-        Frames.
+        The 5m frames of 2,400 synthetic minutes.
     """
     m1 = testing.random_walk(2400, seed=17)
     data = {
@@ -85,8 +87,10 @@ def frames() -> list:  # type: ignore[type-arg]
     return engine.run(data)
 
 
-def test_snapshots_conform(contract_validate: Validate, frames: list) -> None:  # type: ignore[type-arg]
-    """Snapshots (with nested AOIs and events) validate."""
+def test_snapshots_conform(
+    contract_validate: Validate, frames: list[structures.BarFrame]
+) -> None:
+    """Snapshots of all ten plugins, with nested AOIs and events, validate."""
     seen = set()
     for frame in frames[::7] + frames[-1:]:
         for key, snapshot in frame.snapshots.items():
@@ -98,9 +102,9 @@ def test_snapshots_conform(contract_validate: Validate, frames: list) -> None:  
 
 
 def test_every_emitted_aoi_and_event_conforms(
-    contract_validate: Validate, frames: list
-) -> None:  # type: ignore[type-arg]
-    """AOI records and structure events validate individually."""
+    contract_validate: Validate, frames: list[structures.BarFrame]
+) -> None:
+    """Events and last-frame AOIs validate; the main AOI kinds appear."""
     kinds = set()
     names = set()
     for frame in frames:

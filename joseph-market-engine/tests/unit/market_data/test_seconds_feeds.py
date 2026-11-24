@@ -8,6 +8,7 @@ from __future__ import annotations
 import asyncio
 import decimal
 from collections.abc import AsyncIterator
+from collections.abc import Callable
 
 import pytest
 
@@ -34,12 +35,12 @@ def _candle(start: int, final: bool, now: int) -> market.Candle:
     """Builds a 1s candle.
 
     Args:
-        start: Bar start.
-        final: Finality.
-        now: Receipt time.
+        start: Bar start in epoch milliseconds.
+        final: Whether the bar is final.
+        now: Receive time in epoch milliseconds.
 
     Returns:
-        Candle.
+        A flat trade-built 1s bar.
     """
     return market.Candle(
         instrument_id=_ID,
@@ -59,7 +60,17 @@ def _candle(start: int, final: bool, now: int) -> market.Candle:
 
 
 class SecondsAdapter:
-    """``MarketDataPort`` double building seconds bars from trades."""
+    """``MarketDataPort`` double building seconds bars from trades.
+
+    Attributes:
+        venue: Venue the double stands in for.
+        clock: Clock that stamps and advances the bars.
+        history: Whether the venue declares a REST trade history.
+        native_trades: Whether the venue declares a native trade stream.
+        stream_fails: Whether ``stream_candles`` fails at once.
+        fetches: ``(start_ms, end_ms)`` of each ``fetch_candles`` call.
+        streams: Number of ``stream_candles`` calls.
+    """
 
     venue = instruments.Venue.HYPERLIQUID
 
@@ -74,7 +85,7 @@ class SecondsAdapter:
         """Initializes the double.
 
         Args:
-            clock: Clock.
+            clock: Clock that stamps and advances the bars.
             history: Whether a REST trade history exists.
             native_trades: Whether a native trade stream exists.
             stream_fails: Whether the trade stream fails immediately.
@@ -90,7 +101,8 @@ class SecondsAdapter:
         """Returns seconds-capable capabilities.
 
         Returns:
-            Capabilities.
+            Native candle streams and 1s bars built from trades; the trade
+            stream and history follow the constructor flags.
         """
         return capabilities.VenueCapabilities(
             venue=self.venue,
@@ -119,14 +131,14 @@ class SecondsAdapter:
         """Records the range and returns one closed bar.
 
         Args:
-            instrument: Instrument.
-            timeframe: Resolution.
-            start_ms: Start.
-            end_ms: End.
+            instrument: Ignored.
+            timeframe: Ignored; the bar is always 1s.
+            start_ms: Window start in epoch milliseconds.
+            end_ms: Window end in epoch milliseconds.
             limit: Ignored.
 
         Returns:
-            Candles.
+            The final 1s bar of the second before the clock's current one.
         """
         del instrument, timeframe, limit
         self.fetches.append((start_ms, end_ms))
@@ -142,12 +154,12 @@ class SecondsAdapter:
         """Fails or yields live bars.
 
         Args:
-            instrument: Instrument.
-            timeframe: Resolution.
+            instrument: Ignored.
+            timeframe: Ignored; the bars are always 1s.
             tracker: Ignored.
 
         Yields:
-            Candles.
+            In-progress 1s bars; the clock advances 1 ms after each.
 
         Raises:
             errors.VenueUnavailableError: When configured to fail.
@@ -164,25 +176,26 @@ class SecondsAdapter:
 
 
 async def _sleep(_: float) -> None:
-    """Yields control briefly.
-
-    Args:
-        _: Ignored delay.
-    """
+    """Yields control for 5 ms, whatever the requested delay."""
     await asyncio.sleep(0.005)
 
 
-async def _wait_for(predicate: object, limit_s: float = 2.0) -> None:
+async def _wait_for(
+    predicate: Callable[[], object], limit_s: float = 2.0
+) -> None:
     """Waits until ``predicate()`` is truthy.
 
     Args:
         predicate: Zero-argument callable.
         limit_s: Seconds before giving up.
+
+    Raises:
+        TimeoutError: ``predicate()`` stayed falsy for ``limit_s``.
     """
 
     async def loop() -> None:
-        """Polls the predicate."""
-        while not predicate():  # type: ignore[operator]  # noqa: ASYNC110
+        """Polls the predicate every 5 ms."""
+        while not predicate():  # noqa: ASYNC110 - the session and fake state it polls have no event to await
             await asyncio.sleep(0.005)
 
     await asyncio.wait_for(loop(), limit_s)
@@ -195,13 +208,14 @@ def _router(
 
     Args:
         adapter: Adapter double.
-        clock: Clock.
+        clock: Clock shared with the double.
 
     Returns:
-        Router.
+        A router that polls every 5 s and does not retry the native stream
+        within the test.
     """
     return feed_router.FeedRouter(
-        {adapter.venue: adapter},  # type: ignore[dict-item]
+        {adapter.venue: adapter},  # type: ignore[dict-item]  # SecondsAdapter implements only part of the adapter port
         candle_store.CandleStore(),
         clock,
         sleep=_sleep,
@@ -273,22 +287,22 @@ def _service(
 
     Args:
         adapter: Adapter double.
-        clock: Clock.
+        clock: Clock shared with the double.
 
     Returns:
-        Service and its store.
+        The service and its candle store.
     """
     adapters = {adapter.venue: adapter}
     store = candle_store.CandleStore()
     router = feed_router.FeedRouter(
-        adapters,  # type: ignore[arg-type]
+        adapters,  # type: ignore[arg-type]  # SecondsAdapter implements only part of the adapter port
         store,
         clock,
         sleep=_sleep,
     )
     svc = service.MarketDataService(
-        adapters,  # type: ignore[arg-type]
-        registry.InstrumentRegistry(adapters),  # type: ignore[arg-type]
+        adapters,  # type: ignore[arg-type]  # SecondsAdapter implements only part of the adapter port
+        registry.InstrumentRegistry(adapters),  # type: ignore[arg-type]  # SecondsAdapter implements only part of the adapter port
         store,
         router,
         clock,
@@ -297,7 +311,7 @@ def _service(
 
 
 async def test_batch_without_trade_history_serves_store_and_gaps() -> None:
-    """No REST call is attempted; stored live bars and gaps are reported."""
+    """Without trade history no REST call is made; stored bars are served."""
     clock = clock_lib.ManualClock(_T0 + 10_500)
     adapter = SecondsAdapter(clock, history=False)
     svc, store = _service(adapter, clock)

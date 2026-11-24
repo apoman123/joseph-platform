@@ -15,11 +15,11 @@ def _hub(retention: int = 5, max_queue: int = 100) -> streaming.StreamHub:
     """Builds a hub with a manual clock.
 
     Args:
-        retention: Ring size.
+        retention: Envelopes kept for replay.
         max_queue: Per-subscriber queue bound.
 
     Returns:
-        Hub.
+        The hub, on a manual clock at 1 ms.
     """
     return streaming.StreamHub(clock_lib.ManualClock(1), retention, max_queue)
 
@@ -38,7 +38,7 @@ async def test_publish_assigns_monotonic_sequences_and_fans_out() -> None:
 
 
 async def test_replay_within_retention_and_snapshot_required_beyond() -> None:
-    """Resume replays newer envelopes or demands a snapshot."""
+    """A resume replays newer envelopes or demands a snapshot."""
     hub = _hub(retention=3)
     sub = hub.open(None)
     await hub.add_channels(sub, ["feed_health"])
@@ -52,7 +52,7 @@ async def test_replay_within_retention_and_snapshot_required_beyond() -> None:
 
 
 async def test_signals_are_tenant_scoped() -> None:
-    """Tenant-scoped envelopes reach only their tenant."""
+    """Signals reach only their tenant; a signal without a tenant is refused."""
     hub = _hub()
     tenant_a = hub.open("tenant-a")
     tenant_b = hub.open("tenant-b")

@@ -12,6 +12,7 @@ import pathlib
 from collections.abc import AsyncGenerator
 from collections.abc import Callable
 from collections.abc import Sequence
+from typing import Any
 
 import pytest
 
@@ -42,10 +43,10 @@ _DAY = 86_400_000
 
 
 async def _fast_sleep(seconds: float) -> None:
-    """Sleeps at most a millisecond (keeps loops responsive in tests).
+    """Sleeps at most a millisecond so recorder loops turn quickly.
 
     Args:
-        seconds: Requested delay.
+        seconds: Requested delay; capped at 1 ms.
     """
     await asyncio.sleep(min(seconds, 0.001))
 
@@ -56,16 +57,16 @@ def _trade(
     qty: str = "1",
     side: market.AggressorSide = market.AggressorSide.BUY,
 ) -> market.Trade:
-    """Builds a trade.
+    """Builds a trade at price 100.
 
     Args:
-        instrument: Instrument.
-        ts: Venue time.
-        qty: Quantity.
+        instrument: Instrument traded.
+        ts: Venue event time in epoch milliseconds, also the receive time.
+        qty: Base quantity as a decimal string.
         side: Aggressor side.
 
     Returns:
-        Trade.
+        The trade; its id is unique per instrument, time and quantity.
     """
     return market.Trade(
         instrument_id=instrument,
@@ -80,7 +81,20 @@ def _trade(
 
 
 class FakePort:
-    """Venue adapter double with a scripted trade stream and history."""
+    """Venue adapter double with a scripted trade stream and history.
+
+    Attributes:
+        venue: Venue the double serves.
+        history: Whether the venue advertises a REST trade history.
+        taker: Whether the venue's klines carry taker volume.
+        native: Whether the venue has a native trade stream.
+        streams: Event scripts left, one per stream connection; each
+            connection takes the first.
+        history_fn: ``(start, end) -> coverage`` of one REST call, or
+            ``None`` when every call fails.
+        primes: ``prime_from_ms`` of every stream connection, in order.
+        calls: ``(start_ms, end_ms)`` of every REST call, in order.
+    """
 
     def __init__(
         self,
@@ -96,12 +110,13 @@ class FakePort:
         """Initializes the double.
 
         Args:
-            venue: Venue.
-            history: Whether a REST trade history exists.
-            taker: Whether klines carry taker volume.
-            native: Whether a native trade stream exists.
+            venue: Venue the double serves.
+            history: Whether the venue advertises a REST trade history.
+            taker: Whether the venue's klines carry taker volume.
+            native: Whether the venue has a native trade stream.
             streams: Event scripts, one per stream connection.
-            history_fn: ``(start, end) -> coverage`` of one REST call.
+            history_fn: ``(start, end) -> coverage`` of one REST call, or
+                ``None`` to fail every call.
         """
         self.venue = venue
         self.history = history
@@ -113,10 +128,11 @@ class FakePort:
         self.calls: list[tuple[int, int]] = []
 
     def capabilities(self) -> capabilities.VenueCapabilities:
-        """Returns capabilities of the double.
+        """Returns the capabilities of the double.
 
         Returns:
-            Capabilities.
+            PERP capabilities with S1 built from trades, and the trade
+            stream, trade history and taker volume as configured.
         """
         return capabilities.VenueCapabilities(
             venue=self.venue,
@@ -143,17 +159,19 @@ class FakePort:
     ) -> AsyncGenerator[ws.TradeStreamEvent, None]:
         """Replays the next script, then fails or idles.
 
+        Records ``prime_from_ms`` in ``primes``.
+
         Args:
-            instrument: Instrument.
-            tracker: Health tracker.
-            prime_from_ms: Prime point.
+            instrument: Instrument to stream (ignored).
+            tracker: Health tracker (ignored).
+            prime_from_ms: Where the recorder asks the stream to resume.
 
         Yields:
-            Scripted events.
+            The events of the next script, or none when no script is left.
 
         Raises:
-            errors.VenueUnavailableError: When a script ends (except the
-                last, which idles).
+            errors.VenueUnavailableError: The script ended and more scripts
+                remain; after the last one the stream idles for an hour.
         """
         del instrument, tracker
         self.primes.append(prime_from_ms)
@@ -171,19 +189,19 @@ class FakePort:
         end_ms: int,
         max_pages: int | None = None,
     ) -> trades_lib.TradeCoverage:
-        """Serves one scripted REST call.
+        """Records one REST call in ``calls`` and serves it from the script.
 
         Args:
-            instrument: Instrument.
-            start_ms: Inclusive start.
-            end_ms: Exclusive end.
-            max_pages: Budget (unused).
+            instrument: Instrument to fetch (ignored).
+            start_ms: Inclusive start, epoch milliseconds.
+            end_ms: Exclusive end, epoch milliseconds.
+            max_pages: Page budget (ignored).
 
         Returns:
-            Coverage.
+            What ``history_fn`` returns for the span.
 
         Raises:
-            errors.VenueUnavailableError: Without a scripted history.
+            errors.VenueUnavailableError: No ``history_fn`` is scripted.
         """
         del instrument, max_pages
         self.calls.append((start_ms, end_ms))
@@ -198,33 +216,34 @@ def _recorder(
     archive: trade_archive.TradeArchive | None = None,
     **settings: object,
 ) -> trade_recorder.TradeRecorder:
-    """Builds a recorder over fake ports.
+    """Builds a recorder over fake ports that flushes at once.
 
     Args:
         ports: Fake port per venue.
-        clock: Clock.
-        archive: Archive (memory by default).
-        **settings: ``RecorderSettings`` overrides.
+        clock: Time source.
+        archive: Archive to record into; a new memory archive when ``None``.
+        **settings: ``RecorderSettings`` overrides; by default flushes are
+            immediate and supervision runs every millisecond.
 
     Returns:
-        Recorder.
+        The recorder, not started.
     """
-    values: dict[str, object] = {"flush_interval_ms": 0, "supervise_s": 0.001}
+    values: dict[str, Any] = {"flush_interval_ms": 0, "supervise_s": 0.001}
     values.update(settings)
     return trade_recorder.TradeRecorder(
-        ports,  # type: ignore[arg-type]
+        ports,  # type: ignore[arg-type]  # FakePort stands in for MarketDataPort
         archive or trade_archive.MemoryTradeArchive(),
         clock,
-        trade_recorder.RecorderSettings(**values),  # type: ignore[arg-type]
+        trade_recorder.RecorderSettings(**values),
         sleep=_fast_sleep,
     )
 
 
 async def _settle(rounds: int = 30) -> None:
-    """Lets background tasks run.
+    """Lets the recorder's background tasks run.
 
     Args:
-        rounds: Event-loop turns.
+        rounds: Number of 1 ms sleeps.
     """
     for _ in range(rounds):
         await asyncio.sleep(0.001)
@@ -233,14 +252,18 @@ async def _settle(rounds: int = 30) -> None:
 def _live_script(
     instrument: instruments.InstrumentId, start: int | None
 ) -> list[ws.TradeStreamEvent]:
-    """Builds a stream: coverage start, trades in 3 seconds, a proof.
+    """Builds a stream script: coverage start, three trades, delivery proof.
+
+    The trades fall in seconds 0 and 2 after ``_T0``; the last frame proves
+    delivery up to ``_T0 + 5_600``.
 
     Args:
-        instrument: Instrument.
-        start: Coverage start (``None`` = first trade).
+        instrument: Instrument traded.
+        start: Proven coverage start, or ``None`` when the stream cannot
+            prove one.
 
     Returns:
-        Events.
+        The events in stream order.
     """
     trades = (
         _trade(instrument, _T0 + 200, "1"),
@@ -255,7 +278,7 @@ def _live_script(
 
 
 async def test_live_recording_archives_complete_seconds() -> None:
-    """Complete seconds and their coverage land in the archive."""
+    """Live trades land in the archive as proven seconds with coverage."""
     clock = clock_lib.ManualClock(_T0 + 6_000)
     port = FakePort(
         instruments.Venue.HYPERLIQUID, streams=[_live_script(_HL, _T0)]
@@ -364,7 +387,7 @@ async def test_leases_capacity_and_recordable_venues() -> None:
 
 
 async def test_wait_recorded_flushes_once_the_bar_is_proven() -> None:
-    """Waiting succeeds once delivery is proven past the bar end."""
+    """Waiting flushes and succeeds once delivery is proven past the bar."""
     clock = clock_lib.ManualClock(_T0 + 6_000)
     port = FakePort(
         instruments.Venue.HYPERLIQUID, streams=[_live_script(_HL, _T0)]
@@ -387,25 +410,26 @@ async def test_wait_recorded_flushes_once_the_bar_is_proven() -> None:
 def _history(
     instrument: instruments.InstrumentId, window_ms: int
 ) -> Callable[[int, int], trades_lib.TradeCoverage]:
-    """Builds a REST history returning ``window_ms`` per call.
+    """Builds a REST history that covers ``window_ms`` per call.
 
     Args:
-        instrument: Instrument.
-        window_ms: Span covered per call.
+        instrument: Instrument traded.
+        window_ms: Span each call covers, ending at the requested end.
 
     Returns:
-        ``(start, end) -> coverage``.
+        A ``(start, end) -> coverage`` function for ``FakePort``.
     """
 
     def page(start: int, end: int) -> trades_lib.TradeCoverage:
-        """Returns one trade per second of the newest window.
+        """Serves the newest ``window_ms`` of a request.
 
         Args:
-            start: Requested start.
-            end: Requested end.
+            start: Requested inclusive start, epoch milliseconds.
+            end: Requested exclusive end, epoch milliseconds.
 
         Returns:
-            Complete suffix.
+            Coverage of the newest window, with a trade 300 ms into each
+            second.
         """
         begin = max(start, end - window_ms) + 1
         trades = tuple(
@@ -453,24 +477,26 @@ async def test_backfill_walks_back_within_the_budget_and_primes() -> None:
     await recorder.stop()
 
 
+def _stuck_history(start: int, end: int) -> trades_lib.TradeCoverage:
+    """Serves a REST call that makes no progress.
+
+    Args:
+        start: Requested inclusive start (ignored).
+        end: Requested exclusive end, epoch milliseconds.
+
+    Returns:
+        Empty coverage at ``end``.
+    """
+    del start
+    return trades_lib.TradeCoverage((), end, end)
+
+
 async def test_backfill_stops_on_no_progress_and_failures() -> None:
     """A call that covers nothing ends the walk; errors are tolerated."""
     clock = clock_lib.ManualClock(_T0 + 10_000)
-
-    def stuck(start: int, end: int) -> trades_lib.TradeCoverage:
-        """Returns an empty suffix.
-
-        Args:
-            start: Requested start.
-            end: Requested end.
-
-        Returns:
-            Empty coverage at ``end``.
-        """
-        del start
-        return trades_lib.TradeCoverage((), end, end)
-
-    port = FakePort(instruments.Venue.BITGET, history=True, history_fn=stuck)
+    port = FakePort(
+        instruments.Venue.BITGET, history=True, history_fn=_stuck_history
+    )
     recorder = _recorder({port.venue: port}, clock)
     assert await recorder.backfill(_BG) is None
     assert len(port.calls) == 1
@@ -488,52 +514,84 @@ async def test_backfill_stops_on_no_progress_and_failures() -> None:
     )
 
 
+def _utc_day_of(ts_ms: int) -> datetime.date:
+    """Returns the UTC date of a time.
+
+    Args:
+        ts_ms: Epoch milliseconds.
+
+    Returns:
+        The UTC calendar date.
+    """
+    return datetime.datetime.fromtimestamp(ts_ms / 1000, datetime.UTC).date()
+
+
+def _utc_day_bounds(day: datetime.date) -> recorded_trades.Interval:
+    """Returns the UTC bounds of a date.
+
+    Args:
+        day: Calendar date.
+
+    Returns:
+        ``(start, end)`` in epoch milliseconds, end exclusive.
+    """
+    moment = datetime.datetime(
+        day.year, day.month, day.day, tzinfo=datetime.UTC
+    )
+    start = int(moment.timestamp()) * 1000
+    return start, start + _DAY
+
+
 class FakeDays:
-    """Day-archive double (UTC days): scripted outcome per day."""
+    """Day-archive double on UTC days with a scripted outcome per day.
+
+    Attributes:
+        venue: Venue whose archive the double fakes.
+        note: History note the recorder shows for the venue.
+        outcomes: Scripted outcome per day: ``True`` published, ``False``
+            unpublished, or an error to raise.
+        requests: Every day asked for, in order.
+        pruned: Every ``before_ms`` passed to ``prune``, in order.
+        closed: Whether ``close`` ran.
+    """
 
     venue = instruments.Venue.BINANCE
     note = "fake day archive"
 
-    @staticmethod
-    def day_of(ts_ms: int) -> datetime.date:
+    def __init__(self, outcomes: dict[datetime.date, bool | Exception]) -> None:
+        """Initializes the double.
+
+        Args:
+            outcomes: Scripted outcome per day: ``True`` published,
+                ``False`` unpublished (also for days not listed), or an
+                error to raise.
+        """
+        self.outcomes = outcomes
+        self.requests: list[datetime.date] = []
+        self.pruned: list[int] = []
+        self.closed = False
+
+    def day_of(self, ts_ms: int) -> datetime.date:
         """Returns the UTC date of a time.
 
         Args:
             ts_ms: Epoch milliseconds.
 
         Returns:
-            Date.
+            The UTC calendar date.
         """
-        return datetime.datetime.fromtimestamp(
-            ts_ms / 1000, datetime.UTC
-        ).date()
+        return _utc_day_of(ts_ms)
 
-    @staticmethod
-    def day_bounds(day: datetime.date) -> recorded_trades.Interval:
+    def day_bounds(self, day: datetime.date) -> recorded_trades.Interval:
         """Returns the UTC bounds of a date.
 
         Args:
-            day: Date.
+            day: Calendar date.
 
         Returns:
-            ``(start, end)``.
+            ``(start, end)`` in epoch milliseconds, end exclusive.
         """
-        moment = datetime.datetime(
-            day.year, day.month, day.day, tzinfo=datetime.UTC
-        )
-        start = int(moment.timestamp()) * 1000
-        return start, start + _DAY
-
-    def __init__(self, outcomes: dict[datetime.date, bool | Exception]) -> None:
-        """Initializes the double.
-
-        Args:
-            outcomes: ``True`` imported, ``False`` unpublished, or an error.
-        """
-        self.outcomes = outcomes
-        self.requests: list[datetime.date] = []
-        self.pruned: list[int] = []
-        self.closed = False
+        return _utc_day_bounds(day)
 
     async def import_day(
         self,
@@ -542,51 +600,53 @@ class FakeDays:
         sink: trade_recorder.Sink,
         received_ms: int,
     ) -> bool:
-        """Imports a scripted day (one aggregate, full coverage).
+        """Records the request and imports the scripted day.
+
+        A published day writes no aggregates and covers the whole day.
 
         Args:
-            instrument: Instrument.
-            day: Date.
-            sink: Archive writer.
-            received_ms: Receipt time.
+            instrument: Instrument to import (ignored).
+            day: UTC date to import.
+            sink: Archive writer that takes ``(aggregates, coverage)``.
+            received_ms: Receipt time to stamp (ignored).
 
         Returns:
             Whether the day was published.
 
         Raises:
-            Exception: The scripted error.
+            Exception: The error scripted for ``day``.
         """
+        del instrument, received_ms
         self.requests.append(day)
         outcome = self.outcomes.get(day, False)
         if isinstance(outcome, Exception):
             raise outcome
         if outcome:
-            start = FakeDays.day_bounds(day)[0]
+            start = _utc_day_bounds(day)[0]
             sink([], [(start, start + _DAY)])
-        del instrument, received_ms
         return outcome
 
     def prune(self, before_ms: int) -> int:
-        """Records a prune.
+        """Records a prune in ``pruned``.
 
         Args:
-            before_ms: Cut-off.
+            before_ms: Cut-off in epoch milliseconds.
 
         Returns:
-            Zero.
+            Zero: the double holds nothing to delete.
         """
         self.pruned.append(before_ms)
         return 0
 
     async def close(self) -> None:
-        """Records the close."""
+        """Records the close in ``closed``."""
         self.closed = True
 
 
 async def test_day_archive_backfill_and_on_demand_imports() -> None:
     """Newest published days first; unpublished yesterday is skipped."""
     now = _T0
-    today = FakeDays.day_of(now)
+    today = _utc_day_of(now)
     one = datetime.timedelta(days=1)
     days = FakeDays(
         {
@@ -599,7 +659,7 @@ async def test_day_archive_backfill_and_on_demand_imports() -> None:
     clock = clock_lib.ManualClock(now)
     port = FakePort(instruments.Venue.BINANCE, taker=True)
     recorder = trade_recorder.TradeRecorder(
-        {port.venue: port},  # type: ignore[dict-item]
+        {port.venue: port},  # type: ignore[dict-item]  # FakePort stands in for MarketDataPort
         trade_archive.MemoryTradeArchive(),
         clock,
         trade_recorder.RecorderSettings(
@@ -613,9 +673,9 @@ async def test_day_archive_backfill_and_on_demand_imports() -> None:
     assert days.requests == []
     assert await recorder.backfill(_BN) is None
     assert days.requests == [today - one, today - 2 * one]
-    start = FakeDays.day_bounds(today - 4 * one)[0]
+    start = _utc_day_bounds(today - 4 * one)[0]
     bars = await recorder.seconds_bars(
-        _BN, _TF.S1, start, FakeDays.day_bounds(today - one)[0]
+        _BN, _TF.S1, start, _utc_day_bounds(today - one)[0]
     )
     assert bars == []
     assert days.requests[2:] == [today - 3 * one, today - 4 * one]
@@ -647,16 +707,20 @@ class SlowDays(FakeDays):
         sink: trade_recorder.Sink,
         received_ms: int,
     ) -> bool:
-        """Yields a few times, then imports the scripted day.
+        """Yields to the event loop five times, then imports the scripted day.
 
         Args:
-            instrument: Instrument.
-            day: Date.
-            sink: Archive writer.
-            received_ms: Receipt time.
+            instrument: Instrument to import (ignored).
+            day: UTC date to import.
+            sink: Archive writer that takes ``(aggregates, coverage)``.
+            received_ms: Receipt time to stamp (ignored).
 
         Returns:
             Whether the day was published.
+
+        Raises:
+            Exception: The error scripted for ``day``, propagated from
+                ``FakeDays.import_day``.
         """
         for _ in range(5):
             await asyncio.sleep(0)
@@ -666,18 +730,18 @@ class SlowDays(FakeDays):
 async def test_concurrent_requests_import_a_day_once() -> None:
     """A day being imported is awaited, then found covered, not refetched."""
     now = _T0
-    yesterday = FakeDays.day_of(now) - datetime.timedelta(days=1)
+    yesterday = _utc_day_of(now) - datetime.timedelta(days=1)
     days = SlowDays({yesterday: True})
     port = FakePort(instruments.Venue.BINANCE, taker=True)
     recorder = trade_recorder.TradeRecorder(
-        {port.venue: port},  # type: ignore[dict-item]
+        {port.venue: port},  # type: ignore[dict-item]  # FakePort stands in for MarketDataPort
         trade_archive.MemoryTradeArchive(),
         clock_lib.ManualClock(now),
         trade_recorder.RecorderSettings(archive_request_days=1),
         day_archives=[days],
         sleep=_fast_sleep,
     )
-    start, end = FakeDays.day_bounds(yesterday)
+    start, end = _utc_day_bounds(yesterday)
     await asyncio.gather(
         *(recorder.seconds_bars(_BN, _TF.S1, start, end) for _ in range(3))
     )

@@ -5,7 +5,9 @@
 
 from __future__ import annotations
 
+import itertools
 from collections.abc import Callable
+from typing import TypeAlias
 
 import pytest
 
@@ -16,7 +18,7 @@ from joseph.strategy.domain import setup_fsm
 from joseph.strategy.testing import fixtures
 from joseph.strategy.testing import scenarios
 
-Validate = Callable[[str, str, object], None]
+Validate: TypeAlias = Callable[[str, str, object], None]
 
 
 @pytest.mark.parametrize("strategy_id", [fixtures.LONG_A, fixtures.SHORT_B])
@@ -82,11 +84,12 @@ def test_signal_kinds_conform(
         ),
         mode="PAPER",
     )
-    emitted = [
-        s
-        for f in scenarios.long_a_frames(options)
-        for s in proc.step(f, evaluated_at_ms=f.close_ms).signals
-    ]
+    emitted = list(
+        itertools.chain.from_iterable(
+            proc.step(f, evaluated_at_ms=f.close_ms).signals
+            for f in scenarios.long_a_frames(options)
+        )
+    )
     assert emitted
     for signal in emitted:
         contract_validate("signal.schema.json", "Signal", signal.to_contract())

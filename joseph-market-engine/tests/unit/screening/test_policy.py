@@ -7,6 +7,7 @@ from __future__ import annotations
 
 import dataclasses
 import decimal
+from collections.abc import Callable
 
 import hypothesis
 import pytest
@@ -25,11 +26,11 @@ def _obs(value: str | None, age_ms: int = 0) -> policy.Observation:
     """Builds an observation.
 
     Args:
-        value: Decimal text or ``None``.
-        age_ms: Age relative to ``_NOW``.
+        value: Decimal text, or None for a missing value.
+        age_ms: Age relative to ``_NOW``, in ms.
 
     Returns:
-        Observation.
+        An observation made ``age_ms`` before ``_NOW``.
     """
     return policy.Observation(
         None if value is None else _D(value), _NOW - age_ms
@@ -40,10 +41,10 @@ def _input(**overrides: object) -> policy.QualificationInput:
     """Builds a passing input with overrides.
 
     Args:
-        **overrides: Field replacements.
+        **overrides: ``QualificationInput`` field replacements.
 
     Returns:
-        Input.
+        A BTCUSDT perpetual input that passes every gate unless overridden.
     """
     base = policy.QualificationInput(
         instrument_id=_ID,
@@ -56,7 +57,7 @@ def _input(**overrides: object) -> policy.QualificationInput:
         funding_8h_pct=_obs("0.01"),
         funding_interval_hours=8.0,
     )
-    return dataclasses.replace(base, **overrides)  # type: ignore[arg-type]
+    return dataclasses.replace(base, **overrides)  # type: ignore[arg-type]  # overrides are typed object; tests pass each field's real type
 
 
 def test_all_gates_passing_is_qualified() -> None:
@@ -79,7 +80,7 @@ def test_all_gates_passing_is_qualified() -> None:
 def test_value_equal_to_threshold_fails(
     field: str, value: str, gate: policy.Gate
 ) -> None:
-    """Strict comparators: equality fails."""
+    """A value equal to its gate threshold fails the gate."""
     record = policy.evaluate(_input(**{field: _obs(value)}), _POLICY, _NOW)
     result = next(g for g in record.gates if g.gate is gate)
     assert result.passed is False
@@ -202,7 +203,7 @@ def test_high_risk_funding_rejects_by_default_and_is_configurable() -> None:
 
 
 def test_normalized_funding_uses_interval() -> None:
-    """Rate * 100 * 8 / interval_hours."""
+    """Funding normalizes as rate * 100 * 8 / interval hours; 0 h fails."""
     assert policy.normalized_8h_pct(_D("0.0001"), 1.0) == _D("0.08")
     assert policy.normalized_8h_pct(_D("0.0001"), 8.0) == _D("0.01")
     assert policy.normalized_8h_pct(_D("0.0004"), 4.0) == _D("0.08")
@@ -233,7 +234,7 @@ def test_rank_orders_qualified_first_then_heat() -> None:
     strong = policy.evaluate(
         _input(
             spread_pct=_obs("1"),
-            turnover_24h_usd=_obs("9e10".replace("9e10", "90000000000")),
+            turnover_24h_usd=_obs("90000000000"),
         ),
         _POLICY,
         _NOW,
@@ -247,10 +248,12 @@ def test_rank_orders_qualified_first_then_heat() -> None:
     assert [r.rank for r in ranked] == [1, 2]
 
 
-def test_record_contract(contract_validate: object) -> None:
+def test_record_contract(
+    contract_validate: Callable[[str, str, object], None],
+) -> None:
     """Records validate against the JSON Schema."""
     record = policy.rank([policy.evaluate(_input(), _POLICY, _NOW)])[0]
-    contract_validate(  # type: ignore[operator]
+    contract_validate(
         "qualification.schema.json",
         "QualificationRecord",
         record.to_contract(),
@@ -268,7 +271,7 @@ _DECIMALS = strategies.decimals(
 
 @hypothesis.given(_DECIMALS)
 def test_turnover_gate_is_strictly_greater(value: decimal.Decimal) -> None:
-    """Passed == value > threshold for every value."""
+    """The turnover gate passes exactly when the value exceeds USD 50M."""
     record = policy.evaluate(
         _input(turnover_24h_usd=policy.Observation(value, _NOW)), _POLICY, _NOW
     )
@@ -286,7 +289,7 @@ def test_turnover_gate_is_strictly_greater(value: decimal.Decimal) -> None:
     )
 )
 def test_spread_gate_is_strictly_less(value: decimal.Decimal) -> None:
-    """Passed == value < threshold for every value."""
+    """The spread gate passes exactly when the value is below 0.10 %."""
     record = policy.evaluate(
         _input(spread_pct=policy.Observation(value, _NOW)), _POLICY, _NOW
     )

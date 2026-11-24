@@ -6,8 +6,8 @@
 Run with ``JOSEPH_SINOPAC_DATA_TESTS=1 uv run --extra sinopac pytest
 tests/network/test_live_sinopac.py -m sinopac_data`` and
 ``JOSEPH_SINOPAC_API_KEY[_FILE]`` / ``JOSEPH_SINOPAC_SECRET_KEY[_FILE]``
-set. Market data needs no CA certificate. The test reads two closed
-sessions of 2330 (one kbars query and one ticks query: a few MB of the
+set. Market data needs no CA certificate. The test reads the last settled
+session of 2330 (one kbars query and one ticks query: a few MB of the
 daily data allowance) outside trading hours only, so it never spends the
 trading-hours query budget, and checks what the source relies on: kbar
 labels are minute ends on the XTAI grid, ``ts`` is Taipei wall-clock time,
@@ -47,7 +47,7 @@ _ID = instruments.InstrumentId.parse("twse:stock:2330")
 
 
 async def test_live_shioaji_history_matches_the_assumptions() -> None:
-    """Kbars, ticks and the stream shapes match what the adapter expects."""
+    """Kbars and ticks of a settled session match the adapter's assumptions."""
     settings = config.Settings.from_env()
     if not (settings.sinopac_api_key and settings.sinopac_secret_key):
         pytest.skip("JOSEPH_SINOPAC_API_KEY/SECRET_KEY are not set")

@@ -33,10 +33,13 @@ SETTINGS = hypothesis.settings(
 
 
 def _config() -> engine_lib.EngineConfig:
-    """All seven plugins on 5m plus HTF structure and gaps.
+    """Builds a config running every plugin on 5m and some on 1h/4h.
+
+    Daily bias also runs on 1h and 4h, FVGs also on 1h, and the
+    premium/discount study uses a 3-bar swing length.
 
     Returns:
-        Engine configuration.
+        The engine configuration, signalling on 5m.
     """
     plugins = {pid: engine_lib.PluginSpec((M5,)) for pid in REGISTRY.ids()}
     plugins["daily_bias"] = engine_lib.PluginSpec((M5, H1, H4))
@@ -48,10 +51,10 @@ def _config() -> engine_lib.EngineConfig:
 
 
 def _engine() -> engine_lib.IndicatorEngine:
-    """Builds a fresh engine.
+    """Builds a fresh engine over ``_config``.
 
     Returns:
-        Engine.
+        The engine, for the default instrument.
     """
     return engine_lib.IndicatorEngine(
         REGISTRY, _config(), testing.DEFAULT_INSTRUMENT
@@ -62,11 +65,11 @@ def _series(seed: int, minutes: int) -> dict[TF, list[market.Candle]]:
     """Generates consistent 1m/5m/1h/4h data.
 
     Args:
-        seed: Random seed.
+        seed: Random-walk seed.
         minutes: Number of 1m bars.
 
     Returns:
-        Candles per timeframe.
+        Candles per timeframe, aggregated from one 1m walk.
     """
     m1 = testing.random_walk(minutes, seed=seed)
     return {
@@ -84,7 +87,8 @@ def _fingerprint(frames: list[structures.BarFrame]) -> list[object]:
         frames: Frames.
 
     Returns:
-        JSON-compatible structure.
+        Per frame: close time, contract snapshots keyed by plugin and
+        timeframe, contract events and the missing-bar count.
     """
     return [
         [
@@ -110,10 +114,10 @@ def _interleave(
 
     Args:
         data: Candles per timeframe.
-        rng: Random source.
+        rng: Random source choosing the next stream.
 
     Returns:
-        Arrival order.
+        Every candle once, in an arrival order that keeps each stream's order.
     """
     queues = {tf: list(candles) for tf, candles in data.items()}
     order: list[market.Candle] = []

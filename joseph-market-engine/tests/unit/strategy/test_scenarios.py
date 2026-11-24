@@ -7,6 +7,7 @@ from __future__ import annotations
 
 import decimal
 from collections.abc import Sequence
+from typing import Any
 
 import pytest
 
@@ -25,14 +26,14 @@ D = decimal.Decimal
 def _market(
     frames: Sequence[structures.BarFrame], oi_change: str
 ) -> evaluator.MarketContext:
-    """Builds market context with a constant OI change.
+    """Builds a market context with a constant open-interest (OI) change.
 
     Args:
-        frames: Frames.
-        oi_change: Open-interest change in percent.
+        frames: Frames that get one market point each, at their close.
+        oi_change: OI change in percent, as a decimal string.
 
     Returns:
-        Context.
+        The context.
     """
     return evaluator.MarketContext(
         points=tuple(
@@ -47,15 +48,15 @@ def _kinds(
     frames: Sequence[structures.BarFrame],
     market: evaluator.MarketContext | None = None,
 ) -> list[str]:
-    """Runs a fixture strategy over frames.
+    """Runs a fixture strategy over frames in paper mode.
 
     Args:
         strategy_id: Fixture strategy id.
-        frames: Frames.
-        market: Optional market context.
+        frames: Frames in bar order.
+        market: Market context, or ``None`` when no market data is known.
 
     Returns:
-        Emitted signal kinds.
+        The kinds of the signals emitted, in order.
     """
     definition = fixtures.strategy_definitions()[strategy_id]
     plan = compiler.compile_strategy(definition).plan
@@ -73,7 +74,7 @@ def _kinds(
         ),
         mode="PAPER",
     )
-    kinds = []
+    kinds: list[str] = []
     for frame in frames:
         kinds.extend(
             s.kind
@@ -84,7 +85,7 @@ def _kinds(
     return kinds
 
 
-_REMOVALS = {
+_REMOVALS: dict[str, dict[str, Any]] = {
     "bias reversed": {"bias": "BEARISH"},
     "price outside zones": {"in_zone": False},
     "no AOI touch": {"touch": False},
@@ -105,7 +106,7 @@ def test_long_a_positive_case() -> None:
 @pytest.mark.parametrize("change", list(_REMOVALS), ids=list(_REMOVALS))
 def test_long_a_each_condition_is_necessary(change: str) -> None:
     """Removing any single condition prevents ENTRY_CONFIRMED."""
-    opts = scenarios.WorldOptions(**_REMOVALS[change])  # type: ignore[arg-type]
+    opts = scenarios.WorldOptions(**_REMOVALS[change])
     assert "ENTRY_CONFIRMED" not in _kinds(
         fixtures.LONG_A, scenarios.long_a_frames(opts)
     )
@@ -125,7 +126,7 @@ def test_short_b_each_condition_is_necessary(change: str) -> None:
     overrides = dict(_REMOVALS[change])
     if change == "bias reversed":
         overrides["bias"] = "BULLISH"
-    opts = scenarios.WorldOptions(**overrides)  # type: ignore[arg-type]
+    opts = scenarios.WorldOptions(**overrides)
     frames = scenarios.short_b_frames(opts)
     assert "ENTRY_CONFIRMED" not in _kinds(
         fixtures.SHORT_B, frames, _market(frames, "-1")
@@ -148,12 +149,12 @@ def test_short_b_without_market_data_is_blocked() -> None:
 
 
 def test_short_b_k_of_n_bias_uses_two_of_three() -> None:
-    """Short B fires with 1d and 4h bearish while 1h is bullish."""
+    """Short B's two-of-three bias holds with 1d and 4h bearish, 1h bullish."""
     frames = scenarios.short_b_frames()
     evaluation = evaluator.evaluate(
         compiler.compile_strategy(
             fixtures.strategy_definitions()[fixtures.SHORT_B]
-        ).plan,  # type: ignore[arg-type]
+        ).plan,  # type: ignore[arg-type]  # Short B compiles, so plan is set
         frames[:31],
         _market(frames, "-1"),
     )

@@ -1,12 +1,13 @@
 # Copyright 2026 apoman123
 # SPDX-License-Identifier: MIT
 
-"""Alert delivery over mocked HTTP/SMTP with the durable outbox."""
+"""Integration tests for alert delivery over mocked HTTP/SMTP and outboxes."""
 
 from __future__ import annotations
 
 import asyncio
 import datetime
+import email.message
 import hashlib
 import hmac
 import json
@@ -37,13 +38,13 @@ HOOK_SECRET = "hook-SECRET"
 
 
 def _signal(mode: str = "PAPER") -> signal_domain.Signal:
-    """Builds an entry signal.
+    """Builds a tenant-a ENTRY_CONFIRMED signal for the BTCUSDT perpetual.
 
     Args:
-        mode: Strategy mode.
+        mode: Strategy mode, such as ``PAPER`` or ``ALERT_ONLY``.
 
     Returns:
-        Signal.
+        The signal; equal inputs give the same ``signal_id``.
     """
     key = "tenant-a|long-a:v1|*|binance:perp:BTCUSDT|LONG|s1|ENTRY_CONFIRMED"
     return signal_domain.Signal(
@@ -87,11 +88,11 @@ def outbox(
     """Provides each outbox implementation.
 
     Args:
-        request: Parametrization.
-        engine: SQLite engine.
+        request: Parametrization: ``memory`` or ``sql``.
+        engine: SQLite engine; the SQL outbox creates its schema there.
 
     Returns:
-        Outbox.
+        An empty outbox.
     """
     if request.param == "memory":
         return memory.InMemoryOutbox()
@@ -103,7 +104,7 @@ def _subscriptions() -> memory.InMemorySubscriptionRepository:
     """Builds Telegram, LINE, webhook and e-mail subscriptions.
 
     Returns:
-        Repository.
+        A repository holding one tenant-a subscription per channel.
     """
     repo = memory.InMemorySubscriptionRepository()
     for channel, target in (
@@ -131,7 +132,7 @@ def _all_channels(tenant_id: str, version_id: str) -> frozenset[str]:
         version_id: Version (unused).
 
     Returns:
-        All channel names.
+        The names of every channel except EXECUTION.
     """
     del tenant_id, version_id
     return frozenset({"UI", "TELEGRAM", "LINE", "EMAIL", "WEBHOOK"})
@@ -140,19 +141,22 @@ def _all_channels(tenant_id: str, version_id: str) -> frozenset[str]:
 class _FakeSmtp:
     """SMTP stand-in recording calls.
 
+    The records live on the class because ``EmailSender`` builds a new
+    instance per message; tests reset them before use.
+
     Attributes:
         sent: Messages sent.
         calls: Method calls in order.
     """
 
-    sent: typing.ClassVar[list[object]] = []
+    sent: typing.ClassVar[list[email.message.EmailMessage]] = []
     calls: typing.ClassVar[list[str]] = []
 
     def __enter__(self) -> _FakeSmtp:
         """Enters the context.
 
         Returns:
-            Self.
+            This instance.
         """
         return self
 
@@ -171,13 +175,13 @@ class _FakeSmtp:
         """Records LOGIN.
 
         Args:
-            user: User.
-            password: Password.
+            user: User name, recorded.
+            password: Password, never recorded.
         """
         self.calls.append(f"login:{user}")
         del password
 
-    def send_message(self, message: object) -> None:
+    def send_message(self, message: email.message.EmailMessage) -> None:
         """Records a message.
 
         Args:
@@ -190,14 +194,14 @@ async def test_end_to_end_delivery_on_every_channel(
     outbox: ports.OutboxRepository,
     manual_clock: clock.ManualClock,
 ) -> None:
-    """One signal fans out to six channels with correct payloads."""
+    """A twice-published signal reaches each of six channels once, correctly."""
     ui_events: list[tuple[str, Mapping[str, object]]] = []
 
     async def ui_sink(tenant_id: str, payload: Mapping[str, object]) -> None:
-        """Records UI pushes.
+        """Records UI pushes in ``ui_events``.
 
         Args:
-            tenant_id: Tenant.
+            tenant_id: Tenant pushed to.
             payload: Signal payload.
         """
         ui_events.append((tenant_id, payload))
@@ -239,11 +243,11 @@ async def test_end_to_end_delivery_on_every_channel(
                         client, "http://exec.local/", SERVICE_TOKEN
                     ),
                     C.EMAIL: channels.EmailSender(
-                        _FakeSmtp,
+                        _FakeSmtp,  # type: ignore[arg-type]  # fake has only the SMTP calls EmailSender makes
                         "joseph@example.com",
                         username="u",
                         password="pw-SECRET",
-                    ),  # type: ignore[arg-type]
+                    ),
                 },
                 manual_clock,
             )
@@ -270,7 +274,7 @@ async def test_end_to_end_delivery_on_every_channel(
     assert json.loads(forward_request.content)["kind"] == "ENTRY_CONFIRMED"
     assert ui_events[0][0] == "tenant-a"
     assert _FakeSmtp.calls == ["starttls", "login:u"]
-    assert _FakeSmtp.sent[0]["To"] == "trader@example.com"  # type: ignore[index]
+    assert _FakeSmtp.sent[0]["To"] == "trader@example.com"
 
 
 async def test_retries_backoff_and_dead_letter(
@@ -345,7 +349,7 @@ async def test_client_errors_dead_letter_immediately(
     outbox: ports.OutboxRepository,
     manual_clock: clock.ManualClock,
 ) -> None:
-    """Non-retryable responses and unsafe URLs are not retried."""
+    """Client errors, unsafe URLs and missing senders dead-letter at once."""
     bad = model.new_delivery(_signal(), C.EXECUTION, "x", manual_clock.now_ms())
     insecure = model.new_delivery(
         _signal(),
@@ -427,34 +431,35 @@ async def test_quiet_hours_and_channel_policy_in_dispatch(
     assert [r.channel for r in box.all()] == [C.UI]
 
 
+class _Boom:
+    """Publisher that always fails, as a broken downstream would."""
+
+    async def publish(self, signal: signal_domain.Signal) -> None:
+        """Fails without publishing.
+
+        Args:
+            signal: Signal to publish.
+
+        Raises:
+            RuntimeError: Always.
+        """
+        raise RuntimeError("down")
+
+
 async def test_fanout_isolates_failing_publishers(
     manual_clock: clock.ManualClock,
 ) -> None:
     """A failing downstream publisher does not block the others."""
     seen: list[str] = []
 
-    class _Boom:
-        """Publisher that always fails."""
-
-        async def publish(self, signal: signal_domain.Signal) -> None:
-            """Raises.
-
-            Args:
-                signal: Signal.
-
-            Raises:
-                RuntimeError: Always.
-            """
-            raise RuntimeError("down")
-
     class _Ok:
-        """Publisher that records ids."""
+        """Publisher that records ids in ``seen``."""
 
         async def publish(self, signal: signal_domain.Signal) -> None:
             """Records the signal id.
 
             Args:
-                signal: Signal.
+                signal: Signal to publish.
             """
             seen.append(signal.signal_id)
 
@@ -471,11 +476,11 @@ async def test_worker_loop_starts_and_stops(
     delivered: list[str] = []
 
     async def sink(tenant_id: str, payload: Mapping[str, object]) -> None:
-        """Records deliveries.
+        """Records the tenant of each delivery in ``delivered``.
 
         Args:
-            tenant_id: Tenant.
-            payload: Payload.
+            tenant_id: Tenant delivered to.
+            payload: Signal payload (unused).
         """
         delivered.append(tenant_id)
         del payload
@@ -507,8 +512,8 @@ def test_senders_never_expose_secrets_in_repr() -> None:
         repr(channels.ExecutionForwarder(client, "http://x", SERVICE_TOKEN)),
         repr(
             channels.EmailSender(
-                _FakeSmtp,
-                "a@b.c",  # type: ignore[arg-type]
+                _FakeSmtp,  # type: ignore[arg-type]  # fake has only the SMTP calls EmailSender makes
+                "a@b.c",
                 password="pw-SECRET",
             )
         ),
@@ -517,7 +522,7 @@ def test_senders_never_expose_secrets_in_repr() -> None:
 
 
 def test_sql_subscriptions_round_trip(engine: sa.Engine) -> None:
-    """Subscriptions with quiet hours persist."""
+    """Subscriptions with quiet hours persist once per id, per tenant."""
     sql.create_schema(engine)
     repo = sql.SqlSubscriptionRepository(engine)
     sub = model.Subscription(

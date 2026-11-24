@@ -27,7 +27,7 @@ _T0 = 1_795_252_800_000
 _D = decimal.Decimal
 
 
-def bar(
+def _bar(
     start: int = _T0,
     *,
     close: str = "100",
@@ -36,18 +36,18 @@ def bar(
     received: int = 0,
     revision: int = 0,
 ) -> market.Candle:
-    """Builds a candle for tests.
+    """Builds a 5m BTCUSDT candle for tests.
 
     Args:
-        start: Bar start.
-        close: Close price.
-        volume: Volume.
-        final: Finality.
-        received: Receipt time.
-        revision: Revision.
+        start: Bar start, epoch milliseconds.
+        close: Close price; the bar opens at 100 and spans at least 99-101.
+        volume: Base volume.
+        final: Whether the bar is final.
+        received: Receipt time, epoch milliseconds.
+        revision: Revision number of a final bar.
 
     Returns:
-        Candle.
+        The candle.
     """
     price = _D(close)
     return market.Candle(
@@ -70,7 +70,7 @@ def bar(
 
 def test_first_observation_is_inserted() -> None:
     """A bar with no prior observation is inserted."""
-    result = candles.merge_candle(None, bar())
+    result = candles.merge_candle(None, _bar())
     assert result.action is candles.MergeAction.INSERTED
     assert result.changed
 
@@ -78,8 +78,8 @@ def test_first_observation_is_inserted() -> None:
 def test_live_update_replaces_live_bar() -> None:
     """A newer live update with more volume replaces the stored bar."""
     result = candles.merge_candle(
-        bar(volume="10", received=1),
-        bar(close="100.5", volume="12", received=2),
+        _bar(volume="10", received=1),
+        _bar(close="100.5", volume="12", received=2),
     )
     assert result.action is candles.MergeAction.UPDATED
     assert result.candle.close == _D("100.5")
@@ -87,28 +87,28 @@ def test_live_update_replaces_live_bar() -> None:
 
 def test_out_of_order_live_update_is_ignored() -> None:
     """Older receipt time or shrinking volume is treated as stale."""
-    stored = bar(volume="12", received=5)
+    stored = _bar(volume="12", received=5)
     assert (
-        candles.merge_candle(stored, bar(volume="13", received=4)).action
+        candles.merge_candle(stored, _bar(volume="13", received=4)).action
         is candles.MergeAction.IGNORED_STALE
     )
     assert (
-        candles.merge_candle(stored, bar(volume="11", received=6)).action
+        candles.merge_candle(stored, _bar(volume="11", received=6)).action
         is candles.MergeAction.IGNORED_STALE
     )
 
 
 def test_final_replaces_live() -> None:
     """A final observation finalizes a live bar."""
-    result = candles.merge_candle(bar(), bar(final=True, volume="15"))
+    result = candles.merge_candle(_bar(), _bar(final=True, volume="15"))
     assert result.action is candles.MergeAction.FINALIZED
     assert result.candle.is_final
 
 
 def test_live_never_overwrites_final() -> None:
     """A late live update cannot reopen a closed bar."""
-    stored = bar(final=True)
-    result = candles.merge_candle(stored, bar(close="105", received=99))
+    stored = _bar(final=True)
+    result = candles.merge_candle(stored, _bar(close="105", received=99))
     assert result.action is candles.MergeAction.IGNORED_STALE
     assert result.candle is stored
 
@@ -117,7 +117,7 @@ def test_identical_final_is_duplicate() -> None:
     """A repeated final observation is a duplicate."""
     assert (
         candles.merge_candle(
-            bar(final=True), bar(final=True, received=7)
+            _bar(final=True), _bar(final=True, received=7)
         ).action
         is candles.MergeAction.DUPLICATE
     )
@@ -126,7 +126,7 @@ def test_identical_final_is_duplicate() -> None:
 def test_changed_final_is_revised_with_incremented_revision() -> None:
     """Final bars are never mutated silently."""
     result = candles.merge_candle(
-        bar(final=True, revision=0), bar(final=True, close="100.1")
+        _bar(final=True, revision=0), _bar(final=True, close="100.1")
     )
     assert result.action is candles.MergeAction.REVISED
     assert result.candle.revision == 1
@@ -135,7 +135,7 @@ def test_changed_final_is_revised_with_incremented_revision() -> None:
 def test_merge_rejects_different_bars() -> None:
     """Merging two different bars is a programming error."""
     with pytest.raises(ValueError):
-        candles.merge_candle(bar(), bar(start=_T0 + _TF.duration_ms))
+        candles.merge_candle(_bar(), _bar(start=_T0 + _TF.duration_ms))
 
 
 def test_find_gaps_reports_missing_runs() -> None:
@@ -157,7 +157,7 @@ def test_find_gaps_rounds_start_up_to_boundary() -> None:
 
 def test_sort_unique_merges_duplicates() -> None:
     """Duplicate observations collapse to the best one per bar."""
-    rows = [bar(final=True), bar(received=3), bar(start=_T0 - 300_000)]
+    rows = [_bar(final=True), _bar(received=3), _bar(start=_T0 - 300_000)]
     result = candles.sort_unique(rows)
     assert [c.start_ms for c in result] == [_T0 - 300_000, _T0]
     assert result[1].is_final
@@ -165,7 +165,7 @@ def test_sort_unique_merges_duplicates() -> None:
 
 def test_finals_only_filters_live_bars() -> None:
     """Only closed bars survive."""
-    assert candles.finals_only([bar(), bar(start=_T0 + 300_000, final=True)])[
+    assert candles.finals_only([_bar(), _bar(start=_T0 + 300_000, final=True)])[
         0
     ].is_final
 
@@ -173,8 +173,8 @@ def test_finals_only_filters_live_bars() -> None:
 @hypothesis.given(strategies.permutations(list(range(6))))
 def test_final_wins_regardless_of_arrival_order(order: list[int]) -> None:
     """Any arrival order of live updates plus the final ends final."""
-    updates = [bar(volume=str(10 + i), received=i) for i in range(5)]
-    updates.append(bar(final=True, volume="20", received=10))
+    updates = [_bar(volume=str(10 + i), received=i) for i in range(5)]
+    updates.append(_bar(final=True, volume="20", received=10))
     stored = None
     for index in order:
         stored = candles.merge_candle(stored, updates[index]).candle
@@ -186,9 +186,9 @@ def test_final_wins_regardless_of_arrival_order(order: list[int]) -> None:
 def test_merge_is_idempotent_for_replays() -> None:
     """Re-applying the same sequence produces no further changes."""
     sequence = [
-        bar(volume="10", received=1),
-        bar(volume="11", received=2),
-        bar(final=True, volume="12", received=3),
+        _bar(volume="10", received=1),
+        _bar(volume="11", received=2),
+        _bar(final=True, volume="12", received=3),
     ]
     stored = None
     for update in sequence:
@@ -203,7 +203,9 @@ def test_gap_detection_matches_brute_force() -> None:
     for mask in itertools.product([0, 1], repeat=7):
         starts = [_T0 + i * step for i, present in enumerate(mask) if present]
         gaps = candles.find_gaps(starts, _TF, _T0, _T0 + 7 * step)
-        missing = {s for a, b in gaps for s in range(a, b, step)}
+        missing = set(
+            itertools.chain.from_iterable(range(a, b, step) for a, b in gaps)
+        )
         expected = {_T0 + i * step for i, p in enumerate(mask) if not p}
         assert missing == expected
 
@@ -211,7 +213,8 @@ def test_gap_detection_matches_brute_force() -> None:
 def test_revision_of_replaced_dataclass_keeps_identity() -> None:
     """Revised candles keep instrument, timeframe and start."""
     revised = candles.merge_candle(
-        bar(final=True), dataclasses.replace(bar(final=True), close=_D("100.2"))
+        _bar(final=True),
+        dataclasses.replace(_bar(final=True), close=_D("100.2")),
     ).candle
     assert (revised.instrument_id, revised.timeframe, revised.start_ms) == (
         _ID,
@@ -332,7 +335,11 @@ def test_coverage_gaps_match_brute_force(
     gaps = candles.find_gaps(
         present, _M30, *window, calendar=_XNYS, covered=covered
     )
-    reported = {s for low, high in gaps for s in _xnys_starts(low, high)}
+    reported = set(
+        itertools.chain.from_iterable(
+            _xnys_starts(low, high) for low, high in gaps
+        )
+    )
     expected = {
         s
         for s in slots

@@ -28,7 +28,7 @@ def _candle(**overrides: object) -> market.Candle:
         **overrides: Field values replacing the defaults.
 
     Returns:
-        A candle instance.
+        A final, live Binance BTCUSDT perpetual candle.
     """
     fields: dict[str, object] = {
         "instrument_id": _BTC,
@@ -46,7 +46,7 @@ def _candle(**overrides: object) -> market.Candle:
         "received_at_ms": 1_795_253_100_050,
     }
     fields.update(overrides)
-    return market.Candle(**fields)  # type: ignore[arg-type]
+    return market.Candle(**fields)  # type: ignore[arg-type]  # overrides are typed object; tests pass each field's real type
 
 
 def test_instrument_id_round_trips() -> None:
@@ -71,13 +71,13 @@ def test_instrument_id_rejects_ambiguous_symbols(text: str) -> None:
 
 
 def test_candle_rejects_misaligned_bounds() -> None:
-    """Bars must be aligned half-open intervals."""
+    """Bounds not aligned to the timeframe are rejected."""
     with pytest.raises(ValueError):
         _candle(start_ms=1_795_252_800_001, end_ms=1_795_253_100_001)
 
 
 def test_candle_rejects_close_outside_range() -> None:
-    """OHLC relationships are validated."""
+    """A close above the high is rejected."""
     with pytest.raises(ValueError):
         _candle(close=decimal.Decimal("120"))
 
@@ -135,13 +135,13 @@ def test_floor_to_step_never_rounds_up() -> None:
 
 
 def test_uuid7_is_time_ordered() -> None:
-    """UUIDv7 values sort in generation order."""
+    """UUIDv7 values sort in generation order and carry version 7."""
     generated = [ids.uuid7() for _ in range(200)]
     assert generated == sorted(generated)
     assert all(value[14] == "7" for value in generated)
 
 
 def test_stable_id_is_deterministic() -> None:
-    """Identical inputs yield identical ids."""
+    """Identical inputs yield identical ids; different inputs do not."""
     assert ids.stable_id("fvg", 1, "a") == ids.stable_id("fvg", 1, "a")
     assert ids.stable_id("fvg", 1, "a") != ids.stable_id("fvg", 2, "a")

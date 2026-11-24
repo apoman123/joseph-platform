@@ -1,11 +1,15 @@
 # Copyright 2026 apoman123
 # SPDX-License-Identifier: MIT
 
-"""Unit tests for semantic validation and compilation."""
+"""Unit tests for semantic validation and compilation.
+
+AOI is an area of interest: the price zone that an ``AOI_TOUCH`` node tests.
+"""
 
 from __future__ import annotations
 
 from collections.abc import Callable
+from typing import TypeAlias
 
 import pytest
 
@@ -14,7 +18,8 @@ from joseph.strategy.domain import ast
 from joseph.strategy.domain import compiler
 from joseph.strategy.testing import fixtures
 
-Make = Callable[..., ast.StrategyDefinition]
+Make: TypeAlias = Callable[..., ast.StrategyDefinition]
+"""The ``make_definition`` fixture: ``make(when=None, **overrides)``."""
 
 _TOUCH = {
     "op": "AOI_TOUCH",
@@ -28,10 +33,10 @@ def _codes(result: compiler.CompileResult) -> set[str]:
     """Collects error codes.
 
     Args:
-        result: Compile result.
+        result: Result of ``compile_strategy``.
 
     Returns:
-        Error codes.
+        The codes of its validation errors.
     """
     return {issue.code for issue in result.validation.errors}
 
@@ -40,10 +45,10 @@ def _warnings(result: compiler.CompileResult) -> set[str]:
     """Collects warning codes.
 
     Args:
-        result: Compile result.
+        result: Result of ``compile_strategy``.
 
     Returns:
-        Warning codes.
+        The codes of its validation warnings.
     """
     return {issue.code for issue in result.validation.warnings}
 
@@ -106,7 +111,7 @@ def test_removed_operator_fails(make_definition: Make) -> None:
 
 
 def test_bias_finer_than_signal_is_rejected(make_definition: Make) -> None:
-    """HTF bias cannot use a finer timeframe than the signal."""
+    """A higher-timeframe bias cannot use a finer timeframe than the signal."""
     when = {
         "op": "ALL",
         "children": [
@@ -352,7 +357,7 @@ def test_candle_operand_on_other_timeframe_is_rejected(
 def test_warnings_for_rr_floor_auto_live_and_fields(
     make_definition: Make,
 ) -> None:
-    """Non-blocking issues are reported as warnings."""
+    """A low risk-reward floor, AUTO_LIVE, unknown fields and constants warn."""
     when = {
         "op": "ALL",
         "children": [

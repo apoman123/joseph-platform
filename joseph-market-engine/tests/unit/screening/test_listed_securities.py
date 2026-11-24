@@ -1,7 +1,7 @@
 # Copyright 2026 apoman123
 # SPDX-License-Identifier: MIT
 
-"""Qualification of exchange-listed equities and bond ETFs; rates excluded."""
+"""Unit tests for qualifying listed equities and bond ETFs, not rates."""
 
 from __future__ import annotations
 
@@ -10,6 +10,7 @@ import datetime
 import decimal
 import zoneinfo
 from collections.abc import Callable
+from typing import TypeAlias
 
 import pytest
 
@@ -34,7 +35,7 @@ _GATES_WITHOUT_OI = [
     policy.Gate.SPREAD_PCT,
     policy.Gate.SLIPPAGE_50K_PCT,
 ]
-Validate = Callable[[str, str, object], None]
+Validate: TypeAlias = Callable[[str, str, object], None]
 
 
 def _listed(
@@ -49,12 +50,12 @@ def _listed(
     Args:
         instrument_id: Listed security.
         asset_class: Asset class.
-        turnover: Session turnover in the listing currency.
-        spread: Spread in percent.
-        slippage: Slippage in percent.
+        turnover: Session turnover in the listing currency, a decimal string.
+        spread: Spread in percent, a decimal string.
+        slippage: Slippage in percent, a decimal string.
 
     Returns:
-        Input.
+        A qualification input observed at ``_NOW``.
     """
     return policy.QualificationInput(
         instrument_id=instrument_id,
@@ -217,7 +218,7 @@ async def test_demo_stock_is_screened_with_equity_thresholds(
     adapter = _NoDerivativesMock(clock)
     qualification = service.QualificationService(
         {instruments.Venue.MOCK: adapter},
-        clock,  # type: ignore[dict-item]
+        clock,
     )
     report = await qualification.report(instruments.Venue.MOCK)
     contract_validate(
@@ -238,7 +239,7 @@ async def test_rate_venue_is_refused_and_skipped() -> None:
         {
             instruments.Venue.MOCK: mock.MockAdapter(clock),
             instruments.Venue.TREASURY: mock.MockAdapter(clock),
-        },  # type: ignore[dict-item]
+        },
         clock,
     )
     with pytest.raises(errors.UnsupportedError, match="rate series"):
@@ -256,7 +257,7 @@ def _ny(year: int, month: int, day: int, hour: int = 0) -> int:
         year: Year.
         month: Month.
         day: Day.
-        hour: Hour.
+        hour: Hour, 0-23.
 
     Returns:
         Epoch milliseconds.
@@ -267,7 +268,11 @@ def _ny(year: int, month: int, day: int, hour: int = 0) -> int:
 
 
 class _NoDerivativesMock(mock.MockAdapter):
-    """DEMO adapter counting open-interest and funding requests."""
+    """DEMO adapter counting open-interest and funding requests for stocks.
+
+    Attributes:
+        derivative_calls: Open-interest and funding requests made for stocks.
+    """
 
     def __init__(self, clock: clock_lib.Clock) -> None:
         """Initializes the adapter.
@@ -281,13 +286,13 @@ class _NoDerivativesMock(mock.MockAdapter):
     async def fetch_open_interest(
         self, instrument: instruments.InstrumentId
     ) -> market.OpenInterest:
-        """Counts the call, then delegates.
+        """Counts the call for a stock, then delegates.
 
         Args:
             instrument: Instrument.
 
         Returns:
-            Open interest.
+            The mock's open interest.
         """
         if instrument.market_type is instruments.MarketType.STOCK:
             self.derivative_calls += 1
@@ -296,13 +301,13 @@ class _NoDerivativesMock(mock.MockAdapter):
     async def fetch_funding(
         self, instrument: instruments.InstrumentId
     ) -> market.Funding:
-        """Counts the call, then delegates.
+        """Counts the call for a stock, then delegates.
 
         Args:
             instrument: Instrument.
 
         Returns:
-            Funding.
+            The mock's funding.
         """
         if instrument.market_type is instruments.MarketType.STOCK:
             self.derivative_calls += 1

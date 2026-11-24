@@ -6,6 +6,7 @@
 from __future__ import annotations
 
 import copy
+from typing import Any
 
 import pytest
 import sqlalchemy as sa
@@ -33,11 +34,11 @@ def repository(
     """Provides each repository implementation.
 
     Args:
-        request: Parametrization.
-        engine: SQLite engine.
+        request: Parametrization: ``memory`` or ``sql``.
+        engine: SQLite engine; the SQL repository creates its schema there.
 
     Returns:
-        Repository.
+        An empty repository.
     """
     if request.param == "memory":
         return memory.InMemoryStrategyRepository()
@@ -49,10 +50,10 @@ def _long_a(**changes: object) -> ast.StrategyDefinition:
     """Returns Long A with top-level changes.
 
     Args:
-        **changes: Field overrides.
+        **changes: Top-level contract fields to replace.
 
     Returns:
-        Definition.
+        The parsed definition.
     """
     raw = copy.deepcopy(
         fixtures.strategy_definitions()[fixtures.LONG_A].to_contract()
@@ -64,22 +65,22 @@ def _long_a(**changes: object) -> ast.StrategyDefinition:
 def _service(
     repository: ports.StrategyRepository,
     manual_clock: clock.ManualClock,
-    **kwargs: object,
+    **kwargs: Any,
 ) -> version_service.StrategyVersionService:
-    """Builds the service.
+    """Builds a version service over a repository.
 
     Args:
-        repository: Repository.
-        manual_clock: Clock.
-        **kwargs: Service options.
+        repository: Strategy repository.
+        manual_clock: Clock stamping versions.
+        **kwargs: ``StrategyVersionService`` options such as ``on_change``.
 
     Returns:
-        Service.
+        The service.
     """
     return version_service.StrategyVersionService(
         repository,
         manual_clock,
-        **kwargs,  # type: ignore[arg-type]
+        **kwargs,
     )
 
 
@@ -154,7 +155,7 @@ def test_activation_rules(
 def test_auto_live_cannot_be_activated(
     repository: ports.StrategyRepository, manual_clock: clock.ManualClock
 ) -> None:
-    """AUTO_LIVE activation is refused with TRADE_MODE_DISABLED."""
+    """AUTO_LIVE, unknown modes and out-of-universe instruments are refused."""
     service = _service(repository, manual_clock)
     v1 = service.create(ALICE, _long_a(execution_mode="AUTO_LIVE"))
     with pytest.raises(strategy_errors.TradeModeDisabledError) as caught:

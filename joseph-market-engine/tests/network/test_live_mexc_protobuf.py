@@ -52,7 +52,7 @@ async def _protobuf_pushes(
         klines: ``push.kline`` frames wanted.
 
     Returns:
-        Text frames and decoded binary pushes.
+        The text frames (acks, pongs) and the decoded binary pushes.
     """
     texts: list[str] = []
     pushes: list[dict[str, Any]] = []
@@ -92,16 +92,14 @@ async def _protobuf_pushes(
 
 
 async def test_live_protobuf_endpoint_pushes_binary_frames() -> None:
-    """Acks and pongs stay JSON text; deals and klines arrive as PB."""
+    """Acks and pongs stay JSON text; deals and klines arrive as Protobuf."""
     texts, pushes = await _protobuf_pushes(deals=3, klines=1)
     channels = {json.loads(text)["channel"] for text in texts}
     assert {"rs.sub.deal", "rs.sub.kline", "pong"} <= channels
-    deals = [
-        deal
-        for push in pushes
-        if push["channel"] == "push.deal"
-        for deal in push["data"]
-    ]
+    deals: list[dict[str, Any]] = []
+    for push in pushes:
+        if push["channel"] == "push.deal":
+            deals.extend(push["data"])
     assert len(deals) >= 3
     for deal in deals:
         assert deal["i"] > 0
@@ -128,14 +126,14 @@ async def test_live_adapter_streams_in_each_format(
     )[instruments.Venue.MEXC]
     trades = adapter.stream_trades(_BTC)
     got = [await asyncio.wait_for(anext(trades), 60) for _ in range(3)]
-    await trades.aclose()  # type: ignore[attr-defined]
+    await trades.aclose()  # type: ignore[attr-defined]  # stream_trades is typed AsyncIterator; its generator has aclose()
     assert len({t.trade_id for t in got}) == 3
     assert all(
         t.aggressor_side is not market.AggressorSide.UNKNOWN for t in got
     )
     candles = adapter.stream_candles(_BTC, timeframes.Timeframe.M1)
     candle = await asyncio.wait_for(anext(candles), 30)
-    await candles.aclose()  # type: ignore[attr-defined]
+    await candles.aclose()  # type: ignore[attr-defined]  # stream_candles is typed AsyncIterator; its generator has aclose()
     await adapter.close()
     assert candle.timeframe is timeframes.Timeframe.M1
     assert candle.base_volume >= 0

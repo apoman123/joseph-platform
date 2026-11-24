@@ -20,8 +20,8 @@ import decimal
 import json
 import pathlib
 from collections.abc import AsyncIterator
-from collections.abc import Callable
 from typing import Any
+from typing import TypeAlias
 
 import httpx
 import pytest
@@ -55,14 +55,15 @@ _FRAMES = {
 }
 _MEXC_CONTRACT = _D("0.0001")
 
-RawTrade = tuple[int, decimal.Decimal, bool]
+RawTrade: TypeAlias = tuple[int, decimal.Decimal, bool]
+"""``(time_ms, base_quantity, buyer_is_aggressor)`` read from a raw frame."""
 
 
 def _capture(venue: instruments.Venue) -> dict[str, Any]:
     """Loads a captured trade stream.
 
     Args:
-        venue: Venue.
+        venue: Venue whose capture to load.
 
     Returns:
         Capture with ``frames`` and ``captured_at_ms``.
@@ -78,11 +79,11 @@ def _raw_trades(venue: instruments.Venue, frames: list[str]) -> list[RawTrade]:
     """Reads ``(time, quantity, buyer aggressor)`` from raw frames.
 
     Args:
-        venue: Venue.
+        venue: Venue whose frame format to read.
         frames: Captured frames.
 
     Returns:
-        Trades by the venue's documented side field.
+        BTC trades in frame order, sided by the venue's documented field.
     """
     out: list[RawTrade] = []
     for frame in frames:
@@ -131,7 +132,11 @@ def _raw_trades(venue: instruments.Venue, frames: list[str]) -> list[RawTrade]:
 
 
 class _Replay:
-    """WebSocket double replaying frames, then idling."""
+    """WebSocket double replaying frames, then idling.
+
+    Attributes:
+        frames: Frames still to deliver, oldest first.
+    """
 
     def __init__(self, frames: list[str]) -> None:
         """Initializes the connection.
@@ -142,18 +147,18 @@ class _Replay:
         self.frames = list(frames)
 
     async def send(self, message: str) -> None:
-        """Accepts a sent frame.
+        """Accepts and discards a sent frame.
 
         Args:
-            message: Frame.
+            message: Frame payload.
         """
         del message
 
     async def recv(self) -> str:
-        """Returns the next frame or idles.
+        """Returns the next frame, or idles for an hour once none are left.
 
         Returns:
-            Frame.
+            The next frame; an empty string only after the idle wait.
         """
         if self.frames:
             return self.frames.pop(0)
@@ -161,14 +166,14 @@ class _Replay:
         return ""
 
 
-def _connect(frames: list[str]) -> Callable[[str], Any]:
-    """Builds a connector replaying ``frames``.
+def _connect(frames: list[str]) -> ws.ConnectFn:
+    """Builds a connector whose every connection replays ``frames``.
 
     Args:
-        frames: Frames.
+        frames: Frames each connection delivers.
 
     Returns:
-        Connect function.
+        The connect function.
     """
 
     @contextlib.asynccontextmanager
@@ -179,7 +184,7 @@ def _connect(frames: list[str]) -> Callable[[str], Any]:
             url: Ignored.
 
         Yields:
-            Connection.
+            A new replaying connection.
         """
         del url
         yield _Replay(frames)
@@ -202,7 +207,7 @@ async def test_recorded_taker_volume_follows_the_venue_side_field(
         [venue],
         clock,
         client=httpx.AsyncClient(),
-        connect=_connect(frames),  # type: ignore[arg-type]
+        connect=_connect(frames),
     )[venue]
     recorder = trade_recorder.TradeRecorder(
         {venue: adapter},
@@ -310,7 +315,7 @@ def test_trade_events_need_a_native_trade_stream(
             caps.market_data, native_ws_trades=False
         ),
     )
-    adapter.capabilities = lambda: quiet  # type: ignore[method-assign]
+    adapter.capabilities = lambda: quiet  # type: ignore[method-assign]  # stub the capabilities to drop the native trade stream
     with pytest.raises(errors.UnsupportedError):
         adapter.stream_trade_events(
             instruments.InstrumentId.parse(_BTC[instruments.Venue.LIGHTER])
@@ -328,7 +333,7 @@ async def test_primed_trade_events_start_coverage_at_the_prime_point(
         [instruments.Venue.BITGET],
         clock,
         client=httpx.AsyncClient(),
-        connect=_connect(capture["frames"]),  # type: ignore[arg-type]
+        connect=_connect(capture["frames"]),
     )[instruments.Venue.BITGET]
     assert isinstance(adapter, base.BaseVenueAdapter)
     instrument = instruments.InstrumentId.parse(_BTC[instruments.Venue.BITGET])
@@ -336,7 +341,7 @@ async def test_primed_trade_events_start_coverage_at_the_prime_point(
         instrument, prime_from_ms=clock.now_ms() - 1_000
     )
     first = await asyncio.wait_for(anext(events), 5)
-    await events.aclose()  # type: ignore[attr-defined]
+    await events.aclose()  # type: ignore[attr-defined]  # stream_trade_events is typed AsyncIterator; its generator has aclose()
     await adapter.close()
     assert first == ws.CoverageStart(clock.now_ms() - 1_000)
 
@@ -344,7 +349,7 @@ async def test_primed_trade_events_start_coverage_at_the_prime_point(
 async def test_bitget_widens_trade_windows_within_one_second(
     venue_api: respx.Router,
 ) -> None:
-    """Bitget returns nothing for bounds in one second, so asks wider."""
+    """Bitget returns nothing for bounds within one second, so it asks wider."""
     clock = clock_lib.ManualClock(1_795_349_300_000)
     adapter = factory.build_adapters(
         [instruments.Venue.BITGET], clock, client=httpx.AsyncClient()

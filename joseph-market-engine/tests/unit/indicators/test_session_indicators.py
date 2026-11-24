@@ -1,7 +1,7 @@
 # Copyright 2026 apoman123
 # SPDX-License-Identifier: MIT
 
-"""Indicator engine, plugins and queries on exchange session calendars."""
+"""Unit tests for indicator engines, plugins and queries on calendars."""
 
 from __future__ import annotations
 
@@ -12,6 +12,7 @@ import decimal
 import zoneinfo
 from collections.abc import Callable
 from collections.abc import Sequence
+from typing import TypeAlias
 
 import pytest
 
@@ -33,7 +34,7 @@ TF = timeframes.Timeframe
 NY = zoneinfo.ZoneInfo("America/New_York")
 ACME = testing.STOCK_INSTRUMENT
 XNYS = sessions.XNYS
-Validate = Callable[[str, str, object], None]
+Validate: TypeAlias = Callable[[str, str, object], None]
 
 
 def _ny(year: int, month: int, day: int, hour: int = 0, minute: int = 0) -> int:
@@ -57,11 +58,11 @@ def _stock_minutes(sessions_count: int, seed: int = 7) -> list[market.Candle]:
     """Builds ACME 1m bars for whole sessions from Mon 16 Nov 2026.
 
     Args:
-        sessions_count: Sessions to cover.
-        seed: Random seed.
+        sessions_count: Sessions to cover, 390 bars each.
+        seed: Random-walk seed.
 
     Returns:
-        1m candles.
+        1m candles on the XNYS session grid.
     """
     return testing.random_walk(
         390 * sessions_count,
@@ -72,7 +73,12 @@ def _stock_minutes(sessions_count: int, seed: int = 7) -> list[market.Candle]:
 
 
 class _Source:
-    """In-memory candle source recording requested windows."""
+    """In-memory candle source recording requested windows.
+
+    Attributes:
+        data: Candles served per timeframe; tests may replace a series.
+        requests: ``(timeframe, start_ms, end_ms)`` of every request, in order.
+    """
 
     def __init__(self, data: dict[TF, list[market.Candle]]) -> None:
         """Stores candles.
@@ -90,16 +96,16 @@ class _Source:
         start_ms: int,
         end_ms: int,
     ) -> Sequence[market.Candle]:
-        """Returns stored candles in the window.
+        """Returns stored candles in the window and records the request.
 
         Args:
             instrument_id: Ignored (single instrument).
-            timeframe: Timeframe.
-            start_ms: Window start.
-            end_ms: Window end.
+            timeframe: Timeframe to serve.
+            start_ms: Window start, inclusive, epoch ms.
+            end_ms: Window end, exclusive, epoch ms.
 
         Returns:
-            Candles.
+            The stored candles that start inside the window.
         """
         del instrument_id
         self.requests.append((timeframe, start_ms, end_ms))
@@ -114,7 +120,7 @@ class _Source:
 
 
 def test_builders_produce_session_bars() -> None:
-    """ACME 1m bars aggregate into 7 hourly bars and one daily bar."""
+    """ACME 1m bars aggregate into 7 hourly and 1 daily bar per session."""
     m1 = _stock_minutes(2)
     assert m1[0].start_ms == _ny(2026, 11, 16, 9, 30)
     assert m1[389].end_ms == _ny(2026, 11, 16, 16)
@@ -157,7 +163,7 @@ def _daily_bias_engine() -> engine_lib.IndicatorEngine:
     """Builds an ACME engine with 1h frames and 1h/1d daily bias.
 
     Returns:
-        Engine.
+        The engine.
     """
     return engine_lib.IndicatorEngine(
         catalog.build_default_registry(),
@@ -273,12 +279,10 @@ def test_every_plugin_runs_on_session_bars() -> None:
     frames = engine.run(data)
     assert len(frames) == len(data[TF.M5])
     assert all(frame.missing_bars == 0 for frame in frames)
-    aois = [
-        aoi
-        for frame in frames
-        for snapshot in frame.snapshots.values()
-        for aoi in snapshot.aois
-    ]
+    aois: list[structures.Aoi] = []
+    for frame in frames:
+        for snapshot in frame.snapshots.values():
+            aois.extend(snapshot.aois)
     assert aois
     for aoi in aois:
         assert aoi.confirmed_at_ms <= aoi.as_of_ms
@@ -308,10 +312,10 @@ def _classified(
 
     Args:
         candles: Source candles.
-        share: Fraction of the volume classified as buys.
+        share: Fraction of the volume classified as buys, a decimal string.
 
     Returns:
-        Candles with ``buy_volume_method = classified``.
+        Copies of the candles with ``buy_volume_method = classified``.
     """
     return [
         dataclasses.replace(
@@ -435,11 +439,12 @@ def _query(
     """Builds a query service over 1m bars.
 
     Args:
-        bars: 1m candles.
-        config: Optional tuning.
+        bars: 1m candles to serve.
+        config: Query tuning, or None for the defaults.
 
     Returns:
-        Service, source and clock.
+        The service, its recording source and a manual clock at the end of
+        the last bar.
     """
     source = _Source({TF.M1: bars})
     clock = clock_lib.ManualClock(bars[-1].end_ms)
@@ -545,10 +550,13 @@ def test_anchor_cap_counts_every_closed_bar_on_a_boundary(
         """Requests the anchored VWAP anchored at one bar.
 
         Args:
-            anchor_index: Index of the anchor bar.
+            anchor_index: Index of the anchor bar in ``bars``.
 
         Returns:
             Contract ``IndicatorSnapshotList``.
+
+        Raises:
+            errors.ValidationFailedError: The anchor is beyond the bar cap.
         """
         anchor = bars[anchor_index].start_ms
         return asyncio.run(
@@ -561,7 +569,7 @@ def test_anchor_cap_counts_every_closed_bar_on_a_boundary(
             )
         )
 
-    values = snapshot(-2_500)["snapshots"][0]["values"]  # type: ignore[index]
+    values = snapshot(-2_500)["snapshots"][0]["values"]  # type: ignore[index]  # contract payloads are typed dict[str, object]
     assert values["bars"] == 2_500
     with pytest.raises(errors.ValidationFailedError, match="is 2501 closed"):
         snapshot(-2_501)
@@ -583,7 +591,7 @@ def test_only_anchored_requests_are_widened() -> None:
         )
     )
     first_mixed = min(start for _, start, _ in source.requests)
-    values = mixed["snapshots"][0]["values"]  # type: ignore[index]
+    values = mixed["snapshots"][0]["values"]  # type: ignore[index]  # contract payloads are typed dict[str, object]
     assert values["anchor_in_window"] is False
     alone = asyncio.run(
         query.snapshots(
@@ -593,7 +601,7 @@ def test_only_anchored_requests_are_widened() -> None:
             settings=settings,
         )
     )
-    assert alone["snapshots"][0]["values"]["anchor_in_window"] is True  # type: ignore[index]
+    assert alone["snapshots"][0]["values"]["anchor_in_window"] is True  # type: ignore[index]  # contract payloads are typed dict[str, object]
     assert min(start for _, start, _ in source.requests) < first_mixed
 
 
@@ -632,7 +640,7 @@ def test_anchored_series_continue_incrementally() -> None:
         )
     )
     assert second == expected
-    assert len(second["points"]) == len(first["points"]) + 3  # type: ignore[arg-type]
+    assert len(second["points"]) == len(first["points"]) + 3  # type: ignore[arg-type]  # contract payloads are typed dict[str, object]
 
 
 def test_revised_bar_restarts_an_anchored_run() -> None:
@@ -692,7 +700,7 @@ def test_anchored_cache_respects_its_point_budget() -> None:
                 settings=settings,
             )
         )
-        assert len(series["points"]) == 2_200  # type: ignore[arg-type]
+        assert len(series["points"]) == 2_200  # type: ignore[arg-type]  # contract payloads are typed dict[str, object]
         # Recomputed from the anchor each time (nothing cached).
         assert min(start for _, start, _ in source.requests) <= bars[0].start_ms
 
@@ -761,8 +769,8 @@ def test_anchored_studies_build_on_a_24x7_calendar_by_default() -> None:
     vwap = packaged.AnchoredVwapPlugin()
     settings = vwap.resolve_settings({"anchor": "time", "anchor_ms": 90_000})
     built = vwap._build(settings, decimal.Decimal("0.01"), TF.M1)
-    assert built["main"].anchor_time_ms == 60_000  # type: ignore[attr-defined]
+    assert built["main"].anchor_time_ms == 60_000  # type: ignore[attr-defined]  # _build returns library objects typed as object
     regression = packaged.RegressionChannelPlugin()
     settings = regression.resolve_settings({"anchor_ms": 90_000})
     built = regression._build(settings, decimal.Decimal("0.01"), TF.M1)
-    assert built["main"].anchor_time_ms == 60_000  # type: ignore[attr-defined]
+    assert built["main"].anchor_time_ms == 60_000  # type: ignore[attr-defined]  # _build returns library objects typed as object

@@ -10,6 +10,7 @@ import json
 import pathlib
 from collections.abc import Callable
 from typing import Any
+from typing import TypeAlias
 
 import httpx
 import pytest
@@ -18,18 +19,18 @@ from fastapi import testclient
 
 from joseph import bootstrap
 
-Validate = Callable[[str, str, object], None]
+Validate: TypeAlias = Callable[[str, str, object], None]
 
 
-def _fixture_rows(venue: str, name: str) -> list[dict[str, object]]:
+def _fixture_rows(venue: str, name: str) -> list[dict[str, Any]]:
     """Reads a captured venue fixture.
 
     Args:
-        venue: Venue directory.
+        venue: Venue directory under ``fixtures/venues``.
         name: File name without extension.
 
     Returns:
-        Parsed rows.
+        The fixture's JSON rows.
     """
     path = (
         pathlib.Path(__file__).resolve().parents[3]
@@ -38,16 +39,16 @@ def _fixture_rows(venue: str, name: str) -> list[dict[str, object]]:
         / venue
         / f"{name}.json"
     )
-    rows: list[dict[str, object]] = json.loads(path.read_text())
+    rows: list[dict[str, Any]] = json.loads(path.read_text())
     return rows
 
 
 def _error(response: httpx.Response, status: int, code: str) -> None:
-    """Asserts a contract error response.
+    """Asserts a contract error response with a matching trace id.
 
     Args:
-        response: Response.
-        status: Expected status.
+        response: Response to check.
+        status: Expected HTTP status.
         code: Expected error code.
     """
     assert response.status_code == status, response.text
@@ -227,7 +228,7 @@ def test_all_venues_served_from_captured_fixtures(
     venue_client: tuple[testclient.TestClient, respx.Router],
     contract_validate: Validate,
 ) -> None:
-    """Every real venue answers candles and snapshots via its adapter."""
+    """Each crypto venue serves candles and snapshots from captured fixtures."""
     client, _ = venue_client
     venues = client.get("/v1/venues").json()
     contract_validate("market.schema.json", "VenueStatusList", venues)
@@ -316,13 +317,13 @@ def test_weekly_bars_are_aggregated_not_relabelled(
 )
 def test_venue_failures_map_to_contract_errors(
     venue_client: tuple[testclient.TestClient, respx.Router],
-    side_effect: object,
+    side_effect: httpx.Response | Exception,
     status: int,
     code: str,
     retryable: bool,
     binance_handler: Callable[[httpx.Request], httpx.Response],
 ) -> None:
-    """Rate limits and outages surface as retryable errors."""
+    """Rate limits and outages are retryable errors recorded in venue health."""
     client, router = venue_client
     original = binance_handler
 
@@ -330,19 +331,19 @@ def test_venue_failures_map_to_contract_errors(
         """Fails klines requests and serves everything else.
 
         Args:
-            request: Request.
+            request: Request to the Binance host.
 
         Returns:
-            Response.
+            The configured failure response for klines, else the fixture.
 
         Raises:
-            Exception: The configured transport error.
+            Exception: The configured transport error, for klines.
         """
         if not request.url.path.endswith("/klines"):
             return original(request)
         if isinstance(side_effect, Exception):
             raise side_effect
-        return side_effect  # type: ignore[return-value]
+        return side_effect
 
     router.route(host="fapi.binance.com").mock(side_effect=failing)
     response = client.get(
@@ -360,8 +361,10 @@ def test_venue_failures_map_to_contract_errors(
     assert binance["health"]["last_error"]
 
 
-def _receive_until(ws: Any, kind: str, limit: int = 20) -> dict[str, object]:
+def _receive_until(ws: Any, kind: str, limit: int = 20) -> dict[str, Any]:
     """Receives envelopes until one of ``kind`` arrives.
+
+    Envelopes of other types are read and dropped.
 
     Args:
         ws: WebSocket session.
@@ -369,15 +372,15 @@ def _receive_until(ws: Any, kind: str, limit: int = 20) -> dict[str, object]:
         limit: Maximum frames to read.
 
     Returns:
-        The matching envelope.
+        The matching envelope as decoded JSON.
 
     Raises:
         AssertionError: If not received within ``limit`` frames.
     """
     for _ in range(limit):
-        envelope = json.loads(ws.receive_text())
+        envelope: dict[str, Any] = json.loads(ws.receive_text())
         if envelope["type"] == kind:
-            return envelope  # type: ignore[no-any-return]
+            return envelope
     raise AssertionError(f"no {kind} envelope")
 
 
@@ -407,7 +410,7 @@ def test_ws_streams_contract_valid_candles(
         candle = _receive_until(ws, "candle.updated")
         contract_validate("stream.schema.json", "StreamEnvelope", candle)
         contract_validate("market.schema.json", "Candle", candle["payload"])
-        assert candle["sequence"] > 0  # type: ignore[operator]
+        assert candle["sequence"] > 0
         assert candle["channel"] == "candles:mock:perp:BTCUSD:1m"
         ws.send_text(
             json.dumps(
@@ -433,7 +436,7 @@ def test_ws_rejects_bad_frames_and_actions(
     """Malformed input yields error envelopes, not disconnects."""
     with demo_client.websocket_connect("/v1/stream/market") as ws:
         ws.send_text("not json")
-        assert _receive_until(ws, "error")["payload"]["code"] == (  # type: ignore[index]
+        assert _receive_until(ws, "error")["payload"]["code"] == (
             "VALIDATION_FAILED"
         )
         ws.send_text(json.dumps({"action": "dance"}))
@@ -470,7 +473,7 @@ def test_ws_signals_require_token_and_are_tenant_scoped(
             )
         )
         error = _receive_until(anon, "error")
-        assert error["payload"]["code"] == "UNAUTHENTICATED"  # type: ignore[index]
+        assert error["payload"]["code"] == "UNAUTHENTICATED"
     url = "/v1/stream/market?token="
     with (
         demo_client.websocket_connect(url + token_a) as ws_a,
@@ -489,7 +492,7 @@ def test_ws_signals_require_token_and_are_tenant_scoped(
                 "channels": ["signals"]
             }
         hub = demo_container.stream_hub
-        demo_client.portal.call(  # type: ignore[union-attr]
+        demo_client.portal.call(  # type: ignore[union-attr]  # the portal is set while the client is open
             lambda: hub.publish(
                 "signals",
                 "signal.created",
@@ -497,7 +500,7 @@ def test_ws_signals_require_token_and_are_tenant_scoped(
                 tenant_id="tenant-02",
             )
         )
-        demo_client.portal.call(  # type: ignore[union-attr]
+        demo_client.portal.call(  # type: ignore[union-attr]  # the portal is set while the client is open
             lambda: hub.publish(
                 "signals",
                 "signal.created",
@@ -531,14 +534,14 @@ def test_ws_resume_replays_or_requires_snapshot(
         """Publishes three health envelopes.
 
         Returns:
-            Sequence of the first one.
+            The sequence number of the first one.
         """
         first = hub.publish("feed_health", "feed.health", {"n": 1}).sequence
         hub.publish("feed_health", "feed.health", {"n": 2})
         hub.publish("feed_health", "feed.health", {"n": 3})
         return first
 
-    first = demo_client.portal.call(burst)  # type: ignore[union-attr]
+    first = demo_client.portal.call(burst)  # type: ignore[union-attr]  # the portal is set while the client is open
     with demo_client.websocket_connect("/v1/stream/market") as ws:
         ws.send_text(
             json.dumps(
@@ -558,11 +561,11 @@ def test_ws_resume_replays_or_requires_snapshot(
         assert [e["payload"] for e in replayed][-2:] == [{"n": 2}, {"n": 3}]
 
     def flood() -> None:
-        """Publishes past the retention window."""
+        """Publishes five envelopes more than the hub retains."""
         for i in range(demo_container.settings.stream_retention + 5):
             hub.publish("qualification", "qualification.changed", {"i": i})
 
-    demo_client.portal.call(flood)  # type: ignore[union-attr]
+    demo_client.portal.call(flood)  # type: ignore[union-attr]  # the portal is set while the client is open
     with demo_client.websocket_connect("/v1/stream/market") as ws:
         ws.send_text(
             json.dumps(
@@ -598,7 +601,7 @@ def test_ws_native_mode_on_rest_only_venue_is_unsupported(
             )
         )
         error = _receive_until(ws, "error")
-        assert error["payload"]["code"] == "UNSUPPORTED"  # type: ignore[index]
+        assert error["payload"]["code"] == "UNSUPPORTED"
         assert _receive_until(ws, "subscribed")["payload"] == {"channels": []}
 
 
@@ -723,4 +726,4 @@ def test_ws_streams_demo_seconds_candles(
         candle = _receive_until(ws, "candle.updated", limit=200)
         contract_validate("market.schema.json", "Candle", candle["payload"])
         assert candle["channel"] == "candles:mock:perp:ETHUSD:1s"
-        assert candle["payload"]["source"] == "mock.trades"  # type: ignore[index]
+        assert candle["payload"]["source"] == "mock.trades"

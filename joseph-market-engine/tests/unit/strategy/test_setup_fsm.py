@@ -1,7 +1,10 @@
 # Copyright 2026 apoman123
 # SPDX-License-Identifier: MIT
 
-"""Setup state machine: transition table, checkpoints and lifecycle."""
+"""Setup state machine: transition table, checkpoints and lifecycle.
+
+AOI is an area of interest, the price zone a setup is anchored to.
+"""
 
 from __future__ import annotations
 
@@ -10,12 +13,14 @@ import dataclasses
 import decimal
 import itertools
 from collections.abc import Sequence
+from typing import Any
 
 import pytest
 
 from joseph.domain import quality
 from joseph.domain import structures
 from joseph.domain import timeframes
+from joseph.signals.domain import signal as signal_domain
 from joseph.strategy.app import processor
 from joseph.strategy.domain import ast
 from joseph.strategy.domain import compiler
@@ -88,7 +93,7 @@ def test_terminal_states() -> None:
 
 
 def test_checkpoint_round_trip() -> None:
-    """Instance state survives serialization."""
+    """Instance state survives serialization; a malformed dict is rejected."""
     key = setup_fsm.InstanceKey(
         "t1", "s:v1", "*", "binance:perp:BTCUSDT", "LONG"
     )
@@ -137,10 +142,11 @@ def _definition(
 
     Args:
         strategy_id: Fixture strategy id.
-        **notification: Notification overrides (``setup`` key accepted).
+        **notification: Notification fields to replace; a ``setup`` key
+            replaces the setup policy instead.
 
     Returns:
-        Definition.
+        The parsed definition.
     """
     raw = copy.deepcopy(
         fixtures.strategy_definitions()[strategy_id].to_contract()
@@ -157,13 +163,13 @@ def _definition(
 def _processor(
     definition: ast.StrategyDefinition,
 ) -> processor.InstanceProcessor:
-    """Builds a processor for the BTC instrument.
+    """Builds a paper-mode processor for ``binance:perp:BTCUSDT``.
 
     Args:
-        definition: Definition.
+        definition: Definition that must compile.
 
     Returns:
-        Processor.
+        The processor.
     """
     plan = compiler.compile_strategy(definition).plan
     assert plan is not None
@@ -181,23 +187,23 @@ def _processor(
 def _run(
     proc: processor.InstanceProcessor,
     frames: Sequence[structures.BarFrame],
-    **kwargs: object,
+    **kwargs: Any,
 ) -> list[tuple[int, str, str]]:
     """Feeds frames and collects ``(bar index, kind, state)``.
 
     Args:
-        proc: Processor.
-        frames: Frames.
-        **kwargs: Extra ``step`` arguments.
+        proc: Processor to step.
+        frames: Frames in bar order.
+        **kwargs: Extra keyword arguments of ``step``.
 
     Returns:
-        Emitted signal summaries.
+        ``(bar index, signal kind, setup state)`` of every signal, in order.
     """
     base = frame_testing.BASE_MS
     tf_ms = proc.plan.definition.signal_timeframe.duration_ms
-    out = []
+    out: list[tuple[int, str, str]] = []
     for frame in frames:
-        result = proc.step(frame, evaluated_at_ms=frame.close_ms, **kwargs)  # type: ignore[arg-type]
+        result = proc.step(frame, evaluated_at_ms=frame.close_ms, **kwargs)
         for signal in result.signals:
             index = (signal.bar_start_ms - base) // tf_ms
             out.append((index, signal.kind, signal.setup_state))
@@ -239,7 +245,7 @@ def test_expire_after_bars() -> None:
 def test_missing_target_blocks_the_entry_as_unknown() -> None:
     """No opposing liquidity: ENTRY_BLOCKED with an UNKNOWN risk status."""
     proc = _processor(_definition())
-    signals = []
+    signals: list[signal_domain.Signal] = []
     for frame in scenarios.long_a_frames(scenarios.WorldOptions(target=False)):
         signals.extend(proc.step(frame, evaluated_at_ms=frame.close_ms).signals)
     assert [s.kind for s in signals] == ["ENTRY_BLOCKED"]
@@ -254,7 +260,7 @@ def test_unqualified_instrument_is_blocked() -> None:
         (tristate.TriState.UNKNOWN, "UNKNOWN"),
     ):
         proc = _processor(_definition())
-        signals = []
+        signals: list[signal_domain.Signal] = []
         for frame in scenarios.long_a_frames():
             signals.extend(
                 proc.step(
@@ -276,7 +282,7 @@ def test_rr_below_floor_blocks() -> None:
     assert isinstance(risk, dict)
     risk["min_rr"] = "8"
     proc = _processor(ast.parse_definition(raw))
-    signals = []
+    signals: list[signal_domain.Signal] = []
     for frame in scenarios.long_a_frames():
         signals.extend(proc.step(frame, evaluated_at_ms=frame.close_ms).signals)
     assert [(s.kind, s.risk_status) for s in signals] == [
@@ -302,11 +308,11 @@ def _reenter(
     """Repeats the Long A trigger (sweep then failure) ending at ``index``.
 
     Args:
-        frames: Long A frames.
-        index: New entry bar.
+        frames: Long A frames; left unchanged.
+        index: Bar of the new entry; the sweep goes two bars earlier.
 
     Returns:
-        Modified frames.
+        A copy of the frames with the trigger repeated.
     """
     factory = frame_testing.FrameFactory()
     entry = frames[30]
@@ -388,17 +394,15 @@ def test_duplicate_and_out_of_order_frames_emit_nothing_new() -> None:
     """Replayed and late frames never produce a second signal."""
     clean = scenarios.long_a_frames()
     proc = _processor(_definition())
-    once = [
-        s
-        for f in clean
-        for s in proc.step(f, evaluated_at_ms=f.close_ms).signals
-    ]
+    once: list[signal_domain.Signal] = []
+    for frame in clean:
+        once.extend(proc.step(frame, evaluated_at_ms=frame.close_ms).signals)
     noisy_proc = _processor(_definition())
-    noisy = [
-        s
-        for f in scenarios.with_duplicates(clean)
-        for s in noisy_proc.step(f, evaluated_at_ms=f.close_ms).signals
-    ]
+    noisy: list[signal_domain.Signal] = []
+    for frame in scenarios.with_duplicates(clean):
+        noisy.extend(
+            noisy_proc.step(frame, evaluated_at_ms=frame.close_ms).signals
+        )
     assert [s.signal_id for s in once] == [s.signal_id for s in noisy]
     assert len(once) == 1
 
@@ -451,11 +455,9 @@ def test_cancel_closes_open_setup() -> None:
 def test_signal_payload_traces_the_decision() -> None:
     """The entry signal carries versions, hashes, reasons and levels."""
     proc = _processor(_definition())
-    signals = [
-        s
-        for f in scenarios.long_a_frames()
-        for s in proc.step(f, evaluated_at_ms=f.close_ms).signals
-    ]
+    signals: list[signal_domain.Signal] = []
+    for frame in scenarios.long_a_frames():
+        signals.extend(proc.step(frame, evaluated_at_ms=frame.close_ms).signals)
     signal = signals[0]
     assert signal.aoi_ids == ("fvg-5m-long",)
     assert signal.range_ids == ("rng-1h-1",)

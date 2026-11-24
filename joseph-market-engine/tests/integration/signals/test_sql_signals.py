@@ -1,7 +1,7 @@
 # Copyright 2026 apoman123
 # SPDX-License-Identifier: MIT
 
-"""SQL signal repository: unique dedupe keys, filters and isolation."""
+"""Signal repositories (memory and SQL): dedupe keys, filters, isolation."""
 
 from __future__ import annotations
 
@@ -26,16 +26,16 @@ def _signal(
     kind: str = "ENTRY_CONFIRMED",
     instrument: str = "binance:perp:BTCUSDT",
 ) -> signal_domain.Signal:
-    """Builds a signal whose bar closes at ``n`` minutes.
+    """Builds a signal whose bar spans minute ``n`` to ``n + 1``.
 
     Args:
-        n: Bar index.
-        tenant: Tenant.
-        kind: Kind.
-        instrument: Instrument.
+        n: Bar index in minutes; it also names the setup.
+        tenant: Owning tenant id.
+        kind: Signal kind.
+        instrument: Canonical instrument id.
 
     Returns:
-        Signal.
+        The signal; equal arguments give the same ``signal_id``.
     """
     key = f"{tenant}|s:v1|*|{instrument}|LONG|setup-{n}|{kind}"
     return signal_domain.Signal(
@@ -79,11 +79,11 @@ def repository(
     """Provides each repository implementation.
 
     Args:
-        request: Parametrization.
-        engine: SQLite engine.
+        request: Parametrization: ``memory`` or ``sql``.
+        engine: SQLite engine; the SQL repository creates its schema there.
 
     Returns:
-        Repository.
+        An empty repository.
     """
     if request.param == "memory":
         return memory.InMemorySignalRepository()
@@ -102,7 +102,7 @@ def test_dedupe_key_is_unique(repository: ports.SignalRepository) -> None:
 def test_query_filters_order_and_isolation(
     repository: ports.SignalRepository,
 ) -> None:
-    """Filters apply, newest first, scoped to the tenant."""
+    """Filters apply newest first within the tenant; bad filters are refused."""
     for n in range(5):
         repository.add(_signal(n))
     repository.add(_signal(9, kind="ENTRY_BLOCKED"))

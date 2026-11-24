@@ -28,7 +28,7 @@ from joseph.strategy.testing import scenarios
 TF = timeframes.Timeframe
 _SETTINGS = hypothesis.settings(max_examples=30, deadline=None)
 
-_options = st.builds(
+_OPTIONS = st.builds(
     scenarios.WorldOptions,
     bars=st.just(40),
     entry_index=st.integers(min_value=12, max_value=37),
@@ -52,7 +52,7 @@ def _processor() -> processor.InstanceProcessor:
     """Builds a Long A processor.
 
     Returns:
-        Processor.
+        A PAPER processor for the tenant-01 BTCUSDT long instance.
     """
     definition = fixtures.strategy_definitions()[fixtures.LONG_A]
     plan = compiler.compile_strategy(definition).plan
@@ -75,24 +75,23 @@ def _processor() -> processor.InstanceProcessor:
 def _signals(
     frames: Sequence[structures.BarFrame],
 ) -> list[signal_domain.Signal]:
-    """Runs a fresh processor over frames.
+    """Runs a fresh processor over frames, evaluating at each close.
 
     Args:
-        frames: Frames.
+        frames: Frames in delivery order.
 
     Returns:
-        Emitted signals.
+        The emitted signals, in order.
     """
     proc = _processor()
-    return [
-        s
-        for f in frames
-        for s in proc.step(f, evaluated_at_ms=f.close_ms).signals
-    ]
+    signals: list[signal_domain.Signal] = []
+    for frame in frames:
+        signals.extend(proc.step(frame, evaluated_at_ms=frame.close_ms).signals)
+    return signals
 
 
 @_SETTINGS
-@hypothesis.given(_options)
+@hypothesis.given(_OPTIONS)
 def test_replay_is_deterministic(options: scenarios.WorldOptions) -> None:
     """The same frames always yield the same signals."""
     frames = scenarios.long_a_frames(options)
@@ -100,7 +99,7 @@ def test_replay_is_deterministic(options: scenarios.WorldOptions) -> None:
 
 
 @_SETTINGS
-@hypothesis.given(_options, st.integers(min_value=2, max_value=6))
+@hypothesis.given(_OPTIONS, st.integers(min_value=2, max_value=6))
 def test_duplicates_and_late_frames_change_nothing(
     options: scenarios.WorldOptions,
     every: int,
@@ -114,7 +113,7 @@ def test_duplicates_and_late_frames_change_nothing(
 
 
 @_SETTINGS
-@hypothesis.given(_options)
+@hypothesis.given(_OPTIONS)
 def test_batch_equals_incremental(options: scenarios.WorldOptions) -> None:
     """Evaluating each prefix equals the processor's incremental result."""
     frames = scenarios.long_a_frames(options)
@@ -131,7 +130,7 @@ def test_batch_equals_incremental(options: scenarios.WorldOptions) -> None:
 
 @_SETTINGS
 @hypothesis.given(
-    _options,
+    _OPTIONS,
     st.integers(min_value=5, max_value=35),
     st.randoms(use_true_random=False),
 )
@@ -163,13 +162,13 @@ def test_future_bars_never_change_past_signals(
     cutoff = frames[cut].close_ms
 
     def early(signals: list[signal_domain.Signal]) -> list[str]:
-        """Selects ids of signals up to the cut.
+        """Selects ids of signals whose bar closes by the cut.
 
         Args:
-            signals: Signals.
+            signals: Signals to filter.
 
         Returns:
-            Ids.
+            Their ids, in order.
         """
         return [s.signal_id for s in signals if s.bar_close_ms <= cutoff]
 

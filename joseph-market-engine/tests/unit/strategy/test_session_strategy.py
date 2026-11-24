@@ -9,9 +9,12 @@ import copy
 import datetime
 import zoneinfo
 from collections.abc import Callable
+from typing import Any
+from typing import TypeAlias
 
 import pytest
 
+from joseph.domain import clock as clock_lib
 from joseph.domain import errors
 from joseph.domain import identity
 from joseph.domain import instruments
@@ -30,7 +33,8 @@ from joseph.strategy.testing import scenarios
 TF = timeframes.Timeframe
 NY = zoneinfo.ZoneInfo("America/New_York")
 ACME = "mock:stock:ACME"
-Make = Callable[..., ast.StrategyDefinition]
+Make: TypeAlias = Callable[..., ast.StrategyDefinition]
+"""The ``make_definition`` fixture: ``make(when=None, **overrides)``."""
 _ALL_KINDS = [
     "WATCHING_AOI",
     "PRE_SIGNAL",
@@ -48,14 +52,14 @@ _TOUCH = {
 
 
 def _ny(year: int, month: int, day: int, hour: int = 0, minute: int = 0) -> int:
-    """Returns UTC epoch ms of a New York wall time.
+    """Returns a New York wall time in epoch milliseconds.
 
     Args:
-        year: Year.
-        month: Month.
-        day: Day.
-        hour: Hour.
-        minute: Minute.
+        year: Calendar year.
+        month: Month, 1-12.
+        day: Day of the month.
+        hour: Hour of the day, New York time.
+        minute: Minute of the hour.
 
     Returns:
         Epoch milliseconds.
@@ -70,11 +74,11 @@ def _codes(
     """Collects issue codes.
 
     Args:
-        result: Compile result.
+        result: Result of ``compile_strategy``.
         warnings: Collect warnings instead of errors.
 
     Returns:
-        Codes.
+        The codes of the validation errors, or of the warnings.
     """
     issues = (
         result.validation.warnings if warnings else result.validation.errors
@@ -85,14 +89,14 @@ def _codes(
 def _universe(
     venues: list[str], whitelist: list[str] | None = None
 ) -> dict[str, object]:
-    """Builds a universe override.
+    """Builds a universe override that qualifies any instrument at once.
 
     Args:
         venues: Venue names.
-        whitelist: Optional explicit instruments.
+        whitelist: Instrument ids listed explicitly; none when ``None``.
 
     Returns:
-        Universe object.
+        The universe in contract form, without a blacklist.
     """
     return {
         "qualification": "ANY",
@@ -141,11 +145,13 @@ def test_lifecycle_counts_bars_on_the_calendar(
 def _acme_run(definition: ast.StrategyDefinition) -> list[tuple[int, str]]:
     """Runs the Long A world on ACME with the entry on Friday's last bar.
 
+    The world has 90 session bars and no sweep event.
+
     Args:
-        definition: Strategy definition.
+        definition: Strategy definition to run in paper mode.
 
     Returns:
-        ``(bar index, signal kind)`` of every emission.
+        ``(bar index, signal kind)`` of every emission, in order.
     """
     plan = compiler.compile_strategy(definition).plan
     assert plan is not None
@@ -159,7 +165,7 @@ def _acme_run(definition: ast.StrategyDefinition) -> list[tuple[int, str]]:
     frames = scenarios.long_a_frames(options, instrument_id=ACME)
     factory = frame_testing.FrameFactory(instrument_id=ACME)
     index = {factory.start(i): i for i in range(90)}
-    out = []
+    out: list[tuple[int, str]] = []
     for frame in frames:
         result = proc.step(frame, evaluated_at_ms=frame.close_ms)
         out.extend((index[s.bar_start_ms], s.kind) for s in result.signals)
@@ -168,9 +174,9 @@ def _acme_run(definition: ast.StrategyDefinition) -> list[tuple[int, str]]:
 
 def test_setup_expiry_is_counted_in_session_bars(make_definition: Make) -> None:
     """A Friday-close setup with a 2-bar life expires on Monday's 2nd bar."""
-    raw = make_definition().to_contract()
-    raw["notification"]["emit"] = _ALL_KINDS  # type: ignore[index]
-    raw["setup"] = {**raw["setup"], "expire_after_bars": 2}  # type: ignore[dict-item]
+    raw: dict[str, Any] = make_definition().to_contract()
+    raw["notification"]["emit"] = _ALL_KINDS
+    raw["setup"] = {**raw["setup"], "expire_after_bars": 2}
     emitted = _acme_run(ast.parse_definition(copy.deepcopy(raw)))
     assert emitted[0] == (77, "PRE_SIGNAL")
     assert (79, "SETUP_EXPIRED") in emitted
@@ -208,10 +214,10 @@ def test_rate_instrument_cannot_be_traded(make_definition: Make) -> None:
 
 
 def _funding_rule() -> dict[str, object]:
-    """Builds a rule reading the funding rate.
+    """Builds a rule that needs an ``AOI_TOUCH`` and funding below 0.1 %.
 
     Returns:
-        Rule node.
+        The ``when`` root node in contract form.
     """
     return {
         "op": "ALL",
@@ -252,7 +258,7 @@ def test_funding_operands_are_refused_for_exchange_universes(
 def test_stock_universe_compiles_with_session_calendars(
     make_definition: Make,
 ) -> None:
-    """Long A on nasdaq/nyse/cboe compiles; DEMO spans two calendars."""
+    """Long A on nasdaq/nyse/cboe compiles; the mock venue has two calendars."""
     result = compiler.compile_strategy(
         make_definition(universe=_universe(["nasdaq", "nyse", "cboe"]))
     )
@@ -264,8 +270,6 @@ def test_stock_universe_compiles_with_session_calendars(
 
 def test_activation_refuses_rate_instruments(make_definition: Make) -> None:
     """A rate series can never be an activated instrument."""
-    from joseph.domain import clock as clock_lib  # noqa: PLC0415
-
     service = version_service.StrategyVersionService(
         memory.InMemoryStrategyRepository(), clock_lib.ManualClock(0)
     )

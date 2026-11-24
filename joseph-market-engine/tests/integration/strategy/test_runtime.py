@@ -5,11 +5,14 @@
 
 from __future__ import annotations
 
+from collections.abc import Sequence
+
 import pytest
 import sqlalchemy as sa
 
 from joseph.domain import clock
 from joseph.domain import identity
+from joseph.domain import structures
 from joseph.signals.adapters import memory as signal_memory
 from joseph.signals.adapters import sql as signal_sql
 from joseph.signals.app import ports as signal_ports
@@ -17,6 +20,7 @@ from joseph.signals.app import service as signal_service
 from joseph.signals.domain import signal as signal_domain
 from joseph.strategy.adapters import memory
 from joseph.strategy.adapters import sql
+from joseph.strategy.app import ports
 from joseph.strategy.app import runtime
 from joseph.strategy.app import version_service
 from joseph.strategy.domain import tristate
@@ -42,7 +46,7 @@ class _Recorder:
         """Records a signal.
 
         Args:
-            signal: Signal.
+            signal: Signal to record.
         """
         self.published.append(signal)
 
@@ -83,9 +87,14 @@ class _World:
     """Wires services and the runtime around shared stores.
 
     Attributes:
-        versions: Version service.
+        clock: Manual clock shared by every component.
+        repo: Strategy repository.
+        checkpoints: Checkpoint repository the runtime resumes from.
         signals: Signal service.
         recorder: Publisher.
+        gate: Qualification gate.
+        versions: Version service.
+        runtime: Runtime built at construction.
     """
 
     def __init__(
@@ -98,14 +107,18 @@ class _World:
         """Builds the world.
 
         Args:
-            manual_clock: Clock.
+            manual_clock: Clock shared by every component.
             engine: SQLite engine for SQL adapters (memory when None).
             qualification: Answer of the qualification gate.
         """
         self.clock = manual_clock
         if engine is None:
-            self.repo: object = memory.InMemoryStrategyRepository()
-            self.checkpoints: object = memory.InMemoryCheckpointRepository()
+            self.repo: ports.StrategyRepository = (
+                memory.InMemoryStrategyRepository()
+            )
+            self.checkpoints: ports.CheckpointRepository = (
+                memory.InMemoryCheckpointRepository()
+            )
             signal_repo: signal_ports.SignalRepository = (
                 signal_memory.InMemorySignalRepository()
             )
@@ -120,29 +133,29 @@ class _World:
         self.gate = _Qualified(qualification)
         self.versions = version_service.StrategyVersionService(
             self.repo, manual_clock
-        )  # type: ignore[arg-type]
+        )
         self.runtime = self.new_runtime()
 
     def new_runtime(self) -> runtime.StrategyRuntime:
         """Builds a runtime over the shared stores (simulates a restart).
 
         Returns:
-            Runtime.
+            A runtime that has not loaded any strategy yet.
         """
         return runtime.StrategyRuntime(
-            repository=self.repo,  # type: ignore[arg-type]
+            repository=self.repo,
             signals=self.signals,
-            checkpoints=self.checkpoints,  # type: ignore[arg-type]
+            checkpoints=self.checkpoints,
             clock=self.clock,
             publisher=self.recorder,
             qualification=self.gate,
         )
 
     def activate_long_a(self, instruments: tuple[str, ...] = ()) -> None:
-        """Creates and activates Long A in PAPER mode.
+        """Creates and activates Long A in PAPER mode, then refreshes.
 
         Args:
-            instruments: Optional explicit instruments.
+            instruments: Instruments to activate on; empty for the universe.
         """
         definition = fixtures.strategy_definitions()[fixtures.LONG_A]
         self.versions.create(ALICE, definition)
@@ -153,17 +166,19 @@ class _World:
 
 
 async def _feed(
-    world: _World, runtime_: runtime.StrategyRuntime, frames: list
-) -> list[signal_domain.Signal]:  # type: ignore[type-arg]
-    """Feeds frames with the clock at each close.
+    world: _World,
+    runtime_: runtime.StrategyRuntime,
+    frames: Sequence[structures.BarFrame],
+) -> list[signal_domain.Signal]:
+    """Feeds BTCUSDT frames with the clock 100 ms after each close.
 
     Args:
-        world: World.
-        runtime_: Runtime.
-        frames: Frames.
+        world: World whose clock is moved.
+        runtime_: Runtime to feed.
+        frames: Frames in delivery order.
 
     Returns:
-        Newly recorded signals.
+        The signals the runtime recorded, in order.
     """
     out = []
     for frame in frames:

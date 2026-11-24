@@ -18,13 +18,13 @@ D = decimal.Decimal
 def _frames(
     specs: list[tuple[str, str, str, str]],
 ) -> list[structures.BarFrame]:
-    """Builds frames from OHLC tuples.
+    """Builds consecutive frames from OHLC tuples.
 
     Args:
-        specs: OHLC per bar.
+        specs: ``(open, high, low, close)`` decimal strings per bar.
 
     Returns:
-        Frames.
+        One frame per spec, indexed from 0.
     """
     factory = frame_testing.FrameFactory()
     return [
@@ -41,17 +41,17 @@ def _entry(
     stop: str = "95",
     target: str = "110",
 ) -> signal_domain.Signal:
-    """Builds an entry signal on bar ``index``.
+    """Builds an ENTRY_CONFIRMED signal on bar ``index``.
 
     Args:
-        frames: Frames.
-        index: Signal bar.
-        direction: Trade direction.
-        stop: Stop price.
-        target: Target price.
+        frames: Frames the signal refers to.
+        index: Index of the signal bar; its close is the entry price.
+        direction: ``LONG`` or ``SHORT``.
+        stop: Stop price as a decimal string.
+        target: Target price as a decimal string.
 
     Returns:
-        Signal.
+        A PAPER signal with id ``sig-{index}``.
     """
     frame = frames[index]
     return signal_domain.Signal(
@@ -161,7 +161,7 @@ def test_short_trade_and_costs() -> None:
 
 
 def test_one_position_at_a_time() -> None:
-    """Signals during an open trade are skipped."""
+    """A signal while a trade is open is skipped."""
     frames = _frames(
         [("100", "101", "99", "100")] * 4 + [("100", "111", "99", "110")]
     )
@@ -171,24 +171,35 @@ def test_one_position_at_a_time() -> None:
     assert [t.signal_id for t in trades] == ["sig-0"]
 
 
+def _trade(r_multiple: str) -> simulator.Trade:
+    """Builds a closed long trade with a given net R.
+
+    Args:
+        r_multiple: Net R multiple as a decimal string.
+
+    Returns:
+        The trade; only its R matters to the metrics.
+    """
+    return simulator.Trade(
+        signal_id="s",
+        direction="LONG",
+        entry_ms=0,
+        entry_price=D(1),
+        stop_price=D(0),
+        target_price=D(2),
+        exit_ms=1,
+        exit_price=D(1),
+        exit_reason="TARGET",
+        r_multiple=D(r_multiple),
+        fees_r=D(0),
+        hold_bars=2,
+    )
+
+
 def test_metrics() -> None:
-    """Win rate, expectancy, profit factor and drawdown in R."""
-
-    def trade(r: str) -> simulator.Trade:
-        """Builds a trade with a given R.
-
-        Args:
-            r: Net R.
-
-        Returns:
-            Trade.
-        """
-        return simulator.Trade(
-            "s", "LONG", 0, D(1), D(0), D(2), 1, D(1), "TARGET", D(r), D(0), 2
-        )
-
+    """Metrics give win rate, expectancy, profit factor and drawdown in R."""
     metrics = simulator.compute_metrics(
-        [trade("2"), trade("-1"), trade("-1"), trade("3")]
+        [_trade("2"), _trade("-1"), _trade("-1"), _trade("3")]
     )
     assert (metrics.trades, metrics.wins, metrics.losses) == (4, 2, 2)
     assert metrics.win_rate == D("0.5")
@@ -197,5 +208,5 @@ def test_metrics() -> None:
     assert metrics.max_drawdown_r == D(2)
     empty = simulator.compute_metrics([])
     assert empty.win_rate is None and empty.max_drawdown_r == 0
-    no_losses = simulator.compute_metrics([trade("1")])
+    no_losses = simulator.compute_metrics([_trade("1")])
     assert no_losses.profit_factor is None

@@ -15,6 +15,7 @@ from __future__ import annotations
 
 import os
 from collections.abc import Callable
+from typing import TypeAlias
 
 import httpx
 import pytest
@@ -37,7 +38,7 @@ pytestmark = [
     ),
 ]
 
-Validate = Callable[[str, str, object], None]
+Validate: TypeAlias = Callable[[str, str, object], None]
 _TF = timeframes.Timeframe
 
 
@@ -48,10 +49,10 @@ def _live(
 
     Args:
         venue: Venue.
-        config: Alpaca configuration.
+        config: Alpaca keys, or None for venues that need none.
 
     Returns:
-        Adapter and clock.
+        The adapter and the system clock it reads.
     """
     clock = clock_lib.SystemClock()
     adapter = factory.build_adapters(
@@ -219,7 +220,7 @@ _KEYS = alpaca.AlpacaConfig.from_env()
 async def test_live_alpaca_bars_and_snapshot(
     contract_validate: Validate,
 ) -> None:
-    """With keys, Alpaca daily/minute bars and snapshots validate."""
+    """With keys, Alpaca daily and 5m bars and snapshots validate."""
     adapter, clock = _live(instruments.Venue.NASDAQ, _KEYS)
     aapl = instruments.InstrumentId.parse("nasdaq:stock:AAPL")
     now = clock.now_ms()

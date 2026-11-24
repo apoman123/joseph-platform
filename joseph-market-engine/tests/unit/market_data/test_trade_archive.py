@@ -9,6 +9,7 @@ import dataclasses
 import decimal
 import pathlib
 from collections.abc import Callable
+from typing import TypeAlias
 
 import pytest
 
@@ -29,7 +30,8 @@ _OTHER = instruments.InstrumentId.parse("binance:perp:BTCUSDT")
 _T0 = 1_795_349_040_000
 """A minute boundary (2026-11-22)."""
 
-Factory = Callable[[], trade_archive.TradeArchive]
+Factory: TypeAlias = Callable[[], trade_archive.TradeArchive]
+"""Builds an empty archive of the implementation under test."""
 
 
 def _second(
@@ -42,14 +44,15 @@ def _second(
     """Builds an archived 1s aggregate.
 
     Args:
-        start: Second start.
-        price: Price.
-        qty: Volume.
-        taker: Taker buy volume.
-        instrument: Instrument.
+        start: Start of the second, epoch milliseconds.
+        price: Open and close; high and low are one above and below.
+        qty: Base volume.
+        taker: Taker buy base volume, or ``None`` for an aggregate without
+            trade detail (then the trade count is ``None`` too).
+        instrument: Instrument the aggregate belongs to.
 
     Returns:
-        Candle.
+        A final 1s candle.
     """
     return market.Candle(
         instrument_id=instrument,
@@ -75,15 +78,15 @@ def _second(
 def _kline(
     start: int, volume: str, tf: timeframes.Timeframe = _TF.M1
 ) -> market.Candle:
-    """Builds a final kline without taker volume.
+    """Builds a final REST kline without taker volume.
 
     Args:
-        start: Bar start.
+        start: Bar start, epoch milliseconds.
         volume: Base volume.
-        tf: Timeframe.
+        tf: Timeframe of the bar.
 
     Returns:
-        Candle.
+        A final candle.
     """
     return market.Candle(
         instrument_id=_ID,
@@ -103,10 +106,10 @@ def _kline(
 
 
 def _sql() -> trade_archive.TradeArchive:
-    """Builds an in-memory SQL archive.
+    """Builds an empty SQL archive on an in-memory SQLite database.
 
     Returns:
-        Archive.
+        The archive.
     """
     return trade_archive_sql.SqlTradeArchive(db.create_engine("sqlite://"))
 
@@ -120,7 +123,7 @@ _ARCHIVES = pytest.mark.parametrize(
 
 @_ARCHIVES
 def test_put_and_read_back(factory: Factory) -> None:
-    """Aggregates, coverage and roll-ups round-trip exactly."""
+    """Aggregates, coverage and roll-ups round-trip; unknown ids read empty."""
     archive = factory()
     rows = [_second(_T0), _second(_T0 + 2_000, "11", "0.5", None)]
     archive.put(_ID, rows, [(_T0, _T0 + 3_000)])
@@ -207,7 +210,7 @@ def test_sql_archive_survives_a_restart(tmp_path: pathlib.Path) -> None:
 
 
 async def test_reader_rebuilds_seconds_bars() -> None:
-    """The reader serves complete seconds buckets of any width."""
+    """The reader rebuilds 5s bars; covered quiet seconds carry the close."""
     archive = trade_archive.MemoryTradeArchive()
     archive.put(
         _ID,
@@ -225,7 +228,7 @@ async def test_reader_rebuilds_seconds_bars() -> None:
 
 
 def test_reader_enriches_only_fully_covered_bars() -> None:
-    """A partially covered 1m bar keeps no taker volume (coverage-gated)."""
+    """Only fully covered final 1m bars gain taker volume, then cached."""
     archive = trade_archive.MemoryTradeArchive()
     minute_two = _T0 + 60_000
     archive.put(
@@ -262,7 +265,7 @@ def test_reader_enriches_only_fully_covered_bars() -> None:
 
 
 def test_reader_flow_cache_is_bounded(monkeypatch: pytest.MonkeyPatch) -> None:
-    """The flow cache forgets the least recently used spans."""
+    """The flow cache holds at most ``_FLOW_CACHE`` spans."""
     monkeypatch.setattr(trade_archive, "_FLOW_CACHE", 2)
     archive = trade_archive.MemoryTradeArchive()
     archive.put(_ID, [], [(_T0, _T0 + 180_000)])

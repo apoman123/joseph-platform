@@ -55,11 +55,11 @@ def _bar(
     Args:
         instrument: Instrument.
         start: Bar start (aligned to the instrument's calendar).
-        final: Finality.
-        now: Receipt time.
+        final: Whether the bar is final.
+        now: Receipt time, epoch milliseconds.
 
     Returns:
-        Candle.
+        The candle, all prices and the volume 1.
     """
     return market.Candle(
         instrument_id=instrument,
@@ -120,10 +120,12 @@ class _Venue:
     ) -> tuple[list[market.Candle], int, int]:
         """Returns the bars of a range and the span they prove.
 
+        Records the fetch in ``fetches``.
+
         Args:
             instrument: Instrument.
-            start: Inclusive start.
-            end: Exclusive end.
+            start: Inclusive start, epoch milliseconds.
+            end: Exclusive end, epoch milliseconds.
 
         Returns:
             ``(bars, proven_from, proven_to)``; bars settle ``settle_ms``
@@ -154,9 +156,11 @@ class SparseAdapter:
 
     Attributes:
         SPARSE_BARS: Declares sparse bars.
-        venue: Venue.
+        venue: Venue the double serves (Nasdaq).
+        data: Venue whose bars are served.
         native: Whether a native candle stream is advertised.
         updates: Scripted stream updates.
+        down: While True, fetches raise ``VenueUnavailableError``.
     """
 
     SPARSE_BARS = True
@@ -171,7 +175,7 @@ class SparseAdapter:
         """Initializes the double.
 
         Args:
-            venue_data: Bars served.
+            venue_data: Venue whose bars are served.
             native: Whether native candles are advertised.
             updates: Stream updates, delivered once, then the stream idles.
         """
@@ -185,7 +189,7 @@ class SparseAdapter:
         """Returns fake capabilities.
 
         Returns:
-            Capabilities.
+            REST history of 1m bars; native candles only if advertised.
         """
         return capabilities.VenueCapabilities(
             venue=self.venue,
@@ -211,13 +215,13 @@ class SparseAdapter:
 
         Args:
             instrument: Instrument.
-            timeframe: Resolution.
-            start_ms: Start.
-            end_ms: End.
+            timeframe: Ignored; the venue serves 1m bars.
+            start_ms: Inclusive start, epoch milliseconds.
+            end_ms: Exclusive end, epoch milliseconds.
             limit: Ignored.
 
         Returns:
-            Bars and coverage.
+            The served bars and the span the venue proved, marked complete.
 
         Raises:
             errors.VenueUnavailableError: While the venue is down.
@@ -242,13 +246,13 @@ class SparseAdapter:
 
         Args:
             instrument: Instrument.
-            timeframe: Resolution.
-            start_ms: Start.
-            end_ms: End.
+            timeframe: Ignored; the venue serves 1m bars.
+            start_ms: Inclusive start, epoch milliseconds.
+            end_ms: Exclusive end, epoch milliseconds.
             limit: Ignored.
 
         Returns:
-            Bars.
+            The served bars.
         """
         fetched = await self.fetch_candle_coverage(
             instrument, timeframe, start_ms, end_ms, limit
@@ -261,7 +265,7 @@ class SparseAdapter:
         """Delivers the scripted updates, then idles.
 
         Yields:
-            Updates.
+            Each scripted update once.
         """
         for update in self.updates:
             yield update
@@ -276,12 +280,12 @@ class SparseAdapter:
         """Streams the scripted updates.
 
         Args:
-            instrument: Instrument.
-            timeframe: Resolution.
+            instrument: Ignored.
+            timeframe: Ignored.
             tracker: Ignored.
 
         Returns:
-            Updates.
+            The scripted updates; the stream then idles for an hour.
         """
         del instrument, timeframe, tracker
         return self._script()
@@ -295,12 +299,12 @@ class SparseAdapter:
         """Streams the scripted candles.
 
         Args:
-            instrument: Instrument.
-            timeframe: Resolution.
+            instrument: Ignored.
+            timeframe: Ignored.
             tracker: Ignored.
 
         Returns:
-            Candles.
+            The candles of the scripted updates.
         """
         return base.candles_of(
             self.stream_candle_coverage(instrument, timeframe, tracker)
@@ -312,6 +316,7 @@ class DenseAdapter(SparseAdapter):
 
     Attributes:
         SPARSE_BARS: Declares dense bars.
+        venue: Venue the double serves (Binance).
     """
 
     SPARSE_BARS = False
@@ -320,7 +325,7 @@ class DenseAdapter(SparseAdapter):
         """Initializes the double.
 
         Args:
-            venue_data: Bars served.
+            venue_data: Venue whose bars are served.
             native: Whether native candles are advertised.
         """
         super().__init__(venue_data, native=native)
@@ -328,11 +333,7 @@ class DenseAdapter(SparseAdapter):
 
 
 async def _no_sleep(_: float) -> None:
-    """Yields control without waiting.
-
-    Args:
-        _: Ignored delay.
-    """
+    """Sleeps 5 ms whatever the delay, so retry loops yield to the test."""
     await asyncio.sleep(0.005)
 
 
@@ -341,25 +342,28 @@ def _service(
 ) -> tuple[service_lib.MarketDataService, candle_store.CandleStore]:
     """Builds the service around one adapter double.
 
+    The router retries native streams only after an hour, so a session
+    stays on what the double first offers.
+
     Args:
         adapter: Adapter double.
-        clock: Clock.
+        clock: Clock shared by the router and the service.
 
     Returns:
-        Service and store.
+        The service and its candle store.
     """
     adapters = {adapter.venue: adapter}
     store = candle_store.CandleStore()
     router = feed_router.FeedRouter(
-        adapters,  # type: ignore[arg-type]
+        adapters,  # type: ignore[arg-type]  # implements only the MarketDataPort methods these tests reach
         store,
         clock,
         sleep=_no_sleep,
         native_retry_s=3600,
     )
     svc = service_lib.MarketDataService(
-        adapters,  # type: ignore[arg-type]
-        registry.InstrumentRegistry(adapters),  # type: ignore[arg-type]
+        adapters,  # type: ignore[arg-type]  # implements only the MarketDataPort methods these tests reach
+        registry.InstrumentRegistry(adapters),  # type: ignore[arg-type]  # implements only the MarketDataPort methods these tests reach
         store,
         router,
         clock,
@@ -368,7 +372,7 @@ def _service(
 
 
 def _quiet_every_third(minute: int) -> bool:
-    """Trades in every minute except every third one.
+    """Checks whether a minute traded: all do except every third one.
 
     Args:
         minute: Minute offset.
@@ -383,12 +387,15 @@ async def _wait_for(predicate: Callable[[], bool]) -> None:
     """Waits until a background task made ``predicate()`` true.
 
     Args:
-        predicate: Condition.
+        predicate: Condition a background task makes true.
+
+    Raises:
+        TimeoutError: The condition stayed false for 2 seconds.
     """
 
     async def loop() -> None:
         """Polls the condition."""
-        while not predicate():  # noqa: ASYNC110
+        while not predicate():  # noqa: ASYNC110 - polls state that background tasks change; there is no event to await
             await asyncio.sleep(0.005)
 
     await asyncio.wait_for(loop(), 2.0)
@@ -400,9 +407,9 @@ async def _wait_for(predicate: Callable[[], bool]) -> None:
 def test_only_adapters_declaring_sparse_bars_are_sparse() -> None:
     """``SPARSE_BARS`` decides; wrappers and doubles without it are dense."""
     data = _Venue(clock_lib.ManualClock(_OPEN), _OPEN, _quiet_every_third)
-    assert ports.sparse_bars(SparseAdapter(data))  # type: ignore[arg-type]
-    assert not ports.sparse_bars(DenseAdapter(data))  # type: ignore[arg-type]
-    assert not ports.sparse_bars(object())  # type: ignore[arg-type]
+    assert ports.sparse_bars(SparseAdapter(data))  # type: ignore[arg-type]  # implements only the MarketDataPort methods these tests reach
+    assert not ports.sparse_bars(DenseAdapter(data))  # type: ignore[arg-type]  # implements only the MarketDataPort methods these tests reach
+    assert not ports.sparse_bars(object())  # type: ignore[arg-type]  # an object without SPARSE_BARS must count as dense
 
 
 # Store ------------------------------------------------------------------
@@ -513,7 +520,7 @@ async def test_uncovered_outage_is_a_gap_and_gets_repaired() -> None:
     data = _Venue(clock, _OPEN, _quiet_every_third)
     adapter = SparseAdapter(data)
     svc, store = _service(adapter, clock)
-    # A live session saw minutes 0-5 and 12-20, then lost its connection.
+    # A live session saw minutes 0-5 and 12-19, then lost its connection.
     seen = [m for m in (*range(6), *range(12, 20)) if _quiet_every_third(m)]
     store.upsert_many([_bar(_AAPL, _OPEN + m * _MIN) for m in seen])
     store.add_coverage(
@@ -574,6 +581,18 @@ async def test_dense_venue_gaps_are_unchanged() -> None:
 # Live sessions ----------------------------------------------------------
 
 
+def _aapl_minute(m: int) -> market.Candle:
+    """Builds a streamed final AAPL bar.
+
+    Args:
+        m: Minutes after the 2026-11-20 open.
+
+    Returns:
+        The candle.
+    """
+    return _bar(_AAPL, _OPEN + m * _MIN)
+
+
 async def test_polling_session_records_coverage() -> None:
     """A REST polling session of a sparse venue covers what it polled."""
     clock = clock_lib.ManualClock(_OPEN + 10 * _MIN + 30_000)
@@ -605,37 +624,25 @@ async def test_native_session_records_the_coverage_its_stream_proved() -> None:
     """Streamed coverage is stored; an outage between chains stays a gap."""
     clock = clock_lib.ManualClock(_OPEN + 30 * _MIN)
     data = _Venue(clock, _OPEN, _quiet_every_third)
-
-    def minute(m: int) -> market.Candle:
-        """Builds a streamed final bar.
-
-        Args:
-            m: Minute offset.
-
-        Returns:
-            Candle.
-        """
-        return _bar(_AAPL, _OPEN + m * _MIN)
-
     updates = [
-        candle_rules.CandleCoverage((minute(0),)),
+        candle_rules.CandleCoverage((_aapl_minute(0),)),
         candle_rules.CandleCoverage(
-            (minute(1),), ((_OPEN + _MIN, _OPEN + 2 * _MIN),)
+            (_aapl_minute(1),), ((_OPEN + _MIN, _OPEN + 2 * _MIN),)
         ),
         candle_rules.CandleCoverage(
-            (minute(3),), ((_OPEN + 2 * _MIN, _OPEN + 4 * _MIN),)
+            (_aapl_minute(3),), ((_OPEN + 2 * _MIN, _OPEN + 4 * _MIN),)
         ),
         # Reconnect: the next chain starts over at minute 9.
-        candle_rules.CandleCoverage((minute(9),)),
+        candle_rules.CandleCoverage((_aapl_minute(9),)),
         candle_rules.CandleCoverage((), ()),
         candle_rules.CandleCoverage(
-            (minute(10),), ((_OPEN + 10 * _MIN, _OPEN + 11 * _MIN),)
+            (_aapl_minute(10),), ((_OPEN + 10 * _MIN, _OPEN + 11 * _MIN),)
         ),
     ]
     adapter = SparseAdapter(data, native=True, updates=updates)
     svc, store = _service(adapter, clock)
     session = await svc.router.acquire(_AAPL, _M1)
-    await _wait_for(lambda: store.latest(_AAPL, _M1) == minute(10))
+    await _wait_for(lambda: store.latest(_AAPL, _M1) == _aapl_minute(10))
     assert session.state is feed_router.SessionState.LIVE
     await svc.router.close()
     assert store.final_gaps(_AAPL, _M1, _OPEN, _OPEN + 11 * _MIN) == [
@@ -660,15 +667,19 @@ async def test_dense_native_session_records_no_coverage() -> None:
 
 
 class _StreamingVenue(base.BaseVenueAdapter):
-    """Dense base adapter streaming two scripted candles."""
+    """Dense base adapter streaming two scripted candles.
+
+    Attributes:
+        VENUE: Venue the adapter serves (Binance).
+    """
 
     VENUE = instruments.Venue.BINANCE
 
     async def _bars(self) -> AsyncGenerator[market.Candle, None]:
-        """Yields two bars.
+        """Yields two consecutive final BTCUSDT minutes.
 
         Yields:
-            Candles.
+            The bars at ``_T0`` and one minute later.
         """
         yield _bar(_BTC, _T0)
         yield _bar(_BTC, _T0 + _MIN)
@@ -687,7 +698,7 @@ class _StreamingVenue(base.BaseVenueAdapter):
             tracker: Ignored.
 
         Returns:
-            Candles.
+            The two scripted bars.
         """
         del instrument, timeframe, tracker
         return self._bars()
@@ -704,7 +715,7 @@ class _Plain:
         """Initializes the iterator.
 
         Args:
-            items: Updates.
+            items: Updates to deliver in order; consumed.
         """
         self.items = items
 
@@ -712,7 +723,7 @@ class _Plain:
         """Returns the iterator.
 
         Returns:
-            Self.
+            This iterator.
         """
         return self
 
@@ -720,7 +731,7 @@ class _Plain:
         """Returns the next update.
 
         Returns:
-            Update.
+            The oldest remaining update.
 
         Raises:
             StopAsyncIteration: When exhausted.
@@ -733,7 +744,7 @@ class _Plain:
 async def test_base_streams_prove_no_coverage_by_default() -> None:
     """A dense adapter's stream becomes updates without coverage."""
     adapter = _StreamingVenue(
-        None,  # type: ignore[arg-type]
+        None,  # type: ignore[arg-type]  # these paths never use the HTTP client
         clock_lib.ManualClock(_T0),
     )
     assert not adapter.SPARSE_BARS
@@ -791,7 +802,7 @@ async def test_polling_outage_records_nothing_until_the_venue_recovers() -> (
 async def test_base_adapter_defaults_refuse_what_venues_must_provide() -> None:
     """Unimplemented hooks fail loudly instead of fabricating data."""
     adapter = _StreamingVenue(
-        None,  # type: ignore[arg-type]
+        None,  # type: ignore[arg-type]  # these paths never use the HTTP client
         clock_lib.ManualClock(_T0),
     )
     assert adapter.venue is instruments.Venue.BINANCE

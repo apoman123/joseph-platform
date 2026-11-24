@@ -5,15 +5,18 @@
 
 from __future__ import annotations
 
+import json
 import pathlib
 
 import pytest
 
+from joseph.domain import timeframes
 from joseph.indicators import catalog
 from joseph.indicators import golden
+from joseph.indicators import testing
 
 FIXTURES = (
-    pathlib.Path(__file__).resolve().parents[3] / "fixtures" / ("indicators")
+    pathlib.Path(__file__).resolve().parents[3] / "fixtures" / "indicators"
 )
 SCENARIOS = golden.scenario_paths(FIXTURES)
 EXPORTS = golden.pine_export_paths(FIXTURES)
@@ -26,7 +29,7 @@ def test_every_plugin_has_a_scenario() -> None:
 
 
 @pytest.mark.parametrize(
-    "path", SCENARIOS, ids=lambda p: p.parent.name + "/" + p.stem
+    "path", SCENARIOS, ids=lambda p: f"{p.parent.name}/{p.stem}"
 )
 def test_scenario(path: pathlib.Path) -> None:
     """The scenario's expectations hold bar by bar."""
@@ -47,11 +50,6 @@ def test_pine_parity(path: pathlib.Path) -> None:
 
 def test_parity_harness_detects_divergence(tmp_path: pathlib.Path) -> None:
     """A self-generated export passes; a tampered one is reported."""
-    import json  # noqa: PLC0415 - test-local helper.
-
-    from joseph.domain import timeframes  # noqa: PLC0415
-    from joseph.indicators import testing  # noqa: PLC0415
-
     candles = testing.random_walk(60, seed=2, timeframe=timeframes.Timeframe.M5)
     registry = catalog.build_default_registry()
     results = testing.run_bars(registry.get("fvg_ifvg"), candles)

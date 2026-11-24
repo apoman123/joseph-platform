@@ -39,14 +39,14 @@ def _trade(
     """Builds a trade.
 
     Args:
-        ts: Venue time.
-        price: Price.
-        qty: Quantity.
+        ts: Venue and receive time in epoch milliseconds.
+        price: Price as a decimal string.
+        qty: Base quantity as a decimal string.
         side: Aggressor side.
-        trade_id: Optional id (defaults to the time).
+        trade_id: Trade id; defaults to ``"{ts}-{price}-{qty}"``.
 
     Returns:
-        Trade.
+        The trade.
     """
     return market.Trade(
         instrument_id=_ID,
@@ -66,13 +66,13 @@ def _second(
     """Builds an archived 1s aggregate.
 
     Args:
-        start: Second start.
-        price: Single price.
-        qty: Volume.
-        taker: Taker buy volume.
+        start: Second start in epoch milliseconds.
+        price: Open, high, low and close as a decimal string.
+        qty: Base volume as a decimal string.
+        taker: Taker buy volume, or None for an unknown aggressor side.
 
     Returns:
-        Candle.
+        A final single-price 1s aggregate of one trade.
     """
     return market.Candle(
         instrument_id=_ID,
@@ -98,11 +98,11 @@ def _minute(volume: str, final: bool = True) -> market.Candle:
     """Builds a 1m kline without taker volume.
 
     Args:
-        volume: Base volume.
-        final: Finality.
+        volume: Base volume as a decimal string.
+        final: Whether the kline is final.
 
     Returns:
-        Candle.
+        The REST kline of the minute starting at ``_T0``.
     """
     return market.Candle(
         instrument_id=_ID,
@@ -122,7 +122,7 @@ def _minute(volume: str, final: bool = True) -> market.Candle:
 
 
 def test_interval_helpers() -> None:
-    """Rounding, union, containment, holes and clipping of coverage."""
+    """Coverage helpers round, merge, test containment, find holes and clip."""
     assert recorded_trades.ceil_to(1_001, 1_000) == 2_000
     assert recorded_trades.floor_to(1_999, 1_000) == 1_000
     assert recorded_trades.whole_seconds(1_001, 3_500) == (2_000, 3_000)

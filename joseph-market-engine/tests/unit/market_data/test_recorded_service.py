@@ -32,13 +32,13 @@ def _bar(
     """Builds a bar without taker volume.
 
     Args:
-        start: Bar start.
+        start: Bar start in epoch milliseconds.
         tf: Timeframe.
-        volume: Base volume.
-        final: Finality.
+        volume: Base volume as a decimal string.
+        final: Whether the bar is final.
 
     Returns:
-        Candle.
+        A flat REST bar at price 10.
     """
     return market.Candle(
         instrument_id=_ID,
@@ -58,7 +58,13 @@ def _bar(
 
 
 class StreamOnlyAdapter:
-    """MEXC-like double: klines over REST, trades only from the stream."""
+    """MEXC-like double: klines over REST, trades only from the stream.
+
+    Attributes:
+        venue: Venue the double stands in for.
+        minutes: 1m bars served over REST.
+        fetches: Timeframe of each ``fetch_candles`` call, in call order.
+    """
 
     venue = instruments.Venue.MEXC
 
@@ -75,7 +81,7 @@ class StreamOnlyAdapter:
         """Returns capabilities without a trade history.
 
         Returns:
-            Capabilities.
+            REST klines and stream trades; 1s bars are built from trades.
         """
         return capabilities.VenueCapabilities(
             venue=self.venue,
@@ -101,14 +107,15 @@ class StreamOnlyAdapter:
         """Serves 1m bars (seconds have no REST history here).
 
         Args:
-            instrument: Instrument.
-            timeframe: Resolution.
-            start_ms: Start.
-            end_ms: End.
-            limit: Limit.
+            instrument: Ignored; the double serves one instrument.
+            timeframe: Resolution, recorded in ``fetches``.
+            start_ms: Window start in epoch milliseconds, inclusive.
+            end_ms: Window end in epoch milliseconds, exclusive.
+            limit: Ignored.
 
         Returns:
-            Bars.
+            The 1m bars that start inside the window, whatever
+            ``timeframe`` asks for.
         """
         del instrument, limit
         self.fetches.append(timeframe)
@@ -123,22 +130,22 @@ def _service(
     """Builds a service with a recorded-trade reader.
 
     Args:
-        clock: Clock.
-        adapter: Venue adapter.
-        archive: Archive.
+        clock: Clock shared by the router, reader and service.
+        adapter: The only venue adapter.
+        archive: Archive of recorded trades; MEXC reads delta from it.
 
     Returns:
-        Service and its store.
+        The service and its candle store.
     """
     adapters = {adapter.venue: adapter}
     store = candle_store.CandleStore()
-    router = feed_router.FeedRouter(adapters, store, clock)  # type: ignore[arg-type]
+    router = feed_router.FeedRouter(adapters, store, clock)  # type: ignore[arg-type]  # StreamOnlyAdapter implements only part of the adapter port
     reader = trade_archive.ArchiveReader(
         archive, clock, delta_venues=[instruments.Venue.MEXC]
     )
     svc = service.MarketDataService(
-        adapters,  # type: ignore[arg-type]
-        registry.InstrumentRegistry(adapters),  # type: ignore[arg-type]
+        adapters,  # type: ignore[arg-type]  # StreamOnlyAdapter implements only part of the adapter port
+        registry.InstrumentRegistry(adapters),  # type: ignore[arg-type]  # StreamOnlyAdapter implements only part of the adapter port
         store,
         router,
         clock,

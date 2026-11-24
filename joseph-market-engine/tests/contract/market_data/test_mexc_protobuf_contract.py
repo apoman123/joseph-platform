@@ -16,12 +16,14 @@ import asyncio
 import base64
 import contextlib
 import decimal
+import itertools
 import json
 import pathlib
 from collections.abc import AsyncIterator
 from collections.abc import Callable
 from collections.abc import Mapping
 from typing import Any
+from typing import TypeAlias
 
 import httpx
 import pytest
@@ -36,7 +38,7 @@ from joseph.market_data.adapters import mexc
 from joseph.market_data.app import ports
 from joseph.market_data.domain import trades as trades_lib
 
-Validate = Callable[[str, str, object], None]
+Validate: TypeAlias = Callable[[str, str, object], None]
 _D = decimal.Decimal
 _BTC = instruments.InstrumentId.parse("mexc:perp:BTC_USDT")
 _SIZE = _D("0.0001")
@@ -48,7 +50,7 @@ def _fixture(name: str) -> dict[str, Any]:
     """Reads a captured MEXC fixture.
 
     Args:
-        name: File name without extension.
+        name: File name without extension, under ``fixtures/venues/mexc``.
 
     Returns:
         Parsed fixture.
@@ -84,13 +86,18 @@ def _pb_frames(name: str, key: str = "frames") -> list[str | bytes]:
         key: ``frames`` or ``reduced_frames``.
 
     Returns:
-        Frames.
+        The frames as the socket delivered them: text or binary.
     """
     return [_raw(frame) for frame in _fixture(name)[key]]
 
 
 class _Connection:
-    """Replays frames and records what the adapter sends."""
+    """Replays frames and records what the adapter sends.
+
+    Attributes:
+        frames: Frames still to deliver, oldest first.
+        sent: Frames the adapter sent, in order.
+    """
 
     def __init__(self, frames: list[str | bytes]) -> None:
         """Initializes the connection.
@@ -105,15 +112,15 @@ class _Connection:
         """Records a sent frame.
 
         Args:
-            message: Frame.
+            message: Frame payload.
         """
         self.sent.append(message)
 
     async def recv(self) -> str | bytes:
-        """Returns the next frame or idles.
+        """Returns the next frame, or idles for an hour once none are left.
 
         Returns:
-            Frame.
+            The next frame; an empty string only after the idle wait.
         """
         if self.frames:
             return self.frames.pop(0)
@@ -122,7 +129,13 @@ class _Connection:
 
 
 class _Connector:
-    """``ws.ConnectFn`` recording the URLs it opens."""
+    """``ws.ConnectFn`` recording the URLs it opens.
+
+    Attributes:
+        frames: Frames each new connection replays.
+        urls: URLs opened, in order.
+        connections: Connections opened, in order.
+    """
 
     def __init__(self, frames: list[str | bytes]) -> None:
         """Initializes the connector.
@@ -139,10 +152,10 @@ class _Connector:
         """Opens a replaying connection.
 
         Args:
-            url: WebSocket URL.
+            url: WebSocket URL; recorded in ``urls``.
 
         Yields:
-            Connection.
+            A new replaying connection, also recorded in ``connections``.
         """
         self.urls.append(url)
         connection = _Connection(self.frames)
@@ -156,18 +169,18 @@ def _adapter(
     """Builds the MEXC adapter through the factory.
 
     Args:
-        ws_format: Push format.
+        ws_format: Push format the adapter subscribes in.
         connector: Fake connector.
-        clock: Clock.
+        clock: Clock the adapter reads.
 
     Returns:
-        Adapter.
+        The MEXC adapter.
     """
     return factory.build_adapters(
         [instruments.Venue.MEXC],
         clock,
         client=httpx.AsyncClient(),
-        connect=connector,  # type: ignore[arg-type]
+        connect=connector,
         mexc_ws_format=ws_format,
     )[instruments.Venue.MEXC]
 
@@ -175,12 +188,14 @@ def _adapter(
 def test_protobuf_deal_frames_convert_contracts(
     contract_validate: Validate,
 ) -> None:
-    """PB ``t`` 1/2 is buy/sell, ``v`` contracts become base units."""
+    """Protobuf ``t`` 1/2 is buy/sell; ``v`` contracts become base units."""
     frames = _pb_frames("ws_deal_protobuf")
     assert mexc.parse_deal_frame(frames[0], _BTC, _SIZE, 0) == []
-    trades = [
-        t for f in frames[1:] for t in mexc.parse_deal_frame(f, _BTC, _SIZE, 1)
-    ]
+    trades = list(
+        itertools.chain.from_iterable(
+            mexc.parse_deal_frame(f, _BTC, _SIZE, 1) for f in frames[1:]
+        )
+    )
     assert [t.trade_id for t in trades] == [
         "17133941459",
         "17133941562",
@@ -228,7 +243,7 @@ async def test_trade_stream_subscribes_and_parses_in_each_format(
     await adapter.list_instruments()
     stream = adapter.stream_trades(_BTC)
     got = [await asyncio.wait_for(anext(stream), 5) for _ in range(3)]
-    await stream.aclose()  # type: ignore[attr-defined]
+    await stream.aclose()  # type: ignore[attr-defined]  # stream_trades is typed AsyncIterator; its generator has aclose()
     assert connector.urls[0] == (
         mexc.WS_PROTOBUF_URL
         if ws_format is mexc.WsFormat.PROTOBUF
@@ -259,7 +274,7 @@ async def test_protobuf_kline_frames_stream_live_candles(
     )
     stream = adapter.stream_candles(_BTC, timeframes.Timeframe.M1)
     first = await asyncio.wait_for(anext(stream), 5)
-    await stream.aclose()  # type: ignore[attr-defined]
+    await stream.aclose()  # type: ignore[attr-defined]  # stream_candles is typed AsyncIterator; its generator has aclose()
     contract_validate("market.schema.json", "Candle", first.to_contract())
     assert first.start_ms == 1_795_427_280_000
     assert not first.is_final
