@@ -63,17 +63,18 @@ _LOG = logging.getLogger(__name__)
 
 @dataclasses.dataclass(slots=True)
 class Container:
-    """Every wired component (tests reach adapters through it).
+    """Every wired component of one engine (tests reach adapters through it).
 
     Attributes:
-        settings: Settings.
-        clock: Clock.
-        market: Market gateway.
-        paper: Paper simulator.
-        shadow: Shadow recorder.
-        registry: Adapter registry.
-        services: API services.
-        uow_factory: Unit of work factory.
+        settings: Settings the engine was built from.
+        clock: Time source shared by every component.
+        market: Market data gateway (HTTP, static demo or a test override).
+        paper: Paper trading simulator.
+        shadow: Shadow-mode recorder.
+        registry: Adapter registry that resolves an account and mode to an
+            adapter.
+        services: Services the API layer calls.
+        uow_factory: Unit of work factory of the engine's database.
         brokers: Securities broker adapters by broker code.
         live_streams: Private stream supervisor of crypto venue accounts.
     """
@@ -92,11 +93,6 @@ class Container:
     live_streams: live_streams.LiveStreamSupervisor | None = None
 
 
-# ---------------------------------------------------------------------------
-# Securities brokers
-# ---------------------------------------------------------------------------
-
-
 def broker_account_lookup(
     uow_factory: sql.SqlUnitOfWorkFactory, credential_vault: vault.AesGcmVault
 ) -> Callable[[str], str | None]:
@@ -107,7 +103,8 @@ def broker_account_lookup(
         credential_vault: Vault holding the sealed connection fields.
 
     Returns:
-        Lookup returning ``None`` for unknown or revoked accounts.
+        Lookup returning ``None`` for unknown accounts, accounts without
+        credentials, envelopes the vault cannot open and blank numbers.
     """
 
     def lookup(account_id: str) -> str | None:
@@ -117,7 +114,7 @@ def broker_account_lookup(
             account_id: Joseph account.
 
         Returns:
-            Broker account number or ``None``.
+            Broker account number, or ``None`` when there is none.
         """
         with uow_factory() as uow:
             account = uow.accounts.get(account_id)
@@ -145,9 +142,10 @@ def build_brokers(
     """Creates the broker adapters with the deployment's gates.
 
     Args:
-        settings: Settings.
+        settings: Settings; supplies the global LIVE gate, the per-broker
+            enable flags and the connection settings.
         market: Market gateway.
-        clock: Clock.
+        clock: Time source.
         lookup: Joseph account -> broker account number.
 
     Returns:
@@ -156,8 +154,8 @@ def build_brokers(
     sec = settings.securities
     sinopac_config = None
     if sec.sinopac_configured:
-        assert sec.sinopac_api_key is not None
-        assert sec.sinopac_secret_key is not None
+        if sec.sinopac_api_key is None or sec.sinopac_secret_key is None:
+            raise AssertionError("sinopac_configured implies both keys")
         sinopac_config = sinopac.SinopacConfig(
             api_key=sec.sinopac_api_key,
             secret_key=sec.sinopac_secret_key,
@@ -185,6 +183,8 @@ def build_brokers(
     )
 
 
+# Order states in which a LIVE order may be at the broker and still produce
+# events. RESERVED is left out: the order has not been sent yet.
 _LIVE_OPEN = (
     enums.OrderState.SUBMITTING,
     enums.OrderState.ACKNOWLEDGED,
@@ -197,8 +197,13 @@ _LIVE_OPEN = (
 async def pump_brokers(container: Container) -> int:
     """Binds accounts with working LIVE orders and applies broker events.
 
+    Accounts with a LIVE order in a ``_LIVE_OPEN`` state (among the newest
+    2,000 orders in those states) are bound to their broker adapter first,
+    so the adapter collects their events; then every queued event is
+    applied through the order management service (OMS).
+
     Args:
-        container: Container.
+        container: Wired engine.
 
     Returns:
         Events that changed OMS state.
@@ -231,16 +236,20 @@ def build_container(
 ) -> Container:
     """Wires the execution engine.
 
+    Also installs the logging configuration and creates the database
+    engine for ``settings.database_url``.
+
     Args:
         settings: Settings.
-        clock: Optional clock override (tests).
-        market: Optional market gateway override (tests).
+        clock: Clock override (tests); ``None`` uses the system clock.
+        market: Market gateway override (tests); ``None`` picks the gateway
+            named by ``settings.market_gateway``.
 
     Returns:
-        Container.
+        The wired components.
     """
     log_lib.install()
-    the_clock = clock or clock_lib.SystemClock()
+    the_clock = clock if clock is not None else clock_lib.SystemClock()
     id_gen = clock_lib.Uuid7Generator()
     engine = sql.create_engine(settings.database_url)
     uow_factory = sql.SqlUnitOfWorkFactory(engine)
@@ -370,9 +379,9 @@ def _live_adapters(
 
     Args:
         settings: Settings.
-        clock: Clock.
+        clock: Time source.
         uow_factory: Unit of work factory.
-        credential_vault: Credential vault.
+        credential_vault: Vault holding the sealed venue credentials.
 
     Returns:
         Adapters by venue.
@@ -396,13 +405,13 @@ def _live_adapters(
 
 
 async def pump_simulators(container: Container) -> int:
-    """Runs one simulator tick and applies resulting events.
+    """Runs one paper and shadow simulator tick and applies the events.
 
     Args:
-        container: Container.
+        container: Wired engine.
 
     Returns:
-        Events applied.
+        Events that changed OMS state.
     """
     applied = 0
     for adapter in (container.paper, container.shadow):
@@ -419,17 +428,22 @@ async def pump_simulators(container: Container) -> int:
 def background_jobs(container: Container) -> list[api_app.BackgroundTask]:
     """Builds the long-running loops.
 
+    The simulator ticker, outbox worker, reconciler and broker event pump
+    always run; the live stream supervisor runs only when live trading and
+    venue streams are both enabled. Each loop survives its own failures.
+
     Args:
-        container: Container.
+        container: Wired engine.
 
     Returns:
-        Coroutine factories.
+        Coroutine factories, one per loop.
     """
     settings = container.settings
 
     async def ticker() -> None:
         """Animates DEMO marks and matches simulated orders."""
         while True:
+            # Isolation point: a failed tick is dropped; the next one retries.
             with contextlib.suppress(Exception):
                 if isinstance(
                     container.market, market_static.StaticMarketDataGateway
@@ -439,23 +453,25 @@ def background_jobs(container: Container) -> list[api_app.BackgroundTask]:
             await asyncio.sleep(settings.tick_interval_ms / 1000)
 
     async def outbox() -> None:
-        """Processes the outbox."""
+        """Processes due outbox items every 0.5 seconds."""
         while True:
+            # Isolation point: dispatch_pending already logs per-item
+            # failures; anything else must not stop the worker.
             with contextlib.suppress(Exception):
                 await container.services.oms.dispatch_pending()
             await asyncio.sleep(0.5)
 
     async def reconcile() -> None:
-        """Runs reconciliation passes."""
+        """Runs a reconciliation pass every reconcile interval."""
         while True:
             await asyncio.sleep(settings.reconcile_interval_ms / 1000)
             try:
                 await container.services.reconciler.run_once()
-            except Exception:
+            except Exception:  # noqa: BLE001 - isolation point: logged with traceback; the next pass runs on schedule.
                 _LOG.exception("reconciliation pass failed")
 
     async def broker_events() -> None:
-        """Applies broker events; resyncs brokers periodically."""
+        """Applies broker events every tick; resyncs brokers periodically."""
         interval = settings.securities.broker_resync_interval_ms / 1000
         last = time.monotonic()
         while True:
@@ -466,7 +482,7 @@ def background_jobs(container: Container) -> list[api_app.BackgroundTask]:
                     for adapter in container.brokers.values():
                         await adapter.resync()
                 await pump_brokers(container)
-            except Exception:
+            except Exception:  # noqa: BLE001 - isolation point: logged with traceback; the pump retries on the next tick.
                 _LOG.exception("broker event pump failed")
 
     jobs: list[api_app.BackgroundTask] = [
@@ -488,11 +504,14 @@ def background_jobs(container: Container) -> list[api_app.BackgroundTask]:
 def build_app(container: Container) -> fastapi.FastAPI:
     """Builds the application for a container.
 
+    Background loops are attached only when ``settings.background_tasks``
+    is set.
+
     Args:
-        container: Container.
+        container: Wired engine.
 
     Returns:
-        Application.
+        The FastAPI application.
     """
     jobs = (
         background_jobs(container)
@@ -503,10 +522,10 @@ def build_app(container: Container) -> fastapi.FastAPI:
 
 
 def create_application() -> fastapi.FastAPI:
-    """Uvicorn factory reading settings from the environment.
+    """Builds the application from environment settings (uvicorn factory).
 
     Returns:
-        Application.
+        The FastAPI application.
     """
     settings = config.from_env()
     _LOG.info("starting execution engine: %r", settings)

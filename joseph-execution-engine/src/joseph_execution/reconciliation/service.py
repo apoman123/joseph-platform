@@ -3,12 +3,13 @@
 
 """Periodic reconciliation against venue truth.
 
-Each pass (1) resolves due outbox items, including UNKNOWN_RECONCILING
-orders, (2) pulls recent fills so missed stream events are applied, and
-(3) compares positions; a mismatch marks the position unknown, which the
-Risk Gateway treats as a block on new exposure until it matches again.
-LIVE accounts are reconciled against their venue adapter the same way
-(an adapter without credentials refuses and the account is skipped).
+Each pass (1) runs the due outbox items through the order management
+service (OMS), which resolves UNKNOWN_RECONCILING orders, (2) pulls recent
+fills so missed stream events are applied, and (3) compares positions; a
+mismatch marks the position unknown, which the Risk Gateway treats as a
+block on new exposure until it matches again. LIVE accounts are reconciled
+against their venue adapter the same way (an adapter without credentials
+refuses and the account is skipped for that pass).
 Holdings the adapter reports as unmanaged (``VenuePosition.managed`` is
 False, e.g. emerging-board stocks in a SinoPac account) are not compared:
 Joseph can neither trade nor match them, so they must not block the
@@ -35,14 +36,15 @@ _LOG = logging.getLogger(__name__)
 
 @dataclasses.dataclass(frozen=True, slots=True)
 class ReconcileReport:
-    """Summary of one pass.
+    """Summary of one reconciliation pass.
 
     Attributes:
-        outbox_items: Outbox items processed.
-        fills_applied: Missed fills applied.
-        mismatches: Positions flagged unknown.
-        cleared: Positions that matched again.
-        lag_ms: Time since the previous pass.
+        outbox_items: Due outbox items handed to the OMS.
+        fills_applied: Venue fills that were new to the OMS.
+        mismatches: Positions newly flagged unknown, including venue
+            holdings with no local position.
+        cleared: Flagged positions that match the venue again.
+        lag_ms: Milliseconds since the previous pass (0 on the first).
         unmanaged: Venue holdings skipped as not managed by Joseph.
     """
 
@@ -57,7 +59,7 @@ class ReconcileReport:
 class Reconciler:
     """Runs reconciliation passes for simulated and connected accounts."""
 
-    def __init__(  # noqa: PLR0917
+    def __init__(  # noqa: PLR0917 - six injected collaborators; bootstrap passes them positionally.
         self,
         uow_factory: repositories.UnitOfWorkFactory,
         resolver: trading.AdapterResolver,
@@ -70,9 +72,9 @@ class Reconciler:
 
         Args:
             uow_factory: Unit of work factory.
-            resolver: Adapter resolver.
-            oms: OMS.
-            audit_log: Audit log.
+            resolver: Resolves the adapter of an account and mode.
+            oms: Order management service that applies venue truth.
+            audit_log: Audit log for mismatch records.
             clock: Time source.
             metrics: Metrics sink.
         """
@@ -88,8 +90,13 @@ class Reconciler:
     async def run_once(self) -> ReconcileReport:
         """Runs one reconciliation pass.
 
+        Every account with a position (flat included) or a non-terminal
+        order in the newest 2,000 orders is reconciled once per order mode.
+        An account whose adapter raises ``ExecutionError`` is logged and
+        skipped for this pass.
+
         Returns:
-            Report.
+            Counts of the pass.
         """
         now = self._clock.now_ms()
         lag = 0 if self._last_run_ms is None else now - self._last_run_ms
@@ -113,6 +120,8 @@ class Reconciler:
                 continue
             adapter = self._resolver.resolve(account, mode)
             try:
+                # since_ms=0 asks for every fill the venue still lists; the
+                # OMS ignores fills it already recorded.
                 fills = await adapter.list_recent_fills(account_id, 0)
                 fills_applied += await self._oms.apply_venue_fills(
                     account_id, fills
@@ -136,14 +145,14 @@ class Reconciler:
     def _note_unmanaged(
         self, account_id: str, venue_positions: Sequence[trading.VenuePosition]
     ) -> int:
-        """Logs each unmanaged holding once with the adapter's note.
+        """Logs each unmanaged holding once per process with its note.
 
         Args:
-            account_id: Account.
-            venue_positions: Venue positions.
+            account_id: Account the positions belong to.
+            venue_positions: Positions reported by the venue.
 
         Returns:
-            Number of unmanaged holdings.
+            Number of unmanaged holdings in ``venue_positions``.
         """
         count = 0
         for position in venue_positions:
@@ -169,13 +178,20 @@ class Reconciler:
     ) -> tuple[int, int]:
         """Compares local and venue positions and flags differences.
 
+        A local position whose signed quantity differs from the venue is
+        marked unknown and audited (``position.mismatch``); a venue holding
+        with no local position is saved as a new unknown position and
+        audited (``position.unexpected``). An unknown position that matches
+        again is cleared.
+
         Args:
-            account_id: Account.
-            mode: Mode.
-            venue_positions: Venue positions.
+            account_id: Account to compare.
+            mode: Order mode of the local positions to compare.
+            venue_positions: Managed positions reported by the venue.
 
         Returns:
-            ``(mismatches, cleared)``.
+            ``(mismatches, cleared)``: positions newly flagged unknown, and
+            flagged positions cleared.
         """
         venue = {p.instrument_id: p.signed_qty for p in venue_positions}
         mismatches = cleared = 0

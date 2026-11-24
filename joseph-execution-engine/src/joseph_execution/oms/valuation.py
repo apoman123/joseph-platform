@@ -25,11 +25,14 @@ class Valuation:
 
     Attributes:
         equity: Equity, ``None`` when unknown.
-        available_margin: Free margin after positions and reservations.
-        gross_notional: Gross position notional at marks.
-        positions: Open positions.
+        available_margin: Free margin after positions and reservations,
+            ``None`` when unknown.
+        gross_notional: Gross position notional at marks, ``None`` when a
+            mark is missing or equity is unknown.
+        positions: Open positions of the account in this mode.
         marks: Mark price per instrument (``None`` when unavailable).
-        stale: True when any mark is missing or stale.
+        stale: True when any mark is missing or stale, or equity is
+            unknown.
     """
 
     equity: decimal.Decimal | None
@@ -50,7 +53,8 @@ async def quote_or_none(
         instrument_id: Instrument.
 
     Returns:
-        Quote or ``None``.
+        Quote, or ``None`` when there is none or the gateway raises
+        ``ExecutionError``.
     """
     try:
         return await gateway.quote(instrument_id)
@@ -58,7 +62,7 @@ async def quote_or_none(
         return None
 
 
-async def value_account(  # noqa: PLR0917
+async def value_account(  # noqa: PLR0917 - OMS, accounts, intake and tests pass these inputs positionally.
     uow_factory: repositories.UnitOfWorkFactory,
     gateway: market_port.MarketDataGateway,
     account: accounts.Account,
@@ -69,21 +73,26 @@ async def value_account(  # noqa: PLR0917
 ) -> Valuation:
     """Values an account from local positions and marks.
 
-    Paper/shadow accounts use their starting equity. Venue accounts use the
-    venue's balance snapshot when one is given (LIVE risk checks) and are
-    otherwise unknown, which the Risk Gateway treats as a block.
+    Accounts with a starting equity (paper and shadow) are valued as
+    starting equity + realized + unrealized profit and loss (PnL) at
+    marks; free margin is that equity less position margin and active
+    reservations. A position without a mark adds no unrealized PnL and
+    makes the valuation stale. Venue accounts use the venue's balance
+    snapshot when one is given (LIVE risk checks) and are otherwise
+    unknown, which the Risk Gateway treats as a block.
 
     Args:
         uow_factory: Unit of work factory.
         gateway: Market gateway.
         account: Account.
-        mode: Order mode.
-        now_ms: Current time.
-        max_quote_age_ms: Freshness budget for marks.
+        mode: Order mode whose positions and reservations count.
+        now_ms: Current time, epoch milliseconds.
+        max_quote_age_ms: Oldest acceptable mark, in milliseconds.
         venue: Venue balances of a venue account, if fetched.
 
     Returns:
-        Valuation.
+        Valuation; equity, free margin and gross notional are ``None``
+        (and ``stale`` is True) for a venue account without ``venue``.
     """
     with uow_factory() as uow:
         open_positions = tuple(
@@ -142,19 +151,20 @@ def _venue_valuation(
     """Values a venue account from the venue's own balances.
 
     Equity and free margin come from the venue (which already accounts for
-    resting orders); local reservations of orders not yet acknowledged are
-    subtracted as well, so the estimate errs on the safe side. Gross
-    notional uses local positions at marks.
+    resting orders); all active local reservations are subtracted as well,
+    so the estimate errs on the safe side. Gross notional uses local
+    positions at marks.
 
     Args:
         venue: Venue balance snapshot.
         reserved: Active local margin reservations.
         open_positions: Local open positions.
         marks: Marks by instrument.
-        stale: Whether any mark is stale.
+        stale: Whether any mark is already missing or stale.
 
     Returns:
-        Valuation.
+        Valuation; gross notional is ``None`` and ``stale`` True when a
+        mark is missing.
     """
     gross: decimal.Decimal | None = decimals.ZERO
     for pos in open_positions:

@@ -41,11 +41,14 @@ class EquityInputs:
 
     Attributes:
         sessions: Sessions around now, ``None`` when unknown.
-        previous_close: Reference price, ``None`` when unknown or unused.
+        previous_close: Reference price of the daily price limits, ``None``
+            when unknown or when the instrument has no limits.
         cash: Cash buying power, ``None`` when unknown.
-        equity: Account equity for the context.
-        available_margin: Free funds for the context.
-        gross_notional: Gross position notional for the context.
+        equity: Account equity for the context, ``None`` when unknown.
+        available_margin: Free funds for the context, ``None`` when
+            unknown.
+        gross_notional: Gross position notional for the context, ``None``
+            when a mark is missing.
     """
 
     sessions: tuple[market.TradingSession, ...] | None
@@ -63,11 +66,13 @@ async def sessions_around(
 
     Args:
         gateway: Market gateway.
-        calendar: Calendar id.
-        now_ms: Time.
+        calendar: Calendar id, such as ``XTAI``.
+        now_ms: Time, epoch milliseconds.
 
     Returns:
-        Sessions, or ``None`` when the calendar is unavailable.
+        Sessions from ``SESSION_LOOKBACK_MS`` before to
+        ``SESSION_LOOKAHEAD_MS`` after ``now_ms``, or ``None`` when the
+        calendar is unknown or the request fails.
     """
     try:
         sessions = await gateway.sessions(
@@ -99,13 +104,14 @@ async def _previous_close(
 
 
 def _unrealized(val: valuation.Valuation) -> decimal.Decimal:
-    """Sums the known unrealized PnL of a valuation.
+    """Sums the known unrealized profit and loss (PnL) of a valuation.
 
     Args:
         val: Valuation.
 
     Returns:
-        Unrealized PnL of positions with a mark.
+        Unrealized PnL of the positions with a mark; positions without one
+        count as zero.
     """
     total = decimals.ZERO
     for pos in val.positions:
@@ -133,7 +139,7 @@ def _gross(val: valuation.Valuation) -> decimal.Decimal | None:
     return gross
 
 
-async def gather(  # noqa: PLR0917
+async def gather(  # noqa: PLR0917 - the OMS and tests pass these risk inputs positionally.
     gateway: market_port.MarketDataGateway,
     uow_factory: repositories.UnitOfWorkFactory,
     adapter: trading.TradingAdapter,
@@ -153,10 +159,12 @@ async def gather(  # noqa: PLR0917
         mode: Order mode.
         instrument: Instrument metadata, if known.
         val: Local valuation of the account in this mode.
-        now_ms: Evaluation time.
+        now_ms: Evaluation time, epoch milliseconds.
 
     Returns:
-        Inputs; unknown values are ``None`` (checks then fail closed).
+        Inputs; unknown values are ``None`` (checks then fail closed). A
+        LIVE account whose broker snapshot fails gets no cash, equity or
+        available margin.
     """
     sessions = None
     previous = None
@@ -165,14 +173,14 @@ async def gather(  # noqa: PLR0917
         if instrument.price_limit_pct is not None:
             previous = await _previous_close(gateway, instrument.instrument_id)
     if mode is not enums.OrderMode.LIVE:
-        cash = (
-            None
-            if val.available_margin is None
-            else equities.CashBalance(
+        cash: equities.CashBalance | None = None
+        if val.available_margin is not None:
+            # Shares are paid in cash, not in marked-to-market equity, so
+            # unrealized PnL is taken back out of the free margin.
+            cash = equities.CashBalance(
                 currency=account.currency,
                 available=val.available_margin - _unrealized(val),
             )
-        )
         return EquityInputs(
             sessions,
             previous,
@@ -188,6 +196,8 @@ async def gather(  # noqa: PLR0917
         return EquityInputs(sessions, previous, None, None, None, gross)
     with uow_factory() as uow:
         reserved = uow.reservations.active_total(account.account_id, mode)
+    # The broker may already count some of these orders; subtracting them
+    # again errs on the side of not overspending.
     available = snapshot.available_margin - reserved
     cash = equities.CashBalance(
         currency=snapshot.currency,
