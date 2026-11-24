@@ -1,7 +1,12 @@
 # Copyright 2026 apoman123
 # SPDX-License-Identifier: MIT
 
-"""SQLAlchemy Core implementation of the persistence ports."""
+"""SQLAlchemy Core implementation of the persistence ports.
+
+Decimals are stored as exact text and parsed back with ``decimals``; JSON
+columns hold contract payloads. Persisted column names are part of the
+schema and never change here.
+"""
 
 from __future__ import annotations
 
@@ -31,6 +36,7 @@ from joseph_execution.domain import positions
 from joseph_execution.domain import risk
 from joseph_execution.ports import repositories
 
+# Short alias: every row mapper parses several stored decimals.
 _D = decimals.to_decimal
 
 
@@ -54,9 +60,10 @@ def _enable_sqlite_wal(engine: sa.Engine) -> None:
     """Configures every file-based SQLite connection for concurrent access.
 
     The default rollback journal lets one connection's read transaction block
-    another connection's commit; because commits run on the event loop, that
-    froze every request. WAL lets readers and the single writer proceed
-    concurrently, and ``busy_timeout`` makes writers wait instead of failing.
+    another connection's commit, and commits run on the event loop, so a
+    blocked commit freezes every request. WAL lets readers and the single
+    writer proceed concurrently, and ``busy_timeout`` makes writers wait
+    instead of failing.
 
     Args:
         engine: SQLite engine backed by a file.
@@ -70,7 +77,7 @@ def _enable_sqlite_wal(engine: sa.Engine) -> None:
             dbapi_connection: Raw sqlite3 connection.
             _record: Pool record (unused).
         """
-        cursor = dbapi_connection.cursor()  # type: ignore[attr-defined]
+        cursor = dbapi_connection.cursor()  # type: ignore[attr-defined]  # SQLAlchemy types the DB-API connection as object; sqlite3's has cursor()
         cursor.execute("PRAGMA journal_mode=WAL")
         cursor.execute("PRAGMA synchronous=NORMAL")
         cursor.execute(f"PRAGMA busy_timeout={_SQLITE_BUSY_TIMEOUT_MS}")
@@ -81,7 +88,8 @@ def create_engine(url: str) -> sa.Engine:
     """Creates an engine and the schema.
 
     In-memory SQLite uses a single shared connection so every unit of work
-    sees the same database.
+    sees the same database. File-based SQLite runs in WAL mode, and on
+    SQLite the audit table gets triggers that make it append-only.
 
     Args:
         url: SQLAlchemy URL, e.g. ``sqlite:///./var/execution.db``.
@@ -114,7 +122,11 @@ def create_engine(url: str) -> sa.Engine:
 
 
 class SqlUnitOfWorkFactory:
-    """Creates SQL units of work; serializes them for SQLite."""
+    """Creates SQL units of work that one process-wide lock serializes.
+
+    The lock is used for every engine; it matters most for SQLite, which
+    allows a single writer.
+    """
 
     def __init__(self, engine: sa.Engine) -> None:
         """Initializes the factory.
@@ -147,63 +159,63 @@ class _Repo:
 
     @property
     def conn(self) -> sa.Connection:
-        """Returns the active connection."""
+        """The owning unit of work's active connection."""
         return self._uow.connection
+
+
+def _account_from_row(row: sa.Row[object]) -> accounts.Account:
+    """Maps an ``accounts`` row to an account.
+
+    Args:
+        row: Row.
+
+    Returns:
+        Account.
+    """
+    columns = row._mapping
+    return accounts.Account(
+        account_id=columns["account_id"],
+        tenant_id=columns["tenant_id"],
+        venue=columns["venue"],
+        label=columns["label"],
+        status=enums.AccountStatus(columns["status"]),
+        modes=tuple(enums.OrderMode(x) for x in json.loads(columns["modes"])),
+        currency=columns["currency"],
+        created_at_ms=columns["created_at_ms"],
+        starting_equity=_opt_d(columns["starting_equity"]),
+        is_paper=bool(columns["is_paper"]),
+        credential_id=columns["credential_id"],
+        withdrawal_disabled=bool(columns["withdrawal_disabled"]),
+    )
+
+
+def _account_values(account: accounts.Account) -> dict[str, object]:
+    """Maps an account to column values.
+
+    Args:
+        account: Account.
+
+    Returns:
+        Values.
+    """
+    return {
+        "account_id": account.account_id,
+        "tenant_id": account.tenant_id,
+        "venue": account.venue,
+        "label": account.label,
+        "status": account.status.value,
+        "modes": json.dumps([m.value for m in account.modes]),
+        "currency": account.currency,
+        "created_at_ms": account.created_at_ms,
+        "starting_equity": decimals.fmt_optional(account.starting_equity),
+        "is_paper": account.is_paper,
+        "credential_id": account.credential_id,
+        "withdrawal_disabled": account.withdrawal_disabled,
+    }
 
 
 class SqlAccounts(_Repo):
     """Accounts table."""
-
-    @staticmethod
-    def _row(row: sa.Row[object]) -> accounts.Account:
-        """Maps a row.
-
-        Args:
-            row: Row.
-
-        Returns:
-            Account.
-        """
-        m = row._mapping
-        return accounts.Account(
-            account_id=m["account_id"],
-            tenant_id=m["tenant_id"],
-            venue=m["venue"],
-            label=m["label"],
-            status=enums.AccountStatus(m["status"]),
-            modes=tuple(enums.OrderMode(x) for x in json.loads(m["modes"])),
-            currency=m["currency"],
-            created_at_ms=m["created_at_ms"],
-            starting_equity=_opt_d(m["starting_equity"]),
-            is_paper=bool(m["is_paper"]),
-            credential_id=m["credential_id"],
-            withdrawal_disabled=bool(m["withdrawal_disabled"]),
-        )
-
-    @staticmethod
-    def _values(account: accounts.Account) -> dict[str, object]:
-        """Maps an account to column values.
-
-        Args:
-            account: Account.
-
-        Returns:
-            Values.
-        """
-        return {
-            "account_id": account.account_id,
-            "tenant_id": account.tenant_id,
-            "venue": account.venue,
-            "label": account.label,
-            "status": account.status.value,
-            "modes": json.dumps([m.value for m in account.modes]),
-            "currency": account.currency,
-            "created_at_ms": account.created_at_ms,
-            "starting_equity": decimals.fmt_optional(account.starting_equity),
-            "is_paper": account.is_paper,
-            "credential_id": account.credential_id,
-            "withdrawal_disabled": account.withdrawal_disabled,
-        }
 
     def get(self, account_id: str) -> accounts.Account | None:
         """Loads an account.
@@ -219,7 +231,7 @@ class SqlAccounts(_Repo):
                 schema.accounts.c.account_id == account_id
             )
         ).first()
-        return None if row is None else self._row(row)
+        return None if row is None else _account_from_row(row)
 
     def list_for_tenant(self, tenant_id: str) -> list[accounts.Account]:
         """Lists accounts.
@@ -235,7 +247,7 @@ class SqlAccounts(_Repo):
             .where(schema.accounts.c.tenant_id == tenant_id)
             .order_by(schema.accounts.c.created_at_ms)
         )
-        return [self._row(r) for r in rows]
+        return [_account_from_row(r) for r in rows]
 
     def add(self, account: accounts.Account) -> None:
         """Inserts an account.
@@ -244,7 +256,7 @@ class SqlAccounts(_Repo):
             account: Account.
         """
         self.conn.execute(
-            schema.accounts.insert().values(self._values(account))
+            schema.accounts.insert().values(_account_values(account))
         )
 
     def save(self, account: accounts.Account) -> None:
@@ -256,7 +268,7 @@ class SqlAccounts(_Repo):
         self.conn.execute(
             schema.accounts.update()
             .where(schema.accounts.c.account_id == account.account_id)
-            .values(self._values(account))
+            .values(_account_values(account))
         )
 
 
@@ -323,38 +335,40 @@ class SqlCredentials(_Repo):
         return int(result.rowcount or 0)
 
 
+def _intent_from_row(row: sa.Row[object]) -> repositories.StoredIntent:
+    """Maps an ``order_intents`` row to a stored intent.
+
+    Args:
+        row: Row.
+
+    Returns:
+        Stored intent.
+    """
+    columns = row._mapping
+    request = intents.OrderIntentRequest.from_contract(
+        json.loads(columns["request"])
+    )
+    intent = intents.OrderIntent(
+        intent_id=columns["intent_id"],
+        tenant_id=columns["tenant_id"],
+        user_id=columns["user_id"],
+        idempotency_key=columns["idempotency_key"],
+        client_order_id=columns["client_order_id"],
+        created_at_ms=columns["created_at_ms"],
+        request=request,
+        deployment_id=columns["deployment_id"],
+    )
+    return repositories.StoredIntent(
+        intent=intent,
+        decision=risk.RiskDecision.from_contract(
+            json.loads(columns["decision"])
+        ),
+        body_hash=columns["body_hash"],
+    )
+
+
 class SqlIntents(_Repo):
     """Order intents."""
-
-    @staticmethod
-    def _row(row: sa.Row[object]) -> repositories.StoredIntent:
-        """Maps a row.
-
-        Args:
-            row: Row.
-
-        Returns:
-            Stored intent.
-        """
-        m = row._mapping
-        request = intents.OrderIntentRequest.from_contract(
-            json.loads(m["request"])
-        )
-        intent = intents.OrderIntent(
-            intent_id=m["intent_id"],
-            tenant_id=m["tenant_id"],
-            user_id=m["user_id"],
-            idempotency_key=m["idempotency_key"],
-            client_order_id=m["client_order_id"],
-            created_at_ms=m["created_at_ms"],
-            request=request,
-            deployment_id=m["deployment_id"],
-        )
-        return repositories.StoredIntent(
-            intent=intent,
-            decision=risk.RiskDecision.from_contract(json.loads(m["decision"])),
-            body_hash=m["body_hash"],
-        )
 
     def add(self, stored: repositories.StoredIntent) -> None:
         """Inserts an intent.
@@ -402,7 +416,7 @@ class SqlIntents(_Repo):
                 schema.order_intents.c.intent_id == intent_id
             )
         ).first()
-        return None if row is None else self._row(row)
+        return None if row is None else _intent_from_row(row)
 
     def find_by_idempotency(
         self, tenant_id: str, key: str
@@ -422,7 +436,7 @@ class SqlIntents(_Repo):
                 schema.order_intents.c.idempotency_key == key,
             )
         ).first()
-        return None if row is None else self._row(row)
+        return None if row is None else _intent_from_row(row)
 
     def count_for_signal(
         self, tenant_id: str, signal_id: str, deployment_id: str | None
@@ -448,98 +462,98 @@ class SqlIntents(_Repo):
         return int(self.conn.execute(query).scalar_one())
 
 
+def _order_from_row(row: sa.Row[object]) -> orders.Order:
+    """Maps an ``orders`` row to an order.
+
+    Args:
+        row: Row.
+
+    Returns:
+        Order.
+    """
+    columns = row._mapping
+    basis = columns["trigger_basis"]
+    return orders.Order(
+        order_id=columns["order_id"],
+        intent_id=columns["intent_id"],
+        tenant_id=columns["tenant_id"],
+        account_id=columns["account_id"],
+        instrument_id=columns["instrument_id"],
+        client_order_id=columns["client_order_id"],
+        mode=enums.OrderMode(columns["mode"]),
+        role=enums.OrderRole(columns["role"]),
+        side=enums.OrderSide(columns["side"]),
+        order_type=enums.OrderType(columns["order_type"]),
+        time_in_force=enums.TimeInForce(columns["time_in_force"]),
+        quantity_base=_D(columns["quantity_base"]),
+        reduce_only=bool(columns["reduce_only"]),
+        state=enums.OrderState(columns["state"]),
+        created_at_ms=columns["created_at_ms"],
+        updated_at_ms=columns["updated_at_ms"],
+        version=columns["version"],
+        filled_base=_D(columns["filled_base"]),
+        avg_fill_price=_opt_d(columns["avg_fill_price"]),
+        limit_price=_opt_d(columns["limit_price"]),
+        trigger_price=_opt_d(columns["trigger_price"]),
+        trigger_basis=None if basis is None else enums.PriceBasis(basis),
+        exchange_order_id=columns["exchange_order_id"],
+        parent_order_id=columns["parent_order_id"],
+        state_reason=columns["state_reason"],
+        strategy_version_id=columns["strategy_version_id"],
+        signal_id=columns["signal_id"],
+        submit_attempts=columns["submit_attempts"],
+        manual_intervention=bool(columns["manual_intervention"]),
+        fill_ids=set(json.loads(columns["fill_ids"])),
+    )
+
+
+def _order_values(order: orders.Order) -> dict[str, object]:
+    """Maps an order to column values.
+
+    Args:
+        order: Order.
+
+    Returns:
+        Values.
+    """
+    return {
+        "order_id": order.order_id,
+        "intent_id": order.intent_id,
+        "tenant_id": order.tenant_id,
+        "account_id": order.account_id,
+        "instrument_id": order.instrument_id,
+        "client_order_id": order.client_order_id,
+        "exchange_order_id": order.exchange_order_id,
+        "parent_order_id": order.parent_order_id,
+        "mode": order.mode.value,
+        "role": order.role.value,
+        "side": order.side.value,
+        "order_type": order.order_type.value,
+        "time_in_force": order.time_in_force.value,
+        "quantity_base": decimals.fmt(order.quantity_base),
+        "filled_base": decimals.fmt(order.filled_base),
+        "avg_fill_price": decimals.fmt_optional(order.avg_fill_price),
+        "limit_price": decimals.fmt_optional(order.limit_price),
+        "trigger_price": decimals.fmt_optional(order.trigger_price),
+        "trigger_basis": None
+        if order.trigger_basis is None
+        else order.trigger_basis.value,
+        "reduce_only": order.reduce_only,
+        "state": order.state.value,
+        "state_reason": order.state_reason,
+        "strategy_version_id": order.strategy_version_id,
+        "signal_id": order.signal_id,
+        "created_at_ms": order.created_at_ms,
+        "updated_at_ms": order.updated_at_ms,
+        "version": order.version,
+        "submit_attempts": order.submit_attempts,
+        "manual_intervention": order.manual_intervention,
+        "fill_ids": json.dumps(sorted(order.fill_ids)),
+    }
+
+
 class SqlOrders(_Repo):
     """Orders."""
-
-    @staticmethod
-    def _row(row: sa.Row[object]) -> orders.Order:
-        """Maps a row.
-
-        Args:
-            row: Row.
-
-        Returns:
-            Order.
-        """
-        m = row._mapping
-        basis = m["trigger_basis"]
-        return orders.Order(
-            order_id=m["order_id"],
-            intent_id=m["intent_id"],
-            tenant_id=m["tenant_id"],
-            account_id=m["account_id"],
-            instrument_id=m["instrument_id"],
-            client_order_id=m["client_order_id"],
-            mode=enums.OrderMode(m["mode"]),
-            role=enums.OrderRole(m["role"]),
-            side=enums.OrderSide(m["side"]),
-            order_type=enums.OrderType(m["order_type"]),
-            time_in_force=enums.TimeInForce(m["time_in_force"]),
-            quantity_base=_D(m["quantity_base"]),
-            reduce_only=bool(m["reduce_only"]),
-            state=enums.OrderState(m["state"]),
-            created_at_ms=m["created_at_ms"],
-            updated_at_ms=m["updated_at_ms"],
-            version=m["version"],
-            filled_base=_D(m["filled_base"]),
-            avg_fill_price=_opt_d(m["avg_fill_price"]),
-            limit_price=_opt_d(m["limit_price"]),
-            trigger_price=_opt_d(m["trigger_price"]),
-            trigger_basis=None if basis is None else enums.PriceBasis(basis),
-            exchange_order_id=m["exchange_order_id"],
-            parent_order_id=m["parent_order_id"],
-            state_reason=m["state_reason"],
-            strategy_version_id=m["strategy_version_id"],
-            signal_id=m["signal_id"],
-            submit_attempts=m["submit_attempts"],
-            manual_intervention=bool(m["manual_intervention"]),
-            fill_ids=set(json.loads(m["fill_ids"])),
-        )
-
-    @staticmethod
-    def _values(order: orders.Order) -> dict[str, object]:
-        """Maps an order to column values.
-
-        Args:
-            order: Order.
-
-        Returns:
-            Values.
-        """
-        return {
-            "order_id": order.order_id,
-            "intent_id": order.intent_id,
-            "tenant_id": order.tenant_id,
-            "account_id": order.account_id,
-            "instrument_id": order.instrument_id,
-            "client_order_id": order.client_order_id,
-            "exchange_order_id": order.exchange_order_id,
-            "parent_order_id": order.parent_order_id,
-            "mode": order.mode.value,
-            "role": order.role.value,
-            "side": order.side.value,
-            "order_type": order.order_type.value,
-            "time_in_force": order.time_in_force.value,
-            "quantity_base": decimals.fmt(order.quantity_base),
-            "filled_base": decimals.fmt(order.filled_base),
-            "avg_fill_price": decimals.fmt_optional(order.avg_fill_price),
-            "limit_price": decimals.fmt_optional(order.limit_price),
-            "trigger_price": decimals.fmt_optional(order.trigger_price),
-            "trigger_basis": None
-            if order.trigger_basis is None
-            else order.trigger_basis.value,
-            "reduce_only": order.reduce_only,
-            "state": order.state.value,
-            "state_reason": order.state_reason,
-            "strategy_version_id": order.strategy_version_id,
-            "signal_id": order.signal_id,
-            "created_at_ms": order.created_at_ms,
-            "updated_at_ms": order.updated_at_ms,
-            "version": order.version,
-            "submit_attempts": order.submit_attempts,
-            "manual_intervention": order.manual_intervention,
-            "fill_ids": json.dumps(sorted(order.fill_ids)),
-        }
 
     def add(self, order: orders.Order) -> None:
         """Inserts an order.
@@ -552,7 +566,7 @@ class SqlOrders(_Repo):
         """
         try:
             self.conn.execute(
-                schema.orders.insert().values(self._values(order))
+                schema.orders.insert().values(_order_values(order))
             )
         except sa_exc.IntegrityError as err:
             raise errors.ExecutionError(
@@ -575,7 +589,7 @@ class SqlOrders(_Repo):
                 schema.orders.c.order_id == order.order_id,
                 schema.orders.c.version == expected_version,
             )
-            .values(self._values(order))
+            .values(_order_values(order))
         )
         if not result.rowcount:
             raise errors.ExecutionError(
@@ -594,7 +608,7 @@ class SqlOrders(_Repo):
         row = self.conn.execute(
             sa.select(schema.orders).where(schema.orders.c.order_id == order_id)
         ).first()
-        return None if row is None else self._row(row)
+        return None if row is None else _order_from_row(row)
 
     def get_by_client_id(
         self, account_id: str, client_order_id: str
@@ -614,9 +628,9 @@ class SqlOrders(_Repo):
                 schema.orders.c.client_order_id == client_order_id,
             )
         ).first()
-        return None if row is None else self._row(row)
+        return None if row is None else _order_from_row(row)
 
-    def list(  # noqa: PLR0917
+    def list(  # noqa: PLR0917 - implements the OrderRepository port signature
         self,
         tenant_id: str | None = None,
         account_id: str | None = None,
@@ -651,39 +665,41 @@ class SqlOrders(_Repo):
         if parent_order_id is not None:
             query = query.where(c.parent_order_id == parent_order_id)
         query = query.order_by(c.created_at_ms.desc(), c.order_id.desc())
-        return [self._row(r) for r in self.conn.execute(query.limit(limit))]
+        return [
+            _order_from_row(r) for r in self.conn.execute(query.limit(limit))
+        ]
+
+
+def _fill_from_row(row: sa.Row[object]) -> orders.Fill:
+    """Maps a ``fills`` row to a fill.
+
+    Args:
+        row: Row.
+
+    Returns:
+        Fill.
+    """
+    columns = row._mapping
+    return orders.Fill(
+        fill_id=columns["fill_id"],
+        order_id=columns["order_id"],
+        account_id=columns["account_id"],
+        instrument_id=columns["instrument_id"],
+        exchange_fill_id=columns["exchange_fill_id"],
+        side=enums.OrderSide(columns["side"]),
+        price=_D(columns["price"]),
+        quantity_base=_D(columns["quantity_base"]),
+        fee=_D(columns["fee"]),
+        fee_asset=columns["fee_asset"],
+        liquidity=columns["liquidity"],
+        ts_ms=columns["ts_ms"],
+        mode=enums.OrderMode(columns["mode"]),
+        realized_pnl=_D(columns["realized_pnl"]),
+    )
 
 
 class SqlFills(_Repo):
     """Fills."""
-
-    @staticmethod
-    def _row(row: sa.Row[object]) -> orders.Fill:
-        """Maps a row.
-
-        Args:
-            row: Row.
-
-        Returns:
-            Fill.
-        """
-        m = row._mapping
-        return orders.Fill(
-            fill_id=m["fill_id"],
-            order_id=m["order_id"],
-            account_id=m["account_id"],
-            instrument_id=m["instrument_id"],
-            exchange_fill_id=m["exchange_fill_id"],
-            side=enums.OrderSide(m["side"]),
-            price=_D(m["price"]),
-            quantity_base=_D(m["quantity_base"]),
-            fee=_D(m["fee"]),
-            fee_asset=m["fee_asset"],
-            liquidity=m["liquidity"],
-            ts_ms=m["ts_ms"],
-            mode=enums.OrderMode(m["mode"]),
-            realized_pnl=_D(m["realized_pnl"]),
-        )
 
     def add(self, fill: orders.Fill, tenant_id: str) -> bool:
         """Inserts a fill unless the venue fill id is known.
@@ -693,7 +709,8 @@ class SqlFills(_Repo):
             tenant_id: Tenant.
 
         Returns:
-            False for duplicates.
+            True when inserted; False when the account already has a fill
+            with this venue fill id.
         """
         exists = self.conn.execute(
             sa.select(schema.fills.c.fill_id).where(
@@ -749,7 +766,7 @@ class SqlFills(_Repo):
         if order_id is not None:
             query = query.where(c.order_id == order_id)
         query = query.order_by(c.ts_ms.desc(), c.fill_id.desc()).limit(limit)
-        return [self._row(r) for r in self.conn.execute(query)]
+        return [_fill_from_row(r) for r in self.conn.execute(query)]
 
     def realized_since(self, account_id: str, since_ms: int) -> decimal.Decimal:
         """Sums realized PnL since a time.
@@ -770,34 +787,34 @@ class SqlFills(_Repo):
         return sum((_D(r[0]) for r in rows), decimals.ZERO)
 
 
+def _position_from_row(row: sa.Row[object]) -> positions.Position:
+    """Maps a ``positions`` row to a position.
+
+    Args:
+        row: Row.
+
+    Returns:
+        Position.
+    """
+    columns = row._mapping
+    return positions.Position(
+        position_id=columns["position_id"],
+        tenant_id=columns["tenant_id"],
+        account_id=columns["account_id"],
+        instrument_id=columns["instrument_id"],
+        mode=enums.OrderMode(columns["mode"]),
+        signed_qty=_D(columns["signed_qty"]),
+        entry_price=_opt_d(columns["entry_price"]),
+        realized_pnl=_D(columns["realized_pnl"]),
+        fees_paid=_D(columns["fees_paid"]),
+        leverage=_D(columns["leverage"]),
+        updated_at_ms=columns["updated_at_ms"],
+        unknown=bool(columns["unknown"]),
+    )
+
+
 class SqlPositions(_Repo):
     """Positions."""
-
-    @staticmethod
-    def _row(row: sa.Row[object]) -> positions.Position:
-        """Maps a row.
-
-        Args:
-            row: Row.
-
-        Returns:
-            Position.
-        """
-        m = row._mapping
-        return positions.Position(
-            position_id=m["position_id"],
-            tenant_id=m["tenant_id"],
-            account_id=m["account_id"],
-            instrument_id=m["instrument_id"],
-            mode=enums.OrderMode(m["mode"]),
-            signed_qty=_D(m["signed_qty"]),
-            entry_price=_opt_d(m["entry_price"]),
-            realized_pnl=_D(m["realized_pnl"]),
-            fees_paid=_D(m["fees_paid"]),
-            leverage=_D(m["leverage"]),
-            updated_at_ms=m["updated_at_ms"],
-            unknown=bool(m["unknown"]),
-        )
 
     def get(
         self, account_id: str, instrument_id: str, mode: enums.OrderMode
@@ -830,7 +847,7 @@ class SqlPositions(_Repo):
                 schema.positions.c.position_id == position_id
             )
         ).first()
-        return None if row is None else self._row(row)
+        return None if row is None else _position_from_row(row)
 
     def save(self, position: positions.Position) -> None:
         """Upserts a position.
@@ -883,7 +900,7 @@ class SqlPositions(_Repo):
             query = query.where(c.tenant_id == tenant_id)
         if account_id is not None:
             query = query.where(c.account_id == account_id)
-        result = [self._row(r) for r in self.conn.execute(query)]
+        result = [_position_from_row(r) for r in self.conn.execute(query)]
         if include_flat:
             return result
         return [p for p in result if p.signed_qty != decimals.ZERO]
@@ -892,7 +909,7 @@ class SqlPositions(_Repo):
 class SqlReservations(_Repo):
     """Reservations."""
 
-    def add(  # noqa: PLR0917
+    def add(  # noqa: PLR0917 - implements the ReservationRepository port signature
         self,
         reservation_id: str,
         tenant_id: str,
@@ -994,30 +1011,30 @@ class SqlReservations(_Repo):
         return None if row is None else _D(row[0])
 
 
+def _outbox_item_from_row(row: sa.Row[object]) -> repositories.OutboxItem:
+    """Maps an ``outbox`` row to an outbox item.
+
+    Args:
+        row: Row.
+
+    Returns:
+        Item.
+    """
+    columns = row._mapping
+    return repositories.OutboxItem(
+        outbox_id=columns["outbox_id"],
+        aggregate_id=columns["aggregate_id"],
+        event_key=columns["event_key"],
+        kind=columns["kind"],
+        status=columns["status"],
+        attempts=columns["attempts"],
+        next_attempt_ms=columns["next_attempt_ms"],
+        last_error=columns["last_error"],
+    )
+
+
 class SqlOutbox(_Repo):
     """Outbox."""
-
-    @staticmethod
-    def _row(row: sa.Row[object]) -> repositories.OutboxItem:
-        """Maps a row.
-
-        Args:
-            row: Row.
-
-        Returns:
-            Item.
-        """
-        m = row._mapping
-        return repositories.OutboxItem(
-            outbox_id=m["outbox_id"],
-            aggregate_id=m["aggregate_id"],
-            event_key=m["event_key"],
-            kind=m["kind"],
-            status=m["status"],
-            attempts=m["attempts"],
-            next_attempt_ms=m["next_attempt_ms"],
-            last_error=m["last_error"],
-        )
 
     def add(
         self, aggregate_id: str, event_key: str, kind: str, now_ms: int
@@ -1031,7 +1048,8 @@ class SqlOutbox(_Repo):
             now_ms: Time.
 
         Returns:
-            False if it existed.
+            True when added; False when the aggregate already has an item
+            with this key.
         """
         exists = self.conn.execute(
             sa.select(schema.outbox.c.outbox_id).where(
@@ -1074,9 +1092,9 @@ class SqlOutbox(_Repo):
             .order_by(c.outbox_id)
             .limit(limit)
         )
-        return [self._row(r) for r in rows]
+        return [_outbox_item_from_row(r) for r in rows]
 
-    def update(  # noqa: PLR0917
+    def update(  # noqa: PLR0917 - implements the OutboxRepository port signature
         self,
         outbox_id: int,
         status: str,
@@ -1123,37 +1141,37 @@ class SqlOutbox(_Repo):
             .where(schema.outbox.c.aggregate_id == aggregate_id)
             .order_by(schema.outbox.c.outbox_id)
         )
-        return [self._row(r) for r in rows]
+        return [_outbox_item_from_row(r) for r in rows]
+
+
+def _audit_event_from_row(row: sa.Row[object]) -> audit.AuditEvent:
+    """Maps an ``audit_events`` row to an audit event.
+
+    Args:
+        row: Row.
+
+    Returns:
+        Audit event.
+    """
+    columns = row._mapping
+    return audit.AuditEvent(
+        event_id=columns["event_id"],
+        tenant_id=columns["tenant_id"],
+        actor=columns["actor"],
+        action=columns["action"],
+        entity_type=columns["entity_type"],
+        entity_id=columns["entity_id"],
+        trace_id=columns["trace_id"],
+        ts_ms=columns["ts_ms"],
+        payload=json.loads(columns["payload"]),
+        prev_hash=columns["prev_hash"],
+        hash=columns["hash"],
+        account_id=columns["account_id"],
+    )
 
 
 class SqlAudit(_Repo):
     """Append-only audit store."""
-
-    @staticmethod
-    def _row(row: sa.Row[object]) -> audit.AuditEvent:
-        """Maps a row.
-
-        Args:
-            row: Row.
-
-        Returns:
-            Audit event.
-        """
-        m = row._mapping
-        return audit.AuditEvent(
-            event_id=m["event_id"],
-            tenant_id=m["tenant_id"],
-            actor=m["actor"],
-            action=m["action"],
-            entity_type=m["entity_type"],
-            entity_id=m["entity_id"],
-            trace_id=m["trace_id"],
-            ts_ms=m["ts_ms"],
-            payload=json.loads(m["payload"]),
-            prev_hash=m["prev_hash"],
-            hash=m["hash"],
-            account_id=m["account_id"],
-        )
 
     def last_hash(self, tenant_id: str) -> str:
         """Returns the tenant's latest hash.
@@ -1209,7 +1227,7 @@ class SqlAudit(_Repo):
             .where(schema.audit_events.c.tenant_id == tenant_id)
             .order_by(schema.audit_events.c.seq)
         )
-        return [self._row(r) for r in rows]
+        return [_audit_event_from_row(r) for r in rows]
 
     def list(
         self, tenant_id: str, account_id: str | None = None, limit: int = 200
@@ -1229,7 +1247,7 @@ class SqlAudit(_Repo):
         if account_id is not None:
             query = query.where(c.account_id == account_id)
         query = query.order_by(c.seq.desc()).limit(limit)
-        return [self._row(r) for r in self.conn.execute(query)]
+        return [_audit_event_from_row(r) for r in self.conn.execute(query)]
 
 
 class SqlKillSwitches(_Repo):
@@ -1281,18 +1299,18 @@ class SqlKillSwitches(_Repo):
         )
         result = []
         for row in rows:
-            m = row._mapping
+            columns = row._mapping
             result.append(
                 kill_switch.KillSwitch(
-                    tenant_id=m["tenant_id"],
-                    scope=enums.KillSwitchScope(m["scope"]),
-                    target_id=m["target_id"],
-                    engaged=bool(m["engaged"]),
-                    cancel_open_orders=bool(m["cancel_open_orders"]),
-                    flatten_positions=bool(m["flatten_positions"]),
-                    reason=m["reason"],
-                    actor=m["actor"],
-                    changed_at_ms=m["changed_at_ms"],
+                    tenant_id=columns["tenant_id"],
+                    scope=enums.KillSwitchScope(columns["scope"]),
+                    target_id=columns["target_id"],
+                    engaged=bool(columns["engaged"]),
+                    cancel_open_orders=bool(columns["cancel_open_orders"]),
+                    flatten_positions=bool(columns["flatten_positions"]),
+                    reason=columns["reason"],
+                    actor=columns["actor"],
+                    changed_at_ms=columns["changed_at_ms"],
                 )
             )
         return result
@@ -1350,73 +1368,73 @@ class SqlRiskLimits(_Repo):
         )
 
 
+def _deployment_from_row(row: sa.Row[object]) -> deployments.Deployment:
+    """Maps a ``deployments`` row to a deployment.
+
+    Args:
+        row: Row.
+
+    Returns:
+        Deployment.
+    """
+    columns = row._mapping
+    consent_raw = columns["live_consent"]
+    consent = None
+    if consent_raw:
+        body = json.loads(consent_raw)
+        consent = deployments.LiveConsent(
+            consented_at_ms=int(body["consented_at_ms"]),
+            expires_at_ms=int(body["expires_at_ms"]),
+            scope_hash=str(body["scope_hash"]),
+            actor=str(body["actor"]),
+        )
+    return deployments.Deployment(
+        deployment_id=columns["deployment_id"],
+        tenant_id=columns["tenant_id"],
+        strategy_version_id=columns["strategy_version_id"],
+        account_id=columns["account_id"],
+        mode=enums.DeploymentMode(columns["mode"]),
+        state=enums.DeploymentState(columns["state"]),
+        limits=deployments.DeploymentLimits.from_contract(
+            json.loads(columns["limits"])
+        ),
+        sizing=deployments.SizingModel.from_contract(
+            json.loads(columns["sizing"])
+        ),
+        created_at_ms=columns["created_at_ms"],
+        updated_at_ms=columns["updated_at_ms"],
+        live_consent=consent,
+    )
+
+
+def _deployment_values(deployment: deployments.Deployment) -> dict[str, object]:
+    """Maps a deployment to column values.
+
+    Args:
+        deployment: Deployment.
+
+    Returns:
+        Values.
+    """
+    return {
+        "deployment_id": deployment.deployment_id,
+        "tenant_id": deployment.tenant_id,
+        "strategy_version_id": deployment.strategy_version_id,
+        "account_id": deployment.account_id,
+        "mode": deployment.mode.value,
+        "state": deployment.state.value,
+        "limits": json.dumps(deployment.limits.to_contract()),
+        "sizing": json.dumps(deployment.sizing.to_contract()),
+        "live_consent": None
+        if deployment.live_consent is None
+        else json.dumps(deployment.live_consent.to_contract()),
+        "created_at_ms": deployment.created_at_ms,
+        "updated_at_ms": deployment.updated_at_ms,
+    }
+
+
 class SqlDeployments(_Repo):
     """Deployments."""
-
-    @staticmethod
-    def _row(row: sa.Row[object]) -> deployments.Deployment:
-        """Maps a row.
-
-        Args:
-            row: Row.
-
-        Returns:
-            Deployment.
-        """
-        m = row._mapping
-        consent_raw = m["live_consent"]
-        consent = None
-        if consent_raw:
-            body = json.loads(consent_raw)
-            consent = deployments.LiveConsent(
-                consented_at_ms=int(body["consented_at_ms"]),
-                expires_at_ms=int(body["expires_at_ms"]),
-                scope_hash=str(body["scope_hash"]),
-                actor=str(body["actor"]),
-            )
-        return deployments.Deployment(
-            deployment_id=m["deployment_id"],
-            tenant_id=m["tenant_id"],
-            strategy_version_id=m["strategy_version_id"],
-            account_id=m["account_id"],
-            mode=enums.DeploymentMode(m["mode"]),
-            state=enums.DeploymentState(m["state"]),
-            limits=deployments.DeploymentLimits.from_contract(
-                json.loads(m["limits"])
-            ),
-            sizing=deployments.SizingModel.from_contract(
-                json.loads(m["sizing"])
-            ),
-            created_at_ms=m["created_at_ms"],
-            updated_at_ms=m["updated_at_ms"],
-            live_consent=consent,
-        )
-
-    @staticmethod
-    def _values(deployment: deployments.Deployment) -> dict[str, object]:
-        """Maps to column values.
-
-        Args:
-            deployment: Deployment.
-
-        Returns:
-            Values.
-        """
-        return {
-            "deployment_id": deployment.deployment_id,
-            "tenant_id": deployment.tenant_id,
-            "strategy_version_id": deployment.strategy_version_id,
-            "account_id": deployment.account_id,
-            "mode": deployment.mode.value,
-            "state": deployment.state.value,
-            "limits": json.dumps(deployment.limits.to_contract()),
-            "sizing": json.dumps(deployment.sizing.to_contract()),
-            "live_consent": None
-            if deployment.live_consent is None
-            else json.dumps(deployment.live_consent.to_contract()),
-            "created_at_ms": deployment.created_at_ms,
-            "updated_at_ms": deployment.updated_at_ms,
-        }
 
     def add(self, deployment: deployments.Deployment) -> None:
         """Inserts.
@@ -1425,7 +1443,7 @@ class SqlDeployments(_Repo):
             deployment: Deployment.
         """
         self.conn.execute(
-            schema.deployments.insert().values(self._values(deployment))
+            schema.deployments.insert().values(_deployment_values(deployment))
         )
 
     def save(self, deployment: deployments.Deployment) -> None:
@@ -1439,7 +1457,7 @@ class SqlDeployments(_Repo):
             .where(
                 schema.deployments.c.deployment_id == deployment.deployment_id
             )
-            .values(self._values(deployment))
+            .values(_deployment_values(deployment))
         )
 
     def get(self, deployment_id: str) -> deployments.Deployment | None:
@@ -1456,7 +1474,7 @@ class SqlDeployments(_Repo):
                 schema.deployments.c.deployment_id == deployment_id
             )
         ).first()
-        return None if row is None else self._row(row)
+        return None if row is None else _deployment_from_row(row)
 
     def list(
         self, tenant_id: str, strategy_version_id: str | None = None
@@ -1475,7 +1493,7 @@ class SqlDeployments(_Repo):
         if strategy_version_id is not None:
             query = query.where(c.strategy_version_id == strategy_version_id)
         query = query.order_by(c.created_at_ms)
-        return [self._row(r) for r in self.conn.execute(query)]
+        return [_deployment_from_row(r) for r in self.conn.execute(query)]
 
 
 class SqlLiveArming(_Repo):
@@ -1501,17 +1519,17 @@ class SqlLiveArming(_Repo):
         ).first()
         if row is None:
             return None
-        m = row._mapping
+        columns = row._mapping
         return accounts.LiveArming(
-            tenant_id=m["tenant_id"],
-            account_id=m["account_id"],
-            granted_at_ms=m["granted_at_ms"],
-            expires_at_ms=m["expires_at_ms"],
-            granted_by=m["granted_by"],
-            acknowledgement=m["acknowledgement"],
-            scope_hash=m["scope_hash"],
-            revoked_at_ms=m["revoked_at_ms"],
-            revoked_by=m["revoked_by"],
+            tenant_id=columns["tenant_id"],
+            account_id=columns["account_id"],
+            granted_at_ms=columns["granted_at_ms"],
+            expires_at_ms=columns["expires_at_ms"],
+            granted_by=columns["granted_by"],
+            acknowledgement=columns["acknowledgement"],
+            scope_hash=columns["scope_hash"],
+            revoked_at_ms=columns["revoked_at_ms"],
+            revoked_by=columns["revoked_by"],
         )
 
     def put(self, arming: accounts.LiveArming) -> None:
@@ -1578,7 +1596,7 @@ class SqlUnitOfWork:
 
     @property
     def connection(self) -> sa.Connection:
-        """Returns the active connection.
+        """The active connection.
 
         Raises:
             RuntimeError: Outside a ``with`` block.
@@ -1594,6 +1612,7 @@ class SqlUnitOfWork:
             Self.
         """
         self._lock.acquire()
+        # Release the lock if no transaction opens, or it would stay held.
         try:
             self._conn = self._engine.connect()
             self._tx = self._conn.begin()
