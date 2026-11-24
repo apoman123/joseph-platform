@@ -11,7 +11,7 @@
 
 import type {MarketSnapshot} from '@joseph/contracts';
 
-/** Column ids. */
+/** Column ids; `oi` is open interest. */
 export type WatchColumn =
   | 'last'
   | 'mark'
@@ -25,15 +25,20 @@ export type WatchColumn =
 /** Sortable keys: columns plus the instrument name. */
 export type WatchSortKey = WatchColumn | 'symbol';
 
-/** Sort state; `null` keeps the user's manual order. */
-export type WatchSort = {key: WatchSortKey; dir: 'asc' | 'desc'} | null;
+/** Sort state; where it is nullable, `null` keeps the user's manual order. */
+export interface WatchSort {
+  /** Column or instrument name to sort by. */
+  key: WatchSortKey;
+  /** Direction. */
+  dir: 'asc' | 'desc';
+}
 
 /** View preferences of the watchlist. */
 export interface WatchlistPrefs {
   /** Visible columns. */
   columns: readonly WatchColumn[];
-  /** Sort. */
-  sort: WatchSort;
+  /** Sort, or `null` for the user's manual order. */
+  sort: WatchSort | null;
   /** Row source: the user's list or the engine's qualified perpetuals. */
   source: 'mine' | 'qualified';
 }
@@ -75,10 +80,11 @@ export function normalizeColumns(value: unknown): WatchColumn[] {
 }
 
 /**
- * Numeric sort value of a snapshot column.
- * @param snapshot Snapshot or null when unavailable.
+ * Returns the numeric sort value of a snapshot column.
+ * @param snapshot Snapshot, or null when unavailable.
  * @param key Column.
- * @return Number, or null when missing.
+ * @return Number (the `data` column is 1 when stale, else 0), or null when
+ *     the value is missing or not a finite number.
  */
 export function sortValue(
   snapshot: MarketSnapshot | null,
@@ -101,12 +107,16 @@ export function sortValue(
 }
 
 /**
- * Cycles a header click: descending, ascending, then manual order.
- * @param current Current sort.
+ * Cycles a header click: descending, ascending, then manual order. The
+ * instrument name starts ascending instead.
+ * @param current Current sort, or null for manual order.
  * @param key Clicked key.
- * @return Next sort.
+ * @return Next sort; null returns to the manual order.
  */
-export function nextSort(current: WatchSort, key: WatchSortKey): WatchSort {
+export function nextSort(
+  current: WatchSort | null,
+  key: WatchSortKey
+): WatchSort | null {
   if (!current || current.key !== key) {
     return {key, dir: key === 'symbol' ? 'asc' : 'desc'};
   }
@@ -125,7 +135,7 @@ export function nextSort(current: WatchSort, key: WatchSortKey): WatchSort {
  */
 export function sortRows(
   ids: readonly string[],
-  sort: WatchSort,
+  sort: WatchSort | null,
   snapshots: Readonly<Record<string, MarketSnapshot | null>>
 ): string[] {
   if (!sort) return [...ids];

@@ -28,8 +28,8 @@ afterEach(() => {
 });
 
 /**
- * Builds a BTC request.
- * @param patch Overrides.
+ * Builds a paper limit buy of 0.01 DEMO BTCUSD at 90,000.
+ * @param patch Field overrides.
  * @return Request.
  */
 function request(patch: Partial<OrderIntentRequest> = {}): OrderIntentRequest {
@@ -50,10 +50,12 @@ function request(patch: Partial<OrderIntentRequest> = {}): OrderIntentRequest {
 }
 
 /**
- * Opens a filled long position on the DEMO broker.
+ * Opens a filled long position on the DEMO broker and waits until the
+ * broker lists it.
  * @param ctx Fake context.
  */
 async function openLong(ctx: FakeContext): Promise<void> {
+  // A fresh idempotency key, so a second call opens a second order.
   await ctx.broker.submitIntent(
     request({order_type: 'market', limit_price: null}),
     `open-${Math.random()}`

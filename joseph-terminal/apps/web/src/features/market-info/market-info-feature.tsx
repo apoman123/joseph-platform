@@ -12,21 +12,18 @@
  * the yield in percent and its publication session.
  */
 
-import type {Instrument, MarketSnapshot} from '@joseph/contracts';
 import {
   EXCHANGE_HOURS,
+  type Instrument,
   instrumentCalendarId,
   isExchangeCalendar,
+  type MarketSnapshot,
   parseInstrumentId,
   VENUE_NAMES,
 } from '@joseph/contracts';
 import {useEffect, useState} from 'react';
 import type {TerminalRuntime} from '../../composition/runtime';
-import {
-  useStore,
-  type WebFeature,
-  type WebSlotProps,
-} from '../../shell/react-bindings';
+import {useStore, type WebFeature} from '../../shell/react-bindings';
 import {
   formatAge,
   formatDecimal,
@@ -39,22 +36,23 @@ import {
 import {marketTypeLabel} from '../../shell/markets';
 import {shellManifest} from '../shell/manifest';
 
-/** Snapshot refresh interval. */
+/** Snapshot refresh interval in milliseconds. */
 const REFRESH_MS = 5_000;
 
 /** Panel data. */
 interface MarketData {
-  /** Snapshot. */
+  /** Latest snapshot, or null while loading or when none arrived. */
   snapshot: MarketSnapshot | null;
-  /** Instrument specs. */
+  /** Registry entry, or null while loading or when it is not listed. */
   instrument: Instrument | null;
-  /** Error. */
+  /** Message of the last failed snapshot request, or null. */
   error: string | null;
 }
 
 /**
- * Definition-list row.
- * @param props Label and value.
+ * Renders a definition-list row. Values use tabular figures unless `plain`;
+ * `tone` adds a colour class such as `j-pos`.
+ * @param props Label, value, tone and plain flag.
  * @return Row.
  */
 function Row({
@@ -78,7 +76,7 @@ function Row({
 
 /**
  * Formats minutes after midnight as `HH:MM`.
- * @param minutes Minutes.
+ * @param minutes Minutes after midnight.
  * @return Text.
  */
 function clock(minutes: number): string {
@@ -91,7 +89,7 @@ function clock(minutes: number): string {
  * `NT$2.31B`, or `1.20M EUR`).
  * @param value Decimal string.
  * @param currency Quote currency.
- * @return Text.
+ * @return Text, or `—` when the value is missing or invalid.
  */
 export function formatMoneyCompact(
   value: string | null | undefined,
@@ -109,6 +107,7 @@ export function formatMoneyCompact(
  * @return Text, or the plain tick size without a ladder.
  */
 export function tickDescription(instrument: Instrument): string {
+  // `Number` only orders the steps; the text keeps the decimal strings.
   const ladder = [...(instrument.tick_ladder ?? [])].sort(
     (a, b) => Number(a.min_price) - Number(b.min_price)
   );
@@ -124,11 +123,14 @@ export function tickDescription(instrument: Instrument): string {
 }
 
 /**
- * Market info feature.
- * @param _runtime Runtime (unused).
- * @return Feature.
+ * Creates the market info feature.
+ * @param _runtime Runtime; unused, the feature reads only its context.
+ * @return Feature contributing the side-panel market view.
  */
-export function marketInfoFeature(_runtime: TerminalRuntime): WebFeature {
+export function marketInfoFeature(
+  // eslint-disable-next-line @typescript-eslint/no-unused-vars -- composition/features.ts calls every shell feature factory with the runtime; dropping it breaks that call.
+  _runtime: TerminalRuntime
+): WebFeature {
   return {
     manifest: shellManifest(
       'market-info',
@@ -142,11 +144,10 @@ export function marketInfoFeature(_runtime: TerminalRuntime): WebFeature {
     ),
     activate(ctx) {
       /**
-       * Side panel view.
-       * @param _props Slot props (unused).
+       * Renders the side-panel snapshot and specs of the selected instrument.
        * @return Panel.
        */
-      function MarketPanel(_props: WebSlotProps) {
+      function MarketPanel() {
         const selection = useStore(ctx.selection);
         const [data, setData] = useState<MarketData>({
           snapshot: null,
@@ -159,6 +160,7 @@ export function marketInfoFeature(_runtime: TerminalRuntime): WebFeature {
             selection.instrumentId
           );
           setData({snapshot: null, instrument: null, error: null});
+          // A failed registry lookup only leaves the specs as dashes.
           ctx.clients.market
             .listInstruments({venue, q: venueMarketId})
             .then(list => {

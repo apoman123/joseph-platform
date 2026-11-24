@@ -16,6 +16,7 @@
 import {expect, test, type Page} from '@playwright/test';
 import {openPanel, ticket} from './trading-helpers';
 
+/** Folder of the documentation screenshots, relative to `apps/web`. */
 const SHOTS = 'e2e/screenshots';
 
 /** Saturday 2026-11-28 04:00 UTC (Friday 23:00 New York): NYSE closed. */
@@ -34,12 +35,14 @@ const DEMO_CODE = '123456';
  */
 async function load(page: Page, rehearsal = true): Promise<void> {
   const url = rehearsal ? '/?demo-live-rehearsal=1' : '/';
+  // As in `loadTerminal`: the first load provides the origin whose storage
+  // is cleared, and the reload starts clean.
   await page.goto(url);
   await page.evaluate(() => {
     try {
       window.localStorage.clear();
     } catch {
-      // Storage may be unavailable; the app degrades to memory.
+      // Storage may be unavailable; the app then keeps state in memory.
     }
   });
   await page.reload();
@@ -52,7 +55,7 @@ async function load(page: Page, rehearsal = true): Promise<void> {
 }
 
 /**
- * Picks ACME and routes the ticket to the rehearsal account.
+ * Picks the DEMO stock ACME and routes the ticket to the rehearsal account.
  * @param page Page.
  */
 async function rehearsalTicket(page: Page): Promise<void> {
@@ -62,14 +65,17 @@ async function rehearsalTicket(page: Page): Promise<void> {
   await expect(page.getByText('Loading candles…')).toHaveCount(0);
   await openPanel(page, 'Order ticket');
   const account = ticket(page).getByRole('combobox', {name: 'Account'});
+  // Wait for the ticket's own routing to the paper account first: it runs
+  // when the instrument's registry entry arrives and would override an
+  // earlier choice.
   await expect(account).toHaveValue('acct-paper-demo');
   await account.selectOption(REHEARSAL);
 }
 
 /**
- * Arms LIVE from the open arm step.
+ * Arms LIVE from the open arm step with the DEMO code.
  * @param page Page.
- * @param duration Lifetime label.
+ * @param duration Lifetime option label, e.g. `15 minutes`.
  */
 async function arm(page: Page, duration: string): Promise<void> {
   const panel = ticket(page).getByTestId('arm-live');
@@ -80,6 +86,8 @@ async function arm(page: Page, duration: string): Promise<void> {
   await expect(ticket(page).getByTestId('live-armed')).toBeVisible();
 }
 
+// A fixed clock makes the armed-until times exact and lets a test move past
+// an arming's expiry.
 test.beforeEach(async ({page}) => {
   await page.clock.install({time: SATURDAY});
 });
@@ -100,6 +108,8 @@ test('arms LIVE with a step-up code, shows until when and disarms', async ({
   const confirm = panel.getByTestId('arm-live-confirm');
   await expect(confirm).toBeDisabled();
   await panel.getByRole('checkbox').check();
+  // Six digits pass the format check, so the code reaches the simulated
+  // engine, which refuses it.
   await panel.getByRole('textbox', {name: 'Step-up code'}).fill('000000');
   await expect(confirm).toHaveText('Arm live for 1 hour');
   await confirm.click();
@@ -119,6 +129,7 @@ test('arms LIVE with a step-up code, shows until when and disarms', async ({
   await expect(preview).toContainText('Live is armed until 04:15 UTC');
   await expect(t.getByTestId('confirm-order')).toHaveText('Review LIVE order…');
   await expect(t.getByTestId('confirm-order')).toBeEnabled();
+  // Let hover and focus transitions finish so the screenshot is stable.
   await page.waitForTimeout(300);
   await page.screenshot({path: `${SHOTS}/42-live-armed-ticket.png`});
   await t.getByRole('button', {name: 'Disarm'}).click();
@@ -138,6 +149,8 @@ test('an expired arming returns the ticket to paper', async ({page}) => {
   await t.getByRole('button', {name: 'Live'}).click();
   await arm(page, '15 minutes');
   await expect(t.getByTestId('mode-badge')).toContainText('Live money');
+  // One minute past the 15-minute arming: the ticket's clock tick sees the
+  // expiry and drops to paper without any server answer.
   await page.clock.fastForward('16:00');
   await expect(t.getByTestId('mode-badge')).toContainText('Paper');
   await expect(t.getByTestId('live-armed')).toHaveCount(0);

@@ -62,11 +62,13 @@ export interface ArmLivePanelProps {
 }
 
 /**
- * Message for a refused arming.
- * @param err Thrown value.
+ * Returns the message for a refused arming; a rejected step-up code gets an
+ * actionable hint.
+ * @param err Error thrown by the execution client.
  * @return Message.
  */
 function armError(err: unknown): string {
+  // Read `body.code` (as `ApiError` carries it) without trusting the shape.
   const code =
     err && typeof err === 'object' && 'body' in err
       ? (err as {body?: {code?: unknown}}).body?.code
@@ -78,10 +80,10 @@ function armError(err: unknown): string {
 }
 
 /**
- * Consent step before LIVE: names the account and broker, requires an
- * explicit acknowledgement, a lifetime and a step-up code that the
- * execution engine verifies before it arms the account.
- * @param props Props.
+ * Renders the consent step before LIVE: names the account and broker, and
+ * requires an explicit acknowledgement, a lifetime and a step-up code that
+ * the execution engine verifies before it arms the account.
+ * @param props Account, client and callbacks.
  * @return Panel.
  */
 export function ArmLivePanel({
@@ -107,6 +109,7 @@ export function ArmLivePanel({
         account.account_id,
         liveArmRequest(code, duration)
       );
+      // Never treat the account as armed without an end time from the engine.
       if (summary.live_armed_until_ms == null) {
         setError('The execution engine did not arm this account.');
         return;
@@ -204,9 +207,9 @@ export function ArmLivePanel({
 export interface LiveConfirmDialogProps {
   /** Previewed order. */
   preview: OrderPreview;
-  /** Instrument. */
+  /** Instrument of the order (names, ticks and lots). */
   instrument: LiveInstrument;
-  /** Account. */
+  /** Account the order goes to. */
   account: AccountSummary;
   /** Whether submission is running. */
   busy: boolean;
@@ -217,9 +220,11 @@ export interface LiveConfirmDialogProps {
 }
 
 /**
- * Dedicated LIVE confirmation naming LIVE money, the broker, the account,
- * the exact action, the quantity (shares and Taiwan lots), price and currency.
- * @param props Props.
+ * Renders the dedicated LIVE confirmation naming LIVE money, the broker, the
+ * account, the exact action, the quantity (shares and Taiwan lots), price
+ * and currency. Confirming stays disabled until the real-money box is
+ * checked.
+ * @param props Preview, instrument, account and callbacks.
  * @return Dialog.
  */
 export function LiveConfirmDialog({

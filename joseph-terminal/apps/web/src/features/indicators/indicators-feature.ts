@@ -5,27 +5,27 @@
  */
 
 /**
- * @fileoverview Indicator layers feature: fetches backend AOIs/events per
- * chart and publishes one overlay layer per indicator plugin.
+ * @fileoverview Indicator layers feature: fetches backend AOIs (areas of
+ * interest) and events per chart and publishes one overlay layer per
+ * indicator plugin. Nothing is computed in the browser.
  */
 
 import type {OverlayLayer} from '@joseph/chart-core';
 import type {AoiList, ChartState, SeriesQuery} from '@joseph/contracts';
-import type {ReadableStore} from '@joseph/feature-registry';
+import {createStore, type ReadableStore} from '@joseph/feature-registry';
 import {
   DEFAULT_VIZ_SETTINGS,
   PLUGIN_NAMES,
   buildIndicatorLayers,
   type VizSettings,
 } from '@joseph/indicator-viz';
-import {createStore} from '@joseph/feature-registry';
 import {layerSettings, layerStyle} from '@joseph/terminal-shell';
 import type {TerminalRuntime} from '../../composition/runtime';
 import type {WebFeature} from '../../shell/react-bindings';
 import {createLazyStore} from '../shell/lazy-store';
 import {shellManifest} from '../shell/manifest';
 
-/** Poll interval for AOI refresh. */
+/** AOI poll interval in milliseconds; stream updates reload in between. */
 const REFRESH_MS = 30_000;
 
 /**
@@ -74,7 +74,9 @@ export function chartQuerySettings(chart: ChartState): {
 }
 
 /**
- * Indicator visualization feature.
+ * Creates the indicator layers feature: one chart layer per indicator
+ * plugin, fed by backend AOIs and events, and commands that toggle layers
+ * and ended zones.
  * @param runtime Runtime.
  * @return Feature.
  */
@@ -97,10 +99,13 @@ export function indicatorsFeature(runtime: TerminalRuntime): WebFeature {
       settings.subscribe(value => void ctx.settings.write(value));
       const cache = new Map<string, ReadableStore<AoiList | null>>();
       /**
-       * Shared AOI source per series, point-in-time and input overrides.
-       * Replay sources are not cached (each cursor step is a new query).
+       * Returns the shared AOI source of a query (series, point in time and
+       * input overrides). Live sources poll and follow the stream; replay
+       * sources load once and are not cached, since each cursor step is a
+       * new query.
        * @param query Series query.
-       * @return Lazy store of the latest AOI list.
+       * @return Lazy store of the latest AOI list; null before the first
+       *     answer or after a failed request.
        */
       const source = (query: SeriesQuery): ReadableStore<AoiList | null> => {
         const key = JSON.stringify([
@@ -150,6 +155,8 @@ export function indicatorsFeature(runtime: TerminalRuntime): WebFeature {
                 timeframe: query.timeframe,
               },
             ],
+            // `snapshot_required` means the stream missed updates, so the
+            // list is fetched again in full.
             envelope => {
               if (
                 envelope.type === 'aoi.updated' ||
@@ -185,6 +192,7 @@ export function indicatorsFeature(runtime: TerminalRuntime): WebFeature {
                 set(null);
                 return;
               }
+              // Every plugin's layer is built; this provider keeps its own.
               const layer = buildIndicatorLayers({
                 instrumentId: chart.instrumentId,
                 timeframe: chart.timeframe,

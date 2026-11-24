@@ -5,10 +5,13 @@
  */
 
 /**
- * @fileoverview Self-contained fake `FeatureContext` for F6 component tests.
+ * @fileoverview Self-contained fake `FeatureContext` for the feature
+ * component tests (trading, portfolio, alerts, screener, strategy,
+ * watchlist), and `renderFeature` to activate a feature and render one of
+ * its slot views.
  *
- * Uses only the frozen feature-registry types and `createStore`, plus the
- * DEMO broker/strategy services, so tests do not depend on the shell.
+ * Uses only the feature-registry's public types and `createStore`, plus the
+ * DEMO broker and strategy services, so tests do not depend on the shell.
  */
 
 import type {OverlayLayer} from '@joseph/chart-core';
@@ -296,7 +299,7 @@ export function fakeMarketClient(): MarketDataClient {
 }
 
 /**
- * Creates a stream that never emits.
+ * Creates a stream that reports itself open and never emits.
  * @return Stream client.
  */
 function silentStream(): StreamClient {
@@ -316,15 +319,19 @@ export interface FakeContextOptions {
   clients?: Partial<BackendClients>;
   /** Initial selection overrides. */
   selection?: Partial<TerminalSelection>;
-  /** DEMO broker delays (default 0 ms). */
+  /**
+   * Acknowledgement and fill delay of the DEMO broker in milliseconds
+   * (default 0); ignored when `broker` is given.
+   */
   brokerDelayMs?: number;
   /** DEMO broker to use (e.g. a subclass rehearsing LIVE). */
   broker?: DemoExecutionClient;
 }
 
 /**
- * Builds a fake feature context backed by DEMO services.
- * @param options Options.
+ * Builds a fake feature context backed by DEMO services, on the DEMO BTCUSD
+ * perpetual, 5m, paper mode.
+ * @param options Client, selection and broker overrides.
  * @return Fake context.
  */
 export function createFakeContext(
@@ -381,6 +388,8 @@ export function createFakeContext(
         handler(payload);
       }
     },
+    // Handlers are stored type-erased; `emit` passes each one only the
+    // payload of the event type it subscribed to.
     on(type, handler) {
       const set = listeners.get(type) ?? new Set();
       set.add(handler as (payload: unknown) => void);
@@ -452,6 +461,8 @@ export function createFakeContext(
         notifications.push({message, tone});
       },
     },
+    // One feature per fake context, so one settings value; like the real
+    // store, the caller's type is trusted.
     settings: {
       read<T>(fallback: T): T {
         return (settings.get('value') as T | undefined) ?? fallback;
@@ -483,8 +494,9 @@ export interface RenderedFeature extends RenderResult {
  * @param feature Feature to activate.
  * @param slot Slot to render from.
  * @param contributionId Contribution id (first one when omitted).
- * @param ctx Optional pre-built context.
+ * @param ctx Pre-built context; a fresh `createFakeContext()` by default.
  * @return Render result with context and disposer.
+ * @throws `Error` when the slot has no matching contribution.
  */
 export async function renderFeature(
   feature: WebFeature,

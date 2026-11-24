@@ -5,18 +5,23 @@
  */
 
 /**
- * @fileoverview Manifest helper for shell-owned features.
+ * @fileoverview Manifest helper for the shell-owned features (chart tools,
+ * drawing, indicators, market info, data health, workspace, theme and
+ * palette).
  */
 
 import type {FeatureManifest} from '@joseph/feature-registry';
 import {CONTRACT_VERSION} from '../../composition/runtime';
 
 /**
- * Builds a shell feature manifest.
+ * Builds a shell feature manifest: version 1.0.0, owned by
+ * `terminal-shell`, settings schema 1, the runtime's contract version and
+ * no slots unless `extra` sets them.
  * @param id Feature id.
- * @param displayName Name.
- * @param description Purpose.
- * @param extra Overrides.
+ * @param displayName Name shown in the UI.
+ * @param description One-line purpose.
+ * @param extra Fields that override the defaults (slots, capabilities,
+ *     permissions, ...).
  * @return Manifest.
  */
 export function shellManifest(

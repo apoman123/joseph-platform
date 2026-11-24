@@ -51,7 +51,7 @@ export interface StrategyPanelProps {
   editor: StrategyEditor;
 }
 
-/** Panel tabs. */
+/** Panel tabs: rule tree, JSON, backtest and saved versions. */
 type Tab = 'rules' | 'json' | 'backtest' | 'versions';
 
 /** Plain-language explanation of the AUTO_LIVE lock. */
@@ -59,10 +59,11 @@ export const AUTO_LIVE_LOCK_REASON =
   'Automatic live trading is locked. It needs an execution deployment for one account with limits, explicit scoped consent and live trading enabled on the server. This terminal cannot turn it on.';
 
 /**
- * Groups issues by the node they belong to.
+ * Groups issues by the rule-tree node their JSON pointer points into.
  * @param definition Definition.
  * @param issues Issues with JSON pointers.
- * @return Map from node id to issues, plus issues outside the rule tree.
+ * @return Map from node id to issues, plus the issues outside the rule tree
+ *     (`general`).
  */
 export function issuesByNode(
   definition: StrategyDefinition,
@@ -79,8 +80,9 @@ export function issuesByNode(
 }
 
 /**
- * Renders the strategy panel.
- * @param props Props.
+ * Renders the strategy panel: toolbar (template, validate, save) and the
+ * rules, JSON, backtest and versions tabs.
+ * @param props Feature context and the feature's editor.
  * @return Panel element.
  */
 export function StrategyPanel({ctx, editor}: StrategyPanelProps): ReactNode {
@@ -133,6 +135,7 @@ export function StrategyPanel({ctx, editor}: StrategyPanelProps): ReactNode {
           <span className={styles.srOnly}>Start from a template</span>
           <select
             className="j-select"
+            // Always back on the prompt: the select acts as a menu.
             value=""
             aria-label="Start from a template"
             onChange={e =>
@@ -282,6 +285,9 @@ export function StrategyPanel({ctx, editor}: StrategyPanelProps): ReactNode {
                         const venues = e.target.checked
                           ? [...def.universe.venues, v]
                           : def.universe.venues.filter(x => x !== v);
+                        // The contract wants at least one venue. An empty
+                        // list is kept anyway, so client validation can
+                        // point at it ("Choose at least one venue").
                         update({
                           universe: {
                             ...def.universe,
@@ -493,7 +499,8 @@ export function StrategyPanel({ctx, editor}: StrategyPanelProps): ReactNode {
 }
 
 /**
- * JSON export and import (v2 rules and starter v1 configs).
+ * Renders the JSON export and import (version 2 rules, and starter version
+ * 1 configs migrated with a report of what was mapped).
  * @param props Editor and current definition.
  * @return Element.
  */
@@ -580,9 +587,10 @@ function JsonTab({
 }
 
 /**
- * Backtest form and results.
+ * Renders the backtest form and results for the latest saved version on
+ * the selected instrument; fees are in bps (basis points) per side.
  * @param props Context, editor and latest version.
- * @return Element.
+ * @return Element, or a prompt to save when no version exists.
  */
 function BacktestTab({
   ctx,
@@ -611,6 +619,7 @@ function BacktestTab({
     setBusy(true);
     setError(null);
     try {
+      // An empty or invalid day count runs the default 7 days.
       const to = Date.now();
       const from = to - Math.max(1, Number(days) || 7) * 86_400_000;
       setReport(
@@ -684,6 +693,7 @@ function BacktestTab({
           )}
           <div className={styles.metrics}>
             {metric('Trades', report.metrics.trades)}
+            {/* A float is exact enough for a one-decimal percentage. */}
             {metric(
               'Win rate',
               report.metrics.win_rate
@@ -741,8 +751,9 @@ function BacktestTab({
 }
 
 /**
- * Version list with activation, pause and diffs. AUTO_LIVE is locked.
- * @param props Editor, versions and busy flag.
+ * Renders the version list with activation (after a confirmation), pause
+ * and the changes from each previous version. AUTO_LIVE is locked.
+ * @param props Editor, versions (newest first) and busy flag.
  * @return Element.
  */
 function VersionsTab({

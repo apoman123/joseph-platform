@@ -57,11 +57,12 @@ export interface WatchlistPanelProps {
 }
 
 /**
- * Renders one snapshot cell.
+ * Renders one snapshot cell. Prices are grouped decimal strings, never
+ * reformatted through a float.
  * @param column Column id.
  * @param snap Snapshot, or null while loading or unavailable.
  * @param failed Whether the snapshot request failed.
- * @return Cell content.
+ * @return Cell content; `—` for a missing value.
  */
 function cellContent(
   column: WatchColumn,
@@ -104,15 +105,15 @@ function cellContent(
   }
 }
 
-/** Snapshot load result per instrument. */
+/** Snapshot, or the error of its request, per instrument id. */
 type SnapshotMap = Record<string, MarketSnapshot | {error: string}>;
 
 /**
- * Moves an item within a list.
+ * Moves an item one place up or down within a list.
  * @param list List.
- * @param index Index to move.
- * @param delta 1 or +1.
- * @return New list.
+ * @param index Index of the item to move.
+ * @param delta Direction: -1 moves up, 1 moves down.
+ * @return New list, or `list` itself when the item is already at that end.
  */
 export function moveItem<T>(
   list: readonly T[],
@@ -128,8 +129,9 @@ export function moveItem<T>(
 }
 
 /**
- * Renders the watchlist.
- * @param props Props.
+ * Renders the watchlist: the user's list or the engine's qualified
+ * perpetuals, with prices polled every 5 s.
+ * @param props Feature context and the persisted items and preferences.
  * @return Panel element.
  */
 export function WatchlistPanel({
@@ -176,6 +178,7 @@ export function WatchlistPanel({
     5000
   );
 
+  // Search from two characters on, once typing pauses for 200 ms.
   useEffect(() => {
     const q = query.trim();
     if (q.length < 2) {
@@ -203,10 +206,13 @@ export function WatchlistPanel({
   const remove = (instrumentId: string) => {
     if (!qualifiedSource) items.set(mine.filter(id => id !== instrumentId));
   };
+  // Reordering works only in the manual order of the user's list, where a
+  // row index is an index into `mine`.
   const manual = view.sort === null && !qualifiedSource;
   const move = (index: number, delta: -1 | 1) => {
     if (!manual) return;
     items.set(moveItem(mine, index, delta));
+    // Keep keyboard focus on the moved row once React has re-rendered.
     requestAnimationFrame(() => rows.current[index + delta]?.focus());
   };
   const snapshotById: Record<string, MarketSnapshot | null> = {};
@@ -296,6 +302,7 @@ export function WatchlistPanel({
                       const next = event.target.checked
                         ? [...p.columns, column.id]
                         : p.columns.filter(c => c !== column.id);
+                      // The last visible column cannot be turned off.
                       return next.length > 0 ? {...p, columns: next} : p;
                     })
                   }
@@ -464,6 +471,7 @@ export function WatchlistPanel({
                           aria-label={`Add ${id} to my list`}
                           disabled={mine.includes(id)}
                           onClick={e => {
+                            // Row buttons must not also select the row.
                             e.stopPropagation();
                             add(id);
                           }}

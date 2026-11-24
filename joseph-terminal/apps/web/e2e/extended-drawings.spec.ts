@@ -5,10 +5,11 @@
  */
 
 /**
- * @fileoverview System tests (DEMO) of the extended drawing tier and the
- * engine-backed tools: P3 shapes and patterns, anchored VWAP and the
- * regression channel. Canvas text is not in the DOM, so results are read
- * from the object list and the data window.
+ * @fileoverview Browser tests (DEMO) of the extended drawing tier and the
+ * engine-backed tools: the extended shapes and patterns (ellipse, XABCD),
+ * the anchored VWAP (volume-weighted average price) and the regression
+ * channel. Canvas text is not in the DOM, so results are read from the
+ * object list and the data window.
  */
 
 import {expect, test, type Page} from '@playwright/test';
@@ -25,6 +26,7 @@ import {
   showDataWindow,
 } from './support';
 
+/** Folder of the documentation screenshots, relative to `apps/web`. */
 const SHOTS = 'e2e/screenshots';
 
 test('draws P3 shapes and an XABCD pattern with ratio labels', async ({
@@ -65,6 +67,7 @@ test('draws P3 shapes and an XABCD pattern with ratio labels', async ({
     row.getByRole('button', {name: 'Delete XABCD pattern'})
   ).toBeDisabled();
   await row.getByRole('button', {name: 'Unlock XABCD pattern'}).click();
+  // Unlock and lock are undo steps too: the third undo removes the pattern.
   await page.keyboard.press('Control+z');
   await page.keyboard.press('Control+z');
   await page.keyboard.press('Control+z');
@@ -119,13 +122,15 @@ test('draws an anchored VWAP and a regression channel from engine series', async
 });
 
 /**
- * Stores one anchored VWAP on BTCUSD (5m) a number of bars back and reloads.
+ * Stores one anchored VWAP on the DEMO BTCUSD perpetual, anchored a number
+ * of 5m bars back, and reloads so the drawing store reads it.
  * @param page Page.
- * @param barsBack Bars between the anchor and now.
+ * @param barsBack Bars between the anchor and the current bar.
  */
 async function seedVwap(page: Page, barsBack: number): Promise<void> {
   await page.evaluate(
     ({key, back}) => {
+      // One 5m bar in milliseconds; the anchor sits on a bar boundary.
       const bar = 300_000;
       const anchor = Math.floor(Date.now() / bar) * bar - back * bar;
       localStorage.setItem(
@@ -166,12 +171,12 @@ test('draws anchors far back and shows the engine message only on refusal', asyn
   page,
 }) => {
   await openTerminal(page);
-  // 2 400 bars back used to be refused by the terminal; the engine now
-  // computes anchored values from up to 50 000 bars back.
+  // 2,400 bars is far more than the chart has loaded; the engine computes
+  // anchored values from up to 50,000 bars back.
   await seedVwap(page, 2400);
   await openPanel(page, 'Objects');
   await expect(objectDetail(page, 'anchored-vwap')).toHaveText(/^VWAP \d/);
-  // Beyond 50 000 bars the engine refuses; its own message is shown.
+  // Beyond 50,000 bars the engine refuses; its own message is shown.
   await seedVwap(page, 50_001);
   await openPanel(page, 'Objects');
   await expect(objectDetail(page, 'anchored-vwap')).toHaveText(

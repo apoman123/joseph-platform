@@ -93,12 +93,14 @@ describe('alerts', () => {
   });
 
   it('keeps the highest revision when merging', () => {
+    // A deliberate partial signal: merging reads only the id, revision and
+    // the two sort times.
     const a = {
       signal_id: 's',
       revision: 1,
       bar_close_ms: 1,
       evaluated_at_ms: 1,
-    } as Signal;
+    } as unknown as Signal;
     const b = {...a, revision: 0};
     expect(mergeSignals([a], [b])[0]?.revision).toBe(1);
     expect(mergeSignals([b], [a])[0]?.revision).toBe(1);

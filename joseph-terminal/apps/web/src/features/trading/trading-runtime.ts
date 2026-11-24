@@ -52,11 +52,14 @@ export interface MarketMeta {
   instrumentId: string;
   /** Precision, or null while loading or unavailable. */
   precision: InstrumentPrecision | null;
-  /** Reference mark price. */
+  /**
+   * Mark price, else the last trade when the snapshot has no mark; null when
+   * unknown or not a valid decimal.
+   */
   mark: Decimal | null;
-  /** Provenance of the mark. */
+  /** Provenance of the mark; `STALE` when the snapshot is stale. */
   feedState: FeedState | null;
-  /** Load error, if any. */
+  /** Load error, or null. */
   error: string | null;
   /**
    * Previous session close of a security (daily price-limit reference),
@@ -81,9 +84,9 @@ export interface AmendDraft {
   order: Order;
   /** Field being changed. */
   field: 'limit_price' | 'trigger_price';
-  /** Current price. */
+  /** Current price (decimal string). */
   from: string;
-  /** Proposed tick-rounded price. */
+  /** Proposed price rounded to the tick (decimal string). */
   price: string;
 }
 
@@ -97,17 +100,17 @@ export interface LiveArmAnswer {
 
 /** Runtime state of the trading feature. */
 export interface TradingRuntime {
-  /** Ticket controller. */
+  /** Ticket controller (inputs, preview and submission state machine). */
   controller: TicketController;
   /** Metadata of the ticket instrument. */
   meta: WritableStore<MarketMeta>;
-  /** Orders of the account (all instruments). */
+  /** Orders of every account the caller sees, all instruments. */
   orders: WritableStore<readonly Order[]>;
-  /** Positions of the account. */
+  /** Positions of every account the caller sees. */
   positions: WritableStore<readonly Position[]>;
-  /** Context menu state. */
+  /** Open chart context menu, or null. */
   menu: WritableStore<ContextMenuState | null>;
-  /** Pending amendment. */
+  /** Amendment waiting for confirmation, or null. */
   amend: WritableStore<AmendDraft | null>;
   /**
    * Latest server answers on LIVE arming per account id (from granting or
@@ -116,28 +119,33 @@ export interface TradingRuntime {
    */
   liveArm: WritableStore<Readonly<Record<string, LiveArmAnswer>>>;
   /**
-   * Reloads orders and positions.
-   * @return Promise resolving when done.
+   * Reloads orders and positions; only the newest response is applied.
+   * @return Promise resolving when done. It never rejects: on failure the
+   *     stores keep the last known state.
    */
   refreshOrders(): Promise<void>;
   /**
-   * Loads metadata for an instrument.
+   * Loads precision, mark and (for securities) the previous close of an
+   * instrument into `meta`, and passes precision and mark to the controller
+   * when it is still the ticket's instrument. Only the newest call applies.
    * @param instrumentId Instrument id.
-   * @return Promise resolving when done.
+   * @return Promise resolving when done. It never rejects: a failure is
+   *     reported in `meta.error`.
    */
   loadMeta(instrumentId: string): Promise<void>;
   /**
    * Returns cached precision for an instrument.
    * @param instrumentId Instrument id.
-   * @return Precision or null.
+   * @return Precision, or null when it has not been loaded.
    */
   precisionFor(instrumentId: string): InstrumentPrecision | null;
   /**
    * Opens the context menu for a chart price.
    * @param chartId Chart id.
    * @param instrumentId Instrument id.
-   * @param price Display price.
-   * @return Promise resolving when the menu is ready.
+   * @param price Price under the pointer, as a chart (float) coordinate.
+   * @return Promise resolving when the menu is set: no menu for a published
+   *     rate, an empty one when the instrument is not in the registry.
    */
   openMenu(chartId: string, instrumentId: string, price: number): Promise<void>;
   /** Stops timers and subscriptions. */
@@ -145,10 +153,12 @@ export interface TradingRuntime {
 }
 
 /**
- * Creates the trading runtime and starts polling.
+ * Creates the trading runtime: follows the selected instrument and account,
+ * refreshes orders and positions on user-stream events, and polls orders,
+ * positions and metadata.
  * @param ctx Feature context.
- * @param pollMs Order/position refresh interval.
- * @return Runtime.
+ * @param pollMs Poll interval in milliseconds.
+ * @return Runtime; call `dispose` to stop it.
  */
 export function createTradingRuntime(
   ctx: WebFeatureContext,
@@ -173,19 +183,25 @@ export function createTradingRuntime(
   const liveArm = createStore<Readonly<Record<string, LiveArmAnswer>>>({});
   const precisionCache = new Map<string, InstrumentPrecision>();
   const disposers: Disposer[] = [];
+  // Request counters: a response is applied only if no newer request of the
+  // same kind started meanwhile.
   let orderSeq = 0;
   let metaSeq = 0;
 
   /**
-   * Loads the previous session close of a security with a price limit.
+   * Loads the previous session close of a security, the reference of its
+   * daily price limit.
    * @param instrumentId Instrument id.
-   * @return Reference close, or null.
+   * @return Reference close, or null for other instruments, without data or
+   *     when the request fails.
    */
   const loadReference = async (
     instrumentId: string
   ): Promise<Decimal | null> => {
     if (!isCashEquityId(instrumentId)) return null;
     try {
+      // During a session the last daily candle is still open, so the
+      // reference is the one before it: a few candles are enough.
       const batch = await ctx.clients.market.getCandles({
         instrumentId,
         timeframe: '1d',
@@ -197,6 +213,13 @@ export function createTradingRuntime(
     }
   };
 
+  /**
+   * Returns an instrument's registry entry, cached after the first hit.
+   * @param instrumentId Instrument id.
+   * @return Entry, or null when the registry does not list it (not cached,
+   *     so a later call asks again).
+   * @throws The market client's error when the lookup fails.
+   */
   const fetchPrecision = async (
     instrumentId: string
   ): Promise<InstrumentPrecision | null> => {
@@ -266,6 +289,9 @@ export function createTradingRuntime(
         ]);
         if (seq !== metaSeq) return;
         if (precision && isCashEquityId(instrumentId)) {
+          // Prefetch the sessions around now that the market-hours notice
+          // reads (next opening, holidays, early closes); a failed load
+          // keeps the regular-hours fallback.
           const now = Date.now();
           void ctx.calendars
             .ensure(
@@ -323,6 +349,9 @@ export function createTradingRuntime(
       }
       const current = meta.get();
       const mark = current.instrumentId === instrumentId ? current.mark : null;
+      // Securities have price-dependent ticks: look up the tick at the clicked
+      // price. The chart price is a float, converted only for this lookup
+      // (10 fraction digits are far finer than any tick).
       const tick =
         isCashEquityId(instrumentId) && Number.isFinite(price) && price > 0
           ? tickAt(precision, Decimal.fromNumber(price, 10)).toString()
@@ -340,7 +369,9 @@ export function createTradingRuntime(
     },
   };
 
-  // Follow the active chart's instrument and account.
+  // Follow the active chart's instrument and account. An order being
+  // confirmed or submitted keeps its instrument; prices typed for the old
+  // instrument are cleared. The account follows only while drafting.
   let lastInstrument = selection.instrumentId;
   disposers.push(
     ctx.selection.subscribe(next => {

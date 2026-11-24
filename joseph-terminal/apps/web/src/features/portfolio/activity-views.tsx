@@ -42,8 +42,8 @@ export interface ActivityViewProps {
 
 /**
  * Renders executions (fills), newest first.
- * @param props Props.
- * @return Element.
+ * @param props Portfolio runtime (the context is unused).
+ * @return Element, or an empty state once loaded without fills.
  */
 export function FillsView({runtime}: ActivityViewProps): ReactNode {
   const state = useStore(runtime.state);
@@ -98,7 +98,7 @@ export function FillsView({runtime}: ActivityViewProps): ReactNode {
 
 /**
  * Renders the audit log with the hash-chain verification result.
- * @param props Props.
+ * @param props Portfolio runtime (the context is unused).
  * @return Element.
  */
 export function AuditView({runtime}: ActivityViewProps): ReactNode {
@@ -160,8 +160,10 @@ export function AuditView({runtime}: ActivityViewProps): ReactNode {
 }
 
 /**
- * Renders kill-switch controls.
- * @param props Props.
+ * Renders the kill-switch controls: the engaged switches with release, and
+ * a form that engages a global or account switch after a confirmation
+ * stating its consequences.
+ * @param props Feature context and portfolio runtime.
  * @return Element.
  */
 export function RiskView({ctx, runtime}: ActivityViewProps): ReactNode {
@@ -180,6 +182,9 @@ export function RiskView({ctx, runtime}: ActivityViewProps): ReactNode {
       : null;
   const engaged = state.killSwitches.filter(s => s.engaged);
 
+  // Builds the request to confirm: engaging uses the form, releasing an
+  // engaged switch keeps its scope and target. Cancel and flatten apply
+  // only when engaging.
   const prepare = (engage: boolean, existing?: KillSwitchState) => {
     const result = planKillSwitch({
       scope: existing?.scope ?? scope,

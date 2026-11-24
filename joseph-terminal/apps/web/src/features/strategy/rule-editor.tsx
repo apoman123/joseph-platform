@@ -5,9 +5,11 @@
  */
 
 /**
- * @fileoverview Visual Rule AST editor: nested group cards (all / any /
- * not), condition cards with plain-language summaries, inline editors per
- * node type and an "add condition" menu by category.
+ * @fileoverview Visual editor of the rule AST (abstract syntax tree):
+ * nested group cards (all / any / not), condition cards with
+ * plain-language summaries, inline editors per node type and an "add
+ * condition" menu by category. Every edit goes through the strategy
+ * builder's pure tree operations and produces a new root.
  */
 
 'use client';
@@ -60,7 +62,12 @@ export interface RuleEditorProps {
   onError: (message: string) => void;
 }
 
-/** Common AOI kinds offered as checkboxes. */
+/**
+ * Common AOI (area of interest) kinds offered as checkboxes: fair value gap
+ * and its inversion, order block, breaker, buy- and sell-side liquidity,
+ * equal highs and lows, previous day high and low, and the value area high,
+ * point of control and value area low.
+ */
 const COMMON_KINDS: readonly AoiKind[] = [
   'FVG',
   'IFVG',
@@ -91,7 +98,8 @@ const CATEGORIES: readonly NodeCategory[] = [
 /**
  * Runs an edit and reports AST errors instead of throwing.
  * @param props Editor props.
- * @param edit Edit producing a new root.
+ * @param edit Edit producing a new root; it throws `AstEditError` when the
+ *     edit is not allowed, and its message is shown.
  */
 function apply(props: RuleEditorProps, edit: () => RuleNode): void {
   try {
@@ -125,7 +133,7 @@ interface NodeCardProps extends RuleEditorProps {
 }
 
 /**
- * Renders one node (group, wrapper or condition) recursively.
+ * Renders one node (group, wrapper or condition) and its children.
  * @param props Card props.
  * @return Card element.
  */
@@ -182,6 +190,7 @@ function NodeCard(props: NodeCardProps): ReactNode {
       {issues.map(issue => (
         <li
           key={`${issue.path}:${issue.code}`}
+          // These codes are advice, shown as hints rather than errors.
           className={
             issue.code === 'auto_live' ||
             issue.code === 'lower_timeframe' ||
@@ -337,8 +346,9 @@ interface AddMenuProps extends RuleEditorProps {
 }
 
 /**
- * "Add condition" button with a categorized menu.
- * @param props Props.
+ * Renders the "Add condition" button with a menu by category; new
+ * conditions get defaults for the strategy's direction and timeframe.
+ * @param props Editor props and the receiving group.
  * @return Element.
  */
 function AddConditionMenu(props: AddMenuProps): ReactNode {
@@ -400,8 +410,8 @@ interface NodeFieldsProps extends RuleEditorProps {
 }
 
 /**
- * Inline editor for one condition's fields.
- * @param props Props.
+ * Renders the inline editor for one condition's fields.
+ * @param props Editor props and the condition.
  * @return Editor element.
  */
 function NodeFields(props: NodeFieldsProps): ReactNode {
@@ -455,6 +465,8 @@ function NodeFields(props: NodeFieldsProps): ReactNode {
       />
     </label>
   );
+  // Decimal fields keep the typed text; validation checks it, and it never
+  // passes through a float.
   const decimal = (field: string, value: string | undefined, label: string) => (
     <label className="j-field">
       <span className="j-label">{label}</span>
@@ -909,8 +921,10 @@ interface OperandFieldProps {
 }
 
 /**
- * Editor for a COMPARE / IN_RANGE / CROSSES operand.
- * @param props Props.
+ * Renders the editor of a COMPARE / IN_RANGE / CROSSES operand: a constant
+ * (kept as decimal text), a candle field, an indicator output or a market
+ * value. Switching the kind starts from that kind's default.
+ * @param props Label, operand and change handler.
  * @return Element.
  */
 function OperandField({

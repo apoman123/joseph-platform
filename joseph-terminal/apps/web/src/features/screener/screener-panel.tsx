@@ -38,7 +38,7 @@ export interface ScreenerPanelProps {
   ctx: WebFeatureContext;
 }
 
-/** Gate columns in display order. */
+/** Gate columns in display order (OI: open interest). */
 const GATES: ReadonlyArray<{gate: GateName; label: string; title: string}> = [
   {gate: 'TURNOVER_24H', label: 'Turnover', title: '24h quote turnover'},
   {gate: 'OPEN_INTEREST_USD', label: 'OI', title: 'Open interest in USD'},
@@ -66,7 +66,7 @@ const STATUS_FILTERS: ReadonlyArray<{
   {value: 'INSUFFICIENT_DATA', label: 'Missing data'},
 ];
 
-/** Sort keys. */
+/** Sort keys: engine rank (then heat score), status, or 24h turnover. */
 export type SortKey = 'rank' | 'status' | 'turnover';
 
 /** A saved filter preset. */
@@ -90,12 +90,14 @@ export interface ScreenerSettings {
 /**
  * Keeps only well-formed presets.
  * @param value Stored value (untrusted).
- * @return Presets.
+ * @return Presets; empty when `value` is not an array.
  */
 export function normalizePresets(value: unknown): ScreenerPreset[] {
   if (!Array.isArray(value)) return [];
   const statuses = ['ALL', 'QUALIFIED', 'REJECTED', 'INSUFFICIENT_DATA'];
   const sorts = ['rank', 'status', 'turnover'];
+  // The casts only read fields of an untrusted object; the checks are what
+  // establish the type.
   return value.filter(
     (p): p is ScreenerPreset =>
       !!p &&
@@ -112,7 +114,7 @@ export function normalizePresets(value: unknown): ScreenerPreset[] {
 /**
  * Adds or replaces a preset by name (case-insensitive), newest first.
  * @param presets Existing presets.
- * @param preset New preset.
+ * @param preset New preset; its name is trimmed to at most 40 characters.
  * @return Updated list (at most 20).
  */
 export function savePreset(
@@ -127,10 +129,10 @@ export function savePreset(
 }
 
 /**
- * Formats a gate value by unit.
- * @param gate Gate result.
- * @param value Decimal string.
- * @return Display text.
+ * Formats a gate value by its unit.
+ * @param gate Gate result (for the unit).
+ * @param value Decimal string, or null when the engine has no value.
+ * @return Display text; `Missing` for null.
  */
 export function formatGateValue(
   gate: GateResult,
@@ -156,7 +158,7 @@ export function describeGate(gate: GateResult): string {
   return `${formatGateValue(gate, gate.observed)} ${op} ${formatGateValue(gate, gate.threshold)} required: ${outcome}. ${gate.reason}`;
 }
 
-/** Status badge classes. */
+/** Badge class and label per qualification status. */
 const STATUS_BADGE: Readonly<
   Record<QualificationStatus, {className: string; label: string}>
 > = {
@@ -169,8 +171,9 @@ const STATUS_BADGE: Readonly<
 };
 
 /**
- * Renders one gate cell.
- * @param props Props with the gate.
+ * Renders one gate cell: value, pass/fail/missing mark and a tooltip that
+ * spells out the comparison.
+ * @param props Gate result, or undefined when the record lacks the gate.
  * @return Table cell.
  */
 function GateCell({gate}: {gate: GateResult | undefined}): ReactNode {
@@ -195,8 +198,9 @@ function GateCell({gate}: {gate: GateResult | undefined}): ReactNode {
 }
 
 /**
- * Renders the screener.
- * @param props Props.
+ * Renders the screener: filters, saved presets and the qualification table,
+ * polled every 60 s.
+ * @param props Feature context.
  * @return Panel element.
  */
 export function ScreenerPanel({ctx}: ScreenerPanelProps): ReactNode {
@@ -226,6 +230,8 @@ export function ScreenerPanel({ctx}: ScreenerPanelProps): ReactNode {
     `${venue}|${status}`,
     60_000
   );
+  // Turnover becomes a number only to order rows; a missing value sorts
+  // last. Unranked records sort after ranked ones.
   const records = useMemo(() => {
     const list = [...(report.data?.records ?? [])];
     const order: Record<QualificationStatus, number> = {

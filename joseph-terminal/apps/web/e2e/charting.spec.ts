@@ -5,7 +5,7 @@
  */
 
 /**
- * @fileoverview System tests of the TradingView-style chart workflows in
+ * @fileoverview Browser tests of the TradingView-style chart workflows in
  * DEMO mode: volume and Delta % panes, market structure, indicator
  * settings, comparison, session breaks, data window, bar replay, the new
  * drawing tools with the style editor and object list, screenshots,
@@ -16,15 +16,18 @@ import {expect, test, type Page} from '@playwright/test';
 import {openPanel} from './trading-helpers';
 import {
   BTC_DRAWINGS_KEY,
+  clickChart,
   firstCanvas,
   openTerminal,
   savedTools,
 } from './support';
 
+/** Folder of the documentation screenshots, relative to `apps/web`. */
 const SHOTS = 'e2e/screenshots';
 
 /**
- * Counts canvases inside the first chart (one set per LWC pane).
+ * Counts the canvases inside the first chart. Lightweight Charts draws each
+ * pane on its own set of canvases, so the count tracks the pane count.
  * @param page Page.
  * @return Canvas count.
  */
@@ -33,19 +36,7 @@ async function canvasCount(page: Page): Promise<number> {
 }
 
 /**
- * Clicks at a relative position of the first chart canvas.
- * @param page Page.
- * @param x Fraction of the width.
- * @param y Fraction of the height.
- */
-async function clickChart(page: Page, x: number, y: number): Promise<void> {
-  const box = await firstCanvas(page).boundingBox();
-  if (!box) throw new Error('chart canvas not visible');
-  await page.mouse.click(box.x + box.width * x, box.y + box.height * y);
-}
-
-/**
- * Opens the Layers menu.
+ * Opens the Layers menu and waits for its dialog.
  * @param page Page.
  */
 async function openLayers(page: Page): Promise<void> {
@@ -72,10 +63,12 @@ test('shows volume and Delta % panes, market structure and the data window', asy
   await page.keyboard.press('Escape');
   const box = await firstCanvas(page).boundingBox();
   if (!box) throw new Error('no chart');
+  // The data window shows the bar under the pointer.
   await page.mouse.move(box.x + box.width * 0.7, box.y + box.height * 0.3);
   const data = page.getByTestId('data-window');
   await expect(data).toContainText('Open');
   await expect(data).toContainText(/Delta %\s*[−+-]?\d/);
+  // Let the canvases repaint before the screenshot.
   await page.waitForTimeout(400);
   await page.screenshot({path: `${SHOTS}/12-panes-structure-data-window.png`});
 });
@@ -112,6 +105,7 @@ test('compares another symbol on its own percentage axis', async ({page}) => {
   await page.getByTestId('compare-add-mock:perp:ETHUSD').click();
   await page.keyboard.press('Escape');
   await expect(page.getByTestId('compare-chip-mock:perp:ETHUSD')).toBeVisible();
+  // The comparison series loads its own candles; let it draw first.
   await page.waitForTimeout(500);
   await page.screenshot({path: `${SHOTS}/14-compare.png`});
   await page.getByRole('button', {name: 'Stop comparing ETHUSD'}).click();
@@ -136,6 +130,8 @@ test('replays bars point-in-time with trading disabled', async ({page}) => {
   await page.getByTestId('replay-speed').click();
   await page.getByTestId('replay-play').click();
   await expect(bar).toHaveAttribute('data-phase', 'playing');
+  // Playback advances on a timer; at the raised speed a bar passes within
+  // a few seconds.
   const playing = await page.getByTestId('replay-pos').textContent();
   await expect(page.getByTestId('replay-pos')).not.toHaveText(playing ?? '', {
     timeout: 5000,
@@ -161,6 +157,7 @@ test('draws polyline, brush and zone box, styles them and manages the object lis
   await page.getByTestId('tool-option-polyline').click();
   await clickChart(page, 0.2, 0.5);
   await clickChart(page, 0.3, 0.3);
+  // A second click on the last vertex finishes the polyline.
   await clickChart(page, 0.4, 0.45);
   await clickChart(page, 0.4, 0.45);
   await expect.poll(() => savedTools(page)).toEqual(['polyline']);
@@ -171,6 +168,8 @@ test('draws polyline, brush and zone box, styles them and manages the object lis
   if (!box) throw new Error('no chart');
   await page.mouse.move(box.x + box.width * 0.5, box.y + box.height * 0.5);
   await page.mouse.down();
+  // A zigzag of separate moves: the brush samples a point only after the
+  // pointer has travelled a few pixels.
   for (let i = 1; i <= 12; i += 1) {
     await page.mouse.move(
       box.x + box.width * (0.5 + i * 0.01),
@@ -197,6 +196,7 @@ test('draws polyline, brush and zone box, styles them and manages the object lis
   await style.getByRole('button', {name: 'Color #5ab0f0'}).click();
   await style.getByLabel('Drawing text').fill('Weekly FVG');
   await style.getByLabel('Drawing text').press('Enter');
+  // Style and text are saved with the drawing.
   await expect
     .poll(() =>
       page.evaluate(key => {
@@ -269,6 +269,8 @@ test('sorts, snoozes and dismisses alerts', async ({page}) => {
     .count();
   const target = page.locator('[data-testid^="signal-demo-signal-"]').first();
   const id = await target.getAttribute('data-testid');
+  // Snooze one signal for 60 minutes and dismiss another; "show hidden"
+  // brings both back.
   await target.getByTestId('signal-snooze').selectOption('60');
   await expect(page.getByTestId(id ?? '')).toHaveCount(0);
   const next = page.locator('[data-testid^="signal-demo-signal-"]').first();
@@ -289,6 +291,7 @@ test('resizes the side dock and chart columns, and keeps the sizes', async ({
   await openTerminal(page);
   const side = page.getByRole('region', {name: 'Side panel'});
   const before = (await side.boundingBox())?.width ?? 0;
+  // The side dock sits on the right, so dragging its handle left widens it.
   const handle = page.getByTestId('resize-side-panel');
   const hb = await handle.boundingBox();
   if (!hb) throw new Error('no handle');

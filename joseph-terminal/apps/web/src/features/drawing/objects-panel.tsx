@@ -39,12 +39,13 @@ export interface ObjectsPanelProps {
 
 /**
  * Describes a drawing for the list. Engine-backed drawings (anchored VWAP,
- * regression channel) summarize their engine values or say why none are
- * drawn.
+ * the volume-weighted average price, and the regression channel) summarize
+ * their engine values or say why none are drawn.
  * @param runtime Runtime.
  * @param doc Drawing.
  * @param chartId Chart hosting the drawing (defaults to the active chart).
- * @return Name and detail.
+ * @return Tool name and detail; the detail is the drawing's own text when
+ *     set. A drawing of an unregistered tool is named unsupported.
  */
 export function describeDrawing(
   runtime: TerminalRuntime,
@@ -68,17 +69,20 @@ export function describeDrawing(
 }
 
 /**
- * Renders the object list.
- * @param props Props.
+ * Renders the object list of the active chart's instrument.
+ * @param props Runtime.
  * @return Panel.
  */
 export function ObjectsPanel({runtime}: ObjectsPanelProps): ReactElement {
   const selection = useStore(runtime.selection);
   const selected = useStore(runtime.drawing.selection);
+  // Subscribed only to re-render when drawings change; the drawings
+  // themselves are read from the store below.
   useStore(runtime.drawing.revision);
   const store: DrawingStore | undefined = runtime.drawing.stores.get(
     selection.chartId
   );
+  // The store keeps the z order bottom first; the list shows the top first.
   const drawings = [...(store?.get().drawings ?? [])]
     .filter(doc => doc.instrument_id === selection.instrumentId)
     .reverse();

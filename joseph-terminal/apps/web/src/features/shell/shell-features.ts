@@ -5,7 +5,8 @@
  */
 
 /**
- * @fileoverview Shell features: workspace layouts and sync, theme and the
+ * @fileoverview Shell features: workspace commands (layouts, chart sync,
+ * export, share link, showing a panel tab), the theme toggle and the
  * command palette.
  */
 
@@ -20,7 +21,7 @@ import type {TerminalRuntime} from '../../composition/runtime';
 import type {WebFeature} from '../../shell/react-bindings';
 import {shellManifest} from './manifest';
 
-/** Layout labels. */
+/** Chart grid layouts with their labels, in menu order. */
 export const LAYOUT_LABELS: Readonly<Record<LayoutId, string>> = {
   '1': 'Single chart',
   '2h': 'Two charts side by side',
@@ -31,7 +32,7 @@ export const LAYOUT_LABELS: Readonly<Record<LayoutId, string>> = {
 
 /**
  * Binds every default hotkey that targets one of the given command ids.
- * @param bind Hotkey binder.
+ * @param bind Binds one key combination to a command id.
  * @param ids Command ids owned by the feature.
  */
 export function bindDefaultHotkeys(
@@ -44,7 +45,8 @@ export function bindDefaultHotkeys(
 }
 
 /**
- * Workspace feature: layouts, sync toggles, export and share.
+ * Creates the workspace feature: layout and sync commands, workspace export
+ * and share link, and `shell.showPanel` for other features.
  * @param runtime Terminal runtime.
  * @return Feature.
  */
@@ -64,6 +66,7 @@ export function workspaceFeature(runtime: TerminalRuntime): WebFeature {
         id: 'shell.showPanel',
         title: 'Show a panel tab',
         run: args => {
+          // Command arguments are untyped; check every field before use.
           const request = args as {slot?: unknown; id?: unknown} | undefined;
           if (
             (request?.slot !== 'side-panel' &&
@@ -72,6 +75,8 @@ export function workspaceFeature(runtime: TerminalRuntime): WebFeature {
           ) {
             return;
           }
+          // A new nonce makes a repeated request for the same tab a new
+          // value, so the dock reacts again (e.g. after the user switched).
           nonce += 1;
           runtime.panelRequest.set({slot: request.slot, id: request.id, nonce});
         },
@@ -162,7 +167,8 @@ export function workspaceFeature(runtime: TerminalRuntime): WebFeature {
 }
 
 /**
- * Theme feature.
+ * Creates the theme feature: a command that switches between the night and
+ * daylight themes.
  * @param runtime Terminal runtime.
  * @return Feature.
  */
@@ -188,7 +194,8 @@ export function themeFeature(runtime: TerminalRuntime): WebFeature {
 }
 
 /**
- * Command palette feature.
+ * Creates the command palette feature: the command (and default hotkey)
+ * that opens the palette.
  * @param runtime Terminal runtime.
  * @return Feature.
  */

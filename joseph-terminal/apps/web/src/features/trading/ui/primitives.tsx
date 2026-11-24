@@ -23,7 +23,7 @@ import {orderStateLabel} from '@joseph/chart-trading';
 import {useEffect, useRef, type ReactNode} from 'react';
 import styles from './primitives.module.css';
 
-/** Short venue codes for dense rows. */
+/** Short venue codes for dense rows (`UST`: US Treasury). */
 const VENUE_CODES: Readonly<Record<Venue, string>> = {
   binance: 'BIN',
   hyperliquid: 'HL',
@@ -204,9 +204,9 @@ export interface ConfirmDialogProps {
 }
 
 /**
- * Modal confirmation dialog. Escape cancels; focus starts on Cancel so an
- * accidental Enter never confirms a trading action.
- * @param props Props.
+ * Renders a modal confirmation dialog. Escape cancels; focus starts on
+ * Cancel so an accidental Enter never confirms a trading action.
+ * @param props Title, body, labels and callbacks.
  * @return Dialog element.
  */
 export function ConfirmDialog({
@@ -227,6 +227,7 @@ export function ConfirmDialog({
     <div
       className={styles.backdrop}
       role="presentation"
+      // Focus is inside the dialog, so Escape bubbles up to here.
       onKeyDown={e => e.key === 'Escape' && void onCancel()}
     >
       <div
@@ -274,8 +275,8 @@ export interface EmptyStateProps {
 }
 
 /**
- * Empty state inviting the next action.
- * @param props Props.
+ * Renders an empty state inviting the next action.
+ * @param props Title, explanation and optional action.
  * @return Element.
  */
 export function EmptyState({
@@ -301,8 +302,9 @@ export interface NoticeProps {
 }
 
 /**
- * Inline notice; danger notices are announced as alerts.
- * @param props Props.
+ * Renders an inline notice. Danger notices are announced at once as alerts;
+ * the others politely, as status.
+ * @param props Tone and content.
  * @return Element.
  */
 export function Notice({tone = 'info', children}: NoticeProps): ReactNode {

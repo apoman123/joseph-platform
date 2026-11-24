@@ -19,7 +19,7 @@ export const metadata: Metadata = {
 };
 
 /**
- * Pop-out page.
+ * Renders a pop-out window; the pane comes from the query string.
  * @return Page.
  */
 export default function PopoutPage(): ReactElement {

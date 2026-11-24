@@ -29,7 +29,9 @@ export interface TradingContextMenuProps {
 export const SHOW_PANEL_COMMAND = 'shell.showPanel';
 
 /**
- * Prefills the ticket from a menu item and asks the shell to show it.
+ * Prefills the ticket from a menu item, selects the clicked chart's
+ * instrument and, when the shell offers `SHOW_PANEL_COMMAND`, reveals the
+ * ticket tab.
  * @param ctx Feature context.
  * @param runtime Trading runtime.
  * @param instrumentId Instrument of the clicked chart.
@@ -60,8 +62,9 @@ export function applyMenuItem(
 
 /**
  * Renders trading items for the latest chart right-click.
- * @param props Props.
- * @return Menu items, or nothing when no menu is open.
+ * @param props Feature context and trading runtime.
+ * @return Menu items, a hint when the instrument cannot be traded (not in
+ *     the registry), or nothing when no menu is open.
  */
 export function TradingContextMenu({
   ctx,

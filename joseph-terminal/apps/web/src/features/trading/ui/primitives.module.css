@@ -3,7 +3,7 @@
  * SPDX-License-Identifier: MIT
  */
 
-/* Feature-local styles for shared F6 primitives; tokens come from tokens.css. */
+/* Styles of the shared panel primitives (primitives.tsx); tokens come from tokens.css. */
 .instrument {
   align-items: center;
   display: inline-flex;

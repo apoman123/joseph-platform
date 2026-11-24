@@ -25,6 +25,7 @@ test('clicking a screener row selects that exact instrument', async ({
   const instrumentId = testId.replace('screener-row-', '');
   await rows.last().click();
   await openPanel(page, 'Order ticket');
+  // The ticket's instrument label carries the full instrument id as title.
   await expect(
     ticket(page).locator(`[title="${instrumentId}"]`).first()
   ).toBeVisible();

@@ -52,9 +52,9 @@ function rehearsalBroker(): DemoExecutionClient {
 }
 
 /**
- * Formats an armed-until time like the ticket.
- * @param ms UTC ms.
- * @return `HH:MM`.
+ * Formats an armed-until time like the ticket does.
+ * @param ms Time (UTC ms).
+ * @return `HH:MM` in UTC.
  */
 function hhmm(ms: number): string {
   return new Date(ms).toISOString().slice(11, 16);
@@ -64,8 +64,8 @@ function hhmm(ms: number): string {
  * Renders the ticket on an instrument and waits for the routed account,
  * then optionally switches to another account.
  * @param instrumentId Instrument.
- * @param routed Expected routed account.
- * @param options Broker and account to switch to.
+ * @param routed Account id the ticket must route to first.
+ * @param options Broker to use and account id to switch to.
  * @return Rendered feature.
  */
 async function renderOn(
@@ -93,7 +93,7 @@ async function renderOn(
 }
 
 /**
- * Texts of the time-in-force options.
+ * Returns the texts of the time-in-force options.
  * @return Option texts.
  */
 function tifOptions(): Array<string | null> {
@@ -225,6 +225,7 @@ describe('equity order ticket', () => {
         price: 4.2,
         timeMs: null,
       });
+      // `openMenu` is asynchronous; let it settle before rendering the menu.
       await new Promise(resolve => setTimeout(resolve, 10));
     });
     const Menu = ctx.contributions('chart-context-menu')[0]?.view;
@@ -257,6 +258,8 @@ describe('live trading', () => {
     expect(armButton).toHaveTextContent('Arm live for 1 hour');
     await user.click(within(arm).getByRole('checkbox'));
     const code = within(arm).getByRole('textbox', {name: 'Step-up code'});
+    // Five digits are too short to send; six digits that are not the DEMO
+    // code are sent and refused by the simulated engine.
     await user.type(code, '12345');
     expect(armButton).toBeDisabled();
     await user.type(code, '9');
@@ -370,6 +373,8 @@ describe('live trading', () => {
       screen.getByRole('textbox', {name: 'Limit price (USD)'}),
       '182.4'
     );
+    // The preview's LIVE_NOT_ARMED answer drops the ticket to paper and
+    // reopens the arming step with the reason.
     await user.click(screen.getByRole('button', {name: 'Preview order'}));
     expect(await screen.findByTestId('arm-live-reason')).toHaveTextContent(
       'live trading is not armed for this account'

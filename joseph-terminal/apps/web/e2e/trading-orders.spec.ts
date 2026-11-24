@@ -6,7 +6,8 @@
 
 /**
  * @fileoverview End-to-end: paper order lifecycle through the ticket, the
- * Orders and Positions tabs, close and cancel (DEMO mode).
+ * Orders and Positions tabs, close and cancel (DEMO mode). The DEMO broker
+ * acknowledges and fills on timers, so lifecycle steps wait up to 10 s.
  */
 
 import {expect, test} from '@playwright/test';
@@ -34,6 +35,7 @@ test.describe('paper trading', () => {
     // Fills arrive in parts; close only once the whole order has filled so
     // the close covers the full position (closing mid-fill correctly leaves
     // the late remainder open, as a real venue would).
+    // The third cell is the quantity.
     await expect(position.locator('td').nth(2)).toHaveText(/^0\.010?$/, {
       timeout: 10_000,
     });
@@ -97,6 +99,8 @@ test.describe('paper trading', () => {
       quantity: '0.01',
       limitPrice: '1000',
     });
+    // Either click may land while the order is still submitting; one row in
+    // either state proves a single order.
     await ticket(page).getByTestId('confirm-order').dblclick();
     await openPanel(page, 'Orders');
     await expect(

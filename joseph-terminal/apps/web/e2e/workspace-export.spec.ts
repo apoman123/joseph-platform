@@ -5,7 +5,7 @@
  */
 
 /**
- * @fileoverview System test in DEMO mode: *Export workspace* writes the
+ * @fileoverview Browser test in DEMO mode: *Export workspace* writes the
  * layout and the drawings of every instrument (including drawings of tools
  * this build doesn't know), and *Import a workspace* restores them into a
  * browser that has none, showing them on the open chart without a reload.
@@ -21,11 +21,14 @@ import {
 } from './support';
 import {openPanel} from './trading-helpers';
 
+/** Folder of the documentation screenshots, relative to `apps/web`. */
 const SHOTS = 'e2e/screenshots';
+
+/** Storage key of the DEMO ETHUSD drawings in the default workspace. */
 const ETH_DRAWINGS_KEY = 'joseph.drawings.v1.default.mock:perp:ETHUSD';
 
 /**
- * Runs a command from the palette.
+ * Runs a command from the palette: types the text and runs the top match.
  * @param page Page.
  * @param text Text typed into the palette.
  */
@@ -82,6 +85,7 @@ test('exports drawings with the workspace and imports them back', async ({
     {btcKey: BTC_DRAWINGS_KEY, ethKey: ETH_DRAWINGS_KEY}
   );
 
+  // Listen before running the command, so the event is not missed.
   const [download] = await Promise.all([
     page.waitForEvent('download'),
     runCommand(page, 'Export workspace'),
@@ -126,6 +130,7 @@ test('exports drawings with the workspace and imports them back', async ({
   await expect
     .poll(() => savedTools(page, ETH_DRAWINGS_KEY))
     .toEqual(['trendline', 'removed-tool']);
+  // Let the chart draw the restored drawings before the screenshot.
   await page.waitForTimeout(300);
   await page.screenshot({path: `${SHOTS}/37-workspace-import-drawings.png`});
 

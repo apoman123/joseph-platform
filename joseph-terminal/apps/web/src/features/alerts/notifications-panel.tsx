@@ -77,7 +77,8 @@ function localZone(): string {
 }
 
 /**
- * Builds an empty draft subscription.
+ * Builds an empty draft subscription: Telegram, entries only, every
+ * severity, all strategies, no quiet hours.
  * @return Draft.
  */
 function blankDraft(): AlertSubscription {
@@ -94,7 +95,8 @@ function blankDraft(): AlertSubscription {
 }
 
 /**
- * Notification subscriptions panel.
+ * Renders the notification subscriptions panel: the saved subscriptions
+ * (click one to edit it) and a form that adds or updates one.
  * @param props Feature context.
  * @return Panel.
  */
@@ -167,6 +169,7 @@ export function NotificationsPanel({
               <tr
                 key={sub.subscription_id}
                 className={sub.enabled ? undefined : 'j-row--muted'}
+                // A deep copy, so editing the draft never changes the list.
                 onClick={() => void setDraft(structuredClone(sub))}
               >
                 <td>{sub.subscription_id}</td>

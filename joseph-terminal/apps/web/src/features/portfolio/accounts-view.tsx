@@ -40,10 +40,11 @@ const EXCHANGE_NAMES: Readonly<Record<string, string>> = {
 };
 
 /**
- * Formats an optional amount in the account currency.
+ * Formats an optional amount in the account currency, with two decimals
+ * and a typographic minus.
  * @param account Account.
  * @param value Decimal string or null.
- * @return Text or an em dash.
+ * @return Text, or an em dash when missing.
  */
 function money(account: AccountSummary, value: string | null | undefined) {
   return value
@@ -52,8 +53,9 @@ function money(account: AccountSummary, value: string | null | undefined) {
 }
 
 /**
- * What an account trades: its exchanges, crypto on its own venue, or both
- * for the USD paper account.
+ * Describes what an account trades: its exchanges, crypto on its own venue,
+ * or both for the USD paper account. Securities brokers and the TWD paper
+ * account trade no crypto.
  * @param account Account.
  * @return Text such as `Nasdaq, NYSE, Cboe BZX` or `Crypto, Nasdaq, NYSE,
  *     Cboe BZX`.
@@ -72,8 +74,8 @@ function tradesText(account: AccountSummary): string {
 
 /**
  * Renders the accounts list.
- * @param props Props.
- * @return Element.
+ * @param props Portfolio runtime (the context is unused).
+ * @return Element, or an empty state once loaded without accounts.
  */
 export function AccountsView({runtime}: ActivityViewProps): ReactNode {
   const state = useStore(runtime.state);

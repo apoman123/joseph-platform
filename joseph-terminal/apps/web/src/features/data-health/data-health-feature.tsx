@@ -9,20 +9,15 @@
  * and a bottom-panel table with transport, lag, gaps and capabilities.
  */
 
-import type {VenueStatus} from '@joseph/contracts';
-import {VENUE_NAMES} from '@joseph/contracts';
+import {type VenueStatus, VENUE_NAMES} from '@joseph/contracts';
 import type {ReadableStore} from '@joseph/feature-registry';
 import type {TerminalRuntime} from '../../composition/runtime';
-import {
-  useStore,
-  type WebFeature,
-  type WebSlotProps,
-} from '../../shell/react-bindings';
+import {useStore, type WebFeature} from '../../shell/react-bindings';
 import {formatAge, formatUtcTime} from '../../shell/format';
 import {createLazyStore} from '../shell/lazy-store';
 import {shellManifest} from '../shell/manifest';
 
-/** Venue poll interval. */
+/** Venue status poll interval in milliseconds. */
 const POLL_MS = 15_000;
 
 /** Loaded venue data. */
@@ -34,9 +29,10 @@ interface VenueData {
 }
 
 /**
- * Health badge class for a venue.
+ * Returns the badge modifier class for a venue's feed state.
  * @param status Venue status.
- * @return Badge modifier.
+ * @return A `j-badge--*` modifier; an unavailable venue reads as stale, and
+ *     any other unlisted state as muted.
  */
 function badgeFor(status: VenueStatus): string {
   const state = status.health.feed_state;
@@ -51,11 +47,15 @@ function badgeFor(status: VenueStatus): string {
 }
 
 /**
- * Data health feature.
- * @param _runtime Runtime (unused; the feature uses its context only).
- * @return Feature.
+ * Creates the data health feature. It polls the venue list every
+ * `POLL_MS` while a view is mounted.
+ * @param _runtime Runtime; unused, the feature reads only its context.
+ * @return Feature contributing the bottom-panel table and status-bar dots.
  */
-export function dataHealthFeature(_runtime: TerminalRuntime): WebFeature {
+export function dataHealthFeature(
+  // eslint-disable-next-line @typescript-eslint/no-unused-vars -- composition/features.ts calls every shell feature factory with the runtime; dropping it breaks that call.
+  _runtime: TerminalRuntime
+): WebFeature {
   return {
     manifest: shellManifest(
       'data-health',
@@ -97,11 +97,11 @@ export function dataHealthFeature(_runtime: TerminalRuntime): WebFeature {
       );
 
       /**
-       * Bottom-panel table.
-       * @param _props Slot props (unused).
-       * @return Table view.
+       * Renders the bottom-panel venue table.
+       * @return The table, a loading line, or an alert when the request
+       *     failed.
        */
-      function DataHealthPanel(_props: WebSlotProps) {
+      function DataHealthPanel() {
         const {venues, error} = useStore(data);
         if (error) {
           return (
@@ -187,11 +187,10 @@ export function dataHealthFeature(_runtime: TerminalRuntime): WebFeature {
       }
 
       /**
-       * Status-bar venue dots.
-       * @param _props Slot props (unused).
-       * @return Inline status.
+       * Renders one status-bar dot per venue, coloured by feed state.
+       * @return Inline status; empty while loading.
        */
-      function VenueDots(_props: WebSlotProps) {
+      function VenueDots() {
         const {venues, error} = useStore(data);
         if (error) {
           return (

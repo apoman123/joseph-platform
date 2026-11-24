@@ -13,7 +13,7 @@ import type {ReactElement} from 'react';
 import Link from 'next/link';
 
 /**
- * Notices page.
+ * Renders the licenses and notices page.
  * @return Page.
  */
 export default function NoticesPage(): ReactElement {

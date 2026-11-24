@@ -5,14 +5,14 @@
  */
 
 /**
- * @fileoverview 404 page.
+ * @fileoverview Not-found (404) page with a link back to the terminal.
  */
 
 import type {ReactElement} from 'react';
 import Link from 'next/link';
 
 /**
- * Not-found page.
+ * Renders the not-found page.
  * @return Page.
  */
 export default function NotFound(): ReactElement {
