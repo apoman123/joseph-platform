@@ -40,8 +40,9 @@ class ReplaySource:
 
         Args:
             root: Directory containing recordings.
-            sleep: Sleep function used between replayed bars.
-            speed_s: Seconds to wait between replayed bars.
+            sleep: Sleep function awaited after each replayed bar
+                (injectable for tests).
+            speed_s: Seconds to wait after each replayed bar.
         """
         self._root = pathlib.Path(root)
         self._sleep = sleep
@@ -93,6 +94,9 @@ class ReplaySource:
     ) -> list[market.Candle]:
         """Loads and caches a recording.
 
+        A recording is read once per source; later changes to the file are
+        not seen.
+
         Args:
             instrument: Instrument.
             timeframe: Resolution.
@@ -135,12 +139,15 @@ class ReplaySource:
         Args:
             instrument: Instrument.
             timeframe: Resolution.
-            start_ms: Inclusive start.
-            end_ms: Exclusive end.
+            start_ms: Inclusive start, epoch milliseconds.
+            end_ms: Exclusive end, epoch milliseconds.
             limit: Optional maximum (newest kept).
 
         Returns:
-            Candles.
+            Ascending candles.
+
+        Raises:
+            errors.MissingDataError: If no recording exists.
         """
         rows = [
             c
@@ -162,6 +169,10 @@ class ReplaySource:
 
         Yields:
             Recorded candles in order.
+
+        Raises:
+            errors.MissingDataError: If no recording exists (on the first
+                iteration).
         """
         for candle in self._load(instrument, timeframe):
             yield candle

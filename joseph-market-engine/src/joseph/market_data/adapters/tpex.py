@@ -19,9 +19,8 @@ exchange's matching, is not served. Sources (all public, verified live
   (變更交易/分盤/停止交易; flags are a full-width Y, U+FF39). Suspended
   companies are absent from the quotes and are listed as ``HALTED``. ETFs
   are the ``00``-prefixed codes; foreign-currency counters (sixth character
-  K or C,
-  e.g. ``00687C``, whose trading unit is 100 units), preferred shares
-  (``8349A``), ETNs (``02xxxx``) and warrants are not served.
+  K or C, e.g. ``00687C``, whose trading unit is 100 units), preferred
+  shares (``8349A``), ETNs (``02xxxx``) and warrants are not served.
 * Rules (``/zh-tw/mainboard/trading/rules/system.html``): the tick ladders
   are TWSE's (stocks 0.01/0.05/0.1/0.5/1/5 at 10/50/100/500/1000; ETFs
   0.01 below 50, else 0.05); the price limit is 10 % of the reference
@@ -40,6 +39,8 @@ exchange's matching, is not served. Sources (all public, verified live
   come back with ``stat`` ``ok`` and no rows.
 * Live data: TWSE's MIS (``ex_ch=otc_6488.tw``), parsed and paced exactly
   like TWSE's (``twse.MisClient``); the venues share MIS's rate budget.
+  Requests to ``www.tpex.org.tw`` (OpenAPI and reports) share one budget of
+  one request per 2 s with bursts of three (TPEx publishes no limit).
 * Holidays: ``/www/zh-tw/bulletin/tradingDate?date=2027&response=json``
   returns the year's 開(休)市日期表 as an HTML table. TPEx sessions are
   the XTAI calendar: TPEx's daily index history had exactly the XTAI
@@ -548,7 +549,17 @@ def parse_trading_stock(
 
 
 class TpexAdapter(twse.TaiwanExchangeAdapter):
-    """``SparseBarsPort`` for TPEx mainboard stocks and ETFs."""
+    """``SparseBarsPort`` for TPEx mainboard stocks and ETFs.
+
+    Attributes:
+        VENUE: ``tpex``.
+        MIS_MARKET: MIS channel prefix of TPEx listings (``otc``).
+        MIS_SOURCE_NAME: Source stamped on MIS-built bars, snapshots and
+            books (``tpex.mis``).
+        SJ_EXCHANGE: Shioaji contract group of TPEx listings (``OTC``).
+        listing: Listing facts per security code; ETF listing dates are
+            learned from the daily report's listing-day mark.
+    """
 
     VENUE = instruments.Venue.TPEX
     MIS_MARKET = MIS_MARKET
@@ -636,6 +647,8 @@ class TpexAdapter(twse.TaiwanExchangeAdapter):
             modes or [],
             now_ms=self._clock.now_ms(),
         )
+        # The OpenAPI publishes no ETF listing dates; keep the ones the
+        # daily reports revealed (``_fetch_month``) across refreshes.
         for code, known in self.listing.items():
             fresh = meta.get(code)
             if fresh is not None and fresh.listed is None and known.listed:

@@ -69,8 +69,11 @@ _KLINE_TF = tuple(
 _TF = (*timeframes.SECONDS, *_KLINE_TF)
 _SIDES = {"B": market.AggressorSide.BUY, "A": market.AggressorSide.SELL}
 _MAX_DECIMALS = 6
+"""Perp prices carry at most ``_MAX_DECIMALS - szDecimals`` decimals."""
 _CTX_TTL_MS = 2_000
+"""Milliseconds a ``metaAndAssetCtxs`` payload is reused across lookups."""
 _HOUR_MS = 3_600_000
+"""Funding is paid every hour on the hour."""
 
 
 def tick_size(
@@ -78,8 +81,12 @@ def tick_size(
 ) -> decimal.Decimal:
     """Derives the price increment from Hyperliquid's precision rule.
 
+    The tick is the coarser of the fifth significant figure of ``mark``
+    and the ``6 - sz_decimals`` decimal limit.
+
     Args:
-        mark: Current mark price (``None`` falls back to max decimals).
+        mark: Current mark price (``None`` or non-positive falls back to the
+            decimal limit).
         sz_decimals: Size decimals of the asset.
 
     Returns:
@@ -101,10 +108,10 @@ def parse_universe(
     Args:
         meta: Universe metadata.
         ctxs: Asset contexts aligned with the universe.
-        now_ms: Fetch time.
+        now_ms: Fetch time, epoch milliseconds.
 
     Returns:
-        Instruments and native metadata keyed by coin.
+        Instruments and native metadata (``szDecimals``) keyed by coin.
     """
     rows: list[instruments.Instrument] = []
     meta_by_coin: dict[str, Mapping[str, Any]] = {}
@@ -129,6 +136,7 @@ def parse_universe(
                 tick_size=tick_size(mark, sz),
                 lot_size=lot,
                 min_qty=lot,
+                # Hyperliquid rejects orders worth less than 10 USDC.
                 min_notional=decimal.Decimal(10),
                 contract_multiplier=decimals.ONE,
                 linear=True,
@@ -158,11 +166,13 @@ def parse_candle(
     """Converts a Hyperliquid candle object.
 
     Args:
-        row: ``{t, T, o, c, h, l, v, n, ...}``.
+        row: ``{t, T, o, c, h, l, v, n, ...}`` (``t`` is the bar start in
+            epoch milliseconds).
         instrument_id: Instrument.
         timeframe: Resolution.
-        now_ms: Receipt time.
-        source: Provenance label.
+        now_ms: Receipt time, epoch milliseconds.
+        source: Provenance label; one ending in ``.ws`` marks a WebSocket
+            row.
 
     Returns:
         Candle (final once its end has passed for REST rows; never final for
@@ -192,10 +202,11 @@ def parse_trades_frame(
     Args:
         raw: Frame payload.
         instrument_id: Instrument (coin).
-        now_ms: Receipt time.
+        now_ms: Receipt time, epoch milliseconds.
 
     Returns:
-        Trades ascending by time (empty for acks and pongs).
+        Trades ascending by time (empty for acks, pongs and other coins);
+        ids are ``{time}-{tid}`` because ``tid`` is a hash.
     """
     message = json.loads(raw)
     if not isinstance(message, dict) or message.get("channel") != "trades":
@@ -221,7 +232,11 @@ def parse_trades_frame(
 
 
 class HyperliquidAdapter(base.BaseVenueAdapter):
-    """``MarketDataPort`` for Hyperliquid perpetuals."""
+    """``MarketDataPort`` for Hyperliquid perpetuals.
+
+    Attributes:
+        VENUE: ``hyperliquid``.
+    """
 
     VENUE = instruments.Venue.HYPERLIQUID
 
@@ -288,7 +303,7 @@ class HyperliquidAdapter(base.BaseVenueAdapter):
         )
 
     async def _contexts(self) -> Any:
-        """Fetches ``metaAndAssetCtxs`` with a short cache.
+        """Fetches ``metaAndAssetCtxs``, reused for ``_CTX_TTL_MS``.
 
         Returns:
             ``[meta, ctxs]`` payload.
@@ -306,7 +321,7 @@ class HyperliquidAdapter(base.BaseVenueAdapter):
         """Loads the universe.
 
         Returns:
-            Instruments and metadata.
+            Instruments and their ``szDecimals`` keyed by coin.
         """
         meta, ctxs = await self._contexts()
         return parse_universe(meta, ctxs, self._clock.now_ms())
@@ -326,7 +341,8 @@ class HyperliquidAdapter(base.BaseVenueAdapter):
         meta, ctxs = await self._contexts()
         for asset, ctx in zip(meta["universe"], ctxs, strict=False):
             if asset["name"] == coin:
-                return ctx  # type: ignore[no-any-return]
+                found: Mapping[str, Any] = ctx
+                return found
         raise errors.NotFoundError(f"unknown hyperliquid coin {coin}")
 
     async def fetch_candles(
@@ -337,17 +353,22 @@ class HyperliquidAdapter(base.BaseVenueAdapter):
         end_ms: int,
         limit: int | None = None,
     ) -> list[market.Candle]:
-        """Fetches candles (Hyperliquid caps responses at 5000 bars).
+        """Fetches candles in one request (Hyperliquid caps it at 5000 bars).
 
         Args:
             instrument: Instrument.
             timeframe: Resolution.
-            start_ms: Inclusive start.
-            end_ms: Exclusive end.
-            limit: Optional maximum bars.
+            start_ms: Inclusive start, epoch milliseconds.
+            end_ms: Exclusive end, epoch milliseconds.
+            limit: Optional maximum bars (newest kept).
 
         Returns:
             Ascending candles.
+
+        Raises:
+            errors.UnsupportedError: For a resolution Hyperliquid does not
+                serve natively, and for seconds bars (built from the live
+                stream only).
         """
         self._require_timeframe(timeframe)
         if timeframe.is_seconds:
@@ -366,6 +387,7 @@ class HyperliquidAdapter(base.BaseVenueAdapter):
                     "coin": instrument.venue_market_id,
                     "interval": timeframe.value,
                     "startTime": start,
+                    # ``endTime`` is inclusive.
                     "endTime": end_ms - 1,
                 },
             },
@@ -390,10 +412,11 @@ class HyperliquidAdapter(base.BaseVenueAdapter):
             instrument: Instrument.
             ctx: Asset context.
             book: Optional book for best bid/ask.
-            now_ms: Receipt time.
+            now_ms: Receipt time, epoch milliseconds.
 
         Returns:
-            Snapshot.
+            Snapshot: no last price, change against ``prevDayPx``, and the
+            predicted hourly funding due at the next full hour.
         """
         mark = base.dec(ctx["markPx"])
         prev = base.opt_dec(ctx.get("prevDayPx"))
@@ -446,6 +469,9 @@ class HyperliquidAdapter(base.BaseVenueAdapter):
 
         Returns:
             Snapshot.
+
+        Raises:
+            errors.NotFoundError: If the coin is not in the universe.
         """
         await self._require(instrument)
         ctx, book = await asyncio.gather(
@@ -458,7 +484,8 @@ class HyperliquidAdapter(base.BaseVenueAdapter):
         """Builds snapshots for the whole universe from one request.
 
         Returns:
-            Snapshots without best bid/ask.
+            Snapshots without best bid/ask, skipping delisted coins and
+            coins without a mark price.
         """
         await self.list_instruments()
         meta, ctxs = await self._contexts()
@@ -481,7 +508,7 @@ class HyperliquidAdapter(base.BaseVenueAdapter):
 
         Args:
             instrument: Instrument.
-            depth: Levels per side.
+            depth: Levels per side (at most 20 are available).
 
         Returns:
             Order book.
@@ -517,6 +544,11 @@ class HyperliquidAdapter(base.BaseVenueAdapter):
 
         Returns:
             Open interest.
+
+        Raises:
+            errors.NotFoundError: If the coin is not in the universe.
+            errors.MissingDataError: If the snapshot carries no open
+                interest (a guard: ``_snapshot`` always sets it).
         """
         await self._require(instrument)
         snapshot = self._snapshot(
@@ -539,6 +571,11 @@ class HyperliquidAdapter(base.BaseVenueAdapter):
 
         Returns:
             Funding.
+
+        Raises:
+            errors.NotFoundError: If the coin is not in the universe.
+            errors.MissingDataError: If the snapshot carries no funding (a
+                guard: ``_snapshot`` always sets it).
         """
         await self._require(instrument)
         snapshot = self._snapshot(
@@ -568,7 +605,7 @@ class HyperliquidAdapter(base.BaseVenueAdapter):
 
             Args:
                 raw: Frame payload.
-                now_ms: Receipt time.
+                now_ms: Receipt time, epoch milliseconds.
 
             Returns:
                 Trades.
@@ -626,10 +663,10 @@ class HyperliquidAdapter(base.BaseVenueAdapter):
 
             Args:
                 raw: Frame payload.
-                now_ms: Receipt time.
+                now_ms: Receipt time, epoch milliseconds.
 
             Returns:
-                Candles.
+                Candles of this coin and interval (none for other frames).
             """
             message = json.loads(raw)
             if message.get("channel") != "candle":
@@ -648,8 +685,8 @@ class HyperliquidAdapter(base.BaseVenueAdapter):
             """Fetches missed or closing bars over REST.
 
             Args:
-                start: Inclusive start.
-                end: Exclusive end.
+                start: Inclusive start, epoch milliseconds.
+                end: Exclusive end, epoch milliseconds.
 
             Returns:
                 Candles.
@@ -673,6 +710,7 @@ class HyperliquidAdapter(base.BaseVenueAdapter):
             parse=parse,
             timeframe=timeframe,
             venue_marks_final=False,
+            # Hyperliquid closes a connection that sent nothing for 60 s.
             ping_message=json.dumps({"method": "ping"}),
             ping_interval_s=30.0,
         )

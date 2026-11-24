@@ -72,7 +72,9 @@ _INTERVAL: dict[timeframes.Timeframe, str] = {
 }
 _TF = (*timeframes.SECONDS, *_INTERVAL)
 _MAX_CANDLES = 2000
+"""Bars per kline request (MEXC returns at most 2000)."""
 _SIDES = {1: market.AggressorSide.BUY, 2: market.AggressorSide.SELL}
+"""Deal taker side ``T``: 1 buy, 2 sell."""
 _EQUITY_TAGS = frozenset(
     {
         "mc-trade-zone-Stock",
@@ -85,6 +87,7 @@ _EQUITY_TAGS = frozenset(
         "mc-trade-zone-stockmeme",
     }
 )
+"""``conceptPlate`` tags of stock, stock-index and ETF contracts."""
 _RWA_TAGS = frozenset(
     {
         "mc-trade-zone-Commodities",
@@ -95,6 +98,7 @@ _RWA_TAGS = frozenset(
         "mc-trade-zone-OIL",
     }
 )
+"""``conceptPlate`` tags of commodity, metal, forex and RWA contracts."""
 _STATUS = {
     0: instruments.InstrumentStatus.TRADING,
     1: instruments.InstrumentStatus.HALTED,
@@ -102,6 +106,7 @@ _STATUS = {
     3: instruments.InstrumentStatus.DELISTED,
     4: instruments.InstrumentStatus.HALTED,
 }
+"""``state``: 0 enabled, 1 delivering, 2 delivered, 3 offline, 4 paused."""
 
 
 class WsFormat(enum.StrEnum):
@@ -138,13 +143,17 @@ def parse_detail(
 ) -> instruments.Instrument | None:
     """Converts a ``detail`` row.
 
+    Quantities are converted from contracts to base units with
+    ``contractSize``.
+
     Args:
         row: Contract metadata.
-        now_ms: Fetch time.
+        now_ms: Fetch time, epoch milliseconds.
 
     Returns:
         Instrument, or ``None`` for non-perpetuals.
     """
+    # ``futureType`` 1 is a perpetual; other types are delivery contracts.
     if int(row.get("futureType", 1)) != 1:
         return None
     native = str(row["symbol"])
@@ -191,10 +200,11 @@ def parse_deal_frame(
         raw: Frame payload (JSON text or Protobuf bytes).
         instrument_id: Instrument.
         contract_size: Base units per contract.
-        now_ms: Receipt time.
+        now_ms: Receipt time, epoch milliseconds.
 
     Returns:
-        Trades ascending by time and id (empty for acks and pongs).
+        Trades ascending by time and id (empty for acks, pongs, other
+        channels and other symbols).
 
     Raises:
         ValueError: For a malformed frame, or for deals without a trade id
@@ -230,7 +240,11 @@ def parse_deal_frame(
 
 
 class MexcAdapter(base.BaseVenueAdapter):
-    """``MarketDataPort`` for MEXC perpetual contracts."""
+    """``MarketDataPort`` for MEXC perpetual contracts.
+
+    Attributes:
+        VENUE: ``mexc``.
+    """
 
     VENUE = instruments.Venue.MEXC
 
@@ -265,6 +279,16 @@ class MexcAdapter(base.BaseVenueAdapter):
         Returns:
             Capabilities.
         """
+        if self._ws_format is WsFormat.PROTOBUF:
+            stream_note = (
+                "Streams use the Protobuf WebSocket pushes "
+                "(Trans-Protocol=Protobuf)."
+            )
+        else:
+            stream_note = (
+                "Streams use the legacy JSON WebSocket pushes "
+                "(JOSEPH_MEXC_WS_FORMAT=json)."
+            )
         return capabilities.VenueCapabilities(
             venue=self.VENUE,
             display_name="MEXC Futures",
@@ -291,14 +315,7 @@ class MexcAdapter(base.BaseVenueAdapter):
                 "engine recorded the stream and outages are gaps.",
                 "Klines publish no taker buy volume (taker_volume is false); "
                 "seconds bars built from trades do carry it.",
-                (
-                    "Streams use the Protobuf WebSocket pushes "
-                    "(Trans-Protocol=Protobuf)."
-                    if self._ws_format is WsFormat.PROTOBUF
-                    else "Streams use the legacy JSON WebSocket pushes "
-                    "(JOSEPH_MEXC_WS_FORMAT=json)."
-                )
-                + " MEXC migrates futures market data from JSON to "
+                stream_note + " MEXC migrates futures market data from JSON to "
                 "Protobuf by 2026-12-01 10:00 UTC.",
             ),
             docs_url="https://www.mexc.com/api-docs/futures/integration-guide",
@@ -311,7 +328,8 @@ class MexcAdapter(base.BaseVenueAdapter):
         """Loads contract details.
 
         Returns:
-            Instruments and contract-size metadata.
+            Perpetual instruments, and per symbol its ``contract_size``
+            (base units per contract) and ``price_scale`` (price decimals).
         """
         payload = await self._http.get(f"{_PREFIX}/detail")
         now = self._clock.now_ms()
@@ -346,17 +364,24 @@ class MexcAdapter(base.BaseVenueAdapter):
         end_ms: int,
         limit: int | None = None,
     ) -> list[market.Candle]:
-        """Fetches klines (seconds-based API) with pagination.
+        """Fetches klines with pagination (the API counts in epoch seconds).
+
+        Each request asks for at most ``_MAX_CANDLES`` bars; volumes are
+        converted from contracts to base units.
 
         Args:
             instrument: Instrument.
             timeframe: Resolution.
-            start_ms: Inclusive start.
-            end_ms: Exclusive end.
-            limit: Optional maximum bars.
+            start_ms: Inclusive start, epoch milliseconds.
+            end_ms: Exclusive end, epoch milliseconds.
+            limit: Optional maximum bars (newest kept).
 
         Returns:
             Ascending candles.
+
+        Raises:
+            errors.UnsupportedError: For a resolution MEXC does not serve,
+                and for seconds bars (built from the live stream only).
         """
         self._require_timeframe(timeframe)
         if timeframe.is_seconds:
@@ -378,6 +403,8 @@ class MexcAdapter(base.BaseVenueAdapter):
             )
             payload = await self._http.get(
                 f"{_PREFIX}/kline/{instrument.venue_market_id}",
+                # ``start``/``end`` are epoch seconds; ``end`` is sent as the
+                # window's last second.
                 params={
                     "interval": _INTERVAL[timeframe],
                     "start": cursor // 1000,
@@ -416,7 +443,7 @@ class MexcAdapter(base.BaseVenueAdapter):
         Args:
             instrument: Instrument.
             ticker: Ticker row.
-            now_ms: Receipt time.
+            now_ms: Receipt time, epoch milliseconds.
 
         Returns:
             Snapshot (funding interval unknown here, so funding is omitted).
@@ -427,6 +454,20 @@ class MexcAdapter(base.BaseVenueAdapter):
         volume = base.opt_dec(ticker.get("volume24"))
         change = base.opt_dec(ticker.get("riseFallRate"))
         ts = int(ticker.get("timestamp") or now_ms)
+        # ``riseFallRate`` is a fraction (0.01 is 1 %).
+        change_pct = None if change is None else change * decimals.HUNDRED
+        if hold is None or mark is None:
+            open_interest = None
+        else:
+            # ``holdVol`` counts contracts.
+            open_interest = market.OpenInterest(
+                instrument_id=instrument,
+                base_quantity=hold * size,
+                notional_usd=hold * size * mark,
+                mark_price=mark,
+                source="mexc.rest",
+                as_of_ms=ts,
+            )
         return market.MarketSnapshot(
             instrument_id=instrument,
             feed_state=quality.FeedState.LIVE,
@@ -439,21 +480,8 @@ class MexcAdapter(base.BaseVenueAdapter):
             best_ask=base.opt_dec(ticker.get("ask1")),
             turnover_24h_quote=base.opt_dec(ticker.get("amount24")),
             volume_24h_base=None if volume is None else volume * size,
-            change_24h_pct=None
-            if change is None
-            else change * decimals.HUNDRED,
-            open_interest=(
-                None
-                if hold is None or mark is None
-                else market.OpenInterest(
-                    instrument_id=instrument,
-                    base_quantity=hold * size,
-                    notional_usd=hold * size * mark,
-                    mark_price=mark,
-                    source="mexc.rest",
-                    as_of_ms=ts,
-                )
-            ),
+            change_24h_pct=change_pct,
+            open_interest=open_interest,
         )
 
     async def fetch_snapshot(
@@ -468,7 +496,8 @@ class MexcAdapter(base.BaseVenueAdapter):
             Snapshot.
 
         Raises:
-            errors.MissingDataError: If the venue returns no ticker.
+            errors.MissingDataError: If the venue returns no ticker or no
+                funding.
         """
         await self._require(instrument)
         payload = await self._http.get(
@@ -603,6 +632,7 @@ class MexcAdapter(base.BaseVenueAdapter):
         return market.Funding(
             instrument_id=instrument,
             rate=base.dec(data["fundingRate"]),
+            # ``collectCycle`` is in hours; 8 h when the venue omits it.
             interval_hours=float(data.get("collectCycle") or 8),
             kind=market.FundingKind.PREDICTED,
             effective_time_ms=next_ms or now,
@@ -633,7 +663,7 @@ class MexcAdapter(base.BaseVenueAdapter):
 
             Args:
                 raw: Frame payload.
-                now_ms: Receipt time.
+                now_ms: Receipt time, epoch milliseconds.
 
             Returns:
                 Trades.
@@ -689,12 +719,15 @@ class MexcAdapter(base.BaseVenueAdapter):
         def parse(raw: str | bytes, now_ms: int) -> list[market.Candle]:
             """Parses one frame (JSON text or Protobuf bytes).
 
+            Kline ``t`` is the bar start in epoch seconds and ``q`` the
+            volume in contracts.
+
             Args:
                 raw: Frame payload.
-                now_ms: Receipt time.
+                now_ms: Receipt time, epoch milliseconds.
 
             Returns:
-                Candles.
+                Candles (empty for other frames and intervals).
             """
             message = mexc_protobuf.loads(raw)
             if not isinstance(message, dict):
@@ -720,6 +753,7 @@ class MexcAdapter(base.BaseVenueAdapter):
                     event_ts_ms=int(message.get("ts", now_ms)),
                     now_ms=now_ms,
                     source="mexc.ws",
+                    # Kline frames never flag a closed bar; REST confirms it.
                     is_final=False,
                 )
             ]
@@ -728,8 +762,8 @@ class MexcAdapter(base.BaseVenueAdapter):
             """Fetches missed or closing bars over REST.
 
             Args:
-                start: Inclusive start.
-                end: Exclusive end.
+                start: Inclusive start, epoch milliseconds.
+                end: Exclusive end, epoch milliseconds.
 
             Returns:
                 Candles.

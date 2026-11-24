@@ -5,7 +5,7 @@
 
 REST base: ``https://mainnet.zklighter.elliot.ai/api/v1`` — ``orderBooks``,
 ``orderBookDetails``, ``candles`` (the older ``candlesticks`` route returns
-HTTP 403 as of 2026-11), ``fundings`` and ``orderBookOrders``.
+HTTP 403 as of 2026-11), ``fundings``, ``orderBookOrders`` and ``trades``.
 
 Verified behavior and assumptions:
 
@@ -27,8 +27,10 @@ Trades (verified live 2026-11-22, docs.lighter.xyz/api):
 
 * WebSocket ``wss://mainnet.zklighter.elliot.ai/stream`` channel
   ``trade/<market_id>``: ``subscribed/trade`` replays the latest 50 trades,
-  ``update/trade`` frames follow; both list trades newest first. The client
-  must send a frame at least every 2 minutes (``{"type": "ping"}``).
+  ``update/trade`` frames follow; both list trades newest first and label
+  the channel ``trade:<market_id>`` (a colon, not the slash subscribed
+  to). The client must send a frame at least every 2 minutes
+  (``{"type": "ping"}``).
 * ``is_maker_ask`` true means the resting maker sold, so the aggressor
   bought (714/720 trades printed through the matching touch, none against).
 * ``trade_id`` is unique and increasing (a global sequence); ``timestamp``
@@ -85,10 +87,14 @@ _KLINE_TF = (
 )
 _TF = (*timeframes.SECONDS, *_KLINE_TF)
 _MAX_CANDLES = 500
+"""Most bars one ``candles`` request returns."""
 _MAX_TRADES = 100
+"""Page size of ``trades``."""
 _BOOK_TRADE_TYPES = frozenset({"trade"})
+"""Trade types Lighter's candles count (see the module docstring)."""
 _MAX_BOOK_ORDERS = 250
 _QUOTE_DECIMALS = 6
+"""Decimals of USDC, the quote and settlement asset."""
 _HOUR_MS = 3_600_000
 
 
@@ -112,6 +118,10 @@ def parse_order_books(
         symbol = str(book["symbol"])
         size_dec = int(book["supported_size_decimals"])
         price_dec = int(book["supported_price_decimals"])
+        if book.get("status") == "active" and not book.get("is_frozen"):
+            status = instruments.InstrumentStatus.TRADING
+        else:
+            status = instruments.InstrumentStatus.HALTED
         rows.append(
             instruments.Instrument(
                 key=instruments.InstrumentKey(
@@ -131,12 +141,7 @@ def parse_order_books(
                 min_notional=base.opt_dec(book.get("min_quote_amount")),
                 contract_multiplier=base.dec(book.get("multiplier", "1")),
                 linear=True,
-                status=(
-                    instruments.InstrumentStatus.TRADING
-                    if book.get("status") == "active"
-                    and not book.get("is_frozen")
-                    else instruments.InstrumentStatus.HALTED
-                ),
+                status=status,
                 asset_class=instruments.AssetClass.UNKNOWN,
                 source="lighter.rest",
                 as_of_ms=now_ms,
@@ -163,7 +168,8 @@ def parse_candle(
     """Converts a ``candles`` row, quantizing float artifacts.
 
     Args:
-        row: ``{t, o, h, l, c, v, V, i}``.
+        row: ``{t, o, h, l, c, v, V, i}`` (``t`` in epoch milliseconds,
+            ``v`` base and ``V`` quote volume, ``i`` the last trade id).
         instrument_id: Instrument.
         timeframe: Resolution.
         price_dec: Published price decimals.
@@ -206,7 +212,7 @@ def parse_funding(
     """Converts a settled hourly ``fundings`` row.
 
     Args:
-        row: ``{timestamp (s), rate (%), direction}``.
+        row: ``{timestamp (seconds), rate (percent), direction}``.
         instrument_id: Instrument.
         now_ms: Receipt time.
 
@@ -253,6 +259,7 @@ def parse_trade(
         received_at_ms=now_ms,
         price=base.dec(row["price"]),
         base_quantity=base.dec(row["size"]),
+        # A selling maker means the taker bought.
         aggressor_side=(
             market.AggressorSide.BUY
             if row["is_maker_ask"]
@@ -300,7 +307,8 @@ def parse_trade_frame(
         now_ms: Receipt time.
 
     Returns:
-        Trades ascending (empty for ``connected``, pongs and other frames).
+        Trades ascending (empty for ``connected``, pongs, other markets and
+        other frames).
 
     Raises:
         ValueError: On a venue error frame.
@@ -312,6 +320,7 @@ def parse_trade_frame(
         raise ValueError(f"lighter stream error: {message['error']}")
     if message.get("type") not in ("subscribed/trade", "update/trade"):
         return []
+    # Frames say ``trade:<id>`` although the subscription says ``trade/<id>``.
     if message.get("channel") != f"trade:{market_id}":
         return []
     return parse_trade_rows(message.get("trades") or [], instrument_id, now_ms)
@@ -326,7 +335,7 @@ def aggregate_orders(
         orders: ``orderBookOrders`` rows.
 
     Returns:
-        ``(price, quantity)`` levels.
+        ``(price, quantity)`` levels in first-seen price order.
     """
     levels: collections.defaultdict[decimal.Decimal, decimal.Decimal] = (
         collections.defaultdict(decimal.Decimal)
@@ -339,7 +348,11 @@ def aggregate_orders(
 
 
 class LighterAdapter(base.BaseVenueAdapter):
-    """``MarketDataPort`` for Lighter perpetuals (REST candles, WS trades)."""
+    """``MarketDataPort`` for Lighter perpetuals (REST candles, WS trades).
+
+    Attributes:
+        VENUE: Venue served (``LIGHTER``).
+    """
 
     VENUE = instruments.Venue.LIGHTER
 
@@ -429,12 +442,14 @@ class LighterAdapter(base.BaseVenueAdapter):
     ) -> list[market.Candle]:
         """Fetches candles, paging backwards 500 bars at a time.
 
+        Seconds bars are built from trades.
+
         Args:
             instrument: Instrument.
             timeframe: Resolution.
             start_ms: Inclusive start.
             end_ms: Exclusive end.
-            limit: Optional maximum bars.
+            limit: Optional maximum bars (the newest are kept).
 
         Returns:
             Ascending candles.
@@ -489,10 +504,10 @@ class LighterAdapter(base.BaseVenueAdapter):
     async def _details(
         self, market_id: int | None = None
     ) -> list[Mapping[str, Any]]:
-        """Fetches ``orderBookDetails`` (one market or all perps).
+        """Fetches ``orderBookDetails`` of one market or of every market.
 
         Args:
-            market_id: Optional market id.
+            market_id: Market id, or ``None`` for every market.
 
         Returns:
             Detail rows.
@@ -510,7 +525,7 @@ class LighterAdapter(base.BaseVenueAdapter):
             instrument: Instrument.
 
         Returns:
-            Funding or ``None`` when none was published.
+            Funding, or ``None`` when none settled in the last six hours.
         """
         now = self._clock.now_ms()
         payload = await self._http.get(
@@ -571,7 +586,13 @@ class LighterAdapter(base.BaseVenueAdapter):
                 source="lighter.rest",
                 as_of_ms=now_ms,
             )
+        # ``daily_price_change`` is already a percentage.
         change = base.opt_dec(detail.get("daily_price_change"))
+        turnover = None
+        if detail.get("daily_quote_token_volume") is not None:
+            turnover = base.quantize(
+                base.dec(detail["daily_quote_token_volume"]), _QUOTE_DECIMALS
+            )
         return market.MarketSnapshot(
             instrument_id=instrument,
             feed_state=quality.FeedState.LIVE,
@@ -586,14 +607,7 @@ class LighterAdapter(base.BaseVenueAdapter):
             index=base.opt_dec(detail.get("index_price")),
             best_bid=book.best_bid if book else None,
             best_ask=book.best_ask if book else None,
-            turnover_24h_quote=(
-                base.quantize(
-                    base.dec(detail["daily_quote_token_volume"]),
-                    _QUOTE_DECIMALS,
-                )
-                if detail.get("daily_quote_token_volume") is not None
-                else None
-            ),
+            turnover_24h_quote=turnover,
             volume_24h_base=base.opt_dec(detail.get("daily_base_token_volume")),
             change_24h_pct=(
                 None if change is None else base.quantize(change, 4)
@@ -629,7 +643,7 @@ class LighterAdapter(base.BaseVenueAdapter):
         )
 
     async def fetch_snapshots(self) -> list[market.MarketSnapshot]:
-        """Builds snapshots for every active perpetual from one request.
+        """Builds snapshots of every listed perpetual from one request.
 
         Returns:
             Snapshots without best bid/ask and funding.
@@ -657,7 +671,8 @@ class LighterAdapter(base.BaseVenueAdapter):
 
         Args:
             instrument: Instrument.
-            depth: Approximate levels per side.
+            depth: Orders requested (clamped to 1-250); orders at one
+                price merge into a level, so fewer levels can come back.
 
         Returns:
             Order book.
@@ -717,7 +732,7 @@ class LighterAdapter(base.BaseVenueAdapter):
             Funding.
 
         Raises:
-            errors.MissingDataError: If no recent funding exists.
+            errors.MissingDataError: If none settled in the last six hours.
         """
         await self._require(instrument)
         funding = await self._latest_funding(instrument)
@@ -780,7 +795,9 @@ class LighterAdapter(base.BaseVenueAdapter):
             max_pages: Request budget.
 
         Returns:
-            Complete suffix of the range.
+            Complete suffix of the range; the whole range only when a page
+            reaches past ``start_ms`` within ``max_pages`` (the venue keeps
+            about 53 minutes).
         """
         market_id = self._market_id(instrument)
         params: dict[str, Any] = {

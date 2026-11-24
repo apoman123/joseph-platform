@@ -21,6 +21,7 @@ fixtures follow the documented shapes):
 * REST ``https://data.alpaca.markets/v2/stocks/{symbol}/bars|trades|quotes``
   and ``/v2/stocks/snapshots``, headers ``APCA-API-KEY-ID`` and
   ``APCA-API-SECRET-KEY``, ``limit`` up to 10000 with ``next_page_token``.
+  ``end`` is inclusive, so an exclusive end is sent 1 ms earlier.
   The free plan allows 200 requests per minute and SIP history except the
   latest 15 minutes; historical ``feed`` is ``iex`` or ``sip`` (the latest
   and snapshot endpoints also accept ``delayed_sip``).
@@ -80,6 +81,7 @@ from collections.abc import Iterable
 from collections.abc import Mapping
 from collections.abc import Sequence
 from typing import Any
+from typing import TypeAlias
 
 import websockets
 
@@ -122,8 +124,12 @@ _PAGE_LIMIT = 10_000
 MAX_PAGES = 20
 """REST pages per call (newest data is kept when the cap truncates)."""
 _BAR_SETTLE_MS = 60_000
-"""Late trades revise a minute bar for about 30 s; older bars are final."""
+"""Age after its end at which a minute bar is final.
+
+Late trades revise a minute bar for about 30 s after it ends.
+"""
 _DELAY_MS = 900_000
+"""Delay of the ``delayed_sip`` feed (15 minutes)."""
 CLOSING_REQUESTS_PER_FETCH = 20
 """Closing-window requests one history fetch may send (newest first)."""
 CLOSING_REQUESTS_PER_MINUTE = 60
@@ -152,6 +158,7 @@ _DISPLAY_NAMES = {
 }
 _SYMBOL = re.compile(r"^[A-Z]{1,5}(\.[A-Z])?$")
 _SKIPPED_CLASSES = frozenset("UWR")
+"""Suffixes of units, warrants and rights, whose Alpaca form is unverified."""
 BOND_ETFS = frozenset(
     {
         "TLT", "IEF", "SHY", "AGG", "BND", "LQD", "HYG", "TIP", "GOVT",
@@ -164,8 +171,11 @@ TICK_LADDER = (
 )
 """Reg NMS Rule 612 increments: 0.0001 below $1, else 0.01."""
 _HALT_CODES = frozenset({"H", "P", "Q", "2"})
+"""Status codes (``sc``) that stop trading: halt, pause, quotation only."""
 _RESUME_CODES = frozenset({"T", "3"})
-Sleep = Callable[[float], Awaitable[None]]
+"""Status codes (``sc``) that resume trading."""
+Sleep: TypeAlias = Callable[[float], Awaitable[None]]
+"""Asynchronous sleep taking seconds (``asyncio.sleep``)."""
 
 
 class Feed(enum.StrEnum):
@@ -216,7 +226,8 @@ class AlpacaConfig:
             Configuration.
 
         Raises:
-            ValueError: For an unknown feed.
+            ValueError: For an unknown feed or a non-integer
+                ``JOSEPH_ALPACA_SECONDS_HISTORY_MS``.
         """
         source = os.environ if env is None else env
         return cls(
@@ -230,22 +241,22 @@ class AlpacaConfig:
 
     @property
     def configured(self) -> bool:
-        """Returns True when both credentials are set."""
+        """Whether both credentials are set."""
         return bool(self.key_id and self.secret_key)
 
     @property
     def rest_feed(self) -> str:
-        """Returns the historical ``feed`` parameter (``iex`` or ``sip``)."""
+        """The historical ``feed`` parameter (``iex`` or ``sip``)."""
         return "iex" if self.feed is Feed.IEX else "sip"
 
     @property
     def delay_ms(self) -> int:
-        """Returns how far behind real time the entitled data is."""
+        """How far behind real time the entitled data is, in milliseconds."""
         return _DELAY_MS if self.feed is Feed.DELAYED_SIP else 0
 
     @property
     def closing_prints(self) -> bool:
-        """Returns whether minute bars get the closing prints folded in.
+        """Whether minute bars get the closing prints folded in.
 
         Only the consolidated feeds carry the listing exchange's closing
         cross; IEX runs none for Nasdaq, NYSE or Cboe listings.
@@ -260,7 +271,8 @@ class AlpacaConfig:
         """
         if not self.configured:
             return {}
-        assert self.key_id is not None and self.secret_key is not None
+        if self.key_id is None or self.secret_key is None:
+            raise AssertionError("configured implies both credentials")
         return {
             "APCA-API-KEY-ID": self.key_id,
             "APCA-API-SECRET-KEY": self.secret_key,
@@ -343,7 +355,7 @@ def bond_class(symbol: str, name: str, etf: bool) -> instruments.AssetClass:
         etf: ETF flag.
 
     Returns:
-        Asset class.
+        ``BOND`` or ``EQUITY``.
     """
     if symbol in BOND_ETFS:
         return instruments.AssetClass.BOND
@@ -527,7 +539,8 @@ def minute_bar(
         source: Provenance label.
 
     Returns:
-        Candle, or ``None`` for extended-hours minutes.
+        Candle, or ``None`` for minutes outside the XNYS session
+        (extended hours).
     """
     start = rfc3339_ms(str(row["t"]))
     calendar = sessions.XNYS
@@ -562,12 +575,14 @@ def daily_bar(
         row: Alpaca bar.
         instrument_id: Instrument.
         now_ms: Receipt time.
-        delay_ms: Entitlement delay.
+        delay_ms: Entitlement delay in milliseconds.
         source: Provenance label.
 
     Returns:
         Candle, or ``None`` when the day is not an XNYS session.
     """
+    # ``t`` is New York midnight; the hour of margin keeps a stamp up to an
+    # hour early (for example one made with the other DST offset) on its day.
     day = ny_date(rfc3339_ms(str(row["t"])) + 3_600_000)
     session = sessions.XNYS.session(day)
     if session is None:
@@ -598,8 +613,8 @@ def _proven(
         complete: Whether every page was read.
 
     Returns:
-        ``settled_ms``, or the last bar read when the page cap cut the
-        range (bars after it were not delivered).
+        ``settled_ms``; when the page cap cut the range, at most the start
+        of the last bar read (bars after it were not delivered).
     """
     if complete or not rows:
         return settled_ms
@@ -685,7 +700,7 @@ class QuoteBook:
         """Initializes an empty book.
 
         Args:
-            capacity: Quotes kept.
+            capacity: Quotes kept; the oldest are dropped beyond it.
         """
         self._times: list[int] = []
         self._quotes: list[
@@ -702,6 +717,7 @@ class QuoteBook:
         ts = rfc3339_ms(str(row["t"]))
         bid = base.opt_dec(row.get("bp")) or None
         ask = base.opt_dec(row.get("ap")) or None
+        # Quotes can arrive out of order: insert by time from the end.
         index = len(self._times)
         while index and self._times[index - 1] > ts:
             index -= 1
@@ -783,6 +799,7 @@ class _Sub:
     queue: asyncio.Queue[tuple[str, Any]]
 
 
+# Subscription channel of each stream message type (``T``).
 _TYPE_CHANNEL = {
     "t": "trades",
     "q": "quotes",
@@ -801,6 +818,10 @@ class AlpacaStream:
     after every received frame (delivery proof), ``("reset", now_ms)``
     after a reconnect (data may have been missed) and ``("error", err)``
     when the stream gave up.
+
+    Attributes:
+        halted: Trading halt state per symbol from ``statuses`` messages
+            (True while halted or paused; absent until a status arrived).
     """
 
     def __init__(
@@ -833,7 +854,7 @@ class AlpacaStream:
 
     @property
     def url(self) -> str:
-        """Returns the feed URL."""
+        """The WebSocket URL of the configured feed."""
         return STREAM_URL.format(feed=self._config.feed.value)
 
     def _wanted(self) -> dict[str, set[str]]:
@@ -903,6 +924,8 @@ class AlpacaStream:
             "action": action,
             **{c: sorted(s) for c, s in channels.items()},
         }
+        # A failed send means the connection is dropping; the reconnect
+        # subscribes everything wanted again.
         with contextlib.suppress(OSError, websockets.WebSocketException):
             await self._connection.send(json.dumps(message))
 
@@ -931,6 +954,8 @@ class AlpacaStream:
             elif code in _RESUME_CODES:
                 self.halted[symbol] = False
         channel = _TYPE_CHANNEL.get(kind)
+        # Trade corrections (c) and cancels (x) come with a trades
+        # subscription.
         if kind in ("c", "x"):
             channel = "trades"
         if channel is None:
@@ -952,7 +977,9 @@ class AlpacaStream:
 
         Raises:
             errors.VenueUnavailableError: On an authentication or
-                subscription error message.
+                subscription error message, or when three frames passed
+                without authentication.
+            TimeoutError: When a frame takes longer than 10 s.
         """
         config = self._config
         await connection.send(
@@ -968,6 +995,8 @@ class AlpacaStream:
             frame = await asyncio.wait_for(connection.recv(), 10)
             for message in json.loads(frame):
                 if message.get("T") == "error":
+                    # 402 auth failed, 406 connection limit exceeded and
+                    # 409 insufficient subscription: a retry cannot help.
                     raise errors.VenueUnavailableError(
                         f"alpaca stream error {message.get('code')}: "
                         f"{message.get('msg')}",
@@ -987,7 +1016,13 @@ class AlpacaStream:
         raise errors.VenueUnavailableError("alpaca stream did not authenticate")
 
     async def _run(self) -> None:
-        """Connects, authenticates and dispatches until no one listens."""
+        """Connects, authenticates and dispatches until no one listens.
+
+        A failed connection is retried after a full-jitter backoff of up to
+        ``0.5 s * 2**failures`` (capped at 30 s). After ``max_failures``
+        consecutive failures, or on a non-retryable error, subscribers get
+        an ``error`` event and the task ends.
+        """
         failures = 0
         connected_before = False
         while self._subs:
@@ -1052,7 +1087,7 @@ class AlpacaStream:
                     ),
                 )
                 return
-            await self._sleep(min(30.0, 0.5 * 2**failures) * random.random())  # noqa: S311
+            await self._sleep(min(30.0, 0.5 * 2**failures) * random.random())  # noqa: S311 - backoff jitter, not cryptography
 
     async def close(self) -> None:
         """Stops the connection task."""
@@ -1060,6 +1095,8 @@ class AlpacaStream:
         self._connection = None
         if task is not None:
             task.cancel()
+            # Closing never fails: the task already reported its errors to
+            # the subscribers.
             with contextlib.suppress(asyncio.CancelledError, Exception):
                 await task
 
@@ -1109,13 +1146,15 @@ def unsettled(
     Returns:
         The bars, those overlapping a hole made non-final.
     """
-    return [
-        dataclasses.replace(bar, is_final=False)
-        if bar.is_final
-        and any(low < bar.end_ms and bar.start_ms < high for low, high in holes)
-        else bar
-        for bar in rows
-    ]
+    reopened = []
+    for bar in rows:
+        pending = bar.is_final and any(
+            low < bar.end_ms and bar.start_ms < high for low, high in holes
+        )
+        reopened.append(
+            dataclasses.replace(bar, is_final=False) if pending else bar
+        )
+    return reopened
 
 
 class AlpacaSource:
@@ -1267,7 +1306,7 @@ class AlpacaSource:
     async def paged(
         self, path: str, params: dict[str, Any], key: str
     ) -> list[Mapping[str, Any]]:
-        """Follows ``next_page_token`` up to ``MAX_PAGES``.
+        """Follows ``next_page_token`` like ``pages``, without the flag.
 
         Args:
             path: Path.
@@ -1275,7 +1314,7 @@ class AlpacaSource:
             key: Result array (``bars``, ``trades``, ``quotes``).
 
         Returns:
-            Rows of every page read.
+            Rows of every page read (at most ``MAX_PAGES``).
         """
         rows, _ = await self.pages(path, params, key)
         return rows
@@ -1331,6 +1370,7 @@ class AlpacaSource:
                 )
                 max_requests = sent
                 continue
+            # ``u`` marks a trade update (canceled or corrected print).
             trades = [
                 parse_trade(row, market.AggressorSide.UNKNOWN)
                 for row in payload.get("trades") or ()
@@ -1569,11 +1609,49 @@ class _LiveCloses:
             self._withheld.discard(close)
 
 
+def _window(
+    timeframe: timeframes.Timeframe,
+    start_ms: int,
+    end_ms: int,
+    limit: int | None,
+) -> int:
+    """Returns the grid-aligned fetch start honoring ``limit``.
+
+    Args:
+        timeframe: Resolution.
+        start_ms: Requested start.
+        end_ms: Requested end.
+        limit: Optional maximum bars.
+
+    Returns:
+        Fetch start.
+    """
+    calendar = sessions.XNYS
+    try:
+        first = calendar.shift(timeframe, start_ms, 0)
+        if limit is not None:
+            newest = calendar.floor(timeframe, end_ms - 1)
+            first = max(first, calendar.shift(timeframe, newest, -(limit - 1)))
+    except ValueError:
+        # Outside the XNYS session table there is no grid to align to.
+        return start_ms
+    return first
+
+
 class AlpacaAdapter(base.BaseVenueAdapter):
     """``SparseBarsPort`` for one venue (``nasdaq``, ``nyse`` or ``cboe``).
 
     Alpaca publishes no bar for a minute (or day) without trades, so every
     fetch and stream states the span it delivered completely.
+
+    Attributes:
+        VENUE: The venue served (``nasdaq``, ``nyse`` or ``cboe``), set per
+            instance.
+        INSTRUMENT_TTL_MS: Instrument cache lifetime (6 hours, as the
+            directory cache of ``AlpacaSource``).
+        TRADE_BUY_VOLUME_METHOD: ``classified``: the tape has no aggressor
+            side, so trades are classified with Lee-Ready.
+        SPARSE_BARS: True: Alpaca publishes no bar without trades.
     """
 
     INSTRUMENT_TTL_MS = 6 * 3_600_000
@@ -1603,7 +1681,7 @@ class AlpacaAdapter(base.BaseVenueAdapter):
 
     @property
     def config(self) -> AlpacaConfig:
-        """Returns the Alpaca configuration."""
+        """The Alpaca configuration shared through the source."""
         return self._source.config
 
     def capabilities(self) -> capabilities.VenueCapabilities:
@@ -1614,6 +1692,27 @@ class AlpacaAdapter(base.BaseVenueAdapter):
         """
         config = self.config
         name = _DISPLAY_NAMES[self.VENUE]
+        if config.closing_prints:
+            closing_note = (
+                "Alpaca's minute after the close (16:00, 13:00 on early "
+                "closes) also holds post-market trades, so each "
+                "session's closing window is read once per symbol from "
+                "REST trades (one request, cached) and its condition-6 "
+                "prints fold into the session's last minute bar, hence "
+                "into 1h/4h bars: their close is the official close, "
+                "like the 1d bar's. At most "
+                f"{CLOSING_REQUESTS_PER_FETCH} such requests per fetch "
+                f"(newest sessions first) and {CLOSING_REQUESTS_PER_MINUTE}"
+                " per minute overall; until its prints are read a "
+                "session's last minute stays open and is fetched again."
+            )
+        else:
+            closing_note = (
+                "the IEX feed has no closing cross for these "
+                "listings, so the last minute of a session holds IEX "
+                "trades only (sip and delayed_sip fold the official "
+                "closing print in)."
+            )
         return capabilities.VenueCapabilities(
             venue=self.VENUE,
             display_name=f"{name} (Alpaca {config.feed.value})",
@@ -1666,25 +1765,7 @@ class AlpacaAdapter(base.BaseVenueAdapter):
                 "print (sale condition 6) stamped within 60 s after the "
                 "close joins the session's last seconds bar, which settles "
                 "only then; other after-close trades stay out.",
-                "Closing prints in minute bars: "
-                + (
-                    "Alpaca's minute after the close (16:00, 13:00 on early "
-                    "closes) also holds post-market trades, so each "
-                    "session's closing window is read once per symbol from "
-                    "REST trades (one request, cached) and its condition-6 "
-                    "prints fold into the session's last minute bar, hence "
-                    "into 1h/4h bars: their close is the official close, "
-                    "like the 1d bar's. At most "
-                    f"{CLOSING_REQUESTS_PER_FETCH} such requests per fetch "
-                    f"(newest sessions first) and {CLOSING_REQUESTS_PER_MINUTE}"
-                    " per minute overall; until its prints are read a "
-                    "session's last minute stays open and is fetched again."
-                    if config.closing_prints
-                    else "the IEX feed has no closing cross for these "
-                    "listings, so the last minute of a session holds IEX "
-                    "trades only (sip and delayed_sip fold the official "
-                    "closing print in)."
-                ),
+                "Closing prints in minute bars: " + closing_note,
                 "The tape publishes no aggressor side: trades are classified "
                 "with Lee-Ready against the prevailing NBBO (quote rule, "
                 "tick test at the midpoint); taker_buy_method = classified. "
@@ -1755,6 +1836,10 @@ class AlpacaAdapter(base.BaseVenueAdapter):
 
         Returns:
             Instrument metadata.
+
+        Raises:
+            errors.NotFoundError: If the venue does not list it.
+            errors.VenueUnavailableError: Without Alpaca keys.
         """
         listed = await self._require(instrument)
         self._source.require_keys(self.VENUE)
@@ -1801,13 +1886,11 @@ class AlpacaAdapter(base.BaseVenueAdapter):
             - base.TRADE_PUBLISH_LAG_MS
         )
         due = [close for close in closes if close <= horizon]
-        known = (
-            await self._source.closing_prints(
+        known: dict[int, tuple[us_trade_bars.TapeTrade, ...]] = {}
+        if due:
+            known = await self._source.closing_prints(
                 instrument.venue_market_id, due, max_requests
             )
-            if due
-            else {}
-        )
         return known, tuple(close for close in closes if close not in known)
 
     async def _minutes(
@@ -1890,6 +1973,8 @@ class AlpacaAdapter(base.BaseVenueAdapter):
             f"/v2/stocks/{instrument.venue_market_id}/bars",
             {
                 "timeframe": "1Day",
+                # Daily bars are stamped at New York midnight, so the
+                # start's New York date keeps the start's own day.
                 "start": ny_date(start_ms).isoformat(),
                 "end": rfc3339(stop - 1),
                 "adjustment": "split",
@@ -1918,36 +2003,6 @@ class AlpacaAdapter(base.BaseVenueAdapter):
             out, _proven(rows, min(stop, settled), complete), complete
         )
 
-    @staticmethod
-    def _window(
-        timeframe: timeframes.Timeframe,
-        start_ms: int,
-        end_ms: int,
-        limit: int | None,
-    ) -> int:
-        """Returns the grid-aligned fetch start honoring ``limit``.
-
-        Args:
-            timeframe: Resolution.
-            start_ms: Requested start.
-            end_ms: Requested end.
-            limit: Optional maximum bars.
-
-        Returns:
-            Fetch start.
-        """
-        calendar = sessions.XNYS
-        try:
-            first = calendar.shift(timeframe, start_ms, 0)
-            if limit is not None:
-                newest = calendar.floor(timeframe, end_ms - 1)
-                first = max(
-                    first, calendar.shift(timeframe, newest, -(limit - 1))
-                )
-        except ValueError:
-            return start_ms
-        return first
-
     async def fetch_candles(
         self,
         instrument: instruments.InstrumentId,
@@ -1967,6 +2022,12 @@ class AlpacaAdapter(base.BaseVenueAdapter):
 
         Returns:
             Ascending candles on the XNYS calendar.
+
+        Raises:
+            errors.UnsupportedError: For a timeframe the venue does not serve.
+            errors.NotFoundError: If the venue does not list the instrument.
+            errors.VenueUnavailableError: Without Alpaca keys, or when
+                Alpaca rejects them.
         """
         fetched = await self.fetch_candle_coverage(
             instrument, timeframe, start_ms, end_ms, limit
@@ -1996,6 +2057,12 @@ class AlpacaAdapter(base.BaseVenueAdapter):
             no trades). Intraday bars carry the sessions' closing prints;
             the last minute of a session whose prints are pending is left
             out of the span and the bars over it are not final.
+
+        Raises:
+            errors.UnsupportedError: For a timeframe the venue does not serve.
+            errors.NotFoundError: If the venue does not list the instrument.
+            errors.VenueUnavailableError: Without Alpaca keys, or when
+                Alpaca rejects them.
         """
         self._require_timeframe(timeframe)
         await self._ready(instrument)
@@ -2005,7 +2072,7 @@ class AlpacaAdapter(base.BaseVenueAdapter):
             return await self._seconds_history(
                 instrument, timeframe, start_ms, end_ms, limit
             )
-        first = self._window(timeframe, start_ms, end_ms, limit)
+        first = _window(timeframe, start_ms, end_ms, limit)
         now = self._clock.now_ms()
         holes: list[candle_rules.Span] = []
         if timeframe in _INTRADAY:
@@ -2065,6 +2132,7 @@ class AlpacaAdapter(base.BaseVenueAdapter):
             {**common, "start": rfc3339(start_ms), "end": rfc3339(end_ms - 1)},
             "trades",
         )
+        # Quotes from 10 s earlier give the first trades a prevailing quote.
         quotes = await self._source.paged(
             f"/v2/stocks/{symbol}/quotes",
             {
@@ -2158,6 +2226,11 @@ class AlpacaAdapter(base.BaseVenueAdapter):
 
         Returns:
             Ascending trades within the configured window.
+
+        Raises:
+            errors.NotFoundError: If the venue does not list the instrument.
+            errors.VenueUnavailableError: Without Alpaca keys, or when
+                Alpaca rejects them.
         """
         await self._ready(instrument)
         now = self._clock.now_ms()
@@ -2198,6 +2271,7 @@ class AlpacaAdapter(base.BaseVenueAdapter):
         Returns:
             Snapshot per symbol.
         """
+        # Unlike the historical endpoints, snapshots accept ``delayed_sip``.
         feed = (
             Feed.DELAYED_SIP.value
             if self.config.feed is Feed.DELAYED_SIP
@@ -2207,6 +2281,7 @@ class AlpacaAdapter(base.BaseVenueAdapter):
             "/v2/stocks/snapshots",
             {"symbols": ",".join(symbols), "feed": feed},
         )
+        # The body is keyed by symbol; a ``snapshots`` wrapper is unwrapped.
         if isinstance(payload, Mapping) and "snapshots" in payload:
             payload = payload["snapshots"]
         return payload if isinstance(payload, Mapping) else {}
@@ -2266,6 +2341,9 @@ class AlpacaAdapter(base.BaseVenueAdapter):
             Snapshot.
 
         Raises:
+            errors.NotFoundError: If the venue does not list the instrument.
+            errors.VenueUnavailableError: Without Alpaca keys, or when
+                Alpaca rejects them.
             errors.MissingDataError: When Alpaca returns no snapshot.
         """
         await self._ready(instrument)
@@ -2282,6 +2360,10 @@ class AlpacaAdapter(base.BaseVenueAdapter):
 
         Returns:
             Snapshots (turnover = day volume x VWAP, an estimate).
+
+        Raises:
+            errors.VenueUnavailableError: Without Alpaca keys, or when
+                Alpaca rejects them.
         """
         listed = await self.list_instruments()
         self._source.require_keys(self.VENUE)
@@ -2297,7 +2379,7 @@ class AlpacaAdapter(base.BaseVenueAdapter):
                     )
         return out
 
-    async def fetch_order_book(
+    async def fetch_order_book(  # noqa: DOC201 - always raises UnsupportedError; never returns
         self, instrument: instruments.InstrumentId, depth: int
     ) -> market.OrderBook:
         """Alpaca stock data has no order book.
@@ -2312,7 +2394,7 @@ class AlpacaAdapter(base.BaseVenueAdapter):
         del instrument, depth
         raise errors.UnsupportedError("alpaca publishes no stock order book")
 
-    async def fetch_open_interest(
+    async def fetch_open_interest(  # noqa: DOC201 - always raises UnsupportedError; never returns
         self, instrument: instruments.InstrumentId
     ) -> market.OpenInterest:
         """Stocks have no open interest.
@@ -2326,7 +2408,7 @@ class AlpacaAdapter(base.BaseVenueAdapter):
         del instrument
         raise errors.UnsupportedError("stocks have no open interest")
 
-    async def fetch_funding(
+    async def fetch_funding(  # noqa: DOC201 - always raises UnsupportedError; never returns
         self, instrument: instruments.InstrumentId
     ) -> market.Funding:
         """Stocks have no funding.
@@ -2371,10 +2453,12 @@ class AlpacaAdapter(base.BaseVenueAdapter):
             instrument: Instrument.
             channels: Channels.
             tracker: Optional health tracker.
-            timeout_s: Idle interval producing ``tick`` events.
+            timeout_s: Idle seconds after which a ``tick`` event is
+                yielded; ``None`` waits without ticks.
 
         Yields:
-            Events.
+            ``(kind, payload)`` events: ``msg``, ``frame`` and ``reset`` as
+            described in ``AlpacaStream``, and ``("tick", now_ms)``.
 
         Raises:
             errors.VenueUnavailableError: When the stream gave up.
@@ -2470,6 +2554,10 @@ class AlpacaAdapter(base.BaseVenueAdapter):
 
         Returns:
             Async iterator of candle updates with coverage.
+
+        Raises:
+            errors.UnsupportedError: For a timeframe the venue does not serve
+                (at call time, before iteration).
         """
         self._require_timeframe(timeframe)
         if timeframe.is_seconds:

@@ -30,6 +30,7 @@ from collections.abc import Callable
 from collections.abc import Iterable
 from collections.abc import Mapping
 from typing import Any
+from typing import TypeAlias
 
 from joseph.domain import clock as clock_lib
 from joseph.domain import decimals
@@ -48,13 +49,14 @@ from joseph.market_data.domain import trade_bars
 from joseph.market_data.domain import trades as trades_lib
 
 TRADE_PUBLISH_LAG_MS = 1_000
-"""REST trade history may trail real time; bars this close stay open."""
+"""Milliseconds REST trade history may trail real time (never covered)."""
 _SEED_MS = 10_000
-"""History fetched before a seconds range to find the previous close."""
+"""Milliseconds of history fetched before a seconds range for its seed."""
 MAX_TRADE_BARS = 10_000
 """Newest seconds bars built per REST call (bounds flat runs and memory)."""
 
-TradePage = Callable[[int, int], Awaitable[trades_lib.TradeCoverage]]
+TradePage: TypeAlias = Callable[[int, int], Awaitable[trades_lib.TradeCoverage]]
+"""One trade-history request: ``(start_ms, end_ms) -> coverage``."""
 
 
 def dec(value: object) -> decimal.Decimal:
@@ -76,7 +78,7 @@ def opt_dec(value: object) -> decimal.Decimal | None:
         value: Value, ``None`` or ``""``.
 
     Returns:
-        Decimal or ``None``.
+        Decimal, or ``None`` when the value is ``None`` or ``""``.
     """
     return decimals.to_optional_decimal(value)
 
@@ -130,25 +132,28 @@ def make_candle(
 
     Finality defaults to "the bar has ended by ``now_ms``", so the
     in-progress bar is never final. High/low are widened to contain open and
-    close when a venue publishes a slightly inconsistent bar, and the taker
-    buy volume is clamped into ``[0, base_volume]`` likewise.
+    close when a venue publishes a slightly inconsistent bar; a negative
+    base volume becomes zero and the taker buy volume is clamped into
+    ``[0, base_volume]`` likewise.
 
     Args:
         instrument_id: Exact venue instrument.
         timeframe: Resolution.
-        start_ms: UTC bar start.
+        start_ms: Bar start, UTC epoch milliseconds.
         open_: Open.
         high: High.
         low: Low.
         close: Close.
         base_volume: Base volume.
-        now_ms: Receipt time.
+        now_ms: Receipt time, epoch milliseconds.
         source: Provenance label.
         feed_state: Provenance state.
         quote_turnover: Optional quote turnover.
         trade_count: Optional trade count.
-        event_ts_ms: Optional venue event time.
-        is_final: Explicit finality (e.g. Binance ``x``); derived if None.
+        event_ts_ms: Optional venue event time, epoch milliseconds.
+        is_final: Explicit venue finality (e.g. Binance ``x``), honoured
+            only once the bar has ended (1 s clock-skew allowance); derived
+            from ``now_ms`` if None.
         taker_buy_base_volume: Optional venue-published taker buy volume.
         taker_buy_method: How that buy volume was obtained (``classified``
             for stock exchanges, which publish no aggressor side).
@@ -171,6 +176,8 @@ def make_candle(
             f"{source} {timeframe.value} bars are not {grid}"
         )
     end_ms = calendar.end_of(timeframe, start_ms)
+    # A venue may flag its bar final a moment before our clock reaches the
+    # bar end; never accept a "final" bar that is still more than 1 s open.
     final = (
         end_ms <= now_ms
         if is_final is None
@@ -241,7 +248,9 @@ def newest_window_start(
         calendar: Session calendar of the instrument.
 
     Returns:
-        Aligned start no earlier than ``floor(start_ms)``.
+        Aligned start, no earlier than the bar containing ``start_ms``
+        (continuous calendars) or the first bar at or after it (session
+        calendars).
     """
     if calendar.continuous:
         newest = timeframe.floor(end_ms - 1)
@@ -267,17 +276,19 @@ async def suffix_by_chunks(
     """Collects the newest complete trades of a range with forward pages.
 
     For venues whose trade history pages forwards in time, the range is
-    walked backwards in windows (growing while one page suffices), each
-    window paged forwards to completion. A window that runs out of the page
-    budget is discarded, so the result is a complete suffix of the range.
+    walked backwards in windows (four times longer after a window that one
+    page covered, up to ``max_window_ms``), each window paged forwards to
+    completion. A window that runs out of the page budget, or whose page
+    makes no progress, is discarded and ends the walk, so the result is a
+    complete suffix of the range.
 
     Args:
         page: ``(start, end) -> coverage`` of one request (a prefix).
-        start_ms: Inclusive start.
-        end_ms: Exclusive end.
+        start_ms: Inclusive start, epoch milliseconds.
+        end_ms: Exclusive end, epoch milliseconds.
         max_pages: Request budget.
-        first_window_ms: First window length.
-        max_window_ms: Largest window the venue accepts.
+        first_window_ms: First window length in milliseconds.
+        max_window_ms: Largest window the venue accepts, in milliseconds.
 
     Returns:
         Coverage ``[from, end_ms)`` with ``from >= start_ms``.
@@ -324,7 +335,7 @@ def clip_range(
         limit: Optional maximum bars.
 
     Returns:
-        Ascending unique candles.
+        Ascending candles, one per start (the last duplicate wins).
     """
     by_start = {c.start_ms: c for c in rows if start_ms <= c.start_ms < end_ms}
     ordered = [by_start[s] for s in sorted(by_start)]
@@ -387,6 +398,8 @@ async def candles_of(
             for candle in update.candles:
                 yield candle
     finally:
+        # ``AsyncIterator`` has no ``aclose``; close the source when it is an
+        # async generator so its connection is released with this one.
         close = getattr(updates, "aclose", None)
         if close is not None:
             await close()
@@ -419,6 +432,12 @@ class BaseVenueAdapter:
     inherit implementations that raise ``UnsupportedError``.
 
     Attributes:
+        VENUE: Venue served; every subclass sets its own.
+        INSTRUMENT_TTL_MS: Milliseconds ``list_instruments`` reuses the
+            loaded instrument list before fetching it again.
+        TRADE_MAX_PAGES: REST requests per trade-history call
+            (``fetch_trades``, stream backfills, trade-built bars) when the
+            caller gives no budget.
         TRADE_BUY_VOLUME_METHOD: Origin of the aggressor side of the venue's
             public trades, stamped on trade-built bars: ``None`` for a
             venue taker flag, ``classified`` where trades are classified
@@ -455,11 +474,14 @@ class BaseVenueAdapter:
 
     @property
     def venue(self) -> instruments.Venue:
-        """Returns the venue served by this adapter."""
+        """The venue served by this adapter."""
         return self.VENUE
 
     def capabilities(self) -> capabilities.VenueCapabilities:
         """Returns capabilities (overridden by each venue).
+
+        Returns:
+            What the venue serves; each venue's override defines it.
 
         Raises:
             NotImplementedError: Always in the base class.
@@ -483,6 +505,10 @@ class BaseVenueAdapter:
         self,
     ) -> tuple[list[instruments.Instrument], dict[str, Mapping[str, Any]]]:
         """Fetches instruments and per-instrument native metadata.
+
+        Returns:
+            The instruments, and native metadata keyed by venue market id
+            (what ``_meta_for`` returns later); each venue overrides this.
 
         Raises:
             NotImplementedError: Always in the base class.
@@ -563,7 +589,10 @@ class BaseVenueAdapter:
             )
 
     async def fetch_snapshots(self) -> list[market.MarketSnapshot]:
-        """Bulk snapshots are unsupported unless overridden.
+        """Fetches every instrument's snapshot (unsupported unless overridden).
+
+        Returns:
+            One snapshot per instrument, in an override.
 
         Raises:
             errors.UnsupportedError: Always in the base class.
@@ -578,7 +607,7 @@ class BaseVenueAdapter:
         timeframe: timeframes.Timeframe,
         tracker: health.FeedHealthTracker | None = None,
     ) -> AsyncIterator[market.Candle]:
-        """Streams trade-built seconds candles; klines unless overridden.
+        """Streams trade-built seconds candles; kline streams need an override.
 
         Args:
             instrument: Canonical id.
@@ -691,6 +720,7 @@ class BaseVenueAdapter:
 
         Raises:
             errors.UnsupportedError: Without a time-range trade history.
+            errors.NotFoundError: If the venue does not list the instrument.
         """
         if not self.capabilities().market_data.trades_history:
             raise errors.UnsupportedError(
@@ -720,13 +750,15 @@ class BaseVenueAdapter:
             instrument: Canonical id.
             start_ms: Inclusive start.
             end_ms: Exclusive end.
-            max_pages: Request budget (defaults to ``TRADE_MAX_PAGES``).
+            max_pages: Request budget; ``None`` or 0 means
+                ``TRADE_MAX_PAGES``.
 
         Returns:
             Complete suffix ``[from, end_ms)`` of the range.
 
         Raises:
             errors.UnsupportedError: Without a time-range trade history.
+            errors.NotFoundError: If the venue does not list the instrument.
         """
         if not self.capabilities().market_data.trades_history:
             raise errors.UnsupportedError(
@@ -798,7 +830,8 @@ class BaseVenueAdapter:
                 Venue time to backfill from.
             """
             del now_ms
-            assert prime_from_ms is not None
+            if prime_from_ms is None:
+                raise AssertionError("prime is passed only with a start")
             return prime_from_ms
 
         events = ws.trade_stream_events(
@@ -825,9 +858,13 @@ class BaseVenueAdapter:
         Args:
             instrument: Canonical id.
 
+        Returns:
+            In an override, the venue's trade stream for the instrument.
+
         Raises:
             errors.UnsupportedError: Always in the base class.
         """
+        del instrument  # Unused.
         raise errors.UnsupportedError(
             f"{self.VENUE.value} has no native trade stream in Joseph"
         )
@@ -843,13 +880,18 @@ class BaseVenueAdapter:
 
         Args:
             instrument: Canonical id.
-            start_ms: Inclusive start.
-            end_ms: Exclusive end.
+            start_ms: Inclusive start, epoch milliseconds.
+            end_ms: Exclusive end, epoch milliseconds.
             max_pages: Request budget.
+
+        Returns:
+            In an override, a complete suffix ``[from, end_ms)`` of the
+            range: the newest trades are kept when ``max_pages`` runs out.
 
         Raises:
             errors.UnsupportedError: Always in the base class.
         """
+        del instrument, start_ms, end_ms, max_pages  # Unused.
         raise errors.UnsupportedError(
             f"{self.VENUE.value} publishes no time-range trade history"
         )
@@ -929,7 +971,8 @@ class BaseVenueAdapter:
             Ascending candles.
 
         Raises:
-            errors.UnsupportedError: Without a time-range trade history.
+            errors.UnsupportedError: If the venue does not build this
+                resolution from trades, or has no time-range trade history.
         """
         self._require_trade_built(timeframe)
         if not self.capabilities().market_data.trades_history:
@@ -958,6 +1001,8 @@ class BaseVenueAdapter:
         try:
             seed_from = calendar.floor(timeframe, first - _SEED_MS)
         except ValueError:
+            # Session calendars reject times before their first session;
+            # there is no earlier close to seed from then.
             seed_from = first
         if cover_to <= first:
             return []

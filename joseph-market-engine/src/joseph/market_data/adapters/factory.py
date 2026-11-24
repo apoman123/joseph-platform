@@ -5,6 +5,7 @@
 
 from __future__ import annotations
 
+import functools
 from collections.abc import Callable
 from collections.abc import Iterable
 
@@ -47,6 +48,7 @@ EXCHANGE_VERIFIED_AT_MS = 1_795_409_443_000
 TPEX_VERIFIED_AT_MS = 1_795_421_880_000
 
 _RATES: dict[instruments.Venue, tuple[float, int]] = {
+    # (requests per second, burst) of each venue's token bucket.
     instruments.Venue.BINANCE: (10.0, 20),
     instruments.Venue.HYPERLIQUID: (5.0, 10),
     instruments.Venue.LIGHTER: (3.0, 6),
@@ -55,6 +57,7 @@ _RATES: dict[instruments.Venue, tuple[float, int]] = {
     instruments.Venue.TREASURY: (1.0, 2),
 }
 _TWSE_OPENAPI_RATE = (1.0, 3)
+"""openapi.twse.com.tw, paced apart from www.twse.com.tw and MIS."""
 _TWSE_PACED_RATE = (0.5, 2)
 """www.twse.com.tw and MIS block clients above roughly 3 requests / 5 s."""
 _TPEX_RATE = (0.5, 3)
@@ -62,6 +65,7 @@ _TPEX_RATE = (0.5, 3)
 _ALPACA_RATE = (3.0, 10)
 """Alpaca's free plan allows 200 requests per minute (shared by venues)."""
 _SYMDIR_RATE = (1.0, 2)
+"""www.nasdaqtrader.com symbol directory files (US instrument lists)."""
 
 
 def build_adapters(
@@ -84,7 +88,7 @@ def build_adapters(
     Args:
         venues: Venues to enable.
         clock: Time source.
-        timeout_s: HTTP timeout.
+        timeout_s: HTTP timeout in seconds (unused with ``client``).
         client: Optional shared HTTP client (tests inject respx-backed ones).
         connect: WebSocket connector.
         alpaca_config: Alpaca credentials and feed for ``nasdaq``,
@@ -137,65 +141,58 @@ def build_adapters(
             limiter=limiter,
         )
 
-    mis_limiter: http.RateLimiter | None = None
-
+    # The shared objects below are built on first use, once per call of
+    # ``build_adapters``, so venues left out create no clients or SDK.
+    @functools.cache
     def shared_mis_limiter() -> http.RateLimiter:
         """Returns the MIS token bucket shared by TWSE and TPEx.
 
         Returns:
             Limiter (MIS is one host whatever the market).
         """
-        nonlocal mis_limiter
-        if mis_limiter is None:
-            mis_limiter = http.RateLimiter(*_TWSE_PACED_RATE)
-        return mis_limiter
+        return http.RateLimiter(*_TWSE_PACED_RATE)
 
-    alpaca_source: alpaca.AlpacaSource | None = None
-
+    @functools.cache
     def shared_alpaca() -> alpaca.AlpacaSource:
         """Returns the Alpaca source shared by the US exchange venues.
 
         Returns:
             Source.
         """
-        nonlocal alpaca_source
-        if alpaca_source is None:
-            alpaca_source = alpaca.AlpacaSource(
-                alpaca_config or alpaca.AlpacaConfig(),
-                venue_http(
-                    instruments.Venue.NASDAQ,
-                    alpaca.DATA_URL,
-                    _ALPACA_RATE,
-                    "alpaca",
-                ),
-                venue_http(
-                    instruments.Venue.NASDAQ,
-                    alpaca.SYMDIR_URL,
-                    _SYMDIR_RATE,
-                    "nasdaqtrader",
-                ),
-                clock,
-                connect,
-            )
-        return alpaca_source
+        return alpaca.AlpacaSource(
+            alpaca_config or alpaca.AlpacaConfig(),
+            venue_http(
+                instruments.Venue.NASDAQ,
+                alpaca.DATA_URL,
+                _ALPACA_RATE,
+                "alpaca",
+            ),
+            venue_http(
+                instruments.Venue.NASDAQ,
+                alpaca.SYMDIR_URL,
+                _SYMDIR_RATE,
+                "nasdaqtrader",
+            ),
+            clock,
+            connect,
+        )
 
-    sinopac_source: sinopac.SinopacSource | None = None
-
+    @functools.cache
     def shared_sinopac() -> sinopac.SinopacSource | None:
         """Returns the Shioaji source shared by ``twse`` and ``tpex``.
+
+        The SDK is checked when the source is first built.
 
         Returns:
             Source, or ``None`` when not configured.
         """
-        nonlocal sinopac_source
         if sinopac_config is None:
             return None
-        if sinopac_source is None:
-            sinopac_source = sinopac.SinopacSource(
-                sinopac_config, clock, factory=sinopac_factory
-            )
-            sinopac_source.check_sdk()
-        return sinopac_source
+        source = sinopac.SinopacSource(
+            sinopac_config, clock, factory=sinopac_factory
+        )
+        source.check_sdk()
+        return source
 
     adapters: dict[instruments.Venue, ports.MarketDataPort] = {}
     for venue in venues:

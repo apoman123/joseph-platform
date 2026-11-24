@@ -38,7 +38,9 @@ METADATA = sa.MetaData()
 
 _S1 = timeframes.Timeframe.S1
 _CHUNK = 400
+"""Rows per delete/insert statement, bounding each ``IN`` list."""
 _ID_LENGTH = 96
+"""Column width of a canonical instrument id."""
 
 TRADE_SECONDS = sa.Table(
     "trade_seconds",
@@ -143,6 +145,7 @@ def _row(instrument: str, bar: market.Candle) -> dict[str, object]:
         "taker_buy_base_volume": _text(bar.taker_buy_base_volume),
         "trade_count": bar.trade_count,
         "event_ts_ms": bar.event_ts_ms,
+        # The column holds 64 characters; a longer label is cut, not refused.
         "source": bar.source[:64],
         "received_at_ms": bar.received_at_ms,
     }
@@ -151,7 +154,7 @@ def _row(instrument: str, bar: market.Candle) -> dict[str, object]:
 def _candle(
     instrument: instruments.InstrumentId, row: sa.RowMapping
 ) -> market.Candle:
-    """Decodes a ``trade_seconds`` row.
+    """Decodes a ``trade_seconds`` row (recorded live, so ``LIVE`` and final).
 
     Args:
         instrument: Instrument.
@@ -208,7 +211,18 @@ class SqlTradeArchive:
         seconds: Sequence[market.Candle],
         covered: Sequence[recorded_trades.Interval],
     ) -> None:
-        """See ``TradeArchive.put``."""
+        """Stores complete 1s aggregates and merges their coverage.
+
+        Aggregates, the minute roll-ups they touch and the coverage are
+        written in one transaction.
+
+        Args:
+            instrument: Instrument.
+            seconds: Final 1s aggregates with traded volume, upserted by
+                start.
+            covered: Whole-second intervals in which every trade is
+                recorded (united with the stored coverage).
+        """
         key = str(instrument)
         rows = [_row(key, bar) for bar in seconds]
         with self.engine.begin() as conn:
@@ -256,6 +270,8 @@ class SqlTradeArchive:
                 TRADE_SECONDS.c.start_ms < high,
             )
         ).all()
+        # The select spans every minute from the first to the last touched
+        # one; only the touched minutes are recomputed.
         wanted = set(minutes)
         volumes: dict[int, decimal.Decimal] = {}
         takers: dict[int, decimal.Decimal | None] = {}
@@ -268,6 +284,7 @@ class SqlTradeArchive:
             volumes[minute] = volumes.get(
                 minute, decimals.ZERO
             ) + decimals.to_decimal(volume)
+            # One second without a taker volume leaves the minute's unknown.
             held = takers.get(minute, decimals.ZERO)
             takers[minute] = (
                 None
@@ -341,7 +358,16 @@ class SqlTradeArchive:
     def seconds(
         self, instrument: instruments.InstrumentId, start_ms: int, end_ms: int
     ) -> list[market.Candle]:
-        """See ``TradeArchive.seconds``."""
+        """Returns stored 1s aggregates starting in ``[start, end)``.
+
+        Args:
+            instrument: Instrument.
+            start_ms: Inclusive start, epoch milliseconds.
+            end_ms: Exclusive end, epoch milliseconds.
+
+        Returns:
+            Ascending 1s candles.
+        """
         query = (
             sa.select(TRADE_SECONDS)
             .where(
@@ -358,7 +384,15 @@ class SqlTradeArchive:
     def previous(
         self, instrument: instruments.InstrumentId, before_ms: int
     ) -> market.Candle | None:
-        """See ``TradeArchive.previous``."""
+        """Returns the newest stored 1s aggregate starting before a time.
+
+        Args:
+            instrument: Instrument.
+            before_ms: Exclusive bound, epoch milliseconds.
+
+        Returns:
+            The candle, or ``None`` when nothing is stored before it.
+        """
         query = (
             sa.select(TRADE_SECONDS)
             .where(
@@ -375,7 +409,16 @@ class SqlTradeArchive:
     def coverage(
         self, instrument: instruments.InstrumentId, start_ms: int, end_ms: int
     ) -> list[recorded_trades.Interval]:
-        """See ``TradeArchive.coverage``."""
+        """Returns coverage intervals overlapping ``[start, end)``.
+
+        Args:
+            instrument: Instrument.
+            start_ms: Inclusive start, epoch milliseconds.
+            end_ms: Exclusive end, epoch milliseconds.
+
+        Returns:
+            Disjoint ascending intervals (not clipped to the range).
+        """
         table = TRADE_COVERAGE
         query = (
             sa.select(table.c.from_ms, table.c.to_ms)
@@ -392,7 +435,16 @@ class SqlTradeArchive:
     def minute_flows(
         self, instrument: instruments.InstrumentId, start_ms: int, end_ms: int
     ) -> list[recorded_trades.MinuteFlow]:
-        """See ``TradeArchive.minute_flows``."""
+        """Returns per-minute roll-ups of minutes starting in the range.
+
+        Args:
+            instrument: Instrument.
+            start_ms: Inclusive start, epoch milliseconds.
+            end_ms: Exclusive end, epoch milliseconds.
+
+        Returns:
+            Ascending minute totals.
+        """
         table = TRADE_MINUTES
         query = (
             sa.select(
@@ -417,7 +469,15 @@ class SqlTradeArchive:
         ]
 
     def covered_until(self, instrument: instruments.InstrumentId) -> int | None:
-        """See ``TradeArchive.covered_until``."""
+        """Returns the end of the newest coverage interval.
+
+        Args:
+            instrument: Instrument.
+
+        Returns:
+            Exclusive end in epoch milliseconds, or ``None`` without
+            coverage.
+        """
         table = TRADE_COVERAGE
         query = sa.select(sa.func.max(table.c.to_ms)).where(
             table.c.instrument_id == str(instrument)
@@ -427,14 +487,28 @@ class SqlTradeArchive:
         return None if value is None else _int(value)
 
     def instruments(self) -> list[instruments.InstrumentId]:
-        """See ``TradeArchive.instruments``."""
+        """Lists instruments with recorded coverage.
+
+        Returns:
+            Instruments, sorted by canonical id.
+        """
         query = sa.select(TRADE_COVERAGE.c.instrument_id).distinct()
         with self.engine.connect() as conn:
             ids = sorted(str(row[0]) for row in conn.execute(query))
         return [instruments.InstrumentId.parse(value) for value in ids]
 
     def prune(self, before_ms: int) -> int:
-        """See ``TradeArchive.prune``."""
+        """Deletes aggregates and coverage before a retention cut-off.
+
+        Coverage that straddles the cut-off is cut at it; a minute roll-up
+        is deleted only once its whole minute lies before the cut-off.
+
+        Args:
+            before_ms: Cut-off, epoch milliseconds.
+
+        Returns:
+            Number of 1s aggregates deleted, as the driver reports it.
+        """
         minute_cut = before_ms - recorded_trades.MINUTE_MS
         table = TRADE_COVERAGE
         with self.engine.begin() as conn:

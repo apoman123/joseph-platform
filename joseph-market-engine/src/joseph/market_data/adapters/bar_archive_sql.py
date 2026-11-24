@@ -37,7 +37,9 @@ METADATA = sa.MetaData()
 
 _M1 = timeframes.Timeframe.M1
 _CHUNK = 400
+"""Rows per delete/insert statement, bounding each ``IN`` list."""
 _ID_LENGTH = 96
+"""Column width of a canonical instrument id."""
 
 SPARSE_BARS = sa.Table(
     "sparse_bars",
@@ -119,6 +121,7 @@ def _row(key: str, provider: str, bar: market.Candle) -> dict[str, object]:
         "taker_buy_method": None if method is None else method.value,
         "trade_count": bar.trade_count,
         "event_ts_ms": bar.event_ts_ms,
+        # The column holds 64 characters; a longer label is cut, not refused.
         "source": bar.source[:64],
         "received_at_ms": bar.received_at_ms,
     }
@@ -127,7 +130,7 @@ def _row(key: str, provider: str, bar: market.Candle) -> dict[str, object]:
 def _candle(
     instrument: instruments.InstrumentId, row: sa.RowMapping
 ) -> market.Candle:
-    """Decodes a ``sparse_bars`` row.
+    """Decodes a ``sparse_bars`` row (recorded live, so ``LIVE`` and final).
 
     Args:
         instrument: Instrument.
@@ -174,6 +177,57 @@ def _candle(
     )
 
 
+def _merge_coverage(
+    conn: sa.Connection,
+    key: str,
+    provider: str,
+    covered: Sequence[candle_rules.Span],
+) -> None:
+    """Unites new coverage with the stored spans it touches.
+
+    Args:
+        conn: Open transaction.
+        key: Instrument id.
+        provider: Source family.
+        covered: New spans.
+    """
+    fresh = candle_rules.merge_spans(covered)
+    if not fresh:
+        return
+    table = SPARSE_COVERAGE
+    touching = conn.execute(
+        sa.select(table.c.from_ms, table.c.to_ms).where(
+            table.c.instrument_id == key,
+            table.c.provider == provider,
+            table.c.to_ms >= fresh[0][0],
+            table.c.from_ms <= fresh[-1][1],
+        )
+    ).all()
+    merged = candle_rules.merge_spans(
+        [*fresh, *((_int(a), _int(b)) for a, b in touching)]
+    )
+    if touching:
+        conn.execute(
+            table.delete().where(
+                table.c.instrument_id == key,
+                table.c.provider == provider,
+                table.c.from_ms.in_([_int(a) for a, _ in touching]),
+            )
+        )
+    conn.execute(
+        table.insert(),
+        [
+            {
+                "instrument_id": key,
+                "provider": provider,
+                "from_ms": low,
+                "to_ms": high,
+            }
+            for low, high in merged
+        ],
+    )
+
+
 class SqlBarArchive:
     """``BarArchive`` backed by SQLAlchemy Core.
 
@@ -197,7 +251,17 @@ class SqlBarArchive:
         bars: Sequence[market.Candle],
         covered: Sequence[candle_rules.Span],
     ) -> None:
-        """See ``BarArchive.put``."""
+        """Stores final 1m bars and unites their coverage, atomically.
+
+        Bars that are not final or not 1m are skipped. Both tables are
+        written in one transaction.
+
+        Args:
+            instrument: Instrument.
+            provider: Source family of the bars.
+            bars: Bars to store, upserted by start.
+            covered: Spans in which every bar of the provider is stored.
+        """
         key = str(instrument)
         rows = [
             _row(key, provider, bar)
@@ -218,58 +282,7 @@ class SqlBarArchive:
                     )
                 )
                 conn.execute(table.insert(), chunk)
-            self._merge_coverage(conn, key, provider, covered)
-
-    @staticmethod
-    def _merge_coverage(
-        conn: sa.Connection,
-        key: str,
-        provider: str,
-        covered: Sequence[candle_rules.Span],
-    ) -> None:
-        """Unites new coverage with the stored spans it touches.
-
-        Args:
-            conn: Open transaction.
-            key: Instrument id.
-            provider: Source family.
-            covered: New spans.
-        """
-        fresh = candle_rules.merge_spans(covered)
-        if not fresh:
-            return
-        table = SPARSE_COVERAGE
-        touching = conn.execute(
-            sa.select(table.c.from_ms, table.c.to_ms).where(
-                table.c.instrument_id == key,
-                table.c.provider == provider,
-                table.c.to_ms >= fresh[0][0],
-                table.c.from_ms <= fresh[-1][1],
-            )
-        ).all()
-        merged = candle_rules.merge_spans(
-            [*fresh, *((_int(a), _int(b)) for a, b in touching)]
-        )
-        if touching:
-            conn.execute(
-                table.delete().where(
-                    table.c.instrument_id == key,
-                    table.c.provider == provider,
-                    table.c.from_ms.in_([_int(a) for a, _ in touching]),
-                )
-            )
-        conn.execute(
-            table.insert(),
-            [
-                {
-                    "instrument_id": key,
-                    "provider": provider,
-                    "from_ms": low,
-                    "to_ms": high,
-                }
-                for low, high in merged
-            ],
-        )
+            _merge_coverage(conn, key, provider, covered)
 
     def minutes(
         self,
@@ -278,7 +291,17 @@ class SqlBarArchive:
         start_ms: int,
         end_ms: int,
     ) -> list[market.Candle]:
-        """See ``BarArchive.minutes``."""
+        """Returns stored 1m bars starting in ``[start, end)``.
+
+        Args:
+            instrument: Instrument.
+            provider: Source family.
+            start_ms: Inclusive start, epoch milliseconds.
+            end_ms: Exclusive end, epoch milliseconds.
+
+        Returns:
+            Ascending final candles.
+        """
         table = SPARSE_BARS
         query = (
             sa.select(table)
@@ -301,7 +324,17 @@ class SqlBarArchive:
         start_ms: int,
         end_ms: int,
     ) -> list[candle_rules.Span]:
-        """See ``BarArchive.coverage``."""
+        """Returns stored coverage overlapping ``[start, end)``.
+
+        Args:
+            instrument: Instrument.
+            provider: Source family.
+            start_ms: Inclusive start, epoch milliseconds.
+            end_ms: Exclusive end, epoch milliseconds.
+
+        Returns:
+            Disjoint ascending spans clipped to the range.
+        """
         table = SPARSE_COVERAGE
         query = (
             sa.select(table.c.from_ms, table.c.to_ms)
@@ -318,7 +351,15 @@ class SqlBarArchive:
         return candle_rules.clip_spans(spans, start_ms, end_ms)
 
     def prune(self, before_ms: int) -> int:
-        """See ``BarArchive.prune``."""
+        """Drops bars and coverage older than a time.
+
+        Args:
+            before_ms: Bars starting before this time are deleted and
+                coverage is cut at it (epoch milliseconds).
+
+        Returns:
+            Bars deleted, as the driver reports them.
+        """
         table = SPARSE_COVERAGE
         with self.engine.begin() as conn:
             deleted = conn.execute(

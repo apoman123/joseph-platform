@@ -7,8 +7,9 @@ One implementation serves every venue:
 
 * subscribe messages are re-sent on each connection;
 * an application-level ping keeps venues that require it alive;
-* reconnects use exponential backoff with full jitter and give up after
-  ``max_failures`` consecutive failures (so ``AUTO`` can fall back);
+* reconnects use exponential backoff, each delay jittered to 50-100 % of
+  its nominal value, and give up after ``max_failures`` consecutive
+  failures (so ``AUTO`` can fall back);
 * after a reconnect the missed range is backfilled over REST;
 * venues that do not flag closed bars get each closed bar confirmed over
   REST at rollover (a WebSocket update alone never becomes ``is_final``);
@@ -39,6 +40,7 @@ from collections.abc import AsyncIterator
 from collections.abc import Awaitable
 from collections.abc import Callable
 from typing import Protocol
+from typing import TypeAlias
 
 import websockets
 
@@ -54,6 +56,7 @@ from joseph.market_data.domain import trades as trades_lib
 
 _LOG = logging.getLogger(__name__)
 _GUARD_BARS = 6
+"""Newest bars the merge guard keeps per stream; older updates are dropped."""
 
 
 class WsConnection(Protocol):
@@ -76,17 +79,26 @@ class WsConnection(Protocol):
         ...
 
 
-ConnectFn = Callable[
+ConnectFn: TypeAlias = Callable[
     [str], contextlib.AbstractAsyncContextManager[WsConnection]
 ]
-Backfill = Callable[[int, int], Awaitable[list[market.Candle]]]
-TradeBackfill = Callable[[int, int], Awaitable[trades_lib.TradeCoverage]]
+"""Opens a connection to a URL: ``url -> async context manager``."""
+Backfill: TypeAlias = Callable[[int, int], Awaitable[list[market.Candle]]]
+"""REST candle fetch: ``(start_ms, end_ms) -> candles``."""
+TradeBackfill: TypeAlias = Callable[
+    [int, int], Awaitable[trades_lib.TradeCoverage]
+]
+"""REST trade history: ``(start_ms, end_ms) -> coverage``."""
 
 
 def default_connect(
     url: str,
 ) -> contextlib.AbstractAsyncContextManager[WsConnection]:
     """Opens a WebSocket with protocol pings enabled.
+
+    The opening handshake times out after 10 s, a protocol ping is sent
+    every 20 s (and must be answered within 20 s), and frames up to 4 MiB
+    are accepted.
 
     Args:
         url: WebSocket URL.
@@ -110,12 +122,14 @@ class WsCandleSpec:
     Attributes:
         url: WebSocket URL.
         subscribe: Frames sent after each connect.
-        parse: Converts a frame to candle updates (empty for acks).
+        parse: ``(frame, received_ms) -> candles``, empty for acks; raises
+            ``KeyError``/``ValueError``/``TypeError`` for a malformed frame
+            (recorded on the tracker and skipped).
         timeframe: Stream resolution.
         venue_marks_final: True when frames flag closed bars reliably.
         ping_message: Optional application-level ping frame.
-        ping_interval_s: Interval between application pings.
-        idle_timeout_s: Reconnect when no frame arrives for this long.
+        ping_interval_s: Seconds between application pings.
+        idle_timeout_s: Seconds without any frame before reconnecting.
         calendar: Session calendar of the streamed instrument, used before
             the first candle arrives (UTC-aligned bars by default).
     """
@@ -140,6 +154,8 @@ class _Guard:
 
     def accept(self, candle: market.Candle) -> market.Candle | None:
         """Merges a candle, returning it when it changed state.
+
+        An update older than every remembered bar is dropped.
 
         Args:
             candle: Incoming update.
@@ -203,9 +219,11 @@ async def stream_with_recovery(  # noqa: PLR0912 - recovery loop.
         backfill: REST fetch ``(start_ms, end_ms) -> candles``.
         clock: Time source.
         connect: WebSocket connector (injectable for tests).
-        max_failures: Consecutive failures before giving up.
-        base_delay_s: First backoff delay.
-        max_delay_s: Backoff cap.
+        max_failures: Consecutive failed connections before giving up; a
+            frame carrying candles resets the count.
+        base_delay_s: Nominal first backoff delay in seconds (doubles per
+            failure).
+        max_delay_s: Cap of the nominal backoff delay in seconds.
         sleep: Sleep function (injectable for tests).
         tracker: Optional health tracker updated as frames arrive.
 
@@ -225,6 +243,8 @@ async def stream_with_recovery(  # noqa: PLR0912 - recovery loop.
                 for frame in spec.subscribe:
                     await connection.send(frame)
                 if connected_before:
+                    # Refill from the bar after the last final one (else the
+                    # previous bar) through the current bar.
                     calendar = guard.calendar(spec.calendar)
                     resume_from = guard.last_final_start()
                     current = calendar.floor(tf, clock.now_ms())
@@ -295,7 +315,7 @@ async def stream_with_recovery(  # noqa: PLR0912 - recovery loop.
                     f"native stream unavailable after {failures} attempts"
                 ) from err
             delay = min(max_delay_s, base_delay_s * 2 ** (failures - 1))
-            await sleep(delay * (0.5 + random.random() / 2))  # noqa: S311
+            await sleep(delay * (0.5 + random.random() / 2))  # noqa: S311 - backoff jitter, not cryptography
 
 
 async def _apply(
@@ -308,6 +328,10 @@ async def _apply(
     clock: clock_lib.Clock,
 ) -> AsyncIterator[market.Candle]:
     """Applies one parsed update, confirming closed bars when needed.
+
+    On a venue that does not flag closed bars reliably, the first update of
+    a new bar triggers a REST confirmation of the bars it closed; a bar
+    that REST does not return final is recorded as a gap.
 
     Args:
         spec: Stream description.
@@ -346,6 +370,7 @@ async def _apply(
             accepted = guard.accept(candle)
             if accepted is not None:
                 yield accepted
+    # Such a venue's "closed" flag is not trusted: only REST confirms a bar.
     if update.is_final and not spec.venue_marks_final:
         return
     accepted = guard.accept(update)
@@ -364,13 +389,13 @@ async def _safe_backfill(
 
     Args:
         backfill: REST fetch.
-        start_ms: Inclusive start.
-        end_ms: Exclusive end.
+        start_ms: Inclusive start, epoch milliseconds.
+        end_ms: Exclusive end, epoch milliseconds.
         tracker: Optional health tracker.
         clock: Time source.
 
     Returns:
-        Candles, or an empty list when the REST call failed.
+        Candles, or an empty list for an empty range or a failed REST call.
     """
     if end_ms <= start_ms:
         return []
@@ -386,7 +411,8 @@ async def _stop_pinger(pinger: asyncio.Task[None] | None) -> None:
     """Cancels a ping task and waits for it before the connection closes.
 
     Closing a connection while a cancelled ping is still inside ``send``
-    races the connection teardown, so the task is awaited.
+    races the connection teardown, so the task is awaited. Whatever the task
+    ended with is discarded: the stream handles the connection's own errors.
 
     Args:
         pinger: Ping task, if any.
@@ -399,13 +425,14 @@ async def _stop_pinger(pinger: asyncio.Task[None] | None) -> None:
 
 
 async def _ping_loop(connection: WsConnection, spec: WsCandleSpec) -> None:
-    """Sends application-level pings until cancelled.
+    """Sends application-level pings until cancelled or a send fails.
 
     Args:
         connection: Open connection.
         spec: Stream description with the ping frame.
     """
-    assert spec.ping_message is not None
+    if spec.ping_message is None:
+        raise AssertionError("ping loop started without a ping message")
     while True:
         await asyncio.sleep(spec.ping_interval_s)
         try:
@@ -426,11 +453,11 @@ class WsTradeSpec:
             malformed trade frame (treated as lost trades).
         ping_message: Optional application-level ping frame. Venues that
             answer it give quiet markets a steady delivery proof.
-        ping_interval_s: Interval between application pings.
-        idle_timeout_s: Reconnect when no frame arrives for this long.
+        ping_interval_s: Seconds between application pings.
+        idle_timeout_s: Seconds without any frame before reconnecting.
         replays_recent: True when the venue sends its latest trades right
             after subscribing (contiguous with the live feed), so a replay
-            overlapping the last trade seen proves no trade was missed.
+            that repeats a trade already seen proves no trade was missed.
     """
 
     url: str
@@ -460,7 +487,7 @@ class TradesReceived:
 
     Attributes:
         trades: Trades in arrival order.
-        received_ms: Receipt time.
+        received_ms: Receipt time, epoch milliseconds.
     """
 
     trades: tuple[market.Trade, ...]
@@ -472,16 +499,19 @@ class FrameReceived:
     """Any frame arrived: every trade sent before it has been delivered.
 
     Attributes:
-        received_ms: Receipt time.
+        received_ms: Receipt time, epoch milliseconds.
     """
 
     received_ms: int
 
 
-TradeStreamEvent = CoverageStart | TradesReceived | FrameReceived
+TradeStreamEvent: TypeAlias = CoverageStart | TradesReceived | FrameReceived
+"""One event of ``trade_stream_events``."""
 
 _FIRST_FRAME_WAIT_S = 2.0
+"""Seconds to wait for the first frame (subscription live) before backfill."""
 _BACKFILL_SKEW_MS = 5_000
+"""Milliseconds a backfill asks past local now, for a clock behind the venue."""
 
 
 async def trade_stream_events(  # noqa: PLR0912, PLR0915 - recovery loop.
@@ -507,9 +537,12 @@ async def trade_stream_events(  # noqa: PLR0912, PLR0915 - recovery loop.
       ``prime(now)`` are fetched and coverage starts there; otherwise
       coverage starts at the first trade received;
     * reconnect: trades since the last one seen are backfilled; failing
-      that, a replay overlapping the last seen trade (``replays_recent``)
+      that, a replay that repeats a trade already seen (``replays_recent``)
       proves continuity; failing that, a gap is recorded and a new
       coverage segment starts.
+
+    A backfill counts only when it reaches back to its start. A frame that
+    does not parse is treated as lost trades: a gap and a new segment.
 
     Args:
         spec: Venue stream description.
@@ -517,10 +550,12 @@ async def trade_stream_events(  # noqa: PLR0912, PLR0915 - recovery loop.
         connect: WebSocket connector (injectable for tests).
         backfill: Optional REST trade history ``(start, end) -> coverage``.
         prime: Optional ``now -> start`` for the first connection's
-            backfill (requires ``backfill``).
-        max_failures: Consecutive failures before giving up.
-        base_delay_s: First backoff delay.
-        max_delay_s: Backoff cap.
+            backfill (requires ``backfill``), epoch milliseconds.
+        max_failures: Consecutive failed connections before giving up; any
+            frame resets the count.
+        base_delay_s: Nominal first backoff delay in seconds (doubles per
+            failure).
+        max_delay_s: Cap of the nominal backoff delay in seconds.
         sleep: Sleep function (injectable for tests).
         tracker: Optional health tracker updated as frames arrive.
         dedupe_capacity: Trade ids remembered for de-duplication.
@@ -557,6 +592,8 @@ async def trade_stream_events(  # noqa: PLR0912, PLR0915 - recovery loop.
                 if start is not None and backfill is not None:
                     # Ask past "now" so a local clock behind the venue's
                     # cannot leave a hole; overlap is de-duplicated by id.
+                    # A backfill that does not reach back to ``start`` would
+                    # leave a hole, so it does not count as a recovery.
                     coverage = await _safe_trade_backfill(
                         backfill,
                         start,
@@ -587,13 +624,12 @@ async def trade_stream_events(  # noqa: PLR0912, PLR0915 - recovery loop.
                 )
                 try:
                     while True:
-                        raw = (
-                            pending.pop(0)
-                            if pending
-                            else await asyncio.wait_for(
+                        if pending:
+                            raw = pending.pop(0)
+                        else:
+                            raw = await asyncio.wait_for(
                                 connection.recv(), spec.idle_timeout_s
                             )
-                        )
                         now = clock.now_ms()
                         failures = 0
                         if tracker is not None:
@@ -619,6 +655,8 @@ async def trade_stream_events(  # noqa: PLR0912, PLR0915 - recovery loop.
                         if fresh:
                             last_trade_ms = _newest(fresh, last_trade_ms)
                             yield TradesReceived(tuple(fresh), now)
+                        # Until a replay proves continuity, a frame proves
+                        # nothing about the trades sent before it.
                         if not awaiting_overlap:
                             yield FrameReceived(now)
                 finally:
@@ -639,7 +677,7 @@ async def trade_stream_events(  # noqa: PLR0912, PLR0915 - recovery loop.
                     f"native trade stream unavailable after {failures} attempts"
                 ) from err
             delay = min(max_delay_s, base_delay_s * 2 ** (failures - 1))
-            await sleep(delay * (0.5 + random.random() / 2))  # noqa: S311
+            await sleep(delay * (0.5 + random.random() / 2))  # noqa: S311 - backoff jitter, not cryptography
 
 
 async def stream_trades_with_recovery(
@@ -666,6 +704,10 @@ async def stream_trades_with_recovery(
 
     Yields:
         Trades in arrival order.
+
+    Raises:
+        errors.VenueUnavailableError: After ``max_failures`` failures
+            (propagated from ``trade_stream_events``).
     """
     events = trade_stream_events(
         spec,
@@ -708,13 +750,18 @@ async def stream_trade_candles(
         clock: Time source.
         connect: WebSocket connector.
         backfill: Optional REST trade history.
-        grace_ms: Delivery grace before a quiet bar is finalized.
-        max_failures: Consecutive failures before giving up.
+        grace_ms: Milliseconds a frame must trail a quiet bar's end before
+            that frame finalizes the bar (allows for delivery delay).
+        max_failures: Consecutive failed connections before giving up.
         sleep: Sleep function (injectable for tests).
         tracker: Optional health tracker.
 
     Yields:
         Live and finalized seconds candles.
+
+    Raises:
+        errors.VenueUnavailableError: After ``max_failures`` failures
+            (propagated from ``trade_stream_events``).
     """
     tf = builder.timeframe
     calendar = builder.calendar
@@ -723,7 +770,7 @@ async def stream_trade_candles(
         """Returns the aligned start of the bar before the current one.
 
         Args:
-            now_ms: Current time.
+            now_ms: Current time, epoch milliseconds.
 
         Returns:
             Bar start (on the instrument's session grid).
@@ -782,13 +829,14 @@ async def _safe_trade_backfill(
 
     Args:
         backfill: REST trade history.
-        start_ms: Inclusive start.
-        end_ms: Exclusive end.
+        start_ms: Inclusive start, epoch milliseconds.
+        end_ms: Exclusive end, epoch milliseconds.
         tracker: Optional health tracker.
         clock: Time source.
 
     Returns:
-        Coverage, or ``None`` when the REST call failed.
+        Coverage (empty at ``start_ms`` for an empty range), or ``None``
+        when the REST call failed.
     """
     if end_ms <= start_ms:
         return trades_lib.TradeCoverage((), start_ms, start_ms)
@@ -803,13 +851,14 @@ async def _safe_trade_backfill(
 
 
 async def _trade_ping_loop(connection: WsConnection, spec: WsTradeSpec) -> None:
-    """Sends application-level pings until cancelled.
+    """Sends application-level pings until cancelled or a send fails.
 
     Args:
         connection: Open connection.
         spec: Stream description with the ping frame.
     """
-    assert spec.ping_message is not None
+    if spec.ping_message is None:
+        raise AssertionError("ping loop started without a ping message")
     while True:
         await asyncio.sleep(spec.ping_interval_s)
         try:
