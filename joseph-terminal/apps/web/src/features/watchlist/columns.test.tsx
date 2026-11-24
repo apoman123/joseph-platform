@@ -9,7 +9,7 @@
  * source, and for screener presets.
  */
 
-import type {MarketSnapshot} from '@joseph/contracts';
+import type {MarketSnapshot, OpenInterest} from '@joseph/contracts';
 import {fireEvent, screen, waitFor, within} from '@testing-library/react';
 import {afterEach, describe, expect, it} from 'vitest';
 import {
@@ -35,8 +35,8 @@ afterEach(() => {
 });
 
 /**
- * Builds a snapshot.
- * @param extra Overrides.
+ * Builds a live, fresh snapshot of instrument `x`.
+ * @param extra Field overrides.
  * @return Snapshot.
  */
 function snap(extra: Partial<MarketSnapshot>): MarketSnapshot {
@@ -93,9 +93,14 @@ describe('watchlist columns and sorting', () => {
       'b',
     ]);
     expect(sortRows(['b', 'a'], null, {})).toEqual(['b', 'a']);
-    expect(
-      sortValue(snap({open_interest: {notional_usd: '12'} as never}), 'oi')
-    ).toBe(12);
+    const openInterest: OpenInterest = {
+      instrument_id: 'x',
+      base_quantity: '1',
+      notional_usd: '12',
+      source: 't',
+      as_of_ms: 0,
+    };
+    expect(sortValue(snap({open_interest: openInterest}), 'oi')).toBe(12);
     expect(sortValue(snap({stale: true}), 'data')).toBe(1);
   });
 

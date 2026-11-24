@@ -5,7 +5,8 @@
  */
 
 /**
- * @fileoverview Root layout: fonts, design tokens and theme bootstrap.
+ * @fileoverview Root layout: fonts, global stylesheets, page metadata and
+ * the inline script that applies the saved theme before first paint.
  */
 
 import type {Metadata, Viewport} from 'next';
@@ -24,25 +25,32 @@ const archivo = Archivo({
   display: 'swap',
 });
 
-/** Page metadata. */
+/** Document title and description. */
 export const metadata: Metadata = {
   title: 'Joseph Terminal',
   description: 'Open-source multi-venue perpetuals charting terminal.',
 };
 
-/** Viewport settings. */
+/** Viewport and browser theme colour (matches the dark background). */
 export const viewport: Viewport = {
   themeColor: '#0c1820',
   width: 'device-width',
   initialScale: 1,
 };
 
-/** Applies the saved theme before first paint. */
+/**
+ * Inline script that applies the saved light theme before first paint, so a
+ * light-theme user never sees a dark flash. It must stay a string: it runs
+ * before React hydrates. Storage access can throw (private mode, blocked
+ * storage), in which case the dark default stays.
+ */
 const THEME_BOOT = `try{var t=localStorage.getItem('joseph.theme');if(t==='light'){document.documentElement.dataset.theme='light'}}catch(e){}`;
 
 /**
- * Root layout.
- * @param props Children.
+ * Renders the HTML document around every page. The `<html>` element starts
+ * dark and `suppressHydrationWarning` tolerates the boot script switching
+ * `data-theme` before React hydrates.
+ * @param props Page content.
  * @return Document.
  */
 export default function RootLayout({
@@ -58,6 +66,7 @@ export default function RootLayout({
       suppressHydrationWarning
     >
       <head>
+        {/* eslint-disable-next-line no-restricted-syntax -- THEME_BOOT is a constant, not user input, and must run before hydration to avoid a theme flash. */}
         <script dangerouslySetInnerHTML={{__html: THEME_BOOT}} />
       </head>
       <body>{children}</body>

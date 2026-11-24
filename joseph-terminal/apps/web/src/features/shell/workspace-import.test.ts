@@ -69,6 +69,7 @@ function drawing(id: string, instrumentId = BTC): DrawingDocument {
  * Parses a file, failing the test when it is refused.
  * @param text File text.
  * @return Parsed file.
+ * @throws `Error` with the parser's message when the file is refused.
  */
 function parsed(text: string): Extract<WorkspaceFileParseResult, {ok: true}> {
   const result = parseWorkspaceFile(text, 1);

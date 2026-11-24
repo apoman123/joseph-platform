@@ -149,8 +149,8 @@ export function useAoiDistances(
       alive = false;
       clearInterval(timer);
     };
-    // `subset` is derived from `key`.
-  }, [ctx, key]); // eslint-disable-line react-hooks/exhaustive-deps
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- `subset` is a new array every render; `key` (ids and revisions) stands for its content.
+  }, [ctx, key]);
   return distances;
 }
 

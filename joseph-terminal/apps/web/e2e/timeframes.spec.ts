@@ -78,7 +78,7 @@ test('ranks signals by the signal bar quote turnover', async ({page}) => {
     page.getByRole('columnheader', {name: 'Bar vol.'})
   ).toHaveAttribute('title', /quote-currency turnover of the signal bar/i);
   const texts = await cells.allTextContents();
-  const scale = {K: 1e3, M: 1e6, B: 1e9} as Record<string, number>;
+  const scale: Record<string, number> = {K: 1e3, M: 1e6, B: 1e9};
   const values = texts.map(text => {
     const match = /^([\d.]+)([KMB]?)$/.exec(text);
     return match ? Number(match[1]) * (scale[match[2] ?? ''] ?? 1) : -1;

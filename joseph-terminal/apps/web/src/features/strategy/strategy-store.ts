@@ -110,9 +110,11 @@ function canonical(value: unknown): string {
 }
 
 /**
- * Creates the strategy editor.
+ * Creates the strategy editor, starting from the stored draft or, when none
+ * is stored in schema version 2, from the first template.
  * @param ctx Feature context.
  * @return Editor.
+ * @throws `Error` when the template list is empty (a build defect).
  */
 export function createStrategyEditor(ctx: WebFeatureContext): StrategyEditor {
   const fallback = STRATEGY_TEMPLATES[0]?.create();

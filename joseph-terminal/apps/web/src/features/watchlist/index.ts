@@ -33,7 +33,7 @@ export interface WatchlistSettings {
   /** Visible columns. */
   columns?: WatchColumn[];
   /** Sort (null keeps the manual order). */
-  sort?: WatchSort;
+  sort?: WatchSort | null;
   /** Row source: the user's list or the engine's qualified perpetuals. */
   source?: 'mine' | 'qualified';
 }

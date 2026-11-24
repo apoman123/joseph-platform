@@ -11,14 +11,13 @@
 
 import type {OverlayLayer} from '@joseph/chart-core';
 import type {AoiList, ChartState, SeriesQuery} from '@joseph/contracts';
-import type {ReadableStore} from '@joseph/feature-registry';
+import {createStore, type ReadableStore} from '@joseph/feature-registry';
 import {
   DEFAULT_VIZ_SETTINGS,
   PLUGIN_NAMES,
   buildIndicatorLayers,
   type VizSettings,
 } from '@joseph/indicator-viz';
-import {createStore} from '@joseph/feature-registry';
 import {layerSettings, layerStyle} from '@joseph/terminal-shell';
 import type {TerminalRuntime} from '../../composition/runtime';
 import type {WebFeature} from '../../shell/react-bindings';

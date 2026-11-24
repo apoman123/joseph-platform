@@ -12,21 +12,18 @@
  * the yield in percent and its publication session.
  */
 
-import type {Instrument, MarketSnapshot} from '@joseph/contracts';
 import {
   EXCHANGE_HOURS,
+  type Instrument,
   instrumentCalendarId,
   isExchangeCalendar,
+  type MarketSnapshot,
   parseInstrumentId,
   VENUE_NAMES,
 } from '@joseph/contracts';
 import {useEffect, useState} from 'react';
 import type {TerminalRuntime} from '../../composition/runtime';
-import {
-  useStore,
-  type WebFeature,
-  type WebSlotProps,
-} from '../../shell/react-bindings';
+import {useStore, type WebFeature} from '../../shell/react-bindings';
 import {
   formatAge,
   formatDecimal,
@@ -124,11 +121,14 @@ export function tickDescription(instrument: Instrument): string {
 }
 
 /**
- * Market info feature.
- * @param _runtime Runtime (unused).
- * @return Feature.
+ * Creates the market info feature.
+ * @param _runtime Runtime; unused, the feature reads only its context.
+ * @return Feature contributing the side-panel market view.
  */
-export function marketInfoFeature(_runtime: TerminalRuntime): WebFeature {
+export function marketInfoFeature(
+  // eslint-disable-next-line @typescript-eslint/no-unused-vars -- composition/features.ts calls every shell feature factory with the runtime; dropping it breaks that call.
+  _runtime: TerminalRuntime
+): WebFeature {
   return {
     manifest: shellManifest(
       'market-info',
@@ -142,11 +142,10 @@ export function marketInfoFeature(_runtime: TerminalRuntime): WebFeature {
     ),
     activate(ctx) {
       /**
-       * Side panel view.
-       * @param _props Slot props (unused).
+       * Renders the side-panel snapshot and specs of the selected instrument.
        * @return Panel.
        */
-      function MarketPanel(_props: WebSlotProps) {
+      function MarketPanel() {
         const selection = useStore(ctx.selection);
         const [data, setData] = useState<MarketData>({
           snapshot: null,

@@ -55,12 +55,13 @@ function node(
 }
 
 /**
- * Builds a signal.
- * @param id Id.
- * @param extra Overrides.
- * @return Signal.
+ * Builds a partial signal with the fields ranking and triage read.
+ * @param id Signal id.
+ * @param extra Field overrides.
+ * @return Signal; fields the helpers under test never read are absent.
  */
 function signal(id: string, extra: Partial<Signal>): Signal {
+  // A deliberate partial mock: the ranking helpers read only these fields.
   return {
     signal_id: id,
     bar_close_ms: 1000,
@@ -68,7 +69,7 @@ function signal(id: string, extra: Partial<Signal>): Signal {
     rr: null,
     reason_tree: node('TRUE'),
     ...extra,
-  } as Signal;
+  } as unknown as Signal;
 }
 
 describe('signal ranking', () => {

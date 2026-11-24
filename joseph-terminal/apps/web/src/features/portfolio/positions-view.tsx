@@ -130,8 +130,7 @@ function CloseDialog({
   };
   useEffect(() => {
     void load('1');
-    // Load the full-close preview once when the dialog opens.
-    // eslint-disable-next-line react-hooks/exhaustive-deps
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- loads the full-close preview once, when the dialog opens; later fraction changes reload from the input handler.
   }, []);
   const confirm = async () => {
     if (!preview) return;
@@ -265,8 +264,7 @@ function ReverseDialog({
     return () => {
       alive = false;
     };
-    // Re-preview only when the step changes.
-    // eslint-disable-next-line react-hooks/exhaustive-deps
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- previews again only when the reversal step changes, not on every new `plan` object.
   }, [plan?.step]);
 
   const confirm = async () => {

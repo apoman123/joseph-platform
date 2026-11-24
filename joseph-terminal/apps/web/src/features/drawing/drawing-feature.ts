@@ -13,7 +13,7 @@ import type {ToolPlugin} from '@joseph/drawing-core';
 import {FIRST_PARTY_TOOLS} from '@joseph/drawing-tools';
 import {createElement} from 'react';
 import type {TerminalRuntime} from '../../composition/runtime';
-import type {WebFeature, WebSlotProps} from '../../shell/react-bindings';
+import type {WebFeature} from '../../shell/react-bindings';
 import {ObjectsPanel} from './objects-panel';
 import {bindDefaultHotkeys} from '../shell/shell-features';
 import {shellManifest} from '../shell/manifest';
@@ -108,11 +108,10 @@ export function drawingFeature(runtime: TerminalRuntime): WebFeature {
         commands.map(c => c.id)
       );
       /**
-       * Slot view of the object list.
-       * @param _props Slot props (the list reads the shell runtime).
+       * Renders the object list; it reads the shell runtime, not slot props.
        * @return Element.
        */
-      function ObjectsSlot(_props: WebSlotProps) {
+      function ObjectsSlot() {
         return createElement(ObjectsPanel, {runtime});
       }
       return ctx.slots.contribute('side-panel', {
