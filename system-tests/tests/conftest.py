@@ -69,10 +69,10 @@ NEW_YORK = zoneinfo.ZoneInfo("America/New_York")
 
 
 def _free_port() -> int:
-    """Returns an unused localhost TCP port.
+    """Returns a localhost TCP port that is free at the time of the call.
 
     Returns:
-        Port number.
+        Port number; another process may still bind it before the caller.
     """
     with socket.socket() as sock:
         sock.bind(("127.0.0.1", 0))
@@ -94,7 +94,8 @@ def _wait_healthy(
         timeout_s: Maximum wait in seconds.
 
     Raises:
-        RuntimeError: If the server never becomes healthy.
+        RuntimeError: The process exited, or ``url`` did not answer 200
+            within ``timeout_s``; the message ends with the log tail.
     """
     started = time.monotonic()
     deadline = started + timeout_s
@@ -134,7 +135,7 @@ def _command(
         env: Base environment.
 
     Returns:
-        Command and environment.
+        The argument vector and the environment to run it with.
     """
     # A uv environment chosen for the system-test project must not leak
     # into the engines, which are separate uv projects.
@@ -160,6 +161,9 @@ def _start(
     app_dir: pathlib.Path | None = None,
 ) -> tuple[subprocess.Popen[bytes], pathlib.Path]:
     """Starts one engine with uvicorn.
+
+    The log file opened here is the process's stdout and stderr and is not
+    closed by this function: it stays open while the process runs.
 
     Args:
         name: Instance name (log file stem).
@@ -220,7 +224,8 @@ def _serving(
         port: Port to bind; a free one when omitted.
 
     Yields:
-        Base URL and log path.
+        Base URL and log path. On exit the process is terminated, and killed
+        when it has not stopped after 10 seconds.
     """
     port = port or _free_port()
     url = f"http://127.0.0.1:{port}"
@@ -289,7 +294,8 @@ def services(
         tmp_path_factory: Pytest temporary directory factory.
 
     Yields:
-        Mapping with ``market`` and ``execution`` base URLs.
+        Mapping with the ``market`` and ``execution`` base URLs and the
+        ``market_log`` and ``exec_log`` server log paths.
     """
     work = tmp_path_factory.mktemp("services")
     market_port, exec_port = _free_port(), _free_port()
@@ -353,13 +359,13 @@ def ny_ms(
 
     Args:
         year: Year.
-        month: Month.
-        day: Day.
-        hour: Hour.
-        minute: Minute.
+        month: Month, 1-12.
+        day: Day of the month.
+        hour: Hour, 0-23.
+        minute: Minute, 0-59.
 
     Returns:
-        Epoch milliseconds.
+        UTC epoch milliseconds.
     """
     moment = datetime.datetime(year, month, day, hour, minute, tzinfo=NEW_YORK)
     return int(moment.timestamp() * 1000)
@@ -378,14 +384,14 @@ class ClockedEngine:
     log: str
 
     def set_clock(self, now_ms: int) -> None:
-        """Pins the engine clock.
+        """Pins the engine clock and asserts that the engine echoes it.
 
         Pinned times must not lie after the wall clock: the market engine
         stamps quotes with the wall clock, so a later engine time would
         make every quote stale.
 
         Args:
-            now_ms: UTC epoch milliseconds.
+            now_ms: UTC epoch milliseconds, not after the wall clock.
         """
         assert now_ms <= time.time() * 1000, "pin a time in the past"
         response = self.client.put(
@@ -497,7 +503,7 @@ def live(
         tmp_path_factory: Pytest temporary directory factory.
 
     Yields:
-        Client.
+        Client authenticated as tenant A.
     """
     work = tmp_path_factory.mktemp("live")
     env = _execution_env(
@@ -578,10 +584,12 @@ def anonymous(services: dict[str, str]) -> Iterator[dict[str, httpx.Client]]:
         Mapping ``market``/``execution`` to clients without credentials.
     """
     with (
-        httpx.Client(base_url=services["market"], timeout=30) as m,
-        httpx.Client(base_url=services["execution"], timeout=30) as e,
+        httpx.Client(base_url=services["market"], timeout=30) as market_client,
+        httpx.Client(
+            base_url=services["execution"], timeout=30
+        ) as execution_client,
     ):
-        yield {"market": m, "execution": e}
+        yield {"market": market_client, "execution": execution_client}
 
 
 @pytest.fixture(scope="session")
@@ -603,9 +611,12 @@ def validate() -> Callable[[str, str, object], None]:
         """Validates one instance against a contract definition.
 
         Args:
-            schema_file: Schema file name.
-            definition: ``$defs`` entry name.
-            instance: Value to validate.
+            schema_file: Schema file name, such as ``market.schema.json``.
+            definition: ``$defs`` entry name, such as ``Candle``.
+            instance: JSON-compatible value to validate.
+
+        Raises:
+            jsonschema.ValidationError: ``instance`` does not conform.
         """
         schema = {"$ref": f"{BASE_URI}{schema_file}#/$defs/{definition}"}
         jsonschema.Draft202012Validator(schema, registry=registry).validate(

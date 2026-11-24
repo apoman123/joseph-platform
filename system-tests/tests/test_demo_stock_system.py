@@ -11,6 +11,7 @@ boundaries are checked against the engine's own sessions endpoint.
 from __future__ import annotations
 
 from collections.abc import Callable
+from typing import TypeAlias
 
 import httpx
 
@@ -24,11 +25,11 @@ WINDOW = (conftest.ny_ms(2026, 11, 13), conftest.ny_ms(2026, 11, 21))
 FLOW_AT = conftest.ny_ms(2026, 11, 18, 14)
 """An in-session evaluation time for order-flow snapshots."""
 
-Validate = Callable[[str, str, object], None]
+_Validate: TypeAlias = Callable[[str, str, object], None]
 
 
 def _window_sessions(
-    market: httpx.Client, validate: Validate
+    market: httpx.Client, validate: _Validate
 ) -> list[dict[str, int]]:
     """Fetches the XNYS sessions of ``WINDOW``.
 
@@ -37,7 +38,7 @@ def _window_sessions(
         validate: Contract validator.
 
     Returns:
-        Sessions with ``open_ms`` and ``close_ms``.
+        One ``{"open_ms": ..., "close_ms": ...}`` mapping per session.
     """
     body = market.get(
         "/v1/calendars/XNYS/sessions",
@@ -51,14 +52,16 @@ def _window_sessions(
 
 
 def _candles(
-    market: httpx.Client, validate: Validate, tf: str
+    market: httpx.Client, validate: _Validate, tf: str
 ) -> dict[str, object]:
     """Fetches and validates ACME candles of ``WINDOW``.
+
+    Asserts a 200 response.
 
     Args:
         market: Market engine client.
         validate: Contract validator.
-        tf: Timeframe.
+        tf: Timeframe, such as ``1h``.
 
     Returns:
         Contract ``CandleBatch``.
@@ -79,7 +82,7 @@ def _candles(
 
 
 def test_acme_instrument_contract_fields(
-    market: httpx.Client, validate: Validate
+    market: httpx.Client, validate: _Validate
 ) -> None:
     """ACME is an XNYS equity without funding, leverage or TWSE rules."""
     body = market.get("/v1/instruments", params={"q": "ACME"}).json()
@@ -103,7 +106,7 @@ def test_acme_instrument_contract_fields(
 
 
 def test_acme_hourly_bars_follow_xnys_sessions(
-    market: httpx.Client, validate: Validate
+    market: httpx.Client, validate: _Validate
 ) -> None:
     """1h bars open at 09:30 ET, stay inside sessions and skip weekends."""
     sessions = _window_sessions(market, validate)
@@ -146,7 +149,7 @@ def test_acme_hourly_bars_follow_xnys_sessions(
 
 
 def test_acme_buy_volume_is_classified(
-    market: httpx.Client, validate: Validate
+    market: httpx.Client, validate: _Validate
 ) -> None:
     """Every ACME bar carries classified (not taker-flag) buy volume."""
     candles = _candles(market, validate, "1h")["candles"]
@@ -158,7 +161,7 @@ def test_acme_buy_volume_is_classified(
 
 
 def test_acme_daily_bars_are_sessions(
-    market: httpx.Client, validate: Validate
+    market: httpx.Client, validate: _Validate
 ) -> None:
     """A 1d ACME bar spans exactly one session, open to close."""
     sessions = _window_sessions(market, validate)
@@ -170,9 +173,9 @@ def test_acme_daily_bars_are_sessions(
 
 
 def test_acme_snapshot_has_no_funding_or_open_interest(
-    market: httpx.Client, validate: Validate
+    market: httpx.Client, validate: _Validate
 ) -> None:
-    """The DEMO stock snapshot validates and has no funding and no OI."""
+    """The ACME snapshot has no funding or OI; the DEMO venue lists stocks."""
     snap = market.get(
         "/v1/market/snapshot", params={"instrument_id": ACME}
     ).json()
@@ -197,9 +200,9 @@ def test_acme_snapshot_has_no_funding_or_open_interest(
 
 
 def test_order_flow_on_acme_is_trade_classification(
-    market: httpx.Client, validate: Validate
+    market: httpx.Client, validate: _Validate
 ) -> None:
-    """Order-flow values on ACME bars say ``trade_classification``."""
+    """ACME order flow uses trade classification; the perp uses taker volume."""
     for tf in ("5m", "1h"):
         body = market.get(
             "/v1/indicators/snapshot",
@@ -231,7 +234,7 @@ def test_order_flow_on_acme_is_trade_classification(
 
 
 def test_acme_is_screened_with_listed_security_thresholds(
-    market: httpx.Client, validate: Validate
+    market: httpx.Client, validate: _Validate
 ) -> None:
     """ACME skips the OI and funding gates and uses the US equity bar."""
     report = market.get("/v1/market/qualification").json()

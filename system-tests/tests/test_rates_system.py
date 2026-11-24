@@ -15,6 +15,7 @@ from __future__ import annotations
 import json
 import pathlib
 from collections.abc import Callable
+from typing import TypeAlias
 
 import httpx
 
@@ -25,7 +26,7 @@ _FIXTURES = (
     conftest.ROOT / "joseph-terminal" / "packages" / "contracts" / "fixtures"
 )
 
-Validate = Callable[[str, str, object], None]
+_Validate: TypeAlias = Callable[[str, str, object], None]
 
 
 def _definition(
@@ -34,11 +35,12 @@ def _definition(
     """Builds the Long A fixture with another id and universe.
 
     Args:
-        strategy_id: Slug.
+        strategy_id: Strategy id (slug) of the copy.
         universe: Contract ``Universe``.
 
     Returns:
-        Strategy definition.
+        The fixture's first valid definition with ``strategy_id``,
+        ``universe`` and the ``ALERT_ONLY`` execution mode.
     """
     path = pathlib.Path(_FIXTURES / "strategy.fixture.json")
     body = json.loads(path.read_text(encoding="utf-8"))
@@ -55,10 +57,10 @@ def _rate_strategy(strategy_id: str) -> dict[str, object]:
     """Builds a strategy whose universe is the UST10Y rate series.
 
     Args:
-        strategy_id: Slug.
+        strategy_id: Strategy id (slug).
 
     Returns:
-        Strategy definition.
+        An ``ALERT_ONLY`` definition whose only venue is ``treasury``.
     """
     return _definition(
         strategy_id,
@@ -73,17 +75,17 @@ def _codes(result: dict[str, object]) -> dict[str, str]:
         result: Contract ``ValidationResult``.
 
     Returns:
-        Code to JSON pointer.
+        Each error code mapped to the JSON pointer of its field.
     """
     errors = result["errors"]
     assert isinstance(errors, list)
-    return {e["code"]: e["path"] for e in errors}
+    return {error["code"]: error["path"] for error in errors}
 
 
 def test_compiler_rejects_a_rate_universe(
-    market: httpx.Client, validate: Validate
+    market: httpx.Client, validate: _Validate
 ) -> None:
-    """The treasury venue and UST10Y fail with the documented codes."""
+    """The treasury venue and UST10Y fail with their codes and an ETF hint."""
     result = market.post(
         "/v1/strategies/validate", json=_rate_strategy("system-rate-ust10y")
     ).json()
@@ -92,12 +94,12 @@ def test_compiler_rejects_a_rate_universe(
     codes = _codes(result)
     assert codes["RATE_VENUE_NOT_TRADABLE"] == "/universe/venues/0"
     assert codes["RATE_NOT_TRADABLE"] == "/universe/whitelist/0"
-    messages = " ".join(e["message"] for e in result["errors"])
+    messages = " ".join(error["message"] for error in result["errors"])
     assert "bond ETF" in messages
 
 
 def test_rate_whitelist_is_rejected_on_a_tradable_venue(
-    market: httpx.Client, validate: Validate
+    market: httpx.Client, validate: _Validate
 ) -> None:
     """UST10Y in the whitelist of a DEMO-venue universe is still refused."""
     definition = _definition(
@@ -111,7 +113,7 @@ def test_rate_whitelist_is_rejected_on_a_tradable_venue(
 
 
 def test_stored_rate_strategy_cannot_be_activated(
-    market: httpx.Client, validate: Validate
+    market: httpx.Client, validate: _Validate
 ) -> None:
     """A saved rate draft revalidates with the codes and never activates."""
     created = market.post(
@@ -141,7 +143,7 @@ def test_stored_rate_strategy_cannot_be_activated(
 
 
 def test_rate_series_cannot_be_backtested(
-    market: httpx.Client, validate: Validate
+    market: httpx.Client, validate: _Validate
 ) -> None:
     """A valid DEMO strategy refuses a backtest on UST10Y."""
     definition = _definition(
@@ -164,9 +166,9 @@ def test_rate_series_cannot_be_backtested(
 
 
 def test_execution_engine_refuses_rate_orders(
-    execution: httpx.Client, validate: Validate
+    execution: httpx.Client, validate: _Validate
 ) -> None:
-    """A paper order on UST10Y fails routing as a non-tradable series."""
+    """A paper order preview on UST10Y fails routing as non-tradable."""
     preview = execution.post(
         "/v1/orders/preview",
         json={

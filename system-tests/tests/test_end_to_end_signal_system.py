@@ -24,7 +24,7 @@ def _definition() -> dict[str, object]:
     """Builds an always-true 1m PAPER strategy with a computable R:R.
 
     Returns:
-        Strategy definition.
+        Strategy definition body for ``POST /v1/strategies``.
     """
     return {
         "schema_version": 2,
@@ -59,7 +59,7 @@ def _definition() -> dict[str, object]:
 def test_pipeline_signal_becomes_one_paper_order(
     market: httpx.Client, execution: httpx.Client
 ) -> None:
-    """A live entry reaches the paper account exactly once."""
+    """A live entry on a new closed bar becomes exactly one paper order."""
     created = market.post("/v1/strategies", json=_definition())
     assert created.status_code == 201, created.text
     version_id = created.json()["strategy_version_id"]
