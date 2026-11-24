@@ -7,9 +7,10 @@
 /**
  * @fileoverview Canvas painting of overlay boxes, rays and captions.
  *
- * Renderer-agnostic: the LWC adapter calls it from a series primitive and
- * tests call it with a recording context. Positions are recomputed from
- * time/price on every frame, so zoom and resize keep overlays anchored.
+ * Renderer-agnostic: the Lightweight Charts adapter calls it from a series
+ * primitive and tests call it with a recording context. Positions are
+ * recomputed from time/price on every frame, so zoom and resize keep
+ * overlays anchored.
  */
 
 import type {ChartTheme, CoordinateTransform} from './chart-port';
@@ -28,23 +29,25 @@ const DASHES: Readonly<Record<OverlayLineStyle, number[]>> = {
   dotted: [2, 3],
 };
 
-/** Pixel rectangle of a laid-out box. */
+/** Rectangle of a laid-out box in CSS pixels. */
 export interface BoxRect {
   /** Left edge. */
   x: number;
   /** Top edge. */
   y: number;
-  /** Width. */
+  /** Width (>= 1). */
   width: number;
   /** Height (>= 1 so line-like zones stay visible). */
   height: number;
 }
 
 /**
- * Lays out a box overlay in pixels.
+ * Lays out a box overlay in pixels. An open box (`toMs` null) reaches the
+ * right edge of the plot.
  * @param box Box model.
  * @param transform Coordinate transform.
- * @return Rectangle, or null when it cannot be placed.
+ * @return Rectangle, or null when an edge has no coordinate or the box lies
+ *     entirely left or right of the plot.
  */
 export function layoutBox(
   box: BoxOverlay,
@@ -52,6 +55,7 @@ export function layoutBox(
 ): BoxRect | null {
   const x1 = transform.timeToX(box.fromMs);
   const x2 = box.toMs === null ? transform.width : transform.timeToX(box.toMs);
+  // Decimal strings become numbers here for drawing only.
   const yUpper = transform.priceToY(Number(box.upper));
   const yLower = transform.priceToY(Number(box.lower));
   if (x1 === null || x2 === null || yUpper === null || yLower === null) {
@@ -101,7 +105,8 @@ export function paintOverlays(
 }
 
 /**
- * Paints one box.
+ * Paints one box: fill, border, optional midline and a label when the box
+ * is large enough to hold it.
  * @param ctx Context.
  * @param box Box model.
  * @param transform Transform.
@@ -121,6 +126,8 @@ function paintBox(
   ctx.setLineDash(DASHES[box.lineStyle]);
   ctx.strokeStyle = withAlpha(color, 0.75);
   ctx.lineWidth = 1;
+  // A 1 px line centred on a half pixel covers one pixel row exactly, so
+  // borders stay sharp; the inset keeps them inside the fill.
   ctx.strokeRect(rect.x + 0.5, rect.y + 0.5, rect.width - 1, rect.height - 1);
   if (box.midline) {
     const mid = rect.y + rect.height / 2;
@@ -139,9 +146,10 @@ function paintBox(
 }
 
 /**
- * Paints a price ray that starts at `fromMs`.
+ * Paints a price ray from `fromMs` to the right edge, with its label
+ * right-aligned above the line.
  * @param ctx Context.
- * @param line Price line model.
+ * @param line Price line model with `fromMs` set.
  * @param transform Transform.
  * @param theme Theme.
  */
@@ -159,6 +167,7 @@ function paintRay(
   ctx.lineWidth = 1;
   ctx.setLineDash(line.pending ? [4, 4] : DASHES[line.lineStyle]);
   ctx.beginPath();
+  // Half-pixel y keeps the 1 px line on one pixel row (sharp, not blurred).
   ctx.moveTo(Math.max(0, x), Math.round(y) + 0.5);
   ctx.lineTo(transform.width, Math.round(y) + 0.5);
   ctx.stroke();
@@ -173,9 +182,11 @@ function paintRay(
 
 /**
  * Groups captions of the form `<name>, as of <provenance>` so layers that
- * share a timestamp produce one line.
+ * share a provenance produce one line (`<name> as of ...` for one layer,
+ * `<n> layers as of ...` for several).
  * @param captions Raw captions.
- * @return Display lines.
+ * @return Display lines: captions in another form first, unchanged, then
+ *     one line per provenance in first-seen order.
  */
 export function groupCaptions(captions: readonly string[]): string[] {
   const groups = new Map<string, string[]>();
@@ -200,7 +211,8 @@ export function groupCaptions(captions: readonly string[]): string[] {
 }
 
 /**
- * Paints layer provenance captions at the top-left on a plate.
+ * Paints layer provenance captions at the top-left on a plate, one per
+ * 16 px row; a line wider than the plot is skipped.
  * @param ctx Context.
  * @param layers Visible layers.
  * @param transform Transform.

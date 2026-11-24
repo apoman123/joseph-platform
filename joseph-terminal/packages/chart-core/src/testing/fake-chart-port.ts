@@ -18,7 +18,6 @@ import type {
   ChartEventMap,
   ChartEventName,
   ChartPort,
-  ChartTheme,
   ChartViewState,
   CompareSeriesSpec,
   CoordinateTransform,
@@ -31,9 +30,9 @@ import type {OverlayLayer} from '../overlay-model';
 
 /** Geometry options of the fake transform. */
 export interface FakeChartGeometry {
-  /** Time at x = 0. */
+  /** Time at x = 0 (UTC ms). */
   originMs: number;
-  /** Bar duration. */
+  /** Bar duration (ms). */
   durationMs: number;
   /** Pixels per bar. */
   barWidth: number;
@@ -41,25 +40,37 @@ export interface FakeChartGeometry {
   priceTop: number;
   /** Price at y = height. */
   priceBottom: number;
-  /** Plot width. */
+  /** Plot width (CSS pixels). */
   width: number;
-  /** Plot height. */
+  /** Plot height (CSS pixels). */
   height: number;
 }
 
-/** Recording fake chart. */
+/** Recording fake chart; tests read its public fields. */
 export class FakeChartPort implements ChartPort {
+  /** Whether `mount` has been called. */
   mounted = false;
+  /** Whether `destroy` has been called. */
   destroyed = false;
+  /** Last value passed to `setInteractive`. */
   interactive = true;
+  /** Last series configuration. */
   config: SeriesConfig | null = null;
+  /** Bars, sorted by time. */
   bars: ChartBar[] = [];
+  /** Overlay layers by id. */
   readonly layers = new Map<string, OverlayLayer>();
+  /** Canvas layers by id (never drawn by the fake). */
   readonly canvasLayers = new Map<string, CanvasLayer>();
+  /** Study panes by id. */
   readonly studyPanes = new Map<string, StudyPaneSpec>();
+  /** Last comparison series. */
   compare: readonly CompareSeriesSpec[] = [];
+  /** Last synchronized crosshair. */
   crosshair: {timeMs: number; price: number} | null = null;
+  /** Last visible range set (null after `fitContent`). */
   visibleRange: TimeRange | null = null;
+  /** Number of `invalidate` calls. */
   invalidations = 0;
   private readonly handlers = new Map<string, Set<(payload: never) => void>>();
 
@@ -79,12 +90,8 @@ export class FakeChartPort implements ChartPort {
     }
   ) {}
 
-  /**
-   * Marks as mounted.
-   * @param _container Ignored.
-   * @param _theme Ignored.
-   */
-  mount(_container: HTMLElement, _theme: ChartTheme): void {
+  /** Marks the fake as mounted; it needs no container or theme. */
+  mount(): void {
     this.mounted = true;
   }
 
@@ -163,7 +170,7 @@ export class FakeChartPort implements ChartPort {
   }
 
   /**
-   * Returns the linear transform.
+   * Returns the linear transform (available even before mount).
    * @return Transform.
    */
   transform(): CoordinateTransform {
@@ -202,11 +209,13 @@ export class FakeChartPort implements ChartPort {
   }
 
   /**
-   * Emits an event to subscribers (test driver).
+   * Emits an event to subscribers (test driver). Unlike the LWC adapter it
+   * does not catch handler errors, so tests see them.
    * @param event Event name.
    * @param payload Payload.
    */
   emit<E extends ChartEventName>(event: E, payload: ChartEventMap[E]): void {
+    // Handlers in the set for `event` were registered with its payload type.
     for (const handler of [...(this.handlers.get(event) ?? [])]) {
       (handler as (value: ChartEventMap[E]) => void)(payload);
     }
@@ -236,7 +245,7 @@ export class FakeChartPort implements ChartPort {
     this.visibleRange = range;
   }
 
-  /** Fits content (no-op). */
+  /** Clears the recorded visible range, as fitting shows every bar. */
   fitContent(): void {
     this.visibleRange = null;
   }
@@ -297,7 +306,7 @@ export class FakeChartPort implements ChartPort {
     return null;
   }
 
-  /** Releases everything. */
+  /** Marks the fake destroyed and drops its listeners, layers and panes. */
   destroy(): void {
     this.destroyed = true;
     this.handlers.clear();
@@ -308,11 +317,12 @@ export class FakeChartPort implements ChartPort {
   }
 
   /**
-   * Builds a pointer event at pixel coordinates (test helper).
-   * @param x X pixel.
-   * @param y Y pixel.
-   * @param extra Overrides.
-   * @return Pointer event with a `prevented` flag.
+   * Builds a pointer event at pixel coordinates (test helper); time and
+   * price come from the linear transform.
+   * @param x X in CSS pixels.
+   * @param y Y in CSS pixels.
+   * @param extra Fields to override.
+   * @return Pointer event whose `prevented` flag records `preventDefault`.
    */
   pointer(
     x: number,
@@ -367,9 +377,13 @@ export function createRecordingContext(): {
     },
     set(obj, prop: string, value: unknown) {
       calls.push({op: `set:${prop}`, args: [value]});
+      // Stored under a prefixed key, so reading the property back still
+      // yields a recording function rather than the assigned value.
       obj[`__${prop}`] = value;
       return true;
     },
   });
+  // A deliberate partial fake: any method call is recorded, which covers
+  // what the painters use.
   return {ctx: ctx as unknown as CanvasRenderingContext2D, calls};
 }

@@ -7,9 +7,9 @@
 /**
  * @fileoverview Time-axis presentation per timeframe: seconds on the axis
  * and crosshair label for sub-minute bars, dates only from daily bars up,
- * and exchange-local labels for session markets (a TWSE or TPEx chart
- * reads 09:00-13:30, an NYSE chart 09:30-16:00). `24x7` markets keep UTC
- * labels.
+ * and exchange-local labels for session markets (a Taiwan Stock Exchange or
+ * Taipei Exchange chart reads 09:00-13:30, a New York Stock Exchange chart
+ * 09:30-16:00). `24x7` markets keep UTC labels.
  */
 
 import {
@@ -59,9 +59,9 @@ const MONTHS = [
 ];
 
 /**
- * Pads to two digits.
- * @param value Number.
- * @return Text.
+ * Pads a non-negative integer to two digits.
+ * @param value Hour, minute, second or two-digit year.
+ * @return Text such as `09`.
  */
 function pad(value: number): string {
   return String(value).padStart(2, '0');
@@ -95,9 +95,10 @@ export function zonedTickLabel(
 }
 
 /**
- * Short zone label for captions, e.g. `ET` or `TPE`.
+ * Returns a short zone label for captions, e.g. `ET` or `TPE`.
  * @param timeZone IANA time zone.
- * @return Abbreviation.
+ * @return Abbreviation for New York, Taipei and UTC; otherwise the city part
+ *     of the zone name (`Europe/London` gives `London`).
  */
 export function zoneAbbreviation(timeZone: string): string {
   if (timeZone === 'America/New_York') return 'ET';
@@ -108,7 +109,7 @@ export function zoneAbbreviation(timeZone: string): string {
 
 /**
  * Formats the crosshair time label in a time zone, e.g.
- * `Mon 23 Nov '26 09:30 ET` (dates only from daily bars up).
+ * `23 Nov '26 09:30 ET` (dates only, `23 Nov '26`, from daily bars up).
  * @param timeMs Bar start (UTC ms).
  * @param timeframe Chart timeframe.
  * @param timeZone IANA time zone.

@@ -9,13 +9,15 @@
  *
  * Render-only: the order-flow Delta % comes from the engine's
  * `/v1/indicators/series`. Thresholds follow the plugin's
- * `min_delta_share` input, exactly as the Pine pane draws them. Each bar
- * says how its delta was obtained (`values.method`): `taker_volume` is the
- * true delta from the venue's taker buy/sell volume, `trade_classification`
- * is buy/sell volume classified from trades against the prevailing quote
- * (Lee–Ready, on stock exchanges that publish no aggressor side), anything
- * else is the candle-direction estimate. A bar is only called "true" or
- * "classified" when the engine says so.
+ * `min_delta_share` input, exactly as the reference Pine Script pane draws
+ * them. Each bar says how its delta was obtained (`values.method`):
+ * `taker_volume` is the true delta from the venue's taker buy/sell volume,
+ * `trade_classification` is buy/sell volume classified from trades against
+ * the prevailing quote (Lee–Ready, on stock exchanges that publish no
+ * aggressor side), anything else is the candle-direction estimate. A bar is
+ * only called "true" or "classified" when the engine says so. Column
+ * opacity shows the method (true darkest, estimate faintest), and buy/sell
+ * volumes are kept only for true and classified bars.
  */
 
 import type {StudyLevel, StudyPaneSpec, StudyPoint} from '@joseph/chart-core';
@@ -30,7 +32,7 @@ export const STUDY_PLUGINS: Readonly<Record<string, string>> = {
   order_flow_pressure: 'delta_pct',
 };
 
-/** Pine default of `min_delta_share`. */
+/** Default of the plugin's `min_delta_share` input (as in Pine Script). */
 export const DEFAULT_MIN_DELTA_SHARE = 0.2;
 
 /** Column opacity of true (measured) delta bars. */
@@ -62,13 +64,19 @@ export const DELTA_METHOD_LABELS: Readonly<Record<DeltaMethod, string>> = {
 export interface DeltaBar {
   /** Bar start (UTC ms). */
   timeMs: number;
-  /** Delta % of the bar. */
+  /** Delta % of the bar (display number). */
   value: number;
   /** True (taker volume), classified (Lee–Ready) or estimate. */
   method: DeltaMethod;
-  /** Taker-buy base volume (decimal string), when published. */
+  /**
+   * Buy base volume (decimal string) of a true or classified bar, when
+   * published; always null for estimates.
+   */
   buyVolume: string | null;
-  /** Taker-sell base volume (decimal string), when published. */
+  /**
+   * Sell base volume (decimal string) of a true or classified bar, when
+   * published; always null for estimates.
+   */
   sellVolume: string | null;
 }
 
@@ -77,9 +85,10 @@ export const DELTA_LEGEND =
   'Delta % per bar from the engine. True: taker buy minus sell volume published by the venue. Classified (Lee–Ready): trades classified as buys or sells against the prevailing quote, where the exchange publishes no aggressor side. Estimate: bar volume signed by candle direction (drawn faint).';
 
 /**
- * Reads a numeric indicator value.
+ * Reads a numeric indicator value for display.
  * @param value Published value (decimal string, number or null).
- * @return Finite number or null.
+ * @return Finite number, or null for anything else (blank strings, NaN,
+ *     other types).
  */
 export function numericValue(value: unknown): number | null {
   if (typeof value === 'number') return Number.isFinite(value) ? value : null;
@@ -103,7 +112,7 @@ export function deltaMethodOf(value: unknown): DeltaMethod {
 }
 
 /**
- * Column opacity of a delta method.
+ * Returns the column opacity of a delta method.
  * @param method Delta method.
  * @return Opacity 0..1.
  */
@@ -115,9 +124,11 @@ export function deltaOpacity(method: DeltaMethod): number {
 }
 
 /**
- * Reads a published volume (decimal string) without converting it.
+ * Reads a published volume as text, keeping a decimal string exactly as
+ * published.
  * @param value Published value.
- * @return Decimal string or null.
+ * @return The string when it parses as a finite number, `String(value)`
+ *     for a finite number, otherwise null.
  */
 function volumeText(value: unknown): string | null {
   if (typeof value === 'number' && Number.isFinite(value)) return String(value);
@@ -129,7 +140,8 @@ function volumeText(value: unknown): string | null {
 /**
  * Resolves the Delta threshold share from user inputs.
  * @param settings Plugin inputs (may be null).
- * @return Share in 0..1.
+ * @return `min_delta_share` when it is a number in 0..1, otherwise
+ *     DEFAULT_MIN_DELTA_SHARE.
  */
 export function minDeltaShare(
   settings: Readonly<Record<string, unknown>> | null | undefined
@@ -143,8 +155,9 @@ export function minDeltaShare(
 /**
  * Reads the per-bar delta values of an order-flow series.
  * @param series Engine series for `order_flow_pressure`.
- * @param atMs Replay cursor close (UTC ms); later bars are dropped.
- * @return Bars with a numeric Delta %, oldest first.
+ * @param atMs Replay cursor (UTC ms); bars starting at or after it are
+ *     dropped. Null keeps every bar.
+ * @return Bars with a numeric Delta %, in series order (oldest first).
  */
 export function deltaBarsFromSeries(
   series: IndicatorSeries,
@@ -169,10 +182,12 @@ export function deltaBarsFromSeries(
 }
 
 /**
- * Pane title naming the delta methods in view.
+ * Returns the pane title naming the delta methods in view.
  * @param bars Delta bars.
- * @return `Delta % (true)`, `Delta % (classified)`, `Delta % (estimate)`
- *     or a mixed legend.
+ * @return `Delta %` without bars; `Delta % (true)`, `Delta % (classified)`
+ *     or `Delta % (estimate)` for one method; `Delta % (true; classified)`
+ *     for both measured methods; or `Delta % (<measured>; faint =
+ *     estimate)` when estimates mix in (`true` named over `classified`).
  */
 export function deltaStudyTitle(
   bars: ReadonlyArray<Pick<DeltaBar, 'method'>>
@@ -194,12 +209,12 @@ export function deltaStudyTitle(
 export interface DeltaStudyOptions {
   /** Plugin inputs (threshold). */
   settings?: Readonly<Record<string, unknown>> | null;
-  /** Replay cursor close (UTC ms); later points are dropped. */
+  /** Replay cursor (UTC ms); bars starting at or after it are dropped. */
   atMs?: number | null;
 }
 
 /**
- * Builds the Delta % pane: columns colored by sign (estimated bars faint),
+ * Builds the Delta % pane: columns colored by sign with opacity by method,
  * a zero line and the positive/negative thresholds.
  * @param series Engine series for `order_flow_pressure`.
  * @param options Threshold and replay cursor.
@@ -209,6 +224,8 @@ export function deltaStudyFromSeries(
   series: IndicatorSeries,
   options: DeltaStudyOptions = {}
 ): StudyPaneSpec {
+  // The share (0..1) becomes a percentage with at most two decimals, the
+  // unit of the plotted Delta %.
   const threshold = Math.round(minDeltaShare(options.settings) * 10_000) / 100;
   const bars = deltaBarsFromSeries(series, options.atMs ?? null);
   const points: StudyPoint[] = bars.map(bar => ({

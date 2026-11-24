@@ -32,19 +32,29 @@ export interface TimeIndexCalendar {
   timeframe: Timeframe;
 }
 
-/** Cached conversions per index (anchors are re-projected every frame). */
+/**
+ * Most session-calendar conversions cached per index. Anchors are
+ * re-projected every frame and calendar arithmetic is costly; the cache is
+ * simply emptied when full.
+ */
 const CACHE_LIMIT = 512;
 
-/** Sorted, de-duplicated bar time index. */
+/**
+ * Sorted, de-duplicated bar time index. Logical index `i` is the `i`-th bar
+ * start; fractions lie within a bar and negative or past-the-end values lie
+ * outside the data.
+ */
 export class TimeIndex {
   private readonly times: number[];
   private readonly session: TimeIndexCalendar | null;
+  /** Off-data `toLogical` results of session calendars, by time. */
   private readonly logicalCache = new Map<number, number>();
 
   /**
    * Creates the index.
    * @param bars Bars (any order).
-   * @param durationMs Bar duration used to extrapolate outside the data.
+   * @param durationMs Bar duration (ms). It extrapolates outside the data
+   *     and caps the span of a bar followed by a gap.
    * @param calendar Session calendar and timeframe; omitted or `24x7`
    *     extrapolates by `durationMs`.
    */
@@ -60,7 +70,7 @@ export class TimeIndex {
   }
 
   /**
-   * Number of bars.
+   * Number of distinct bar times.
    * @return Count.
    */
   get length(): number {
@@ -85,8 +95,9 @@ export class TimeIndex {
   }
 
   /**
-   * Finds the index of the last bar starting at or before a time.
-   * @param timeMs Time.
+   * Finds the index of the last bar starting at or before a time (binary
+   * search).
+   * @param timeMs Time (UTC ms).
    * @return Index, or -1 before the first bar.
    */
   floorIndex(timeMs: number): number {
@@ -106,10 +117,11 @@ export class TimeIndex {
   }
 
   /**
-   * Length of the bar starting at a time (session bars may be cut short at
-   * the close).
-   * @param startMs Bar start.
-   * @return Length in ms (at least 1).
+   * Returns the length of the bar starting at a time (session bars may be
+   * cut short at the close).
+   * @param startMs Bar start (UTC ms).
+   * @return Length in ms (at least 1); `durationMs` when the calendar
+   *     cannot place the bar.
    */
   private barLength(startMs: number): number {
     if (!this.session) return this.durationMs;
@@ -122,12 +134,15 @@ export class TimeIndex {
   }
 
   /**
-   * Session-bar offset of a time from a bar on the chart.
+   * Returns the offset of a time from a bar on the chart, counted in
+   * session bars: whole bars between the two bar starts plus the fraction
+   * of its own bar that `timeMs` has reached.
    * @param fromMs Bar start on the chart (first or last bar).
    * @param timeMs Time outside the data.
    * @return Fractional bars from `fromMs` (negative before it).
    */
   private sessionOffset(fromMs: number, timeMs: number): number {
+    // Callers check `this.session` first.
     const {calendar, timeframe} = this.session as TimeIndexCalendar;
     const bar = calendar.floor(timeframe, timeMs);
     const end = calendar.endOf(timeframe, bar);
@@ -140,8 +155,12 @@ export class TimeIndex {
   }
 
   /**
-   * Converts a time to a fractional logical index.
-   * @param timeMs Time.
+   * Converts a time to a fractional logical index. Inside the data the
+   * fraction is the share of its bar that has elapsed, and a time in a gap
+   * after a bar maps to the start of the next bar. Outside the data the
+   * index is extrapolated in session bars (exchange calendars) or by
+   * `durationMs`.
+   * @param timeMs Time (UTC ms).
    * @return Logical index, or null when there are no bars.
    */
   toLogical(timeMs: number): number | null {
@@ -159,6 +178,7 @@ export class TimeIndex {
             ? this.sessionOffset(first, timeMs)
             : lastIndex + this.sessionOffset(last, timeMs);
       } catch {
+        // The calendar cannot place the time: extrapolate by duration.
         logical =
           timeMs < first
             ? (timeMs - first) / this.durationMs
@@ -173,12 +193,16 @@ export class TimeIndex {
     const index = this.floorIndex(timeMs);
     const start = this.times[index] ?? first;
     const next = this.times[index + 1] ?? start + this.durationMs;
+    // The span is the bar itself, not the distance to the next bar, so a
+    // time in the gap after a bar clamps to `index + 1` (the next bar start).
     const span = Math.max(1, Math.min(next - start, this.barLength(start)));
     return index + Math.min(1, (timeMs - start) / span);
   }
 
   /**
-   * Converts a fractional logical index back to a time.
+   * Converts a fractional logical index back to a time: the bar start plus
+   * the fraction of the bar's length, so inside the data a time in a gap
+   * is never returned. Outside the data it extrapolates like `toLogical`.
    * @param logical Logical index.
    * @return Time (UTC ms), or null when there are no bars.
    */
@@ -215,12 +239,15 @@ export class TimeIndex {
 
   /**
    * Snaps a time to the start of the bar containing it.
-   * @param timeMs Time.
-   * @return Bar start (extrapolated outside the data).
+   * @param timeMs Time (UTC ms).
+   * @return Bar start (extrapolated outside the data), or null when there
+   *     are no bars.
    */
   snap(timeMs: number): number | null {
     const logical = this.toLogical(timeMs);
     if (logical === null) return null;
+    // The epsilon absorbs float error, so a bar start whose index comes out
+    // as 6.9999999 still floors to its own bar.
     return this.toTime(Math.floor(logical + 1e-9));
   }
 }

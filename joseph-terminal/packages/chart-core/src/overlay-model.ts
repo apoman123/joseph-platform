@@ -22,7 +22,10 @@ export type OverlayLineStyle = 'solid' | 'dashed' | 'dotted';
 export type OverlayTone =
   'bid' | 'ask' | 'user' | 'neutral' | 'warning' | 'danger' | 'muted';
 
-/** Horizontal price line, e.g. an order line, SL/TP or liquidity level. */
+/**
+ * Horizontal price line, e.g. an order line, a stop-loss or take-profit
+ * level, or a liquidity level.
+ */
 export interface PriceLineOverlay {
   /** Discriminator. */
   kind: 'price-line';
@@ -38,15 +41,24 @@ export interface PriceLineOverlay {
   lineStyle: OverlayLineStyle;
   /** Axis/label text. */
   label: string;
-  /** Whether the user may drag the line (emits `overlay.dragEnd`). */
+  /**
+   * Whether the user may drag the line (full-width lines only); a drag
+   * emits `overlayDragEnd`.
+   */
   draggable?: boolean;
   /** Optional time from which the line starts (ray); full width if unset. */
   fromMs?: TimestampMs;
-  /** Optional pending/unknown styling (e.g. awaiting venue ACK). */
+  /**
+   * Optional pending styling (e.g. awaiting the venue's acknowledgement):
+   * dashed, and full-width lines get a `· pending` label suffix.
+   */
   pending?: boolean;
 }
 
-/** Rectangular zone between two prices over a time span (AOIs, ranges). */
+/**
+ * Rectangular zone between two prices over a time span (areas of interest,
+ * ranges).
+ */
 export interface BoxOverlay {
   /** Discriminator. */
   kind: 'box';
@@ -54,7 +66,7 @@ export interface BoxOverlay {
   id: string;
   /** Left edge (UTC ms). */
   fromMs: TimestampMs;
-  /** Right edge (UTC ms); `null` extends to the latest bar. */
+  /** Right edge (UTC ms); `null` extends to the right edge of the plot. */
   toMs: TimestampMs | null;
   /** Lower price. */
   lower: DecimalString;
@@ -70,7 +82,7 @@ export interface BoxOverlay {
   lineStyle: OverlayLineStyle;
   /** Short label drawn inside the box. */
   label?: string;
-  /** Optional midline (e.g. FVG 50%). */
+  /** Optional dashed midline, e.g. the 50% level of a fair value gap. */
   midline?: boolean;
 }
 
@@ -80,7 +92,7 @@ export interface MarkerOverlay {
   kind: 'marker';
   /** Stable id unique within the layer. */
   id: string;
-  /** Bar time (UTC ms). */
+  /** Time (UTC ms); the adapter snaps it to the start of its bar. */
   timeMs: TimestampMs;
   /** Placement relative to the bar. */
   position: 'above' | 'below' | 'at';
@@ -101,7 +113,10 @@ export type OverlayModel = PriceLineOverlay | BoxOverlay | MarkerOverlay;
 export interface OverlayLayer {
   /** Unique layer id, e.g. `indicator-viz:fvg_ifvg`. */
   layerId: string;
-  /** Paint order; higher draws on top. */
+  /**
+   * Paint order of the layer's boxes and rays; higher draws on top. Markers
+   * and full-width price lines are drawn by the chart library itself.
+   */
   zIndex: number;
   /** Whether the layer is currently shown. */
   visible: boolean;

@@ -7,9 +7,23 @@
 /**
  * @fileoverview `ChartPort`: Joseph's own chart abstraction.
  *
- * Only `src/adapters/lwc/` may import `lightweight-charts`. Everything else
+ * Only `src/adapters/lwc/`, the Lightweight Charts (LWC) adapter, may import
+ * `lightweight-charts` (dependency-cruiser enforces it). Everything else
  * (features, drawing tools, indicator visualization) talks to this port, so
  * the renderer can be replaced without touching strategy logic or contracts.
+ *
+ * What crosses the port:
+ *
+ * - Times are UTC epoch milliseconds. The adapter converts them to the
+ *   library's UTC seconds and to logical bar indices internally; neither
+ *   leaves the adapter.
+ * - Pixel coordinates are CSS pixels from the top-left corner of the price
+ *   pane's plot area (right of the left comparison axis when it is shown).
+ * - Prices in bars, events and transforms are display numbers (floats).
+ *   Overlay models carry prices as contract decimal strings instead. A
+ *   number read back from the chart (a pointer or drag price) must be
+ *   rounded to the tick size and turned into a decimal string before it
+ *   can become an order parameter.
  */
 
 import type {
@@ -28,19 +42,19 @@ import type {
 export type Disposer = () => void;
 
 /**
- * Bar shaped for rendering only. Numbers here are display coordinates and
- * must never be fed back into order parameters.
+ * Bar shaped for rendering only. Its prices are display numbers and must
+ * never be fed back into order parameters.
  */
 export interface ChartBar {
   /** Bar start (UTC ms). */
   timeMs: number;
-  /** Open. */
+  /** Opening price. */
   open: number;
-  /** High. */
+  /** Highest price. */
   high: number;
-  /** Low. */
+  /** Lowest price. */
   low: number;
-  /** Close. */
+  /** Closing price. */
   close: number;
   /** Base volume. */
   volume: number;
@@ -58,7 +72,7 @@ export interface SeriesConfig {
   chartType: ChartType;
   /** Price axis mode. */
   priceScale: PriceScaleMode;
-  /** Tick size string used for price formatting. */
+  /** Tick size (decimal string); sets the axis precision and minimum move. */
   tickSize: string;
   /** Whether the volume pane is shown. */
   showVolume: boolean;
@@ -83,9 +97,9 @@ export interface ChartTheme {
   text: string;
   /** Axis borders. */
   border: string;
-  /** Rising bars. */
+  /** Rising bars and the `bid` tone. */
   bid: string;
-  /** Falling bars. */
+  /** Falling bars and the `ask` and `danger` tones. */
   ask: string;
   /** User-authored marks. */
   user: string;
@@ -111,13 +125,16 @@ export interface TimeRange {
 
 /** Pointer location in both pixel and data space. */
 export interface ChartPoint {
-  /** X in CSS pixels relative to the plot area. */
+  /** X in CSS pixels from the left edge of the plot area. */
   x: number;
-  /** Y in CSS pixels relative to the plot area. */
+  /** Y in CSS pixels from the top of the price pane. */
   y: number;
-  /** Time under the pointer (UTC ms), snapped to a bar when possible. */
+  /**
+   * Time under the pointer (UTC ms), or null when there are no bars. The
+   * LWC adapter reports the start of the bar slot under the pointer.
+   */
   timeMs: number | null;
-  /** Price under the pointer. */
+  /** Price under the pointer (display number); null outside the price pane. */
   price: number | null;
 }
 
@@ -129,7 +146,10 @@ export interface ChartPointerEvent extends ChartPoint {
   shiftKey: boolean;
   /** Ctrl/Meta key pressed. */
   modKey: boolean;
-  /** Prevents default chart panning while a tool handles the gesture. */
+  /**
+   * Prevents the browser default and locks chart pan/zoom until the pointer
+   * is released, so a tool can own the gesture.
+   */
   preventDefault(): void;
 }
 
@@ -139,7 +159,10 @@ export interface OverlayDragEvent {
   layerId: string;
   /** Model id. */
   modelId: string;
-  /** Price where the drag ended (display number; round with tick size). */
+  /**
+   * Price where the drag ended. A display number: round it to the tick size
+   * and convert it to a decimal string before any order uses it.
+   */
   price: number;
 }
 
@@ -147,7 +170,7 @@ export interface OverlayDragEvent {
 export interface ChartEventMap {
   /** Crosshair moved (null when the pointer leaves the plot). */
   crosshairMove: ChartPoint | null;
-  /** Primary click. */
+  /** Primary-button press and release without moving more than a few pixels. */
   click: ChartPointerEvent;
   /** Secondary click / context menu request. */
   contextMenu: ChartPointerEvent;
@@ -157,11 +180,11 @@ export interface ChartEventMap {
   pointerMove: ChartPointerEvent;
   /** Pointer released. */
   pointerUp: ChartPointerEvent;
-  /** Visible range changed by pan/zoom. */
+  /** Visible range changed (pan, zoom or code); null when there are no bars. */
   visibleRangeChange: TimeRange | null;
   /** Draggable overlay released. */
   overlayDragEnd: OverlayDragEvent;
-  /** Plot size changed. */
+  /** Container size changed (CSS pixels). */
   resize: {width: number; height: number};
 }
 
@@ -171,32 +194,33 @@ export type ChartEventName = keyof ChartEventMap;
 /** Pixel/data transforms valid for the current frame. */
 export interface CoordinateTransform {
   /**
-   * Converts time to x.
+   * Converts a time to an x coordinate.
    * @param timeMs UTC ms (bar start or arbitrary time).
-   * @return X in CSS pixels, or null when outside the data range.
+   * @return X in CSS pixels, which may lie outside `0..width` (times beyond
+   *     the data are extrapolated), or null when there are no bars.
    */
   timeToX(timeMs: number): number | null;
   /**
-   * Converts price to y.
-   * @param price Price.
-   * @return Y in CSS pixels, or null when unavailable.
+   * Converts a price to a y coordinate in the price pane.
+   * @param price Display price.
+   * @return Y in CSS pixels, or null while the price scale has no data.
    */
   priceToY(price: number): number | null;
   /**
-   * Converts x to time.
+   * Converts an x coordinate to a time.
    * @param x X in CSS pixels.
-   * @return Time (UTC ms) or null.
+   * @return Time (UTC ms), or null when there are no bars.
    */
   xToTime(x: number): number | null;
   /**
-   * Converts y to price.
+   * Converts a y coordinate to a price.
    * @param y Y in CSS pixels.
-   * @return Price or null.
+   * @return Display price, or null outside the price pane or without data.
    */
   yToPrice(y: number): number | null;
-  /** Plot width in CSS pixels. */
+  /** Plot width in CSS pixels (price axes excluded). */
   readonly width: number;
-  /** Plot height in CSS pixels. */
+  /** Price pane height in CSS pixels (volume and study panes excluded). */
   readonly height: number;
 }
 
@@ -207,11 +231,15 @@ export interface CoordinateTransform {
 export interface CanvasLayer {
   /** Unique id. */
   readonly id: string;
-  /** Paint order; higher draws on top. */
+  /**
+   * Paint order among canvas layers; higher draws on top. All canvas layers
+   * draw above overlay boxes and rays.
+   */
   readonly zIndex: number;
   /**
    * Paints the layer.
-   * @param ctx 2D context in CSS-pixel space (DPR already applied).
+   * @param ctx 2D context in CSS-pixel space (the device pixel ratio is
+   *     already applied).
    * @param transform Coordinate transforms for this frame.
    */
   draw(ctx: CanvasRenderingContext2D, transform: CoordinateTransform): void;
@@ -223,11 +251,11 @@ export interface StudyPoint {
   timeMs: number;
   /** Plotted value. */
   value: number;
-  /** Optional color role, e.g. bid for positive delta columns. */
+  /** Optional column color role (histograms only), e.g. bid for delta > 0. */
   tone?: OverlayTone;
   /**
-   * Optional column opacity 0..1 (default 0.7), e.g. faint columns for
-   * estimated values next to measured ones.
+   * Optional column opacity 0..1 (default 0.7), used with `tone`, e.g. faint
+   * columns for estimated values next to measured ones.
    */
   opacity?: number;
 }
@@ -276,7 +304,7 @@ export interface CompareSeriesSpec {
   label: string;
   /** Line color (CSS). */
   color: string;
-  /** Closes per bar; bars missing on the main series are skipped. */
+  /** Display closes by bar start; bars not on the main series are skipped. */
   points: ReadonlyArray<{timeMs: number; value: number}>;
 }
 
@@ -291,17 +319,19 @@ export interface ChartPort {
   /**
    * Mounts into a container.
    * @param container Host element (sized by CSS).
-   * @param theme Theme colors.
+   * @param theme Theme colors, applied once at mount.
    */
   mount(container: HTMLElement, theme: ChartTheme): void;
   /**
-   * Sets series identity/presentation. Clears bars and venue-specific
-   * overlays when the instrument changes.
+   * Sets series identity/presentation. When the instrument or timeframe
+   * changes, clears the bars, overlay layers, study panes and comparisons,
+   * so nothing from the previous venue stays on the chart.
    * @param config Series configuration.
    */
   setSeries(config: SeriesConfig): void;
   /**
-   * Replaces all bars (sorted, de-duplicated by the adapter).
+   * Replaces all bars; the adapter sorts them and keeps the last bar given
+   * for each time.
    * @param bars Bars in any order.
    */
   setBars(bars: readonly ChartBar[]): void;
@@ -311,7 +341,7 @@ export interface ChartPort {
    */
   updateBar(bar: ChartBar): void;
   /**
-   * Adds or replaces an overlay layer.
+   * Adds an overlay layer or replaces the one with the same `layerId`.
    * @param layer Layer snapshot.
    */
   setOverlayLayer(layer: OverlayLayer): void;
@@ -321,7 +351,7 @@ export interface ChartPort {
    */
   removeOverlayLayer(layerId: string): void;
   /**
-   * Adds a custom canvas layer.
+   * Adds a custom canvas layer or replaces the one with the same `id`.
    * @param layer Canvas layer.
    * @return Disposer removing the layer.
    */
@@ -330,27 +360,29 @@ export interface ChartPort {
   invalidate(): void;
   /**
    * Returns transforms valid right now.
-   * @return Coordinate transform, or null before mount.
+   * @return Coordinate transform, or null until both `mount` and `setSeries`
+   *     have run.
    */
   transform(): CoordinateTransform | null;
   /**
    * Subscribes to an event.
    * @param event Event name.
-   * @param handler Handler.
-   * @return Disposer.
+   * @param handler Called with the event payload.
+   * @return Disposer that unsubscribes the handler.
    */
   on<E extends ChartEventName>(
     event: E,
     handler: (payload: ChartEventMap[E]) => void
   ): Disposer;
   /**
-   * Shows a synchronized crosshair from another chart.
-   * @param point Time/price or null to hide.
+   * Shows a synchronized crosshair from another chart. It is not emitted as
+   * `crosshairMove`, so synchronized charts do not echo each other.
+   * @param point Time (UTC ms) and display price, or null to hide.
    */
   setCrosshair(point: {timeMs: number; price: number} | null): void;
   /**
    * Sets the visible range.
-   * @param range Range.
+   * @param range Time range (the LWC adapter ignores it while it has no bars).
    */
   setVisibleRange(range: TimeRange): void;
   /** Fits all bars into view. */

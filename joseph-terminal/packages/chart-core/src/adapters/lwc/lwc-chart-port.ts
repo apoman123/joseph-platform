@@ -5,10 +5,19 @@
  */
 
 /**
- * @fileoverview Lightweight Charts (Apache-2.0) implementation of `ChartPort`.
+ * @fileoverview Lightweight Charts (LWC, Apache-2.0) implementation of
+ * `ChartPort`.
  *
  * This is the only module that imports `lightweight-charts`. It uses public
  * APIs only: series, price lines, the markers plugin and series primitives.
+ *
+ * Conversions at the boundary: port times (UTC ms) become LWC
+ * `UTCTimestamp`s (whole seconds) and back; times map to LWC logical bar
+ * indices through a `TimeIndex` built from the main series' bars, so
+ * anchors before, between and after the bars still get a position; overlay
+ * decimal strings become numbers only for drawing; DOM pointer positions
+ * are shifted by the left comparison axis so they share the plot-area
+ * origin of `CoordinateTransform`.
  */
 
 import {
@@ -31,6 +40,7 @@ import {
   type ISeriesPrimitive,
   type IPrimitivePaneRenderer,
   type IPrimitivePaneView,
+  type Logical,
   type LogicalRange,
   type MouseEventParams,
   type SeriesAttachedParameter,
@@ -94,8 +104,8 @@ const TICK_KINDS: Readonly<Record<TickMarkType, TickLabelKind>> = {
 };
 
 /**
- * Builds the time index of a series configuration.
- * @param bars Bars.
+ * Builds the time index of the main series' bars.
+ * @param bars Bars on the main series.
  * @param config Series configuration (null before `setSeries`).
  * @return Index (session-aware for exchange calendars).
  */
@@ -103,6 +113,7 @@ function indexFor(
   bars: readonly ChartBar[],
   config: SeriesConfig | null
 ): TimeIndex {
+  // Without a timeframe yet, extrapolate by one minute per bar.
   if (!config) return new TimeIndex(bars, 60_000);
   return new TimeIndex(
     bars,
@@ -126,7 +137,8 @@ interface StudyState {
 }
 
 /**
- * Converts milliseconds to an LWC UTC timestamp (seconds).
+ * Converts milliseconds to an LWC UTC timestamp (whole seconds; the
+ * shortest timeframe is one second, so no bar start loses precision).
  * @param timeMs UTC ms.
  * @return LWC time.
  */
@@ -135,7 +147,7 @@ function toTime(timeMs: number): UTCTimestamp {
 }
 
 /**
- * Maps a line style.
+ * Maps an overlay line style to the LWC line style.
  * @param style Overlay line style.
  * @return LWC line style.
  */
@@ -148,8 +160,9 @@ function lineStyleOf(style: OverlayLineStyle): LineStyle {
 /**
  * Maps a marker model to an LWC marker.
  * @param marker Marker model.
- * @param theme Theme.
- * @param snap Snaps a time to its bar start.
+ * @param theme Theme that resolves the marker's tone.
+ * @param snap Returns the start of the bar containing a time, or null when
+ *     there are no bars (the marker's own time is then used).
  * @return LWC marker.
  */
 export function toLwcMarker(
@@ -189,7 +202,7 @@ class PaintView implements IPrimitivePaneView {
   ) {}
 
   /**
-   * Draws above series.
+   * Returns the z-order: above every series in the pane.
    * @return Z order.
    */
   zOrder(): 'top' {
@@ -197,12 +210,14 @@ class PaintView implements IPrimitivePaneView {
   }
 
   /**
-   * Returns the renderer.
+   * Returns a renderer that calls the paint callback.
    * @return Renderer.
    */
   renderer(): IPrimitivePaneRenderer {
     return {
       draw: target => {
+        // Media space is CSS pixels with the device pixel ratio already
+        // applied, which is what `CanvasLayer.draw` promises its layers.
         target.useMediaCoordinateSpace(({context}) => {
           this.paint(context);
         });
@@ -259,11 +274,15 @@ interface DragState {
   modelId: string;
   /** Native line being moved. */
   line: IPriceLine;
-  /** Latest price. */
+  /** Latest display price under the pointer. */
   price: number;
 }
 
-/** Lightweight Charts adapter. */
+/**
+ * `ChartPort` on Lightweight Charts. Pane 0 holds the price series and the
+ * comparison lines; the volume pane (when shown) and one pane per study
+ * follow below it.
+ */
 export class LwcChartPort implements ChartPort {
   private container: HTMLElement | null = null;
   private chart: IChartApi | null = null;
@@ -277,23 +296,35 @@ export class LwcChartPort implements ChartPort {
   private readonly compareSeries = new Map<string, ISeriesApi<'Line'>>();
   private theme: ChartTheme = DEFAULT_CHART_THEME;
   private config: SeriesConfig | null = null;
+  /** Raw bars of the main series, sorted by time (never Heikin Ashi). */
   private bars: ChartBar[] = [];
+  /** Maps times to the logical indices of `bars`; rebuilt when bars change. */
   private index = new TimeIndex([], 60_000);
   private readonly layers = new Map<string, OverlayLayer>();
+  /**
+   * Native price lines keyed `${layerId}\u0000${modelId}`. The separator is
+   * NUL because printable ids never contain it, so a `${layerId}\u0000`
+   * prefix selects exactly one layer's lines.
+   */
   private readonly nativeLines = new Map<string, IPriceLine>();
   private readonly canvasLayers = new Map<string, CanvasLayer>();
   private readonly handlers = new Map<string, Set<(payload: never) => void>>();
+  /** Undo actions for every DOM and LWC subscription made in `mount`. */
   private readonly cleanups: Disposer[] = [];
   private drag: DragState | null = null;
+  /** Primary press in progress, to tell a click from a pan. */
   private press: {x: number; y: number; moved: boolean} | null = null;
+  /** Pan/zoom state requested through `setInteractive`. */
   private interactive = true;
+  /** Set while `setCrosshair` moves the crosshair, so it is not re-emitted. */
   private suppressCrosshair = false;
+  /** Whether the last crosshair event was null, so a leave is emitted once. */
   private lastCrosshairNull = true;
 
   /**
-   * Mounts the chart.
+   * Mounts the chart; a second call while mounted does nothing.
    * @param container Host element.
-   * @param theme Theme.
+   * @param theme Theme colors, used for the lifetime of the chart.
    */
   mount(container: HTMLElement, theme: ChartTheme): void {
     if (this.chart) return;
@@ -365,6 +396,8 @@ export class LwcChartPort implements ChartPort {
     );
     this.listen('contextmenu', event => {
       event.preventDefault();
+      // `contextmenu` is a PointerEvent in current browsers; `pointerEvent`
+      // reads only fields that every MouseEvent has.
       this.emit('contextMenu', this.pointerEvent(event as PointerEvent, 2));
     });
     if (typeof ResizeObserver !== 'undefined') {
@@ -379,7 +412,9 @@ export class LwcChartPort implements ChartPort {
   }
 
   /**
-   * Adds a DOM listener in the capture phase and tracks its removal.
+   * Adds a DOM listener on the container and tracks its removal. It listens
+   * in the capture phase because the library handles pointer events on its
+   * own child elements; capturing on the container sees each event first.
    * @param type Event type.
    * @param handler Handler.
    */
@@ -393,7 +428,9 @@ export class LwcChartPort implements ChartPort {
   }
 
   /**
-   * Applies series configuration, rebuilding the series when needed.
+   * Applies series configuration. A new chart type rebuilds the main series;
+   * a new instrument or timeframe also drops bars, overlays, studies and
+   * comparisons.
    * @param config Series configuration.
    */
   setSeries(config: SeriesConfig): void {
@@ -461,6 +498,7 @@ export class LwcChartPort implements ChartPort {
         });
         break;
       case 'area':
+        // The fill is the default theme's text color (#8fa5b3) fading out.
         this.series = chart.addSeries(AreaSeries, {
           ...common,
           lineColor: theme.text,
@@ -512,6 +550,8 @@ export class LwcChartPort implements ChartPort {
       study.primitive = null;
       study.style = null;
     }
+    // Walk backwards: removing a pane renumbers the panes after it. Pane 0
+    // (price) always stays.
     const panes = chart.panes();
     for (let index = panes.length - 1; index > 0; index -= 1) {
       if ((panes[index]?.getSeries().length ?? 0) === 0) {
@@ -557,8 +597,9 @@ export class LwcChartPort implements ChartPort {
   }
 
   /**
-   * Creates the native series of one study in a given pane.
-   * @param study Study state.
+   * Creates the native series of one study in a given pane, with its
+   * reference levels as price lines and a title primitive.
+   * @param study Study state, updated with the created objects.
    * @param pane Pane index.
    */
   private createStudySeries(study: StudyState, pane: number): void {
@@ -614,13 +655,18 @@ export class LwcChartPort implements ChartPort {
       .map((_, i) =>
         i === 0 && this.volume ? VOLUME_PANE_SHARE : STUDY_PANE_SHARE
       );
+    // Stretch factors are relative weights. When the auxiliary panes would
+    // leave the price pane less than MIN_PRICE_PANE_SHARE, shrink them all
+    // by the same factor so together they take exactly the rest.
     const auxTotal = shares.reduce((sum, share) => sum + share, 0);
     const scale =
       1 - auxTotal < MIN_PRICE_PANE_SHARE
         ? (1 - MIN_PRICE_PANE_SHARE) / auxTotal
         : 1;
     panes[0]?.setStretchFactor(1 - auxTotal * scale);
-    shares.forEach((share, i) => panes[i + 1]?.setStretchFactor(share * scale));
+    shares.forEach((share, i) => {
+      panes[i + 1]?.setStretchFactor(share * scale);
+    });
   }
 
   /**
@@ -689,6 +735,9 @@ export class LwcChartPort implements ChartPort {
    */
   setStudyPane(spec: StudyPaneSpec): void {
     const existing = this.studies.get(spec.id);
+    // Only new values can be pushed in place. A new style needs another
+    // series type and new levels need new price lines, so either rebuilds
+    // the auxiliary panes.
     if (
       existing &&
       existing.series &&
@@ -711,7 +760,8 @@ export class LwcChartPort implements ChartPort {
   }
 
   /**
-   * Removes a study pane.
+   * Removes a study pane and rebuilds the auxiliary panes, whose indices
+   * shift.
    * @param id Study id.
    */
   removeStudyPane(id: string): void {
@@ -723,7 +773,8 @@ export class LwcChartPort implements ChartPort {
   }
 
   /**
-   * Replaces comparison overlays.
+   * Replaces comparison overlays. Series are recreated only when the ids or
+   * colors change; otherwise only their data is pushed.
    * @param series Instruments to compare.
    */
   setCompareSeries(series: readonly CompareSeriesSpec[]): void {
@@ -752,8 +803,8 @@ export class LwcChartPort implements ChartPort {
   }
 
   /**
-   * Bar start times currently on the main series.
-   * @return Set of times.
+   * Returns the bar start times currently on the main series.
+   * @return Set of times (UTC ms).
    */
   private barTimes(): Set<number> {
     return new Set(this.bars.map(bar => bar.timeMs));
@@ -766,6 +817,9 @@ export class LwcChartPort implements ChartPort {
    */
   private renderStudy(study: StudyState, times = this.barTimes()): void {
     if (!study.series) return;
+    // All series share one time scale. A point at a time with no main bar
+    // would add a slot and shift the logical indices that `this.index`
+    // derives from the main bars alone.
     const points = study.spec.points
       .filter(point => times.has(point.timeMs) && Number.isFinite(point.value))
       .sort((a, b) => a.timeMs - b.timeMs)
@@ -784,7 +838,10 @@ export class LwcChartPort implements ChartPort {
     study.series.setData(points);
   }
 
-  /** Pushes comparison closes (only bars present on the main series). */
+  /**
+   * Pushes comparison closes (only bars present on the main series, for the
+   * same time-scale reason as `renderStudy`).
+   */
   private renderCompare(): void {
     const times = this.barTimes();
     for (const spec of this.compareSpecs) {
@@ -809,7 +866,7 @@ export class LwcChartPort implements ChartPort {
     this.renderCompare();
   }
 
-  /** Applies price format and scale mode. */
+  /** Applies the config's price format, time labels and price scale mode. */
   private applySeriesOptions(): void {
     const config = this.config;
     if (!config || !this.series || !this.chart) return;
@@ -819,7 +876,8 @@ export class LwcChartPort implements ChartPort {
       priceFormat: {type: 'price', precision, minMove: Number(config.tickSize)},
     });
     // Exchange calendars label times in exchange time; 24x7 keeps the
-    // library's UTC labels (null restores the defaults).
+    // library's UTC labels (null restores the defaults). LWC passes times in
+    // seconds, hence the `* 1000`.
     const calendar = config.calendar;
     const zone = calendar && !calendar.continuous ? calendar.timeZone : null;
     const timeframe = config.timeframe;
@@ -857,7 +915,7 @@ export class LwcChartPort implements ChartPort {
 
   /**
    * Replaces bars.
-   * @param bars Bars (any order, duplicates allowed).
+   * @param bars Bars in any order; the last bar given for a time wins.
    */
   setBars(bars: readonly ChartBar[]): void {
     const byTime = new Map<number, ChartBar>();
@@ -887,6 +945,8 @@ export class LwcChartPort implements ChartPort {
     if (!this.series || !this.config) return;
     let display = bar;
     if (this.config.chartType === 'heikin_ashi') {
+      // A Heikin Ashi open depends on every earlier bar, so the previous HA
+      // bar is recomputed from the raw history.
       const previousRaw = this.bars.at(-2) ?? null;
       const previousHa = previousRaw
         ? (toHeikinAshi(this.bars.slice(0, -1)).at(-1) ?? null)
@@ -903,7 +963,8 @@ export class LwcChartPort implements ChartPort {
   }
 
   /**
-   * Converts a bar to the main series data shape.
+   * Converts a bar to the main series data shape (close only for line and
+   * area charts).
    * @param bar Bar.
    * @return LWC data point.
    */
@@ -925,7 +986,7 @@ export class LwcChartPort implements ChartPort {
   }
 
   /**
-   * Converts a bar to a volume histogram point.
+   * Converts a bar to a volume histogram point colored by bar direction.
    * @param bar Bar.
    * @return LWC histogram point.
    */
@@ -940,7 +1001,7 @@ export class LwcChartPort implements ChartPort {
     };
   }
 
-  /** Pushes all bars to the series. */
+  /** Pushes all bars (as Heikin Ashi when selected) and the auxiliary data. */
   private renderData(): void {
     if (!this.series || !this.config) return;
     const display =
@@ -988,7 +1049,8 @@ export class LwcChartPort implements ChartPort {
   }
 
   /**
-   * Creates native price lines (full-width lines with axis labels).
+   * Creates native price lines for the layer's full-width lines, which get
+   * axis labels; rays (`fromMs` set) are painted by `paintOverlays`.
    * @param layer Layer.
    */
   private applyNativeLayer(layer: OverlayLayer): void {
@@ -1007,6 +1069,7 @@ export class LwcChartPort implements ChartPort {
    */
   private priceLineOptions(model: PriceLineOverlay) {
     return {
+      // Display only: the decimal string stays the source of truth.
       price: Number(model.price),
       color: model.color ?? toneColor(this.theme, model.tone),
       lineWidth: 1 as const,
@@ -1018,7 +1081,10 @@ export class LwcChartPort implements ChartPort {
     };
   }
 
-  /** Recomputes markers from all visible layers. */
+  /**
+   * Recomputes markers from all visible layers, sorted by time as the
+   * markers plugin requires.
+   */
   private refreshMarkers(): void {
     if (!this.markers) return;
     const snap = (timeMs: number) => this.index.snap(timeMs);
@@ -1051,7 +1117,7 @@ export class LwcChartPort implements ChartPort {
   }
 
   /**
-   * Paints overlay boxes and canvas layers.
+   * Paints overlay boxes and rays, then the canvas layers in `zIndex` order.
    * @param ctx Context in CSS pixels.
    */
   private paint(ctx: CanvasRenderingContext2D): void {
@@ -1074,7 +1140,7 @@ export class LwcChartPort implements ChartPort {
 
   /**
    * Returns current transforms.
-   * @return Transform or null before mount.
+   * @return Transform, or null before `mount` and `setSeries`.
    */
   transform(): CoordinateTransform | null {
     const chart = this.chart;
@@ -1084,6 +1150,8 @@ export class LwcChartPort implements ChartPort {
     const timeScale = chart.timeScale();
     const index = this.index;
     const width = Math.max(0, timeScale.width());
+    // Before the first layout the pane reports 0; estimate the price pane
+    // as the container minus the time axis until then.
     const paneHeight = chart.paneSize(0).height;
     const height = Math.max(
       0,
@@ -1095,7 +1163,8 @@ export class LwcChartPort implements ChartPort {
       timeToX: timeMs => {
         const logical = index.toLogical(timeMs);
         if (logical === null) return null;
-        return timeScale.logicalToCoordinate(logical as never);
+        // `Logical` is the library's branded number for the same index.
+        return timeScale.logicalToCoordinate(logical as Logical);
       },
       xToTime: x => {
         const logical = timeScale.coordinateToLogical(x);
@@ -1110,8 +1179,8 @@ export class LwcChartPort implements ChartPort {
   /**
    * Subscribes to an event.
    * @param event Event name.
-   * @param handler Handler.
-   * @return Disposer.
+   * @param handler Called with the event payload.
+   * @return Disposer that unsubscribes the handler.
    */
   on<E extends ChartEventName>(
     event: E,
@@ -1122,6 +1191,8 @@ export class LwcChartPort implements ChartPort {
       set = new Set();
       this.handlers.set(event, set);
     }
+    // One map holds handlers of every payload type; `emit` only calls a
+    // handler with the payload of the event it was registered for.
     const typed = handler as (payload: never) => void;
     set.add(typed);
     return () => {
@@ -1130,7 +1201,7 @@ export class LwcChartPort implements ChartPort {
   }
 
   /**
-   * Emits an event.
+   * Emits an event; a throwing handler does not stop the others.
    * @param event Event name.
    * @param payload Payload.
    */
@@ -1148,7 +1219,8 @@ export class LwcChartPort implements ChartPort {
   }
 
   /**
-   * Handles LWC crosshair moves; external sync moves are not re-emitted.
+   * Handles LWC crosshair moves; moves made by `setCrosshair` are not
+   * re-emitted.
    * @param param LWC mouse params.
    */
   private handleCrosshair(param: MouseEventParams<Time>): void {
@@ -1160,6 +1232,7 @@ export class LwcChartPort implements ChartPort {
       }
       return;
     }
+    // Only moves caused by the user's pointer carry a DOM source event.
     if (param.sourceEvent === undefined) return;
     this.lastCrosshairNull = false;
     const inPricePane = param.paneIndex === undefined || param.paneIndex === 0;
@@ -1175,9 +1248,10 @@ export class LwcChartPort implements ChartPort {
   }
 
   /**
-   * Builds a pointer event from a DOM event.
+   * Builds a pointer event from a DOM event, in plot-area coordinates.
    * @param event DOM pointer event.
-   * @param button Button override.
+   * @param button Button to report instead of `event.button` (2 for the
+   *     context menu).
    * @return Chart pointer event.
    */
   private pointerEvent(
@@ -1204,7 +1278,8 @@ export class LwcChartPort implements ChartPort {
   }
 
   /**
-   * Width of the left (comparison) price axis, which offsets the plot.
+   * Returns the width of the left (comparison) price axis, which offsets
+   * the plot area inside the container.
    * @return Width in CSS pixels (0 when hidden).
    */
   private leftScaleWidth(): number {
@@ -1217,7 +1292,10 @@ export class LwcChartPort implements ChartPort {
   }
 
   /**
-   * Routes pointer events, handling price-line drags and click synthesis.
+   * Routes pointer events. A primary press on a draggable price line starts
+   * a drag instead of a `pointerDown`; moves then move the line, and the
+   * release emits `overlayDragEnd` instead of `pointerUp`. Otherwise a
+   * primary release within CLICK_SLOP_PX of its press also emits `click`.
    * @param kind Event kind.
    * @param raw DOM event.
    */
@@ -1225,6 +1303,7 @@ export class LwcChartPort implements ChartPort {
     kind: 'pointerDown' | 'pointerMove' | 'pointerUp',
     raw: Event
   ): void {
+    // Registered only for pointerdown, pointermove and pointerup.
     const event = raw as PointerEvent;
     const payload = this.pointerEvent(event);
     if (kind === 'pointerDown') {
@@ -1272,7 +1351,8 @@ export class LwcChartPort implements ChartPort {
   }
 
   /**
-   * Whether chart interaction is currently locked by a tool gesture.
+   * Returns whether chart pan/zoom is currently locked, e.g. by a tool
+   * gesture.
    * @return True when locked.
    */
   private isPanLocked(): boolean {
@@ -1280,8 +1360,9 @@ export class LwcChartPort implements ChartPort {
   }
 
   /**
-   * Starts dragging a draggable price line near `y`, if any.
-   * @param y Pointer y.
+   * Starts dragging the first draggable price line within DRAG_TOLERANCE_PX
+   * of `y`, if any, and locks pan/zoom for the drag.
+   * @param y Pointer y in CSS pixels.
    * @return True when a drag started.
    */
   private startLineDrag(y: number): boolean {
@@ -1313,7 +1394,8 @@ export class LwcChartPort implements ChartPort {
 
   /**
    * Shows a synchronized crosshair without re-emitting it.
-   * @param point Point or null.
+   * @param point Time (UTC ms, snapped to its bar) and display price, or
+   *     null to hide.
    */
   setCrosshair(point: {timeMs: number; price: number} | null): void {
     if (!this.chart || !this.series) return;
@@ -1337,9 +1419,9 @@ export class LwcChartPort implements ChartPort {
   }
 
   /**
-   * Converts a logical range to a time range.
-   * @param range Logical range.
-   * @return Time range or null.
+   * Converts an LWC logical range to a time range.
+   * @param range Logical range (fractional bar indices).
+   * @return Time range, or null when there are no bars.
    */
   private logicalToRange(range: LogicalRange): TimeRange | null {
     const from = this.index.toTime(range.from);
@@ -1349,7 +1431,7 @@ export class LwcChartPort implements ChartPort {
 
   /**
    * Sets the visible range.
-   * @param range Range.
+   * @param range Time range; ignored while there are no bars.
    */
   setVisibleRange(range: TimeRange): void {
     const from = this.index.toLogical(range.fromMs);
@@ -1373,8 +1455,9 @@ export class LwcChartPort implements ChartPort {
   }
 
   /**
-   * Applies interaction options.
-   * @param enabled Whether enabled.
+   * Turns the library's pan (scroll) and zoom (scale) handling on or off,
+   * without changing the state requested through `setInteractive`.
+   * @param enabled Whether pan/zoom is enabled.
    */
   private applyInteractive(enabled: boolean): void {
     this.chart?.applyOptions({handleScroll: enabled, handleScale: enabled});
@@ -1399,7 +1482,7 @@ export class LwcChartPort implements ChartPort {
 
   /**
    * Takes a PNG screenshot.
-   * @return Data URL or null.
+   * @return Data URL, or null before mount or when the canvas cannot be read.
    */
   screenshot(): string | null {
     try {
@@ -1436,7 +1519,7 @@ export class LwcChartPort implements ChartPort {
   }
 
   /**
-   * Number of active listeners (leak diagnostics).
+   * Returns the number of active listeners (leak diagnostics).
    * @return Count of port listeners plus tracked DOM/LWC cleanups.
    */
   listenerCount(): number {

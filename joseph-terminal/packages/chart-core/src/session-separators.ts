@@ -17,15 +17,19 @@
  * it never changes bars or indicator inputs.
  */
 
-import type {Timeframe} from '@joseph/contracts';
-import {TIMEFRAME_MS, isCalendarTimeframe, zonedParts} from '@joseph/contracts';
+import {
+  TIMEFRAME_MS,
+  isCalendarTimeframe,
+  zonedParts,
+  type Timeframe,
+} from '@joseph/contracts';
 import type {CanvasLayer, CoordinateTransform} from './chart-port';
 import {withAlpha} from './theme';
 
 /** Calendar unit that separates sessions on a timeframe. */
 export type SessionUnit = 'minute' | 'hour' | 'day' | 'week' | 'month' | 'year';
 
-/** Weekday names used in labels (UTC). */
+/** Weekday names used in labels, indexed by `Date.getUTCDay()`. */
 const WEEKDAYS = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'];
 /** Month names used in labels. */
 const MONTHS = [
@@ -72,6 +76,8 @@ function sessionKey(
   timeZone: string
 ): number {
   if (timeZone !== 'UTC') {
+    // Count local calendar days since 1970-01-01 so keys follow the
+    // exchange's dates; weeks use the same Monday start as below.
     const p = zonedParts(timeMs, timeZone);
     const day = Date.UTC(p.year, p.month - 1, p.day) / 86_400_000;
     if (unit === 'year') return p.year;
@@ -91,7 +97,8 @@ function sessionKey(
 }
 
 /**
- * Finds the first bar of every session after the first visible one.
+ * Finds the first bar of every session except the first session in `times`
+ * (its start is not known to be on the chart).
  * @param times Bar start times in ascending order.
  * @param timeframe Chart timeframe.
  * @param timeZone Exchange time zone (default `UTC`, 24x7 markets).
@@ -129,6 +136,8 @@ export function sessionLabel(
 ): string {
   let shifted = timeMs;
   if (timeZone !== 'UTC') {
+    // Encode the zone's wall-clock time as a UTC instant, so the getUTC*
+    // readers below return exchange-local fields.
     const p = zonedParts(timeMs, timeZone);
     shifted = Date.UTC(p.year, p.month - 1, p.day, p.hour, p.minute, p.second);
   }
@@ -160,12 +169,14 @@ export interface SessionSeparatorOptions {
 }
 
 /**
- * Paints separators for the given boundaries.
+ * Paints dotted separators for the boundaries inside the plot, labelled at
+ * the bottom; a label within 56 px of the previous label is skipped so the
+ * labels do not crowd.
  * @param ctx Context in CSS pixels.
  * @param transform Frame transform.
- * @param boundaries Session start times.
+ * @param boundaries Session start times (UTC ms).
  * @param unit Session unit (for labels).
- * @param color Line color.
+ * @param color Line and label color (`#rrggbb` gets transparency applied).
  * @param fontFamily Label font.
  * @param timeZone Time zone of the labels (default `UTC`).
  */
@@ -188,6 +199,7 @@ export function paintSessionSeparators(
   for (const time of boundaries) {
     const x = transform.timeToX(time);
     if (x === null || x < 0 || x > transform.width) continue;
+    // Half-pixel x keeps the 1 px line on one pixel column (sharp).
     const px = Math.round(x) + 0.5;
     ctx.beginPath();
     ctx.moveTo(px, 0);
