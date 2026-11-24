@@ -416,6 +416,8 @@ def _twse(client: httpx.Client) -> None:
         )
         time.sleep(_TWSE_PACE_S)
     series = []
+    # ``00679B`` is a TPEx listing: ``tse_00679B.tw`` records MIS's empty
+    # record for a code queried on the wrong market.
     query = "|".join(f"tse_{code}.tw" for code in (*_MIS_CODES, "00679B"))
     for _ in range(24):
         started = int(time.time() * 1000)
@@ -613,7 +615,11 @@ def _treasury(client: httpx.Client) -> None:
 
 
 def main() -> None:
-    """Captures the fixtures of the venues named on the command line."""
+    """Captures the fixtures of the venues named on the command line.
+
+    With no arguments every venue is captured; an unknown name stops the
+    run with a ``KeyError`` once the venues before it are captured.
+    """
     captures = {
         "binance": _binance,
         "hyperliquid": _hyperliquid,
@@ -628,10 +634,10 @@ def main() -> None:
     names = sys.argv[1:] or list(captures)
     with httpx.Client(
         timeout=30.0, headers={"User-Agent": "joseph-fixture-capture"}
-    ) as c:
+    ) as client:
         for name in names:
-            captures[name](c)
-            print(f"captured {name}")  # noqa: T201
+            captures[name](client)
+            print(f"captured {name}")  # noqa: T201 - CLI script output
 
 
 if __name__ == "__main__":

@@ -4,8 +4,8 @@
 """Value conversions between ``smc_indicators`` and the platform domain.
 
 The library computes with IEEE-754 floats (as Pine does); the platform
-publishes decimals. Prices are converted once, at this boundary, rounded to
-four decimal places below the instrument tick so float noise such as
+publishes decimals. Prices are converted once, at this boundary, rounded
+half-up to four decimal places below the instrument tick so float noise such as
 ``0.30000000000000004`` never reaches a contract while sub-tick levels (an
 equilibrium halfway between two ticks) keep their value.
 """
@@ -87,7 +87,8 @@ def price(value: float | None, step: decimal.Decimal) -> decimal.Decimal | None:
         step: Quantum from ``quantum``.
 
     Returns:
-        Normalized decimal, or ``None`` for ``None``/NaN/inf.
+        The price rounded half-up to ``step`` and normalized, or ``None``
+        for ``None``/NaN/inf.
     """
     if value is None or not math.isfinite(value):
         return None
@@ -105,7 +106,8 @@ def ratio(value: float | None, places: int = 4) -> decimal.Decimal | None:
         places: Decimal places kept.
 
     Returns:
-        Normalized decimal or ``None``.
+        The value rounded half-up to ``places`` and normalized, or ``None``
+        for ``None``/NaN/inf.
     """
     if value is None or not math.isfinite(value):
         return None

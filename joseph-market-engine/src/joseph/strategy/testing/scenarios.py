@@ -1,11 +1,13 @@
 # Copyright 2026 apoman123
 # SPDX-License-Identifier: MIT
 
-"""Canonical market worlds for the proposal's Long A and Short B rules.
+"""Canonical market worlds for the Long A and Short B fixture strategies.
 
-Each builder returns frames in which every condition of the rule holds on
-``entry_index`` only; keyword switches remove individual conditions so
-tests can show that each one is necessary.
+The two rules are the valid entries of the contract ``strategy`` fixture
+(see ``fixtures.LONG_A`` and ``fixtures.SHORT_B``). Each builder returns
+frames in which every condition of the rule holds on ``entry_index`` only;
+keyword switches remove individual conditions so tests can show that each
+one is necessary.
 """
 
 from __future__ import annotations
@@ -18,9 +20,9 @@ from joseph.domain import structures
 from joseph.domain import timeframes
 from joseph.strategy.testing import frames
 
-TF = timeframes.Timeframe
-K = structures.AoiKind
-E = structures.StructureEventName
+_TF = timeframes.Timeframe
+_K = structures.AoiKind
+_E = structures.StructureEventName
 
 
 @dataclasses.dataclass(frozen=True, slots=True)
@@ -89,11 +91,11 @@ def long_a_frames(
     Returns:
         Frames, oldest first.
     """
-    opts = options or WorldOptions()
+    opts = WorldOptions() if options is None else options
     factory = frames.FrameFactory(instrument_id=instrument_id)
     bias = opts.bias or "BULLISH"
     fvg = factory.aoi(
-        K.FVG,
+        _K.FVG,
         "bullish",
         "92",
         "94",
@@ -111,9 +113,9 @@ def long_a_frames(
         snaps = [
             factory.snapshot(
                 "daily_bias",
-                TF.H4,
+                _TF.H4,
                 index,
-                as_of_ms=_htf_as_of(factory, index, TF.H4),
+                as_of_ms=_htf_as_of(factory, index, _TF.H4),
                 values={
                     "trend": bias,
                     "last_event": "BOS",
@@ -123,27 +125,30 @@ def long_a_frames(
             _range_snapshot(factory, index, opts, bullish=True),
             factory.snapshot(
                 "fvg_ifvg",
-                TF.M5,
+                _TF.M5,
                 index,
                 aois=[fvg] if index >= 10 else [],
                 values={"active_count": 1},
             ),
             factory.snapshot(
-                "order_breaker_blocks", TF.M5, index, values={"active_count": 0}
+                "order_breaker_blocks",
+                _TF.M5,
+                index,
+                values={"active_count": 0},
             ),
             _liquidity_snapshot(factory, index, opts),
             factory.snapshot(
                 "order_flow_pressure",
-                TF.M5,
+                _TF.M5,
                 index,
                 values={"delta_pct": frames.dec("-25")},
             ),
         ]
         events = []
         if opts.sweep and index == opts.entry_index - 2:
-            events.append(factory.event(E.SSL_SWEEP, index, price="90"))
+            events.append(factory.event(_E.SSL_SWEEP, index, price="90"))
         if opts.failure and entry:
-            events.append(factory.event(E.SELLER_FAILURE, index))
+            events.append(factory.event(_E.SELLER_FAILURE, index))
         feed = opts.entry_feed if entry else quality.FeedState.LIVE
         result.append(
             factory.frame(index, spec, snaps, events, feed_state=feed)
@@ -168,11 +173,11 @@ def short_b_frames(
     Returns:
         Frames, oldest first.
     """
-    opts = options or WorldOptions()
+    opts = WorldOptions() if options is None else options
     factory = frames.FrameFactory(instrument_id=instrument_id)
     bias = opts.bias or "BEARISH"
     breaker = factory.aoi(
-        K.BREAKER,
+        _K.BREAKER,
         "bearish",
         "106",
         "108",
@@ -194,21 +199,21 @@ def short_b_frames(
                 index,
                 as_of_ms=_htf_as_of(factory, index, tf),
                 values={
-                    "trend": bias if tf is not TF.H1 else "BULLISH",
+                    "trend": bias if tf is not _TF.H1 else "BULLISH",
                     "last_event": "BOS",
                     "last_event_direction": bias,
                 },
             )
-            for tf in (TF.D1, TF.H4, TF.H1)
+            for tf in (_TF.D1, _TF.H4, _TF.H1)
         ]
         snaps += [
             _range_snapshot(factory, index, opts, bullish=False),
             factory.snapshot(
-                "fvg_ifvg", TF.M5, index, values={"active_count": 0}
+                "fvg_ifvg", _TF.M5, index, values={"active_count": 0}
             ),
             factory.snapshot(
                 "order_breaker_blocks",
-                TF.M5,
+                _TF.M5,
                 index,
                 aois=[breaker] if index >= 12 else [],
                 values={"active_count": 1},
@@ -216,16 +221,16 @@ def short_b_frames(
             _liquidity_snapshot(factory, index, opts),
             factory.snapshot(
                 "order_flow_pressure",
-                TF.M5,
+                _TF.M5,
                 index,
                 values={"delta_pct": frames.dec("30")},
             ),
         ]
         events = []
         if opts.sweep and index == opts.entry_index - 2:
-            events.append(factory.event(E.BSL_SWEEP, index, price="110"))
+            events.append(factory.event(_E.BSL_SWEEP, index, price="110"))
         if opts.failure and entry:
-            events.append(factory.event(E.BUYER_FAILURE, index))
+            events.append(factory.event(_E.BUYER_FAILURE, index))
         feed = opts.entry_feed if entry else quality.FeedState.LIVE
         result.append(
             factory.frame(index, spec, snaps, events, feed_state=feed)
@@ -257,8 +262,8 @@ def _entry_bar(opts: WorldOptions, *, long: bool) -> frames.BarSpec:
             (False, True): ("105.2", "105.6", "104.9", "105"),
             (False, False): ("99", "99.5", "98.5", "99"),
         }
-    o, h, low, c = table[(opts.touch, opts.in_zone)]
-    return frames.bar(o, h, low, c)
+    open_, high, low, close = table[(opts.touch, opts.in_zone)]
+    return frames.bar(open_, high, low, close)
 
 
 def _range_snapshot(
@@ -269,45 +274,46 @@ def _range_snapshot(
     Args:
         factory: Frame factory.
         index: Signal bar index.
-        opts: Scenario options.
+        opts: Scenario options (the range does not depend on them).
         bullish: Leg direction (bullish OTE sits in discount).
 
     Returns:
         The snapshot.
     """
+    del opts  # Unused.
     range_id = "rng-1h-1"
     ote = ("88.4", "95.2") if bullish else ("104.8", "111.6")
     side = "bullish" if bullish else "bearish"
     aois = [
         factory.aoi(
-            K.DISCOUNT,
+            _K.DISCOUNT,
             "bullish",
             "80",
             "100",
             confirmed_index=0,
-            tf=TF.H1,
+            tf=_TF.H1,
             aoi_id="disc-1",
             range_id=range_id,
             quality_score=None,
         ),
         factory.aoi(
-            K.PREMIUM,
+            _K.PREMIUM,
             "bearish",
             "100",
             "120",
             confirmed_index=0,
-            tf=TF.H1,
+            tf=_TF.H1,
             aoi_id="prem-1",
             range_id=range_id,
             quality_score=None,
         ),
         factory.aoi(
-            K.OTE,
+            _K.OTE,
             side,
             ote[0],
             ote[1],
             confirmed_index=0,
-            tf=TF.H1,
+            tf=_TF.H1,
             aoi_id="ote-1",
             range_id=range_id,
             quality_score=None,
@@ -315,9 +321,9 @@ def _range_snapshot(
     ]
     return factory.snapshot(
         "premium_discount_ote",
-        TF.H1,
+        _TF.H1,
         index,
-        as_of_ms=_htf_as_of(factory, index, TF.H1),
+        as_of_ms=_htf_as_of(factory, index, _TF.H1),
         aois=aois,
         values={
             "range_id": range_id,
@@ -348,7 +354,7 @@ def _liquidity_snapshot(
     if opts.target:
         pools = [
             factory.aoi(
-                K.BSL,
+                _K.BSL,
                 "neutral",
                 "110",
                 "110",
@@ -357,7 +363,7 @@ def _liquidity_snapshot(
                 quality_score=None,
             ),
             factory.aoi(
-                K.SSL,
+                _K.SSL,
                 "neutral",
                 "90",
                 "90",
@@ -368,7 +374,7 @@ def _liquidity_snapshot(
         ]
     return factory.snapshot(
         "liquidity_sweeps",
-        TF.M5,
+        _TF.M5,
         index,
         aois=pools,
         values={"active_count": len(pools)},

@@ -38,6 +38,24 @@ _ACTIVATABLE_STATES = frozenset(
         versions.StrategyState.ACTIVE,
     }
 )
+"""States from which a version may be activated; a version in one of them
+that fails revalidation becomes UNSUPPORTED."""
+
+
+def _require_write(principal: identity.Principal) -> None:
+    """Checks write permission.
+
+    A principal that carries no scopes may write; one that carries scopes
+    needs ``WRITE_SCOPE``.
+
+    Args:
+        principal: Caller.
+
+    Raises:
+        errors.ForbiddenError: If scopes are present but lack writes.
+    """
+    if principal.scopes and not principal.has_scope(WRITE_SCOPE):
+        raise errors.ForbiddenError("strategy:write scope required")
 
 
 class StrategyVersionService:
@@ -46,6 +64,9 @@ class StrategyVersionService:
     Attributes:
         repository: Version store.
         clock: Time source.
+        available_plugins: Registered indicator plugin ids, or ``None`` for
+            every first-party plugin.
+        unsupported_ops: Rule operators removed from this build.
     """
 
     def __init__(
@@ -62,8 +83,8 @@ class StrategyVersionService:
         Args:
             repository: Version store.
             clock: Time source.
-            available_plugins: Registered indicator plugins (defaults to the
-                seven first-party plugins).
+            available_plugins: Registered indicator plugins (defaults to
+                every first-party plugin).
             unsupported_ops: Rule operators removed from this build.
             on_change: Called after activation changes (runtime refresh).
         """
@@ -104,19 +125,6 @@ class StrategyVersionService:
             Validation result.
         """
         return self.compile(definition).validation
-
-    @staticmethod
-    def _require_write(principal: identity.Principal) -> None:
-        """Checks write permission.
-
-        Args:
-            principal: Caller.
-
-        Raises:
-            errors.ForbiddenError: If scopes are present but lack writes.
-        """
-        if principal.scopes and not principal.has_scope(WRITE_SCOPE):
-            raise errors.ForbiddenError("strategy:write scope required")
 
     def _store(
         self,
@@ -170,7 +178,7 @@ class StrategyVersionService:
             errors.ConflictError: If the strategy id already exists.
             errors.ForbiddenError: If writes are not permitted.
         """
-        self._require_write(principal)
+        _require_write(principal)
         if self.repository.list_versions(
             principal.tenant_id, definition.strategy_id
         ):
@@ -200,10 +208,11 @@ class StrategyVersionService:
             The new (or identical latest) version.
 
         Raises:
+            errors.ForbiddenError: If writes are not permitted.
             errors.ValidationFailedError: If ids disagree.
             errors.NotFoundError: If the strategy does not exist.
         """
-        self._require_write(principal)
+        _require_write(principal)
         if definition.strategy_id != strategy_id:
             raise errors.ValidationFailedError(
                 "definition.strategy_id must match the strategy in the path"
@@ -340,12 +349,14 @@ class StrategyVersionService:
             The activated version.
 
         Raises:
+            errors.ForbiddenError: If writes are not permitted.
             strategy_errors.TradeModeDisabledError: For AUTO_LIVE.
             errors.ValidationFailedError: For unknown modes or instruments.
+            errors.NotFoundError: If the version does not exist.
             strategy_errors.StrategyValidationError: If the version is
                 invalid against the current catalog.
         """
-        self._require_write(principal)
+        _require_write(principal)
         if mode == "AUTO_LIVE":
             raise strategy_errors.TradeModeDisabledError(
                 "AUTO_LIVE cannot be activated from the strategy service. "
@@ -420,9 +431,11 @@ class StrategyVersionService:
             The paused version.
 
         Raises:
+            errors.ForbiddenError: If writes are not permitted.
+            errors.NotFoundError: If the strategy does not exist.
             errors.ConflictError: If no version is active.
         """
-        self._require_write(principal)
+        _require_write(principal)
         for stored in self.get_versions(principal, strategy_id):
             if stored.state is versions.StrategyState.ACTIVE:
                 paused = self.repository.update_lifecycle(

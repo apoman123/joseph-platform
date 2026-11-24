@@ -1,13 +1,13 @@
 # Copyright 2026 apoman123
 # SPDX-License-Identifier: MIT
 
-"""The indicator plugin contract (V5 §3.3 / §6.3).
+"""The indicator plugin contract.
 
 A plugin is a deterministic, pure state machine over closed bars of one
 series. The engine owns data plumbing and visibility; plugins own only their
-algorithm. Plugins publish canonical ``Aoi`` / ``StructureEvent`` records and
-scalar values inside ``IndicatorSnapshot``; no other module may depend on a
-plugin's private state.
+algorithm. Plugins publish canonical ``Aoi`` (area of interest, AOI) and
+``StructureEvent`` records and scalar values inside ``IndicatorSnapshot``; no
+other module may depend on a plugin's private state.
 
 Stream names returned by ``required_streams``:
 
@@ -33,8 +33,13 @@ from joseph.domain import timeframes as tfs
 from joseph.indicators.sdk import settings as settings_lib
 
 CHART_STREAM = "candles:chart"
+"""Stream of the series' own closed bars."""
+
 INTRABAR_PREFIX = "intrabars:"
+"""Prefix of lower-timeframe streams; the timeframe follows it."""
+
 AUX_PREFIX = "aux:"
+"""Prefix of completed other-timeframe streams; the timeframe follows it."""
 
 
 def intrabar_stream(timeframe: tfs.Timeframe) -> str:
@@ -87,8 +92,8 @@ class BarInput:
 
     Attributes:
         candle: The closed bar of the series (``is_final`` is True).
-        intrabars: Closed lower-timeframe bars inside ``[start, end)``,
-            keyed by timeframe, oldest first.
+        intrabars: Closed lower-timeframe bars inside the candle's
+            ``[start_ms, end_ms)``, keyed by timeframe, oldest first.
         aux: Completed bars of other timeframes visible at the close (their
             ``end_ms <= candle.end_ms``), keyed by timeframe, oldest first.
     """
@@ -124,9 +129,11 @@ class SeriesHeader:
         timeframe: Series timeframe.
         settings: Resolved settings as sorted ``(name, value)`` pairs.
         bars: Number of bars processed.
-        bar_start_ms: Start of the last processed bar.
-        as_of_ms: Close of the last processed bar.
-        last_start_ms: Start of the last processed bar, ``None`` initially.
+        bar_start_ms: Start of the last processed bar (0 before the first).
+        as_of_ms: Close (exclusive ``end_ms``) of the last processed bar (0
+            before the first).
+        last_start_ms: Start of the last processed bar, ``None`` before the
+            first; used for ordering and gap detection.
         feed_state: Provenance of the last bar.
         missing_bars: Gaps detected in the series so far.
         events: Events confirmed on the last bar.
@@ -206,57 +213,57 @@ class IndicatorPlugin(Protocol):
 
     @property
     def plugin_id(self) -> str:
-        """Returns the unique plugin id, e.g. ``fvg_ifvg``."""
+        """The unique plugin id, e.g. ``fvg_ifvg``."""
         ...
 
     @property
     def indicator_version(self) -> str:
-        """Returns the semantic version of the algorithm."""
+        """The semantic version of the algorithm."""
         ...
 
     @property
     def schema_version(self) -> int:
-        """Returns the output schema version."""
+        """The output schema version."""
         ...
 
     @property
     def display_name(self) -> str:
-        """Returns a human readable name."""
+        """A human-readable name."""
         ...
 
     @property
     def description(self) -> str:
-        """Returns a one-sentence description."""
+        """A one-sentence description."""
         ...
 
     @property
     def warmup_bars(self) -> int:
-        """Returns bars needed (with default settings) before outputs."""
+        """Bars needed (with default settings) before outputs are complete."""
         ...
 
     @property
     def timeframes(self) -> tuple[tfs.Timeframe, ...]:
-        """Returns the series timeframes the plugin supports."""
+        """The series timeframes the plugin supports."""
         ...
 
     @property
     def output_kinds(self) -> tuple[structures.AoiKind, ...]:
-        """Returns the AOI kinds the plugin can publish."""
+        """The AOI kinds the plugin can publish."""
         ...
 
     @property
     def output_events(self) -> tuple[structures.StructureEventName, ...]:
-        """Returns the event names the plugin can publish."""
+        """The event names the plugin can publish."""
         ...
 
     @property
     def licensing_status(self) -> str:
-        """Returns the contract ``LicensingStatus``."""
+        """The contract ``LicensingStatus``."""
         ...
 
     @property
     def parity_status(self) -> str:
-        """Returns the contract ``ParityStatus``."""
+        """The contract ``ParityStatus``."""
         ...
 
     def input_schema(self) -> dict[str, object]:
@@ -279,6 +286,10 @@ class IndicatorPlugin(Protocol):
             settings: Overrides (``None`` for defaults).
             timeframe: Series timeframe, when known (``None`` for the
                 plugin descriptor), so a plugin can pick nesting intrabars.
+
+        Returns:
+            Stream names (see the module docstring); always includes
+            ``CHART_STREAM``.
         """
         ...
 
@@ -290,6 +301,10 @@ class IndicatorPlugin(Protocol):
         Args:
             settings: Overrides (``None`` for defaults).
             stream: Stream name.
+
+        Returns:
+            Number of completed bars of ``stream`` to supply with each bar
+            (0 when the plugin reads none).
         """
         ...
 
@@ -305,6 +320,9 @@ class IndicatorPlugin(Protocol):
             instrument_id: Exact venue instrument.
             timeframe: Series timeframe.
             settings: Overrides (``None`` for defaults).
+
+        Returns:
+            Immutable plugin state before any bar.
         """
         ...
 
@@ -318,6 +336,10 @@ class IndicatorPlugin(Protocol):
         Args:
             state: Previous state.
             bar: Closed bar and visible auxiliary data.
+
+        Returns:
+            ``(new_state, output)``: the state after the bar and the events
+            and AOI changes it confirmed.
         """
         ...
 
@@ -329,6 +351,9 @@ class IndicatorPlugin(Protocol):
 
         Args:
             state: Current state.
+
+        Returns:
+            The snapshot as of the last processed bar.
         """
         ...
 
@@ -337,6 +362,10 @@ class IndicatorPlugin(Protocol):
 
         Args:
             state: Current state.
+
+        Returns:
+            JSON-compatible data that ``restore_state`` turns back into an
+            equal state.
         """
         ...
 
@@ -345,6 +374,9 @@ class IndicatorPlugin(Protocol):
 
         Args:
             blob: Encoded checkpoint.
+
+        Returns:
+            A state equal to the one that was dumped.
         """
         ...
 

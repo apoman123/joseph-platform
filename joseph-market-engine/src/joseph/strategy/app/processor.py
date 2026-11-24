@@ -33,6 +33,7 @@ _KIND_TEXT = {
     "AOI_INVALIDATED": "AOI invalidated",
     "SETUP_EXPIRED": "Setup expired",
 }
+"""Display text of each signal kind in signal messages."""
 
 
 @dataclasses.dataclass(frozen=True, slots=True)
@@ -41,8 +42,10 @@ class StepResult:
 
     Attributes:
         signals: Signals built from the emissions (not yet recorded).
-        outcome: State machine outcome (``None`` before evaluation).
-        evaluation: Evaluation, when the frame was new.
+        outcome: State machine outcome; a skip outcome when the bar was a
+            duplicate, out of order or a revision of a processed bar.
+        evaluation: Evaluation of the frame, or ``None`` when it was
+            skipped before evaluation.
     """
 
     signals: tuple[signal_domain.Signal, ...]
@@ -199,14 +202,16 @@ class InstanceProcessor:
                 instruments.InstrumentId.parse(key.instrument_id)
             ),
         )
-        self.state = state or setup_fsm.InstanceState(key=key)
+        self.state = (
+            setup_fsm.InstanceState(key=key) if state is None else state
+        )
         self._window: collections.deque[structures.BarFrame] = (
             collections.deque(maxlen=plan.window_bars)
         )
 
     @property
     def window(self) -> tuple[structures.BarFrame, ...]:
-        """Returns the frames currently held, oldest first."""
+        """The frames currently held, oldest first."""
         return tuple(self._window)
 
     def warm(self, frame: structures.BarFrame) -> None:
@@ -274,6 +279,8 @@ class InstanceProcessor:
         if early is not None:
             self.state = early.state
             return StepResult(signals=(), outcome=early, evaluation=None)
+        # No look-ahead: warmed history may hold frames that closed after
+        # this one, and they must not be evaluated with it.
         window = [f for f in self._window if f.close_ms <= frame.close_ms]
         evaluation = evaluator.evaluate(
             self.plan, window, market, evaluated_at_ms

@@ -13,10 +13,12 @@ State mapping (``gates`` are the top-level conjuncts of the root ``ALL``):
 * WAITING — no open setup (conditions not progressing).
 * AOI_TOUCHED — a positive AOI_TOUCH is true but more than one gate is
   still outstanding. Emits WATCHING_AOI.
-* CONFIRMING — all gates but one are true (for rules without an AOI_TOUCH
-  this alone opens a setup). Emits PRE_SIGNAL.
-* READY — every gate true, or no gate FALSE with some UNKNOWN. Transient:
-  the same bar resolves READY to FIRED or BLOCKED.
+* CONFIRMING — at least two gates and all but one TRUE, with a positive
+  AOI_TOUCH true when the rule has one (for rules without an AOI_TOUCH this
+  alone opens a setup). Emits PRE_SIGNAL.
+* READY — the rule is TRUE, or it is UNKNOWN with no gate FALSE and at
+  least one gate TRUE. Transient: the same bar resolves READY to FIRED or
+  BLOCKED (an UNKNOWN rule always blocks).
 * FIRED — entry confirmed: risk computable, net R:R >= the strategy floor,
   instrument qualified, no cooldown and AOI not already used when
   ``once_per_aoi``. Emits ENTRY_CONFIRMED. Terminal.
@@ -54,7 +56,7 @@ from joseph.strategy.domain import evaluator
 from joseph.strategy.domain import risk
 from joseph.strategy.domain import tristate
 
-T = tristate.TriState
+_TriState = tristate.TriState
 
 
 class SetupState(enum.StrEnum):
@@ -71,19 +73,35 @@ class SetupState(enum.StrEnum):
     BLOCKED = "BLOCKED"
 
 
-S = SetupState
-_OPEN_EXITS = frozenset({S.EXPIRED, S.INVALIDATED, S.CANCELLED})
+_OPEN_EXITS = frozenset(
+    {SetupState.EXPIRED, SetupState.INVALIDATED, SetupState.CANCELLED}
+)
+"""Terminal states that end an open setup without an entry."""
 
 TRANSITIONS: Mapping[SetupState, frozenset[SetupState]] = {
-    S.WAITING: frozenset({S.AOI_TOUCHED, S.CONFIRMING, S.READY, S.CANCELLED}),
-    S.AOI_TOUCHED: frozenset({S.CONFIRMING, S.READY} | _OPEN_EXITS),
-    S.CONFIRMING: frozenset({S.AOI_TOUCHED, S.READY} | _OPEN_EXITS),
-    S.READY: frozenset({S.FIRED, S.BLOCKED}),
-    S.BLOCKED: frozenset({S.AOI_TOUCHED, S.CONFIRMING, S.READY} | _OPEN_EXITS),
-    S.FIRED: frozenset(),
-    S.EXPIRED: frozenset(),
-    S.INVALIDATED: frozenset(),
-    S.CANCELLED: frozenset(),
+    SetupState.WAITING: frozenset(
+        {
+            SetupState.AOI_TOUCHED,
+            SetupState.CONFIRMING,
+            SetupState.READY,
+            SetupState.CANCELLED,
+        }
+    ),
+    SetupState.AOI_TOUCHED: frozenset(
+        {SetupState.CONFIRMING, SetupState.READY} | _OPEN_EXITS
+    ),
+    SetupState.CONFIRMING: frozenset(
+        {SetupState.AOI_TOUCHED, SetupState.READY} | _OPEN_EXITS
+    ),
+    SetupState.READY: frozenset({SetupState.FIRED, SetupState.BLOCKED}),
+    SetupState.BLOCKED: frozenset(
+        {SetupState.AOI_TOUCHED, SetupState.CONFIRMING, SetupState.READY}
+        | _OPEN_EXITS
+    ),
+    SetupState.FIRED: frozenset(),
+    SetupState.EXPIRED: frozenset(),
+    SetupState.INVALIDATED: frozenset(),
+    SetupState.CANCELLED: frozenset(),
 }
 """Every legal transition; anything else raises."""
 
@@ -129,7 +147,7 @@ class InstanceKey:
 
     @property
     def venue(self) -> str:
-        """Returns the venue part of the instrument id."""
+        """The venue part of the instrument id."""
         return self.instrument_id.split(":", 1)[0]
 
     def as_text(self) -> str:
@@ -457,6 +475,8 @@ class _Step:
     """Mutable working copy used inside ``step``.
 
     Attributes:
+        policy: Lifecycle policy of the instance.
+        close_ms: Close of the bar being processed.
         setup: Open setup being advanced.
         transitions: Transitions recorded so far.
         emissions: Emissions recorded so far.
@@ -540,25 +560,25 @@ def _target_phase(
         WAITING, AOI_TOUCHED, CONFIRMING or READY.
     """
     gates = evaluation.gate_results
-    true_count = sum(1 for g in gates if g is T.TRUE)
-    if evaluation.result is T.TRUE:
-        return S.READY
+    true_count = sum(1 for g in gates if g is _TriState.TRUE)
+    if evaluation.result is _TriState.TRUE:
+        return SetupState.READY
     if (
-        evaluation.result is T.UNKNOWN
-        and T.FALSE not in gates
+        evaluation.result is _TriState.UNKNOWN
+        and _TriState.FALSE not in gates
         and true_count >= 1
     ):
-        return S.READY
+        return SetupState.READY
     touched = bool(evaluation.touched)
     if (
         len(gates) >= 2
         and true_count == len(gates) - 1
         and (touched or not policy.has_aoi_touch)
     ):
-        return S.CONFIRMING
+        return SetupState.CONFIRMING
     if touched:
-        return S.AOI_TOUCHED
-    return S.WAITING
+        return SetupState.AOI_TOUCHED
+    return SetupState.WAITING
 
 
 def _anchor_invalidated(
@@ -609,7 +629,7 @@ def _blockers(
     """
     blockers: list[str] = []
     unknown = False
-    if evaluation.result is not T.TRUE:
+    if evaluation.result is not _TriState.TRUE:
         unknown = True
         blockers.append("some conditions are UNKNOWN (missing or stale data)")
     assessment: risk.RiskAssessment = evaluation.risk
@@ -622,10 +642,10 @@ def _blockers(
         blockers.append(
             f"net R:R {assessment.rr} below the floor {policy.min_rr}"
         )
-    if qualification is T.UNKNOWN:
+    if qualification is _TriState.UNKNOWN:
         unknown = True
         blockers.append("instrument qualification unknown")
-    elif qualification is T.FALSE:
+    elif qualification is _TriState.FALSE:
         blockers.append("instrument not qualified")
     close = evaluation.bar_close_ms
     if state.cooldown_until_ms is not None and close < state.cooldown_until_ms:
@@ -656,13 +676,17 @@ def _close_setup(
     if setup.anchor_aoi_id and _anchor_invalidated(
         evaluation, setup.anchor_aoi_id
     ):
-        work.move(S.INVALIDATED, f"anchor {setup.anchor_aoi_id} invalidated")
+        work.move(
+            SetupState.INVALIDATED, f"anchor {setup.anchor_aoi_id} invalidated"
+        )
         work.emit("AOI_INVALIDATED", f"AOI {setup.anchor_aoi_id} invalidated")
     elif work.close_ms >= expires_at_ms:
-        work.move(S.EXPIRED, f"expired after {policy.expire_after_bars} bars")
+        work.move(
+            SetupState.EXPIRED, f"expired after {policy.expire_after_bars} bars"
+        )
         work.emit("SETUP_EXPIRED", "setup expired without an entry")
-    elif target is S.WAITING:
-        work.move(S.EXPIRED, "conditions lapsed")
+    elif target is SetupState.WAITING:
+        work.move(SetupState.EXPIRED, "conditions lapsed")
         work.emit("SETUP_EXPIRED", "setup conditions lapsed")
     else:
         return
@@ -702,7 +726,7 @@ def step(
     evaluation: evaluator.Evaluation,
     policy: LifecyclePolicy,
     *,
-    qualification: tristate.TriState = T.TRUE,
+    qualification: tristate.TriState = _TriState.TRUE,
     candle_revision: int = 0,
 ) -> StepOutcome:
     """Folds one closed-bar evaluation into the instance state.
@@ -740,12 +764,16 @@ def step(
     already_used = (
         policy.once_per_aoi and bool(touched_ids) and touched_ids <= fired_ids
     )
-    if work.setup is None and target is not S.WAITING and not already_used:
+    if (
+        work.setup is None
+        and target is not SetupState.WAITING
+        and not already_used
+    ):
         work.setup = Setup(
             setup_id=ids.stable_id(
                 "setup", state.key.as_text(), anchor_id or "-", close
             ),
-            state=S.WAITING,
+            state=SetupState.WAITING,
             started_at_ms=close,
             anchor_aoi_id=anchor_id,
         )
@@ -792,20 +820,20 @@ def _advance(
     Returns:
         Updated instance state (setup is set by the caller).
     """
-    if target is S.AOI_TOUCHED:
-        work.move(S.AOI_TOUCHED, "AOI touched")
+    if target is SetupState.AOI_TOUCHED:
+        work.move(SetupState.AOI_TOUCHED, "AOI touched")
         work.emit("WATCHING_AOI", "price touched a qualifying AOI")
         return base
-    if target is S.CONFIRMING:
-        work.move(S.CONFIRMING, "one condition outstanding")
+    if target is SetupState.CONFIRMING:
+        work.move(SetupState.CONFIRMING, "one condition outstanding")
         work.emit("PRE_SIGNAL", "all but one entry condition hold")
         return base
-    if target is not S.READY:
+    if target is not SetupState.READY:
         return base
-    work.move(S.READY, "entry conditions met")
+    work.move(SetupState.READY, "entry conditions met")
     blockers, unknown = _blockers(state, evaluation, work.policy, qualification)
     if blockers:
-        work.move(S.BLOCKED, "; ".join(blockers))
+        work.move(SetupState.BLOCKED, "; ".join(blockers))
         work.emit(
             "ENTRY_BLOCKED",
             "; ".join(blockers),
@@ -813,7 +841,7 @@ def _advance(
             tuple(blockers),
         )
         return base
-    work.move(S.FIRED, "entry confirmed")
+    work.move(SetupState.FIRED, "entry confirmed")
     work.emit("ENTRY_CONFIRMED", "entry confirmed", "PASS")
     policy = work.policy
     cooldown = None
@@ -839,11 +867,11 @@ def cancel(state: InstanceState, bar_close_ms: int, reason: str) -> StepOutcome:
         Outcome with the CANCELLED transition, if a setup was open.
     """
     setup = state.setup
-    if setup is None or setup.state is S.READY:
+    if setup is None or setup.state is SetupState.READY:
         return StepOutcome(state=state)
-    check_transition(setup.state, S.CANCELLED)
+    check_transition(setup.state, SetupState.CANCELLED)
     transition = Transition(
-        setup.setup_id, setup.state, S.CANCELLED, bar_close_ms, reason
+        setup.setup_id, setup.state, SetupState.CANCELLED, bar_close_ms, reason
     )
     return StepOutcome(
         state=dataclasses.replace(state, setup=None), transitions=(transition,)

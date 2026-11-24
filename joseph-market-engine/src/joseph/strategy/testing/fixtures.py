@@ -54,7 +54,8 @@ def strategy_definitions() -> dict[str, ast.StrategyDefinition]:
         ``{"discount-ote-reversal": Long A, "premium-ote-short": Short B}``.
     """
     valid = load_fixture("strategy")["valid"]
-    assert isinstance(valid, list)
+    if not isinstance(valid, list):
+        raise AssertionError("strategy.fixture.json 'valid' must be a list")
     parsed = [ast.parse_definition(item) for item in valid]
     return {definition.strategy_id: definition for definition in parsed}
 

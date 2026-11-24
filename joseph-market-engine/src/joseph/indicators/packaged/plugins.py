@@ -6,8 +6,12 @@
 Each adapter declares the plugin metadata, exposes the Pine inputs as
 settings (same defaults and bounds as the Pine source), feeds the right data
 streams to the library object and maps its outputs onto the published
-values contract documented in ``joseph.domain.structures``. No indicator
-rule is implemented here.
+values contract documented in ``joseph.domain.structures``, which also
+defines the SMC abbreviations used here (BOS, CHOCH, FVG and so on). No
+indicator rule is implemented here.
+
+Further abbreviations: HH / HL / LH / LL higher high, higher low, lower high,
+lower low; ATR average true range; HTF higher timeframe.
 """
 
 from __future__ import annotations
@@ -39,6 +43,7 @@ from joseph.indicators.packaged import convert
 from joseph.indicators.sdk import protocol
 from joseph.indicators.sdk import settings as settings_lib
 
+# Short aliases keep the long metadata and settings tables readable.
 _K = structures.AoiKind
 _E = structures.StructureEventName
 _S = settings_lib.SettingSpec
@@ -47,6 +52,7 @@ _DEC = settings_lib.SettingKind.DECIMAL
 _ENUM = settings_lib.SettingKind.ENUM
 _D = decimal.Decimal
 _PINE_DIR = "PineScripts/tradingview_indicators"
+"""Directory of the Pine sources in the library repository."""
 
 _STRUCTURE_EVENTS: tuple[structures.StructureEventName, ...] = (
     _E.BOS_BULL,
@@ -129,7 +135,21 @@ def _swing_spec(default: int, maximum: int = 20) -> settings_lib.SettingSpec:
 
 
 class MarketStructurePlugin(bridge.PackagedPlugin):
-    """Current-timeframe swing structure (HH/HL/LH/LL, BOS/MSS)."""
+    """Current-timeframe swing structure (HH/HL/LH/LL, BOS/MSS).
+
+    Attributes:
+        PLUGIN_ID: ``"market_structure"``.
+        DISPLAY_NAME: Human-readable name.
+        DESCRIPTION: One-sentence description.
+        PINE_SOURCE: The ported ``smc_current_timeframe_structure.pine``.
+        OUTPUT_KINDS: Swing-high and swing-low lines (the unbroken pivots).
+        OUTPUT_EVENTS: Structure breaks and the HH/HL/LH/LL/EQH/EQL swing
+            labels.
+        SETTINGS: ``swing_length`` (default 3) and ``tick_size``.
+        EVENT_ALIASES: The library's MSS events, published as CHOCH.
+        KIND_ALIASES: The library's pending pivots, published as swing
+            lines.
+    """
 
     PLUGIN_ID = "market_structure"
     DISPLAY_NAME = "Current-timeframe structure"
@@ -187,7 +207,7 @@ class MarketStructurePlugin(bridge.PackagedPlugin):
         Returns:
             Objects by role.
         """
-        del timeframe
+        del timeframe  # Unused.
         return {
             "main": market_structure.MarketStructure(
                 float(tick), _int(settings, "swing_length")
@@ -212,9 +232,10 @@ class MarketStructurePlugin(bridge.PackagedPlugin):
         Returns:
             Library outputs and values.
         """
-        del settings
+        del settings  # Unused.
         indicator = _main(payload)
-        assert isinstance(indicator, market_structure.MarketStructure)
+        if not isinstance(indicator, market_structure.MarketStructure):
+            raise AssertionError("the payload holds no MarketStructure")
         result = indicator.update(convert.to_bar(bar.candle))
         raw = result.values
         code = raw.get("latest_event")
@@ -255,7 +276,7 @@ class MarketStructurePlugin(bridge.PackagedPlugin):
         Returns:
             Terminal state.
         """
-        del current_zone_ids
+        del current_zone_ids  # Unused.
         for event in events:
             pivot = event.meta.get("pivot_time_ms")
             if pivot is None:
@@ -267,7 +288,22 @@ class MarketStructurePlugin(bridge.PackagedPlugin):
 
 
 class DailyBiasPlugin(bridge.PackagedPlugin):
-    """Per-timeframe structure plus the Pine daily-bias dashboard."""
+    """Per-timeframe structure plus the Pine daily-bias dashboard.
+
+    Attributes:
+        PLUGIN_ID: ``"daily_bias"``.
+        DISPLAY_NAME: Human-readable name.
+        DESCRIPTION: One-sentence description.
+        PINE_SOURCE: The ported ``smc_daily_bias_dashboard.pine``.
+        OUTPUT_KINDS: Previous-day high and low and session high and low
+            lines.
+        OUTPUT_EVENTS: The series' structure breaks (BOS, CHOCH, initial).
+        SETTINGS: ``swing_length`` (default 3) and ``tick_size``.
+        AUX_LOOKBACK: Completed bars supplied per aux stream, enough to
+            confirm higher-timeframe pivots.
+        AUX: Timeframes read as completed aux bars by the dashboard: 1D,
+            4H and 1H.
+    """
 
     PLUGIN_ID = "daily_bias"
     DISPLAY_NAME = "Daily bias"
@@ -315,7 +351,7 @@ class DailyBiasPlugin(bridge.PackagedPlugin):
         Returns:
             Stream names.
         """
-        del settings, timeframe
+        del settings, timeframe  # Unused.
         return frozenset(
             {
                 protocol.CHART_STREAM,
@@ -335,7 +371,7 @@ class DailyBiasPlugin(bridge.PackagedPlugin):
         Returns:
             Bars per aux stream.
         """
-        del settings
+        del settings  # Unused.
         kind, _ = protocol.parse_stream(stream)
         return self.AUX_LOOKBACK if kind == "aux" else 0
 
@@ -355,7 +391,7 @@ class DailyBiasPlugin(bridge.PackagedPlugin):
         Returns:
             Objects by role.
         """
-        del timeframe
+        del timeframe  # Unused.
         span = _int(settings, "swing_length")
         return {
             "series": daily_bias.StructureTracker(span),
@@ -382,11 +418,13 @@ class DailyBiasPlugin(bridge.PackagedPlugin):
         Returns:
             Library outputs and values.
         """
-        del settings
+        del settings  # Unused.
         tracker = _main(payload, "series")
         dashboard = _main(payload, "dashboard")
-        assert isinstance(tracker, daily_bias.StructureTracker)
-        assert isinstance(dashboard, daily_bias.DailyBiasDashboard)
+        if not isinstance(tracker, daily_bias.StructureTracker):
+            raise AssertionError("the payload holds no StructureTracker")
+        if not isinstance(dashboard, daily_bias.DailyBiasDashboard):
+            raise AssertionError("the payload holds no DailyBiasDashboard")
         chart_bar = convert.to_bar(bar.candle)
         structure = tracker.update(chart_bar)
         dashboard.push_daily(self.new_aux(payload, bar, tfs.Timeframe.D1))
@@ -429,7 +467,18 @@ class DailyBiasPlugin(bridge.PackagedPlugin):
 
 
 class FvgIfvgPlugin(bridge.PackagedPlugin):
-    """Fair value gaps and their inversions."""
+    """Fair value gaps and their inversions.
+
+    Attributes:
+        PLUGIN_ID: ``"fvg_ifvg"``.
+        DISPLAY_NAME: Human-readable name.
+        DESCRIPTION: One-sentence description.
+        PINE_SOURCE: The ported ``smc_fvg_ifvg.pine``.
+        OUTPUT_KINDS: FVG and IFVG zones.
+        OUTPUT_EVENTS: Gap formation and inversion, invalidation and expiry.
+        SETTINGS: Minimum gap in ticks and ATR(14) units, zone count and age
+            limits, the first-test score factor and ``tick_size``.
+    """
 
     PLUGIN_ID = "fvg_ifvg"
     DISPLAY_NAME = "FVG / IFVG"
@@ -500,7 +549,7 @@ class FvgIfvgPlugin(bridge.PackagedPlugin):
         Returns:
             Warm-up bars.
         """
-        del settings
+        del settings  # Unused.
         return 14
 
     def _build(
@@ -519,7 +568,7 @@ class FvgIfvgPlugin(bridge.PackagedPlugin):
         Returns:
             Objects by role.
         """
-        del timeframe
+        del timeframe  # Unused.
         return {
             "main": fvg_ifvg.FvgIfvg(
                 float(tick),
@@ -551,15 +600,29 @@ class FvgIfvgPlugin(bridge.PackagedPlugin):
         Returns:
             Library outputs and values.
         """
-        del settings
+        del settings  # Unused.
         indicator = _main(payload)
-        assert isinstance(indicator, fvg_ifvg.FvgIfvg)
+        if not isinstance(indicator, fvg_ifvg.FvgIfvg):
+            raise AssertionError("the payload holds no FvgIfvg")
         result = indicator.update(convert.to_bar(bar.candle))
         return _zone_step(result, step)
 
 
 class OrderBreakerBlocksPlugin(bridge.PackagedPlugin):
-    """Order blocks and breaker blocks."""
+    """Order blocks and breaker blocks.
+
+    Attributes:
+        PLUGIN_ID: ``"order_breaker_blocks"``.
+        DISPLAY_NAME: Human-readable name.
+        DESCRIPTION: One-sentence description.
+        PINE_SOURCE: The ported ``smc_order_breaker_blocks.pine``.
+        OUTPUT_KINDS: OB and breaker zones.
+        OUTPUT_EVENTS: Block formation and conversion to a breaker,
+            invalidation and expiry.
+        SETTINGS: Pivot length, block search window, minimum break body in
+            ATR(14) units, zone count and age limits, the first-touch score
+            factor and ``tick_size``.
+    """
 
     PLUGIN_ID = "order_breaker_blocks"
     DISPLAY_NAME = "Order / breaker blocks"
@@ -649,7 +712,7 @@ class OrderBreakerBlocksPlugin(bridge.PackagedPlugin):
         Returns:
             Objects by role.
         """
-        del timeframe
+        del timeframe  # Unused.
         return {
             "main": order_breaker_blocks.OrderBreakerBlocks(
                 float(tick),
@@ -684,15 +747,28 @@ class OrderBreakerBlocksPlugin(bridge.PackagedPlugin):
         Returns:
             Library outputs and values.
         """
-        del settings
+        del settings  # Unused.
         indicator = _main(payload)
-        assert isinstance(indicator, order_breaker_blocks.OrderBreakerBlocks)
+        if not isinstance(indicator, order_breaker_blocks.OrderBreakerBlocks):
+            raise AssertionError("the payload holds no OrderBreakerBlocks")
         result = indicator.update(convert.to_bar(bar.candle))
         return _zone_step(result, step)
 
 
 class LiquiditySweepsPlugin(bridge.PackagedPlugin):
-    """Buy-side / sell-side liquidity pools and their sweeps."""
+    """Buy-side / sell-side liquidity pools and their sweeps.
+
+    Attributes:
+        PLUGIN_ID: ``"liquidity_sweeps"``.
+        DISPLAY_NAME: Human-readable name.
+        DESCRIPTION: One-sentence description.
+        PINE_SOURCE: The ported ``smc_liquidity_sweeps.pine``.
+        OUTPUT_KINDS: BSL, SSL, EQH and EQL lines.
+        OUTPUT_EVENTS: Sweeps and breaks of each side, and expiry.
+        SETTINGS: Pivot length, equal-level tolerance (ticks, ATR units,
+            window), sweep and scoring thresholds, pool count and age limits
+            and ``tick_size``.
+    """
 
     PLUGIN_ID = "liquidity_sweeps"
     DISPLAY_NAME = "Liquidity sweeps"
@@ -819,7 +895,7 @@ class LiquiditySweepsPlugin(bridge.PackagedPlugin):
         Returns:
             Objects by role.
         """
-        del timeframe
+        del timeframe  # Unused.
         return {
             "main": liquidity_sweeps.LiquiditySweeps(
                 float(tick),
@@ -856,9 +932,10 @@ class LiquiditySweepsPlugin(bridge.PackagedPlugin):
         Returns:
             Library outputs and values.
         """
-        del settings
+        del settings, step  # Unused.
         indicator = _main(payload)
-        assert isinstance(indicator, liquidity_sweeps.LiquiditySweeps)
+        if not isinstance(indicator, liquidity_sweeps.LiquiditySweeps):
+            raise AssertionError("the payload holds no LiquiditySweeps")
         result = indicator.update(convert.to_bar(bar.candle))
         live = [zone for zone in result.zones if zone.state != "swept"]
         return bridge.LibraryStep(
@@ -888,6 +965,18 @@ class OrderFlowPressurePlugin(bridge.PackagedPlugin):
     ``trade_classification``, snapshot method ``trade_classification``).
     Otherwise, and always with ``"estimate"``, the Pine intrabar
     candle-direction estimate.
+
+    Attributes:
+        PLUGIN_ID: ``"order_flow_pressure"``.
+        DISPLAY_NAME: Human-readable name.
+        DESCRIPTION: One-sentence description.
+        INTRABAR_AUTO: The ``intrabar_tf`` choice resolved per chart
+            timeframe by TradingView's rule (see ``intrabar_timeframe``).
+        PINE_SOURCE: The ported ``smc_order_flow_pressure.pine``.
+        OUTPUT_EVENTS: Buyer and seller failures and breakouts beyond the
+            prior range.
+        SETTINGS: Delta source, intrabar timeframe and coverage minimums,
+            the lookback and signal thresholds, and ``tick_size``.
     """
 
     PLUGIN_ID = "order_flow_pressure"
@@ -898,7 +987,6 @@ class OrderFlowPressurePlugin(bridge.PackagedPlugin):
         "with failed-auction and breakout signals beyond the 20-bar range."
     )
     INTRABAR_AUTO = "auto"
-    """Intrabar choice resolved per chart timeframe (TradingView's rule)."""
     PINE_SOURCE = f"{_PINE_DIR}/smc_order_flow_pressure.pine"
     OUTPUT_EVENTS = (
         _E.BUYER_FAILURE,
@@ -1005,9 +1093,8 @@ class OrderFlowPressurePlugin(bridge.PackagedPlugin):
         """
         return _int(settings, "lookback_bars") + 1
 
-    @classmethod
     def intrabar_timeframe(
-        cls,
+        self,
         settings: Mapping[str, settings_lib.SettingValue],
         timeframe: tfs.Timeframe | None,
     ) -> tfs.Timeframe | None:
@@ -1027,7 +1114,7 @@ class OrderFlowPressurePlugin(bridge.PackagedPlugin):
             The intrabar timeframe, or ``None`` when there is none.
         """
         choice = settings_lib.get_str(settings, "intrabar_tf")
-        if choice != cls.INTRABAR_AUTO:
+        if choice != self.INTRABAR_AUTO:
             return tfs.parse(choice)
         if timeframe is None:
             return tfs.Timeframe.M1
@@ -1097,7 +1184,7 @@ class OrderFlowPressurePlugin(bridge.PackagedPlugin):
         Returns:
             Objects by role.
         """
-        del timeframe
+        del timeframe  # Unused.
         return {
             "main": order_flow_pressure.OrderFlowPressure(
                 float(tick),
@@ -1142,7 +1229,8 @@ class OrderFlowPressurePlugin(bridge.PackagedPlugin):
             Library outputs and values.
         """
         indicator = _main(payload)
-        assert isinstance(indicator, order_flow_pressure.OrderFlowPressure)
+        if not isinstance(indicator, order_flow_pressure.OrderFlowPressure):
+            raise AssertionError("the payload holds no OrderFlowPressure")
         intrabar_tf = self.intrabar_timeframe(settings, bar.candle.timeframe)
         intrabars = [
             convert.to_bar(candle)
@@ -1157,12 +1245,11 @@ class OrderFlowPressurePlugin(bridge.PackagedPlugin):
         coverage = convert.ratio(_opt_float(raw.get("coverage_percent")), 2)
         method = "candle_direction"
         if raw.get("method") == "taker_volume":
-            method = (
-                "trade_classification"
-                if bar.candle.buy_volume_method
-                is market.BuyVolumeMethod.CLASSIFIED
-                else "taker_volume"
-            )
+            classified = market.BuyVolumeMethod.CLASSIFIED
+            if bar.candle.buy_volume_method is classified:
+                method = "trade_classification"
+            else:
+                method = "taker_volume"
         values: dict[str, structures.ValueType] = {
             "delta_pct": convert.ratio(_opt_float(raw.get("delta_percent")), 2),
             "coverage_pct": coverage,
@@ -1189,7 +1276,19 @@ class OrderFlowPressurePlugin(bridge.PackagedPlugin):
 
 
 class AuctionValueAreasPlugin(bridge.PackagedPlugin):
-    """Volume-profile value areas of the last 24 hours and 20 bars."""
+    """Volume-profile value areas of the last 24 hours and 20 bars.
+
+    Attributes:
+        PLUGIN_ID: ``"auction_value_areas"``.
+        DISPLAY_NAME: Human-readable name.
+        DESCRIPTION: One-sentence description.
+        PINE_SOURCE: The ported ``smc_auction_value_areas.pine``.
+        TIMEFRAMES: Seconds charts and 1m to 30m charts.
+        OUTPUT_KINDS: VAH, POC and VAL lines.
+        OUTPUT_EVENTS: A value-area update.
+        SETTINGS: Profiled 1H and chart bar counts, profile rows, the value
+            area's volume share and ``tick_size``.
+    """
 
     PLUGIN_ID = "auction_value_areas"
     DISPLAY_NAME = "Auction value areas"
@@ -1272,7 +1371,7 @@ class AuctionValueAreasPlugin(bridge.PackagedPlugin):
         Returns:
             Stream names.
         """
-        del settings, timeframe
+        del settings, timeframe  # Unused.
         return frozenset(
             {protocol.CHART_STREAM, protocol.aux_stream(tfs.Timeframe.H1)}
         )
@@ -1339,9 +1438,10 @@ class AuctionValueAreasPlugin(bridge.PackagedPlugin):
         Returns:
             Library outputs and values.
         """
-        del settings
+        del settings  # Unused.
         indicator = _main(payload)
-        assert isinstance(indicator, auction_value_areas.AuctionValueAreas)
+        if not isinstance(indicator, auction_value_areas.AuctionValueAreas):
+            raise AssertionError("the payload holds no AuctionValueAreas")
         indicator.push_hourly(self.new_aux(payload, bar, tfs.Timeframe.H1))
         result = indicator.update(convert.to_bar(bar.candle))
         values = {
@@ -1361,7 +1461,21 @@ class AuctionValueAreasPlugin(bridge.PackagedPlugin):
 
 
 class PremiumDiscountOtePlugin(bridge.PackagedPlugin):
-    """Dealing range premium / discount and OTE zones (LuxAlgo-derived)."""
+    """Dealing range premium / discount and OTE zones (LuxAlgo-derived).
+
+    Attributes:
+        PLUGIN_ID: ``"premium_discount_ote"``.
+        DISPLAY_NAME: Human-readable name.
+        DESCRIPTION: One-sentence description, with the licence of the
+            LuxAlgo source.
+        PINE_SOURCE: The ported ``smc_premium_discount_ote_zones.pine``.
+        OUTPUT_KINDS: Premium, discount, equilibrium and OTE zones.
+        OUTPUT_EVENTS: A dealing-range reset.
+        EVENT_ALIASES: The library's new-range event, published as
+            ``RANGE_RESET``.
+        SETTINGS: ``swing_length`` (default 10), close or wick break
+            confirmation and ``tick_size``.
+    """
 
     PLUGIN_ID = "premium_discount_ote"
     DISPLAY_NAME = "Premium / discount / OTE"
@@ -1417,7 +1531,7 @@ class PremiumDiscountOtePlugin(bridge.PackagedPlugin):
         Returns:
             Objects by role.
         """
-        del timeframe
+        del timeframe  # Unused.
         confirmation = settings_lib.get_str(settings, "break_confirmation")
         return {
             "main": premium_discount_ote.PremiumDiscountOte(
@@ -1447,9 +1561,10 @@ class PremiumDiscountOtePlugin(bridge.PackagedPlugin):
         Returns:
             Library outputs and values.
         """
-        del settings
+        del settings  # Unused.
         indicator = _main(payload)
-        assert isinstance(indicator, premium_discount_ote.PremiumDiscountOte)
+        if not isinstance(indicator, premium_discount_ote.PremiumDiscountOte):
+            raise AssertionError("the payload holds no PremiumDiscountOte")
         result = indicator.update(convert.to_bar(bar.candle))
         raw = result.values
         premium = _opt_bool(raw.get("in_premium"))
@@ -1547,6 +1662,13 @@ class AnchoredVwapPlugin(bridge.PackagedPlugin):
     calendar's ``1d``, ``1w`` and ``1M`` bars (one session, the sessions of
     an ISO week or calendar month in exchange time): the adapter restarts a
     time-anchored library study at each such bar.
+
+    Attributes:
+        PLUGIN_ID: ``"anchored_vwap"``.
+        DISPLAY_NAME: Human-readable name.
+        DESCRIPTION: One-sentence description.
+        SETTINGS: Anchor period or ``time`` with ``anchor_ms``, the price
+            source, three band multipliers and ``tick_size``.
     """
 
     PLUGIN_ID = "anchored_vwap"
@@ -1655,36 +1777,7 @@ class AnchoredVwapPlugin(bridge.PackagedPlugin):
         anchor_ms = _effective_anchor(settings, timeframe, calendar)
         if anchor == "time" and anchor_ms == 0:
             raise ValueError("anchored_vwap: anchor_ms is required for time")
-        return {"main": self._library(settings, tick, anchor, anchor_ms)}
-
-    @staticmethod
-    def _library(
-        settings: Mapping[str, settings_lib.SettingValue],
-        tick: decimal.Decimal,
-        anchor: str,
-        anchor_ms: int,
-    ) -> anchored_vwap.AnchoredVwap:
-        """Builds one library study.
-
-        Args:
-            settings: Resolved settings.
-            tick: Tick size.
-            anchor: Library anchor mode.
-            anchor_ms: Anchor time for ``time``.
-
-        Returns:
-            The study.
-        """
-        return anchored_vwap.AnchoredVwap(
-            float(tick),
-            anchor=anchor,
-            anchor_time_ms=anchor_ms,
-            source=settings_lib.get_str(settings, "source"),
-            band_multipliers=tuple(
-                bridge.float_setting(settings, f"band_{index}")
-                for index in (1, 2, 3)
-            ),
-        )
+        return {"main": _vwap_study(settings, tick, anchor, anchor_ms)}
 
     def _period_study(
         self,
@@ -1714,7 +1807,7 @@ class AnchoredVwapPlugin(bridge.PackagedPlugin):
             return _main(payload)
         period = calendar.floor(period_tf, candle.start_ms)
         if payload.memo.get("period_ms") != period:
-            payload.objects["main"] = self._library(
+            payload.objects["main"] = _vwap_study(
                 settings, payload.tick, "time", period
             )
             payload.memo["period_ms"] = period
@@ -1739,7 +1832,8 @@ class AnchoredVwapPlugin(bridge.PackagedPlugin):
             Library outputs and values.
         """
         indicator = self._period_study(payload, bar.candle, settings)
-        assert isinstance(indicator, anchored_vwap.AnchoredVwap)
+        if not isinstance(indicator, anchored_vwap.AnchoredVwap):
+            raise AssertionError("the payload holds no AnchoredVwap")
         raw = indicator.update(convert.to_bar(bar.candle)).values
         started = _opt_int(raw.get("anchor_time_ms"))
         in_window = True
@@ -1753,11 +1847,12 @@ class AnchoredVwapPlugin(bridge.PackagedPlugin):
         keys = (
             "vwap",
             "stdev",
-            *(
-                f"{side}_{index}"
-                for index in (1, 2, 3)
-                for side in ("upper", "lower")
-            ),
+            "upper_1",
+            "lower_1",
+            "upper_2",
+            "lower_2",
+            "upper_3",
+            "lower_3",
         )
         values: dict[str, structures.ValueType] = {
             key: _price(raw.get(key), step) if in_window else None
@@ -1778,6 +1873,13 @@ class RegressionChannelPlugin(bridge.PackagedPlugin):
     with bands at ``deviations`` sample standard deviations of the
     residuals. An anchor outside the computed window yields ``None`` values
     and ``anchor_in_window`` False.
+
+    Attributes:
+        PLUGIN_ID: ``"regression_channel"``.
+        DISPLAY_NAME: Human-readable name.
+        DESCRIPTION: One-sentence description.
+        SETTINGS: Rolling ``length`` or ``anchor_ms``, the price source,
+            band width in standard deviations and ``tick_size``.
     """
 
     PLUGIN_ID = "regression_channel"
@@ -1845,7 +1947,9 @@ class RegressionChannelPlugin(bridge.PackagedPlugin):
         Returns:
             Objects by role.
         """
-        return self._objects(settings, tick, timeframe, sessions.CONTINUOUS)
+        return _regression_objects(
+            settings, tick, timeframe, sessions.CONTINUOUS
+        )
 
     def _build_series(
         self,
@@ -1863,40 +1967,12 @@ class RegressionChannelPlugin(bridge.PackagedPlugin):
         Returns:
             Objects by role.
         """
-        return self._objects(
+        return _regression_objects(
             settings,
             tick,
             header.timeframe,
             sessions.for_instrument(header.instrument_id),
         )
-
-    @staticmethod
-    def _objects(
-        settings: Mapping[str, settings_lib.SettingValue],
-        tick: decimal.Decimal,
-        timeframe: tfs.Timeframe,
-        calendar: sessions.BarCalendar,
-    ) -> dict[str, object]:
-        """Creates the library object for a calendar.
-
-        Args:
-            settings: Resolved settings.
-            tick: Tick size.
-            timeframe: Series timeframe.
-            calendar: Instrument calendar.
-
-        Returns:
-            Objects by role.
-        """
-        return {
-            "main": regression_channel.RegressionChannel(
-                float(tick),
-                length=_int(settings, "length"),
-                anchor_time_ms=_effective_anchor(settings, timeframe, calendar),
-                source=settings_lib.get_str(settings, "source"),
-                deviations=bridge.float_setting(settings, "deviations"),
-            )
-        }
 
     def _advance(
         self,
@@ -1917,7 +1993,8 @@ class RegressionChannelPlugin(bridge.PackagedPlugin):
             Library outputs and values.
         """
         indicator = _main(payload)
-        assert isinstance(indicator, regression_channel.RegressionChannel)
+        if not isinstance(indicator, regression_channel.RegressionChannel):
+            raise AssertionError("the payload holds no RegressionChannel")
         raw = indicator.update(convert.to_bar(bar.candle)).values
         started = _opt_int(raw.get("start_time_ms"))
         wanted = _effective_anchor(
@@ -1951,6 +2028,66 @@ class RegressionChannelPlugin(bridge.PackagedPlugin):
         values["bars"] = (_opt_int(raw.get("bars")) or 0) if in_window else 0
         values["anchor_in_window"] = in_window
         return bridge.LibraryStep(values=values)
+
+
+def _vwap_study(
+    settings: Mapping[str, settings_lib.SettingValue],
+    tick: decimal.Decimal,
+    anchor: str,
+    anchor_ms: int,
+) -> anchored_vwap.AnchoredVwap:
+    """Builds one anchored-VWAP library study.
+
+    Args:
+        settings: Resolved ``anchored_vwap`` settings.
+        tick: Tick size.
+        anchor: Library anchor mode.
+        anchor_ms: Anchor time for ``time``.
+
+    Returns:
+        The study.
+    """
+    return anchored_vwap.AnchoredVwap(
+        float(tick),
+        anchor=anchor,
+        anchor_time_ms=anchor_ms,
+        source=settings_lib.get_str(settings, "source"),
+        band_multipliers=tuple(
+            bridge.float_setting(settings, f"band_{index}")
+            for index in (1, 2, 3)
+        ),
+    )
+
+
+def _regression_objects(
+    settings: Mapping[str, settings_lib.SettingValue],
+    tick: decimal.Decimal,
+    timeframe: tfs.Timeframe,
+    calendar: sessions.BarCalendar,
+) -> dict[str, object]:
+    """Creates the regression-channel library object for a calendar.
+
+    Args:
+        settings: Resolved ``regression_channel`` settings.
+        tick: Tick size.
+        timeframe: Series timeframe.
+        calendar: Instrument calendar, which aligns the anchor bar.
+
+    Returns:
+        Objects by role.
+
+    Raises:
+        ValueError: If the anchor precedes the calendar's first session.
+    """
+    return {
+        "main": regression_channel.RegressionChannel(
+            float(tick),
+            length=_int(settings, "length"),
+            anchor_time_ms=_effective_anchor(settings, timeframe, calendar),
+            source=settings_lib.get_str(settings, "source"),
+            deviations=bridge.float_setting(settings, "deviations"),
+        )
+    }
 
 
 def _zone_step(

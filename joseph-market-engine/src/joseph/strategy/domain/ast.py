@@ -17,6 +17,7 @@ import json
 import re
 from typing import Annotated
 from typing import Literal
+from typing import TypeAlias
 
 import pydantic
 
@@ -74,38 +75,56 @@ def _parse_non_negative(value: object) -> decimal.Decimal:
     return result
 
 
-DecimalStr = Annotated[
+DecimalStr: TypeAlias = Annotated[
     decimal.Decimal,
     pydantic.BeforeValidator(_parse_decimal_string),
     pydantic.PlainSerializer(decimals.format_decimal, return_type=str),
 ]
 """Decimal transported as a contract ``DecimalString``."""
 
-NonNegativeDecimalStr = Annotated[
+NonNegativeDecimalStr: TypeAlias = Annotated[
     decimal.Decimal,
     pydantic.BeforeValidator(_parse_non_negative),
     pydantic.PlainSerializer(decimals.format_decimal, return_type=str),
 ]
 """Non-negative decimal transported as a string."""
 
-StrictInt = Annotated[int, pydantic.Strict()]
+StrictInt: TypeAlias = Annotated[int, pydantic.Strict()]
 """Integer that rejects strings and floats."""
 
-StrictBool = Annotated[bool, pydantic.Strict()]
+StrictBool: TypeAlias = Annotated[bool, pydantic.Strict()]
 """Boolean that rejects truthy strings and numbers."""
 
-NodeId = Annotated[str, pydantic.Field(max_length=64)]
-NodeLabel = Annotated[str, pydantic.Field(max_length=200)]
-Bars200 = Annotated[int, pydantic.Strict(), pydantic.Field(ge=0, le=200)]
-Bars200Min1 = Annotated[int, pydantic.Strict(), pydantic.Field(ge=1, le=200)]
-InstrumentIdStr = Annotated[str, pydantic.Field(pattern=_INSTRUMENT_PATTERN)]
+NodeId: TypeAlias = Annotated[str, pydantic.Field(max_length=64)]
+"""Editor id of a node, echoed in the reason tree."""
 
-ZoneName = Literal["PREMIUM", "DISCOUNT", "EQUILIBRIUM", "OTE"]
-Side = Literal["bullish", "bearish"]
+NodeLabel: TypeAlias = Annotated[str, pydantic.Field(max_length=200)]
+"""Display label of a node."""
+
+Bars200: TypeAlias = Annotated[
+    int, pydantic.Strict(), pydantic.Field(ge=0, le=200)
+]
+"""Bar count from 0 to 200."""
+
+Bars200Min1: TypeAlias = Annotated[
+    int, pydantic.Strict(), pydantic.Field(ge=1, le=200)
+]
+"""Bar count from 1 to 200."""
+
+InstrumentIdStr: TypeAlias = Annotated[
+    str, pydantic.Field(pattern=_INSTRUMENT_PATTERN)
+]
+"""Canonical instrument id text, e.g. ``binance:perp:BTCUSDT``."""
+
+ZoneName: TypeAlias = Literal["PREMIUM", "DISCOUNT", "EQUILIBRIUM", "OTE"]
+"""Dealing-range zone tested by ``PRICE_IN_ZONE``."""
+
+Side: TypeAlias = Literal["bullish", "bearish"]
+"""Required AOI side."""
 
 
 class _Model(pydantic.BaseModel):
-    """Base class: immutable, strict about unknown fields."""
+    """Immutable model base that rejects unknown fields."""
 
     model_config = pydantic.ConfigDict(extra="forbid", frozen=True)
 
@@ -382,7 +401,7 @@ class MarketOperand(_Model):
     ]
 
 
-Operand = Annotated[
+Operand: TypeAlias = Annotated[
     ConstOperand | CandleOperand | IndicatorOperand | MarketOperand,
     pydantic.Field(discriminator="kind"),
 ]
@@ -433,6 +452,9 @@ class InRangeNode(_Model):
 
 class CrossesNode(_Model):
     """``left`` crossed ``right`` between the previous and current bar.
+
+    ``ABOVE``: at or below on the previous bar, above on the current one;
+    ``BELOW`` mirrors it.
 
     Attributes:
         op: Discriminator ``CROSSES``.
@@ -522,7 +544,7 @@ class RiskRewardNode(_Model):
     min_rr: NonNegativeDecimalStr
 
 
-RuleNode = Annotated[
+RuleNode: TypeAlias = Annotated[
     AllNode
     | AnyNode
     | NotNode
@@ -543,7 +565,7 @@ RuleNode = Annotated[
 ]
 """Discriminated union of every rule node on ``op``."""
 
-AnyRuleNode = (
+AnyRuleNode: TypeAlias = (
     AllNode
     | AnyNode
     | NotNode
@@ -606,7 +628,7 @@ class RiskModel(_Model):
     max_risk_pct_equity: NonNegativeDecimalStr | None = None
 
 
-ChannelName = Literal["UI", "TELEGRAM", "LINE", "EMAIL", "WEBHOOK"]
+ChannelName: TypeAlias = Literal["UI", "TELEGRAM", "LINE", "EMAIL", "WEBHOOK"]
 """Notification channels selectable in a strategy."""
 
 
@@ -619,7 +641,7 @@ def _default_channels() -> list[ChannelName]:
     return ["UI"]
 
 
-SignalKindName = Literal[
+SignalKindName: TypeAlias = Literal[
     "WATCHING_AOI",
     "PRE_SIGNAL",
     "ENTRY_CONFIRMED",
@@ -674,7 +696,8 @@ class DataPolicy(_Model):
     """Input freshness policy.
 
     Attributes:
-        max_data_age_ms: Maximum age of the evaluated bar at evaluation.
+        max_data_age_ms: Maximum time from the evaluated bar's close to the
+            evaluation; an older bar evaluates to UNKNOWN.
         allow_rest_poll: Whether polled (POLL) candles are acceptable.
     """
 
@@ -772,6 +795,8 @@ def parse_definition(payload: object) -> StrategyDefinition:
     return StrategyDefinition.model_validate(payload)
 
 
+# The recursive models refer to ``RuleNode`` before it is defined; resolve
+# those forward references once every node class exists.
 for _model in (
     AllNode,
     AnyNode,

@@ -36,10 +36,12 @@ from __future__ import annotations
 
 import collections
 import dataclasses
+import itertools
 from collections.abc import Iterable
 from collections.abc import Mapping
 from collections.abc import Sequence
 from typing import Any
+from typing import TypeAlias
 
 from joseph.domain import errors
 from joseph.domain import instruments
@@ -53,9 +55,17 @@ from joseph.indicators.sdk import registry as registry_lib
 from joseph.indicators.sdk import state_codec
 
 _MIN_STORE = 64
+"""Candles kept per timeframe store at least, whatever the dependencies."""
+
 _NO_LIMIT = 2**62
+"""``force_until`` value that forces every pending item."""
+
 _VISIBLE_CACHE = 4_096
-"""Memoized visibility watermarks per engine (exchange calendars only)."""
+"""Size at which the memo of visibility watermarks is cleared.
+
+The memo exists only for exchange calendars, where the watermark needs a
+session lookup.
+"""
 
 _SNAPSHOT_TYPES: tuple[type, ...] = (
     structures.IndicatorSnapshot,
@@ -71,8 +81,12 @@ _SNAPSHOT_TYPES: tuple[type, ...] = (
     timeframes.Timeframe,
 )
 
-EventKey = tuple[int, int, int, int, int]
-"""Canonical event order: confirmed, duration, series, bar, index."""
+EventKey: TypeAlias = tuple[int, int, int, int, int]
+"""Canonical event order key.
+
+``(confirmed_at_ms, timeframe duration_ms, series index, series bar count,
+position in the bar's output)``.
+"""
 
 
 @dataclasses.dataclass(frozen=True, slots=True)
@@ -134,7 +148,8 @@ class _Series:
         timeframe: Series timeframe.
         state: Plugin state.
         intrabar_tfs: Intrabar dependency timeframes.
-        aux: Aux dependency timeframe to lookback.
+        aux: Aux dependency timeframes, each mapped to the number of
+            completed bars supplied per run.
         queue: Closed bars waiting to run, oldest first.
         snapshot: Cached snapshot after the last processed bar.
         history: Snapshots not yet superseded for pending frames; a series
@@ -199,7 +214,11 @@ def series_key(plugin_id: str, timeframe: timeframes.Timeframe) -> str:
 
 
 class IndicatorEngine:
-    """Runs plugins across timeframes for one instrument."""
+    """Runs plugins across timeframes for one instrument.
+
+    Attributes:
+        stats: Counters of degraded or rejected input since construction.
+    """
 
     def __init__(
         self,
@@ -239,12 +258,12 @@ class IndicatorEngine:
             plugin = registry.get(plugin_id)
             for tf in spec.timeframes:
                 self._add_series(plugin, tf, spec.settings, capacity)
-        self._timeframes = frozenset(
-            {config.signal_timeframe}
-            | {s.timeframe for s in self._series.values()}
-            | {tf for s in self._series.values() for tf in s.intrabar_tfs}
-            | {tf for s in self._series.values() for tf in s.aux}
-        )
+        consumed = {config.signal_timeframe}
+        for series in self._series.values():
+            consumed.add(series.timeframe)
+            consumed.update(series.intrabar_tfs)
+            consumed.update(series.aux)
+        self._timeframes = frozenset(consumed)
         for tf in self._timeframes:
             self._store[tf] = collections.deque(maxlen=capacity[tf])
             self._watermark[tf] = -1
@@ -305,17 +324,17 @@ class IndicatorEngine:
 
     @property
     def required_timeframes(self) -> frozenset[timeframes.Timeframe]:
-        """Returns every timeframe the engine consumes."""
+        """Every timeframe the engine consumes; others are ignored."""
         return self._timeframes
 
     @property
     def instrument_id(self) -> instruments.InstrumentId:
-        """Returns the engine's instrument."""
+        """The engine's instrument."""
         return self._instrument_id
 
     @property
     def calendar(self) -> sessions.BarCalendar:
-        """Returns the instrument's session calendar."""
+        """The instrument's session calendar."""
         return self._calendar
 
     def _visible_through(self, tf: timeframes.Timeframe, end_ms: int) -> int:
@@ -419,8 +438,10 @@ class IndicatorEngine:
         Returns:
             All frames, oldest first.
         """
+        # Event-time order: by close, and lower timeframes first so that
+        # intrabars arrive before the bar that contains them.
         ordered = sorted(
-            (c for series in candles_by_tf.values() for c in series),
+            itertools.chain.from_iterable(candles_by_tf.values()),
             key=lambda c: (c.end_ms, c.timeframe.duration_ms, c.start_ms),
         )
         frames = self.feed(ordered)
@@ -762,9 +783,15 @@ class IndicatorEngine:
         )
         self._events = [
             (
-                (int(k[0]), int(k[1]), int(k[2]), int(k[3]), int(k[4])),
+                (
+                    int(key[0]),
+                    int(key[1]),
+                    int(key[2]),
+                    int(key[3]),
+                    int(key[4]),
+                ),
                 state_codec.load(event, event_types),
             )
-            for k, event in blob["events"]
+            for key, event in blob["events"]
         ]
         self._signal_missing = int(blob["signal_missing"])

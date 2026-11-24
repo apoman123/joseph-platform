@@ -67,7 +67,8 @@ class StrategyVersion:
     """Immutable definition plus mutable lifecycle metadata.
 
     The definition and its hash never change after creation; only
-    ``state`` and ``activation`` move through the lifecycle.
+    ``state`` and ``activation`` move through the lifecycle, each change
+    making a new copy (the record itself is frozen).
 
     Attributes:
         strategy_id: Strategy slug.
@@ -97,7 +98,7 @@ class StrategyVersion:
 
     @property
     def strategy_version_id(self) -> str:
-        """Returns ``{strategy_id}:v{version}``."""
+        """The version id, ``{strategy_id}:v{version}``."""
         return version_id(self.strategy_id, self.version)
 
     def to_contract(self) -> dict[str, object]:

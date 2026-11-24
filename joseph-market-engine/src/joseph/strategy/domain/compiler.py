@@ -142,7 +142,7 @@ class ValidationResult:
 
     @property
     def valid(self) -> bool:
-        """Returns True when there are no errors."""
+        """Whether there are no blocking errors."""
         return not self.errors
 
     def to_contract(self) -> dict[str, object]:
@@ -368,6 +368,15 @@ class _Collector:
     """Accumulates issues and requirements while visiting the tree.
 
     Attributes:
+        definition: Definition being compiled.
+        signal_tf: Signal timeframe of the definition.
+        available: Plugin ids currently registered.
+        unsupported_ops: Operators that are disabled or removed.
+        calendars: Session calendars of every universe venue; lower
+            timeframes must nest on all of them.
+        exchange_venues: Universe venues (values) that list securities or
+            publish rates, which have no funding or open interest.
+        only_exchanges: Whether every universe venue is such a venue.
         errors: Blocking issues.
         warnings: Non-blocking issues.
         plugins: Required plugin timeframes.
@@ -391,9 +400,10 @@ class _Collector:
         self.available = available
         self.unsupported_ops = unsupported_ops
         venues = definition.universe.venues
-        self.calendars = frozenset(
-            calendar for venue in venues for calendar in venue_calendars(venue)
-        )
+        calendars: set[sessions.BarCalendar] = set()
+        for venue in venues:
+            calendars.update(venue_calendars(venue))
+        self.calendars = frozenset(calendars)
         self.exchange_venues = frozenset(
             venue.value
             for venue in venues
@@ -913,8 +923,8 @@ def compile_strategy(
 
     Args:
         definition: Schema-valid definition.
-        available_plugins: Registered indicator plugin ids; defaults to the
-            seven first-party plugins.
+        available_plugins: Registered indicator plugin ids; defaults to
+            every first-party plugin (``catalog.DEFAULT_PLUGINS``).
         unsupported_ops: Operators disabled or removed from this build.
 
     Returns:

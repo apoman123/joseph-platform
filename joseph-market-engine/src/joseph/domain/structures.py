@@ -3,15 +3,25 @@
 
 """Market-structure outputs shared by indicators and the strategy engine.
 
-Indicator plugins publish ``Aoi`` records, ``StructureEvent`` occurrences and
-scalar ``values`` inside an ``IndicatorSnapshot``. The strategy engine reads
-only these published types, never a plugin's private state.
+Indicator plugins publish ``Aoi`` (area of interest, AOI) records,
+``StructureEvent`` occurrences and scalar ``values`` inside an
+``IndicatorSnapshot``. The strategy engine reads only these published types,
+never a plugin's private state.
+
+Every plugin is an adapter around the external ``smc_indicators`` library
+(``apoman123/PineScripts``), a line-by-line port of the Pine sources; its
+``anchored_vwap`` and ``regression_channel`` modules are Python-native
+studies with no Pine source.
+
+Abbreviations: BOS break of structure, CHOCH change of character, MSS market
+structure shift, FVG fair value gap, IFVG inverted FVG, OB order block, BSL /
+SSL buy-side / sell-side liquidity, EQH / EQL equal highs / lows, OTE optimal
+trade entry, VAH / POC / VAL value-area high / point of control / value-area
+low, PDH / PDL previous-day high / low, ATR average true range, VWAP
+volume-weighted average price.
 
 Published values contract (``IndicatorSnapshot.values`` keys per plugin; all
 decimals are ``Decimal`` objects in-process and strings on the wire):
-
-Every plugin is an adapter around the external ``smc_indicators`` library
-(``apoman123/PineScripts``), a line-by-line port of the Pine sources.
 
 ``daily_bias`` (run on each timeframe it is configured for)
     ``trend``: ``"BULLISH" | "BEARISH" | "NEUTRAL"``
@@ -89,6 +99,7 @@ import dataclasses
 import decimal
 import enum
 from collections.abc import Mapping
+from typing import TypeAlias
 
 from joseph.domain import decimals
 from joseph.domain import instruments
@@ -96,7 +107,8 @@ from joseph.domain import market
 from joseph.domain import quality
 from joseph.domain import timeframes
 
-ValueType = str | int | bool | decimal.Decimal | None
+ValueType: TypeAlias = str | int | bool | decimal.Decimal | None
+"""Type of one published scalar in ``IndicatorSnapshot.values``."""
 
 
 class ZoneSide(enum.StrEnum):
@@ -319,7 +331,7 @@ class StructureEvent:
         source: Plugin id.
         name: Event name.
         bar_start_ms: Start of the confirming bar.
-        confirmed_at_ms: Close of the confirming bar (``bar_start + tf``).
+        confirmed_at_ms: Close (exclusive ``end_ms``) of the confirming bar.
         price: Optional reference price (e.g. swept level).
         aoi_id: Optional related AOI.
         score: Optional 0-100 event score.
@@ -370,7 +382,8 @@ class IndicatorSnapshot:
         indicator_version: Plugin semantic version.
         method: Calculation method.
         bar_start_ms: Start of the last processed closed bar.
-        as_of_ms: Close of that bar (``bar_start_ms + timeframe``).
+        as_of_ms: Close of that bar (its exclusive ``end_ms``, which the
+            session calendar may cut short at a session close).
         aois: AOIs known at ``as_of_ms`` (live ones plus recently ended).
         events: Events confirmed on the last processed bar only.
         values: Published scalar values (see module docstring).
@@ -424,7 +437,7 @@ class IndicatorSnapshot:
         }
 
 
-SnapshotKey = tuple[str, timeframes.Timeframe]
+SnapshotKey: TypeAlias = tuple[str, timeframes.Timeframe]
 """Key of ``BarFrame.snapshots``: ``(plugin_id, timeframe)``."""
 
 
@@ -459,7 +472,7 @@ class BarFrame:
 
     @property
     def close_ms(self) -> int:
-        """Returns the exclusive end (close time) of the signal bar."""
+        """The exclusive end (close time) of the signal bar."""
         return self.candle.end_ms
 
     def snapshot(

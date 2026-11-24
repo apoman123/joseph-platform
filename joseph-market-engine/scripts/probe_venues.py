@@ -3,14 +3,17 @@
 
 """Live connectivity probe for every venue adapter (evidence, not tests).
 
-Usage::
+Usage, from the ``joseph-market-engine`` directory::
 
     uv run python scripts/probe_venues.py [--json]
 
-For each venue it lists instruments, the BTC contract metadata, the latest
-candles, snapshot, open interest, funding, top-of-book spread and the
+For each crypto venue it lists instruments, the BTC contract metadata, the
+latest candles, snapshot, open interest, funding, top-of-book spread and the
 latency of the first native WebSocket candle. Only public endpoints are
 called; nothing is traded.
+
+Output is one JSON object per venue per line, or with ``--json`` a single
+indented JSON array. The exit status is 1 when any venue failed.
 """
 
 from __future__ import annotations
@@ -18,6 +21,7 @@ from __future__ import annotations
 import argparse
 import asyncio
 import json
+import sys
 import time
 
 import httpx
@@ -45,7 +49,9 @@ async def _probe(venue: instruments.Venue) -> dict[str, object]:
         venue: Venue.
 
     Returns:
-        Result summary.
+        Result summary: ``ok`` is False and ``error`` names the failure when
+        an expected error, a missing BTC contract or a timeout stopped the
+        probe.
     """
     clock = clock_lib.SystemClock()
     adapter = factory.build_adapters(
@@ -85,9 +91,9 @@ async def _probe(venue: instruments.Venue) -> dict[str, object]:
                 snapshot.turnover_24h_quote
             ),
         }
-        oi = await adapter.fetch_open_interest(instrument)
+        open_interest = await adapter.fetch_open_interest(instrument)
         result["open_interest_usd"] = decimals.format_decimal(
-            oi.notional_usd.quantize(decimals.ONE)
+            open_interest.notional_usd.quantize(decimals.ONE)
         )
         funding = await adapter.fetch_funding(instrument)
         result["funding"] = {
@@ -110,7 +116,7 @@ async def _probe(venue: instruments.Venue) -> dict[str, object]:
             ws_start = time.perf_counter()
             stream = adapter.stream_candles(instrument, timeframes.Timeframe.M1)
             first = await asyncio.wait_for(anext(stream), 30)
-            await stream.aclose()  # type: ignore[attr-defined]
+            await stream.aclose()  # type: ignore[attr-defined]  # The port types an AsyncIterator; adapters return async generators.
             result["ws_first_candle_ms"] = round(
                 (time.perf_counter() - ws_start) * 1000
             )
@@ -128,27 +134,36 @@ async def _main(as_json: bool) -> int:
     """Probes every venue concurrently and prints the results.
 
     Args:
-        as_json: Emit JSON instead of a text summary.
+        as_json: Print one indented JSON array instead of one JSON object
+            per line.
 
     Returns:
-        Process exit code (non-zero if any venue failed).
+        Process exit code: 1 if any venue failed, else 0.
     """
-    results = await asyncio.gather(*(_probe(v) for v in _BTC))
+    results = await asyncio.gather(*(_probe(venue) for venue in _BTC))
     if as_json:
-        print(json.dumps(results, indent=2))  # noqa: T201
+        print(json.dumps(results, indent=2))  # noqa: T201 - CLI script output
     else:
         for row in results:
-            print(json.dumps(row))  # noqa: T201
-    return 0 if all(r.get("ok") for r in results) else 1
+            print(json.dumps(row))  # noqa: T201 - CLI script output
+    return 0 if all(row.get("ok") for row in results) else 1
 
 
-def main() -> None:
-    """Parses arguments and runs the probe."""
+def main() -> int:
+    """Parses arguments and runs the probe.
+
+    Returns:
+        Process exit code: 1 if any venue failed, else 0.
+    """
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("--json", action="store_true")
+    parser.add_argument(
+        "--json",
+        action="store_true",
+        help="print one indented JSON array instead of JSON lines",
+    )
     args = parser.parse_args()
-    raise SystemExit(asyncio.run(_main(args.json)))
+    return asyncio.run(_main(args.json))
 
 
 if __name__ == "__main__":
-    main()
+    sys.exit(main())
