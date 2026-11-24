@@ -43,6 +43,7 @@ import re
 import zoneinfo
 from collections.abc import Mapping
 from typing import Any
+from typing import TypeAlias
 
 from joseph.domain import clock as clock_lib
 from joseph.domain import decimals
@@ -84,6 +85,8 @@ _REFRESH_MS = 6 * 3_600_000
 """Re-read interval of the current year otherwise."""
 _TICK = decimal.Decimal("0.01")
 _LABEL = re.compile(r"^\s*([0-9.]+)\s*(mo|month|yr|year)s?\s*$", re.IGNORECASE)
+# Most sessions one bar can hold, so ``limit`` bars need at most
+# ``limit * n`` daily rows.
 _SESSIONS_PER_BAR = {
     timeframes.Timeframe.D1: 1,
     timeframes.Timeframe.W1: 5,
@@ -152,7 +155,8 @@ TENORS: tuple[Tenor, ...] = (
 )
 _BY_CODE = {tenor.code: tenor for tenor in TENORS}
 
-Rows = dict[datetime.date, dict[str, decimal.Decimal]]
+Rows: TypeAlias = dict[datetime.date, dict[str, decimal.Decimal]]
+"""Yields in percent per date and tenor key."""
 
 
 def column_key(label: str) -> str | None:
@@ -178,7 +182,8 @@ def parse_csv(text: str) -> Rows:
         text: CSV body (header ``Date,"1 Mo",...``; newest row first).
 
     Returns:
-        Yields in percent per date and tenor key (blank cells omitted).
+        Yields in percent per date and tenor key (blank and ``N/A`` cells
+        omitted).
 
     Raises:
         errors.VenueUnavailableError: If the body is not the expected CSV.
@@ -221,11 +226,14 @@ def ny_date(ts_ms: int) -> datetime.date:
 def due_day(now_ms: int) -> datetime.date | None:
     """Returns the newest session whose yields should be published by now.
 
+    Publication is expected after 18:00 New York on the session's day.
+
     Args:
-        now_ms: Current time.
+        now_ms: Current UTC epoch milliseconds.
 
     Returns:
-        Session date (publication expected after 18:00 New York).
+        Session date, or ``None`` when no session of the last 14 days is
+        due yet.
     """
     calendar = sessions.USBOND
     day = ny_date(now_ms)
@@ -326,15 +334,38 @@ class _Year:
 
     Attributes:
         rows: Parsed yields.
-        fetched_ms: When they were read.
+        fetched_ms: UTC epoch milliseconds when they were read.
     """
 
     rows: Rows
     fetched_ms: int
 
 
+def _year_complete(entry: _Year, year: int) -> bool:
+    """Checks that a past year's rows reach its last USBOND session.
+
+    Args:
+        entry: Cached rows.
+        year: Calendar year.
+
+    Returns:
+        True when the newest row is the year's last session.
+    """
+    calendar = sessions.USBOND
+    day = datetime.date(year, 12, 31)
+    while calendar.session(day) is None:
+        day -= datetime.timedelta(days=1)
+    return max(entry.rows, default=day - datetime.timedelta(days=1)) >= day
+
+
 class TreasuryAdapter(base.BaseVenueAdapter):
-    """``MarketDataPort`` for Treasury par and par real yields."""
+    """``MarketDataPort`` for Treasury par and par real yields.
+
+    Attributes:
+        VENUE: ``treasury``.
+        INSTRUMENT_TTL_MS: Instrument cache lifetime (one day; the series
+            list is static).
+    """
 
     VENUE = instruments.Venue.TREASURY
     INSTRUMENT_TTL_MS = 86_400_000
@@ -439,38 +470,23 @@ class TreasuryAdapter(base.BaseVenueAdapter):
         Returns:
             True when newer rows can exist.
         """
+        del curve  # Unused.
         due = due_day(now_ms)
         if due is None or due.year < year:
             return False
         if due.year > year:
-            # A past year is complete once read after its last session.
+            # A past year is final once read in a later year, or once its
+            # rows reach the year's last session.
             return ny_date(entry.fetched_ms).year == year and (
                 max(entry.rows, default=datetime.date(year, 1, 1))
                 < datetime.date(year, 12, 31)
-                and not self._year_complete(entry, year)
+                and not _year_complete(entry, year)
             )
         newest = max(entry.rows, default=None)
         age = now_ms - entry.fetched_ms
         if newest is None or newest < due:
             return age >= _POLL_MS
         return age >= _REFRESH_MS
-
-    @staticmethod
-    def _year_complete(entry: _Year, year: int) -> bool:
-        """Checks that a past year's rows reach its last USBOND session.
-
-        Args:
-            entry: Cached rows.
-            year: Calendar year.
-
-        Returns:
-            True when the newest row is the year's last session.
-        """
-        calendar = sessions.USBOND
-        day = datetime.date(year, 12, 31)
-        while calendar.session(day) is None:
-            day -= datetime.timedelta(days=1)
-        return max(entry.rows, default=day - datetime.timedelta(days=1)) >= day
 
     async def _year(self, curve: str, year: int) -> Rows:
         """Returns one curve-year, reading it when missing or stale.
@@ -534,12 +550,13 @@ class TreasuryAdapter(base.BaseVenueAdapter):
             tenor: Series.
             start_ms: Inclusive start.
             end_ms: Exclusive end.
-            wanted: Stop once this many bars in range are collected.
+            wanted: Stop once this many bars in range are collected;
+                ``None`` reads every year of the range.
 
         Returns:
-            Ascending daily bars in ``[start, end)`` and the close of the
-            newest published session of the curve (data is complete before
-            it).
+            Ascending daily bars in ``[start, end)`` and the close (epoch
+            milliseconds) of the newest session the curve published in the
+            years read, before which the data is complete; 0 when none was.
         """
         now = self._clock.now_ms()
         first_year = max(
@@ -593,6 +610,10 @@ class TreasuryAdapter(base.BaseVenueAdapter):
 
         Returns:
             Ascending candles on the USBOND calendar.
+
+        Raises:
+            errors.UnsupportedError: For any other timeframe.
+            errors.NotFoundError: For an unknown series.
         """
         self._require_timeframe(timeframe)
         tenor = self._tenor(instrument)
@@ -602,19 +623,19 @@ class TreasuryAdapter(base.BaseVenueAdapter):
         try:
             grid_start = calendar.floor(timeframe, start_ms)
         except ValueError:
+            # Before USBOND's first session there is no grid to align to.
             grid_start = start_ms
         wanted = None if limit is None else limit * _SESSIONS_PER_BAR[timeframe]
         daily, covered = await self._daily(
             tenor, min(grid_start, start_ms), end_ms, wanted
         )
         now = self._clock.now_ms()
-        rows = (
-            daily
-            if timeframe is _D1
-            else session_bars.aggregate(
+        if timeframe is _D1:
+            rows = daily
+        else:
+            rows = session_bars.aggregate(
                 daily, timeframe, now_ms=now, covered_to_ms=covered
             )
-        )
         return base.clip_range(rows, start_ms, end_ms, limit)
 
     async def _latest(self, tenor: Tenor) -> market.Candle | None:
@@ -662,7 +683,9 @@ class TreasuryAdapter(base.BaseVenueAdapter):
             Snapshot (no bid/ask, volume or change fields).
 
         Raises:
-            errors.MissingDataError: Without a recent published value.
+            errors.NotFoundError: For an unknown series.
+            errors.MissingDataError: Without a value published in the last
+                two years.
         """
         tenor = self._tenor(instrument)
         bar = await self._latest(tenor)
@@ -683,7 +706,7 @@ class TreasuryAdapter(base.BaseVenueAdapter):
                 rows.append(self._snapshot(tenor, bar))
         return rows
 
-    async def fetch_order_book(
+    async def fetch_order_book(  # noqa: DOC201 - always raises UnsupportedError; never returns
         self, instrument: instruments.InstrumentId, depth: int
     ) -> market.OrderBook:
         """Rate series have no order book.
@@ -698,7 +721,7 @@ class TreasuryAdapter(base.BaseVenueAdapter):
         del instrument, depth
         raise errors.UnsupportedError("treasury yields have no order book")
 
-    async def fetch_open_interest(
+    async def fetch_open_interest(  # noqa: DOC201 - always raises UnsupportedError; never returns
         self, instrument: instruments.InstrumentId
     ) -> market.OpenInterest:
         """Rate series have no open interest.
@@ -712,7 +735,7 @@ class TreasuryAdapter(base.BaseVenueAdapter):
         del instrument
         raise errors.UnsupportedError("treasury yields have no open interest")
 
-    async def fetch_funding(
+    async def fetch_funding(  # noqa: DOC201 - always raises UnsupportedError; never returns
         self, instrument: instruments.InstrumentId
     ) -> market.Funding:
         """Rate series have no funding.

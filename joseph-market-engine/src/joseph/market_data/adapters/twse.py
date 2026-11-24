@@ -30,7 +30,8 @@ Sources (all public, verified live 2026-11-23):
   ``exKey`` and ``cachedAlive`` (ms in cache). Polling one query every 5 s,
   109 of 120 responses were cached and per-symbol data times advanced every
   4-120 s. TWSE blocks clients above roughly 3 requests per 5 s, so MIS and
-  ``www`` requests are paced at one per 2 s. MIS also serves TPEx listings
+  ``www`` requests are paced at one per 2 s (token buckets with a burst of
+  two, set up in ``adapters/factory.py``). MIS also serves TPEx listings
   (``otc_6488.tw``, ``adapters/tpex.py``); both venues share the MIS pace.
 * Holidays: ``openapi.../holidaySchedule/holidaySchedule`` (the latest
   published year) and ``www.../rwd/zh/holidaySchedule/holidaySchedule``
@@ -82,6 +83,7 @@ from collections.abc import Iterable
 from collections.abc import Mapping
 from collections.abc import Sequence
 from typing import Any
+from typing import TypeAlias
 
 from joseph.domain import clock as clock_lib
 from joseph.domain import decimals
@@ -147,14 +149,21 @@ _HISTORY_FLOOR = datetime.date(1999, 1, 1)
 MAX_MONTHS_PER_CALL = 24
 """STOCK_DAY months read per call (one request each, newest kept)."""
 _MONTH_TTL_MS = 30 * 60_000
+"""An open month's cached report is re-read after this long."""
 _DUE_MONTH_TTL_MS = 10 * 60_000
+"""Re-read interval once today's closed session is missing from a month."""
 _MIS_CACHE_MS = 4_000
+"""Per-symbol reuse window (MIS data times advanced every 4 s at most)."""
 _MIS_BATCH = 40
 _WATCH_TTL_MS = 30 * 60_000
+"""A code is recorded until this long after the last request for it."""
 _PRE_OPEN_MS = 5 * 60_000
+"""Recording starts this long before a session opens."""
 _POST_CLOSE_MS = 2 * 60_000
+"""Recording continues this long after a session closes."""
 POLL_INTERVAL_S = 5.0
-Sleep = Callable[[float], Awaitable[None]]
+"""Default pause between recorder passes, in seconds."""
+Sleep: TypeAlias = Callable[[float], Awaitable[None]]
 _PERSIST_EVERY_MS = 60_000
 """MIS recordings are written to the bar archive at most this often."""
 ARCHIVE_RETENTION_MS = 400 * 86_400_000
@@ -162,10 +171,16 @@ ARCHIVE_RETENTION_MS = 400 * 86_400_000
 MAX_INTRADAY_SESSIONS = 60
 """Sessions of Shioaji minute history read per call (newest kept)."""
 _KBAR_CACHE_DAYS = 300
+"""``(code, day)`` kbar sessions kept in memory (least recent out)."""
 _TICK_CACHE_DAYS = 20
+"""``(code, day)`` tick histories kept in memory (least recent out)."""
 _TODAY_KBARS_EVERY_MS = 60_000
+"""Today's kbars are re-read at most this often while the tick stream
+proves minutes, five times less often before it does."""
 _BOOK_WAIT_S = 2.0
+"""Seconds a book request waits for Shioaji's first bid/ask of the day."""
 _STREAM_IDLE_S = 1.0
+"""Seconds without a feed event after which a stream sees ``idle``."""
 _SEED_MS = 10_000
 
 
@@ -210,13 +225,14 @@ def listing_date(text: str) -> datetime.date:
 
 
 def number(text: object) -> decimal.Decimal | None:
-    """Parses a TWSE number (comma groups; ``--``/``-``/empty is missing).
+    """Parses a TWSE number (comma groups; dashes or empty text are missing).
 
     Args:
         text: Raw value.
 
     Returns:
-        Decimal or ``None``.
+        Decimal, or ``None`` when the value is missing (empty, one to four
+        dashes, ``X0.00``) or not a number.
     """
     raw = str(text).replace(",", "").strip()
     if raw in ("", "-", "--", "---", "----", "X0.00"):
@@ -289,7 +305,8 @@ def etf_asset_class(
         fund: ``t187ap47_L`` row.
 
     Returns:
-        ``BOND`` for bond funds, else ``EQUITY``.
+        ``BOND`` for a ``B`` code, a bond fund type (債券) or a bond index
+        (債券/公債 without 股), else ``EQUITY``.
     """
     kind = str(fund.get("基金類型", ""))
     index = str(fund.get("標的指數/追蹤指數名稱", ""))
@@ -538,7 +555,7 @@ def parse_stock_day(
     instrument_id: instruments.InstrumentId,
     now_ms: int,
 ) -> list[market.Candle]:
-    """Converts one ``STOCK_DAY`` month to final daily candles.
+    """Converts one ``STOCK_DAY`` month to daily candles.
 
     Args:
         payload: ``{stat: "OK", fields, data: [[date, shares, value, open,
@@ -547,7 +564,9 @@ def parse_stock_day(
         now_ms: Receipt time.
 
     Returns:
-        Ascending candles (days without a trade are skipped).
+        Ascending candles, final once their session has closed (days
+        without a trade or outside XTAI sessions are skipped; empty unless
+        ``stat`` is ``OK``).
     """
     if str(payload.get("stat", "")).upper() != "OK":
         return []
@@ -598,7 +617,7 @@ class MisQuote:
         previous_close: Reference price ``y``.
         bids: Bid ``(price, shares)`` levels, best first.
         asks: Ask ``(price, shares)`` levels, best first.
-        received_ms: Receipt time.
+        received_ms: Receipt time (epoch ms).
     """
 
     code: str
@@ -610,7 +629,7 @@ class MisQuote:
 
     @property
     def last(self) -> decimal.Decimal | None:
-        """Returns the newest known trade price (``z``, else ``trade.z``)."""
+        """The newest known trade price (``z``, else ``trade.z``)."""
         snap = self.snapshot
         return (
             snap.last_price if snap.last_price is not None else snap.trade_price
@@ -731,11 +750,14 @@ def mis_key(code: str, market: str = MIS_MARKET) -> str:
 class MisClient:
     """Batched, cached and coalesced MIS snapshot requests.
 
-    Concurrent callers within a few milliseconds share one request (up to
-    ``batch`` symbols), and a symbol fetched within ``cache_ms`` is served
-    from memory, so screening and the recorder stay within TWSE's limits.
-    MIS serves TWSE (``tse_``) and TPEx (``otc_``) listings from the same
-    host; one client serves one market.
+    Callers arriving within ``coalesce_s`` of each other share one round of
+    requests (``batch`` symbols each), and a symbol fetched within
+    ``cache_ms`` is served from memory, so screening and the recorder stay
+    within TWSE's limits. MIS serves TWSE (``tse_``) and TPEx (``otc_``)
+    listings from the same host; one client serves one market.
+
+    Attributes:
+        requests: MIS requests sent so far.
     """
 
     def __init__(
@@ -753,9 +775,10 @@ class MisClient:
         Args:
             http_client: HTTP client for ``MIS_URL``.
             clock: Time source.
-            cache_ms: Reuse window per symbol.
+            cache_ms: Reuse window per symbol, in milliseconds.
             batch: Symbols per request.
-            coalesce_s: Wait before a request so concurrent callers join.
+            coalesce_s: Seconds to wait before a request so concurrent
+                callers join it.
             market: MIS market prefix of the channels (``tse``/``otc``).
         """
         self._http = http_client
@@ -779,6 +802,10 @@ class MisClient:
 
         Returns:
             Quotes of the codes MIS knows.
+
+        Raises:
+            errors.JosephError: When the round that fetched the codes
+                failed (propagated from the request).
         """
         now = self._clock.now_ms()
         missing = [
@@ -892,6 +919,11 @@ MIS_SECONDS_NOTE = (
     "honest seconds bars."
 )
 """Seconds note of the official sources (MIS)."""
+_FALLBACK_SECONDS_NOTE = (
+    "Fallback: MIS snapshots cannot make honest seconds bars, so "
+    "seconds bars need Shioaji."
+)
+"""Replaces ``MIS_SECONDS_NOTE`` when Shioaji serves seconds bars."""
 
 
 def sinopac_notes(config: sinopac_lib.SinopacConfig) -> tuple[str, ...]:
@@ -1008,7 +1040,7 @@ def provider(candle: market.Candle) -> str:
     return candle.source.split(".", 1)[0]
 
 
-Layer = tuple[list[market.Candle], list[candle_rules.Span]]
+Layer: TypeAlias = tuple[list[market.Candle], list[candle_rules.Span]]
 """One source's one-minute bars and the whole minutes it covers."""
 
 
@@ -1054,12 +1086,14 @@ def aggregate_minutes(
         timeframe: Target intraday resolution.
         covered: Coverage of the minutes.
         now_ms: Receipt time.
-        covered_to: Completeness of the minutes from a bar start (``None``
-            skips the bar); defaults to the coverage span holding it.
+        covered_to: Maps a bar start to the time its minutes are complete
+            through (``None`` skips the bar); by default the end of the
+            coverage span holding the start.
 
     Returns:
         Aggregates and the coverage without the slots of bars that would
-        mix sources (they are not emitted).
+        mix sources (they are not emitted); for ``1m`` the minutes as given
+        and the merged coverage.
     """
     spans = candle_rules.merge_spans(covered)
     if timeframe is _M1:
@@ -1183,6 +1217,22 @@ class _Month:
     fetched_ms: int
 
 
+def _day_due(cached: _Month, now_ms: int) -> bool:
+    """Checks whether a closed session is still missing from a month.
+
+    Args:
+        cached: Cached month.
+        now_ms: Current time.
+
+    Returns:
+        True when today's session has closed but has no row yet.
+    """
+    session = sessions.XTAI.session(taipei_date(now_ms))
+    if session is None or now_ms < session.close_ms:
+        return False
+    return all(bar.start_ms != session.open_ms for bar in cached.bars)
+
+
 class TaiwanExchangeAdapter(base.BaseVenueAdapter):
     """``SparseBarsPort`` shared by the exchanges MIS serves (TWSE, TPEx).
 
@@ -1191,6 +1241,20 @@ class TaiwanExchangeAdapter(base.BaseVenueAdapter):
     the ``MIS_MARKET`` channel; both follow the XTAI calendar. Subclasses
     provide the listings, capabilities, holiday schedule, monthly report
     and bulk snapshots.
+
+    Attributes:
+        VENUE: Venue served (``twse``; subclasses override it).
+        INSTRUMENT_TTL_MS: How long listings are cached (6 hours).
+        TRADE_BUY_VOLUME_METHOD: ``classified``: neither MIS nor Shioaji
+            publishes the exchange's aggressor side.
+        SPARSE_BARS: True: a minute or day without trades has no bar.
+        MIS_MARKET: MIS channel prefix of the venue's listings.
+        MIS_SOURCE_NAME: Source stamped on MIS-built bars, snapshots and
+            books.
+        SJ_EXCHANGE: Shioaji contract group of the venue's listings.
+        mis: MIS snapshot client of the venue's channel.
+        listing: Listing facts per security code, refreshed with the
+            instruments.
     """
 
     VENUE = instruments.Venue.TWSE
@@ -1199,9 +1263,7 @@ class TaiwanExchangeAdapter(base.BaseVenueAdapter):
     SPARSE_BARS = True
     MIS_MARKET = MIS_MARKET
     MIS_SOURCE_NAME = MIS_SOURCE
-    """Source stamped on MIS-built bars, snapshots and books."""
     SJ_EXCHANGE = "TSE"
-    """Shioaji contract group of the venue's listings."""
 
     def __init__(
         self,
@@ -1282,6 +1344,9 @@ class TaiwanExchangeAdapter(base.BaseVenueAdapter):
     async def refresh_calendar(self) -> set[datetime.date]:
         """Adds newly published closures to the XTAI calendar.
 
+        Returns:
+            Closures added (implemented by subclasses).
+
         Raises:
             NotImplementedError: Always in the base class.
         """
@@ -1296,6 +1361,9 @@ class TaiwanExchangeAdapter(base.BaseVenueAdapter):
             instrument: Instrument.
             year: Year.
             month: Month.
+
+        Returns:
+            Daily candles of the month (implemented by subclasses).
 
         Raises:
             NotImplementedError: Always in the base class.
@@ -1324,32 +1392,12 @@ class TaiwanExchangeAdapter(base.BaseVenueAdapter):
         if cached is not None:
             if month_complete(year, month, cached.fetched_ms):
                 return cached.bars
-            ttl = (
-                _DUE_MONTH_TTL_MS
-                if self._day_due(cached, now)
-                else _MONTH_TTL_MS
-            )
+            ttl = _DUE_MONTH_TTL_MS if _day_due(cached, now) else _MONTH_TTL_MS
             if now - cached.fetched_ms < ttl:
                 return cached.bars
         bars = await self._fetch_month(instrument, year, month)
         self._months[key] = _Month(bars, self._clock.now_ms())
         return bars
-
-    @staticmethod
-    def _day_due(cached: _Month, now_ms: int) -> bool:
-        """Checks whether a closed session is still missing from a month.
-
-        Args:
-            cached: Cached month.
-            now_ms: Current time.
-
-        Returns:
-            True when today's session has closed but has no row yet.
-        """
-        session = sessions.XTAI.session(taipei_date(now_ms))
-        if session is None or now_ms < session.close_ms:
-            return False
-        return all(bar.start_ms != session.open_ms for bar in cached.bars)
 
     async def _daily(
         self,
@@ -1400,6 +1448,8 @@ class TaiwanExchangeAdapter(base.BaseVenueAdapter):
                 )
             )
             year, month = (year, month - 1) if month > 1 else (year - 1, 12)
+            # A month read can reveal the listing date (TPEx marks it in
+            # its daily report), which moves the first month worth reading.
             first = self._first_day(instrument, start_ms)
             if (
                 wanted is not None
@@ -1446,7 +1496,7 @@ class TaiwanExchangeAdapter(base.BaseVenueAdapter):
     async def _live_daily(
         self, instrument: instruments.InstrumentId
     ) -> market.Candle | None:
-        """Builds today's in-progress daily bar from MIS.
+        """Builds today's in-progress daily bar (Shioaji stream, else MIS).
 
         Args:
             instrument: Instrument.
@@ -1488,6 +1538,8 @@ class TaiwanExchangeAdapter(base.BaseVenueAdapter):
     def watch(self, code: str) -> None:
         """Records interest in a code so the recorder polls it.
 
+        Starts the recorder task when it is not running.
+
         Args:
             code: Security code.
         """
@@ -1520,6 +1572,9 @@ class TaiwanExchangeAdapter(base.BaseVenueAdapter):
 
     async def poll_once(self) -> int:
         """Polls every watched code once.
+
+        Codes nobody requested for ``_WATCH_TTL_MS`` are dropped first; the
+        recordings are then written to the archive when due.
 
         Returns:
             Snapshots applied.
@@ -1584,7 +1639,7 @@ class TaiwanExchangeAdapter(base.BaseVenueAdapter):
                 archive.put(
                     builder.instrument_id, self.MIS_SOURCE_NAME, bars, spans
                 )
-            except Exception as err:
+            except Exception as err:  # noqa: BLE001 - isolation point: a failing archive write must not stop recording
                 _LOG.warning(
                     "%s: archiving recorded bars failed: %s",
                     self.VENUE.value,
@@ -1608,7 +1663,7 @@ class TaiwanExchangeAdapter(base.BaseVenueAdapter):
         self._pruned_day = today
         try:
             self._archive.prune(now_ms - ARCHIVE_RETENTION_MS)
-        except Exception as err:
+        except Exception as err:  # noqa: BLE001 - isolation point: a failing prune must not stop recording
             _LOG.warning("bar archive prune failed: %s", type(err).__name__)
 
     def _recording_window(self, now_ms: int) -> int:
@@ -1618,7 +1673,8 @@ class TaiwanExchangeAdapter(base.BaseVenueAdapter):
             now_ms: Current time.
 
         Returns:
-            Delay before polling should resume.
+            Delay before polling should resume (an hour when no session
+            is left in the next 15 days).
         """
         calendar = sessions.XTAI
         for session in calendar.sessions(
@@ -1718,7 +1774,7 @@ class TaiwanExchangeAdapter(base.BaseVenueAdapter):
             stored_spans = self._archive.coverage(
                 instrument, self.MIS_SOURCE_NAME, start_ms, end_ms
             )
-        except Exception as err:
+        except Exception as err:  # noqa: BLE001 - isolation point: a failing archive read leaves the live recording served
             _LOG.warning("bar archive read failed: %s", type(err).__name__)
             return live, candle_rules.merge_spans(covered)
         by_start = {bar.start_ms: bar for bar in stored}
@@ -1775,8 +1831,15 @@ class TaiwanExchangeAdapter(base.BaseVenueAdapter):
 
         Returns:
             Ascending candles on the XTAI calendar and the spans proven
-            complete: the MIS recording for intraday bars, the monthly
-            reports read for daily, weekly and monthly bars.
+            complete: the Shioaji or MIS minutes for intraday bars, the
+            Shioaji ticks for seconds bars, the monthly reports read for
+            daily, weekly and monthly bars.
+
+        Raises:
+            errors.NotFoundError: When the venue does not list the
+                instrument.
+            errors.UnsupportedError: For a timeframe the venue does not
+                serve, or seconds bars without Shioaji.
         """
         self._require_timeframe(timeframe)
         await self._require(instrument)
@@ -1835,7 +1898,7 @@ class TaiwanExchangeAdapter(base.BaseVenueAdapter):
 
     @property
     def _sinopac_on(self) -> bool:
-        """Returns True when a usable Shioaji source is configured."""
+        """Whether an enabled Shioaji source is configured."""
         return self._sinopac is not None and self._sinopac.enabled
 
     def _with_sinopac(
@@ -1863,10 +1926,7 @@ class TaiwanExchangeAdapter(base.BaseVenueAdapter):
                 ),
             )
         notes = tuple(
-            "Fallback: MIS snapshots cannot make honest seconds bars, so "
-            "seconds bars need Shioaji."
-            if note == MIS_SECONDS_NOTE
-            else note
+            _FALLBACK_SECONDS_NOTE if note == MIS_SECONDS_NOTE else note
             for note in caps.notes
         )
         return dataclasses.replace(
@@ -1911,7 +1971,7 @@ class TaiwanExchangeAdapter(base.BaseVenueAdapter):
 
         Args:
             instrument: Instrument.
-            wait_s: How long to wait for today's first book.
+            wait_s: Seconds to wait for today's first book.
             subscribe: Subscribe the code when it is not streamed yet
                 (snapshots only read codes already streamed).
             today_only: Return the feed only once it has today's data.
@@ -2024,6 +2084,8 @@ class TaiwanExchangeAdapter(base.BaseVenueAdapter):
         wanted = MAX_INTRADAY_SESSIONS
         if limit is not None:
             per_bar = max(1, timeframe.duration_ms // _M1.duration_ms)
+            # An XTAI session has 270 minutes (09:00-13:30), plus two
+            # sessions of slack for the rounding and today's partial one.
             wanted = min(wanted, limit * per_bar // 270 + 2)
         complete = len(found) <= wanted
         found = found[:wanted]
@@ -2144,7 +2206,7 @@ class TaiwanExchangeAdapter(base.BaseVenueAdapter):
                 instrument, sinopac_lib.SOURCE, low, high
             )
             stored = archive.minutes(instrument, sinopac_lib.SOURCE, low, high)
-        except Exception as err:
+        except Exception as err:  # noqa: BLE001 - isolation point: a failing archive read falls back to Shioaji queries
             _LOG.warning("bar archive read failed: %s", type(err).__name__)
             return list(missing)
         left = []
@@ -2248,7 +2310,7 @@ class TaiwanExchangeAdapter(base.BaseVenueAdapter):
             return
         try:
             self._archive.put(instrument, sinopac_lib.SOURCE, bars, covered)
-        except Exception as err:
+        except Exception as err:  # noqa: BLE001 - isolation point: a failing archive write must not fail the fetch
             _LOG.warning("bar archive write failed: %s", type(err).__name__)
 
     async def _today_minutes(
@@ -2272,7 +2334,8 @@ class TaiwanExchangeAdapter(base.BaseVenueAdapter):
             Bars and whole-minute coverage.
         """
         source = self._sinopac
-        assert source is not None
+        if source is None:
+            raise AssertionError("_today_minutes needs a Shioaji source")
         code = instrument.venue_market_id
         day = taipei_date(session.open_ms)
         layers: list[Layer] = []
@@ -2338,7 +2401,8 @@ class TaiwanExchangeAdapter(base.BaseVenueAdapter):
         Returns:
             Open of the session ``seconds_history_days`` before the latest.
         """
-        assert self._sinopac is not None
+        if self._sinopac is None:
+            raise AssertionError("_history_from needs a Shioaji source")
         calendar = sessions.XTAI
         session = calendar.session_at_or_before(now_ms)
         for _ in range(self._sinopac.config.seconds_history_days):
@@ -2555,10 +2619,15 @@ class TaiwanExchangeAdapter(base.BaseVenueAdapter):
             instrument: Instrument.
             start_ms: Inclusive start.
             end_ms: Exclusive end.
-            max_pages: Unused (Shioaji reads a whole day per query).
+            max_pages: Request budget of the base implementation; unused
+                with Shioaji, which reads a whole day per query.
 
         Returns:
             Complete trades ``[from, to)`` with ``to <= end``.
+
+        Raises:
+            errors.UnsupportedError: Without a Shioaji source (from the
+                base implementation).
         """
         if not self._sinopac_on:
             return await super()._trade_history(
@@ -2699,7 +2768,8 @@ class TaiwanExchangeAdapter(base.BaseVenueAdapter):
             ``(source, feed, queue)``.
         """
         source = self._sinopac
-        assert source is not None
+        if source is None:
+            raise AssertionError("_open_feed needs a Shioaji source")
         await self._require(instrument)
         feed = await source.watch(
             instrument.venue_market_id, self.SJ_EXCHANGE, instrument
@@ -2766,40 +2836,42 @@ class TaiwanExchangeAdapter(base.BaseVenueAdapter):
             source=sinopac_lib.TICK_SOURCE,
             buy_volume_method=market.BuyVolumeMethod.CLASSIFIED,
         )
-        cover_from: int | None = None
-        proven = 0
 
-        def restart(now: int) -> list[market.Candle]:
+        def restart(now: int) -> tuple[list[market.Candle], int | None]:
             """Restarts the builder on the feed's newest segment.
+
+            Only the segment's trades of the last 300 bars are replayed.
 
             Args:
                 now: Current time.
 
             Returns:
-                Bars of the segment's retained trades.
+                Bars of the segment's retained trades and where the
+                coverage restarts (``None`` without a segment).
             """
-            nonlocal cover_from, proven
             if not feed.segments:
                 builder.start_segment(None)
-                cover_from = None
-                return []
+                return [], None
             segment = feed.segments[-1]
             horizon = now - 300 * timeframe.duration_ms
-            cover_from = max(segment.from_ms, horizon)
-            proven = 0
-            builder.start_segment(cover_from)
+            start = max(segment.from_ms, horizon)
+            builder.start_segment(start)
             kept = [
                 t
                 for t in feed.segment_trades(len(feed.segments) - 1)
-                if t.venue_event_ts_ms >= cover_from
+                if t.venue_event_ts_ms >= start
             ]
-            return [
+            bars = [
                 *builder.add(kept, now),
                 *builder.finalize_through(segment.proven_ms, now),
             ]
+            return bars, start
 
         try:
-            first = restart(self._clock.now_ms())
+            first, cover_from = restart(self._clock.now_ms())
+            # Proofs count from the newest restart (read only while
+            # ``cover_from`` is set).
+            proven = 0
             if first:
                 yield candle_rules.CandleCoverage(tuple(first))
             while True:
@@ -2808,7 +2880,8 @@ class TaiwanExchangeAdapter(base.BaseVenueAdapter):
                 candles: list[market.Candle] = []
                 covered: tuple[candle_rules.Span, ...] = ()
                 if event.kind == "segment":
-                    candles = restart(now)
+                    candles, cover_from = restart(now)
+                    proven = 0
                 elif event.kind == "trade" and event.trade is not None:
                     candles = builder.add([event.trade], now)
                 elif event.kind == "proof" and event.proven_ms is not None:
@@ -3014,7 +3087,7 @@ class TaiwanExchangeAdapter(base.BaseVenueAdapter):
     async def fetch_snapshot(
         self, instrument: instruments.InstrumentId
     ) -> market.MarketSnapshot:
-        """Fetches the MIS snapshot (last trade, best quotes, day volume).
+        """Fetches the snapshot (last trade, best quotes, day volume).
 
         ``volume_24h_base`` is the regular session's volume so far in
         shares and ``change_24h_pct`` the change from the previous close.
@@ -3025,6 +3098,9 @@ class TaiwanExchangeAdapter(base.BaseVenueAdapter):
         Returns:
             Snapshot (Shioaji's tick and bid/ask stream while it streams the
             code today, else MIS).
+
+        Raises:
+            errors.MissingDataError: When MIS has no record of the code.
         """
         feed = await self._live_feed(instrument, subscribe=False)
         if feed is not None and self._sinopac is not None:
@@ -3055,7 +3131,7 @@ class TaiwanExchangeAdapter(base.BaseVenueAdapter):
     async def fetch_order_book(
         self, instrument: instruments.InstrumentId, depth: int
     ) -> market.OrderBook:
-        """Returns the MIS 5-level book (sizes in shares).
+        """Fetches the 5-level book (sizes in shares).
 
         Args:
             instrument: Instrument.
@@ -3064,6 +3140,9 @@ class TaiwanExchangeAdapter(base.BaseVenueAdapter):
         Returns:
             Order book (Shioaji's bid/ask stream while it streams the code
             today, else MIS).
+
+        Raises:
+            errors.MissingDataError: When MIS has no record of the code.
         """
         feed = await self._live_feed(instrument, wait_s=_BOOK_WAIT_S)
         if feed is not None and feed.book is not None:
@@ -3083,7 +3162,7 @@ class TaiwanExchangeAdapter(base.BaseVenueAdapter):
             source=self.MIS_SOURCE_NAME,
         )
 
-    async def fetch_open_interest(
+    async def fetch_open_interest(  # noqa: DOC201 - always raises UnsupportedError; never returns
         self, instrument: instruments.InstrumentId
     ) -> market.OpenInterest:
         """Cash securities have no open interest.
@@ -3099,7 +3178,7 @@ class TaiwanExchangeAdapter(base.BaseVenueAdapter):
             f"{self.VENUE.value} securities have no open interest"
         )
 
-    async def fetch_funding(
+    async def fetch_funding(  # noqa: DOC201 - always raises UnsupportedError; never returns
         self, instrument: instruments.InstrumentId
     ) -> market.Funding:
         """Cash securities have no funding.
@@ -3131,7 +3210,13 @@ class TaiwanExchangeAdapter(base.BaseVenueAdapter):
 
 
 class TwseAdapter(TaiwanExchangeAdapter):
-    """``SparseBarsPort`` for TWSE-listed stocks and ETFs."""
+    """``SparseBarsPort`` for TWSE-listed stocks and ETFs.
+
+    Attributes:
+        VENUE: ``twse``.
+        listing: Listing facts per security code (``t187ap03_L`` and
+            ``t187ap47_L``), refreshed with the instruments.
+    """
 
     VENUE = instruments.Venue.TWSE
 

@@ -67,6 +67,7 @@ from collections.abc import Iterator
 from collections.abc import Mapping
 from collections.abc import Sequence
 from typing import Any
+from typing import TypeAlias
 
 import httpx
 import pyarrow as pa
@@ -90,7 +91,7 @@ DAY_PATH = "v1.1/lighter/core/mainnet/trades/date={day}/trades.parquet"
 SOURCE = "lighter.trades.archive"
 DAY_MS = 86_400_000
 TAIL_BYTES = 65_536
-"""First read of a file: pyarrow reads the last 64 KiB to find the footer."""
+"""Bytes of the first (tail) read: what pyarrow's first footer read wants."""
 PUBLIC_KEY = "public_market_index"
 INTERNAL_KEY = "market_id"
 TRADE_COLUMNS = (
@@ -113,13 +114,19 @@ SCHEMA = pa.schema(
 )
 """Columns kept of a market's book trades."""
 _MAGIC = b"PAR1"
+"""Last four bytes of every Parquet file."""
 _MAX_GAP = 65_536
+"""Default largest gap (bytes) between chunks fetched in one request."""
 _MISSING_RETRY_S = 1_800.0
+"""Seconds before an unpublished day is requested again."""
 _MARKETS_TTL_S = 3_600.0
+"""Seconds the ``orderBooks`` market ids and decimals are reused."""
 _EXACT = decimal.Context(prec=60)
+"""Precision that keeps scaled archive integers and their sums exact."""
 _WIDE = pa.decimal128(38, 0)
+"""Type int64 sizes and products are summed in, so a day cannot overflow."""
 
-ArchiveSink = Callable[
+ArchiveSink: TypeAlias = Callable[
     [list[market.Candle], list[recorded_trades.Interval]], None
 ]
 """Receives archived 1s aggregates and coverage (``TradeArchive.put``)."""
@@ -286,6 +293,7 @@ def chunk_range(column: Any) -> tuple[int, int]:
     Returns:
         ``(start, end)`` file offsets.
     """
+    # A dictionary page, when there is one, precedes the data pages.
     start = int(column.data_page_offset)
     dictionary = column.dictionary_page_offset
     if column.has_dictionary_page and dictionary and dictionary < start:
@@ -300,7 +308,7 @@ def coalesce(
 
     Args:
         ranges: ``(start, end)`` ranges in any order.
-        max_gap: Largest gap fetched to save a request.
+        max_gap: Largest gap, in bytes, fetched to save a request.
 
     Returns:
         Ascending disjoint ranges.
@@ -574,7 +582,7 @@ def _metadata(size: int, buffers: Mapping[int, bytes]) -> Any:
     """Parses the footer of a remote file.
 
     Args:
-        size: File size.
+        size: File size in bytes.
         buffers: Fetched tail (footer included).
 
     Returns:
@@ -690,7 +698,7 @@ class _Remote:
 
     Attributes:
         url: File URL.
-        size: File size.
+        size: File size in bytes.
         etag: ETag the column reads are pinned to.
         metadata: ``pyarrow.parquet.FileMetaData``.
         names: Column names in file order.
@@ -711,8 +719,8 @@ class LighterArchive:
         FOLD_TRADES: Trades folded per builder call.
         SINK_BARS: Aggregates handed to the archive per write.
         note: Capability note describing the archive.
-        bytes_received: Body bytes received from the archive host.
-        requests: Range requests made to the archive host.
+        bytes_received: Body bytes of the partial responses received.
+        requests: Range requests answered with partial content (HTTP 206).
     """
 
     venue = instruments.Venue.LIGHTER
@@ -745,11 +753,13 @@ class LighterArchive:
             client: Optional HTTP client (tests inject respx-backed ones).
             base_url: Archive host.
             rest_url: Lighter REST base (market ids and ``1d`` candles).
-            max_concurrency: Concurrent range requests.
-            max_days: Days imported at the same time (bounds memory).
-            coalesce_gap: Largest gap between column chunks fetched in one
-                request.
-            timeout_s: Per-request timeout.
+            max_concurrency: Concurrent range requests (at least 1).
+            max_days: Days imported at the same time (at least 1; bounds
+                memory).
+            coalesce_gap: Largest gap, in bytes, between column chunks
+                fetched in one request.
+            timeout_s: Per-request timeout in seconds of the client created
+                when ``client`` is not given.
             monotonic: Monotonic clock (seconds) for retry and TTL caches.
         """
         self._owns_client = client is None
@@ -770,7 +780,7 @@ class LighterArchive:
         self.bytes_received = 0
         self.requests = 0
 
-    @staticmethod
+    @staticmethod  # noqa: GPY035 - implements DayArchive.day_of, which trade_recorder calls on the instance
     def day_of(ts_ms: int) -> datetime.date:
         """Returns the archive (UTC) day containing a time.
 
@@ -782,7 +792,7 @@ class LighterArchive:
         """
         return day_of(ts_ms)
 
-    @staticmethod
+    @staticmethod  # noqa: GPY035 - implements DayArchive.day_bounds, which trade_recorder calls on the instance
     def day_bounds(day: datetime.date) -> recorded_trades.Interval:
         """Returns the ``[start, end)`` of an archive (UTC) day.
 
@@ -824,6 +834,7 @@ class LighterArchive:
         if self._markets_at is None or now - self._markets_at > _MARKETS_TTL_S:
             payload = await self._rest.get("/orderBooks")
             try:
+                # Only the metadata is used, so the fetch time does not matter.
                 _, meta = lighter.parse_order_books(payload, 0)
                 self._markets = {
                     symbol: Market(
@@ -932,6 +943,8 @@ class LighterArchive:
                     "GET", url, headers=headers
                 ) as response:
                     status = response.status_code
+                    # S3 answers 403, not 404, for a missing key to a caller
+                    # that may not list the bucket.
                     if etag is None and status in (403, 404):
                         return None
                     if status == 412:
@@ -990,9 +1003,12 @@ class LighterArchive:
             Bytes by offset.
 
         Raises:
-            errors.VenueUnavailableError: On the first failed request.
+            errors.VenueUnavailableError: The first failure in range order,
+                once every request has finished.
         """
         spans = coalesce(ranges, self._gap)
+        # Collecting failures lets every request finish before one is
+        # raised, so no request is left running.
         bodies = await asyncio.gather(
             *(self._span(remote.url, a, b, remote.etag) for a, b in spans),
             return_exceptions=True,
@@ -1022,6 +1038,8 @@ class LighterArchive:
         if got is None:
             return None
         tail, first, size, etag = got
+        # A Parquet file ends with the footer length (4 bytes, little
+        # endian) and the magic; it also starts with the magic.
         footer = int.from_bytes(tail[-8:-4], "little")
         begin = size - 8 - footer
         if (
@@ -1081,6 +1099,7 @@ class LighterArchive:
         mask = await asyncio.to_thread(
             _read_mask, remote, buffers, index, keys, market_id
         )
+        # Frees the market chunks before the trade columns are fetched.
         del buffers
         if not pc.any(mask).as_py():
             return None
@@ -1107,6 +1126,8 @@ class LighterArchive:
         remote = await self.open_file(day)
         if remote is None:
             return None
+        # Starts with an empty table so a day without the market still
+        # concatenates.
         parts = [SCHEMA.empty_table()]
         for index in range(remote.metadata.num_row_groups):
             part = await self._row_group(remote, index, scale.market_id)
@@ -1174,6 +1195,8 @@ class LighterArchive:
                 for bar in builder.add(trades, received_ms)
                 if recorded_trades.archivable(bar)
             )
+            # Coverage goes with the last write only, so a day that fails
+            # halfway is never reported as covered.
             if len(out) >= self.SINK_BARS:
                 sink(out, [])
                 out = []
@@ -1200,7 +1223,8 @@ class LighterArchive:
             received_ms: Receipt time stamped on the aggregates.
 
         Returns:
-            True when imported, False when the day is not published yet.
+            True when imported, False when the day is not published yet (a
+            day found unpublished is not requested again for 30 minutes).
 
         Raises:
             errors.NotFoundError: For a market Lighter does not list.
@@ -1256,7 +1280,8 @@ class LighterArchive:
         Nothing is cached on disk.
 
         Args:
-            before_ms: Retention cut-off.
+            before_ms: Retention cut-off; markers of days that end at or
+                before it are forgotten.
 
         Returns:
             Number of markers forgotten.

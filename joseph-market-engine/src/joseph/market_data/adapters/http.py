@@ -4,9 +4,10 @@
 """Shared HTTP plumbing for venue adapters.
 
 Maps transport failures to domain errors (timeouts and 5xx become
-``VenueUnavailableError``; 429/418 become ``RateLimitedError``) and applies a
-per-venue token-bucket rate limit plus a concurrency cap so screening scans
-stay within public API budgets.
+``VenueUnavailableError``; 429/418 become ``RateLimitedError``; other 4xx
+become the non-retryable ``HttpStatusError``) and applies a per-venue
+token-bucket rate limit plus a concurrency cap so screening scans stay
+within public API budgets.
 """
 
 from __future__ import annotations
@@ -46,7 +47,7 @@ class RateLimiter:
 
     Attributes:
         rate_per_s: Sustained requests per second.
-        burst: Maximum bucket size.
+        burst: Maximum bucket size, in requests.
     """
 
     def __init__(self, rate_per_s: float, burst: int) -> None:
@@ -79,7 +80,13 @@ class RateLimiter:
 
 
 class VenueHttp:
-    """JSON HTTP client bound to one venue."""
+    """JSON HTTP client bound to one venue.
+
+    Attributes:
+        venue: Venue the client serves.
+        name: Source name used in error messages.
+        base_url: Base URL without a trailing slash.
+    """
 
     def __init__(
         self,
@@ -99,10 +106,12 @@ class VenueHttp:
         Args:
             venue: Venue for error messages.
             base_url: Base URL without trailing slash.
-            client: Optional injected client (tests use respx).
-            timeout_s: Request timeout.
-            rate_per_s: Token-bucket rate.
-            burst: Token-bucket capacity.
+            client: Optional injected client (tests use respx); it keeps its
+                own timeout and headers, and ``close`` leaves it open.
+            timeout_s: Request timeout in seconds of the client created
+                here (unused with ``client``).
+            rate_per_s: Token-bucket rate in requests per second.
+            burst: Token-bucket capacity in requests.
             max_concurrency: Concurrent request cap.
             name: Source name for error messages (defaults to the venue;
                 e.g. ``alpaca`` serves two venues).
@@ -135,6 +144,12 @@ class VenueHttp:
 
         Returns:
             Parsed JSON body.
+
+        Raises:
+            errors.RateLimitedError: On HTTP 418/429.
+            errors.VenueUnavailableError: On timeouts, transport errors,
+                4xx/5xx responses (``HttpStatusError`` for 4xx) or invalid
+                JSON.
         """
         response = await self._request(
             "GET", path, params=params, headers=headers
@@ -157,6 +172,11 @@ class VenueHttp:
 
         Returns:
             Decoded body.
+
+        Raises:
+            errors.RateLimitedError: On HTTP 418/429.
+            errors.VenueUnavailableError: On timeouts, transport errors or
+                4xx/5xx responses (``HttpStatusError`` for 4xx).
         """
         response = await self._request(
             "GET", path, params=params, headers=headers
@@ -172,6 +192,12 @@ class VenueHttp:
 
         Returns:
             Parsed JSON body.
+
+        Raises:
+            errors.RateLimitedError: On HTTP 418/429.
+            errors.VenueUnavailableError: On timeouts, transport errors,
+                4xx/5xx responses (``HttpStatusError`` for 4xx) or invalid
+                JSON.
         """
         response = await self._request("POST", path, json_body=body)
         return self._json(response, path)
@@ -215,12 +241,14 @@ class VenueHttp:
             headers: Extra request headers.
 
         Returns:
-            The successful (2xx/3xx) response.
+            The response, when its status is below 400 (redirects are not
+            followed).
 
         Raises:
             errors.RateLimitedError: On HTTP 418/429.
-            errors.VenueUnavailableError: On timeouts, transport errors,
-                non-2xx responses.
+            errors.VenueUnavailableError: On timeouts, transport errors and
+                5xx responses.
+            HttpStatusError: On any other 4xx response.
         """
         await self._limiter.acquire()
         name = self.name
@@ -241,6 +269,7 @@ class VenueHttp:
             raise errors.VenueUnavailableError(
                 f"{name} unreachable: {type(err).__name__}"
             ) from err
+        # Binance answers 418 once an IP is banned for ignoring its 429s.
         if response.status_code in (418, 429):
             raise errors.RateLimitedError(f"{name} rate limited {path}")
         if response.status_code >= 500:

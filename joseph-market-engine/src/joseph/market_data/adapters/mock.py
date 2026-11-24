@@ -10,10 +10,11 @@ Any range therefore reproduces exactly, and the indicator engine finds
 realistic structure. Every value is labeled ``DEMO``; the venue is never
 tradable live.
 
-Each bar aggregates 60 sub-steps (1 minute for timeframes up to 1h, coarser
-above; calendar months use their real length), so bars up to 1h are
-mutually consistent; higher timeframes are consistent with each other at
-their own sampling step. Every bar carries a plausible taker buy volume
+Each bar samples the price path in sub-steps: one minute long for
+timeframes up to 1h, and ``minutes // 60`` minutes above (so 60 to 119
+sub-steps; calendar months use their real length). Bars up to 1h are
+therefore mutually consistent; higher timeframes are consistent with each
+other at their own sampling step. Every bar carries a plausible taker buy volume
 (the buy share leans with each step's price move), so true delta works.
 
 Public trades are synthesized per minute so that they aggregate exactly to
@@ -26,7 +27,7 @@ these trades with the same builder (and rules) as real venues.
 start at the 09:30 New York open, stop at the close (early closes
 included), skip weekends and holidays, and aggregate in-session minutes
 only; daily bars are sessions and weekly/monthly bars their sessions. Its
-trades exist only in session and its buy volume is labelled ``classified``
+trades exist only in session and its buy volume is labeled ``classified``
 like a stock exchange's. It has no funding and no open interest, and its
 24h snapshot fields describe the latest completed session.
 """
@@ -61,8 +62,9 @@ _MINUTE_MS = 60_000
 _MASK = (1 << 64) - 1
 _SOURCE = "mock"
 _TRADE_SOURCE = "mock.trades"
+# Most recent minutes of trades generated per call (a page cap): 6 hours.
 _MAX_TRADE_MINUTES = 360
-"""Most recent minutes of trades generated per call (a page cap)."""
+# Minutes of synthesized trades kept in the per-adapter LRU cache.
 _TRADE_CACHE = 4_096
 
 
@@ -80,7 +82,7 @@ class MockSpec:
         spread_bps: Quoted spread in basis points.
         funding_rate: Funding rate per 8h interval.
         open_interest_base: Open interest in base units.
-        book_depth_base: Base quantity at the best level.
+        book_depth_base: Typical base quantity at the best book level.
         market_type: Product type (``perp`` or ``stock``).
         asset_class: Asset class.
     """
@@ -100,7 +102,7 @@ class MockSpec:
 
     @property
     def is_stock(self) -> bool:
-        """Returns True for the exchange-listed DEMO stock."""
+        """Whether this is the exchange-listed DEMO stock."""
         return self.market_type is instruments.MarketType.STOCK
 
     def instrument_id(self) -> instruments.InstrumentId:
@@ -241,6 +243,9 @@ def log_return(seed: int, minute: float) -> float:
         + 0.006 * _noise(seed, 3, minute / 45.0)
         + 0.0009 * _unit(seed, 4, int(minute))
     )
+    # A jump starts on about a third of days, at a seeded minute, and decays
+    # with an 1800-minute (30-hour) time constant, so the jumps of the two
+    # previous days still contribute.
     day = int(minute // 1440)
     for knot in (day - 2, day - 1, day):
         if _unit(seed, 5, knot) > 0.35:
@@ -292,22 +297,78 @@ def _split_lots(
     return parts
 
 
-def _buy_count(n: int, lots: int, taker_lots: int, share: float) -> int:
-    """Chooses how many of ``n`` trades are buyer-aggressed.
+def _buy_count(
+    trade_count: int, lots: int, taker_lots: int, share: float
+) -> int:
+    """Chooses how many of a minute's trades are buyer-aggressed.
 
     Args:
-        n: Trades in the minute.
+        trade_count: Trades in the minute.
         lots: Total lots.
         taker_lots: Buyer-aggressor lots.
         share: Desired buy fraction of trades.
 
     Returns:
-        Buy trades, so both sides can hold at least one lot per trade.
+        Number of buy trades, clamped so that every trade on either side can
+        hold at least one lot.
     """
     sell_lots = lots - taker_lots
-    low = max(n - sell_lots, 1 if taker_lots > 0 else 0)
-    high = min(taker_lots, n - (1 if sell_lots > 0 else 0))
-    return max(low, min(high, round(n * share)))
+    low = max(trade_count - sell_lots, 1 if taker_lots > 0 else 0)
+    high = min(taker_lots, trade_count - (1 if sell_lots > 0 else 0))
+    return max(low, min(high, round(trade_count * share)))
+
+
+def _sample_span(
+    spec: MockSpec,
+    seed: int,
+    span: tuple[float, float],
+    *,
+    step: int,
+    wick: float,
+    totals: tuple[float, float, float, float, float],
+) -> tuple[float, float, float, float, float]:
+    """Folds the sub-steps of one in-session span into running totals.
+
+    Args:
+        spec: Instrument parameters.
+        seed: Instrument seed.
+        span: ``(first, stop)`` minute positions.
+        step: Minutes per sub-step.
+        wick: Largest wick per sub-step, as a fraction of the price.
+        totals: ``(volume, taker, high, low, close)`` so far.
+
+    Returns:
+        Updated ``(volume, taker, high, low, close)``.
+    """
+    volume, taker, high, low, close = totals
+    position, stop = span
+    while position < stop:
+        nxt = min(position + step, stop)
+        p0 = _price(spec, seed, position)
+        p1 = _price(spec, seed, nxt)
+        index = int(position)
+        up = abs(_unit(seed, 8, index)) * wick
+        down = abs(_unit(seed, 9, index)) * wick
+        high = max(high, max(p0, p1) * (1 + up))
+        low = min(low, min(p0, p1) * (1 - down))
+        fraction = (nxt - position) / step
+        # Volume grows with the size of the move, and the taker buy share
+        # leans with its direction (fully at a 0.2% move), so delta tracks
+        # price.
+        step_volume = (
+            spec.volume_per_minute
+            * step
+            * fraction
+            * (0.5 + abs(_unit(seed, 10, index)))
+            * (1 + 300 * abs(p1 - p0) / p0)
+        )
+        lean = max(-1.0, min(1.0, (p1 - p0) / (p0 * 0.002)))
+        share = 0.5 + 0.3 * lean + 0.15 * _unit(seed, 12, index)
+        volume += step_volume
+        taker += step_volume * min(0.95, max(0.05, share))
+        close = p1
+        position = nxt
+    return volume, taker, high, low, close
 
 
 class MockAdapter:
@@ -337,7 +398,7 @@ class MockAdapter:
 
     @property
     def venue(self) -> instruments.Venue:
-        """Returns ``Venue.MOCK``."""
+        """The venue, always ``Venue.MOCK``."""
         return instruments.Venue.MOCK
 
     def capabilities(self) -> capabilities.VenueCapabilities:
@@ -513,17 +574,20 @@ class MockAdapter:
         start_ms: int,
         now: int,
     ) -> market.Candle:
-        """Builds a minute-or-longer bar from 60 sub-steps of the path.
+        """Builds a minute-or-longer bar by sampling the price path.
 
-        Only in-session minutes are sampled, so an exchange bar spanning
-        several sessions (``1d`` and above) never sees overnight prices.
+        Sub-steps are one minute long up to 1h bars and ``minutes // 60``
+        minutes above. Only in-session minutes are sampled, so an exchange
+        bar spanning several sessions (``1d`` and above) never sees
+        overnight prices.
 
         Args:
             spec: Instrument parameters.
             instrument: Mock instrument.
             timeframe: Minute or longer resolution.
             start_ms: Aligned bar start.
-            now: Current time (bars are partial up to it).
+            now: Current time in epoch milliseconds (bars are partial up to
+                it).
 
         Returns:
             Candle with a taker buy volume.
@@ -540,7 +604,7 @@ class MockAdapter:
         taker = 0.0
         wick = 0.0004 * math.sqrt(step)
         for segment_start, segment_end in segments:
-            volume, taker, high, low, close = self._sample(
+            volume, taker, high, low, close = _sample_span(
                 spec,
                 seed,
                 (
@@ -578,56 +642,6 @@ class MockAdapter:
             ),
         )
 
-    @staticmethod
-    def _sample(
-        spec: MockSpec,
-        seed: int,
-        span: tuple[float, float],
-        *,
-        step: int,
-        wick: float,
-        totals: tuple[float, float, float, float, float],
-    ) -> tuple[float, float, float, float, float]:
-        """Folds the sub-steps of one in-session span into running totals.
-
-        Args:
-            spec: Instrument parameters.
-            seed: Instrument seed.
-            span: ``(first, stop)`` minute positions.
-            step: Minutes per sub-step.
-            wick: Wick size per sub-step.
-            totals: ``(volume, taker, high, low, close)`` so far.
-
-        Returns:
-            Updated ``(volume, taker, high, low, close)``.
-        """
-        volume, taker, high, low, close = totals
-        position, stop = span
-        while position < stop:
-            nxt = min(position + step, stop)
-            p0 = _price(spec, seed, position)
-            p1 = _price(spec, seed, nxt)
-            index = int(position)
-            up = abs(_unit(seed, 8, index)) * wick
-            down = abs(_unit(seed, 9, index)) * wick
-            high = max(high, max(p0, p1) * (1 + up))
-            low = min(low, min(p0, p1) * (1 - down))
-            fraction = (nxt - position) / step
-            step_volume = (
-                spec.volume_per_minute
-                * step
-                * fraction
-                * (0.5 + abs(_unit(seed, 10, index)))
-                * (1 + 300 * abs(p1 - p0) / p0)
-            )
-            lean = max(-1.0, min(1.0, (p1 - p0) / (p0 * 0.002)))
-            share = 0.5 + 0.3 * lean + 0.15 * _unit(seed, 12, index)
-            volume += step_volume
-            taker += step_volume * min(0.95, max(0.05, share))
-            close = p1
-            position = nxt
-        return volume, taker, high, low, close
-
     def _minute_trades(
         self, instrument: instruments.InstrumentId, minute: int
     ) -> tuple[market.Trade, ...]:
@@ -654,14 +668,16 @@ class MockAdapter:
         lots = int(candle.base_volume / spec.lot)
         taker = candle.taker_buy_base_volume or decimals.ZERO
         taker_lots = int(taker / spec.lot)
-        n = min(6 + int(abs(_unit(seed, 13, minute)) * 40), lots)
-        if n <= 0:
+        count = min(6 + int(abs(_unit(seed, 13, minute)) * 40), lots)
+        if count <= 0:
             self._trade_cache[key] = ()
             return ()
-        width = _MINUTE_MS // n
+        # One trade per equal slot of the minute, the first at :00.000 so that
+        # it opens the bar.
+        width = _MINUTE_MS // count
         offsets = [0] + [
             k * width + int(abs(_unit(seed, 14, minute * 97 + k)) * (width - 1))
-            for k in range(1, n)
+            for k in range(1, count)
         ]
         prices = [
             min(
@@ -676,31 +692,44 @@ class MockAdapter:
             for off in offsets
         ]
         prices[0] = candle.open
-        prices[-1] = candle.close if n > 1 else candle.open
-        if n >= 4:
-            i_high = 1 + min(n - 3, int(abs(_unit(seed, 17, minute)) * (n - 2)))
-            i_low = 1 + min(n - 3, int(abs(_unit(seed, 18, minute)) * (n - 2)))
+        prices[-1] = candle.close if count > 1 else candle.open
+        # Two distinct interior trades print the bar's high and low.
+        if count >= 4:
+            i_high = 1 + min(
+                count - 3, int(abs(_unit(seed, 17, minute)) * (count - 2))
+            )
+            i_low = 1 + min(
+                count - 3, int(abs(_unit(seed, 18, minute)) * (count - 2))
+            )
             if i_low == i_high:
-                i_low = i_high + 1 if i_high + 1 <= n - 2 else i_high - 1
+                i_low = i_high + 1 if i_high + 1 <= count - 2 else i_high - 1
             prices[i_high], prices[i_low] = candle.high, candle.low
         share = taker_lots / lots
-        buys = _buy_count(n, lots, taker_lots, share)
-        rank = sorted(
-            range(n),
-            key=lambda k: (
-                -(
-                    _unit(seed, 16, minute * 97 + k)
-                    + (0.6 if k and prices[k] > prices[k - 1] else 0.0)
-                )
-            ),
-        )
+        buys = _buy_count(count, lots, taker_lots, share)
+
+        def buy_rank(k: int) -> float:
+            """Orders a trade for the buy side, likeliest buyer first.
+
+            Upticks rank first, so the aggressor sides look like the tick
+            rule would classify them.
+
+            Args:
+                k: Trade index within the minute.
+
+            Returns:
+                Negated buy score (ascending order puts upticks first).
+            """
+            uptick = 0.6 if k and prices[k] > prices[k - 1] else 0.0
+            return -(_unit(seed, 16, minute * 97 + k) + uptick)
+
+        rank = sorted(range(count), key=buy_rank)
         buy_set = set(rank[:buys])
         buy_parts = iter(_split_lots(taker_lots, buys, seed, 15, minute))
         sell_parts = iter(
-            _split_lots(lots - taker_lots, n - buys, seed, 19, minute)
+            _split_lots(lots - taker_lots, count - buys, seed, 19, minute)
         )
         trades = []
-        for k in range(n):
+        for k in range(count):
             is_buy = k in buy_set
             parts = buy_parts if is_buy else sell_parts
             ts = start + offsets[k]
@@ -746,19 +775,24 @@ class MockAdapter:
         last = (end_ms - 1) // _MINUTE_MS
         first = max(start_ms // _MINUTE_MS, last - _MAX_TRADE_MINUTES + 1)
         # Exchange instruments trade only in session minutes.
-        minutes = [
-            minute
-            for a, b in self._segments(
-                instrument, first * _MINUTE_MS, (last + 1) * _MINUTE_MS
+        minutes: list[int] = []
+        for segment_start, segment_end in self._segments(
+            instrument, first * _MINUTE_MS, (last + 1) * _MINUTE_MS
+        ):
+            # Ceiling division keeps a minute the segment ends inside.
+            minutes.extend(
+                range(
+                    segment_start // _MINUTE_MS, -(-segment_end // _MINUTE_MS)
+                )
             )
-            for minute in range(a // _MINUTE_MS, -(-b // _MINUTE_MS))
-        ]
-        return [
-            trade
-            for minute in minutes
-            for trade in self._minute_trades(instrument, minute)
-            if start_ms <= trade.venue_event_ts_ms < end_ms
-        ]
+        trades: list[market.Trade] = []
+        for minute in minutes:
+            trades.extend(
+                trade
+                for trade in self._minute_trades(instrument, minute)
+                if start_ms <= trade.venue_event_ts_ms < end_ms
+            )
+        return trades
 
     def _seconds_bars(
         self,
@@ -942,6 +976,9 @@ class MockAdapter:
     ) -> market.MarketSnapshot:
         """Builds a DEMO snapshot with 24h stats from synthetic bars.
 
+        Perpetuals take the last 24 hourly bars; the DEMO stock's 24h fields
+        describe its latest completed session instead.
+
         Args:
             instrument: Mock instrument.
 
@@ -1028,13 +1065,11 @@ class MockAdapter:
         calendar = sessions.for_instrument(instrument)
         day = timeframes.Timeframe.D1
         closed = calendar.last_closed_start(day, now)
-        rows = (
-            []
-            if closed is None
-            else await self.fetch_candles(
+        rows: list[market.Candle] = []
+        if closed is not None:
+            rows = await self.fetch_candles(
                 instrument, day, closed, calendar.end_of(day, closed)
             )
-        )
         session = rows[-1] if rows else None
         if calendar.is_open(now):
             last = self._last_price(spec, now)
@@ -1043,6 +1078,15 @@ class MockAdapter:
         else:
             last = self._last_price(spec, now)
         bid, ask = self._quotes(spec, last)
+        turnover: decimal.Decimal | None = None
+        change_pct: decimal.Decimal | None = None
+        if session is not None:
+            turnover = decimals.round_to_step(
+                session.base_volume * session.close, decimal.Decimal("0.01")
+            )
+            change_pct = (
+                (session.close - session.open) / session.open * decimals.HUNDRED
+            )
         return market.MarketSnapshot(
             instrument_id=instrument,
             feed_state=quality.FeedState.DEMO,
@@ -1052,22 +1096,9 @@ class MockAdapter:
             mark=last,
             best_bid=bid,
             best_ask=ask,
-            turnover_24h_quote=(
-                None
-                if session is None
-                else decimals.round_to_step(
-                    session.base_volume * session.close,
-                    decimal.Decimal("0.01"),
-                )
-            ),
+            turnover_24h_quote=turnover,
             volume_24h_base=None if session is None else session.base_volume,
-            change_24h_pct=(
-                None
-                if session is None
-                else (session.close - session.open)
-                / session.open
-                * decimals.HUNDRED
-            ),
+            change_24h_pct=change_pct,
         )
 
     async def fetch_snapshots(self) -> list[market.MarketSnapshot]:
@@ -1114,7 +1145,7 @@ class MockAdapter:
 
         Args:
             instrument: Mock instrument.
-            depth: Levels per side.
+            depth: Levels per side (at least one is built).
 
         Returns:
             Order book.
@@ -1122,8 +1153,11 @@ class MockAdapter:
         snapshot = await self.fetch_snapshot(instrument)
         spec = self._spec(instrument)
         seed = self._seeds[spec.symbol]
-        assert snapshot.best_bid is not None
-        assert snapshot.best_ask is not None
+        if snapshot.best_bid is None:
+            raise AssertionError("DEMO snapshots always quote a best bid")
+        if snapshot.best_ask is None:
+            raise AssertionError("DEMO snapshots always quote a best ask")
+        # Levels sit 0.5 bp of the bid apart, at least one tick.
         step = max(
             spec.tick,
             decimals.round_to_step(
@@ -1160,6 +1194,10 @@ class MockAdapter:
 
         Returns:
             Open interest.
+
+        Raises:
+            errors.NotFoundError: If not a mock instrument.
+            errors.UnsupportedError: For the DEMO stock.
         """
         spec = self._spec(instrument)
         if spec.is_stock:
@@ -1167,7 +1205,8 @@ class MockAdapter:
                 f"{instrument} is a stock: stocks have no open interest"
             )
         snapshot = await self.fetch_snapshot(instrument)
-        assert snapshot.open_interest is not None
+        if snapshot.open_interest is None:
+            raise AssertionError("DEMO perpetual snapshots carry open interest")
         return snapshot.open_interest
 
     async def fetch_funding(
@@ -1179,7 +1218,11 @@ class MockAdapter:
             instrument: Mock instrument.
 
         Returns:
-            Funding.
+            Predicted funding for the next 8h boundary.
+
+        Raises:
+            errors.NotFoundError: If not a mock instrument.
+            errors.UnsupportedError: For the DEMO stock.
         """
         spec = self._spec(instrument)
         if spec.is_stock:
@@ -1282,4 +1325,4 @@ class MockAdapter:
         return None
 
     async def close(self) -> None:
-        """No resources to release."""
+        """Does nothing: the DEMO venue holds no resources."""

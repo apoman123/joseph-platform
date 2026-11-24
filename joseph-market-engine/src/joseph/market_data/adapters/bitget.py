@@ -4,9 +4,10 @@
 """Bitget v2 mix (``USDT-FUTURES``) market-data adapter.
 
 REST base: ``https://api.bitget.com/api/v2/mix/market`` — ``contracts``,
-``candles``, ``ticker(s)``, ``open-interest``, ``current-fund-rate`` and
-``orderbook``. WebSocket: ``wss://ws.bitget.com/v2/ws/public`` with
-``candle<granularity>`` channels (all used channels verified live).
+``candles``, ``history-candles``, ``ticker(s)``, ``open-interest``,
+``current-fund-rate``, ``orderbook`` and ``fills-history``. WebSocket:
+``wss://ws.bitget.com/v2/ws/public`` with ``candle<granularity>`` and
+``trade`` channels (all used channels verified live).
 
 Daily, weekly, monthly, 6h and 12h granularities default to UTC+8
 boundaries on Bitget; the ``...utc`` variants are used so bars align to UTC
@@ -22,12 +23,13 @@ taker buy volume.
 
 Trades (verified live 2026-11-22): the ``trade`` channel pushes taker trades
 newest first with lowercase ``side`` (122/122 printed through the matching
-side of the BBO) and no snapshot on subscribe. ``fills-history`` returns
-trades newest first (``Buy``/``Sell``), both bounds inclusive, at most 1000
-per page with ``idLessThan`` paging, windows of at most 7 days within the
-last 90 days; ``size`` is in base coin. A request whose ``startTime`` and
-``endTime`` fall in the same second returns no rows at all (verified
-2026-11-23), so short windows are widened before clipping.
+side of the best bid and offer) and no snapshot on subscribe.
+``fills-history`` returns trades newest first (``Buy``/``Sell``), both
+bounds inclusive, at most 1000 per page with ``idLessThan`` paging, windows
+of at most 7 days within the last 90 days; ``size`` is in base coin. A
+request whose ``startTime`` and ``endTime`` fall in the same second returns
+no rows at all (verified 2026-11-23), so short windows are widened before
+clipping.
 """
 
 from __future__ import annotations
@@ -76,18 +78,25 @@ _GRANULARITY: dict[timeframes.Timeframe, str] = {
 }
 _TF = (*timeframes.SECONDS, *_GRANULARITY)
 _MAX_CANDLES = 1000
+"""Largest ``limit`` of ``candles``."""
 _MAX_HISTORY_CANDLES = 200
+"""Largest ``limit`` of ``history-candles``."""
 _MAX_HISTORY_PAGES = 50
+"""Request budget of one ``history-candles`` backfill."""
 _DAY_MS = 86_400_000
 _WINDOW_MS = 90 * _DAY_MS - 1
 """``candles`` accepts at most 90 days between ``startTime`` and ``endTime``."""
 _MAX_FILLS = 1000
+"""Largest ``limit`` of ``fills-history``."""
 _FILLS_WINDOW_MS = 7 * _DAY_MS
+"""Longest ``fills-history`` window."""
 _FILLS_HISTORY_MS = 90 * _DAY_MS - 60_000
+"""``fills-history`` reach (90 days), a minute short to stay inside it."""
 _MIN_FILLS_WINDOW_MS = 2_000
 """``fills-history`` returns nothing when both bounds fall in one second."""
 _SIDES = {"buy": market.AggressorSide.BUY, "sell": market.AggressorSide.SELL}
 _BOOK_LIMITS = (1, 5, 15, 50, 100)
+"""Depths ``orderbook`` accepts as ``limit``."""
 _STATUS = {
     "normal": instruments.InstrumentStatus.TRADING,
     "listed": instruments.InstrumentStatus.PRE_LAUNCH,
@@ -113,6 +122,8 @@ def parse_contract(
     if row.get("symbolType") != "perpetual":
         return None
     native = str(row["symbol"])
+    # Bitget gives the price precision in decimal places and the tick in
+    # units of the last place: step 5 with 2 places is a 0.05 tick.
     tick = base.dec(row["priceEndStep"]) * base.pow10(-int(row["pricePlace"]))
     return instruments.Instrument(
         key=instruments.InstrumentKey(
@@ -250,7 +261,11 @@ def parse_trade_frame(
 
 
 class BitgetAdapter(base.BaseVenueAdapter):
-    """``MarketDataPort`` for Bitget USDT-margined perpetuals."""
+    """``MarketDataPort`` for Bitget USDT-margined perpetuals.
+
+    Attributes:
+        VENUE: Venue served (``BITGET``).
+    """
 
     VENUE = instruments.Venue.BITGET
 
@@ -338,14 +353,17 @@ class BitgetAdapter(base.BaseVenueAdapter):
         end_ms: int,
         limit: int | None = None,
     ) -> list[market.Candle]:
-        """Fetches candles with forward pagination (1000 per request).
+        """Fetches candles, paging forward up to 1000 bars per request.
+
+        Seconds bars are built from trades; bars older than 90 days come
+        from ``history-candles``.
 
         Args:
             instrument: Instrument.
             timeframe: Resolution.
             start_ms: Inclusive start.
             end_ms: Exclusive end.
-            limit: Optional maximum bars.
+            limit: Optional maximum bars (the newest are kept).
 
         Returns:
             Ascending candles.
@@ -403,6 +421,9 @@ class BitgetAdapter(base.BaseVenueAdapter):
         end_ms: int,
     ) -> list[market.Candle]:
         """Pages finished candles backwards with ``history-candles``.
+
+        Stops at ``start_ms``, at an empty page or after
+        ``_MAX_HISTORY_PAGES`` requests of 200 bars.
 
         Args:
             instrument: Instrument.
@@ -462,9 +483,31 @@ class BitgetAdapter(base.BaseVenueAdapter):
         """
         mark = base.opt_dec(ticker.get("markPrice"))
         oi_base = base.opt_dec(ticker.get("holdingAmount"))
+        # ``change24h`` is a fraction (0.01 is 1 %).
         change = base.opt_dec(ticker.get("change24h"))
         ts = int(ticker.get("ts") or now_ms)
         funding_rate = base.opt_dec(ticker.get("fundingRate"))
+        funding: market.Funding | None = None
+        if funding_rate is not None:
+            funding = market.Funding(
+                instrument_id=instrument,
+                rate=funding_rate,
+                interval_hours=listed.funding_interval_hours or 8.0,
+                kind=market.FundingKind.PREDICTED,
+                effective_time_ms=ts,
+                source="bitget.rest",
+                as_of_ms=ts,
+            )
+        open_interest: market.OpenInterest | None = None
+        if oi_base is not None and mark is not None:
+            open_interest = market.OpenInterest(
+                instrument_id=instrument,
+                base_quantity=oi_base,
+                notional_usd=oi_base * mark,
+                mark_price=mark,
+                source="bitget.rest",
+                as_of_ms=ts,
+            )
         return market.MarketSnapshot(
             instrument_id=instrument,
             feed_state=quality.FeedState.LIVE,
@@ -480,29 +523,8 @@ class BitgetAdapter(base.BaseVenueAdapter):
             change_24h_pct=(
                 None if change is None else change * decimals.HUNDRED
             ),
-            funding=None
-            if funding_rate is None
-            else market.Funding(
-                instrument_id=instrument,
-                rate=funding_rate,
-                interval_hours=listed.funding_interval_hours or 8.0,
-                kind=market.FundingKind.PREDICTED,
-                effective_time_ms=ts,
-                source="bitget.rest",
-                as_of_ms=ts,
-            ),
-            open_interest=(
-                None
-                if oi_base is None or mark is None
-                else market.OpenInterest(
-                    instrument_id=instrument,
-                    base_quantity=oi_base,
-                    notional_usd=oi_base * mark,
-                    mark_price=mark,
-                    source="bitget.rest",
-                    as_of_ms=ts,
-                )
-            ),
+            funding=funding,
+            open_interest=open_interest,
         )
 
     async def _ticker(
@@ -529,12 +551,13 @@ class BitgetAdapter(base.BaseVenueAdapter):
         rows = payload.get("data") or []
         if not rows:
             raise errors.MissingDataError(f"no ticker for {instrument}")
-        return rows[0]  # type: ignore[no-any-return]
+        row: Mapping[str, Any] = rows[0]
+        return row
 
     async def fetch_snapshot(
         self, instrument: instruments.InstrumentId
     ) -> market.MarketSnapshot:
-        """Fetches the ticker snapshot (includes mark, funding and OI).
+        """Fetches the ticker snapshot (with mark, funding, open interest).
 
         Args:
             instrument: Instrument.
@@ -554,7 +577,8 @@ class BitgetAdapter(base.BaseVenueAdapter):
         """Fetches all USDT-FUTURES tickers.
 
         Returns:
-            Snapshots.
+            Snapshots of the listed contracts (tickers of unknown symbols
+            are skipped).
         """
         await self.list_instruments()
         payload = await self._http.get(
@@ -577,7 +601,8 @@ class BitgetAdapter(base.BaseVenueAdapter):
 
         Args:
             instrument: Instrument.
-            depth: Levels per side (rounded up to a Bitget limit).
+            depth: Levels per side (rounded up to a depth Bitget accepts,
+                at most 100).
 
         Returns:
             Order book.
@@ -738,8 +763,9 @@ class BitgetAdapter(base.BaseVenueAdapter):
             max_pages: Request budget.
 
         Returns:
-            Complete suffix of the range (empty beyond the 90-day history;
-            at most a 7-day window).
+            Complete suffix of the range: empty beyond the 90-day history,
+            at most a 7-day window, and the whole window only when a short
+            page ends the paging within ``max_pages``.
         """
         oldest = self._clock.now_ms() - _FILLS_HISTORY_MS
         if end_ms <= oldest:
@@ -782,6 +808,8 @@ class BitgetAdapter(base.BaseVenueAdapter):
         tracker: health.FeedHealthTracker | None = None,
     ) -> AsyncIterator[market.Candle]:
         """Streams candles with REST confirmation of closed bars.
+
+        Seconds bars are built from the trade stream.
 
         Args:
             instrument: Instrument.

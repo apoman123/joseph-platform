@@ -80,6 +80,7 @@ from collections.abc import Mapping
 from collections.abc import Sequence
 from typing import Any
 from typing import Protocol
+from typing import TypeAlias
 
 from joseph.domain import clock as clock_lib
 from joseph.domain import decimals
@@ -107,7 +108,10 @@ LOT = decimal.Decimal(1000)
 HISTORY_FLOOR = datetime.date(2020, 3, 2)
 """First day of Shioaji stock history (tutor/market_data/historical)."""
 KBARS_MAX_DAYS = 30
-"""Longest ``kbars`` query range."""
+"""Longest ``kbars`` query range, in days."""
+# Shioaji's documented limits (tutor/limit): ``ticks`` and ``kbars`` queries
+# per day in trading hours, and subscriptions. The budgets in
+# ``SinopacConfig`` stay below them.
 INTRADAY_TICKS_LIMIT = 10
 INTRADAY_KBARS_LIMIT = 270
 MAX_SUBSCRIPTIONS = 200
@@ -116,26 +120,34 @@ _TPE_OFFSET_MS = 8 * 3_600_000
 _M1 = timeframes.Timeframe.M1
 KBAR_SETTLE_MS = 5_000
 """A kbar ending this long before its query is complete."""
+# The trading-hours query budget applies from this long before the open.
 _BEFORE_OPEN_MS = 30 * 60_000
 DAY_SETTLE_MS = 15 * 60_000
-"""History of a session is read as final this long after its close; the
-trading-hours query budget applies from 30 minutes before the open until
-then."""
+"""History of a session is read as final this long after its close.
+
+The trading-hours query budget applies until then as well.
+"""
 _BOOK_GRACE_MS = 2_000
 """A bid/ask update proves tick delivery up to this long before it."""
+# Token bucket of 4 queries/s with bursts of 5: at most 45 queries per 10 s,
+# below Shioaji's 50 market-data queries per 10 s.
 _RATE_PER_S = 4.0
 _BURST = 5
-"""Pacing below the 50 market-data queries per 10 s."""
+# How long a failed login and an outage pause SDK calls before a retry.
 _LOGIN_RETRY_MS = 10 * 60_000
 _OUTAGE_RETRY_MS = 60_000
+# Taipei time at which the daily data allowance resets.
 _QUOTA_RESET = datetime.time(8, 0)
 WATCH_TTL_MS = 30 * 60_000
 """A streamed code without listeners is dropped after this idle time."""
+# Shioaji session ``event_code`` values: 1 (down) and 2 (connect failed)
+# mark the source down, 0 (up) and 13 (reconnected) end that outage, and 12
+# (reconnecting) only makes the feeds suspect.
 _DOWN_EVENTS = frozenset({1, 2})
 _UP_EVENTS = frozenset({0, 13})
 _RECONNECTING = 12
 
-Runner = Callable[[Callable[[], Any]], Awaitable[Any]]
+Runner: TypeAlias = Callable[[Callable[[], Any]], Awaitable[Any]]
 """Runs one blocking SDK call (default: a worker thread)."""
 
 
@@ -143,7 +155,7 @@ async def _thread_runner(fn: Callable[[], Any]) -> Any:
     """Runs a blocking SDK call in a worker thread.
 
     Args:
-        fn: Call.
+        fn: Blocking zero-argument SDK call.
 
     Returns:
         Its result.
@@ -187,7 +199,7 @@ class SinopacConfig:
 
     @property
     def configured(self) -> bool:
-        """Returns True when both credentials are set."""
+        """Whether both credentials are set."""
         return bool(self.api_key and self.secret_key)
 
 
@@ -202,7 +214,7 @@ class SjDataClient(Protocol):
         Args:
             api_key: API key.
             secret_key: Secret key.
-            subscribe_trade: Subscribe order/deal callbacks.
+            subscribe_trade: Whether to subscribe order/deal callbacks.
 
         Returns:
             Accounts.
@@ -223,7 +235,7 @@ class SjDataClient(Protocol):
 
     @property
     def contracts(self) -> Any:
-        """Returns the contract tree (``contracts.stocks.TSE[code]``)."""
+        """The contract tree (``contracts.stocks.TSE[code]``)."""
         ...
 
     def ticks(self, contract: Any, date: str) -> Any:
@@ -535,7 +547,7 @@ def _session_of(ts_ms: int) -> sessions.Session | None:
     if (
         session.open_ms
         <= ts_ms
-        < session.close_ms + (sessions.XTAI.close_grace_ms)
+        < session.close_ms + sessions.XTAI.close_grace_ms
     ):
         return session
     return None
@@ -710,7 +722,7 @@ def _trade(
 
     Args:
         instrument_id: Instrument.
-        trade_id: Trade id (``trade_id``).
+        trade_id: Trade id (see the module function ``trade_id``).
         ts_ms: Trade time.
         received_ms: Receipt time.
         price: Price.
@@ -734,6 +746,30 @@ def _trade(
     )
 
 
+def _book_levels(
+    prices: Iterable[Any], sizes: Iterable[Any]
+) -> list[tuple[decimal.Decimal, decimal.Decimal]]:
+    """Parses one side of a ``BidAskSTKv1``.
+
+    Args:
+        prices: Level prices (str).
+        sizes: Level sizes (lots).
+
+    Returns:
+        ``(price, shares)`` levels with a positive price and size.
+    """
+    out = []
+    for price_text, size in zip(prices, sizes, strict=False):
+        try:
+            price = decimals.to_decimal(str(price_text))
+            lots = decimals.to_decimal(size)
+        except (ValueError, decimal.InvalidOperation):
+            continue
+        if price > 0 and lots > 0:
+            out.append((price, lots * LOT))
+    return out
+
+
 def parse_book(
     bidask: Any, instrument_id: instruments.InstrumentId, received_ms: int
 ) -> market.OrderBook:
@@ -747,34 +783,10 @@ def parse_book(
     Returns:
         Order book (empty and market-order levels skipped).
     """
-
-    def levels(
-        prices: Iterable[Any], sizes: Iterable[Any]
-    ) -> list[tuple[decimal.Decimal, decimal.Decimal]]:
-        """Parses one side.
-
-        Args:
-            prices: Level prices (str).
-            sizes: Level sizes (lots).
-
-        Returns:
-            ``(price, shares)`` levels with a positive price and size.
-        """
-        out = []
-        for price_text, size in zip(prices, sizes, strict=False):
-            try:
-                price = decimals.to_decimal(str(price_text))
-                lots = decimals.to_decimal(size)
-            except (ValueError, decimal.InvalidOperation):
-                continue
-            if price > 0 and lots > 0:
-                out.append((price, lots * LOT))
-        return out
-
     return books.snapshot_book(
         instrument_id,
-        levels(bidask.bid_price or [], bidask.bid_volume or []),
-        levels(bidask.ask_price or [], bidask.ask_volume or []),
+        _book_levels(bidask.bid_price or [], bidask.bid_volume or []),
+        _book_levels(bidask.ask_price or [], bidask.ask_volume or []),
         ts_ms=local_ms(bidask.datetime),
         received_ms=received_ms,
         source=BOOK_SOURCE,
@@ -951,7 +963,7 @@ class LiveQuote:
         high: Day high.
         low: Day low.
         close: Last trade price.
-        total_volume: Day volume in shares (board lots).
+        total_volume: Day volume in shares (converted from board lots).
         change: Change from the reference price, when published.
     """
 
@@ -1018,8 +1030,8 @@ class Feed:
         book: Latest five-level book.
         listeners: Queues of the streams reading this feed.
         used_ms: Last time a request used the feed.
-        suspect: A disconnect happened since the last tick.
-        seeded: The tick history of today was merged (or attempted).
+        suspect: Whether a disconnect happened since the last tick.
+        seeded: Whether today's tick history was merged (or attempted).
     """
 
     def __init__(
@@ -1104,9 +1116,14 @@ class Feed:
         events = [Event("quote")]
         session = _session_of(ts)
         last = self.cumulative[-1] if self.cumulative else None
+        # Only in-session ticks with a rising day volume are new trades; a
+        # day volume that does not rise is a repeat (for example after a
+        # reconnect).
         if session is None or lots <= 0 or (last is not None and total <= last):
             return events
         base = total - lots
+        # The day volume before this tick must equal the last tick's, or a
+        # trade was missed in between.
         if not self.segments or base != last:
             self.segments.append(
                 Segment(
@@ -1279,9 +1296,36 @@ class Feed:
         return True
 
 
+def _broadcast(feed: Feed, events: Sequence[Event]) -> None:
+    """Hands events to a feed's listeners.
+
+    Args:
+        feed: Feed.
+        events: Events.
+    """
+    for queue in feed.listeners:
+        for event in events:
+            queue.put_nowait(event)
+
+
 # ---------------------------------------------------------------------------
 # Source
 # ---------------------------------------------------------------------------
+
+
+def _until_text(until_ms: int | None) -> str:
+    """Formats when a pause ends.
+
+    Args:
+        until_ms: End of the pause.
+
+    Returns:
+        `` until YYYY-MM-DD HH:MM Taipei`` or nothing.
+    """
+    if until_ms is None:
+        return ""
+    moment = datetime.datetime.fromtimestamp(until_ms / 1000, _TPE)
+    return " until " + moment.strftime("%Y-%m-%d %H:%M Taipei")
 
 
 class SinopacSource:
@@ -1319,12 +1363,12 @@ class SinopacSource:
         self._api: SjDataClient | None = None
         self._login_lock = asyncio.Lock()
         self._sdk_lock = asyncio.Lock()
-        self._permanent: str | None = (
-            None
-            if config.configured
-            else "JOSEPH_SINOPAC_API_KEY and JOSEPH_SINOPAC_SECRET_KEY are "
-            "not set"
-        )
+        self._permanent: str | None = None
+        if not config.configured:
+            self._permanent = (
+                "JOSEPH_SINOPAC_API_KEY and JOSEPH_SINOPAC_SECRET_KEY are "
+                "not set"
+            )
         self._down_until_ms: int | None = None
         self._down_reason: str | None = None
         self._quota_until_ms: int | None = None
@@ -1354,12 +1398,13 @@ class SinopacSource:
         self._feeds.clear()
         api, self._api = self._api, None
         if api is not None:
+            # Shutting down: a failed logout changes nothing for the caller.
             with contextlib.suppress(Exception):
                 await self._run(api.logout)
 
     @property
     def enabled(self) -> bool:
-        """Returns False when Shioaji can never be used (no key or SDK)."""
+        """Whether Shioaji can be used at all (False without keys or SDK)."""
         return self._permanent is None
 
     def check_sdk(self) -> bool:
@@ -1406,21 +1451,6 @@ class SinopacSource:
             return self._quota_reason
         return None
 
-    @staticmethod
-    def _until(until_ms: int | None) -> str:
-        """Formats when a pause ends.
-
-        Args:
-            until_ms: End of the pause.
-
-        Returns:
-            `` until YYYY-MM-DD HH:MM Taipei`` or nothing.
-        """
-        if until_ms is None:
-            return ""
-        moment = datetime.datetime.fromtimestamp(until_ms / 1000, _TPE)
-        return " until " + moment.strftime("%Y-%m-%d %H:%M Taipei")
-
     def status_note(self) -> str:
         """Describes the current state for capability notes.
 
@@ -1432,7 +1462,7 @@ class SinopacSource:
             when = (
                 ""
                 if self._permanent is not None
-                else self._until(self._down_until_ms)
+                else _until_text(self._down_until_ms)
             )
             return (
                 f"Shioaji status: unavailable ({reason}){when}; TWSE/TPEx "
@@ -1442,7 +1472,7 @@ class SinopacSource:
         if history is not None:
             return (
                 f"Shioaji status: streams available, history paused "
-                f"({history}){self._until(self._quota_until_ms)}; official "
+                f"({history}){_until_text(self._quota_until_ms)}; official "
                 "data serves what the streams do not."
             )
         return (
@@ -1508,7 +1538,7 @@ class SinopacSource:
         """Runs one blocking SDK call at a time.
 
         Args:
-            fn: Call.
+            fn: Blocking zero-argument SDK call.
 
         Returns:
             Its result.
@@ -1523,8 +1553,8 @@ class SinopacSource:
             Logged-in client.
 
         Raises:
-            errors.VenueUnavailableError: When the SDK is missing or the
-                login fails.
+            errors.VenueUnavailableError: When Shioaji is unavailable, the
+                SDK is missing or the login fails.
         """
         self._require()
         async with self._login_lock:
@@ -1546,7 +1576,8 @@ class SinopacSource:
             api.set_on_bidask_stk_v1_callback(self._on_bidask)
             api.set_event_callback(self._on_event)
             config = self.config
-            assert config.api_key is not None and config.secret_key is not None
+            if config.api_key is None or config.secret_key is None:
+                raise AssertionError("_require() refuses a source without keys")
             key, secret = config.api_key, config.secret_key
             self.calls.append("login")
             try:
@@ -1557,6 +1588,8 @@ class SinopacSource:
                 )
             except Exception as err:
                 kind = error_kind(err)
+                # An unclassified login failure counts as an auth failure,
+                # which waits the longer login retry before trying again.
                 raise self._mark_down(
                     "auth" if kind == "outage" else kind, type(err).__name__
                 ) from err
@@ -1599,7 +1632,8 @@ class SinopacSource:
             kind: ``ticks`` or ``kbars``.
 
         Returns:
-            Queries left (unbounded outside trading hours: the limit).
+            Queries left; the whole configured budget outside trading hours
+            and before today's first query.
         """
         now = self._clock.now_ms()
         limit = (
@@ -1675,8 +1709,10 @@ class SinopacSource:
             SDK result.
 
         Raises:
-            errors.VenueUnavailableError: On SDK failures (the source is
-                marked down) or a spent budget.
+            errors.VenueUnavailableError: When history is paused or Shioaji
+                is unavailable, on SDK failures (the source is marked down)
+                and, as ``errors.RateLimitedError``, for a spent budget.
+            errors.MissingDataError: When Shioaji has no such contract.
         """
         self._require_history()
         api = await self._client()
@@ -1731,6 +1767,9 @@ class SinopacSource:
 
         Raises:
             ValueError: For a range longer than 30 days.
+            errors.VenueUnavailableError: As for ``_query``, or when the
+                answer is empty because the data allowance is used up.
+            errors.MissingDataError: When Shioaji has no such contract.
         """
         if (last - first).days >= KBARS_MAX_DAYS:
             raise ValueError("Shioaji kbars span at most 30 days")
@@ -1756,7 +1795,8 @@ class SinopacSource:
         Returns:
             ``KBars``.
         """
-        assert self._api is not None
+        if self._api is None:
+            raise AssertionError("_query() logs in before calling kbars")
         return self._api.kbars(contract=contract, start=start, end=end)
 
     async def ticks(self, code: str, exchange: str, day: datetime.date) -> Any:
@@ -1769,6 +1809,11 @@ class SinopacSource:
 
         Returns:
             ``Ticks`` columns.
+
+        Raises:
+            errors.VenueUnavailableError: As for ``_query``, or when the
+                answer is empty because the data allowance is used up.
+            errors.MissingDataError: When Shioaji has no such contract.
         """
         text = day.isoformat()
         rows = await self._query(
@@ -1791,7 +1836,8 @@ class SinopacSource:
         Returns:
             ``Ticks``.
         """
-        assert self._api is not None
+        if self._api is None:
+            raise AssertionError("_query() logs in before calling ticks")
         return self._api.ticks(contract=contract, date=day)
 
     # Streams -------------------------------------------------------------
@@ -1812,8 +1858,9 @@ class SinopacSource:
     ) -> Feed:
         """Streams a code's ticks and bid/ask (subscribing on first use).
 
-        Idle feeds (no listener, unused for ``WATCH_TTL_MS``) are dropped,
-        the least recently used first when the symbol budget is full.
+        Before a new subscription, idle feeds (no listener, unused for
+        ``WATCH_TTL_MS``) are dropped, and so is the least recently used idle
+        feed when the symbol budget is still full.
 
         Args:
             code: Security code.
@@ -1826,6 +1873,7 @@ class SinopacSource:
         Raises:
             errors.VenueUnavailableError: When Shioaji is unavailable, the
                 subscription fails or every streamed code is in use.
+            errors.MissingDataError: When Shioaji has no such contract.
         """
         now = self._clock.now_ms()
         found = self._feeds.get(code)
@@ -1874,6 +1922,8 @@ class SinopacSource:
             del self._feeds[feed.code]
             contract = self._contracts.get((feed.exchange, feed.code))
             self.calls.append(f"unsubscribe {feed.exchange} {feed.code}")
+            # The feed is gone either way; a failed unsubscribe only leaves
+            # a stream the callbacks ignore.
             with contextlib.suppress(Exception):
                 await self._run(
                     functools.partial(
@@ -1891,7 +1941,8 @@ class SinopacSource:
             contract: Contract.
             subscribe: True to subscribe, False to unsubscribe.
         """
-        assert self._factory is not None
+        if self._factory is None:
+            raise AssertionError("_client() creates the factory first")
         version = self._factory.quote_version()
         method = api.subscribe if subscribe else api.unsubscribe
         for quote_type in ("tick", "bid_ask"):
@@ -1927,7 +1978,10 @@ class SinopacSource:
         feed.used_ms = self._clock.now_ms()
 
     def _hop(self, fn: Callable[..., None], *args: Any) -> None:
-        """Runs a callback's work on the event loop.
+        """Schedules a callback's work on the event loop thread.
+
+        The work is dropped when there is no open loop (before the login or
+        after shutdown).
 
         Args:
             fn: Loop-side handler.
@@ -1971,18 +2025,6 @@ class SinopacSource:
         del resp_code, event
         self._hop(self.deliver_event, int(event_code), str(info))
 
-    @staticmethod
-    def _broadcast(feed: Feed, events: Sequence[Event]) -> None:
-        """Hands events to a feed's listeners.
-
-        Args:
-            feed: Feed.
-            events: Events.
-        """
-        for queue in feed.listeners:
-            for event in events:
-                queue.put_nowait(event)
-
     def deliver_tick(self, tick: Any) -> None:
         """Applies a tick on the loop thread.
 
@@ -1991,7 +2033,7 @@ class SinopacSource:
         """
         feed = self._feeds.get(str(getattr(tick, "code", "")))
         if feed is not None:
-            self._broadcast(feed, feed.apply_tick(tick, self._clock.now_ms()))
+            _broadcast(feed, feed.apply_tick(tick, self._clock.now_ms()))
 
     def deliver_bidask(self, bidask: Any) -> None:
         """Applies a bid/ask update on the loop thread.
@@ -2001,7 +2043,7 @@ class SinopacSource:
         """
         feed = self._feeds.get(str(getattr(bidask, "code", "")))
         if feed is not None:
-            self._broadcast(feed, feed.apply_book(bidask, self._clock.now_ms()))
+            _broadcast(feed, feed.apply_book(bidask, self._clock.now_ms()))
 
     def deliver_event(self, event_code: int, info: str) -> None:
         """Applies a session event on the loop thread.
@@ -2038,6 +2080,7 @@ class SinopacSource:
         if quote is None:
             return None
         book = feed.book
+        # ``price_chg`` is the change from the reference price.
         previous = None if quote.change is None else quote.close - quote.change
         change = (
             None

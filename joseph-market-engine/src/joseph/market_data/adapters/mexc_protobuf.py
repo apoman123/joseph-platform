@@ -77,7 +77,9 @@ PROTO_DIR = pathlib.Path(__file__).with_name("mexc_proto")
 """Vendored official ``.proto`` files (with ``LICENSE`` and ``NOTICE``)."""
 
 _PACKAGE = "joseph_mexc_futures_ws"
+"""Package of the synthetic descriptor file (private to its own pool)."""
 _JSON_START = (b"{", b"[")
+"""First bytes of a JSON frame sent as a binary frame."""
 _FDP = descriptor_pb2.FieldDescriptorProto
 _SCALARS = {
     "string": _FDP.TYPE_STRING,
@@ -228,6 +230,8 @@ class Schema:
                     )
                     field.type_name = f".{package}.{spec.kind}"
                 if spec.label == "optional":
+                    # proto3 ``optional`` is a synthetic one-field oneof
+                    # named ``_<field>``, as protoc writes it.
                     field.proto3_optional = True
                     field.oneof_index = len(body.oneof_decl)
                     body.oneof_decl.add(name=f"_{spec.name}")
@@ -377,6 +381,9 @@ def loads(raw: str | bytes) -> Any:
     Raises:
         ValueError: For malformed JSON or Protobuf.
     """
+    # No Protobuf push starts with "{" (0x7B) or "[" (0x5B): as a first byte
+    # they are the one-byte tags of fields 15 and 11 with the deprecated
+    # group wire type, which ``ContractWrapper`` does not have.
     if isinstance(raw, str) or raw[:1] in _JSON_START:
         return json.loads(raw)
     return decode(raw)

@@ -50,6 +50,7 @@ from collections.abc import Callable
 from collections.abc import Iterable
 from collections.abc import Iterator
 from collections.abc import Sequence
+from typing import TypeAlias
 
 import httpx
 
@@ -75,15 +76,18 @@ UTC8 = datetime.timezone(datetime.timedelta(hours=8))
 _PART = re.compile(r"_(\d+)\.zip$")
 _SIDES = {"buy": market.AggressorSide.BUY, "sell": market.AggressorSide.SELL}
 _COLUMNS = ("trade_id", "timestamp", "price", "side", "size(base)")
+"""Columns read; quote volume is recomputed from price and size."""
 _MANIFEST = "parts.json"
 _MISSING_RETRY_S = 1_800.0
+"""Seconds before a day that was not listed yet is listed again."""
 _CHUNK_BYTES = 1 << 16
 
-ArchiveSink = Callable[
+ArchiveSink: TypeAlias = Callable[
     [list[market.Candle], list[recorded_trades.Interval]], None
 ]
 """Receives archived 1s aggregates and coverage (``TradeArchive.put``)."""
-Sleep = Callable[[float], Awaitable[None]]
+Sleep: TypeAlias = Callable[[float], Awaitable[None]]
+"""Waits a number of seconds (``asyncio.sleep``)."""
 
 
 def day_bounds(day: datetime.date) -> recorded_trades.Interval:
@@ -217,8 +221,9 @@ def totals(trades: Iterable[market.Trade]) -> DayTotals | None:
 def matches(found: DayTotals | None, expected: DayTotals) -> bool:
     """Checks that a day's trades reproduce its kline.
 
-    Prices and base volume must be equal; quote volume may differ by the
-    kline's rounding (``recorded_trades.VOLUME_TOLERANCE``).
+    High, low, close and base volume must be equal; quote volume may differ
+    by the kline's rounding (``recorded_trades.VOLUME_TOLERANCE``). The open
+    is not compared: the kline opens at the previous day's close.
 
     Args:
         found: Totals of the archived trades.
@@ -299,9 +304,11 @@ class BitgetArchive:
         Args:
             cache_dir: Cache directory (created on demand).
             client: Optional HTTP client (tests inject respx-backed ones).
-            max_concurrency: Concurrent day downloads.
-            timeout_s: Per-request timeout.
-            list_interval_s: Spacing of file-list calls (rate limit).
+            max_concurrency: Concurrent day downloads (at least 1).
+            timeout_s: Per-request timeout in seconds of the client created
+                when ``client`` is not given.
+            list_interval_s: Seconds between file-list calls, which the
+                endpoint rate-limits.
             monotonic: Monotonic clock (seconds).
             sleep: Sleep function (injectable for tests).
         """
@@ -319,7 +326,7 @@ class BitgetArchive:
         self._monotonic = monotonic
         self._sleep = sleep
 
-    @staticmethod
+    @staticmethod  # noqa: GPY035 - implements DayArchive.day_of, which trade_recorder calls on the instance
     def day_of(ts_ms: int) -> datetime.date:
         """Returns the archive (UTC+8) day containing a time.
 
@@ -327,16 +334,16 @@ class BitgetArchive:
             ts_ms: Epoch milliseconds.
 
         Returns:
-            Date.
+            Date in UTC+8.
         """
         return day_of(ts_ms)
 
-    @staticmethod
+    @staticmethod  # noqa: GPY035 - implements DayArchive.day_bounds, which trade_recorder calls on the instance
     def day_bounds(day: datetime.date) -> recorded_trades.Interval:
         """Returns the ``[start, end)`` of an archive (UTC+8) day.
 
         Args:
-            day: Date.
+            day: Date in UTC+8.
 
         Returns:
             Epoch milliseconds.
@@ -418,7 +425,8 @@ class BitgetArchive:
             URLs, or ``None`` when the day is not listed (yet).
 
         Raises:
-            errors.VenueUnavailableError: On failures or unexpected files.
+            errors.VenueUnavailableError: On failures (``RateLimitedError``
+                on HTTP 429) or unexpected files.
         """
         payload = await self._post_list(symbol, day)
         if not isinstance(payload, dict) or str(payload.get("code")) != "200":
@@ -426,11 +434,13 @@ class BitgetArchive:
                 "bitget archive list rejected the request"
             )
         start = day_bounds(day)[0]
+        # A set, because the endpoint may list a file twice.
         urls: set[str] = set()
         for entry in payload.get("data") or []:
             if int(entry.get("dateTime", -1)) != start:
                 continue
             url = httpx.URL(str(entry["fileUrl"]))
+            # Only Bitget's file host is trusted for downloads.
             if url.scheme != "https" or url.host != FILE_HOST:
                 raise errors.VenueUnavailableError(
                     f"bitget archive listed an unexpected file host {url.host}"
@@ -483,10 +493,11 @@ class BitgetArchive:
             day: UTC+8 date.
 
         Returns:
-            Part files in order, or ``None`` when the day is not listed.
+            Part files in order, or ``None`` when the day is not listed (a
+            day found unlisted is not listed again for 30 minutes).
 
         Raises:
-            errors.VenueUnavailableError: On download failures.
+            errors.VenueUnavailableError: On list or download failures.
         """
         key = (symbol, day)
         lock = self._locks.setdefault(key, asyncio.Lock())
@@ -538,6 +549,8 @@ class BitgetArchive:
                 params={
                     "symbol": symbol,
                     "productType": "USDT-FUTURES",
+                    # ``1D`` (not ``1Dutc``) bars span UTC+8 days, as the
+                    # archive's days do.
                     "granularity": "1D",
                     "endTime": end,
                     "limit": 2,
@@ -561,7 +574,7 @@ class BitgetArchive:
             f"no bitget 1D kline of {day} to verify the archive"
         )
 
-    @staticmethod
+    @staticmethod  # noqa: GPY035 - unit tests call BitgetArchive._lines on the class
     def _lines(paths: Sequence[pathlib.Path]) -> Iterator[str]:
         """Streams the CSV lines of every part in order.
 
@@ -587,7 +600,7 @@ class BitgetArchive:
                     )
 
     @classmethod
-    def _trades(
+    def _trades(  # noqa: GPY036 - live network tests call BitgetArchive._trades on the class
         cls,
         paths: Sequence[pathlib.Path],
         instrument: instruments.InstrumentId,
@@ -603,6 +616,7 @@ class BitgetArchive:
         Yields:
             Trades in file order.
         """
+        # Every part repeats the CSV header, so each is parsed on its own.
         for path in paths:
             yield from parse_rows(cls._lines([path]), instrument, received_ms)
 
@@ -658,6 +672,8 @@ class BitgetArchive:
                     if recorded_trades.archivable(b)
                 )
                 pending = []
+            # Coverage goes with the last write only, so a day that fails
+            # halfway is never reported as covered.
             if len(out) >= self.SINK_BARS:
                 sink(out, [])
                 out = []
@@ -687,8 +703,9 @@ class BitgetArchive:
             True when imported, False when the day is not listed yet.
 
         Raises:
-            errors.VenueUnavailableError: On download or verification
-                failures (failed files are discarded).
+            errors.VenueUnavailableError: On list, download or verification
+                failures (a day whose files fail to parse or verify is
+                discarded).
         """
         symbol = instrument.venue_market_id
         paths = await self.day_files(symbol, day)
@@ -729,7 +746,8 @@ class BitgetArchive:
         """Deletes cached days entirely before a cut-off.
 
         Args:
-            before_ms: Retention cut-off.
+            before_ms: Retention cut-off; days that end at or before it are
+                deleted.
 
         Returns:
             Number of days deleted.
