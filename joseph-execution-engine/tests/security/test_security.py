@@ -8,6 +8,7 @@ from __future__ import annotations
 import dataclasses
 import decimal
 import logging
+from typing import NoReturn
 
 import pytest
 from fastapi import testclient
@@ -25,8 +26,21 @@ from joseph_execution.testing import harness
 D = decimal.Decimal
 
 
+async def _boom(*args: object, **kwargs: object) -> NoReturn:
+    """Raises an unexpected error whose message holds a fake secret.
+
+    Args:
+        *args: Ignored.
+        **kwargs: Ignored.
+
+    Raises:
+        RuntimeError: Always.
+    """
+    raise RuntimeError("database password is hunter2")
+
+
 def test_every_route_requires_authentication() -> None:
-    """All routes except /health reject anonymous callers."""
+    """All routes but /health refuse anonymous calls; /metrics needs a token."""
     h = harness.build()
     app = bootstrap.build_app(h.container)
     with testclient.TestClient(app) as client:
@@ -41,7 +55,7 @@ def test_every_route_requires_authentication() -> None:
                 "account_id",
                 "deployment_id",
             ):
-                concrete = concrete.replace("{" + name + "}", "x")
+                concrete = concrete.replace(f"{{{name}}}", "x")
             for method in operations:
                 response = client.request(method.upper(), concrete, json={})
                 assert response.status_code == 401, (method, path)
@@ -104,7 +118,7 @@ def test_secrets_never_logged_or_returned(
     assert secret not in caplog.text
     with h.container.uow_factory() as uow:
         envelope = uow.credentials.get(
-            uow.accounts.get(account_id).credential_id  # type: ignore[union-attr]
+            uow.accounts.get(account_id).credential_id  # type: ignore[union-attr, arg-type]  # connect stored the account and its credential
         )
     assert envelope is not None and secret not in str(envelope)
 
@@ -113,20 +127,7 @@ def test_errors_never_leak_internals() -> None:
     """Unexpected errors return a generic INTERNAL body."""
     h = harness.build()
     app = bootstrap.build_app(h.container)
-
-    async def boom(*args: object, **kwargs: object) -> object:
-        """Raises an unexpected error.
-
-        Args:
-            *args: Ignored.
-            **kwargs: Ignored.
-
-        Raises:
-            RuntimeError: Always.
-        """
-        raise RuntimeError("database password is hunter2")
-
-    h.container.services.oms.preview = boom  # type: ignore[method-assign]
+    h.container.services.oms.preview = _boom  # type: ignore[method-assign]  # replaces the bound method to inject a failure
     with testclient.TestClient(app, raise_server_exceptions=False) as client:
         response = client.post(
             "/v1/orders/preview",
@@ -203,7 +204,7 @@ async def test_live_gate_positive_control_reaches_only_when_all_pass() -> None:
         gated.market, gated.clock, name="fake-live"
     )
     gated.container.registry.live["mock"] = fake
-    svc = gated.container.services
+    services = gated.container.services
     with gated.container.uow_factory() as uow:
         account = uow.accounts.get(harness.PAPER_A)
         assert account is not None
@@ -215,7 +216,7 @@ async def test_live_gate_positive_control_reaches_only_when_all_pass() -> None:
     gated.market.feed_state = enums.FeedState.LIVE
     body = harness.intent_body(mode="LIVE")
     request = intents.OrderIntentRequest.from_contract(body)
-    unarmed = await svc.oms.preview(harness.TENANT_A, request)
+    unarmed = await services.oms.preview(harness.TENANT_A, request)
     assert unarmed.decision.primary_code() == "LIVE_NOT_ARMED"
     with gated.container.uow_factory() as uow:
         # The paper account cannot be armed through the API, so this
@@ -228,16 +229,16 @@ async def test_live_gate_positive_control_reaches_only_when_all_pass() -> None:
                 forced, "user:user-a", gated.clock.now_ms(), 60_000
             )
         )
-    preview = await svc.oms.preview(harness.TENANT_A, request)
+    preview = await services.oms.preview(harness.TENANT_A, request)
     assert preview.allowed, preview.decision.failures()
     tokened = dataclasses.replace(
         preview.normalized, preview_token=preview.token
     )
-    result = await svc.oms.submit_intent(harness.TENANT_A, tokened, "live")
+    result = await services.oms.submit_intent(harness.TENANT_A, tokened, "live")
     assert result.decision.allowed
     assert fake.submit_calls == 1
 
-    dep = svc.deployments.create(
+    deployment = services.deployments.create(
         harness.TENANT_A,
         "s:v1",
         harness.PAPER_A,
@@ -245,8 +246,12 @@ async def test_live_gate_positive_control_reaches_only_when_all_pass() -> None:
         deployments.DeploymentLimits(D(50000), 2, D(500), (harness.BTC,), D(3)),
         deployments.SizingModel("FIXED_QTY", fixed_qty=D("0.01")),
     )
-    granted = await svc.deployments.grant_live_consent(
-        harness.TENANT_A, dep.deployment_id, gated.totp(), True, 3_600_000
+    granted = await services.deployments.grant_live_consent(
+        harness.TENANT_A,
+        deployment.deployment_id,
+        gated.totp(),
+        True,
+        3_600_000,
     )
     assert granted.state is enums.DeploymentState.ENABLED
     assert granted.live_consent is not None

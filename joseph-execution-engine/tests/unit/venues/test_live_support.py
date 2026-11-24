@@ -54,17 +54,18 @@ class _FlakyAdapter:
     async def stream_account_events(
         self, account_id: str
     ) -> AsyncIterator[trading.VenueEvent]:
-        """Streams events.
+        """Streams events, failing on the first two attempts.
 
         Args:
-            account_id: Account.
+            account_id: Account the events are for.
 
         Yields:
-            Events.
+            From the third attempt on, a position event and a fill of an
+            unknown order; the stream then stays silent for an hour.
 
         Raises:
-            ExecutionError: First attempt.
-            RuntimeError: Second attempt.
+            AdapterUnavailableError: On the first attempt.
+            RuntimeError: On the second attempt.
         """
         self.attempts += 1
         if self.attempts == 1:
@@ -87,27 +88,31 @@ class _FlakyAdapter:
 
 
 class _Resolver:
-    """Resolver returning one adapter."""
+    """Adapter resolver that returns one adapter for every account and mode.
+
+    Attributes:
+        adapter: The adapter returned.
+    """
 
     def __init__(self, adapter: _FlakyAdapter) -> None:
         """Initializes the resolver.
 
         Args:
-            adapter: Adapter.
+            adapter: Adapter to return.
         """
         self.adapter = adapter
 
     def resolve(
         self, account: accounts.Account, mode: enums.OrderMode
     ) -> _FlakyAdapter:
-        """Returns the adapter.
+        """Returns the adapter, whatever the account and mode.
 
         Args:
-            account: Account.
-            mode: Mode.
+            account: Ignored account.
+            mode: Ignored order mode.
 
         Returns:
-            Adapter.
+            ``adapter``.
         """
         del account, mode
         return self.adapter
@@ -121,7 +126,8 @@ def _venue_account(h: harness.Harness, status: enums.AccountStatus) -> str:
         status: Account status.
 
     Returns:
-        Account id.
+        The account id, ``acct-binance-<status>``; its position is long
+        0.5 BTCUSDT from 90000.
     """
     account = accounts.Account(
         f"acct-binance-{status.value.lower()}",
@@ -160,7 +166,7 @@ async def test_supervisor_restarts_streams_and_tracks_scope() -> None:
     metrics = metrics_lib.MetricsRegistry()
     supervisor = live_streams.LiveStreamSupervisor(
         h.container.uow_factory,
-        _Resolver(adapter),  # type: ignore[arg-type]
+        _Resolver(adapter),  # type: ignore[arg-type]  # duck-typed stand-in for the AdapterRegistry
         h.container.services.oms,
         metrics,
         poll_s=0.0,
@@ -269,26 +275,26 @@ def _mexc(known: list[directory.KnownOrder]) -> mexc.MexcFuturesAdapter:
     """Builds a MEXC adapter with a directory.
 
     Args:
-        known: Directory orders.
+        known: Orders the directory knows.
 
     Returns:
-        Adapter.
+        A LIVE-enabled MEXC adapter for account ``acct`` on a manual clock.
     """
 
     class _Directory:
-        """In-memory directory."""
+        """Order directory over ``known``."""
 
         def find(
             self, account_id: str, cid: str
         ) -> directory.KnownOrder | None:
-            """Finds an order.
+            """Finds a known order by client id.
 
             Args:
-                account_id: Account.
-                cid: Client id.
+                account_id: Ignored; the tests use one account.
+                cid: Client order id.
 
             Returns:
-                Order.
+                The order, or ``None`` when it is not known.
             """
             del account_id
             return next((k for k in known if k.client_order_id == cid), None)
@@ -296,14 +302,14 @@ def _mexc(known: list[directory.KnownOrder]) -> mexc.MexcFuturesAdapter:
         def recent(
             self, account_id: str, since_ms: int
         ) -> list[directory.KnownOrder]:
-            """Lists orders.
+            """Lists every known order, whatever the account and time.
 
             Args:
-                account_id: Account.
-                since_ms: Lower bound.
+                account_id: Ignored; the tests use one account.
+                since_ms: Ignored lower bound, epoch milliseconds.
 
             Returns:
-                Orders.
+                The known orders.
             """
             del account_id, since_ms
             return list(known)
@@ -326,10 +332,10 @@ def _ok(data: object) -> httpx.Response:
     """Builds a MEXC success answer.
 
     Args:
-        data: ``data``.
+        data: Value of the ``data`` field.
 
     Returns:
-        Response.
+        A 200 response with MEXC's success envelope.
     """
     return httpx.Response(200, json={"success": True, "code": 0, "data": data})
 
@@ -446,6 +452,7 @@ async def test_mexc_contract_flags_and_cancel_edge_cases() -> None:
     assert done.status is S.FILLED
 
 
+# Complete, well-formed (but fake) credentials for each venue.
 _VALID_FIELDS = {
     "binance": {"api_key": "k", "api_secret": "secret-value"},
     "bitget": {"api_key": "k", "api_secret": "secret-value", "passphrase": "p"},

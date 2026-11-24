@@ -10,6 +10,7 @@ import datetime
 import decimal
 import types
 from typing import Any
+from typing import NoReturn
 
 import pytest
 
@@ -31,22 +32,23 @@ NUMBER = "DU1234567"
 
 
 class _Rig:
-    """Adapter wired to a fake IB.
+    """An IBKR adapter wired to a fake IB client, clock and market gateway.
 
     Attributes:
-        adapter: Adapter under test.
-        ib: Fake client.
-        factory: Fake factory.
-        clock: Clock.
-        gateway: Market gateway.
+        adapter: Adapter under test; ``ACCOUNT`` maps to ``NUMBER``.
+        ib: Fake IB client the adapter talks to.
+        factory: Factory that hands out ``ib`` and counts the clients made.
+        clock: Manual clock, at 10:00 New York on ``MONDAY``.
+        gateway: Static market gateway with the securities fixtures.
     """
 
     def __init__(self, gate: str | None = None, **config: Any) -> None:
         """Builds the rig.
 
         Args:
-            gate: Gate reason.
-            **config: ``IbkrConfig`` overrides.
+            gate: Reason the adapter is gated; ``None`` leaves it open.
+            **config: ``IbkrConfig`` fields that replace the short test
+                timeouts.
         """
         self.clock = clock_lib.ManualClock(fixtures.new_york(MONDAY, 10))
         self.gateway = market_static.StaticMarketDataGateway(self.clock)
@@ -73,11 +75,11 @@ class _Rig:
         """Builds a Joseph client id created ``age_ms`` ago.
 
         Args:
-            n: Distinguishing number.
-            age_ms: Age.
+            n: Distinguishing number, the id's random part.
+            age_ms: Age of the id, in milliseconds.
 
         Returns:
-            Client id.
+            ``j`` + 12 hex digits of the creation ms + 18 hex digits of ``n``.
         """
         return f"j{self.clock.now_ms() - age_ms:012x}{n:018x}"
 
@@ -86,11 +88,11 @@ def _req(cid: str, **overrides: object) -> trading.VenueOrderRequest:
     """Builds a venue request for AAPL.
 
     Args:
-        cid: Client id.
-        **overrides: Overrides.
+        cid: Client order id.
+        **overrides: Request fields that replace the defaults.
 
     Returns:
-        Request.
+        By default a DAY limit buy of 10 AAPL at 190.01 on ``ACCOUNT``.
     """
     fields: dict[str, object] = {
         "account_id": ACCOUNT,
@@ -104,7 +106,19 @@ def _req(cid: str, **overrides: object) -> trading.VenueOrderRequest:
         "limit_price": D("190.01"),
     }
     fields.update(overrides)
-    return trading.VenueOrderRequest(**fields)  # type: ignore[arg-type]
+    return trading.VenueOrderRequest(**fields)  # type: ignore[arg-type]  # dict[str, object] holds each field's own type
+
+
+def _missing_module(name: str) -> NoReturn:
+    """Fails like ``importlib.import_module`` without the ``ibkr`` extra.
+
+    Args:
+        name: Module name.
+
+    Raises:
+        ImportError: Always.
+    """
+    raise ImportError(name)
 
 
 async def test_gated_adapter_never_creates_a_client() -> None:
@@ -530,10 +544,10 @@ async def test_pacer_limits_requests_per_window() -> None:
     slept: list[float] = []
 
     async def sleep(seconds: float) -> None:
-        """Advances fake time.
+        """Records the delay and advances the fake time by it.
 
         Args:
-            seconds: Delay.
+            seconds: Delay in seconds.
         """
         slept.append(seconds)
         now[0] += seconds
@@ -549,19 +563,7 @@ def test_real_factory_requires_the_extra(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     """The ib_async factory fails closed when the extra is missing."""
-
-    def missing(name: str) -> object:
-        """Raises ImportError.
-
-        Args:
-            name: Module.
-
-        Raises:
-            ImportError: Always.
-        """
-        raise ImportError(name)
-
-    monkeypatch.setattr(ibkr.importlib, "import_module", missing)
+    monkeypatch.setattr(ibkr.importlib, "import_module", _missing_module)
     with pytest.raises(errors.AdapterUnavailableError):
         ibkr.IbAsyncFactory()
 

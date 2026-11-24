@@ -17,6 +17,7 @@ import statistics
 import time
 import uuid
 from collections.abc import Callable
+from typing import TypeAlias
 
 import httpx
 import pytest
@@ -33,6 +34,7 @@ _FIXTURES = (
     / "contracts"
     / "fixtures"
 )
+_Validate: TypeAlias = Callable[[str, str, object], None]
 
 
 def _signal(
@@ -41,13 +43,14 @@ def _signal(
     """Builds a contract Signal for the DEMO instrument.
 
     Args:
-        strategy_version_id: Version the deployment is bound to.
-        entry: Entry price.
-        stop: Stop price.
-        target: Target price.
+        strategy_version_id: Version the deployment is bound to, as
+            ``<strategy_id>:<version>``.
+        entry: Entry price, as a decimal string.
+        stop: Stop price, as a decimal string.
+        target: Target price, as a decimal string.
 
     Returns:
-        Signal payload.
+        A PAPER signal for tenant A with a fresh id, on a bar closing now.
     """
     body = json.loads(
         (_FIXTURES / "signal.fixture.json").read_text(encoding="utf-8")
@@ -76,7 +79,7 @@ def _signal(
 def test_signal_creates_exactly_one_paper_order(
     services: dict[str, str],
     execution: httpx.Client,
-    validate: Callable[[str, str, object], None],
+    validate: _Validate,
 ) -> None:
     """A PAPER deployment turns one signal into one sized order, once."""
     version_id = "system-forward:v1"
@@ -195,12 +198,12 @@ async def _first_message(
 
     Args:
         url: WebSocket URL.
-        subscribe: Client message.
+        subscribe: Subscribe message sent after connecting.
         wanted: Envelope type to wait for.
-        timeout_s: Maximum wait.
+        timeout_s: Maximum wait in seconds, in total and for each message.
 
     Returns:
-        The envelope.
+        The first envelope whose ``type`` is ``wanted``.
     """
     async with websockets.connect(url) as ws:
         await ws.send(json.dumps(subscribe))
@@ -214,7 +217,7 @@ async def _first_message(
 
 
 async def test_market_stream_delivers_candles(
-    services: dict[str, str], validate: Callable[[str, str, object], None]
+    services: dict[str, str], validate: _Validate
 ) -> None:
     """The market WebSocket streams contract candle envelopes."""
     url = services["market"].replace("http", "ws") + "/v1/stream/market"
@@ -243,7 +246,7 @@ async def test_user_stream_requires_token_and_streams_orders(
 ) -> None:
     """The user stream rejects anonymous clients and streams order events."""
     base = services["execution"].replace("http", "ws") + "/v1/stream/user"
-    with pytest.raises(Exception):  # noqa: B017 - any rejection.
+    with pytest.raises(Exception):  # noqa: B017 - the refusal may be a handshake error or a closed socket
         async with websockets.connect(base) as ws:
             await ws.send(
                 json.dumps(

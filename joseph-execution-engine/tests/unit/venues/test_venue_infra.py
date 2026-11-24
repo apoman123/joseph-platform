@@ -7,6 +7,7 @@ from __future__ import annotations
 
 import decimal
 import json
+from typing import Any
 
 import httpx
 import pytest
@@ -39,11 +40,11 @@ def _limiter(
     """Builds a limiter with a 3-per-10s budget.
 
     Args:
-        clock: Manual clock.
-        max_wait: Wait cap.
+        clock: Manual monotonic clock; its ``sleep`` advances it.
+        max_wait: Longest wait, in seconds, before the limiter refuses.
 
     Returns:
-        Limiter.
+        A limiter named ``test`` with one ``weight`` budget.
     """
     return ratelimit.WindowLimiter(
         "test",
@@ -93,7 +94,7 @@ async def test_limiter_penalty_and_observed_usage() -> None:
 
 @respx.mock
 async def test_http_maps_transport_failures_to_safety_semantics() -> None:
-    """Connect errors mean not sent; timeouts mean unknown; 429 pauses."""
+    """A connect error means not sent, a timeout unknown; a 429 pauses."""
     clock = venue_fakes.ManualMonotonic()
     limiter = ratelimit.WindowLimiter(
         "test",
@@ -233,6 +234,11 @@ def test_order_directory_projects_live_orders() -> None:
     assert found.recent("a", 0) == []
 
 
+async def _stream_url() -> str:
+    """Returns the test stream URL."""
+    return "wss://venue.test/ws"
+
+
 def _spec(
     parse_frames: list[str],
     resync_items: list[ws.StreamUpdate],
@@ -242,36 +248,37 @@ def _spec(
     """Builds a stream spec over JSON frames.
 
     Args:
-        parse_frames: Frames that parse to fills (records them).
-        resync_items: Snapshot replay.
-        opens: Receives a counter per on_open call.
-        **kwargs: Spec overrides.
+        parse_frames: Receives the text of every frame parsed.
+        resync_items: Updates that each resync replays.
+        opens: Receives a 1 per ``on_open`` call.
+        **kwargs: ``PrivateStreamSpec`` fields that replace the defaults.
 
     Returns:
-        Spec.
+        A spec named ``test stream`` for ``wss://venue.test/ws``.
     """
 
-    async def url() -> str:
-        """Returns the URL."""
-        return "wss://venue.test/ws"
-
     async def on_open(connection: ws.WsConnection) -> None:
-        """Subscribes.
+        """Counts the open in ``opens`` and subscribes.
 
         Args:
-            connection: Connection.
+            connection: Freshly opened connection.
         """
         opens.append(1)
         await connection.send('{"op":"subscribe"}')
 
     def parse(frame: str | bytes) -> list[ws.StreamUpdate]:
-        """Parses a frame.
+        """Parses a JSON frame and records its text in ``parse_frames``.
 
         Args:
-            frame: Frame.
+            frame: JSON text or bytes.
 
         Returns:
-            Updates.
+            A reconnect request for ``reconnect`` frames, else one fill whose
+            venue fill id is the frame's ``id``.
+
+        Raises:
+            KeyError: The frame sets ``bad``.
+            VenuePermissionError: The frame sets ``deny``.
         """
         message = json.loads(frame)
         parse_frames.append(str(frame))
@@ -302,17 +309,17 @@ def _spec(
 
     fields: dict[str, object] = {
         "name": "test stream",
-        "url": url,
+        "url": _stream_url,
         "on_open": on_open,
         "parse": parse,
         "resync": resync,
     }
     fields.update(kwargs)
-    return ws.PrivateStreamSpec(**fields)  # type: ignore[arg-type]
+    return ws.PrivateStreamSpec(**fields)  # type: ignore[arg-type]  # dict[str, object] holds each field's own type
 
 
 async def test_stream_reconnects_resubscribes_and_resyncs() -> None:
-    """Drops reconnect with backoff, resubscribe and replay the snapshot."""
+    """Dropped streams back off, resubscribe and replay the snapshot."""
     clock = venue_fakes.ManualMonotonic()
     connector = venue_fakes.FakeConnector(
         [
@@ -337,13 +344,13 @@ async def test_stream_reconnects_resubscribes_and_resyncs() -> None:
         jitter=lambda: 1.0,
         stats=stats,
     )
-    items = await venue_fakes.collect(stream, 6)
+    items: list[Any] = await venue_fakes.collect(stream, 6)
     kinds = [
         (
             "resync" if replay else "live",
             u.fill.exchange_fill_id if u.fill else "pos",
         )
-        for u, replay in items  # type: ignore[misc]
+        for u, replay in items
     ]
     assert kinds == [
         ("resync", "pos"),

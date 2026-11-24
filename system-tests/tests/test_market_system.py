@@ -8,6 +8,7 @@ from __future__ import annotations
 import json
 import pathlib
 from collections.abc import Callable
+from typing import TypeAlias
 
 import httpx
 
@@ -19,6 +20,7 @@ _FIXTURES = (
     / "contracts"
     / "fixtures"
 )
+_Validate: TypeAlias = Callable[[str, str, object], None]
 
 
 def test_health_and_metrics(market: httpx.Client) -> None:
@@ -30,7 +32,7 @@ def test_health_and_metrics(market: httpx.Client) -> None:
 
 
 def test_venues_report_capabilities_and_health(
-    market: httpx.Client, validate: Callable[[str, str, object], None]
+    market: httpx.Client, validate: _Validate
 ) -> None:
     """The venue list validates and includes the DEMO venue."""
     body = market.get("/v1/venues").json()
@@ -40,9 +42,9 @@ def test_venues_report_capabilities_and_health(
 
 
 def test_instrument_search_is_venue_scoped(
-    market: httpx.Client, validate: Callable[[str, str, object], None]
+    market: httpx.Client, validate: _Validate
 ) -> None:
-    """Instrument search returns exact venue ids."""
+    """Instrument search returns venue-qualified ids, DEMO BTC among them."""
     body = market.get("/v1/instruments", params={"q": "BTC"}).json()
     validate("market.schema.json", "InstrumentList", body)
     ids = [i["instrument_id"] for i in body["instruments"]]
@@ -51,7 +53,7 @@ def test_instrument_search_is_venue_scoped(
 
 
 def test_candles_have_provenance_and_finality(
-    market: httpx.Client, validate: Callable[[str, str, object], None]
+    market: httpx.Client, validate: _Validate
 ) -> None:
     """Candles validate, are ordered, and only the newest may be open."""
     body = market.get(
@@ -68,7 +70,7 @@ def test_candles_have_provenance_and_finality(
 
 
 def test_snapshot_orderbook_and_qualification(
-    market: httpx.Client, validate: Callable[[str, str, object], None]
+    market: httpx.Client, validate: _Validate
 ) -> None:
     """Snapshot, order book and qualification conform to contracts."""
     snap = market.get(
@@ -85,7 +87,7 @@ def test_snapshot_orderbook_and_qualification(
 
 
 def test_unknown_instrument_returns_contract_error(
-    market: httpx.Client, validate: Callable[[str, str, object], None]
+    market: httpx.Client, validate: _Validate
 ) -> None:
     """Bad input yields a contract ErrorResponse, not a stack trace."""
     response = market.get(
@@ -96,9 +98,9 @@ def test_unknown_instrument_returns_contract_error(
 
 
 def test_indicator_plugins_and_snapshots(
-    market: httpx.Client, validate: Callable[[str, str, object], None]
+    market: httpx.Client, validate: _Validate
 ) -> None:
-    """All seven plugins are registered and produce valid snapshots."""
+    """The seven core plugins are registered; snapshots and AOIs validate."""
     plugins = market.get("/v1/indicators/plugins").json()
     validate("indicators.schema.json", "IndicatorPluginList", plugins)
     ids = {p["plugin_id"] for p in plugins["plugins"]}
@@ -126,10 +128,11 @@ def _demo_strategy(strategy_id: str) -> dict[str, object]:
     """Builds the Long A fixture retargeted to the DEMO venue.
 
     Args:
-        strategy_id: Slug to use.
+        strategy_id: Strategy id (slug) to use.
 
     Returns:
-        Strategy definition.
+        The fixture's first valid definition on the DEMO venue, in the
+        ``ALERT_ONLY`` execution mode.
     """
     body = json.loads(
         (_FIXTURES / "strategy.fixture.json").read_text(encoding="utf-8")
@@ -142,9 +145,9 @@ def _demo_strategy(strategy_id: str) -> dict[str, object]:
 
 
 def test_strategy_lifecycle_and_backtest(
-    market: httpx.Client, validate: Callable[[str, str, object], None]
+    market: httpx.Client, validate: _Validate
 ) -> None:
-    """Validate → create → new version → backtest → activate → pause."""
+    """A strategy validates, saves, versions, backtests, activates, pauses."""
     definition = _demo_strategy("system-long-a")
     result = market.post("/v1/strategies/validate", json=definition).json()
     validate("strategy.schema.json", "ValidationResult", result)
@@ -187,7 +190,7 @@ def test_strategy_lifecycle_and_backtest(
 def test_auto_live_cannot_be_activated_from_market_engine(
     market: httpx.Client,
 ) -> None:
-    """AUTO_LIVE activation is refused by the schema/service."""
+    """AUTO_LIVE activation is refused with a 409 or a 422."""
     market.post("/v1/strategies", json=_demo_strategy("system-no-live"))
     response = market.post(
         "/v1/strategies/system-no-live/activate",
@@ -197,9 +200,9 @@ def test_auto_live_cannot_be_activated_from_market_engine(
 
 
 def test_signals_are_tenant_scoped(
-    market: httpx.Client, validate: Callable[[str, str, object], None]
+    market: httpx.Client, validate: _Validate
 ) -> None:
-    """The signal history validates and requires authentication."""
+    """The signal history validates and holds only tenant A's signals."""
     body = market.get("/v1/signals", params={"limit": 50}).json()
     validate("signal.schema.json", "SignalList", body)
     assert all(s["tenant_id"] == "tenant-a" for s in body["signals"])

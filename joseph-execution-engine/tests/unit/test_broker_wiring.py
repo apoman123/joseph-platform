@@ -44,10 +44,10 @@ async def test_catalog_builds_gated_brokers_without_clients() -> None:
     created: list[str] = []
 
     def ib_factory() -> ibkr.IbFactory:
-        """Records creation.
+        """Records that the IB client factory was created.
 
         Returns:
-            Fake factory.
+            A fake IB client factory.
         """
         created.append("ib")
         return fake_ib.FakeIbFactory(fake_ib.FakeIB())
@@ -78,11 +78,11 @@ def _request(account_id: str, instrument_id: str) -> trading.VenueOrderRequest:
     """Builds a minimal venue request.
 
     Args:
-        account_id: Account.
-        instrument_id: Instrument.
+        account_id: Account to trade.
+        instrument_id: Instrument to buy.
 
     Returns:
-        Venue request.
+        A DAY limit buy of 1 unit at 1 with a fixed client order id.
     """
     return trading.VenueOrderRequest(
         account_id=account_id,
@@ -140,7 +140,7 @@ def test_container_registers_brokers_behind_the_live_gate() -> None:
 
 
 async def test_pump_brokers_without_brokers_is_a_no_op() -> None:
-    """The broker pump does nothing when no broker is wired."""
+    """The broker pump does nothing without brokers; four jobs remain."""
     h = harness.build()
     h.container.brokers.clear()
     assert await bootstrap.pump_brokers(h.container) == 0
@@ -149,24 +149,24 @@ async def test_pump_brokers_without_brokers_is_a_no_op() -> None:
 
 
 def test_sinopac_settings_build_a_config() -> None:
-    """Configured Shioaji credentials produce an adapter config."""
-    sec = config.SecuritiesSettings(
+    """Configured Shioaji credentials wire the adapter and stay out of repr."""
+    settings = config.SecuritiesSettings(
         sinopac_enabled=True,
         sinopac_api_key="k" * 8,
         sinopac_secret_key="s" * 8,
     )
-    h = harness.build(securities=sec)
+    h = harness.build(securities=settings)
     adapter = h.container.brokers["sinopac"]
     assert adapter.name == "sinopac"
-    assert sec.sinopac_configured
-    assert "s" * 8 not in repr(sec)
+    assert settings.sinopac_configured
+    assert "s" * 8 not in repr(settings)
 
 
 def test_securities_settings_from_env(tmp_path: pathlib.Path) -> None:
     """Broker settings load from env and secret files, redacted."""
     secret = tmp_path / "secret"
     secret.write_text("shioaji-secret-value\n", encoding="utf-8")
-    sec = config.securities_from_env(
+    settings = config.securities_from_env(
         {
             "JOSEPH_EQUITY_CLOSED_MARKET_ORDERS": "queue",
             "JOSEPH_IBKR_ENABLED": "true",
@@ -181,17 +181,21 @@ def test_securities_settings_from_env(tmp_path: pathlib.Path) -> None:
             "JOSEPH_PAPER_TWD_STARTING_CASH": "off",
         }
     )
-    assert sec.closed_market_orders == "queue"
-    assert (sec.ibkr_host, sec.ibkr_port, sec.ibkr_client_id) == (
+    assert settings.closed_market_orders == "queue"
+    assert (
+        settings.ibkr_host,
+        settings.ibkr_port,
+        settings.ibkr_client_id,
+    ) == (
         "ib-gateway",
         4004,
         21,
     )
-    assert sec.ibkr_paper and sec.sinopac_enabled
-    assert not sec.sinopac_simulation
-    assert sec.sinopac_secret_key == "shioaji-secret-value"
-    assert sec.paper_twd_starting_cash is None
-    assert "shioaji-secret-value" not in repr(sec)
+    assert settings.ibkr_paper and settings.sinopac_enabled
+    assert not settings.sinopac_simulation
+    assert settings.sinopac_secret_key == "shioaji-secret-value"
+    assert settings.paper_twd_starting_cash is None
+    assert "shioaji-secret-value" not in repr(settings)
     scrubbed = log_lib.SECRETS.scrub("token shioaji-secret-value")
     assert "shioaji-secret-value" not in scrubbed
     defaults = config.securities_from_env({})
@@ -327,7 +331,7 @@ async def test_http_gateway_reads_sessions_closes_and_securities() -> None:
 
 @respx.mock
 async def test_http_gateway_fails_closed_on_bad_payloads() -> None:
-    """Missing or malformed calendars and candles return None."""
+    """Bad calendars and candles return None; bare instruments get defaults."""
     base = "http://market"
     respx.get(f"{base}/v1/calendars/XNYS/sessions").mock(
         return_value=httpx.Response(200, json={"sessions": "nope"})

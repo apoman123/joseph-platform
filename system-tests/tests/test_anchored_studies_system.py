@@ -14,6 +14,7 @@ from __future__ import annotations
 
 import json
 from collections.abc import Callable
+from typing import TypeAlias
 
 import httpx
 import pytest
@@ -31,22 +32,22 @@ PLUGINS: dict[str, dict[str, str]] = {
 }
 """Anchored plugins and the settings that make ``anchor_ms`` their anchor."""
 
-Validate = Callable[[str, str, object], None]
+_Validate: TypeAlias = Callable[[str, str, object], None]
 
 
 def _anchored(
     market: httpx.Client, plugin: str, bars_back: int, at_ms: int
 ) -> httpx.Response:
-    """Requests one anchored study anchored ``bars_back`` 1m bars ago.
+    """Requests one study anchored ``bars_back`` 1m bars before ``AT_MS``.
 
     Args:
         market: Market engine client.
-        plugin: Anchored plugin id.
+        plugin: Anchored plugin id, a key of ``PLUGINS``.
         bars_back: Closed bars between the anchor and ``AT_MS``.
-        at_ms: Evaluation time.
+        at_ms: Evaluation time, UTC epoch milliseconds.
 
     Returns:
-        Response of ``/v1/indicators/snapshot``.
+        Response of ``GET /v1/indicators/snapshot``.
     """
     settings = {**PLUGINS[plugin], "anchor_ms": AT_MS - bars_back * _MINUTE_MS}
     return market.get(
@@ -63,7 +64,7 @@ def _anchored(
 
 @pytest.mark.parametrize("plugin", sorted(PLUGINS))
 def test_anchor_beyond_the_cap_is_refused_with_its_bar_count(
-    market: httpx.Client, validate: Validate, plugin: str
+    market: httpx.Client, validate: _Validate, plugin: str
 ) -> None:
     """2,500 closed bars back is a 422 that names the count and the cap."""
     response = _anchored(market, plugin, 2_500, AT_MS + 30_000)
@@ -77,7 +78,7 @@ def test_anchor_beyond_the_cap_is_refused_with_its_bar_count(
 
 @pytest.mark.parametrize("at_offset_ms", [0, 30_000], ids=["boundary", "mid"])
 def test_cap_counts_every_closed_bar(
-    market: httpx.Client, validate: Validate, at_offset_ms: int
+    market: httpx.Client, validate: _Validate, at_offset_ms: int
 ) -> None:
     """Exactly the cap is computed; one bar more is refused, at any time."""
     at_ms = AT_MS + at_offset_ms

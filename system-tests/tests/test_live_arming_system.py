@@ -26,6 +26,7 @@ import struct
 import time
 import uuid
 from collections.abc import Callable
+from typing import TypeAlias
 
 import httpx
 import pytest
@@ -46,7 +47,7 @@ WHY_UNAVAILABLE = {
 }
 """Capability note explaining why each broker cannot trade here."""
 
-Validate = Callable[[str, str, object], None]
+_Validate: TypeAlias = Callable[[str, str, object], None]
 
 
 def _totp(secret_b32: str, at_ms: int) -> str:
@@ -57,7 +58,7 @@ def _totp(secret_b32: str, at_ms: int) -> str:
         at_ms: Time in UTC epoch milliseconds.
 
     Returns:
-        Zero-padded code.
+        The six-digit code, zero-padded.
     """
     key = base64.b32decode(secret_b32 + "=" * (-len(secret_b32) % 8))
     counter = struct.pack(">Q", at_ms // 1000 // 30)
@@ -81,13 +82,16 @@ def _arm(
 ) -> httpx.Response:
     """Requests account LIVE arming.
 
+    The default body carries a valid step-up code, acknowledges the risk and
+    asks for one hour.
+
     Args:
         client: Execution engine client.
-        account_id: Account.
-        **overrides: Body fields to replace.
+        account_id: Account to arm.
+        **overrides: Body fields that replace the defaults.
 
     Returns:
-        Response.
+        Response of ``POST /v1/accounts/{account_id}/live-consent``.
     """
     body: dict[str, object] = {
         "step_up_code": _code(),
@@ -99,12 +103,12 @@ def _arm(
 
 
 def _refused(
-    response: httpx.Response, validate: Validate, status: int, code: str
+    response: httpx.Response, validate: _Validate, status: int, code: str
 ) -> str:
     """Asserts a contract error and returns its message.
 
     Args:
-        response: Response.
+        response: Response to check.
         validate: Contract validator.
         status: Expected HTTP status.
         code: Expected error code.
@@ -120,14 +124,14 @@ def _refused(
 
 
 def _connect(
-    client: httpx.Client, validate: Validate, broker: str = "ibkr"
+    client: httpx.Client, validate: _Validate, broker: str = "ibkr"
 ) -> dict[str, object]:
     """Connects a broker account by its account number (no secrets).
 
     Args:
         client: Execution engine client.
         validate: Contract validator.
-        broker: Broker venue.
+        broker: Broker venue id, a key of ``BROKER_ACCOUNTS``.
 
     Returns:
         Contract ``AccountSummary`` (pending verification).
@@ -148,10 +152,10 @@ def _connect(
 
 
 def _live_intent(account_id: str) -> dict[str, object]:
-    """Builds a manual LIVE limit buy.
+    """Builds a manual LIVE limit buy of 0.010 BTC at 50000.
 
     Args:
-        account_id: Account.
+        account_id: Account to trade.
 
     Returns:
         Contract ``OrderIntentRequest``.
@@ -187,7 +191,7 @@ def _mode_check(preview: dict[str, object]) -> dict[str, object]:
 
 
 def test_arming_a_paper_account_is_refused(
-    live: httpx.Client, validate: Validate
+    live: httpx.Client, validate: _Validate
 ) -> None:
     """Paper accounts never trade LIVE: 403 TRADE_MODE_DISABLED."""
     for account_id in (PAPER, "acct-twd-paper-tenant-a"):
@@ -202,7 +206,7 @@ def test_arming_a_paper_account_is_refused(
 
 @pytest.mark.parametrize("broker", sorted(BROKER_ACCOUNTS))
 def test_arming_an_unverified_account_is_refused(
-    live: httpx.Client, validate: Validate, broker: str
+    live: httpx.Client, validate: _Validate, broker: str
 ) -> None:
     """A pending (then unavailable) broker account cannot be armed."""
     account = _connect(live, validate, broker)
@@ -246,16 +250,17 @@ def test_arming_an_unverified_account_is_refused(
     validate("execution.schema.json", "AuditEventList", events)
     assert events["chain_valid"] is True
     denied = [
-        e
-        for e in events["events"]
-        if e["action"] == "live_arming.denied" and e["entity_id"] == account_id
+        event
+        for event in events["events"]
+        if event["action"] == "live_arming.denied"
+        and event["entity_id"] == account_id
     ]
     assert len(denied) == 4
 
 
 @pytest.mark.parametrize("target", ["paper", "unverified"])
 def test_unarmed_live_order_is_refused_past_the_open_gate(
-    live: httpx.Client, validate: Validate, target: str
+    live: httpx.Client, validate: _Validate, target: str
 ) -> None:
     """With the gate open, an unarmed manual LIVE order is still blocked."""
     account_id = (
@@ -300,7 +305,7 @@ def test_unarmed_live_order_is_refused_past_the_open_gate(
 
 
 def test_gate_closed_engine_refuses_arming(
-    execution: httpx.Client, validate: Validate
+    execution: httpx.Client, validate: _Validate
 ) -> None:
     """With the gate closed, paper and broker accounts cannot be armed."""
     _refused(_arm(execution, PAPER), validate, 403, "TRADE_MODE_DISABLED")

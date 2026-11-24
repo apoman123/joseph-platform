@@ -25,6 +25,7 @@ import decimal
 import time
 import uuid
 from collections.abc import Callable
+from typing import TypeAlias
 
 import httpx
 import pytest
@@ -41,14 +42,15 @@ WEDNESDAY_CLOSE = conftest.ny_ms(2026, 11, 18, 16)
 THURSDAY_OPEN = conftest.ny_ms(2026, 11, 19, 9, 30)
 """The T+1 settlement time of a Wednesday fill."""
 
-Validate = Callable[[str, str, object], None]
+_Validate: TypeAlias = Callable[[str, str, object], None]
 
 
 def _intent(**overrides: object) -> dict[str, object]:
     """Builds a paper ACME limit DAY buy of 10 shares.
 
     Args:
-        **overrides: Fields to replace.
+        **overrides: Request fields that replace the defaults; the default
+            ``limit_price`` is ``None``.
 
     Returns:
         Contract ``OrderIntentRequest``.
@@ -72,9 +74,9 @@ def _intent(**overrides: object) -> dict[str, object]:
 
 
 def _preview(
-    client: httpx.Client, validate: Validate, body: dict[str, object]
+    client: httpx.Client, validate: _Validate, body: dict[str, object]
 ) -> dict[str, object]:
-    """Previews an intent and validates the contract.
+    """Previews an intent, asserting a 200 response that validates.
 
     Args:
         client: Execution engine client.
@@ -92,9 +94,9 @@ def _preview(
 
 
 def _submit(
-    client: httpx.Client, validate: Validate, body: dict[str, object]
+    client: httpx.Client, validate: _Validate, body: dict[str, object]
 ) -> dict[str, object]:
-    """Previews and submits an intent.
+    """Previews and submits an intent, asserting that both succeed.
 
     Args:
         client: Execution engine client.
@@ -121,7 +123,7 @@ def _check(preview: dict[str, object], name: str) -> dict[str, object]:
 
     Args:
         preview: Contract ``OrderPreview`` or ``SubmitIntentResponse``.
-        name: Check name.
+        name: Check name, such as ``market.session``.
 
     Returns:
         Contract ``RiskCheckResult``.
@@ -131,7 +133,7 @@ def _check(preview: dict[str, object], name: str) -> dict[str, object]:
     return next(c for c in risk["checks"] if c["check"] == name)
 
 
-def _resting_buy(client: httpx.Client, validate: Validate) -> str:
+def _resting_buy(client: httpx.Client, validate: _Validate) -> str:
     """Returns a buy limit 5% under the ACME mark (inside the 10% band).
 
     Args:
@@ -139,7 +141,7 @@ def _resting_buy(client: httpx.Client, validate: Validate) -> str:
         validate: Contract validator.
 
     Returns:
-        Tick-aligned price.
+        Price string aligned to the 0.01 tick.
     """
     probe = _preview(client, validate, _intent(order_type="market"))
     mark = decimal.Decimal(str(probe["mark_price"]))
@@ -152,7 +154,7 @@ def _order(client: httpx.Client, order_id: str) -> dict[str, object]:
 
     Args:
         client: Execution engine client.
-        order_id: Order.
+        order_id: Order id.
 
     Returns:
         Contract ``Order``.
@@ -168,12 +170,12 @@ def _wait_state(
 
     Args:
         client: Execution engine client.
-        order_id: Order.
+        order_id: Order id.
         states: Wanted states.
-        timeout_s: Maximum wait.
+        timeout_s: Maximum wait in seconds.
 
     Returns:
-        The last observed state.
+        The last observed state, which is not in ``states`` on timeout.
     """
     deadline = time.monotonic() + timeout_s
     state = ""
@@ -186,14 +188,14 @@ def _wait_state(
 
 
 def _summary(
-    client: httpx.Client, validate: Validate, account_id: str = USD_PAPER
+    client: httpx.Client, validate: _Validate, account_id: str = USD_PAPER
 ) -> dict[str, object]:
     """Fetches and validates an account summary.
 
     Args:
         client: Execution engine client.
         validate: Contract validator.
-        account_id: Account.
+        account_id: Account id.
 
     Returns:
         Contract ``AccountSummary``.
@@ -209,9 +211,9 @@ def _summary(
 
 
 def test_twd_paper_account_is_provisioned(
-    execution: httpx.Client, validate: Validate
+    execution: httpx.Client, validate: _Validate
 ) -> None:
-    """Each tenant also gets a TWD paper account for TWSE securities."""
+    """Tenant A also has a TWD cash paper account for TWSE securities."""
     accounts = execution.get("/v1/accounts").json()
     validate("execution.schema.json", "AccountList", accounts)
     by_id = {a["account_id"]: a for a in accounts["accounts"]}
@@ -227,7 +229,7 @@ def test_twd_paper_account_is_provisioned(
 
 
 def test_paper_accounts_route_by_currency(
-    execution: httpx.Client, validate: Validate
+    execution: httpx.Client, validate: _Validate
 ) -> None:
     """USD stocks need the USD account and TWSE listings the TWD one."""
     twd = _preview(
@@ -248,7 +250,7 @@ def test_paper_accounts_route_by_currency(
 
 
 def test_day_orders_are_refused_on_24x7_markets(
-    execution: httpx.Client, validate: Validate
+    execution: httpx.Client, validate: _Validate
 ) -> None:
     """DAY and outside-RTH need an exchange; the DEMO perp has none."""
     for overrides in ({"time_in_force": "DAY"}, {"outside_rth": True}):
@@ -278,7 +280,7 @@ def test_day_orders_are_refused_on_24x7_markets(
 
 
 def test_paper_account_cannot_flag_outside_rth(
-    execution: httpx.Client, validate: Validate
+    execution: httpx.Client, validate: _Validate
 ) -> None:
     """The paper simulator offers no extended hours, so ACME refuses it."""
     preview = _preview(
@@ -302,7 +304,7 @@ def test_paper_account_cannot_flag_outside_rth(
 
 
 def test_day_limit_rests_in_session_and_expires_at_the_close(
-    clocked: conftest.ClockedEngine, validate: Validate
+    clocked: conftest.ClockedEngine, validate: _Validate
 ) -> None:
     """A Wednesday DAY limit rests until 16:00 ET and then expires."""
     client = clocked.client
@@ -327,7 +329,7 @@ def test_day_limit_rests_in_session_and_expires_at_the_close(
 
 
 def test_in_session_fill_settles_t_plus_one(
-    clocked: conftest.ClockedEngine, validate: Validate
+    clocked: conftest.ClockedEngine, validate: _Validate
 ) -> None:
     """A Wednesday buy fills at once and its cash settles at Thursday's open."""
     client = clocked.client
@@ -382,7 +384,7 @@ def test_in_session_fill_settles_t_plus_one(
 )
 def test_closed_market_refuses_market_and_ioc_orders(
     clocked: conftest.ClockedEngine,
-    validate: Validate,
+    validate: _Validate,
     now_ms: int,
     next_open: str,
 ) -> None:
@@ -421,7 +423,7 @@ def test_closed_market_refuses_market_and_ioc_orders(
 
 
 def test_queue_policy_queues_a_closed_market_day_order_for_the_open(
-    clocked_queue: conftest.ClockedEngine, validate: Validate
+    clocked_queue: conftest.ClockedEngine, validate: _Validate
 ) -> None:
     """With ``queue``, a weekend market DAY order fills at Monday's open."""
     client = clocked_queue.client

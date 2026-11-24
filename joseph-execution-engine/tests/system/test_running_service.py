@@ -28,7 +28,7 @@ _TOKEN = "system-token"
 
 
 def _free_port() -> int:
-    """Finds a free TCP port.
+    """Finds a localhost TCP port that is free at the time of the call.
 
     Returns:
         Port number.
@@ -42,13 +42,16 @@ def _free_port() -> int:
 def server(
     tmp_path_factory: pytest.TempPathFactory,
 ) -> collections.abc.Iterator[str]:
-    """Runs the service in a subprocess.
+    """Runs the service in a subprocess for the module's tests.
+
+    Fails the requesting test, with the server log, when the service is not
+    healthy within 60 seconds.
 
     Args:
         tmp_path_factory: Temporary directory factory.
 
     Yields:
-        Base URL.
+        Base URL of the running service.
     """
     port = _free_port()
     workdir = tmp_path_factory.mktemp("exec")
@@ -104,13 +107,13 @@ def server(
 
 
 def _headers(key: str | None = None) -> dict[str, str]:
-    """Builds headers.
+    """Builds the system tenant's request headers.
 
     Args:
-        key: Idempotency key.
+        key: Idempotency key; no ``Idempotency-Key`` header when empty.
 
     Returns:
-        Headers.
+        The bearer token header and, when ``key`` is given, the key.
     """
     result = {"Authorization": f"Bearer {_TOKEN}"}
     if key:
@@ -122,10 +125,11 @@ def _body(**overrides: object) -> dict[str, object]:
     """Builds an intent body for the system tenant.
 
     Args:
-        **overrides: Overrides.
+        **overrides: Request fields that replace the defaults (a 0.010 BTC
+            paper market IOC buy).
 
     Returns:
-        Body.
+        Contract ``OrderIntentRequest`` body.
     """
     body: dict[str, object] = {
         "account_id": "acct-paper-tenant-sys",
@@ -152,12 +156,12 @@ def test_health_reports_safe_defaults(server: str) -> None:
 
 
 def test_end_to_end_trading_flow_over_real_sockets(server: str) -> None:
-    """Order, stream events, background fills, close and audit."""
+    """Orders stream events, fill, close flat and leave a valid audit chain."""
     asyncio.run(_flow(server))
 
 
 async def _flow(server: str) -> None:
-    """Drives the running service.
+    """Trades through the running service and asserts each step.
 
     Args:
         server: Base URL.

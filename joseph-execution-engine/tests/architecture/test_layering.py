@@ -13,7 +13,7 @@ _PROJECT = pathlib.Path(__file__).resolve().parents[2]
 
 
 def test_import_linter_contracts_hold() -> None:
-    """Dependency direction and plugin independence are enforced."""
+    """The import-linter layer and independence contracts all hold."""
     executable = shutil.which("lint-imports")
     assert executable is not None, "import-linter is not installed"
     result = subprocess.run(

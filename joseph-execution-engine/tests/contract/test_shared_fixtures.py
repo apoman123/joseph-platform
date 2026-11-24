@@ -32,7 +32,8 @@ def _cases(kind: str) -> list[tuple[str, str, str, object]]:
         kind: ``"valid"`` or ``"invalid"``.
 
     Returns:
-        ``(fixture, schema, definition, instance)`` tuples.
+        ``(name, schema, definition, instance)`` tuples in file order, where
+        ``name`` is ``<fixture stem>[<index>]``.
     """
     cases = []
     for path in sorted(_FIXTURES.glob("*.fixture.json")):

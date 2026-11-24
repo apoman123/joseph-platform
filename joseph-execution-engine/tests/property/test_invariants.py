@@ -23,15 +23,17 @@ D = decimal.Decimal
 S = enums.OrderState
 _SETTINGS = hypothesis.settings(max_examples=60, deadline=None)
 
-_qty = strategies.decimals(min_value=D("0.001"), max_value=D(5), places=3)
-_price = strategies.decimals(min_value=D(1), max_value=D(200000), places=1)
+_QUANTITIES = strategies.decimals(
+    min_value=D("0.001"), max_value=D(5), places=3
+)
+_PRICES = strategies.decimals(min_value=D(1), max_value=D(200000), places=1)
 
 
 @_SETTINGS
 @hypothesis.given(
     strategies.lists(
         strategies.one_of(
-            strategies.tuples(strategies.just("fill"), _qty),
+            strategies.tuples(strategies.just("fill"), _QUANTITIES),
             strategies.tuples(
                 strategies.just("state"), strategies.sampled_from(list(S))
             ),
@@ -104,7 +106,7 @@ def test_order_invariants_under_random_operations(
 @hypothesis.given(
     strategies.lists(
         strategies.tuples(
-            strategies.sampled_from(list(enums.OrderSide)), _qty, _price
+            strategies.sampled_from(list(enums.OrderSide)), _QUANTITIES, _PRICES
         ),
         min_size=1,
         max_size=25,
@@ -134,7 +136,7 @@ def test_position_quantity_equals_signed_fill_sum(
 def test_rounding_never_increases_quantity(
     value: decimal.Decimal, step: decimal.Decimal
 ) -> None:
-    """Lot flooring never increases size; tick rounding stays within half."""
+    """Lot flooring never increases size; tick rounding errs <= half a step."""
     floored = decimals.floor_to_step(value, step)
     assert floored <= value
     assert value - floored < step
@@ -164,14 +166,21 @@ def test_oms_random_flows_keep_reservations_and_positions_consistent(
 
 
 async def _run_flow(steps: list[tuple[str, str, int, int]]) -> None:
-    """Executes a random OMS flow and checks invariants after each step.
+    """Executes a random OMS flow and checks invariants after each order.
+
+    After every submission, reservations are non-negative and released for
+    terminal orders, and the local position equals the signed fill sum; at
+    the end it also equals the simulator's position.
 
     Args:
-        steps: ``(action, side, size, mark_move)`` tuples.
+        steps: ``(action, side, size, mark_move)`` tuples: ``action`` is
+            ``market``, ``limit``, ``cancel`` (the oldest working order) or
+            ``tick`` (move the mark to ``95000 + 10 * mark_move`` and pump);
+            orders are ``0.00<size>`` BTC.
     """
     h = harness.build()
     oms = h.container.services.oms
-    a = harness.TENANT_A
+    tenant = harness.TENANT_A
     for n, (action, side, size, move) in enumerate(steps):
         qty = f"0.00{size}"
         if action == "market":
@@ -186,16 +195,16 @@ async def _run_flow(steps: list[tuple[str, str, int, int]]) -> None:
                 time_in_force="GTC",
             )
         elif action == "cancel":
-            working = [o for o in oms.list_orders(a) if o.state.is_working]
+            working = [o for o in oms.list_orders(tenant) if o.state.is_working]
             if working:
-                await oms.cancel_order(a, working[0].order_id)
+                await oms.cancel_order(tenant, working[0].order_id)
             continue
         else:
             h.set_mark(harness.BTC, str(95000 + move * 10))
             await h.pump()
             continue
         await oms.submit_intent(
-            a, intents.OrderIntentRequest.from_contract(body), f"k{n}"
+            tenant, intents.OrderIntentRequest.from_contract(body), f"k{n}"
         )
         with h.container.uow_factory() as uow:
             assert uow.reservations.active_total(harness.PAPER_A) >= 0

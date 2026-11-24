@@ -25,10 +25,11 @@ def _req(**overrides: object) -> intents.OrderIntentRequest:
     """Builds a domain request from the harness body.
 
     Args:
-        **overrides: Body overrides.
+        **overrides: Contract body fields passed on to
+            ``harness.intent_body``.
 
     Returns:
-        Request.
+        The request; by default a 0.010 BTC paper market buy for tenant A.
     """
     return intents.OrderIntentRequest.from_contract(
         harness.intent_body(**overrides)
@@ -39,11 +40,11 @@ def _limit(price: str, **overrides: object) -> intents.OrderIntentRequest:
     """Builds a GTC limit buy.
 
     Args:
-        price: Limit price.
-        **overrides: Overrides.
+        price: Limit price, as a decimal string.
+        **overrides: Further body fields passed on to ``_req``.
 
     Returns:
-        Request.
+        The limit request.
     """
     return _req(
         order_type="limit", limit_price=price, time_in_force="GTC", **overrides
@@ -231,7 +232,7 @@ async def test_cancel_resting_and_cancel_fill_race() -> None:
 
 
 async def test_amend_version_tick_and_success() -> None:
-    """Amend checks the version, the tick grid and then applies."""
+    """Amend checks the version, tick grid and price band, then applies."""
     h = harness.build()
     oms = h.container.services.oms
     order = (await oms.submit_intent(A, _limit("94000"), "a")).orders[0]
@@ -263,10 +264,10 @@ async def test_amend_version_tick_and_success() -> None:
 async def test_kill_switch_blocks_opening_allows_reduce_and_options() -> None:
     """Engaging blocks new exposure; cancel/flatten run only on request."""
     h = harness.build()
-    svc = h.container.services
-    await svc.oms.submit_intent(A, _req(), "open")
-    resting = await svc.oms.submit_intent(A, _limit("90000"), "rest")
-    await svc.kill_switches.set(
+    services = h.container.services
+    await services.oms.submit_intent(A, _req(), "open")
+    resting = await services.oms.submit_intent(A, _limit("90000"), "rest")
+    await services.kill_switches.set(
         A,
         enums.KillSwitchScope.ACCOUNT,
         harness.PAPER_A,
@@ -275,22 +276,22 @@ async def test_kill_switch_blocks_opening_allows_reduce_and_options() -> None:
         False,
         "test",
     )
-    assert svc.oms.get_order(A, resting.orders[0].order_id).state is (
+    assert services.oms.get_order(A, resting.orders[0].order_id).state is (
         S.ACKNOWLEDGED
     )
-    blocked = await svc.oms.submit_intent(A, _req(), "blocked")
+    blocked = await services.oms.submit_intent(A, _req(), "blocked")
     assert blocked.decision.decision is enums.Decision.BLOCK
     assert blocked.decision.primary_code() == "KILL_SWITCH_ENGAGED"
-    pos_id = str((await svc.oms.list_positions(A))[0]["position_id"])
-    close = await svc.oms.close_request(
+    pos_id = str((await services.oms.list_positions(A))[0]["position_id"])
+    close = await services.oms.close_request(
         A, pos_id, D(1), enums.OrderType.MARKET, None
     )
-    closed = await svc.oms.submit_intent(A, close, "close")
+    closed = await services.oms.submit_intent(A, close, "close")
     assert closed.decision.allowed
-    await svc.kill_switches.set(
+    await services.kill_switches.set(
         A, enums.KillSwitchScope.GLOBAL, None, False, False, False, "release"
     )
-    await svc.kill_switches.set(
+    await services.kill_switches.set(
         A,
         enums.KillSwitchScope.ACCOUNT,
         harness.PAPER_A,
@@ -299,21 +300,21 @@ async def test_kill_switch_blocks_opening_allows_reduce_and_options() -> None:
         False,
         "release",
     )
-    await svc.oms.submit_intent(A, _req(), "again")
-    await svc.kill_switches.set(
+    await services.oms.submit_intent(A, _req(), "again")
+    await services.kill_switches.set(
         A, enums.KillSwitchScope.GLOBAL, None, True, True, True, "panic"
     )
-    assert svc.oms.get_order(A, resting.orders[0].order_id).state is (
+    assert services.oms.get_order(A, resting.orders[0].order_id).state is (
         S.CANCELED
     )
-    assert await svc.oms.list_positions(A) == []
+    assert await services.oms.list_positions(A) == []
     with h.container.uow_factory() as uow:
         actions = [e.action for e in uow.audit.chain("tenant-a")]
     assert actions.count("kill_switch.engaged") == 2
 
 
 async def test_stale_market_data_blocks_new_exposure() -> None:
-    """Stale quotes block opening orders with MARKET_STALE."""
+    """Stale quotes (MARKET_STALE) and stale books block opening orders."""
     h = harness.build()
     h.market.set_mark(harness.BTC, D(95000), as_of_ms=h.clock.now_ms())
     h.clock.advance(60_000)
@@ -331,19 +332,19 @@ async def test_stale_market_data_blocks_new_exposure() -> None:
 async def test_daily_loss_pauses_new_exposure() -> None:
     """Breaching the daily loss limit pauses opening orders."""
     h = harness.build()
-    svc = h.container.services
+    services = h.container.services
     with h.container.uow_factory() as uow:
         uow.risk_limits.put(
             "tenant-a", harness.PAPER_A, {"max_daily_loss": "10"}, 0
         )
-    await svc.oms.submit_intent(A, _req(quantity_base="0.100"), "open")
+    await services.oms.submit_intent(A, _req(quantity_base="0.100"), "open")
     h.set_mark(harness.BTC, "94000")
-    pos_id = str((await svc.oms.list_positions(A))[0]["position_id"])
-    close = await svc.oms.close_request(
+    pos_id = str((await services.oms.list_positions(A))[0]["position_id"])
+    close = await services.oms.close_request(
         A, pos_id, D(1), enums.OrderType.MARKET, None
     )
-    await svc.oms.submit_intent(A, close, "close")
-    paused = await svc.oms.submit_intent(A, _req(), "next")
+    await services.oms.submit_intent(A, close, "close")
+    paused = await services.oms.submit_intent(A, _req(), "next")
     assert paused.decision.decision is enums.Decision.PAUSE
 
 
@@ -351,26 +352,28 @@ async def test_insufficient_margin_and_tenant_isolation() -> None:
     """Oversized orders fail margin; other tenants see nothing."""
     h = harness.build(paper_starting_equity=D(1000))
     h.container.services.accounts.ensure_paper_account("tenant-c")
-    svc = h.container.services
-    big = await svc.oms.submit_intent(
+    services = h.container.services
+    big = await services.oms.submit_intent(
         A, _req(quantity_base="1.000", leverage="1"), "big"
     )
     assert big.decision.primary_code() == "INSUFFICIENT_MARGIN"
-    order = (await svc.oms.submit_intent(A, _limit("94000"), "x")).orders[0]
+    order = (await services.oms.submit_intent(A, _limit("94000"), "x")).orders[
+        0
+    ]
     with pytest.raises(errors.ExecutionError) as info:
-        svc.oms.get_order(harness.TENANT_B, order.order_id)
+        services.oms.get_order(harness.TENANT_B, order.order_id)
     assert info.value.code == "NOT_FOUND"
     with pytest.raises(errors.ExecutionError):
-        await svc.oms.cancel_order(harness.TENANT_B, order.order_id)
-    assert svc.oms.list_orders(harness.TENANT_B) == []
+        await services.oms.cancel_order(harness.TENANT_B, order.order_id)
+    assert services.oms.list_orders(harness.TENANT_B) == []
     with pytest.raises(errors.ExecutionError):
-        await svc.oms.submit_intent(harness.TENANT_B, _req(), "steal")
+        await services.oms.submit_intent(harness.TENANT_B, _req(), "steal")
 
 
 async def test_reconciler_skips_unmanaged_holdings(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    """Unmanaged holdings never block the account; mislabelled ones would."""
+    """Unmanaged holdings never block the account; mislabelled ones do."""
     h = harness.build()
     oms = h.container.services.oms
     assert (await oms.submit_intent(A, _req(), "k1")).decision.allowed
@@ -388,10 +391,10 @@ async def test_reconciler_skips_unmanaged_holdings(
         """Adds the extra holdings to the simulator's positions.
 
         Args:
-            account_id: Account.
+            account_id: Account to list.
 
         Returns:
-            Positions.
+            The simulator's positions followed by ``extra``.
         """
         return [*await real(account_id), *extra]
 

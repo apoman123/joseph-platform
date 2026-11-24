@@ -37,7 +37,7 @@ pytestmark = [
 
 
 async def test_simulation_login_and_place_order() -> None:
-    """Simulation login, place_order, lookup and cancel succeed."""
+    """Simulation login, place_order and lookup succeed; a cancel is sent."""
     pytest.importorskip("shioaji")
     config = sinopac.SinopacConfig(
         api_key=os.environ["JOSEPH_SINOPAC_API_KEY"],
@@ -60,6 +60,7 @@ async def test_simulation_login_and_place_order() -> None:
         api = adapter._api
         assert api is not None
         contract = api.contracts.stocks[code]
+        # Shioaji quotes prices as floats; repr() keeps the shortest exact text.
         price = decimal.Decimal(repr(float(contract.limit_down)))
         cid = ids.client_order_id(ids.uuid7())
         result = await adapter.submit_order(

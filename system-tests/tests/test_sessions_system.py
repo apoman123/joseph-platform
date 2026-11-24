@@ -13,6 +13,7 @@ from __future__ import annotations
 import datetime
 import zoneinfo
 from collections.abc import Callable
+from typing import TypeAlias
 
 import httpx
 import pytest
@@ -21,26 +22,29 @@ from tests import conftest
 
 TAIPEI = zoneinfo.ZoneInfo("Asia/Taipei")
 _DAY_MS = 86_400_000
+_Validate: TypeAlias = Callable[[str, str, object], None]
 
 
 def _sessions(
     market: httpx.Client,
-    validate: Callable[[str, str, object], None],
+    validate: _Validate,
     calendar: str,
     from_ms: int,
     to_ms: int,
 ) -> list[dict[str, object]]:
     """Fetches and validates the sessions of a calendar window.
 
+    Asserts a 200 response that echoes the calendar and the window.
+
     Args:
         market: Market engine client.
         validate: Contract validator.
-        calendar: Calendar id.
-        from_ms: Inclusive window start.
-        to_ms: Exclusive window end.
+        calendar: Calendar id, such as ``XNYS``.
+        from_ms: Inclusive window start, UTC epoch milliseconds.
+        to_ms: Exclusive window end, UTC epoch milliseconds.
 
     Returns:
-        Contract ``TradingSession`` objects.
+        Contract ``TradingSession`` objects, in order.
     """
     response = market.get(
         f"/v1/calendars/{calendar}/sessions",
@@ -61,20 +65,20 @@ def _taipei_ms(year: int, month: int, day: int, hour: int, minute: int) -> int:
 
     Args:
         year: Year.
-        month: Month.
-        day: Day.
-        hour: Hour.
-        minute: Minute.
+        month: Month, 1-12.
+        day: Day of the month.
+        hour: Hour, 0-23.
+        minute: Minute, 0-59.
 
     Returns:
-        Epoch milliseconds.
+        UTC epoch milliseconds.
     """
     moment = datetime.datetime(year, month, day, hour, minute, tzinfo=TAIPEI)
     return int(moment.timestamp() * 1000)
 
 
 def test_xnys_skips_thanksgiving_and_closes_early_the_day_after(
-    market: httpx.Client, validate: Callable[[str, str, object], None]
+    market: httpx.Client, validate: _Validate
 ) -> None:
     """XNYS has no 2026-11-26 session and closes 2026-11-27 at 13:00 ET."""
     sessions = _sessions(
@@ -102,7 +106,7 @@ def test_xnys_skips_thanksgiving_and_closes_early_the_day_after(
 
 
 def test_xtai_closes_for_lunar_new_year_2027(
-    market: httpx.Client, validate: Callable[[str, str, object], None]
+    market: httpx.Client, validate: _Validate
 ) -> None:
     """XTAI trades Feb 1 2027, is shut Feb 2-10, reopens Feb 11 09:00."""
     sessions = _sessions(
@@ -134,9 +138,9 @@ def test_xtai_closes_for_lunar_new_year_2027(
 
 
 def test_usbond_has_a_good_friday_2026_session(
-    market: httpx.Client, validate: Callable[[str, str, object], None]
+    market: httpx.Client, validate: _Validate
 ) -> None:
-    """Treasury published on Good Friday 2026, so 2026-04-03 is a session."""
+    """USBOND has a Good Friday 2026-04-03 session; XNYS has none that day."""
     sessions = _sessions(
         market,
         validate,
@@ -166,7 +170,7 @@ def test_usbond_has_a_good_friday_2026_session(
 
 
 def test_continuous_calendar_has_no_sessions(
-    market: httpx.Client, validate: Callable[[str, str, object], None]
+    market: httpx.Client, validate: _Validate
 ) -> None:
     """The 24x7 calendar never closes, so a whole year lists no sessions."""
     start = conftest.ny_ms(2026, 1, 1)
@@ -176,7 +180,7 @@ def test_continuous_calendar_has_no_sessions(
 
 
 def test_unknown_calendar_is_not_found(
-    market: httpx.Client, validate: Callable[[str, str, object], None]
+    market: httpx.Client, validate: _Validate
 ) -> None:
     """Unknown (or wrongly cased) calendar ids are a contract 404."""
     for calendar in ("LSE", "xnys"):
@@ -202,10 +206,10 @@ def test_unknown_calendar_is_not_found(
 )
 def test_bad_session_windows_are_rejected(
     market: httpx.Client,
-    validate: Callable[[str, str, object], None],
+    validate: _Validate,
     params: dict[str, int],
 ) -> None:
-    """Windows over 400 days, empty, reversed or incomplete are a 422."""
+    """Over-400-day, empty, reversed, negative or open-ended windows are 422."""
     response = market.get("/v1/calendars/XNYS/sessions", params=params)
     assert response.status_code == 422, response.text
     validate("common.schema.json", "ErrorResponse", response.json())
@@ -213,7 +217,7 @@ def test_bad_session_windows_are_rejected(
 
 
 def test_a_400_day_window_is_accepted(
-    market: httpx.Client, validate: Callable[[str, str, object], None]
+    market: httpx.Client, validate: _Validate
 ) -> None:
     """Exactly 400 days is the largest window and lists every session."""
     start = conftest.ny_ms(2026, 1, 1)

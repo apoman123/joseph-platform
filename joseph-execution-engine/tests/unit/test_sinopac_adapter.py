@@ -11,6 +11,7 @@ import datetime
 import decimal
 import types
 from typing import Any
+from typing import NoReturn
 
 import pytest
 
@@ -38,13 +39,13 @@ CONFIG = sinopac.SinopacConfig(
 
 
 class _Rig:
-    """Adapter wired to a fake Shioaji.
+    """A SinoPac adapter wired to a fake Shioaji SDK and a manual clock.
 
     Attributes:
-        adapter: Adapter under test.
-        api: Fake SDK client.
-        factory: Fake factory.
-        clock: Clock.
+        adapter: Adapter under test; ``ACCOUNT`` maps to ``NUMBER``.
+        api: Fake SDK client the adapter talks to.
+        factory: Factory that hands out ``api`` and counts the clients made.
+        clock: Manual clock, at 10:00 Taipei on ``MONDAY``.
         market: Static market data (given to the adapter on request).
     """
 
@@ -57,8 +58,8 @@ class _Rig:
         """Builds the rig.
 
         Args:
-            config: Adapter settings.
-            gate: Gate reason.
+            config: Adapter settings; ``None`` leaves it unconfigured.
+            gate: Reason the adapter is gated; ``None`` leaves it open.
             market: Give the adapter market data (TWSE/TPEx fixtures with
                 00679B as a BOND ETF).
         """
@@ -78,14 +79,14 @@ class _Rig:
         )
 
     def cid(self, n: int, age_ms: int = 0) -> str:
-        """Builds a Joseph client id.
+        """Builds a Joseph client id created ``age_ms`` ago.
 
         Args:
-            n: Distinguishing number.
-            age_ms: Age.
+            n: Distinguishing number, the id's random part.
+            age_ms: Age of the id, in milliseconds.
 
         Returns:
-            Client id.
+            ``j`` + 12 hex digits of the creation ms + 18 hex digits of ``n``.
         """
         return f"j{self.clock.now_ms() - age_ms:012x}{n:018x}"
 
@@ -94,11 +95,11 @@ def _req(cid: str, **overrides: object) -> trading.VenueOrderRequest:
     """Builds a TWSE board-lot limit buy.
 
     Args:
-        cid: Client id.
-        **overrides: Overrides.
+        cid: Client order id.
+        **overrides: Request fields that replace the defaults.
 
     Returns:
-        Request.
+        By default a DAY buy of 2000 TSMC (2330) shares at 600 TWD.
     """
     fields: dict[str, object] = {
         "account_id": ACCOUNT,
@@ -112,11 +113,36 @@ def _req(cid: str, **overrides: object) -> trading.VenueOrderRequest:
         "limit_price": D(600),
     }
     fields.update(overrides)
-    return trading.VenueOrderRequest(**fields)  # type: ignore[arg-type]
+    return trading.VenueOrderRequest(**fields)  # type: ignore[arg-type]  # dict[str, object] holds each field's own type
+
+
+def _wrong_ca_password(*args: object, **kwargs: object) -> NoReturn:
+    """Fails like ``activate_ca`` given a wrong CA password.
+
+    Args:
+        *args: Ignored.
+        **kwargs: Ignored.
+
+    Raises:
+        ValueError: Always.
+    """
+    raise ValueError("bad password")
+
+
+def _missing_module(name: str) -> NoReturn:
+    """Fails like ``importlib.import_module`` without the ``sinopac`` extra.
+
+    Args:
+        name: Module name.
+
+    Raises:
+        ImportError: Always.
+    """
+    raise ImportError(name)
 
 
 async def _settle() -> None:
-    """Lets threadsafe callbacks run."""
+    """Yields to the event loop so that threadsafe callbacks run."""
     for _ in range(3):
         await asyncio.sleep(0)
 
@@ -191,19 +217,7 @@ async def test_production_requires_ca_and_signing() -> None:
 async def test_ca_activation_errors_are_reported() -> None:
     """An SDK error during CA activation keeps trading unavailable."""
     rig = _Rig()
-
-    def boom(**kwargs: object) -> bool:
-        """Raises like a wrong CA password.
-
-        Args:
-            **kwargs: Ignored.
-
-        Raises:
-            ValueError: Always.
-        """
-        raise ValueError("bad password")
-
-    rig.api.activate_ca = boom  # type: ignore[method-assign]
+    rig.api.activate_ca = _wrong_ca_password  # type: ignore[method-assign]  # injects a failure into this fake
     caps = await rig.adapter.capabilities(ACCOUNT)
     assert "CA activation failed" in caps.notes[-1]
 
@@ -300,13 +314,13 @@ async def test_submit_and_callbacks_report_order_and_deals() -> None:
     listed = await rig.adapter.list_recent_fills(ACCOUNT)
     assert len(listed) == 2
     assert await rig.adapter.list_open_orders(ACCOUNT) == []
-    rig.api.order_cb("FDEAL", {})  # type: ignore[misc]
-    rig.api.order_cb("SDEAL", {"trade_id": "unknown"})  # type: ignore[misc]
+    rig.api.order_cb("FDEAL", {})  # type: ignore[misc]  # order_cb is Optional; login registered it
+    rig.api.order_cb("SDEAL", {"trade_id": "unknown"})  # type: ignore[misc]  # order_cb is Optional; login registered it
     await _settle()
 
 
 async def test_odd_lot_orders_are_in_shares() -> None:
-    """Intraday odd-lot orders send and fill share quantities."""
+    """Odd-lot orders send and fill in shares and cannot be amended."""
     rig = _Rig()
     cid = rig.cid(1)
     await rig.adapter.submit_order(_req(cid, quantity_base=D(300)))
@@ -441,7 +455,7 @@ async def test_unresolved_holdings_are_reported_unmanaged() -> None:
 
 
 async def test_bond_etf_fills_follow_the_tax_window() -> None:
-    """Fill fees skip the sale tax on BOND ETFs only through 2026-12-31."""
+    """Classified BOND ETF fills skip the sale tax only through 2026-12-31."""
     rig = _Rig(market=True)
     cid = rig.cid(1)
     await rig.adapter.submit_order(
@@ -559,24 +573,24 @@ async def test_amend_failure_events_conflict() -> None:
         """Reports a failed price update.
 
         Args:
-            trade: Trade.
-            price: Price.
-            qty: Quantity.
+            trade: Fake trade being amended.
+            price: Ignored new price.
+            qty: Ignored new quantity.
 
         Returns:
-            Trade.
+            ``trade``, unchanged.
         """
         del price, qty
         rig.api._order_event(trade, "UpdatePrice", "77", "locked")
         return trade
 
-    rig.api.update_order = failing  # type: ignore[method-assign]
+    rig.api.update_order = failing  # type: ignore[method-assign, assignment]  # injects a failure; the adapter never passes timeout
     # Deliver callbacks synchronously, as an SDK reply would before return.
     rig.api.set_order_callback(rig.adapter._on_order)
     with pytest.raises(errors.ExecutionError) as info:
         await rig.adapter.amend_order(ACCOUNT, cid, D(601), None, None)
     assert info.value.code == "CONFLICT"
-    rig.api.update_order = original  # type: ignore[method-assign]
+    rig.api.update_order = original  # type: ignore[method-assign]  # restores the bound method
 
 
 async def test_restart_finds_orders_by_tag() -> None:
@@ -666,19 +680,7 @@ async def test_threaded_runner_and_real_factory(
 ) -> None:
     """The default runner uses a thread; the factory needs the extra."""
     assert await sinopac._thread_runner(lambda: 41 + 1) == 42
-
-    def missing(name: str) -> object:
-        """Raises ImportError.
-
-        Args:
-            name: Module.
-
-        Raises:
-            ImportError: Always.
-        """
-        raise ImportError(name)
-
-    monkeypatch.setattr(sinopac.importlib, "import_module", missing)
+    monkeypatch.setattr(sinopac.importlib, "import_module", _missing_module)
     with pytest.raises(errors.AdapterUnavailableError):
         sinopac.ShioajiFactory()
     module = types.SimpleNamespace(

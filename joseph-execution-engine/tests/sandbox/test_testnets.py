@@ -25,6 +25,7 @@ import os
 import uuid
 from collections.abc import Awaitable
 from collections.abc import Callable
+from typing import Any
 
 import httpx
 import pytest
@@ -69,21 +70,24 @@ class Case:
     decimals: int = 0
 
 
-async def _get_json(url: str, **kwargs: object) -> object:
+async def _get_json(url: str, **kwargs: object) -> Any:
     """Fetches JSON from a public endpoint.
 
     Args:
         url: URL.
-        **kwargs: ``httpx`` request options.
+        **kwargs: ``httpx`` request options; ``method`` defaults to ``GET``.
 
     Returns:
-        Parsed JSON.
+        Parsed JSON, with numbers that have a fraction as ``Decimal``.
+
+    Raises:
+        httpx.HTTPStatusError: The endpoint answered with an error status.
     """
     async with httpx.AsyncClient(timeout=10) as client:
         reply = await client.request(
             str(kwargs.pop("method", "GET")),
             url,
-            **kwargs,  # type: ignore[arg-type]
+            **kwargs,  # type: ignore[arg-type]  # callers pass valid httpx request options
         )
         reply.raise_for_status()
         return json.loads(reply.text, parse_float=decimal.Decimal)
@@ -93,22 +97,22 @@ async def _binance_mark(symbol: str) -> decimal.Decimal:
     """Reads the testnet mark price.
 
     Args:
-        symbol: Symbol.
+        symbol: Venue symbol, such as ``BTCUSDT``.
 
     Returns:
-        Mark.
+        Mark price.
     """
     data = await _get_json(
         f"{binance.TESTNET_REST_URL}/fapi/v1/premiumIndex?symbol={symbol}"
     )
-    return D(str(data["markPrice"]))  # type: ignore[index]
+    return D(str(data["markPrice"]))
 
 
 async def _bitget_last(symbol: str) -> decimal.Decimal:
-    """Reads the futures ticker.
+    """Reads the mainnet USDT-futures ticker (demo trading shares the host).
 
     Args:
-        symbol: Symbol.
+        symbol: Venue symbol, such as ``BTCUSDT``.
 
     Returns:
         Last price.
@@ -117,45 +121,43 @@ async def _bitget_last(symbol: str) -> decimal.Decimal:
         f"{bitget.REST_URL}/api/v2/mix/market/ticker"
         f"?symbol={symbol}&productType=USDT-FUTURES"
     )
-    return D(str(data["data"][0]["lastPr"]))  # type: ignore[index]
+    return D(str(data["data"][0]["lastPr"]))
 
 
 async def _hyperliquid_mid(symbol: str) -> decimal.Decimal:
-    """Reads the testnet mid.
+    """Reads the testnet mid price.
 
     Args:
-        symbol: Coin.
+        symbol: Coin name, such as ``BTC``.
 
     Returns:
-        Mid.
+        Mid price.
     """
     data = await _get_json(
         f"{hyperliquid.TESTNET_REST_URL}/info",
         method="POST",
         json={"type": "allMids"},
     )
-    return D(str(data[symbol]))  # type: ignore[index]
+    return D(str(data[symbol]))
 
 
 async def _lighter_last(symbol: str) -> decimal.Decimal:
     """Reads the testnet last trade price.
 
     Args:
-        symbol: Symbol.
+        symbol: Market symbol, such as ``BTC``.
 
     Returns:
         Last trade price.
     """
     books = await _get_json(f"{lighter.TESTNET_REST_URL}/api/v1/orderBooks")
     market_id = next(
-        b["market_id"]
-        for b in books["order_books"]  # type: ignore[index]
-        if b["symbol"] == symbol
+        b["market_id"] for b in books["order_books"] if b["symbol"] == symbol
     )
     details = await _get_json(
         f"{lighter.TESTNET_REST_URL}/api/v1/orderBookDetails?market_id={market_id}"
     )
-    return D(str(details["order_book_details"][0]["last_trade_price"]))  # type: ignore[index]
+    return D(str(details["order_book_details"][0]["last_trade_price"]))
 
 
 CASES = {
@@ -203,7 +205,10 @@ CASES = {
 
 
 def _env(case: Case) -> dict[str, str]:
-    """Reads a venue's sandbox credentials or skips.
+    """Reads a venue's sandbox credentials or skips the test.
+
+    Skips unless ``JOSEPH_SANDBOX_TESTS=1`` and every
+    ``JOSEPH_SANDBOX_<VENUE>_<SUFFIX>`` variable of ``case`` is set.
 
     Args:
         case: Venue case.
@@ -222,7 +227,11 @@ def _env(case: Case) -> dict[str, str]:
 
 
 class _Known:
-    """Directory that knows the single test order."""
+    """Order directory that knows only the order the test placed.
+
+    Attributes:
+        orders: Known orders by client order id.
+    """
 
     def __init__(self) -> None:
         """Initializes the directory."""
@@ -231,14 +240,14 @@ class _Known:
     def find(
         self, account_id: str, client_order_id: str
     ) -> directory.KnownOrder | None:
-        """Finds the test order.
+        """Finds a known order.
 
         Args:
-            account_id: Account.
-            client_order_id: Client id.
+            account_id: Ignored; the test uses one account.
+            client_order_id: Client order id.
 
         Returns:
-            Order or ``None``.
+            The order, or ``None`` when the test did not place it.
         """
         del account_id
         return self.orders.get(client_order_id)
@@ -246,14 +255,14 @@ class _Known:
     def recent(
         self, account_id: str, since_ms: int
     ) -> list[directory.KnownOrder]:
-        """Lists the test order.
+        """Lists every known order, whatever the account and time.
 
         Args:
-            account_id: Account.
-            since_ms: Lower bound.
+            account_id: Ignored; the test uses one account.
+            since_ms: Ignored lower bound, epoch milliseconds.
 
         Returns:
-            Orders.
+            The known orders.
         """
         del account_id, since_ms
         return list(self.orders.values())
@@ -267,12 +276,13 @@ async def _wait_for(
     """Polls the venue until a condition holds (venues confirm async).
 
     Args:
-        adapter: Adapter.
-        cid: Client id.
-        done: Condition.
+        adapter: Venue adapter holding the ``sandbox`` account.
+        cid: Client order id.
+        done: Condition on the latest state.
 
     Returns:
-        Last state.
+        The first state that satisfies ``done``, else the last one read
+        after 20 one-second polls.
     """
     state = None
     for _ in range(20):

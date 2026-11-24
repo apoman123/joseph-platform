@@ -13,18 +13,23 @@ import decimal
 import time
 import uuid
 from collections.abc import Callable
+from typing import TypeAlias
 
 import httpx
 
 MOCK_BTC = "mock:perp:BTCUSD"
 PAPER = "acct-paper-tenant-a"
+_Validate: TypeAlias = Callable[[str, str, object], None]
 
 
 def _intent(**overrides: object) -> dict[str, object]:
     """Builds a paper order intent request.
 
+    The default is a 0.010 BTC market IOC buy at 2x leverage on tenant A's
+    paper account.
+
     Args:
-        **overrides: Fields to replace.
+        **overrides: Request fields that replace the defaults.
 
     Returns:
         Contract ``OrderIntentRequest``.
@@ -60,13 +65,15 @@ def _submit(
 ) -> httpx.Response:
     """Previews then submits an intent with an idempotency key.
 
+    Asserts that the preview succeeds; its token goes into the submission.
+
     Args:
         client: Authenticated client.
         body: Intent request.
         key: Idempotency key; random when omitted.
 
     Returns:
-        Submit response.
+        Response of ``POST /v1/orders/intents``.
     """
     preview = client.post("/v1/orders/preview", json=body)
     assert preview.status_code == 200, preview.text
@@ -79,7 +86,7 @@ def _submit(
 
 
 def _resting_price(client: httpx.Client, side: str) -> str:
-    """Returns a non-marketable limit price 15% away from the mark.
+    """Returns a non-marketable limit price 7% away from the mark.
 
     The default account band rejects limits more than 10% from the mark, so
     test orders sit inside that band.
@@ -103,8 +110,8 @@ def _wait_for(predicate: Callable[[], bool], timeout_s: float = 15) -> bool:
     """Polls ``predicate`` until it is true.
 
     Args:
-        predicate: Condition.
-        timeout_s: Maximum wait.
+        predicate: Condition, polled every 0.25 seconds.
+        timeout_s: Maximum wait in seconds.
 
     Returns:
         Whether the condition became true.
@@ -118,9 +125,9 @@ def _wait_for(predicate: Callable[[], bool], timeout_s: float = 15) -> bool:
 
 
 def test_paper_account_is_provisioned(
-    execution: httpx.Client, validate: Callable[[str, str, object], None]
+    execution: httpx.Client, validate: _Validate
 ) -> None:
-    """Each tenant gets a paper account without LIVE mode."""
+    """Tenant A has a paper account without LIVE mode and a valid summary."""
     accounts = execution.get("/v1/accounts").json()
     validate("execution.schema.json", "AccountList", accounts)
     paper = [a for a in accounts["accounts"] if a["account_id"] == PAPER]
@@ -130,7 +137,7 @@ def test_paper_account_is_provisioned(
 
 
 def test_preview_reports_every_risk_check(
-    execution: httpx.Client, validate: Callable[[str, str, object], None]
+    execution: httpx.Client, validate: _Validate
 ) -> None:
     """Preview returns normalized values and a full risk verdict."""
     preview = execution.post(
@@ -143,7 +150,7 @@ def test_preview_reports_every_risk_check(
 
 
 def test_paper_market_order_fills_and_close_flattens(
-    execution: httpx.Client, validate: Callable[[str, str, object], None]
+    execution: httpx.Client, validate: _Validate
 ) -> None:
     """Market buy fills into a position; reduce-only close flattens it."""
     response = _submit(execution, _intent())
@@ -154,7 +161,7 @@ def test_paper_market_order_fills_and_close_flattens(
     order_id = body["orders"][0]["order_id"]
 
     def filled() -> bool:
-        """Checks whether the order filled."""
+        """Returns whether the order has reached ``FILLED``."""
         orders = execution.get(
             "/v1/orders", params={"account_id": PAPER}
         ).json()
@@ -193,7 +200,7 @@ def test_paper_market_order_fills_and_close_flattens(
     assert closed.status_code in (200, 201), closed.text
 
     def flat() -> bool:
-        """Checks whether the position is flat."""
+        """Returns whether every BTC position is flat."""
         rows = execution.get(
             "/v1/positions", params={"account_id": PAPER}
         ).json()
@@ -304,7 +311,7 @@ def test_live_mode_fails_closed(execution: httpx.Client) -> None:
 def test_tenant_isolation(
     execution: httpx.Client, execution_b: httpx.Client
 ) -> None:
-    """Tenant B can neither see nor cancel tenant A's orders."""
+    """Tenant B cannot see or cancel tenant A's orders or read its account."""
     body = _intent(
         order_type="limit",
         limit_price=_resting_price(execution, "buy"),
@@ -322,7 +329,7 @@ def test_tenant_isolation(
 
 
 def test_audit_chain_is_valid(
-    execution: httpx.Client, validate: Callable[[str, str, object], None]
+    execution: httpx.Client, validate: _Validate
 ) -> None:
     """Audit events validate and the hash chain verifies."""
     body = execution.get("/v1/audit/events", params={"limit": 500}).json()

@@ -33,11 +33,11 @@ def _live_request(
     """Builds a LIVE AAPL limit buy.
 
     Args:
-        account_id: Account.
-        **overrides: Overrides.
+        account_id: Account to trade.
+        **overrides: Request fields that replace the defaults.
 
     Returns:
-        Request.
+        A manual DAY limit buy of 10 AAPL at 190.01.
     """
     fields: dict[str, object] = {
         "account_id": account_id,
@@ -53,7 +53,7 @@ def _live_request(
         "source": enums.IntentSource.MANUAL_TICKET,
     }
     fields.update(overrides)
-    return intents.OrderIntentRequest(**fields)  # type: ignore[arg-type]
+    return intents.OrderIntentRequest(**fields)  # type: ignore[arg-type]  # dict[str, object] holds each field's own type
 
 
 async def _connect(h: harness.Harness, venue: str, number: str) -> str:
@@ -61,14 +61,14 @@ async def _connect(h: harness.Harness, venue: str, number: str) -> str:
 
     Args:
         h: Harness.
-        venue: Broker.
+        venue: Broker venue id, such as ``ibkr``; also the account label.
         number: Broker account number.
 
     Returns:
-        Account id.
+        The new account id, CONNECTED with LIVE mode.
     """
-    svc = h.container.services
-    summary = await svc.accounts.connect_start(
+    services = h.container.services
+    summary = await services.accounts.connect_start(
         harness.TENANT_A, venue, venue, {"account": number}, True
     )
     account_id = str(summary["account_id"])
@@ -81,7 +81,7 @@ def _force_live(h: harness.Harness, account_id: str) -> None:
 
     Args:
         h: Harness.
-        account_id: Account.
+        account_id: Account to update.
     """
     with h.container.uow_factory() as uow:
         account = uow.accounts.get(account_id)
@@ -116,7 +116,7 @@ async def test_default_deployment_never_reaches_a_broker() -> None:
     )
     assert not result.decision.allowed and result.orders == ()
     for adapter in h.container.brokers.values():
-        assert "submit_order" not in adapter.calls  # type: ignore[attr-defined]
+        assert "submit_order" not in adapter.calls  # type: ignore[attr-defined]  # the BrokerAdapter protocol omits calls; every broker records it
     ib_adapter = h.container.brokers["ibkr"]
     assert isinstance(ib_adapter, ibkr.IbkrAdapter)
     assert ib_adapter._factory is None
@@ -145,10 +145,10 @@ def _live_venue_request(account_id: str) -> trading.VenueOrderRequest:
     """Builds the venue request of a LIVE order.
 
     Args:
-        account_id: Account.
+        account_id: Account to trade.
 
     Returns:
-        Venue request.
+        A DAY limit buy of 10 AAPL at 190.01 with a fixed client order id.
     """
     return trading.VenueOrderRequest(
         account_id=account_id,
@@ -164,7 +164,7 @@ def _live_venue_request(account_id: str) -> trading.VenueOrderRequest:
 
 
 async def test_every_gate_still_applies_to_open_brokers() -> None:
-    """Preview, kill switch and strategy consent guard an open broker."""
+    """Preview, consent, arming and the kill switch guard an open broker."""
     h = harness.build(
         live_trading_enabled=True,
         securities=config.SecuritiesSettings(ibkr_enabled=True),
@@ -190,9 +190,9 @@ async def test_every_gate_still_applies_to_open_brokers() -> None:
     )
     h.container.registry.live["ibkr"] = adapter
     account_id = await _connect(h, "ibkr", "DU1234567")
-    svc = h.container.services
+    services = h.container.services
     with pytest.raises(errors.ExecutionError) as info:
-        await svc.oms.submit_intent(
+        await services.oms.submit_intent(
             harness.TENANT_A, _live_request(account_id), "no-preview"
         )
     assert info.value.code == "PREVIEW_REQUIRED"
@@ -202,15 +202,17 @@ async def test_every_gate_still_applies_to_open_brokers() -> None:
         strategy_version_id="s:v1",
         signal_id="sig-1",
     )
-    auto = await svc.oms.submit_intent(harness.TENANT_A, strategy, "auto")
+    auto = await services.oms.submit_intent(harness.TENANT_A, strategy, "auto")
     assert auto.decision.primary_code() == "TRADE_MODE_DISABLED"
-    unarmed = await svc.oms.preview(harness.TENANT_A, _live_request(account_id))
+    unarmed = await services.oms.preview(
+        harness.TENANT_A, _live_request(account_id)
+    )
     assert unarmed.decision.primary_code() == "LIVE_NOT_ARMED"
-    armed = await svc.accounts.grant_live_consent(
+    armed = await services.accounts.grant_live_consent(
         harness.TENANT_A, account_id, h.totp(), True
     )
     assert armed["live_armed_until_ms"] is not None
-    await svc.kill_switches.set(
+    await services.kill_switches.set(
         harness.TENANT_A,
         enums.KillSwitchScope.ACCOUNT,
         account_id,
@@ -219,7 +221,9 @@ async def test_every_gate_still_applies_to_open_brokers() -> None:
         False,
         "drill",
     )
-    preview = await svc.oms.preview(harness.TENANT_A, _live_request(account_id))
+    preview = await services.oms.preview(
+        harness.TENANT_A, _live_request(account_id)
+    )
     assert preview.decision.primary_code() == "KILL_SWITCH_ENGAGED"
     assert ib.placed == []
 
@@ -237,8 +241,8 @@ async def test_broker_secrets_never_travel_through_the_api() -> None:
         )
     assert info.value.code == "VALIDATION_FAILED"
     assert "hunter2-secret" not in info.value.message
-    sec = config.SecuritiesSettings(
+    settings = config.SecuritiesSettings(
         sinopac_api_key="api-key-value", sinopac_secret_key="secret-value-x"
     )
-    assert "secret-value-x" not in repr(sec)
+    assert "secret-value-x" not in repr(settings)
     assert "secret-value-x" not in repr(h.container.settings)

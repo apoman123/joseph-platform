@@ -7,6 +7,8 @@ from __future__ import annotations
 
 import dataclasses
 import decimal
+from collections.abc import Callable
+from typing import TypeAlias
 
 import httpx
 import pytest
@@ -27,6 +29,7 @@ from joseph_execution.ports import trading
 D = decimal.Decimal
 S = enums.OrderState
 BTC = "mock:perp:BTCUSD"
+_Validate: TypeAlias = Callable[[str, str, object], None]
 
 
 def _setup() -> tuple[
@@ -35,7 +38,8 @@ def _setup() -> tuple[
     """Builds a paper adapter over a static gateway.
 
     Returns:
-        Adapter and gateway.
+        The adapter and the gateway, which share a manual clock; the gateway
+        lists the mock instruments with their default demo marks.
     """
     clock = clock_lib.ManualClock()
     gateway = market_static.StaticMarketDataGateway(clock)
@@ -43,14 +47,14 @@ def _setup() -> tuple[
 
 
 def _req(cid: str, **overrides: object) -> trading.VenueOrderRequest:
-    """Builds a venue request.
+    """Builds a venue request for account ``a``.
 
     Args:
-        cid: Client id.
-        **overrides: Overrides.
+        cid: Client order id.
+        **overrides: Request fields that replace the defaults.
 
     Returns:
-        Request.
+        By default a 0.01 BTC market IOC buy.
     """
     fields: dict[str, object] = {
         "account_id": "a",
@@ -63,11 +67,11 @@ def _req(cid: str, **overrides: object) -> trading.VenueOrderRequest:
         "reduce_only": False,
     }
     fields.update(overrides)
-    return trading.VenueOrderRequest(**fields)  # type: ignore[arg-type]
+    return trading.VenueOrderRequest(**fields)  # type: ignore[arg-type]  # dict[str, object] holds each field's own type
 
 
 async def test_market_order_fills_at_ask_with_taker_fee() -> None:
-    """Market orders fill immediately at the ask."""
+    """Market orders fill at once at the ask, as taker, and open a position."""
     adapter, _ = _setup()
     result = await adapter.submit_order(_req("c1"))
     assert result.accepted and result.state.status is S.FILLED
@@ -87,7 +91,7 @@ async def test_duplicate_client_id_is_deduplicated() -> None:
 
 
 async def test_limit_rests_then_fills_as_maker_on_tick() -> None:
-    """Resting limits fill when the market crosses them."""
+    """Resting limits fill as maker at their price once the market crosses."""
     adapter, gateway = _setup()
     req = _req(
         "c1",
@@ -107,7 +111,7 @@ async def test_limit_rests_then_fills_as_maker_on_tick() -> None:
 
 
 async def test_partial_fills_on_tick() -> None:
-    """Partial fill fraction splits resting fills."""
+    """A partial-fill fraction splits a resting fill until it completes."""
     adapter, gateway = _setup()
     adapter.faults.partial_fill_fraction = D("0.5")
     await adapter.submit_order(
@@ -228,7 +232,7 @@ async def test_cancel_race_reports_fill() -> None:
 
 
 async def test_shadow_records_without_sending() -> None:
-    """Shadow orders are recorded with deviation from the mark."""
+    """Shadow orders are only recorded, with their deviation from the mark."""
     clock = clock_lib.ManualClock()
     gateway = market_static.StaticMarketDataGateway(clock)
     adapter = shadow.ShadowAdapter(gateway, clock)
@@ -241,7 +245,7 @@ async def test_shadow_records_without_sending() -> None:
     assert "never sent" in caps.notes[0]
 
 
-async def test_live_adapters_fail_closed(contract_validate: object) -> None:
+async def test_live_adapters_fail_closed(contract_validate: _Validate) -> None:
     """Every live venue adapter refuses trading and reports unavailable."""
     adapters = catalog.build_live_adapters()
     assert sorted(adapters) == [
@@ -255,7 +259,7 @@ async def test_live_adapters_fail_closed(contract_validate: object) -> None:
         caps = await adapter.capabilities("x")
         assert caps.status is enums.TradingStatus.TRADING_UNAVAILABLE
         contract_validate(
-            "execution.schema.json",  # type: ignore[operator]
+            "execution.schema.json",
             "TradingCapabilities",
             caps.to_contract(),
         )
@@ -276,7 +280,7 @@ async def test_live_adapters_fail_closed(contract_validate: object) -> None:
 
 
 def test_resolver_routes_by_mode() -> None:
-    """PAPER and SHADOW never resolve to a live venue adapter."""
+    """PAPER and SHADOW resolve to simulators, LIVE to the account venue."""
     adapter, gateway = _setup()
     shadow_adapter = shadow.ShadowAdapter(gateway, clock_lib.ManualClock())
     live = catalog.build_live_adapters()

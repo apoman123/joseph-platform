@@ -8,6 +8,7 @@ from __future__ import annotations
 import decimal
 import json
 import urllib.parse
+from typing import Any
 
 import httpx
 import pytest
@@ -44,14 +45,14 @@ def _adapter(
     """Builds an adapter for account ``acct``.
 
     Args:
-        fields: Credential fields (``None`` = no credentials).
-        gate: Global LIVE gate.
+        fields: Credential fields of ``acct``; ``None`` stores none.
+        gate: Whether the global LIVE gate is open.
         known: OMS orders visible through the directory.
-        connector: Fake WebSocket connector.
-        clock: Manual monotonic clock.
+        connector: Fake WebSocket connector; one without scripts by default.
+        clock: Manual monotonic clock; a new one by default.
 
     Returns:
-        Adapter.
+        The adapter, on a manual wall clock at 1_795_000_000_000 ms.
     """
     mono = clock or venue_fakes.ManualMonotonic()
     source = credentials.StaticCredentials(
@@ -71,27 +72,27 @@ def _adapter(
 
 
 class _Directory:
-    """In-memory order directory."""
+    """In-memory order directory keyed by client order id."""
 
     def __init__(self, known: list[directory.KnownOrder]) -> None:
         """Initializes the directory.
 
         Args:
-            known: Orders.
+            known: Orders the directory knows.
         """
         self._known = {k.client_order_id: k for k in known}
 
     def find(
         self, account_id: str, client_order_id: str
     ) -> directory.KnownOrder | None:
-        """Finds an order.
+        """Finds a known order by client id.
 
         Args:
-            account_id: Account.
-            client_order_id: Client id.
+            account_id: Ignored; the tests use one account.
+            client_order_id: Client order id.
 
         Returns:
-            Order or ``None``.
+            The order, or ``None`` when it is not known.
         """
         del account_id
         return self._known.get(client_order_id)
@@ -99,14 +100,14 @@ class _Directory:
     def recent(
         self, account_id: str, since_ms: int
     ) -> list[directory.KnownOrder]:
-        """Lists orders.
+        """Lists every known order, whatever the account and time.
 
         Args:
-            account_id: Account.
-            since_ms: Lower bound.
+            account_id: Ignored; the tests use one account.
+            since_ms: Ignored lower bound, epoch milliseconds.
 
         Returns:
-            Orders.
+            The known orders.
         """
         del account_id, since_ms
         return list(self._known.values())
@@ -118,11 +119,11 @@ def _known(
     """Builds a directory entry.
 
     Args:
-        cid: Client id.
+        cid: Client order id.
         kind: Order type.
 
     Returns:
-        Entry.
+        A LIVE, non-reduce-only BTCUSDT entry.
     """
     return directory.KnownOrder(
         cid, "binance:perp:BTCUSDT", enums.OrderMode.LIVE, 1, False, kind
@@ -130,13 +131,13 @@ def _known(
 
 
 def _request(**overrides: object) -> trading.VenueOrderRequest:
-    """Builds an order request.
+    """Builds an order request for account ``acct``.
 
     Args:
-        **overrides: Field overrides.
+        **overrides: Request fields that replace the defaults.
 
     Returns:
-        Request.
+        By default a GTC limit buy of 0.002 BTCUSDT at 50000, 3x cross.
     """
     fields: dict[str, object] = {
         "account_id": "acct",
@@ -152,11 +153,11 @@ def _request(**overrides: object) -> trading.VenueOrderRequest:
         "margin_mode": enums.MarginMode.CROSS,
     }
     fields.update(overrides)
-    return trading.VenueOrderRequest(**fields)  # type: ignore[arg-type]
+    return trading.VenueOrderRequest(**fields)  # type: ignore[arg-type]  # dict[str, object] holds each field's own type
 
 
 def _params(request: httpx.Request) -> dict[str, str]:
-    """Decodes query parameters and checks the HMAC signature.
+    """Decodes query parameters, asserting the HMAC signature and API key.
 
     Args:
         request: Captured request.
@@ -172,10 +173,10 @@ def _params(request: httpx.Request) -> dict[str, str]:
 
 
 def _time_route() -> respx.Route:
-    """Mocks ``GET /fapi/v1/time`` at the manual clock.
+    """Mocks ``GET /fapi/v1/time`` 100 ms after the manual wall clock.
 
     Returns:
-        Route.
+        The mocked route.
     """
     return respx.get(f"{API}/fapi/v1/time").mock(
         return_value=httpx.Response(200, json={"serverTime": 1_795_000_000_100})
@@ -427,7 +428,7 @@ async def test_stop_orders_use_the_algo_order_api() -> None:
 async def test_venue_rejections_become_rejected_results(
     status: int, body: dict[str, object], code: str
 ) -> None:
-    """Definite rejections are REJECTED with the mapped, non-retryable code."""
+    """Definite venue rejections are REJECTED with the mapped error code."""
     _time_route()
     respx.post(f"{API}/fapi/v1/order").mock(
         return_value=httpx.Response(status, json=body)
@@ -774,7 +775,7 @@ def test_stream_parser_on_documented_payloads() -> None:
     assert updates[1].order is not None
     assert updates[1].order.status is S.PARTIALLY_FILLED
     assert updates[1].order.filled_base == D("0.001")
-    algo = {
+    algo: dict[str, Any] = {
         "e": "ALGO_UPDATE",
         "T": 1750515742297,
         "E": 1750515742303,
@@ -796,10 +797,10 @@ def test_stream_parser_on_documented_payloads() -> None:
     (cancel,) = adapter.parse(session, json.dumps(algo))
     assert cancel.order is not None and cancel.order.status is S.CANCELED
     assert cancel.order.reason == "Reduce Only reject"
-    algo["o"].update({"X": "TRIGGERED", "ai": "555"})  # type: ignore[union-attr]
+    algo["o"].update({"X": "TRIGGERED", "ai": "555"})
     assert adapter.parse(session, json.dumps(algo)) == []
     assert session.order_ids["555"] == f"{CID}-sl"
-    algo["o"].update({"X": "FINISHED", "aq": "0.002"})  # type: ignore[union-attr]
+    algo["o"].update({"X": "FINISHED", "aq": "0.002"})
     (done,) = adapter.parse(session, json.dumps(algo))
     assert done.order is not None and done.order.status is S.FILLED
     account = {
@@ -880,9 +881,11 @@ async def test_user_stream_uses_listen_keys_and_resyncs() -> None:
     adapter = _adapter(
         KEYS, connector=connector, clock=mono, known=[_known(CID)]
     )
-    events = await venue_fakes.collect(adapter.stream_account_events("acct"), 2)
+    events: list[Any] = await venue_fakes.collect(
+        adapter.stream_account_events("acct"), 2
+    )
     assert connector.urls == ["wss://fstream.binance.com/private/ws/LK1"]
     first, second = events
-    assert first.resync and first.balance is not None  # type: ignore[attr-defined]
-    assert second.order is not None and not second.resync  # type: ignore[attr-defined]
-    assert second.sequence > first.sequence  # type: ignore[attr-defined]
+    assert first.resync and first.balance is not None
+    assert second.order is not None and not second.resync
+    assert second.sequence > first.sequence

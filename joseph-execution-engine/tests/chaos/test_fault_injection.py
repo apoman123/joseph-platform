@@ -3,8 +3,8 @@
 
 """Chaos tests: lost ACKs, timeouts, duplicate/out-of-order events, crashes.
 
-The invariant under test (V5 §12.2 #3): an uncertain submit is never sent a
-second time unless the venue confirms it does not have the order.
+The invariant under test: an uncertain submit is never sent a second time
+unless the venue confirms that it does not have the order.
 """
 
 from __future__ import annotations
@@ -26,10 +26,11 @@ def _req(**overrides: object) -> intents.OrderIntentRequest:
     """Builds a request from the harness body.
 
     Args:
-        **overrides: Overrides.
+        **overrides: Contract body fields passed on to
+            ``harness.intent_body``.
 
     Returns:
-        Request.
+        The request; by default a 0.010 BTC paper market buy for tenant A.
     """
     return intents.OrderIntentRequest.from_contract(
         harness.intent_body(**overrides)
@@ -37,7 +38,7 @@ def _req(**overrides: object) -> intents.OrderIntentRequest:
 
 
 async def test_ack_loss_reconciles_without_duplicate_submit() -> None:
-    """A lost ACK ends FILLED via reconciliation with one submit call."""
+    """A lost ACK blocks new orders, then reconciles to FILLED, sent once."""
     h = harness.build()
     h.container.paper.faults.drop_ack_next = 1
     oms = h.container.services.oms
@@ -94,7 +95,7 @@ async def test_no_query_capability_requires_manual_intervention() -> None:
 
 
 async def test_failing_queries_back_off_then_escalate() -> None:
-    """Repeated query timeouts back off and finally escalate."""
+    """Repeated query failures escalate to manual intervention, never resend."""
     h = harness.build()
     h.container.paper.faults.drop_ack_next = 1
     h.container.paper.faults.query_fails_next = 100
@@ -178,7 +179,7 @@ async def test_dropped_fill_events_are_recovered_from_status() -> None:
 
 
 async def test_reconciler_applies_missed_fills_and_flags_mismatch() -> None:
-    """Reconciliation repairs missed fills and blocks on mismatches."""
+    """Reconciliation applies missed fills; a mismatch blocks until cleared."""
     h = harness.build()
     oms = h.container.services.oms
     order = (
@@ -231,7 +232,7 @@ async def test_cancel_timeout_is_resolved_by_reconciliation() -> None:
 
 
 async def test_venue_outage_fails_cleanly_and_rejects_count() -> None:
-    """Refusals before sending fail the order; reject spikes pause."""
+    """An unavailable venue blocks orders; five rejects pause new ones."""
     h = harness.build()
     oms = h.container.services.oms
     h.container.paper.faults.unavailable = True

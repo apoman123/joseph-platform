@@ -14,7 +14,7 @@ from joseph_execution.adapters.persistence import sql
 
 
 def test_open_reader_does_not_block_commit(tmp_path: pathlib.Path) -> None:
-    """A commit completes promptly while another connection is reading."""
+    """A commit finishes within a second during an open read; WAL is on."""
     engine = sql.create_engine(f"sqlite:///{tmp_path / 'execution.db'}")
     with engine.begin() as conn:
         conn.exec_driver_sql("CREATE TABLE probe (value INTEGER)")

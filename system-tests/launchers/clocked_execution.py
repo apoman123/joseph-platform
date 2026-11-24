@@ -64,7 +64,7 @@ def clock_router(
         """Rejects callers without the service token.
 
         Args:
-            presented: Header value.
+            presented: ``X-Joseph-Service-Token`` header value, if any.
 
         Raises:
             fastapi.HTTPException: 403 without a matching token.
@@ -78,10 +78,10 @@ def clock_router(
 
     @router.get(CLOCK_PATH)
     async def read_clock() -> dict[str, int]:
-        """Returns the engine time.
+        """Returns the engine time; no token is needed to read it.
 
         Returns:
-            ``{"now_ms": ...}``.
+            ``{"now_ms": <UTC epoch ms>}``.
         """
         return {"now_ms": the_clock.now_ms()}
 
@@ -92,14 +92,17 @@ def clock_router(
             None, alias="X-Joseph-Service-Token"
         ),
     ) -> dict[str, int]:
-        """Pins the engine time.
+        """Pins the engine time, earlier or later than the current one.
 
         Args:
-            body: New time.
-            token: Service token header.
+            body: New engine time.
+            token: ``X-Joseph-Service-Token`` header value, if any.
 
         Returns:
-            ``{"now_ms": ...}`` after the change.
+            ``{"now_ms": <UTC epoch ms>}`` after the change.
+
+        Raises:
+            fastapi.HTTPException: 403 without the service token.
         """
         require_token(token)
         the_clock.current_ms = body.now_ms
@@ -109,10 +112,10 @@ def clock_router(
 
 
 def create_application() -> fastapi.FastAPI:
-    """Uvicorn factory: the execution engine on a settable clock.
+    """Builds the execution engine on a settable clock (uvicorn factory).
 
     Returns:
-        Application.
+        The engine's application with the clock routes added.
     """
     settings = config.from_env()
     raw = os.environ.get("JOSEPH_SYSTEM_TEST_CLOCK_MS", "").strip()

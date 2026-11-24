@@ -57,11 +57,11 @@ class Engine:
     """A wired engine with a Binance account.
 
     Attributes:
-        container: Container.
+        container: The engine's composition root.
         clock: Manual wall clock.
-        mono: Manual monotonic clock (streams).
+        mono: Manual monotonic clock of the private streams.
         connector: Fake WebSocket connector.
-        account_id: Binance account id.
+        account_id: Binance account id once ``_connect`` has run, else empty.
     """
 
     container: bootstrap.Container
@@ -75,10 +75,12 @@ def _engine(gate: bool) -> Engine:
     """Builds an engine whose market gateway lists Binance BTCUSDT (LIVE).
 
     Args:
-        gate: ``live_trading_enabled``.
+        gate: Whether the global LIVE gate is open
+            (``live_trading_enabled``).
 
     Returns:
-        Engine.
+        The engine with tenant A's paper account and the BTCUSDT mark at
+        95000; no Binance account is connected yet.
     """
     clock = clock_lib.ManualClock(1_795_000_000_000)
     meta = market.InstrumentMeta(
@@ -122,11 +124,12 @@ async def _connect(engine: Engine, *, live_mode: bool = False) -> str:
     """Stores Binance credentials for tenant A.
 
     Args:
-        engine: Engine.
-        live_mode: Force CONNECTED + LIVE without verification.
+        engine: Engine; its ``account_id`` is set to the new account.
+        live_mode: Whether to mark the account CONNECTED and LIVE-capable
+            without verifying it.
 
     Returns:
-        Account id.
+        The new account id.
     """
     summary = await engine.container.services.accounts.connect_start(
         harness.TENANT_A, "binance", "Main", KEYS, True
@@ -171,11 +174,12 @@ def _mock_venue(
     """Mocks a healthy Binance account.
 
     Args:
-        router: Router.
+        router: respx router to register the routes on.
         order: ``POST /fapi/v1/order`` answer.
 
     Returns:
-        Routes by path.
+        Routes keyed by a short name (``order``, ``margin``, ``listen`` ...),
+        or by path for the open and historical order lists.
     """
     routes = {
         "time": router.get(f"{API}/fapi/v1/time").mock(
@@ -262,11 +266,12 @@ def _intent(account_id: str, **overrides: object) -> intents.OrderIntentRequest:
     """Builds a LIVE intent for the Binance account.
 
     Args:
-        account_id: Account.
-        **overrides: Contract field overrides.
+        account_id: Binance account to trade.
+        **overrides: Contract body fields passed on to
+            ``harness.intent_body``.
 
     Returns:
-        Request.
+        The LIVE intent request on Binance BTCUSDT.
     """
     body = harness.intent_body(
         account_id=account_id, instrument_id=BTC, mode="LIVE", **overrides
@@ -277,15 +282,15 @@ def _intent(account_id: str, **overrides: object) -> intents.OrderIntentRequest:
 async def _submit(
     engine: Engine, request: intents.OrderIntentRequest, key: str
 ) -> Any:
-    """Previews then submits a manual LIVE intent.
+    """Previews a request for tenant A and submits it with the preview token.
 
     Args:
         engine: Engine.
-        request: Request.
+        request: Intent request.
         key: Idempotency key.
 
     Returns:
-        Submit result.
+        The OMS submit result.
     """
     oms = engine.container.services.oms
     preview = await oms.preview(harness.TENANT_A, request)
@@ -301,8 +306,8 @@ def _order_calls(
     """Counts requests to order-changing endpoints.
 
     Args:
-        routes: Routes.
-        router: Router.
+        routes: Unused; the count comes from every call ``router`` saw.
+        router: respx router of the test.
 
     Returns:
         Number of order, algo, margin and leverage requests.
@@ -317,7 +322,7 @@ def _order_calls(
 
 
 async def test_live_order_flows_end_to_end_with_reconciliation() -> None:
-    """Verify, preview, submit, fill, reconcile: a LIVE order really works."""
+    """A LIVE order verifies, previews, submits, fills and reconciles."""
     engine = _engine(gate=True)
     with respx.mock(assert_all_called=False) as router:
         routes = _mock_venue(
@@ -470,14 +475,14 @@ async def test_closed_gate_and_missing_credentials_make_zero_venue_calls() -> (
         if revoke:
             with engine.container.uow_factory() as uow:
                 uow.credentials.delete_for_account(account_id)
-        engine.container.registry.live["binance"].calls.clear()  # type: ignore[attr-defined]
+        engine.container.registry.live["binance"].calls.clear()  # type: ignore[attr-defined]  # registry is typed TradingAdapter; this is a LiveVenueAdapter
         with respx.mock(assert_all_called=False) as router:
             result = await _submit(engine, _intent(account_id), f"g-{gate}")
             assert not result.decision.allowed
             codes = {c.code for c in result.decision.failures()}
             assert codes & {"LIVE_TRADING_DISABLED", "TRADE_MODE_DISABLED"}
             assert router.calls.call_count == 0
-        assert not engine.container.registry.live["binance"].calls  # type: ignore[attr-defined]
+        assert not engine.container.registry.live["binance"].calls  # type: ignore[attr-defined]  # registry is typed TradingAdapter; this is a LiveVenueAdapter
 
 
 async def test_kill_switch_and_missing_consent_never_send_orders() -> None:
@@ -526,11 +531,11 @@ async def test_kill_switch_and_missing_consent_never_send_orders() -> None:
         assert strategy.orders == ()
         assert _order_calls(routes, router) == 0
     adapter = engine.container.registry.live["binance"]
-    assert "submit_order" not in adapter.calls  # type: ignore[attr-defined]
+    assert "submit_order" not in adapter.calls  # type: ignore[attr-defined]  # registry is typed TradingAdapter; this is a LiveVenueAdapter
 
 
 async def test_unarmed_manual_live_orders_never_reach_the_venue() -> None:
-    """Without arming nothing is sent; arming sends; disarming stops it."""
+    """Unarmed sends nothing, armed sends, disarmed sends only closes."""
     engine = _engine(gate=True)
     with respx.mock(assert_all_called=False) as router:
         routes = _mock_venue(
