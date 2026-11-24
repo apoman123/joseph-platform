@@ -22,7 +22,10 @@ import {
   type VenueCapabilities,
 } from '@joseph/contracts';
 
-/** Parse result of a custom timeframe. */
+/**
+ * Parse result of a typed timeframe: the timeframe, or a message for the
+ * user.
+ */
 export type TimeframeParse =
   {ok: true; timeframe: Timeframe} | {ok: false; error: string};
 
@@ -60,7 +63,7 @@ function canonicalUnit(raw: string): string | null {
 /**
  * Normalizes an optional offered-timeframe list.
  * @param offered Timeframes the venue offers (null = unknown, allow all).
- * @return Set or null.
+ * @return The timeframes as a set, or null when unknown.
  */
 function offeredSet(
   offered: Iterable<Timeframe> | null | undefined
@@ -145,7 +148,7 @@ const UNIT_WORDS: Readonly<Record<string, string>> = {
 
 /**
  * Spells a timeframe out, so `1m` and `1M` are never confused.
- * @param timeframe Timeframe.
+ * @param timeframe Contract timeframe.
  * @return Text such as `15 seconds`, `1 minute` or `1 month`.
  */
 export function timeframeTitle(timeframe: Timeframe): string {
@@ -155,7 +158,7 @@ export function timeframeTitle(timeframe: Timeframe): string {
   return `${count} ${word}${count === 1 ? '' : 's'}`;
 }
 
-/** Whether a venue offers a timeframe, and how. */
+/** Whether a venue offers a timeframe, and how it builds the bars. */
 export interface TimeframeAvailability {
   /** Whether the chart can request it on this venue. */
   offered: boolean;
@@ -172,7 +175,8 @@ export type TimeframeCapabilities = Pick<
 >;
 
 /**
- * Timeframes a venue offers according to its published capabilities.
+ * Returns the timeframes a venue offers according to its published
+ * capabilities, including the trade-built ones.
  * @param capabilities Venue capabilities (null while unknown).
  * @return Offered timeframes, or null when unknown (nothing is hidden).
  */
@@ -188,9 +192,10 @@ export function offeredTimeframes(
 
 /**
  * Describes a timeframe for a venue (menu state and tooltip).
- * @param timeframe Timeframe.
+ * @param timeframe Contract timeframe.
  * @param capabilities Venue capabilities (null while unknown).
- * @return Availability.
+ * @return Availability; every timeframe counts as offered while the
+ *     capabilities are unknown.
  */
 export function timeframeAvailability(
   timeframe: Timeframe,
@@ -219,9 +224,10 @@ export function timeframeAvailability(
 }
 
 /**
- * Time left until the bar containing `nowMs` closes (calendar-aware).
+ * Returns the time left until the bar containing `nowMs` closes
+ * (calendar-aware).
  * @param timeframe Chart timeframe.
- * @param nowMs Clock.
+ * @param nowMs Current time (UTC epoch ms).
  * @param calendar Session calendar (default UTC bars, which never pause).
  * @return Milliseconds until the close (> 0; 0 between sessions).
  */
@@ -237,15 +243,18 @@ export function msUntilBarClose(
   return Math.max(0, end - nowMs);
 }
 
-/** What the bar countdown chip shows. */
+/**
+ * What the bar countdown chip shows: time to the bar close, time to the
+ * next session open, or `closed` when the calendar knows no next session.
+ */
 export type BarCountdown =
   {kind: 'closes'; ms: number} | {kind: 'opens'; ms: number} | {kind: 'closed'};
 
 /**
- * Countdown of the chart's bar: time to the bar close while in session,
- * otherwise time to the next session open.
+ * Returns the countdown of the chart's bar: time to the bar close while in
+ * session, otherwise time to the next session open.
  * @param timeframe Chart timeframe.
- * @param nowMs Clock.
+ * @param nowMs Current time (UTC epoch ms).
  * @param calendar Session calendar (default UTC bars).
  * @return Countdown.
  */
@@ -260,6 +269,7 @@ export function barCountdown(
     const next = calendar.shift(timeframe, nowMs, 0);
     return {kind: 'opens', ms: Math.max(0, next - nowMs)};
   } catch {
+    // The calendar throws a `RangeError` past its last known session.
     return {kind: 'closed'};
   }
 }

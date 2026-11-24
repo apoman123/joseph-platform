@@ -45,16 +45,19 @@ export const POPOUT_CHANNEL = 'joseph.popout.v1';
 /** Route of pop-out windows. */
 export const POPOUT_PATH = '/popout';
 
-/** Pop-out heartbeat interval. */
+/** Interval between a pop-out's heartbeats. */
 export const HEARTBEAT_MS = 2_000;
 
 /** Silence after which a visible pop-out counts as crashed. */
 export const LIVE_TIMEOUT_MS = 10_000;
 
-/** Silence budget while the pop-out reported itself hidden (throttled). */
+/**
+ * Silence after which a pop-out that reported itself hidden counts as
+ * crashed; longer because browsers throttle timers in hidden windows.
+ */
 export const HIDDEN_TIMEOUT_MS = 90_000;
 
-/** Time a newly opened window has to say hello. */
+/** Time a newly opened window has to say hello before it counts as lost. */
 export const OPEN_GRACE_MS = 20_000;
 
 /**
@@ -66,7 +69,7 @@ export const PROBE_MS = 2_500;
 /** Unacknowledged pop-out actions kept for replay (oldest dropped first). */
 export const MAX_PENDING_ACTIONS = 200;
 
-/** Dock panels that may be popped out (contribution ids). */
+/** Dock panels that may be popped out (feature contribution ids). */
 export const DETACHABLE_PANELS: ReadonlySet<string> = new Set([
   'market-info',
   'watchlist',
@@ -74,7 +77,7 @@ export const DETACHABLE_PANELS: ReadonlySet<string> = new Set([
   'alerts',
 ]);
 
-/** What a pop-out window shows. */
+/** What a pop-out window shows: a chart, or a dock panel and its slot. */
 export type DetachedPaneRef =
   | {kind: 'chart'; chartId: string}
   | {kind: 'panel'; slot: 'side-panel' | 'bottom-panel'; panelId: string};
@@ -105,17 +108,17 @@ export interface DetachedPane {
 
 /** Runtime liveness of one detached pane (never persisted). */
 export interface PaneLiveness {
-  /** When this window opened it (this session), if it did. */
+  /** When this main window opened the pop-out, if it did in this session. */
   openedAtMs?: number;
-  /** Last hello or heartbeat. */
+  /** Time of the last hello or heartbeat from the pop-out. */
   seenMs?: number;
   /** Whether the pop-out last reported itself hidden. */
   hidden?: boolean;
 }
 
 /**
- * Status of a detached pane as seen by the main window: `reconnecting`
- * while a reloaded main window probes for surviving pop-outs.
+ * Status of a detached pane as seen by the main window; `detachedStatus`
+ * explains each value.
  */
 export type DetachedStatus =
   'opening' | 'live' | 'reconnecting' | 'dormant' | 'lost';
@@ -124,17 +127,18 @@ export type DetachedStatus =
 export interface DetachState {
   /** Detached panes in detach order. */
   panes: readonly DetachedPane[];
-  /** Liveness by key. */
+  /** Liveness by pane key; a pane without an entry was restored. */
   live: Readonly<Record<string, PaneLiveness>>;
   /** Whether restored panes are still waiting for surviving windows. */
   probing?: boolean;
 }
 
-/** Empty state. */
+/** Detach state with no detached panes. */
 export const EMPTY_DETACH_STATE: DetachState = {panes: [], live: {}};
 
 /**
- * Stable key of a pane reference.
+ * Returns the stable key of a pane reference. A panel's key leaves out its
+ * slot, so a panel is detached at most once.
  * @param ref Pane reference.
  * @return Key such as `chart:chart-2` or `panel:alerts`.
  */
@@ -146,9 +150,10 @@ export function paneKey(ref: DetachedPaneRef): string {
 const ID_PATTERN = /^[A-Za-z0-9._-]{1,64}$/;
 
 /**
- * Validates an untrusted pane reference.
- * @param value Candidate.
- * @return Reference or null.
+ * Validates an untrusted pane reference: chart ids must match the id
+ * pattern and panels must be in `DETACHABLE_PANELS`.
+ * @param value Candidate, for example from a message or a saved layout.
+ * @return A fresh reference with only the known fields, or null.
  */
 export function parsePaneRef(value: unknown): DetachedPaneRef | null {
   if (!value || typeof value !== 'object') return null;
@@ -179,9 +184,10 @@ const GEOMETRY_LIMITS = {
 };
 
 /**
- * Validates an untrusted window geometry.
- * @param value Candidate.
- * @return Geometry with integer pixels, or null when implausible.
+ * Validates an untrusted window geometry against `GEOMETRY_LIMITS`.
+ * @param value Candidate, for example from a heartbeat or a saved layout.
+ * @return Geometry rounded to integer pixels, or null when a field is
+ *     missing, not finite or out of bounds.
  */
 export function parseGeometry(value: unknown): WindowGeometry | null {
   if (!value || typeof value !== 'object') return null;
@@ -203,10 +209,10 @@ export function parseGeometry(value: unknown): WindowGeometry | null {
 }
 
 /**
- * Whether two geometries are equal (both absent counts as equal).
+ * Returns whether two geometries are equal.
  * @param a First geometry.
  * @param b Second geometry.
- * @return True when equal.
+ * @return True when every field matches, or when both are absent.
  */
 function sameGeometry(
   a: WindowGeometry | undefined,
@@ -222,9 +228,11 @@ function sameGeometry(
 }
 
 /**
- * Reads persisted detached panes defensively from `workspace.panels`.
- * @param panels Workspace panel state.
- * @return Valid panes (duplicates dropped).
+ * Reads persisted detached panes defensively from
+ * `workspace.panels['shell.detached']`.
+ * @param panels Workspace panel state (untrusted).
+ * @return Valid panes in saved order; invalid entries and repeated keys are
+ *     dropped, titles are cut to 80 characters.
  */
 export function readDetachedPanes(panels: unknown): DetachedPane[] {
   const raw = (panels as Record<string, unknown> | null | undefined)?.[
@@ -233,6 +241,8 @@ export function readDetachedPanes(panels: unknown): DetachedPane[] {
   const list = (raw as {panes?: unknown} | undefined)?.panes;
   if (!Array.isArray(list)) return [];
   const panes: DetachedPane[] = [];
+  // 16 is more than the 8 charts plus the detachable panels, and bounds the
+  // work done on untrusted data.
   for (const item of list.slice(0, 16)) {
     const ref = parsePaneRef((item as {ref?: unknown} | null)?.ref);
     if (!ref) continue;
@@ -251,7 +261,8 @@ export function readDetachedPanes(panels: unknown): DetachedPane[] {
 }
 
 /**
- * Panel state to persist for detached panes.
+ * Builds the panel state persisted for detached panes. Only the pane fields
+ * are kept; liveness is never persisted.
  * @param panes Detached panes.
  * @return Value for `panels['shell.detached']`.
  */
@@ -269,8 +280,8 @@ export function detachedPanelState(panes: readonly DetachedPane[]): {
 }
 
 /**
- * Whether two pane lists hold the same keys in the same order with the same
- * remembered window geometry.
+ * Returns whether two pane lists hold the same keys in the same order with
+ * the same remembered window geometry. Titles are not compared.
  * @param a First list.
  * @param b Second list.
  * @return True when equal.
@@ -288,9 +299,10 @@ export function samePanes(
 }
 
 /**
- * Status of a pane right now.
+ * Returns a pane's status at `nowMs`. Heartbeats decide once the pop-out has
+ * been seen; before that the open grace period does.
  * @param live Liveness (undefined for a pane restored from the layout).
- * @param nowMs Clock.
+ * @param nowMs Current time (epoch ms).
  * @param probing Whether a reloaded main window is still probing for
  *     surviving pop-outs.
  * @return `opening` (waiting for a new window), `live`, `reconnecting`
@@ -313,11 +325,11 @@ export function detachedStatus(
 }
 
 /**
- * Status of one pane of a state.
+ * Returns the status of one pane of a detach state.
  * @param state Detach state.
  * @param key Pane key.
- * @param nowMs Clock.
- * @return Status.
+ * @param nowMs Current time (epoch ms).
+ * @return Status; see `detachedStatus`.
  */
 export function paneStatus(
   state: DetachState,
@@ -328,10 +340,10 @@ export function paneStatus(
 }
 
 /**
- * Panes waiting for a click to restore their windows (restored from the
- * layout and unclaimed after the probe).
+ * Returns the panes waiting for a click to restore their windows (restored
+ * from the layout and unclaimed after the probe).
  * @param state Detach state.
- * @param nowMs Clock.
+ * @param nowMs Current time (epoch ms).
  * @return Dormant panes in detach order.
  */
 export function dormantPanes(
@@ -341,7 +353,12 @@ export function dormantPanes(
   return state.panes.filter(p => paneStatus(state, p.key, nowMs) === 'dormant');
 }
 
-/** Inputs of the detach reducer. */
+/**
+ * Inputs of the detach reducer: `restore` adds panes from the saved layout,
+ * `probe` starts or ends the reload probe, `open` records a window this main
+ * window opened, `seen` records a hello or heartbeat, `close` re-docks a pane
+ * and `expire` re-docks every lost pane.
+ */
 export type DetachEvent =
   | {type: 'restore'; panes: readonly DetachedPane[]}
   | {type: 'probe'; probing: boolean}
@@ -359,10 +376,11 @@ export type DetachEvent =
   | {type: 'expire'; nowMs: number};
 
 /**
- * Pure reducer of the main window's detached panes.
+ * Applies a detach event to the main window's detached panes (pure).
  * @param state Current state.
- * @param event Event.
- * @return Next state (same object when nothing changed).
+ * @param event Event to apply.
+ * @return Next state; `state` itself for `restore`, `probe`, `close` and
+ *     `expire` events that change nothing.
  */
 export function detachReducer(
   state: DetachState,
@@ -452,10 +470,10 @@ export function detachReducer(
 }
 
 /**
- * Keys of panes whose window went silent or never came up.
- * @param state State.
- * @param nowMs Clock.
- * @return Keys to re-dock.
+ * Returns the keys of panes whose window went silent or never came up.
+ * @param state Detach state.
+ * @param nowMs Current time (epoch ms).
+ * @return Keys to re-dock, in detach order.
  */
 export function lostKeys(state: DetachState, nowMs: number): string[] {
   return state.panes
@@ -464,10 +482,11 @@ export function lostKeys(state: DetachState, nowMs: number): string[] {
 }
 
 /**
- * Builds the URL of a pop-out window.
- * @param ref Pane reference.
- * @param workspaceId Workspace id.
- * @return Same-origin path with query.
+ * Builds the URL of a pop-out window; `parsePopoutQuery` reads it back.
+ * @param ref Pane shown by the window.
+ * @param workspaceId Workspace the window joins.
+ * @return Same-origin path with the query `pane`, `ws` and, for panels,
+ *     `slot`.
  */
 export function popoutUrl(ref: DetachedPaneRef, workspaceId: string): string {
   const query = new URLSearchParams({pane: paneKey(ref), ws: workspaceId});
@@ -475,17 +494,17 @@ export function popoutUrl(ref: DetachedPaneRef, workspaceId: string): string {
   return `${POPOUT_PATH}?${query.toString()}`;
 }
 
-/** Target of a pop-out window. */
+/** Target of a pop-out window, read from its URL. */
 export interface PopoutTarget {
   /** Pane shown. */
   ref: DetachedPaneRef;
-  /** Workspace id. */
+  /** Workspace the window joins. */
   workspaceId: string;
 }
 
 /**
  * Parses a pop-out window's query string.
- * @param search `location.search`.
+ * @param search `location.search`; a missing `ws` means `default`.
  * @return Target, or null for an invalid link.
  */
 export function parsePopoutQuery(search: string): PopoutTarget | null {
@@ -506,7 +525,7 @@ export function parsePopoutQuery(search: string): PopoutTarget | null {
 export interface SharedCrosshair {
   /** Chart the pointer is over. */
   sourceChartId: string;
-  /** Time and price, or null when the pointer left. */
+  /** Time (epoch ms) and price under the pointer, or null when it left. */
   point: {timeMs: number; price: number} | null;
 }
 
@@ -514,7 +533,7 @@ export interface SharedCrosshair {
 export interface SequencedAction {
   /** Increasing number per pop-out window (from 1). */
   seq: number;
-  /** Action. */
+  /** Action applied in the pop-out. */
   action: WorkspaceAction;
 }
 
@@ -563,11 +582,11 @@ export type PopoutMessage =
       pending?: readonly SequencedAction[];
     };
 
-/** Wire envelope. */
+/** Envelope of every message on the channel. */
 export interface PopoutEnvelope {
   /** Protocol version. */
   v: 1;
-  /** Workspace the windows share. */
+  /** Workspace the windows share; other workspaces' messages are ignored. */
   workspaceId: string;
   /** Sender window id. */
   from: string;
@@ -575,7 +594,7 @@ export interface PopoutEnvelope {
   msg: PopoutMessage;
 }
 
-/** Message types accepted from the channel. */
+/** Message types accepted from the channel; others are dropped. */
 const MESSAGE_TYPES: ReadonlySet<string> = new Set([
   'main-hello',
   'main-heartbeat',
@@ -592,9 +611,11 @@ const MESSAGE_TYPES: ReadonlySet<string> = new Set([
 ]);
 
 /**
- * Validates an untrusted channel message (same-origin, but still data).
+ * Validates an untrusted channel message (same-origin, but still data): the
+ * envelope, the message type and the main fields of each type. A
+ * `workspace` document is only checked to be an object.
  * @param value Received data.
- * @return Envelope or null.
+ * @return The value typed as an envelope, or null when malformed.
  */
 export function parseEnvelope(value: unknown): PopoutEnvelope | null {
   if (!value || typeof value !== 'object') return null;
@@ -647,13 +668,14 @@ export function parseEnvelope(value: unknown): PopoutEnvelope | null {
       break;
     }
     default:
+      // `main-hello`, `main-heartbeat` and `main-bye` carry no payload.
       break;
   }
   return env as PopoutEnvelope;
 }
 
 /**
- * Whether a value is a valid action sequence number.
+ * Returns whether a value is a valid action sequence number.
  * @param value Candidate.
  * @return True for a positive safe integer.
  */
@@ -662,8 +684,8 @@ function isSeq(value: unknown): value is number {
 }
 
 /**
- * Whether a value looks like a workspace action (the reducer ignores
- * unknown types).
+ * Returns whether a value looks like a workspace action. Only the `type` is
+ * checked, because the reducer ignores unknown types.
  * @param value Candidate.
  * @return True for an object with a string `type`.
  */
@@ -676,9 +698,9 @@ function isAction(value: unknown): value is WorkspaceAction {
 }
 
 /**
- * Whether a value is a window-id to sequence-number map.
+ * Returns whether a value is a window-id to sequence-number map.
  * @param value Candidate.
- * @return True when every entry is a sequence number.
+ * @return True for a plain object whose values are all sequence numbers.
  */
 function isSeqMap(value: unknown): value is Record<string, number> {
   return (
@@ -690,9 +712,11 @@ function isSeqMap(value: unknown): value is Record<string, number> {
 }
 
 /**
- * Validates untrusted pending actions.
+ * Validates untrusted pending actions. Sequence numbers must strictly
+ * increase, so the actions are applied in the order they were made.
  * @param value Candidate.
- * @return Actions in increasing sequence order, or null when malformed.
+ * @return Actions in increasing sequence order, or null when malformed or
+ *     longer than `MAX_PENDING_ACTIONS`.
  */
 export function parsePending(value: unknown): SequencedAction[] | null {
   if (!Array.isArray(value) || value.length > MAX_PENDING_ACTIONS) return null;
@@ -709,7 +733,7 @@ export function parsePending(value: unknown): SequencedAction[] | null {
 }
 
 /**
- * Actions of a pop-out that a main window has not applied yet.
+ * Returns the actions of a pop-out that a main window has not applied yet.
  * @param pending Pop-out's unacknowledged actions, oldest first.
  * @param applied Last sequence number the main window applied (0 = none).
  * @return Actions to apply, oldest first.
@@ -778,8 +802,8 @@ export interface ChannelPort {
   postMessage(data: unknown): void;
   /**
    * Subscribes to data from other ports.
-   * @param handler Handler.
-   * @return Unsubscribe.
+   * @param handler Called with each received value.
+   * @return Function that removes the handler.
    */
   onMessage(handler: (data: unknown) => void): () => void;
   /** Closes the port. */
@@ -788,8 +812,8 @@ export interface ChannelPort {
 
 /**
  * Opens a `BroadcastChannel` port, when the browser has one.
- * @param name Channel name.
- * @return Port, or null when unsupported.
+ * @param name Channel name, normally `POPOUT_CHANNEL`.
+ * @return Port, or null when `BroadcastChannel` is unsupported.
  */
 export function broadcastChannelPort(name: string): ChannelPort | null {
   if (typeof BroadcastChannel === 'undefined') return null;
@@ -813,13 +837,16 @@ export class MemoryChannelHub {
 
   /**
    * Creates a port on the hub.
-   * @return Port.
+   * @return Port that delivers synchronously to the hub's other ports.
    */
   port(): ChannelPort {
     const self = {handlers: new Set<(data: unknown) => void>()};
     this.ports.add(self);
     return {
       postMessage: data => {
+        // Clone like BroadcastChannel does, so tests catch data that cannot
+        // be cloned and never share objects between windows. The ports and
+        // handlers are copied so a handler may close or unsubscribe.
         const copy: unknown = structuredClone(data);
         for (const other of [...this.ports]) {
           if (other === self) continue;
@@ -845,7 +872,7 @@ export class MemoryChannelHub {
 export class PopoutBus {
   /**
    * Creates the bus.
-   * @param port Channel port.
+   * @param port Channel port; the bus closes it in `close`.
    * @param workspaceId Workspace the windows share.
    * @param windowId This window's id (own messages are ignored).
    */
@@ -856,8 +883,9 @@ export class PopoutBus {
   ) {}
 
   /**
-   * Sends a message to the other windows.
-   * @param msg Message.
+   * Sends a message to the other windows. Posting errors (for example from
+   * a channel closed while the window unloads) are swallowed.
+   * @param msg Message to send.
    */
   send(msg: PopoutMessage): void {
     const envelope: PopoutEnvelope = {
@@ -876,7 +904,7 @@ export class PopoutBus {
   /**
    * Subscribes to valid messages of this workspace from other windows.
    * @param handler Handler receiving the message and the sender id.
-   * @return Unsubscribe.
+   * @return Function that removes the handler.
    */
   on(handler: (msg: PopoutMessage, from: string) => void): () => void {
     return this.port.onMessage(data => {
@@ -902,7 +930,7 @@ export class PopoutBus {
 export interface TrailingThrottle<T> {
   /**
    * Offers a value; the latest one is always delivered eventually.
-   * @param value Value.
+   * @param value Value to send; replaces any value still waiting.
    */
   push(value: T): void;
   /** Drops any pending value and stops the timer. */
@@ -912,9 +940,9 @@ export interface TrailingThrottle<T> {
 /**
  * Creates a throttle that forwards at most one value per interval and always
  * delivers the latest value last (so "pointer left" is never dropped).
- * @param send Receiver.
- * @param intervalMs Minimum spacing.
- * @param now Clock.
+ * @param send Receives the forwarded values.
+ * @param intervalMs Minimum time between two deliveries, in milliseconds.
+ * @param now Clock in milliseconds; `Date.now` by default.
  * @return Throttled sender with a disposer.
  */
 export function createTrailingThrottle<T>(

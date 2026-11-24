@@ -29,7 +29,10 @@ export const DEFAULT_REPLAY_LOOKBACK = 100;
 export interface ReplayState {
   /** `select`: waiting for the user to click a start bar. */
   phase: 'select' | 'paused' | 'playing';
-  /** Start time of the last visible bar, or null before a start is chosen. */
+  /**
+   * Start time (UTC epoch ms) of the last visible bar, or null before a
+   * start is chosen.
+   */
   cursorMs: number | null;
   /** Bars per second while playing. */
   speed: number;
@@ -37,16 +40,17 @@ export interface ReplayState {
 
 /**
  * Enters replay, waiting for a start bar.
- * @return Initial state.
+ * @return Initial state: `select` phase at 1 bar per second.
  */
 export function startReplay(): ReplayState {
   return {phase: 'select', cursorMs: null, speed: 1};
 }
 
 /**
- * Index of the last bar at or before a time.
- * @param times Bar start times, ascending.
- * @param timeMs Time.
+ * Returns the index of the last bar starting at or before a time (binary
+ * search).
+ * @param times Bar start times (epoch ms), ascending.
+ * @param timeMs Time to look up (epoch ms).
  * @return Index, or -1 when every bar is later.
  */
 export function lastIndexAtOrBefore(
@@ -72,9 +76,11 @@ export function lastIndexAtOrBefore(
  * Chooses the start bar (snapped to a bar at or before the clicked time).
  * At least one bar must remain hidden, otherwise there is nothing to replay.
  * @param state Current state.
- * @param times Bar start times, ascending.
- * @param timeMs Clicked time, or null for the default lookback.
- * @return Paused state at the start bar (unchanged when impossible).
+ * @param times Bar start times (epoch ms), ascending.
+ * @param timeMs Clicked time (epoch ms), or null for
+ *     `DEFAULT_REPLAY_LOOKBACK` bars before the newest.
+ * @return Paused state at the start bar; `state` itself when there are
+ *     fewer than two bars.
  */
 export function chooseReplayStart(
   state: ReplayState,
@@ -94,11 +100,13 @@ export function chooseReplayStart(
 }
 
 /**
- * Moves the cursor by whole bars. Reaching the newest bar pauses playback.
+ * Moves the cursor by whole bars, clamped to the first and newest bar.
+ * Reaching the newest bar pauses playback.
  * @param state Current state.
- * @param times Bar start times, ascending.
+ * @param times Bar start times (epoch ms), ascending.
  * @param delta Bars to move (negative steps back).
- * @return Next state.
+ * @return Next state; `state` itself before a start is chosen or without
+ *     bars.
  */
 export function stepReplay(
   state: ReplayState,
@@ -118,10 +126,10 @@ export function stepReplay(
 }
 
 /**
- * Whether the cursor shows the newest bar (nothing left to replay).
- * @param state State.
- * @param times Bar start times, ascending.
- * @return True at the end.
+ * Returns whether the cursor shows the newest bar (nothing left to replay).
+ * @param state Replay state.
+ * @param times Bar start times (epoch ms), ascending.
+ * @return True at or past the newest bar; false before a start is chosen.
  */
 export function replayAtEnd(
   state: ReplayState,
@@ -131,8 +139,8 @@ export function replayAtEnd(
 }
 
 /**
- * Bars visible during replay.
- * @param bars Bars, ascending by `timeMs`.
+ * Returns the bars visible during replay.
+ * @param bars Bars, ascending by `timeMs` (bar start, epoch ms).
  * @param state Replay state (null = not replaying).
  * @return Bars up to and including the cursor (all bars when not replaying
  *     or while choosing the start).
@@ -147,15 +155,17 @@ export function replayVisibleBars<T extends {timeMs: number}>(
 }
 
 /**
- * Point-in-time for backend indicator queries: the close of the cursor bar.
- * Pass the timeframe so calendar months close on the 1st of the next month
- * (28 to 31 days later); a number is a fixed bar duration. With a session
- * calendar the close is the calendar's bar end (the session close for the
- * last bar of a session, the last session of the week or month).
- * @param state Replay state.
- * @param barLength Chart timeframe, or a fixed bar duration in ms.
+ * Returns the point-in-time for backend indicator queries: the close of the
+ * cursor bar. Pass the timeframe so calendar months close on the 1st of the
+ * next month (28 to 31 days later); a number is a fixed bar duration. With a
+ * session calendar the close is the calendar's bar end (the session close
+ * for the last bar of a session, the last session of the week or month).
+ * @param state Replay state (null = not replaying).
+ * @param barLength Chart timeframe, or a fixed bar duration in ms (the
+ *     calendar is then ignored).
  * @param calendar Session calendar of the instrument (default UTC bars).
- * @return `at_ms`, or null when not replaying a chosen bar.
+ * @return `at_ms` (UTC epoch ms, exclusive bar end), or null when not
+ *     replaying a chosen bar.
  */
 export function replayAsOfMs(
   state: ReplayState | null,
@@ -170,9 +180,9 @@ export function replayAsOfMs(
 }
 
 /**
- * Cycles to the next playback speed.
- * @param state State.
- * @return State with the next speed.
+ * Cycles to the next playback speed in `REPLAY_SPEEDS`, wrapping around.
+ * @param state Replay state.
+ * @return State with the next speed; an unknown speed restarts at the first.
  */
 export function nextReplaySpeed(state: ReplayState): ReplayState {
   const index = REPLAY_SPEEDS.indexOf(state.speed);

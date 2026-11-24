@@ -15,10 +15,10 @@ import type {ChartState} from '@joseph/contracts';
 import type {WorkspaceStorage} from './persistence';
 import type {ChartPresentation} from './workspace';
 
-/** Storage key of the template list (schema version 1). */
+/** Storage key of the template list, stored as one JSON array (schema v1). */
 export const TEMPLATE_STORAGE_KEY = 'joseph.chartTemplates.v1';
 
-/** Maximum templates kept. */
+/** Maximum templates kept; saving beyond it drops the oldest. */
 export const MAX_TEMPLATES = 50;
 
 /** Saved chart template. */
@@ -27,18 +27,19 @@ export interface ChartTemplate {
   schema_version: 1;
   /** Unique id. */
   template_id: string;
-  /** User-visible name. */
+  /** User-visible name, unique ignoring case. */
   name: string;
-  /** Creation time (UTC ms). */
+  /** Creation time (UTC epoch ms). */
   created_at_ms: number;
   /** Captured presentation. */
   presentation: ChartPresentation;
 }
 
 /**
- * Captures a chart's presentation.
- * @param chart Chart state.
- * @return Presentation without instrument, range or link settings.
+ * Captures a chart's presentation as a deep copy.
+ * @param chart Chart to capture.
+ * @return Presentation only: no chart id, instrument, timeframe,
+ *     comparisons, feed mode, link group or viewport.
  */
 export function presentationOf(chart: ChartState): ChartPresentation {
   return {
@@ -52,12 +53,13 @@ export function presentationOf(chart: ChartState): ChartPresentation {
 
 /**
  * Creates a template from a chart.
- * @param chart Chart state.
- * @param name Template name (trimmed, max 60 characters).
- * @param id Unique id.
- * @param nowMs Clock.
+ * @param chart Chart to capture.
+ * @param name Template name; trimmed and cut to 60 characters.
+ * @param id Unique template id.
+ * @param nowMs Creation time (UTC epoch ms).
  * @return Template.
- * @throws {Error} When the name is empty.
+ * @throws `Error` when the name is empty after trimming; its message is
+ *     shown to the user.
  */
 export function createTemplate(
   chart: ChartState,
@@ -77,8 +79,9 @@ export function createTemplate(
 }
 
 /**
- * Validates an untrusted template.
- * @param value Candidate.
+ * Validates an untrusted template's shape. The layer entries and enum
+ * values are not checked.
+ * @param value Candidate, usually from storage.
  * @return True when the value has the template shape.
  */
 export function isChartTemplate(value: unknown): value is ChartTemplate {
@@ -102,13 +105,14 @@ export function isChartTemplate(value: unknown): value is ChartTemplate {
 export class TemplateRepository {
   /**
    * Creates the repository.
-   * @param storage Storage.
+   * @param storage Storage holding the list under `TEMPLATE_STORAGE_KEY`.
    */
   constructor(private readonly storage: WorkspaceStorage) {}
 
   /**
    * Loads templates, newest first.
-   * @return Templates.
+   * @return Valid templates; empty when nothing is stored or the stored text
+   *     is not a JSON array.
    */
   list(): ChartTemplate[] {
     try {
@@ -125,9 +129,10 @@ export class TemplateRepository {
   }
 
   /**
-   * Saves a template, replacing one with the same name.
-   * @param template Template.
-   * @return Updated list.
+   * Saves a template first in the list, replacing any template whose name
+   * matches ignoring case, and keeps at most `MAX_TEMPLATES`.
+   * @param template Template to save.
+   * @return Updated list, newest first.
    */
   save(template: ChartTemplate): ChartTemplate[] {
     const others = this.list().filter(
@@ -139,9 +144,9 @@ export class TemplateRepository {
   }
 
   /**
-   * Deletes a template.
-   * @param templateId Template id.
-   * @return Updated list.
+   * Deletes a template; an unknown id leaves the list as it is.
+   * @param templateId Id of the template to delete.
+   * @return Updated list, newest first.
    */
   remove(templateId: string): ChartTemplate[] {
     const next = this.list().filter(t => t.template_id !== templateId);

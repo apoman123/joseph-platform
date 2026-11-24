@@ -8,7 +8,11 @@
  * @fileoverview Default hotkeys and the command-palette model.
  */
 
-/** Default key bindings (normalized combos to command ids). */
+/**
+ * Default key bindings: normalized combos (modifiers in `shift`, `alt`,
+ * `mod` order, where `mod` is Ctrl or Cmd, then the lowercase key) mapped to
+ * command ids.
+ */
 export const DEFAULT_HOTKEYS: Readonly<Record<string, string>> = {
   'mod+k': 'palette.open',
   'mod+z': 'drawing.undo',
@@ -28,21 +32,25 @@ export const DEFAULT_HOTKEYS: Readonly<Record<string, string>> = {
   'alt+8': 'layout.8',
 };
 
-/** Palette entry. */
+/** One command listed in the command palette. */
 export interface PaletteEntry {
-  /** Command id. */
+  /** Command id run when the entry is chosen. */
   id: string;
-  /** Title. */
+  /** Text shown and matched against the query. */
   title: string;
-  /** Shortcut hint. */
+  /** Key combination shown next to the title, if the command has one. */
   shortcut?: string;
 }
 
 /**
- * Scores how well a title matches a query (subsequence with bonuses).
- * @param title Title.
- * @param query Query.
- * @return Score; -1 when it does not match.
+ * Scores how well a title matches a query, case-insensitively: a title
+ * prefix scores highest, then a word prefix, then the query's characters as
+ * an in-order subsequence (consecutive characters score more). Shorter
+ * titles win ties within the prefix tiers.
+ * @param title Entry title.
+ * @param query Text typed by the user; surrounding spaces are ignored.
+ * @return Score, higher is better; 0 for an empty query; -1 when the title
+ *     does not contain the query as a subsequence.
  */
 export function matchScore(title: string, query: string): number {
   const t = title.toLowerCase();
@@ -65,11 +73,11 @@ export function matchScore(title: string, query: string): number {
 }
 
 /**
- * Filters and ranks palette entries.
- * @param entries Entries.
- * @param query Query.
- * @param limit Maximum results.
- * @return Ranked entries.
+ * Filters and ranks palette entries by `matchScore`, breaking ties by title.
+ * @param entries Entries to search.
+ * @param query Text typed by the user.
+ * @param limit Maximum number of entries returned.
+ * @return Matching entries, best first.
  */
 export function filterPalette(
   entries: readonly PaletteEntry[],
@@ -86,17 +94,20 @@ export function filterPalette(
     .map(item => item.entry);
 }
 
-/** Palette UI state. */
+/** Command palette UI state. */
 export interface PaletteState {
   /** Whether the palette is open. */
   open: boolean;
-  /** Query text. */
+  /** Text typed by the user. */
   query: string;
-  /** Highlighted index. */
+  /** Index of the highlighted entry in the filtered list. */
   index: number;
 }
 
-/** Palette actions. */
+/**
+ * Command palette actions. `move` shifts the highlight by `delta` within
+ * `count` filtered entries, wrapping at both ends.
+ */
 export type PaletteAction =
   | {type: 'open'}
   | {type: 'close'}
@@ -104,10 +115,10 @@ export type PaletteAction =
   | {type: 'move'; delta: number; count: number};
 
 /**
- * Pure palette reducer.
- * @param state State.
- * @param action Action.
- * @return Next state.
+ * Applies a command palette action (pure).
+ * @param state Current state.
+ * @param action Action to apply.
+ * @return Next state; opening clears the query and the highlight.
  */
 export function paletteReducer(
   state: PaletteState,

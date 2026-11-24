@@ -8,11 +8,13 @@
  * @fileoverview Workspace persistence: versioned storage with migrations,
  * JSON import/export, share links and debounced autosave.
  *
- * The stored and shared `WorkspaceDocument` stays at schema v1. Export
- * files carry their own format version, migrated step by step on import:
+ * Workspaces are stored under `joseph.workspace.v1.<workspace id>`. The
+ * stored and shared `WorkspaceDocument` stays at schema v1. Export files
+ * carry their own format version, migrated step by step on import:
  *
- * - format 0: the V4 starter's single chart (`exchange`/`symbol`/
- *   `timeframe`), migrated to a v1 document (`migrateWorkspaceV0`);
+ * - format 0: the single chart (`exchange`/`symbol`/`timeframe`) of the V4
+ *   starter, the terminal that predates schema v1, migrated to a v1
+ *   document (`migrateWorkspaceV0`);
  * - format 1: a plain v1 `WorkspaceDocument` (exports before drawings were
  *   included); it imports without touching drawings;
  * - format 2: the `WorkspaceExport` envelope (`format:
@@ -21,7 +23,8 @@
  *   themselves are validated and migrated by `@joseph/drawing-core`.
  *
  * Files from a newer format are refused with an actionable message rather
- * than half-imported. Share links keep carrying the layout only.
+ * than half-imported. Share links carry the workspace document only: no
+ * drawings and no panel state.
  */
 
 import {
@@ -32,26 +35,35 @@ import {
 } from '@joseph/contracts';
 import {LAYOUT_PANES, MAX_CHARTS, createChartState} from './workspace';
 
-/** Storage port (structurally compatible with feature-registry storage). */
+/**
+ * Storage port: a subset of `KeyValueStorage` in `@joseph/feature-registry`,
+ * which satisfies it structurally.
+ */
 export interface WorkspaceStorage {
   /**
-   * Reads a value.
-   * @param key Key.
-   * @return Value or null.
+   * Reads a stored string.
+   * @param key Storage key.
+   * @return Stored text, or null when the key is absent.
    */
   getItem(key: string): string | null;
   /**
-   * Writes a value.
-   * @param key Key.
-   * @param value Value.
+   * Stores a string, replacing any previous value.
+   * @param key Storage key.
+   * @param value Text to store.
    */
   setItem(key: string, value: string): void;
 }
 
-/** Maximum size of a workspace document (storage, share links). */
+/**
+ * Maximum size of a workspace document in storage and share links, measured
+ * as JSON text length (UTF-16 code units, not bytes).
+ */
 export const MAX_WORKSPACE_BYTES = 64 * 1024;
 
-/** Maximum size of an imported workspace file (layout plus drawings). */
+/**
+ * Maximum size of an imported workspace file (layout plus drawings), measured
+ * as text length like `MAX_WORKSPACE_BYTES`.
+ */
 export const MAX_WORKSPACE_FILE_BYTES = 2 * 1024 * 1024;
 
 /** `format` marker of workspace export files. */
@@ -63,7 +75,11 @@ export const WORKSPACE_EXPORT_VERSION = 2;
 /** Most instruments with drawings in one export file (contract limit). */
 export const MAX_EXPORT_COLLECTIONS = 500;
 
-/** Outcome of parsing a workspace from untrusted input. */
+/**
+ * Outcome of parsing a workspace from untrusted input: the document and
+ * whether it was migrated from the V4 starter shape, or an error message
+ * for the user.
+ */
 export type WorkspaceParseResult =
   | {ok: true; workspace: WorkspaceDocument; migrated: boolean}
   | {ok: false; error: string};
@@ -88,19 +104,21 @@ export type WorkspaceFileParseResult =
 
 /** V4 starter shape: one chart described by exchange/symbol/timeframe. */
 interface LegacyV0Workspace {
-  /** Venue. */
+  /** Venue id; `mock` when missing. */
   exchange?: string;
-  /** Venue symbol. */
+  /** Venue symbol in any case; `BTCUSD` when missing. */
   symbol?: string;
-  /** Timeframe. */
+  /** Timeframe; `5m` when missing. */
   timeframe?: string;
 }
 
 /**
- * Migrates the V4 starter's single-chart state to schema v1.
+ * Migrates the V4 starter's single-chart state to schema v1. The instrument
+ * becomes a perpetual (`<exchange>:perp:<SYMBOL>`) and the timeframe is
+ * copied unchecked; callers validate the result with `validateWorkspace`.
  * @param raw Legacy object.
- * @param nowMs Clock.
- * @return v1 workspace candidate.
+ * @param nowMs Migration time (UTC epoch ms), stored as `updated_at_ms`.
+ * @return v1 workspace candidate, not yet validated.
  */
 export function migrateWorkspaceV0(
   raw: LegacyV0Workspace,
@@ -125,6 +143,7 @@ export function migrateWorkspaceV0(
       createChartState(
         'chart-1',
         instrumentId,
+        // Unchecked on purpose: the result is only a candidate (`unknown`).
         (raw.timeframe ?? '5m') as never
       ),
     ],
@@ -135,9 +154,11 @@ export function migrateWorkspaceV0(
 }
 
 /**
- * Structural validation of a v1 workspace.
- * @param value Candidate.
- * @return Error message, or null when valid.
+ * Checks the structure of a v1 workspace candidate: schema version, id,
+ * layout, 1 to 8 charts with ids, valid instrument ids and layer lists, and
+ * the sync options. Other fields are not checked.
+ * @param value Candidate, usually parsed JSON.
+ * @return Error message for the user, or null when the checks pass.
  */
 export function validateWorkspace(value: unknown): string | null {
   if (!value || typeof value !== 'object') return 'Workspace must be an object';
@@ -172,9 +193,10 @@ export function validateWorkspace(value: unknown): string | null {
 }
 
 /**
- * Validates a parsed workspace value, migrating the V4 starter shape.
+ * Validates a parsed workspace value, migrating the V4 starter shape (an
+ * object without `schema_version`).
  * @param value Parsed JSON.
- * @param nowMs Clock for migrations.
+ * @param nowMs Current time (UTC epoch ms) for migrations.
  * @return Parse result with an actionable error.
  */
 function readWorkspaceValue(
@@ -193,6 +215,8 @@ function readWorkspaceValue(
   if (JSON.stringify(workspace).length > MAX_WORKSPACE_BYTES) {
     return {ok: false, error: 'The workspace layout is larger than 64 KB'};
   }
+  // A dangling active chart id is repaired rather than rejected: the rest of
+  // the layout is still usable.
   if (!workspace.charts.some(c => c.chart_id === workspace.active_chart_id)) {
     workspace.active_chart_id = workspace.charts[0]?.chart_id ?? 'chart-1';
   }
@@ -203,8 +227,8 @@ function readWorkspaceValue(
  * Parses untrusted workspace JSON (stored document or share link),
  * migrating legacy versions. Export files with drawings go through
  * `parseWorkspaceFile`.
- * @param text JSON text.
- * @param nowMs Clock for migrations.
+ * @param text JSON text, at most `MAX_WORKSPACE_BYTES` long.
+ * @param nowMs Current time (UTC epoch ms) for migrations.
  * @return Parse result with an actionable error.
  */
 export function parseWorkspace(
@@ -225,9 +249,10 @@ export function parseWorkspace(
 
 /**
  * Parses an imported workspace file of any format (0 starter, 1 plain
- * document, 2 export with drawings), migrating older formats.
- * @param text File text.
- * @param nowMs Clock for migrations.
+ * document, 2 export with drawings), migrating older formats. A file without
+ * a `format` field is format 0 or 1.
+ * @param text File text, at most `MAX_WORKSPACE_FILE_BYTES` long.
+ * @param nowMs Current time (UTC epoch ms) for migrations.
  * @return Workspace and raw drawing collections, or an actionable error.
  */
 export function parseWorkspaceFile(
@@ -292,8 +317,8 @@ export function parseWorkspaceFile(
 
 /**
  * Serializes a workspace document alone (export format 1, no drawings).
- * @param workspace Workspace.
- * @return Pretty JSON.
+ * @param workspace Workspace to export.
+ * @return JSON indented by two spaces.
  */
 export function exportWorkspace(workspace: WorkspaceDocument): string {
   return JSON.stringify(workspace, null, 2);
@@ -302,9 +327,10 @@ export function exportWorkspace(workspace: WorkspaceDocument): string {
 /**
  * Builds a workspace export file (format 2): the document plus the drawings
  * of its instruments.
- * @param workspace Workspace.
- * @param drawings Drawing collections (from `DrawingRepository.exportAll`).
- * @param nowMs Export time.
+ * @param workspace Workspace to export.
+ * @param drawings Drawing collections (from `DrawingRepository.exportAll`);
+ *     only the first `MAX_EXPORT_COLLECTIONS` are kept.
+ * @param nowMs Export time (UTC epoch ms); rounded and clamped at 0.
  * @return The export envelope.
  */
 export function createWorkspaceExport(
@@ -322,11 +348,11 @@ export function createWorkspaceExport(
 }
 
 /**
- * Serializes a workspace export file (format 2).
- * @param workspace Workspace.
- * @param drawings Drawing collections.
- * @param nowMs Export time.
- * @return Pretty JSON.
+ * Serializes a workspace export file (format 2); see `createWorkspaceExport`.
+ * @param workspace Workspace to export.
+ * @param drawings Drawing collections of its instruments.
+ * @param nowMs Export time (UTC epoch ms).
+ * @return JSON indented by two spaces.
  */
 export function exportWorkspaceFile(
   workspace: WorkspaceDocument,
@@ -341,11 +367,14 @@ export function exportWorkspaceFile(
 }
 
 /**
- * Encodes UTF-8 text as base64url.
- * @param text Text.
- * @return base64url string.
+ * Encodes text as UTF-8 and then as base64url (RFC 4648 section 5), which
+ * needs no escaping in a URL.
+ * @param text Text to encode.
+ * @return base64url string without `=` padding.
  */
 function toBase64Url(text: string): string {
+  // `btoa` takes one character per byte, so the UTF-8 bytes are spelled
+  // out as Latin-1 characters first.
   const bytes = new TextEncoder().encode(text);
   let binary = '';
   for (const byte of bytes) {
@@ -358,10 +387,12 @@ function toBase64Url(text: string): string {
 }
 
 /**
- * Decodes base64url to UTF-8 text.
+ * Decodes unpadded base64url and reads the bytes as UTF-8.
  * @param value base64url string.
- * @return Text.
- * @throws {Error} When the value is not base64url.
+ * @return Decoded text; invalid UTF-8 becomes U+FFFD.
+ * @throws `Error` when the value has characters outside the base64url
+ *     alphabet; `atob` throws a `DOMException` when its length is not a
+ *     valid base64 length.
  */
 function fromBase64Url(value: string): string {
   if (!/^[A-Za-z0-9_-]*$/.test(value)) throw new Error('invalid base64url');
@@ -374,9 +405,10 @@ function fromBase64Url(value: string): string {
 }
 
 /**
- * Encodes a workspace into a share token (panel state is not shared).
- * @param workspace Workspace.
- * @return base64url token.
+ * Encodes a workspace into a share token. Panel state (per-feature UI state,
+ * which may be private) is replaced by an empty object.
+ * @param workspace Workspace to share.
+ * @return base64url token of the document JSON.
  */
 export function encodeShareLink(workspace: WorkspaceDocument): string {
   const {panels: _panels, ...shareable} = workspace;
@@ -385,14 +417,16 @@ export function encodeShareLink(workspace: WorkspaceDocument): string {
 
 /**
  * Decodes and validates a share token.
- * @param token base64url token.
- * @param nowMs Clock.
- * @return Parse result.
+ * @param token base64url token from `encodeShareLink`.
+ * @param nowMs Current time (UTC epoch ms) for migrations.
+ * @return Parse result; a token that does not decode reports a damaged link.
  */
 export function decodeShareLink(
   token: string,
   nowMs: number
 ): WorkspaceParseResult {
+  // base64 spells 3 bytes as 4 characters: a longer token cannot hold a
+  // document within the limit, so it is refused before decoding.
   if (token.length > (MAX_WORKSPACE_BYTES * 4) / 3) {
     return {ok: false, error: 'The share link is too long'};
   }
@@ -403,19 +437,20 @@ export function decodeShareLink(
   }
 }
 
-/** Repository of workspaces. */
+/** Stores workspaces as JSON under `joseph.workspace.v1.<workspace id>`. */
 export class WorkspaceRepository {
   /**
    * Creates the repository.
-   * @param storage Storage port.
+   * @param storage Storage the documents are kept in.
    */
   constructor(private readonly storage: WorkspaceStorage) {}
 
   /**
-   * Loads a workspace, migrating legacy data; invalid data yields null.
+   * Loads a workspace, migrating legacy data.
    * @param workspaceId Workspace id.
-   * @param nowMs Clock.
-   * @return Workspace or null.
+   * @param nowMs Current time (UTC epoch ms) for migrations.
+   * @return Workspace, or null when nothing is stored or the stored data is
+   *     invalid.
    */
   load(workspaceId: string, nowMs: number): WorkspaceDocument | null {
     const raw = this.storage.getItem(`joseph.workspace.v1.${workspaceId}`);
@@ -425,8 +460,8 @@ export class WorkspaceRepository {
   }
 
   /**
-   * Saves a workspace.
-   * @param workspace Workspace.
+   * Saves a workspace under its `workspace_id`, replacing the stored copy.
+   * @param workspace Workspace to store.
    */
   save(workspace: WorkspaceDocument): void {
     this.storage.setItem(
@@ -436,21 +471,21 @@ export class WorkspaceRepository {
   }
 }
 
-/** Debounced saver. */
+/** Debounced saver: only the latest scheduled workspace is written. */
 export interface Autosaver {
   /**
-   * Schedules a save.
-   * @param workspace Latest workspace.
+   * Schedules a save and restarts the delay.
+   * @param workspace Latest workspace; replaces any pending one.
    */
   schedule(workspace: WorkspaceDocument): void;
-  /** Saves immediately if a save is pending. */
+  /** Saves the pending workspace now, if there is one, and stops the timer. */
   flush(): void;
 }
 
 /**
  * Creates a debounced workspace saver.
- * @param repository Repository.
- * @param delayMs Debounce delay.
+ * @param repository Repository the workspaces are saved to.
+ * @param delayMs Quiet time in milliseconds before a scheduled save runs.
  * @return Autosaver.
  */
 export function createAutosaver(

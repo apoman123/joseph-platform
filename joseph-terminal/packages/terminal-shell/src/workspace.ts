@@ -26,7 +26,7 @@ import type {
   WorkspaceDocument,
 } from '@joseph/contracts';
 
-/** Visible panes per layout. */
+/** Number of chart panes each layout shows. */
 export const LAYOUT_PANES: Readonly<Record<LayoutId, number>> = {
   '1': 1,
   '2h': 2,
@@ -38,7 +38,7 @@ export const LAYOUT_PANES: Readonly<Record<LayoutId, number>> = {
 /** Maximum charts stored in a workspace. */
 export const MAX_CHARTS = 8;
 
-/** Default indicator layers shown on new charts. */
+/** Indicator layers of a new chart, with their initial visibility. */
 export const DEFAULT_INDICATOR_LAYERS: ChartState['indicator_layers'] = [
   {plugin_id: 'fvg_ifvg', visible: true},
   {plugin_id: 'order_breaker_blocks', visible: true},
@@ -55,7 +55,7 @@ export const MAX_COMPARE = 3;
 
 /** Presentation settings stored in `IndicatorLayerState.style`. */
 export interface IndicatorLayerStyle {
-  /** User colors per AOI kind or event name (`#rrggbb`). */
+  /** User colors per area-of-interest (AOI) kind or event name (`#rrggbb`). */
   colors?: Readonly<Record<string, string>>;
   /** Whether structure-event markers are drawn (default true). */
   show_events?: boolean;
@@ -74,10 +74,10 @@ export interface IndicatorLayerPatch {
 }
 
 /**
- * Reads a layer's presentation settings.
- * @param chart Chart state.
- * @param pluginId Plugin id.
- * @return Style (empty when unset).
+ * Returns a layer's presentation settings.
+ * @param chart Chart holding the layer.
+ * @param pluginId Indicator plugin id.
+ * @return Style; empty when the layer or its style is missing.
  */
 export function layerStyle(
   chart: ChartState,
@@ -90,26 +90,29 @@ export function layerStyle(
 }
 
 /**
- * Reads a layer's indicator inputs.
- * @param chart Chart state.
- * @param pluginId Plugin id.
- * @return Inputs, or null when the plugin defaults apply.
+ * Returns a layer's indicator inputs.
+ * @param chart Chart holding the layer.
+ * @param pluginId Indicator plugin id.
+ * @return Inputs, or null when the layer has none (missing or empty), so the
+ *     plugin defaults apply.
  */
 export function layerSettings(
   chart: ChartState,
   pluginId: string
 ): Readonly<Record<string, unknown>> | null {
+  // The contract types `settings` as an open object (`{}`); its keys are
+  // the plugin's input names.
   const settings = chart.indicator_layers.find(l => l.plugin_id === pluginId)
     ?.settings as Record<string, unknown> | undefined;
   return settings && Object.keys(settings).length > 0 ? settings : null;
 }
 
 /**
- * Whether a plugin layer is shown (layers missing from older workspaces
- * default to visible, matching the chart renderer).
- * @param chart Chart state.
- * @param pluginId Plugin id.
- * @return Visibility.
+ * Returns whether a plugin layer is shown. Layers missing from older
+ * workspaces count as visible, matching the chart renderer.
+ * @param chart Chart holding the layer.
+ * @param pluginId Indicator plugin id.
+ * @return True when the layer is visible or missing.
  */
 export function layerVisible(chart: ChartState, pluginId: string): boolean {
   return (
@@ -119,21 +122,23 @@ export function layerVisible(chart: ChartState, pluginId: string): boolean {
 
 /** Inputs for a fresh workspace. */
 export interface DefaultWorkspaceInput {
-  /** Workspace id. */
+  /** Workspace id, also the storage key suffix. */
   workspaceId: string;
   /** Instrument for the first chart. */
   instrumentId: InstrumentId;
   /** Timeframe for the first chart. */
   timeframe: Timeframe;
-  /** Clock. */
+  /** Creation time (UTC epoch ms), stored as `updated_at_ms`. */
   nowMs: number;
 }
 
 /**
- * Creates a chart state.
- * @param chartId Chart id.
- * @param instrumentId Instrument.
- * @param timeframe Timeframe.
+ * Creates a chart with the default presentation: candles, linear scale,
+ * volume, `DEFAULT_INDICATOR_LAYERS`, no link group, `AUTO` feed and no
+ * saved viewport.
+ * @param chartId Chart id, unique within the workspace (`chart-<n>`).
+ * @param instrumentId Instrument shown.
+ * @param timeframe Bar timeframe.
  * @return Chart state.
  */
 export function createChartState(
@@ -156,9 +161,10 @@ export function createChartState(
 }
 
 /**
- * Creates the default single-chart workspace.
- * @param input Inputs.
- * @return Workspace document.
+ * Creates the default single-chart workspace: layout `1`, crosshair sync
+ * only, and the default favorite timeframes.
+ * @param input Workspace id, first chart and clock.
+ * @return Workspace document (schema v1).
  */
 export function createDefaultWorkspace(
   input: DefaultWorkspaceInput
@@ -182,7 +188,10 @@ export function createDefaultWorkspace(
   };
 }
 
-/** Workspace actions. */
+/**
+ * Workspace actions. Pop-out windows send these over the window channel,
+ * so they stay structured-cloneable data.
+ */
 export type WorkspaceAction =
   | {type: 'setLayout'; layout: LayoutId}
   | {type: 'setActiveChart'; chartId: string}
@@ -235,11 +244,12 @@ export type ChartPresentation = Pick<
 > & {session_separators?: boolean};
 
 /**
- * Applies a configuration patch to one indicator layer.
+ * Applies a configuration patch to one indicator layer. Fields the patch
+ * omits are kept; `null` removes `kinds` or `settings`.
  * @param layers Current layers.
- * @param pluginId Plugin id.
- * @param patch Patch.
- * @return Updated layers (the layer is added when missing).
+ * @param pluginId Indicator plugin id.
+ * @param patch Fields to change.
+ * @return New layer list; a missing layer is appended as visible first.
  */
 export function patchIndicatorLayer(
   layers: ChartState['indicator_layers'],
@@ -263,11 +273,13 @@ export function patchIndicatorLayer(
 }
 
 /**
- * Charts that should follow a change made on `chartId`.
+ * Returns the charts that follow a change made on `chartId`. Only charts
+ * visible in the current layout follow; when the source chart has a link
+ * group, only charts of that group do.
  * @param doc Workspace.
- * @param chartId Source chart.
- * @param synced Whether the relevant sync option is on.
- * @return Chart ids to update (always includes the source).
+ * @param chartId Chart the change was made on.
+ * @param synced Whether the sync option for this kind of change is on.
+ * @return Chart ids to update; always includes `chartId`.
  */
 export function linkedChartIds(
   doc: WorkspaceDocument,
@@ -286,11 +298,11 @@ export function linkedChartIds(
 }
 
 /**
- * Applies a change to charts.
+ * Applies a change to some charts of a workspace.
  * @param doc Workspace.
- * @param ids Charts to change.
- * @param change Chart updater.
- * @return Updated charts.
+ * @param ids Ids of the charts to change.
+ * @param change Returns the new state of one chart.
+ * @return Chart list with the changed charts, in the original order.
  */
 function mapCharts(
   doc: WorkspaceDocument,
@@ -306,19 +318,20 @@ function mapCharts(
 export type WorkspaceCharts = WorkspaceDocument['charts'];
 
 /**
- * Narrows a chart array to the contract's 1..8 tuple type.
- * @param charts Charts (callers guarantee 1..8 items).
- * @return Typed chart list.
+ * Narrows a chart array to the contract's 1..8 tuple type. The length is
+ * not checked.
+ * @param charts Charts; the caller guarantees 1 to 8 items.
+ * @return The same array, typed as the contract's chart list.
  */
 export function asCharts(charts: ChartState[]): WorkspaceCharts {
   return charts as WorkspaceCharts;
 }
 
 /**
- * Toggles membership of a value in a list.
- * @param list List.
- * @param value Value.
- * @return New list.
+ * Adds a value to a list, or removes it when present.
+ * @param list Current list; undefined counts as empty.
+ * @param value Value to toggle.
+ * @return New list; an added value goes last.
  */
 function toggle<T>(list: readonly T[] | undefined, value: T): T[] {
   const items = [...(list ?? [])];
@@ -328,11 +341,12 @@ function toggle<T>(list: readonly T[] | undefined, value: T): T[] {
 }
 
 /**
- * Pure workspace reducer.
+ * Applies a workspace action (pure) and stamps `updated_at_ms` when anything
+ * changed.
  * @param doc Current workspace.
- * @param action Action.
- * @param nowMs Clock for `updated_at_ms`.
- * @return Next workspace (same object when nothing changed).
+ * @param action Action to apply.
+ * @param nowMs Current time (UTC epoch ms) for `updated_at_ms`.
+ * @return Next workspace; `doc` itself when the action changed nothing.
  */
 export function workspaceReducer(
   doc: WorkspaceDocument,
@@ -344,10 +358,10 @@ export function workspaceReducer(
 }
 
 /**
- * Reducer body without timestamping.
- * @param doc Workspace.
- * @param action Action.
- * @return Next workspace.
+ * Applies a workspace action without touching `updated_at_ms`.
+ * @param doc Current workspace.
+ * @param action Action to apply.
+ * @return Next workspace; `doc` itself for no-op actions.
  */
 function reduce(
   doc: WorkspaceDocument,
@@ -362,6 +376,8 @@ function reduce(
       const template =
         charts.find(chart => chart.chart_id === doc.active_chart_id) ??
         charts[0];
+      // New panes copy the active chart (without its viewport). Charts beyond
+      // the layout are kept, so shrinking and growing again restores them.
       let seq = charts.length;
       while (charts.length < needed && template) {
         seq += 1;
@@ -497,6 +513,8 @@ function reduce(
         charts: mapCharts(doc, new Set([action.chartId]), chart => {
           const {compare: _previous, ...rest} = chart;
           const kept = ids.filter(id => id !== chart.instrument_id);
+          // `ids` is capped at MAX_COMPARE, so `kept` fits the contract's
+          // tuple of at most three instruments.
           return kept.length > 0
             ? {...rest, compare: kept as ChartState['compare']}
             : rest;
@@ -568,9 +586,10 @@ function reduce(
 }
 
 /**
- * Charts visible in the current layout.
+ * Returns the charts visible in the current layout: the first
+ * `LAYOUT_PANES[layout]` charts.
  * @param doc Workspace.
- * @return Visible chart states.
+ * @return Visible charts in pane order.
  */
 export function visibleCharts(doc: WorkspaceDocument): ChartState[] {
   return doc.charts.slice(0, LAYOUT_PANES[doc.layout]);
@@ -579,7 +598,9 @@ export function visibleCharts(doc: WorkspaceDocument): ChartState[] {
 /**
  * Returns the active chart state.
  * @param doc Workspace.
- * @return Active chart (falls back to the first chart).
+ * @return Active chart, or the first chart when `active_chart_id` is stale.
+ * @throws `Error` when the workspace has no charts, which a valid document
+ *     never has (the contract requires 1 to 8).
  */
 export function activeChart(doc: WorkspaceDocument): ChartState {
   const chart =
