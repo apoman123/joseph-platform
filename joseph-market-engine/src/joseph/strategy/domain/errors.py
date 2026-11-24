@@ -13,13 +13,20 @@ class TradeModeDisabledError(errors.JosephError):
 
     AUTO_LIVE requires an execution-engine deployment with explicit scoped
     consent; the market engine never enables live trading.
+
+    Attributes:
+        code: Default contract error code, ``"TRADE_MODE_DISABLED"``.
     """
 
     code = "TRADE_MODE_DISABLED"
 
 
 class IllegalTransitionError(errors.JosephError):
-    """A setup state machine transition is not in the transition table."""
+    """A setup state machine transition is not in the transition table.
+
+    Attributes:
+        code: Default contract error code, ``"CONFLICT"``.
+    """
 
     code = "CONFLICT"
 

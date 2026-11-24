@@ -70,8 +70,8 @@ class InMemoryStrategyRepository:
         with self._lock:
             found = [
                 v
-                for (t, s, _), v in self._rows.items()
-                if t == tenant_id and s == strategy_id
+                for (tenant, slug, _), v in self._rows.items()
+                if tenant == tenant_id and slug == strategy_id
             ]
         return sorted(found, key=lambda v: -v.version)
 
@@ -143,7 +143,10 @@ class InMemoryStrategyRepository:
 
 
 class InMemoryCheckpointRepository:
-    """In-memory ``CheckpointRepository``."""
+    """In-memory ``CheckpointRepository``.
+
+    Unlike ``InMemoryStrategyRepository`` it takes no lock.
+    """
 
     def __init__(self) -> None:
         """Initializes an empty store."""
@@ -170,5 +173,5 @@ class InMemoryCheckpointRepository:
             state: Instance state.
             updated_at_ms: Save time (unused in memory).
         """
-        del updated_at_ms
+        del updated_at_ms  # Unused.
         self._rows[state.key.as_text()] = state.to_dict()

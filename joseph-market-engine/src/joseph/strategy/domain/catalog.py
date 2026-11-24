@@ -15,6 +15,7 @@ from collections.abc import Mapping
 
 from joseph.domain import structures
 
+# Plugin ids, as registered by ``joseph.indicators.packaged.plugins``.
 DAILY_BIAS = "daily_bias"
 FVG_IFVG = "fvg_ifvg"
 ORDER_BREAKER_BLOCKS = "order_breaker_blocks"
@@ -42,6 +43,7 @@ DEFAULT_PLUGINS: frozenset[str] = frozenset(
 )
 """First-party plugins assumed available when no registry is supplied."""
 
+# Short aliases keep the mapping tables readable.
 _K = structures.AoiKind
 _E = structures.StructureEventName
 

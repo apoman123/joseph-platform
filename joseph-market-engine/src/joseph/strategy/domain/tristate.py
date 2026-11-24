@@ -4,8 +4,10 @@
 """Three-valued (Kleene) logic used by the strategy evaluator.
 
 ``UNKNOWN`` represents missing, stale or not-yet-warm data. It never
-silently becomes ``TRUE`` or ``FALSE``: ``TRUE AND UNKNOWN`` is ``UNKNOWN``
-and ``FALSE AND UNKNOWN`` is ``FALSE``.
+silently becomes ``TRUE`` or ``FALSE``; it decides a result only when the
+known operands already do: ``TRUE AND UNKNOWN`` is ``UNKNOWN`` and
+``FALSE AND UNKNOWN`` is ``FALSE``, ``TRUE OR UNKNOWN`` is ``TRUE`` and
+``FALSE OR UNKNOWN`` is ``UNKNOWN``, and ``NOT UNKNOWN`` is ``UNKNOWN``.
 """
 
 from __future__ import annotations

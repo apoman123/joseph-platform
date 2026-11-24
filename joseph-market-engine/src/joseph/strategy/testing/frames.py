@@ -27,8 +27,7 @@ from joseph.domain import timeframes
 BASE_MS = 1_795_132_800_000
 """2026-11-20 00:00 UTC; aligned to every timeframe up to 1d."""
 
-D = decimal.Decimal
-_TEN = D(10)
+_TEN = decimal.Decimal(10)
 
 
 def dec(value: str | int | decimal.Decimal) -> decimal.Decimal:
@@ -40,7 +39,9 @@ def dec(value: str | int | decimal.Decimal) -> decimal.Decimal:
     Returns:
         The decimal.
     """
-    return value if isinstance(value, decimal.Decimal) else D(str(value))
+    if isinstance(value, decimal.Decimal):
+        return value
+    return decimal.Decimal(str(value))
 
 
 @dataclasses.dataclass(frozen=True, slots=True)
@@ -144,7 +145,8 @@ class FrameFactory:
             as_of_ms: Visibility time.
 
         Returns:
-            Bar start on the instrument's calendar.
+            Bar start on the instrument's calendar; the start of the bar
+            containing ``as_of_ms`` when none has closed yet.
         """
         start = self.calendar.last_closed_start(tf, as_of_ms)
         return self.calendar.floor(tf, as_of_ms) if start is None else start
@@ -205,6 +207,9 @@ class FrameFactory:
     ) -> structures.Aoi:
         """Builds an AOI confirmed at the close of a signal bar.
 
+        The AOI is created two bars before the confirming bar (a
+        three-candle pattern), never before bar 0.
+
         Args:
             kind: AOI kind.
             side: ``bullish``, ``bearish`` or ``neutral``.
@@ -216,7 +221,8 @@ class FrameFactory:
             state: Lifecycle state.
             quality_score: Score.
             range_id: Dealing range id.
-            source: Plugin id (derived from kind otherwise).
+            source: Plugin id (derived from kind otherwise; required for
+                swing kinds).
             invalidated_at_ms: Invalidation time.
 
         Returns:

@@ -26,7 +26,11 @@ SWING_LOOKBACK_BARS = 10
 """Bars scanned for the SWING stop model."""
 
 _RR_QUANTUM = decimal.Decimal("0.0001")
+"""Reward/risk precision; values are rounded down so that rounding never
+lifts a setup over a ``min_rr`` threshold."""
+
 _BPS = decimal.Decimal(10_000)
+"""Basis points per unit."""
 
 
 @dataclasses.dataclass(frozen=True, slots=True)
@@ -50,8 +54,10 @@ class RiskAssessment:
         entry: Projected entry (signal close).
         stop: Protective stop, if computable.
         target: Target, if computable.
-        rr: Net reward/risk after estimated costs, if computable.
-        gross_rr: Reward/risk before costs.
+        rr: Net reward/risk after estimated round-trip costs, rounded down
+            to 0.0001, if computable.
+        gross_rr: Reward/risk before costs, rounded down to 0.0001, if
+            computable.
         atr: ATR(14) used for buffers, if available.
         anchor_aoi_id: AOI used for the invalidation stop.
         reasons: Why values could not be computed.
@@ -68,7 +74,7 @@ class RiskAssessment:
 
     @property
     def computable(self) -> bool:
-        """Returns True when a net reward/risk was computed."""
+        """Whether a net reward/risk was computed."""
         return self.rr is not None
 
 
@@ -229,6 +235,11 @@ def assess(
     touched: Sequence[TouchedAoi],
 ) -> RiskAssessment:
     """Projects entry, stop, target and net reward/risk.
+
+    Costs are ``fee_bps_estimate`` charged on entry and exit at the entry
+    price, ``cost = entry * fee_bps * 2 / 10000``; the net reward/risk is
+    ``(reward - cost) / (risk + cost)``. A stop on the wrong side of the
+    entry counts as no stop.
 
     Args:
         definition: Strategy definition (direction and risk model).

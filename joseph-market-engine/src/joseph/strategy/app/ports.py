@@ -161,7 +161,7 @@ class QualificationGate(Protocol):
 
 
 class MarketContextProvider(Protocol):
-    """Supplies market context (funding, OI, spread) for MARKET operands."""
+    """Supplies funding, open interest and spread for MARKET operands."""
 
     def context(
         self, instrument_id: str, at_ms: int

@@ -5,7 +5,8 @@
 
 Definitions are stored as canonical JSON and are immutable: the repository
 never updates them, and a database trigger rejects any attempt to rewrite
-a version's definition or hash (SQLite and PostgreSQL variants).
+a version's definition or hash (on SQLite also its key columns; SQLite and
+PostgreSQL variants).
 """
 
 from __future__ import annotations
@@ -51,20 +52,22 @@ STRATEGY_INSTANCES = sa.Table(
     sa.Column("updated_at_ms", sa.BigInteger, nullable=False),
 )
 
-sa.event.listen(
+# The immutability triggers are created with the table by ``create_all``,
+# so they are attached to it when the module is imported.
+sa.event.listen(  # noqa: GPY047 - the trigger must be attached before create_all runs
     STRATEGY_VERSIONS,
     "after_create",
-    sa.DDL(  # type: ignore[no-untyped-call]
+    sa.DDL(  # type: ignore[no-untyped-call]  # SQLAlchemy's DDL constructor is untyped.
         "CREATE TRIGGER strategy_versions_immutable BEFORE UPDATE OF "
         "definition_json, definition_hash, tenant_id, strategy_id, version "
         "ON strategy_versions BEGIN SELECT RAISE(ABORT, "
         "'strategy versions are immutable'); END;"
     ).execute_if(dialect="sqlite"),
 )
-sa.event.listen(
+sa.event.listen(  # noqa: GPY047 - the trigger must be attached before create_all runs
     STRATEGY_VERSIONS,
     "after_create",
-    sa.DDL(  # type: ignore[no-untyped-call]
+    sa.DDL(  # type: ignore[no-untyped-call]  # SQLAlchemy's DDL constructor is untyped.
         "CREATE OR REPLACE FUNCTION joseph_forbid_version_rewrite() "
         "RETURNS trigger AS $$ BEGIN IF NEW.definition_json <> "
         "OLD.definition_json OR NEW.definition_hash <> OLD.definition_hash "
@@ -358,7 +361,7 @@ class SqlCheckpointRepository:
         return setup_fsm.InstanceState.from_dict(json.loads(str(row[0])))
 
     def save(self, state: setup_fsm.InstanceState, updated_at_ms: int) -> None:
-        """Upserts a checkpoint.
+        """Upserts a checkpoint (update, else insert, in one transaction).
 
         Args:
             state: Instance state.

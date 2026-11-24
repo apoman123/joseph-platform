@@ -32,7 +32,7 @@ from joseph.strategy.domain import versions
 
 _LOG = logging.getLogger(__name__)
 
-T = tristate.TriState
+_TriState = tristate.TriState
 
 
 @dataclasses.dataclass(frozen=True, slots=True)
@@ -151,8 +151,8 @@ class StrategyRuntime:
         for key in list(self._processors):
             tenant_id, version_id, _ = key
             if (tenant_id, version_id) not in fresh:
-                proc = self._processors.pop(key)
-                outcome = proc.cancel(now, "strategy paused or replaced")
+                instance = self._processors.pop(key)
+                outcome = instance.cancel(now, "strategy paused or replaced")
                 self._checkpoints.save(outcome.state, now)
         self._plans = fresh
         return list(fresh.values())
@@ -223,9 +223,9 @@ class StrategyRuntime:
         """
         universe = version.definition.universe
         if universe.qualification == "ANY":
-            return T.TRUE
+            return _TriState.TRUE
         if self._qualification is None:
-            return T.UNKNOWN
+            return _TriState.UNKNOWN
         return self._qualification.qualification(
             instrument_id, at_ms, universe.min_qualified_minutes
         )
@@ -241,6 +241,9 @@ class StrategyRuntime:
 
         Returns:
             Signals recorded for the first time (already published).
+
+        Raises:
+            ValueError: If ``instrument_id`` is not the frame's instrument.
         """
         if str(frame.instrument_id) != instrument_id:
             raise ValueError("instrument_id does not match the frame")
@@ -253,13 +256,13 @@ class StrategyRuntime:
                 continue
             if not universe_allows(active.version, instrument_id):
                 continue
-            proc = self._processor(active, instrument_id)
+            instance = self._processor(active, instrument_id)
             market = (
                 None
                 if self._market is None
                 else self._market.context(instrument_id, frame.close_ms)
             )
-            result = proc.step(
+            result = instance.step(
                 frame,
                 evaluated_at_ms=self._clock.now_ms(),
                 market=market,
@@ -276,7 +279,7 @@ class StrategyRuntime:
                     result.outcome.revision.old_revision,
                     result.outcome.revision.new_revision,
                 )
-            self._checkpoints.save(proc.state, self._clock.now_ms())
+            self._checkpoints.save(instance.state, self._clock.now_ms())
             for signal in result.signals:
                 if self._signals.record(signal):
                     recorded.append(signal)
@@ -298,20 +301,21 @@ class StrategyRuntime:
             frames: Historical frames, oldest first.
 
         Returns:
-            Number of (plan, frame) pairs added to windows.
+            Number of (plan, frame) pairs offered to the windows; a window
+            keeps only final frames.
         """
         added = 0
         for active in list(self._plans.values()):
             definition = active.version.definition
             if not universe_allows(active.version, instrument_id):
                 continue
-            proc = self._processor(active, instrument_id)
+            instance = self._processor(active, instrument_id)
             for frame in frames:
                 if (
                     str(frame.instrument_id) == instrument_id
                     and frame.timeframe == definition.signal_timeframe
                 ):
-                    proc.warm(frame)
+                    instance.warm(frame)
                     added += 1
         return added
 
@@ -337,6 +341,9 @@ class StrategyRuntime:
 
         Returns:
             Signals recorded for the first time.
+
+        Raises:
+            ValueError: If a frame belongs to another instrument.
         """
         recorded: list[signal_domain.Signal] = []
         for frame in frames:

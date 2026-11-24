@@ -9,6 +9,12 @@ last), so backtest, replay, paper, shadow and live share one code path and
 one result for the same confirmed bars. Missing, stale, unconfirmed or
 not-yet-warm inputs evaluate to UNKNOWN, which can never fire an entry.
 Every node produces a ``ReasonNode`` whether it is true or false.
+
+No look-ahead: a node evaluated at a frame reads only that frame and
+earlier ones; a snapshot stamped after the frame's close is rejected; an
+AOI counts as touched only by a bar that opened at or after the AOI's
+confirmation. A lookback window that is too short or broken by a missing
+bar yields UNKNOWN wherever the missing bars could change the answer.
 """
 
 from __future__ import annotations
@@ -17,11 +23,13 @@ import dataclasses
 import datetime
 import decimal
 import itertools
+import operator
 import zoneinfo
 from collections.abc import Callable
 from collections.abc import Mapping
 from collections.abc import Sequence
 from typing import Any
+from typing import TypeAlias
 
 from joseph.domain import decimals
 from joseph.domain import market as market_domain
@@ -43,13 +51,16 @@ EVALUATOR_VERSION = "1.1.0"
 time between sessions is not a gap); 24x7 evaluation is unchanged.
 """
 
-T = tristate.TriState
+_TriState = tristate.TriState
 _NEW_YORK = "America/New_York"
 _SESSIONS: Mapping[str, tuple[datetime.time, datetime.time | None]] = {
     "ASIA": (datetime.time(20, 0), None),
     "LONDON": (datetime.time(2, 0), datetime.time(5, 0)),
     "NEW_YORK": (datetime.time(8, 30), datetime.time(11, 0)),
 }
+"""Session windows in New York time as ``[begin, end)``; ``None`` ends the
+window at midnight."""
+
 _UNUSABLE_FEEDS = frozenset(
     {
         quality.FeedState.STALE,
@@ -57,12 +68,14 @@ _UNUSABLE_FEEDS = frozenset(
         quality.FeedState.CONNECTING,
     }
 )
+"""Feed states whose frames and snapshots evaluate to UNKNOWN."""
+
 _HUNDRED = decimal.Decimal(100)
 
 
 @dataclasses.dataclass(frozen=True, slots=True)
 class MarketPoint:
-    """Market context observation (funding, OI, spread, turnover).
+    """Market context observation (funding, open interest, spread, turnover).
 
     Attributes:
         ts_ms: Observation time.
@@ -145,12 +158,12 @@ class Evaluation:
 
     @property
     def aoi_ids(self) -> tuple[str, ...]:
-        """Returns ids of positively touched AOIs, sorted."""
+        """The ids of the positively touched AOIs, sorted."""
         return tuple(sorted({t.aoi.aoi_id for t in self.touched}))
 
     @property
     def usable(self) -> bool:
-        """Returns True when the evaluated frame itself is usable."""
+        """Whether the evaluated frame itself is usable."""
         return self.current_issue is None
 
 
@@ -195,9 +208,22 @@ class _Run:
 
     Attributes:
         plan: Compiled strategy.
+        definition: The plan's definition.
+        signal_tf: Signal timeframe of the definition.
         frames: Evaluation window.
         current: Index of the evaluated frame.
         calendar: Session calendar of the frames' instrument.
+        market: Market context for MARKET operands, if any.
+        evaluated_at_ms: Evaluation time for the data-age check, or
+            ``None`` to skip it.
+        flags: Data flags collected while evaluating (``DEMO_DATA``,
+            ``GAP_IN_WINDOW``, ``LOOKAHEAD_REJECTED`` and so on).
+        group_bindings: Range id bound by each range group at the current
+            bar (``None`` when unknown), cached on first use.
+        range_ids: Dealing ranges bound by zone conditions true at the
+            current bar.
+        assessment: Risk assessment of the current bar, set before the tree
+            is evaluated.
     """
 
     def __init__(
@@ -236,6 +262,12 @@ class _Run:
 
     def frame_issue(self, pos: int) -> str | None:
         """Explains why a frame is unusable.
+
+        A frame is unusable when its candle is not final, its feed state is
+        unusable, polled data is not allowed, or (for the evaluated frame
+        only) its close is older than ``max_data_age_ms``. Records the
+        ``DEMO_DATA``, ``REPLAY_DATA`` or ``POLL_DATA`` flag as a side
+        effect.
 
         Args:
             pos: Frame index.
@@ -551,8 +583,8 @@ def _count_detail(children: Sequence[reasons.ReasonNode]) -> str:
     Returns:
         Text such as ``"2 of 3 true, 1 unknown"``.
     """
-    true_count = sum(1 for c in children if c.result is T.TRUE)
-    unknown = sum(1 for c in children if c.result is T.UNKNOWN)
+    true_count = sum(1 for c in children if c.result is _TriState.TRUE)
+    unknown = sum(1 for c in children if c.result is _TriState.UNKNOWN)
     text = f"{true_count} of {len(children)} true"
     return f"{text}, {unknown} unknown" if unknown else text
 
@@ -597,7 +629,7 @@ def _eval_bias(
     for tf in node.timeframes:
         snap = run.snapshot(pos, catalog.DAILY_BIAS, tf)
         if snap is None:
-            per_tf.append(T.UNKNOWN)
+            per_tf.append(_TriState.UNKNOWN)
             evidence[tf.value] = "UNKNOWN"
             continue
         trend = snap.values.get("trend")
@@ -608,13 +640,13 @@ def _eval_bias(
                 and snap.values.get("last_event") == "BOS"
                 and (snap.values.get("last_event_direction") == node.value)
             )
-        per_tf.append(T.of(ok))
+        per_tf.append(_TriState.of(ok))
         evidence[tf.value] = trend
     if node.match == "K_OF_N":
         k = node.k or len(node.timeframes)
         result = tristate.at_least(per_tf, k)
         detail = (
-            f"{sum(r is T.TRUE for r in per_tf)} of {len(per_tf)} "
+            f"{sum(r is _TriState.TRUE for r in per_tf)} of {len(per_tf)} "
             f"timeframes {node.value}, need {k}"
         )
     else:
@@ -678,7 +710,7 @@ def _eval_price_in_zone(
         return run.reason(
             node,
             path,
-            T.UNKNOWN,
+            _TriState.UNKNOWN,
             f"dealing range on {node.tf.value} unavailable",
         )
     raw_range = snap.values.get("range_id")
@@ -690,20 +722,28 @@ def _eval_price_in_zone(
         evidence["bound_range_id"] = bound
         if bound is None or range_id is None:
             return run.reason(
-                node, path, T.UNKNOWN, "range group binding unknown", evidence
+                node,
+                path,
+                _TriState.UNKNOWN,
+                "range group binding unknown",
+                evidence,
             )
         if bound != range_id:
             return run.reason(
                 node,
                 path,
-                T.FALSE,
+                _TriState.FALSE,
                 f"range {range_id} differs from group range {bound}",
                 evidence,
             )
     lower, upper = _zone_bounds(snap, node.zone, range_id)
     if lower is None or upper is None:
         return run.reason(
-            node, path, T.UNKNOWN, f"{node.zone} bounds unavailable", evidence
+            node,
+            path,
+            _TriState.UNKNOWN,
+            f"{node.zone} bounds unavailable",
+            evidence,
         )
     price = run.candle_price(pos, node.price_source)
     inside = lower <= price <= upper
@@ -713,7 +753,7 @@ def _eval_price_in_zone(
     return run.reason(
         node,
         path,
-        T.of(inside),
+        _TriState.of(inside),
         f"{node.price_source} {price} {'inside' if inside else 'outside'} "
         f"{node.tf.value} {node.zone} [{lower}, {upper}]",
         evidence,
@@ -829,7 +869,7 @@ def aoi_touches(
     tf = node.tf or run.signal_tf
     plugins = sorted({catalog.AOI_KIND_PLUGIN[k] for k in node.kinds})
     if any(run.snapshot(pos, plugin, tf) is None for plugin in plugins):
-        return T.UNKNOWN, [], f"AOI source on {tf.value} unavailable"
+        return _TriState.UNKNOWN, [], f"AOI source on {tf.value} unavailable"
     window = run.window(pos, node.within_bars)
     latest, missing = _visible_aois(run, node, window.positions, plugins)
     unknown = missing or not window.complete
@@ -849,12 +889,16 @@ def aoi_touches(
                 )
     if touches:
         ids = sorted({t.aoi.aoi_id for t in touches})
-        return T.TRUE, touches, f"touched {', '.join(ids)}"
+        return _TriState.TRUE, touches, f"touched {', '.join(ids)}"
     if unknown:
-        return T.UNKNOWN, [], "no touch found but the window is incomplete"
+        return (
+            _TriState.UNKNOWN,
+            [],
+            "no touch found but the window is incomplete",
+        )
     kinds = "/".join(sorted(k.value for k in node.kinds))
     return (
-        T.FALSE,
+        _TriState.FALSE,
         [],
         f"no {node.side} {kinds} touch in {node.within_bars + 1} bars",
     )
@@ -905,7 +949,10 @@ def _eval_aoi_overlap(
         snap = run.snapshot(pos, plugin, tf)
         if snap is None:
             return run.reason(
-                node, path, T.UNKNOWN, f"{plugin}@{tf.value} unavailable"
+                node,
+                path,
+                _TriState.UNKNOWN,
+                f"{plugin}@{tf.value} unavailable",
             )
         live.extend(
             a
@@ -935,7 +982,7 @@ def _eval_aoi_overlap(
     return run.reason(
         node,
         path,
-        T.of(bool(unique)),
+        _TriState.of(bool(unique)),
         f"{len(unique)} overlapping pair(s)",
         {"pairs": [list(pair) for pair in unique]},
     )
@@ -1021,7 +1068,7 @@ def _eval_event(
         return run.reason(
             node,
             path,
-            T.TRUE,
+            _TriState.TRUE,
             f"{node.name.value} on {tf.value} found",
             evidence,
         )
@@ -1029,14 +1076,14 @@ def _eval_event(
         return run.reason(
             node,
             path,
-            T.UNKNOWN,
+            _TriState.UNKNOWN,
             f"{node.name.value} not found; window incomplete",
             evidence,
         )
     return run.reason(
         node,
         path,
-        T.FALSE,
+        _TriState.FALSE,
         f"no {node.name.value} on {tf.value} in {node.within_bars + 1} bars",
         evidence,
     )
@@ -1059,17 +1106,22 @@ def _eval_sequence(
     steps = [(step.name, step.tf or run.signal_tf) for step in node.steps]
     names = [name.value for name, _ in steps]
     if not run.usable(pos):
-        return run.reason(node, path, T.UNKNOWN, "evaluated bar unusable")
+        return run.reason(
+            node, path, _TriState.UNKNOWN, "evaluated bar unusable"
+        )
     final_name, final_tf = steps[-1]
     if not _event_at(run, pos, final_name, final_tf):
         if not _event_source_known(run, pos, final_name, final_tf):
             return run.reason(
-                node, path, T.UNKNOWN, f"{final_name.value} source unavailable"
+                node,
+                path,
+                _TriState.UNKNOWN,
+                f"{final_name.value} source unavailable",
             )
         return run.reason(
             node,
             path,
-            T.FALSE,
+            _TriState.FALSE,
             f"final step {final_name.value} not on this bar",
             {"steps": names},
         )
@@ -1093,7 +1145,7 @@ def _eval_sequence(
         return run.reason(
             node,
             path,
-            T.TRUE,
+            _TriState.TRUE,
             f"sequence {' -> '.join(names)} complete",
             evidence,
         )
@@ -1101,28 +1153,29 @@ def _eval_sequence(
         return run.reason(
             node,
             path,
-            T.UNKNOWN,
+            _TriState.UNKNOWN,
             "earlier steps not found; window incomplete",
             evidence,
         )
     return run.reason(
         node,
         path,
-        T.FALSE,
+        _TriState.FALSE,
         f"missing {names[cursor]} before {final_name.value} within "
         f"{node.within_bars} bars",
         evidence,
     )
 
 
-_COMPARATORS = {
-    "gt": lambda a, b: a > b,
-    "gte": lambda a, b: a >= b,
-    "lt": lambda a, b: a < b,
-    "lte": lambda a, b: a <= b,
-    "eq": lambda a, b: a == b,
-    "neq": lambda a, b: a != b,
+_COMPARATORS: Mapping[str, Callable[[Any, Any], Any]] = {
+    "gt": operator.gt,
+    "gte": operator.ge,
+    "lt": operator.lt,
+    "lte": operator.le,
+    "eq": operator.eq,
+    "neq": operator.ne,
 }
+"""COMPARE comparators by contract name."""
 
 
 def _eval_compare(
@@ -1146,13 +1199,17 @@ def _eval_compare(
         return run.reason(
             node,
             path,
-            T.UNKNOWN,
+            _TriState.UNKNOWN,
             f"{left_text} {node.cmp} {right_text}",
             evidence,
         )
     ok = bool(_COMPARATORS[node.cmp](left, right))
     return run.reason(
-        node, path, T.of(ok), f"{left_text} {node.cmp} {right_text}", evidence
+        node,
+        path,
+        _TriState.of(ok),
+        f"{left_text} {node.cmp} {right_text}",
+        evidence,
     )
 
 
@@ -1176,11 +1233,11 @@ def _eval_in_range(
     evidence = {"value": value, "low": low, "high": high}
     if value is None or low is None or high is None:
         return run.reason(
-            node, path, T.UNKNOWN, f"{text}; bounds unknown", evidence
+            node, path, _TriState.UNKNOWN, f"{text}; bounds unknown", evidence
         )
     ok = low <= value <= high if node.inclusive else low < value < high
     return run.reason(
-        node, path, T.of(ok), f"{text} in [{low}, {high}]", evidence
+        node, path, _TriState.of(ok), f"{text} in [{low}, {high}]", evidence
     )
 
 
@@ -1188,6 +1245,10 @@ def _eval_crosses(
     run: _Run, node: ast.CrossesNode, path: str, pos: int
 ) -> reasons.ReasonNode:
     """Evaluates CROSSES between the previous and current bar.
+
+    ``ABOVE`` holds when ``left`` was at or below ``right`` on the previous
+    bar and is above it now; ``BELOW`` mirrors it. Without a contiguous
+    previous bar the result is UNKNOWN.
 
     Args:
         run: Evaluation state.
@@ -1199,7 +1260,7 @@ def _eval_crosses(
         Reason node.
     """
     if pos < 1 or not run.window(pos, 1).complete:
-        return run.reason(node, path, T.UNKNOWN, "no previous bar")
+        return run.reason(node, path, _TriState.UNKNOWN, "no previous bar")
     now_l, _ = run.operand(node.left, pos)
     now_r, _ = run.operand(node.right, pos)
     prev_l, _ = run.operand(node.left, pos - 1)
@@ -1211,7 +1272,9 @@ def _eval_crosses(
         "right": now_r,
     }
     if now_l is None or now_r is None or prev_l is None or prev_r is None:
-        return run.reason(node, path, T.UNKNOWN, "operand unknown", evidence)
+        return run.reason(
+            node, path, _TriState.UNKNOWN, "operand unknown", evidence
+        )
     if node.direction == "ABOVE":
         ok = prev_l <= prev_r and now_l > now_r
     else:
@@ -1219,7 +1282,7 @@ def _eval_crosses(
     return run.reason(
         node,
         path,
-        T.of(ok),
+        _TriState.of(ok),
         f"crossed {node.direction.lower()}: {ok}",
         evidence,
     )
@@ -1228,7 +1291,10 @@ def _eval_crosses(
 def _eval_persist(
     run: _Run, node: ast.PersistForNode, path: str, pos: int
 ) -> reasons.ReasonNode:
-    """Evaluates PERSIST_FOR.
+    """Evaluates PERSIST_FOR: the child on each of the last ``bars`` bars.
+
+    The result is the Kleene conjunction of the child results; an
+    incomplete window adds an UNKNOWN, so it can be FALSE but not TRUE.
 
     Args:
         run: Evaluation state.
@@ -1245,12 +1311,12 @@ def _eval_persist(
     ]
     results = [trace.result for _, trace in traces]
     if not window.complete:
-        results.append(T.UNKNOWN)
+        results.append(_TriState.UNKNOWN)
     result = tristate.all_of(results)
     deciding = next(
-        (t for _, t in traces if t.result is T.FALSE), traces[-1][1]
+        (t for _, t in traces if t.result is _TriState.FALSE), traces[-1][1]
     )
-    true_count = sum(1 for _, t in traces if t.result is T.TRUE)
+    true_count = sum(1 for _, t in traces if t.result is _TriState.TRUE)
     return run.reason(
         node,
         path,
@@ -1264,7 +1330,10 @@ def _eval_persist(
 def _eval_within(
     run: _Run, node: ast.WithinBarsNode, path: str, pos: int
 ) -> reasons.ReasonNode:
-    """Evaluates WITHIN_BARS.
+    """Evaluates WITHIN_BARS: the child on any of the last ``bars + 1`` bars.
+
+    The result is the Kleene disjunction of the child results; an
+    incomplete window adds an UNKNOWN, so it can be TRUE but not FALSE.
 
     Args:
         run: Evaluation state.
@@ -1281,12 +1350,13 @@ def _eval_within(
     ]
     results = [trace.result for _, trace in traces]
     if not window.complete:
-        results.append(T.UNKNOWN)
+        results.append(_TriState.UNKNOWN)
     result = tristate.any_of(results)
     deciding = next(
-        (t for _, t in reversed(traces) if t.result is T.TRUE), traces[-1][1]
+        (t for _, t in reversed(traces) if t.result is _TriState.TRUE),
+        traces[-1][1],
     )
-    true_count = sum(1 for _, t in traces if t.result is T.TRUE)
+    true_count = sum(1 for _, t in traces if t.result is _TriState.TRUE)
     return run.reason(
         node,
         path,
@@ -1300,8 +1370,8 @@ def _eval_within(
 def session_of(start_ms: int) -> str:
     """Names the New York-time session containing a bar start.
 
-    Windows (America/New_York, DST aware): ASIA 20:00-24:00, LONDON
-    02:00-05:00, NEW_YORK 08:30-11:00.
+    Windows (America/New_York, DST aware, start inclusive and end
+    exclusive): ASIA 20:00-24:00, LONDON 02:00-05:00, NEW_YORK 08:30-11:00.
 
     Args:
         start_ms: Bar start (UTC ms).
@@ -1333,11 +1403,15 @@ def _eval_session(
         Reason node.
     """
     if not run.usable(pos):
-        return run.reason(node, path, T.UNKNOWN, "bar unusable")
+        return run.reason(node, path, _TriState.UNKNOWN, "bar unusable")
     session = session_of(run.frames[pos].candle.start_ms)
     ok = session in node.sessions
     return run.reason(
-        node, path, T.of(ok), f"bar session {session}", {"session": session}
+        node,
+        path,
+        _TriState.of(ok),
+        f"bar session {session}",
+        {"session": session},
     )
 
 
@@ -1360,21 +1434,21 @@ def _eval_rr(
         return run.reason(
             node,
             path,
-            T.UNKNOWN,
+            _TriState.UNKNOWN,
             "reward/risk is projected for the evaluated bar only",
         )
     if assessment.rr is None:
         return run.reason(
             node,
             path,
-            T.UNKNOWN,
+            _TriState.UNKNOWN,
             "; ".join(assessment.reasons) or "rr unavailable",
         )
     ok = assessment.rr >= node.min_rr
     return run.reason(
         node,
         path,
-        T.of(ok),
+        _TriState.of(ok),
         f"net R:R {assessment.rr} vs {node.min_rr}",
         {
             "rr": assessment.rr,
@@ -1385,7 +1459,7 @@ def _eval_rr(
     )
 
 
-_Handler = Callable[[_Run, Any, str, int], reasons.ReasonNode]
+_Handler: TypeAlias = Callable[[_Run, Any, str, int], reasons.ReasonNode]
 
 _HANDLERS: Mapping[type, _Handler] = {
     ast.AllNode: _eval_all,
@@ -1424,7 +1498,7 @@ def _collect_touches(
         if not positive:
             return []
         result, touches, _ = aoi_touches(run, node, run.current)
-        return touches if result is T.TRUE else []
+        return touches if result is _TriState.TRUE else []
     if isinstance(node, ast.NotNode):
         return _collect_touches(run, node.child, not positive)
     collected: list[risk.TouchedAoi] = []
@@ -1467,7 +1541,8 @@ def evaluate(
     """Evaluates a plan on the latest frame.
 
     Only the last ``plan.window_bars`` frames are read, so passing more
-    history never changes the result.
+    history never changes the result. When the evaluated frame itself is
+    unusable, the result is UNKNOWN and ``current_issue`` says why.
 
     Args:
         plan: Compiled strategy.
@@ -1493,7 +1568,7 @@ def evaluate(
     if current_issue is not None:
         tree = dataclasses.replace(
             tree,
-            result=T.UNKNOWN,
+            result=_TriState.UNKNOWN,
             detail=f"evaluated bar unusable: {current_issue}; {tree.detail}",
         )
     if isinstance(root, ast.AllNode):
