@@ -3,9 +3,17 @@
 
 """Environment-driven settings.
 
-Safety defaults: live trading off, emergency halt off, dev tokens only in
-the ``development`` environment, step-up disabled unless a TOTP secret is
-configured.
+Every setting is read from a ``JOSEPH_*`` environment variable by
+``from_env``; the attribute docs below name each variable, its default and
+its unit. Boolean variables are true for ``1``, ``true``, ``yes`` or ``on``
+(any case) and false for anything else.
+
+Safety defaults: LIVE trading is off. The built-in dev bearer token and
+service token exist only when ``JOSEPH_ENV`` is ``development``; any other
+environment needs ``JOSEPH_VAULT_MASTER_KEY`` and gets no default tokens
+(``JOSEPH_DEV_TOKENS`` is still honoured when set). Step-up verification
+fails, so no AUTO_LIVE consent or LIVE arming can be granted, unless
+``JOSEPH_STEP_UP_TOTP_SECRET`` is set.
 """
 
 from __future__ import annotations
@@ -32,6 +40,7 @@ _TRUE = ("1", "true", "yes", "on")
 # ----------------------------------------------------------------------
 
 CRYPTO_VENUES = ("binance", "bitget", "hyperliquid", "lighter", "mexc")
+"""Crypto venues with live adapters; the only names venue settings accept."""
 
 
 @dataclasses.dataclass(frozen=True, slots=True)
@@ -41,14 +50,21 @@ class VenueSettings:
     Attributes:
         sandbox_venues: Venues whose accounts default to the venue's test
             environment (an account's ``environment`` credential field
-            overrides it).
-        timeout_s: Venue HTTP timeout.
-        recv_window_ms: Signed-request validity window.
-        market_slippage_bps: Worst-price band of market orders on venues
-            that need one (Hyperliquid, Lighter).
+            overrides it). ``JOSEPH_VENUE_SANDBOX``: comma-separated venue
+            names or ``all``; default none (production endpoints).
+        timeout_s: Venue HTTP timeout in seconds
+            (``JOSEPH_VENUE_TIMEOUT_S``, default 10).
+        recv_window_ms: Validity window of signed requests in milliseconds
+            (``JOSEPH_VENUE_RECV_WINDOW_MS``, default 5000).
+        market_slippage_bps: Worst-price band of market orders in basis
+            points (1 bp = 0.01%) on venues that need one (Hyperliquid,
+            Lighter) (``JOSEPH_VENUE_MARKET_SLIPPAGE_BPS``, default 50).
         urls: Endpoint overrides per venue (``rest_url``,
-            ``testnet_rest_url``, ``ws_url`` …).
-        streams: Run private account streams for live accounts.
+            ``testnet_rest_url``, ``ws_url`` …). ``JOSEPH_VENUE_URLS``:
+            comma-separated ``venue.key=url`` entries; default none.
+        streams: Run private account streams for live accounts; they also
+            need LIVE trading enabled (``JOSEPH_LIVE_STREAMS``, default
+            true).
     """
 
     sandbox_venues: tuple[str, ...] = ()
@@ -69,7 +85,7 @@ def parse_venue_urls(raw: str) -> dict[str, dict[str, str]]:
             ``binance.testnet_rest_url=https://testnet.binancefuture.com``.
 
     Returns:
-        Overrides by venue.
+        Overrides by venue; empty for empty text.
 
     Raises:
         ValueError: For malformed entries or unknown venues.
@@ -85,7 +101,7 @@ def parse_venue_urls(raw: str) -> dict[str, dict[str, str]]:
 
 
 def venue_settings(source: Mapping[str, str]) -> VenueSettings:
-    """Reads ``JOSEPH_VENUE_*`` variables.
+    """Reads ``JOSEPH_VENUE_*`` and ``JOSEPH_LIVE_STREAMS``.
 
     Args:
         source: Environment.
@@ -94,7 +110,8 @@ def venue_settings(source: Mapping[str, str]) -> VenueSettings:
         Venue settings.
 
     Raises:
-        ValueError: For unknown sandbox venues or bad numbers.
+        ValueError: For unknown sandbox venues, bad numbers or malformed
+            ``JOSEPH_VENUE_URLS`` entries.
     """
     raw = source.get("JOSEPH_VENUE_SANDBOX", "").strip().lower()
     venues = (
@@ -121,6 +138,9 @@ def venue_settings(source: Mapping[str, str]) -> VenueSettings:
 # Securities brokers (Interactive Brokers, SinoPac, Cathay)
 # ---------------------------------------------------------------------------
 
+# IB Gateway (4001/4002), its container relay (4003/4004) and TWS
+# (7496/7497) API ports, live and paper; JOSEPH_IBKR_PAPER must agree with
+# the port so that a paper deployment cannot reach a live login.
 _IB_LIVE_PORTS = frozenset({4001, 4003, 7496})
 _IB_PAPER_PORTS = frozenset({4002, 4004, 7497})
 _CLOSED_MARKET_POLICIES = ("reject", "queue")
@@ -132,33 +152,55 @@ class SecuritiesSettings:
 
     Broker secrets come only from the environment or ``*_FILE`` secret
     files and are registered for log redaction; ``repr`` never shows them.
+    Defaults below are those of ``securities_from_env``; the dataclass
+    defaults match except where noted. Settings marked secret are read
+    with ``secret_value`` from the variable or its ``_FILE`` file.
 
     Attributes:
         closed_market_orders: ``reject`` market orders while the exchange
             is closed, or ``queue`` them as DAY orders for the next open
-            where the broker allows it.
-        paper_twd_starting_cash: Starting cash of the TWD paper account
-            (TWSE and TPEx); ``None`` disables it.
+            where the broker allows it
+            (``JOSEPH_EQUITY_CLOSED_MARKET_ORDERS``, default ``reject``).
+        paper_twd_starting_cash: Starting cash in TWD of the TWD paper
+            account (TWSE and TPEx); ``None`` disables it
+            (``JOSEPH_PAPER_TWD_STARTING_CASH``, default 3000000; empty,
+            ``0``, ``off`` or ``none`` disable it; the dataclass default is
+            ``None``).
         twd_limit_factor: Multiplier of the USD-sized money risk limits
             (defaults and hard caps) for TWD accounts
             (``JOSEPH_TWD_LIMIT_FACTOR``, default 30); a sizing
             convention, not an exchange rate.
-        ibkr_enabled: Connect to IB Gateway/TWS.
-        ibkr_host: Gateway host.
+        ibkr_enabled: Connect to IB Gateway/TWS (``JOSEPH_IBKR_ENABLED``,
+            default false).
+        ibkr_host: Gateway host (``JOSEPH_IBKR_HOST``, default
+            ``127.0.0.1``).
         ibkr_port: Gateway API port (paper 4002 / live 4001; the container
-            relays 4004 / 4003).
-        ibkr_client_id: API client id.
-        ibkr_paper: The gateway is logged in to the IBKR paper account.
-        ibkr_short_selling: The IBKR account may short (margin account).
-        ibkr_readonly: Connect read-only.
-        sinopac_enabled: Log in to Shioaji.
-        sinopac_simulation: Shioaji simulation mode (default on).
-        sinopac_api_key: API key.
-        sinopac_secret_key: Secret key.
-        sinopac_ca_path: Path of the CA ``.pfx`` certificate.
-        sinopac_ca_password: CA password.
-        sinopac_person_id: National id for CA activation.
-        broker_resync_interval_ms: Periodic broker resync interval.
+            relays 4004 / 4003) (``JOSEPH_IBKR_PORT``, default 4002).
+        ibkr_client_id: API client id (``JOSEPH_IBKR_CLIENT_ID``, default
+            17).
+        ibkr_paper: The gateway is logged in to the IBKR paper account
+            (``JOSEPH_IBKR_PAPER``, default true); must match the port.
+        ibkr_short_selling: The IBKR account may short (margin account)
+            (``JOSEPH_IBKR_SHORT_SELLING``, default false).
+        ibkr_readonly: Connect read-only (``JOSEPH_IBKR_READONLY``, default
+            false).
+        sinopac_enabled: Log in to Shioaji (``JOSEPH_SINOPAC_ENABLED``,
+            default false).
+        sinopac_simulation: Shioaji simulation mode
+            (``JOSEPH_SINOPAC_SIMULATION``, default true).
+        sinopac_api_key: API key (secret ``JOSEPH_SINOPAC_API_KEY``; no
+            default).
+        sinopac_secret_key: Secret key (secret
+            ``JOSEPH_SINOPAC_SECRET_KEY``; no default).
+        sinopac_ca_path: Path of the CA ``.pfx`` certificate
+            (``JOSEPH_SINOPAC_CA_PATH``; no default).
+        sinopac_ca_password: CA password (secret
+            ``JOSEPH_SINOPAC_CA_PASSWORD``; no default).
+        sinopac_person_id: National id for CA activation (secret
+            ``JOSEPH_SINOPAC_PERSON_ID``; no default).
+        broker_resync_interval_ms: Interval of the periodic broker resync
+            in milliseconds, checked on every tick
+            (``JOSEPH_BROKER_RESYNC_INTERVAL_MS``, default 60000).
     """
 
     closed_market_orders: str = "reject"
@@ -203,10 +245,11 @@ def _flag(source: Mapping[str, str], name: str, default: bool) -> bool:
     Args:
         source: Environment.
         name: Variable.
-        default: Default.
+        default: Value when the variable is unset.
 
     Returns:
-        Value.
+        True when the variable is set to a true word (``_TRUE``, any case,
+        surrounding spaces ignored), False when set to anything else.
     """
     raw = source.get(name)
     return default if raw is None else raw.strip().lower() in _TRUE
@@ -215,14 +258,15 @@ def _flag(source: Mapping[str, str], name: str, default: bool) -> bool:
 def secret_value(source: Mapping[str, str], name: str) -> str | None:
     """Reads a secret from ``NAME`` or the file named by ``NAME_FILE``.
 
-    The value is registered for log redaction.
+    ``NAME`` wins when both are set; the file content is stripped. The
+    value is registered for log redaction.
 
     Args:
         source: Environment.
         name: Variable.
 
     Returns:
-        Value, or ``None`` when unset.
+        Value, or ``None`` when unset or empty.
 
     Raises:
         ValueError: When ``NAME_FILE`` points to an unreadable file.
@@ -277,7 +321,7 @@ def securities_from_env(source: Mapping[str, str]) -> SecuritiesSettings:
 
     Raises:
         ValueError: For invalid values, e.g. an IBKR paper flag that
-            contradicts the gateway port.
+            contradicts the gateway port, or an unreadable secret file.
     """
     policy = source.get("JOSEPH_EQUITY_CLOSED_MARKET_ORDERS", "reject")
     if policy not in _CLOSED_MARKET_POLICIES:
@@ -326,27 +370,63 @@ def securities_from_env(source: Mapping[str, str]) -> SecuritiesSettings:
 class Settings:
     """Execution engine settings.
 
+    Defaults below are those of ``from_env``; the dataclass defaults match
+    except where noted (tests build ``Settings`` directly).
+
     Attributes:
-        environment: ``development`` or ``production``.
-        database_url: SQLAlchemy URL.
-        market_url: Market engine base URL.
-        market_gateway: ``static`` (DEMO) or ``http``.
+        environment: ``development`` or another name such as
+            ``production``; only ``development`` gets dev defaults
+            (``JOSEPH_ENV``, default ``development``).
+        database_url: SQLAlchemy URL (``JOSEPH_DATABASE_URL``, default
+            ``sqlite:///./var/execution.db``).
+        market_url: Market engine base URL (``JOSEPH_MARKET_URL``, default
+            ``http://localhost:8000``).
+        market_gateway: ``static`` (built-in DEMO data) or ``http`` (the
+            market engine) (``JOSEPH_MARKET_GATEWAY``, default ``static``).
         dev_tokens: Bearer token to ``(tenant_id, user_id)``.
-        service_token: Token for ``/internal`` endpoints.
-        live_trading_enabled: Global LIVE gate.
-        emergency_halt: Platform-wide halt.
-        vault_master_key: 32-byte master key.
-        preview_secret: HMAC key for preview tokens.
-        step_up_totp_secret: Base32 TOTP secret or ``None``.
-        live_arm_max_ms: Longest (and default) account LIVE arming; at
-            most 24 hours.
-        cors_origins: Allowed browser origins.
-        paper_starting_equity: Paper equity.
-        background_tasks: Run outbox, tick and reconcile loops.
-        tick_interval_ms: Paper tick interval.
-        reconcile_interval_ms: Reconcile interval.
-        stream_heartbeat_s: User stream heartbeat.
-        demo_walk_bps: Random-walk step of the static DEMO gateway.
+            ``JOSEPH_DEV_TOKENS``: comma-separated ``token:tenant:user``
+            entries; default ``dev-local-token:tenant-01:user-01`` in
+            development, none elsewhere (dataclass default: none).
+        service_token: Token for ``/internal`` endpoints
+            (``JOSEPH_SERVICE_TOKEN``; default ``dev-service-token`` in
+            development, ``None`` elsewhere, which disables those
+            endpoints; dataclass default ``None``).
+        live_trading_enabled: Deployment-wide LIVE gate
+            (``JOSEPH_LIVE_TRADING_ENABLED``, default false).
+        emergency_halt: Platform-wide halt: every order that is not
+            risk-reducing is blocked (``JOSEPH_EMERGENCY_HALT``, default
+            false).
+        vault_master_key: 32-byte key-encryption key of the credential
+            vault (``JOSEPH_VAULT_MASTER_KEY``, base64; required outside
+            development, where an unset key becomes a random per-process
+            key; dataclass default empty).
+        preview_secret: HMAC key of order preview tokens
+            (``JOSEPH_PREVIEW_SECRET``, taken as UTF-8 bytes; default a
+            random per-process key, so tokens do not survive a restart;
+            dataclass default empty).
+        step_up_totp_secret: Base32 TOTP (time-based one-time password)
+            secret of step-up verification, or ``None`` to make every
+            step-up fail (``JOSEPH_STEP_UP_TOTP_SECRET``, default ``None``).
+        live_arm_max_ms: Longest (and default) account LIVE arming in
+            milliseconds (``JOSEPH_LIVE_ARM_MAX_MS``, default 28800000 =
+            8 hours, at most 86400000 = 24 hours).
+        cors_origins: Allowed browser origins (``JOSEPH_CORS_ORIGINS``,
+            comma-separated; default ``http://localhost:3000`` and
+            ``http://127.0.0.1:3000``).
+        paper_starting_equity: Starting equity in USD of the USD paper
+            account (``JOSEPH_PAPER_STARTING_EQUITY``, default 100000).
+        background_tasks: Run the outbox, tick, reconcile and broker event
+            loops (``JOSEPH_BACKGROUND_TASKS``, default true).
+        tick_interval_ms: Interval in milliseconds of the paper/DEMO tick
+            and of the broker event pump (``JOSEPH_TICK_INTERVAL_MS``,
+            default 1000).
+        reconcile_interval_ms: Interval in milliseconds between
+            reconciliation passes (``JOSEPH_RECONCILE_INTERVAL_MS``,
+            default 10000).
+        stream_heartbeat_s: Heartbeat interval of the user stream in
+            seconds (``JOSEPH_STREAM_HEARTBEAT_S``, default 15).
+        demo_walk_bps: Random-walk step of the static DEMO gateway in basis
+            points per tick (``JOSEPH_DEMO_WALK_BPS``, default 3).
         securities: Brokers, securities paper account and session policy.
         venues: Live crypto venue adapter settings.
     """
@@ -399,7 +479,7 @@ def parse_tokens(raw: str) -> dict[str, tuple[str, str]]:
         raw: Configuration text.
 
     Returns:
-        Token mapping.
+        Token to ``(tenant_id, user_id)``; empty for empty text.
 
     Raises:
         ValueError: For malformed entries.
@@ -423,7 +503,8 @@ def live_arm_max_ms(source: Mapping[str, str]) -> int:
         Maximum account LIVE arming in milliseconds (default 8 hours).
 
     Raises:
-        ValueError: Unless 0 < value <= 24 hours.
+        ValueError: Unless the value is an integer with
+            0 < value <= 24 hours.
     """
     raw = source.get("JOSEPH_LIVE_ARM_MAX_MS", "").strip()
     value = int(raw) if raw else accounts.LIVE_ARM_DEFAULT_MS
@@ -444,7 +525,8 @@ def from_env(env: Mapping[str, str] | None = None) -> Settings:
         Settings.
 
     Raises:
-        ValueError: For invalid values or missing production secrets.
+        ValueError: For invalid values, or a missing
+            ``JOSEPH_VAULT_MASTER_KEY`` outside development.
     """
     source = os.environ if env is None else env
     environment = source.get("JOSEPH_ENV", "development")

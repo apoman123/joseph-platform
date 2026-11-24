@@ -13,7 +13,7 @@ from joseph_execution.domain import market
 
 
 class MarketDataGateway(Protocol):
-    """Provides instrument metadata, quotes and books.
+    """A read-only source of instrument metadata, quotes, books and sessions.
 
     Implementations return ``None`` (never fabricated values) when data is
     unavailable; the Risk Gateway then reports UNKNOWN and fails closed.
@@ -28,7 +28,7 @@ class MarketDataGateway(Protocol):
             instrument_id: Canonical id.
 
         Returns:
-            Metadata or ``None``.
+            Metadata, or ``None`` when unknown or unavailable.
         """
         ...
 
@@ -39,7 +39,7 @@ class MarketDataGateway(Protocol):
             instrument_id: Canonical id.
 
         Returns:
-            Quote or ``None``.
+            Quote, or ``None`` when unavailable.
         """
         ...
 
@@ -50,10 +50,10 @@ class MarketDataGateway(Protocol):
 
         Args:
             instrument_id: Canonical id.
-            depth: Levels per side.
+            depth: Maximum levels per side.
 
         Returns:
-            Book or ``None``.
+            Book, or ``None`` when unavailable.
         """
         ...
 

@@ -21,10 +21,10 @@ from joseph_execution.domain import identity
 from joseph_execution.platform import clock as clock_lib
 from joseph_execution.platform import config
 
-TOKEN_A = "token-tenant-a"  # noqa: S105
-TOKEN_B = "token-tenant-b"  # noqa: S105
-SERVICE_TOKEN = "service-token-test"  # noqa: S105
-TOTP_SECRET = "JBSWY3DPEHPK3PXP"  # noqa: S105
+TOKEN_A = "token-tenant-a"  # noqa: S105 - fixed test credential, not a secret.
+TOKEN_B = "token-tenant-b"  # noqa: S105 - fixed test credential, not a secret.
+SERVICE_TOKEN = "service-token-test"  # noqa: S105 - fixed test credential, not a secret.
+TOTP_SECRET = "JBSWY3DPEHPK3PXP"  # noqa: S105 - widely published example TOTP secret, used only in tests.
 TENANT_A = identity.Principal("tenant-a", "user-a")
 TENANT_B = identity.Principal("tenant-b", "user-b")
 PAPER_A = "acct-paper-tenant-a"
@@ -36,8 +36,12 @@ ETH = "mock:perp:ETHUSD"
 def settings(**overrides: object) -> config.Settings:
     """Returns test settings.
 
+    The base settings use in-memory SQLite, the static DEMO gateway, fixed
+    tokens and keys, step-up with ``TOTP_SECRET``, no background loops and
+    a 0.2 s stream heartbeat; LIVE trading stays off unless overridden.
+
     Args:
-        **overrides: Field overrides.
+        **overrides: ``Settings`` field overrides.
 
     Returns:
         Settings.
@@ -57,7 +61,7 @@ def settings(**overrides: object) -> config.Settings:
         background_tasks=False,
         stream_heartbeat_s=0.2,
     )
-    return dataclasses.replace(base, **overrides)  # type: ignore[arg-type]
+    return dataclasses.replace(base, **overrides)  # type: ignore[arg-type]  # overrides are untyped by design; callers pass Settings field values
 
 
 @dataclasses.dataclass(slots=True)
@@ -76,7 +80,7 @@ class Harness:
 
     @property
     def oms(self) -> object:
-        """Returns the OMS service."""
+        """The OMS (order management system) service."""
         return self.container.services.oms
 
     def totp(self) -> str:
@@ -106,10 +110,10 @@ class Harness:
 
 
 def build(**overrides: object) -> Harness:
-    """Builds a harness.
+    """Builds a harness with both test tenants' paper accounts provisioned.
 
     Args:
-        **overrides: Settings overrides.
+        **overrides: Settings overrides (see ``settings``).
 
     Returns:
         Harness.
@@ -132,7 +136,7 @@ def headers(
         idempotency_key: Optional Idempotency-Key.
 
     Returns:
-        Headers.
+        Headers with ``Authorization`` and, when given, ``Idempotency-Key``.
     """
     result = {"Authorization": f"Bearer {token}"}
     if idempotency_key is not None:
@@ -147,7 +151,8 @@ def intent_body(**overrides: object) -> dict[str, object]:
         **overrides: Field overrides.
 
     Returns:
-        Body.
+        Body: a PAPER market IOC buy of 0.010 BTC at leverage 2 unless
+        overridden.
     """
     body: dict[str, object] = {
         "account_id": PAPER_A,

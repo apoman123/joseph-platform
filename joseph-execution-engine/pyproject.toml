@@ -12,6 +12,7 @@ dependencies = [
   "httpx>=0.27,<1",
   "websockets>=13,<17",
   "sqlalchemy>=2.0,<3",
+  # AES-GCM credential vault.
   "cryptography>=49.0.0,<51",
   # MEXC futures WebSocket Protobuf pushes (BSD-3-Clause; decoded with
   # runtime-built descriptors, no generated code).
@@ -20,7 +21,8 @@ dependencies = [
 
 [project.optional-dependencies]
 # Live venue signing. Binance, Bitget and MEXC sign with the standard
-# library (HMAC-SHA256); only the DEX venues need these packages.
+# library (HMAC-SHA256); only the decentralized-exchange (DEX) venues need
+# these packages.
 # Hyperliquid: EIP-712 typed-data signing (eth-account, MIT) over a
 # msgpack action hash (msgpack, Apache-2.0).
 hyperliquid = [
@@ -33,6 +35,7 @@ hyperliquid = [
 lighter = [
   "lighter-sdk==1.1.9",
 ]
+# Every crypto venue signer; the container image always installs it.
 venues = [
   "joseph-execution-engine[hyperliquid,lighter]",
 ]
@@ -77,6 +80,8 @@ markers = [
   "ibkr_paper: places orders on an IB Gateway paper account (opt-in with JOSEPH_IBKR_PAPER_TESTS=1)",
   "sinopac_sim: places orders in Shioaji simulation (opt-in with JOSEPH_SINOPAC_SIM_TESTS=1)",
 ]
+# importlib imports test modules without changing sys.path, so test files
+# in different directories may share a name.
 addopts = "-q --strict-markers --import-mode=importlib"
 
 [tool.ruff]
@@ -113,7 +118,8 @@ external = ["DOC", "GPY"]
 convention = "google"
 
 [tool.ruff.lint.per-file-ignores]
-# Tests assert (S101) and use fixtures, fakes and signatures they ignore.
+# Tests may assert and hold fake secrets (S), run long scenarios (PLR), need
+# no package docstrings (D104) and take fixtures they do not use (ARG).
 "tests/**" = ["S", "PLR", "D104", "ARG"]
 
 [tool.ruff.lint.isort]

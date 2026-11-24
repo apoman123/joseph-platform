@@ -12,6 +12,8 @@ from joseph_execution.domain import tracing
 from joseph_execution.ports import repositories
 from joseph_execution.ports import services
 
+# Case-insensitive substrings: a payload key containing any of them has its
+# value redacted before the record is hashed and stored.
 _SECRET_KEYS = (
     "secret",
     "password",
@@ -26,13 +28,17 @@ _SECRET_KEYS = (
 
 
 def _scrub(payload: Mapping[str, object]) -> dict[str, object]:
-    """Removes credential-like keys from an audit payload.
+    """Redacts credential-like values in an audit payload.
+
+    Nested mappings are scrubbed recursively; values inside lists are kept
+    as they are.
 
     Args:
-        payload: Raw payload.
+        payload: Raw payload (not mutated).
 
     Returns:
-        Payload with secret-like values replaced by ``"[REDACTED]"``.
+        A copy whose values under secret-like keys (see ``_SECRET_KEYS``)
+        are replaced by ``"[REDACTED]"``.
     """
     clean: dict[str, object] = {}
     for key, value in payload.items():
@@ -46,7 +52,11 @@ def _scrub(payload: Mapping[str, object]) -> dict[str, object]:
 
 
 class AuditLog:
-    """Writes audit records atomically with the audited change."""
+    """Audit writer that appends records in the caller's transaction.
+
+    Each record extends its tenant's hash chain, so it commits or rolls back
+    together with the change it audits.
+    """
 
     def __init__(
         self, clock: services.Clock, ids: services.IdGenerator
@@ -54,8 +64,8 @@ class AuditLog:
         """Initializes the log.
 
         Args:
-            clock: Time source.
-            ids: Id generator.
+            clock: Source of record timestamps.
+            ids: Generator of record ids.
         """
         self._clock = clock
         self._ids = ids
@@ -72,20 +82,22 @@ class AuditLog:
         payload: Mapping[str, object],
         account_id: str | None = None,
     ) -> audit.AuditEvent:
-        """Appends one record to the tenant chain.
+        """Appends one record to the tenant's chain.
 
         Args:
-            uow: Active unit of work (same transaction as the change).
-            tenant_id: Tenant.
-            actor: Actor label.
-            action: Action name.
-            entity_type: Entity type.
-            entity_id: Entity id.
-            payload: JSON payload; secret-like keys are redacted.
-            account_id: Related account.
+            uow: Active unit of work of the audited change; the record is
+                written in the same transaction.
+            tenant_id: Tenant whose chain the record extends.
+            actor: Who acted, such as ``user:<id>`` or ``system:oms``.
+            action: Dotted action name, such as ``order.submitted``.
+            entity_type: Kind of the audited entity, such as ``order``.
+            entity_id: Id of the audited entity.
+            payload: JSON-compatible details; values under secret-like keys
+                are redacted before hashing.
+            account_id: Related account, if any.
 
         Returns:
-            The appended record.
+            The appended record, chained to the tenant's previous hash.
         """
         now = self._clock.now_ms()
         event_id = self._ids.new_id()
@@ -119,15 +131,16 @@ class AuditLog:
         uow.audit.append(event)
         return event
 
-    @staticmethod
+    @staticmethod  # noqa: GPY035 - public API: api/routers/risk.py calls AuditLog.verify on the class.
     def verify(uow: repositories.UnitOfWork, tenant_id: str) -> bool:
         """Verifies a tenant's whole chain.
 
         Args:
-            uow: Unit of work.
+            uow: Unit of work to read the chain from.
             tenant_id: Tenant.
 
         Returns:
-            True when intact.
+            True when every link and hash is intact (also for an empty
+            chain), False otherwise.
         """
         return audit.verify_chain(uow.audit.chain(tenant_id))

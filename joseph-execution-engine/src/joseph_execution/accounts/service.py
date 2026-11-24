@@ -3,19 +3,24 @@
 
 """Account service: paper provisioning, venue connections, summaries.
 
-Credentials are sealed by the vault before persistence and are never
-returned, logged or audited. Withdrawal-capable keys are refused, and DEX
-connections accept only delegated agent/API keys, never seed phrases.
-Broker connections carry only the broker account number: broker logins
-(IB Gateway, Shioaji keys and certificates) are deployment secrets read
-from the environment or secret files, never sent through the browser.
+Credentials are sealed by the vault before persistence; their values are
+never returned, logged or audited (audits record field names only). A
+connection is refused unless the user confirms the key cannot withdraw, and
+credential fields that look like seed phrases or main wallet keys are
+refused for every venue. DEX (decentralized exchange) connections need a
+delegated agent/API key. Broker connections carry only the broker account
+number: broker logins (IB Gateway, Shioaji keys and certificates) are
+deployment secrets read from the environment or secret files, never sent
+through the browser.
 
-Manual LIVE orders also need a server-side, time-limited LIVE arming of the
-account, granted with a step-up code (verified exactly like AUTO_LIVE
-deployment consent) and an explicit risk acknowledgement, bounded by
-``JOSEPH_LIVE_ARM_MAX_MS`` (8 hours by default, never more than 24 hours).
-Grants, denials and revocations are audited; revoking credentials or losing
-LIVE on re-verification disarms the account.
+An account trades LIVE only after verification negotiates AVAILABLE
+trading. Manual LIVE orders also need a server-side, time-limited LIVE
+arming of the account, granted with a step-up code (checked by the same
+verifier as AUTO_LIVE deployment consent) and an explicit risk
+acknowledgement, and lasting at most ``JOSEPH_LIVE_ARM_MAX_MS`` (8 hours by
+default, never more than 24 hours). Grants, refusals and revocations are
+audited; revoking credentials or losing LIVE on re-verification disarms the
+account. The risk check ``mode.allowed`` enforces the arming per order.
 """
 
 from __future__ import annotations
@@ -38,7 +43,13 @@ from joseph_execution.ports import services
 from joseph_execution.ports import trading
 
 LIVE_VENUES = ("binance", "hyperliquid", "lighter", "bitget", "mexc")
+"""Crypto venues that accept a connection (brokers are listed separately)."""
+
 DEX_VENUES = ("hyperliquid", "lighter")
+"""Venues that must be connected with a delegated agent/API key."""
+
+# Substrings of credential field names that denote a wallet's master secret
+# rather than a revocable, delegated key; such fields are always refused.
 _FORBIDDEN_FIELDS = (
     "seed",
     "mnemonic",
@@ -50,6 +61,7 @@ BROKER_ACCOUNT_FIELD = "account"
 """The only credential field of a broker connection (account number)."""
 
 _BROKER_ACCOUNT = re.compile(r"^[A-Za-z0-9][A-Za-z0-9-]{2,31}$")
+# Order states listed as open orders in an account summary.
 _OPEN = (
     enums.OrderState.RESERVED,
     enums.OrderState.SUBMITTING,
@@ -63,7 +75,7 @@ _OPEN = (
 class AccountService:
     """Manages accounts and builds ``AccountSummary`` read models."""
 
-    def __init__(  # noqa: PLR0917
+    def __init__(  # noqa: PLR0917 - bootstrap passes the injected collaborators positionally; the LIVE settings are keyword-only.
         self,
         uow_factory: repositories.UnitOfWorkFactory,
         resolver: trading.AdapterResolver,
@@ -89,14 +101,16 @@ class AccountService:
             audit_log: Audit log.
             clock: Time source.
             id_gen: Id generator.
-            paper_starting_equity: Starting equity of paper accounts.
+            paper_starting_equity: Starting equity of the USD paper
+                account.
             paper_twd_starting_cash: Starting cash of the TWD paper
                 account for TWSE and TPEx securities; ``None``
                 disables it.
             step_up: Step-up verifier (shared with deployment consent).
-            live_trading_enabled: Global LIVE gate.
-            live_arm_max_ms: Longest (and default) LIVE arming, capped at
-                24 hours.
+            live_trading_enabled: Deployment-wide LIVE gate; while it is
+                off, no account can be armed.
+            live_arm_max_ms: Longest (and default) LIVE arming in
+                milliseconds; values above 24 hours are clamped to 24 hours.
         """
         self._uow = uow_factory
         self._resolver = resolver
@@ -115,7 +129,8 @@ class AccountService:
         """Returns (creating once) the tenant's paper account.
 
         Also provisions the TWD paper account (TWSE and TPEx securities)
-        when one is configured.
+        when one is configured. Each account created is audited as
+        ``account.paper_provisioned``.
 
         Args:
             tenant_id: Tenant.
@@ -132,13 +147,15 @@ class AccountService:
     ) -> accounts.Account:
         """Returns (creating once) one paper account of a tenant.
 
+        A new paper account trades PAPER and SHADOW only, never LIVE.
+
         Args:
             tenant_id: Tenant.
             currency: Account currency.
-            starting: Starting cash/equity.
+            starting: Starting cash/equity in ``currency``.
 
         Returns:
-            Paper account.
+            The existing or newly created paper account.
         """
         account_id = accounts.paper_account_id(tenant_id, currency)
         with self._uow() as uow:
@@ -175,7 +192,7 @@ class AccountService:
     def get(
         self, principal: identity.Principal, account_id: str
     ) -> accounts.Account:
-        """Loads a tenant account.
+        """Loads an account of the caller's tenant.
 
         Args:
             principal: Caller.
@@ -185,7 +202,8 @@ class AccountService:
             Account.
 
         Raises:
-            ExecutionError: ``NOT_FOUND``.
+            ExecutionError: ``NOT_FOUND`` when the account does not exist or
+                belongs to another tenant (the two are not distinguished).
         """
         with self._uow() as uow:
             account = uow.accounts.get(account_id)
@@ -196,13 +214,13 @@ class AccountService:
     async def list(
         self, principal: identity.Principal
     ) -> list[dict[str, object]]:
-        """Lists account summaries.
+        """Lists account summaries, provisioning the paper account first.
 
         Args:
             principal: Caller.
 
         Returns:
-            Contract ``AccountSummary`` objects.
+            Contract ``AccountSummary`` objects of the caller's tenant.
         """
         self.ensure_paper_account(principal.tenant_id)
         with self._uow() as uow:
@@ -220,6 +238,9 @@ class AccountService:
 
         Returns:
             Contract ``AccountSummary``.
+
+        Raises:
+            ExecutionError: ``NOT_FOUND`` (see ``get``).
         """
         return await self._summary(self.get(principal, account_id))
 
@@ -227,6 +248,8 @@ class AccountService:
         self, account: accounts.Account
     ) -> accounts.TradingCapabilities:
         """Negotiates capabilities of the account's trading adapter.
+
+        Paper accounts are asked in PAPER mode, all others in LIVE mode.
 
         Args:
             account: Account.
@@ -242,6 +265,11 @@ class AccountService:
 
     async def _summary(self, account: accounts.Account) -> dict[str, object]:
         """Builds a summary.
+
+        Equity and margin come from the venue snapshot for non-paper
+        accounts that report one (brokers) and from local valuation
+        otherwise. Non-paper summaries are always flagged ``stale`` and
+        carry no ``last_sync_ms``.
 
         Args:
             account: Account.
@@ -259,6 +287,7 @@ class AccountService:
             health = await adapter.health()
         except errors.ExecutionError:
             health = enums.HealthState.UNAVAILABLE
+        # 15 s matches the default quote age budget of the risk limits.
         val = await valuation.value_account(
             self._uow, self._market, account, mode, now, 15_000
         )
@@ -342,18 +371,24 @@ class AccountService:
     ) -> dict[str, object]:
         """Stores an encrypted venue credential and creates the account.
 
+        The new account has no order modes until ``verify`` succeeds.
+
         Args:
             principal: Caller.
-            venue: Live venue code.
-            label: Display label.
+            venue: Crypto venue (``LIVE_VENUES``) or broker code.
+            label: Display label (truncated to 120 characters; empty uses
+                the venue).
             credentials: Credential fields (never echoed back).
-            withdrawal_disabled: User attests withdrawals are disabled.
+            withdrawal_disabled: User attests withdrawals are disabled;
+                ``False`` is refused.
 
         Returns:
             Contract ``AccountSummary`` (PENDING_VERIFICATION).
 
         Raises:
-            ExecutionError: ``VALIDATION_FAILED`` for unsafe credentials.
+            ExecutionError: ``VALIDATION_FAILED`` for an unsupported venue,
+                an unconfirmed withdrawal permission, missing or unsafe
+                credentials, or malformed broker fields.
         """
         broker = equities.is_broker(venue)
         if venue not in LIVE_VENUES and not broker:
@@ -428,14 +463,20 @@ class AccountService:
     ) -> dict[str, object]:
         """Verifies a venue connection through its adapter.
 
+        The account becomes CONNECTED with LIVE mode only when its adapter
+        negotiates AVAILABLE (credentials, healthy venue and a passing
+        permission probe); otherwise it becomes TRADING_UNAVAILABLE without
+        modes and any LIVE arming is revoked. Paper accounts are unchanged.
+
         Args:
             principal: Caller.
             account_id: Account.
 
         Returns:
-            Updated summary. The account gains LIVE mode only when its
-            adapter negotiates AVAILABLE (credentials, healthy venue and a
-            passing permission probe).
+            Updated summary.
+
+        Raises:
+            ExecutionError: ``NOT_FOUND`` (see ``get``).
         """
         account = self.get(principal, account_id)
         if account.is_paper:
@@ -473,6 +514,9 @@ class AccountService:
     ) -> dict[str, object]:
         """Crypto-shreds credentials and disconnects an account.
 
+        Deletes the sealed credential envelopes, sets the account
+        DISCONNECTED without modes and revokes any LIVE arming.
+
         Args:
             principal: Caller.
             account_id: Account.
@@ -481,7 +525,8 @@ class AccountService:
             Updated summary.
 
         Raises:
-            ExecutionError: ``CONFLICT`` for the paper account.
+            ExecutionError: ``NOT_FOUND`` (see ``get``) or ``CONFLICT`` for
+                a paper account.
         """
         account = self.get(principal, account_id)
         if account.is_paper:
@@ -519,24 +564,29 @@ class AccountService:
     ) -> dict[str, object]:
         """Arms manual LIVE orders on an account for a bounded time.
 
-        Fails closed: every refusal is audited as ``live_arming.denied``.
-        The step-up code is checked by the same verifier, in the same way,
-        as AUTO_LIVE deployment consent.
+        Fails closed: the first failing condition of ``_arming_problem``
+        refuses the arming, and every refusal of an existing account is
+        audited as ``live_arming.denied`` before it is raised. A grant
+        replaces any current arming and is audited as
+        ``live_arming.granted``. The step-up code is checked by the same
+        verifier, in the same way, as AUTO_LIVE deployment consent.
 
         Args:
             principal: Caller.
             account_id: Verified venue or broker account.
-            step_up_code: Step-up (MFA) code.
+            step_up_code: Step-up (MFA, multi-factor authentication) code.
             acknowledge_risk: Explicit risk acknowledgement.
-            duration_ms: Lifetime; ``None`` uses the configured maximum.
+            duration_ms: Lifetime in milliseconds; ``None`` uses the
+                configured maximum.
 
         Returns:
             Contract ``AccountSummary`` with ``live_armed_until_ms``.
 
         Raises:
-            ExecutionError: ``NOT_FOUND``, ``TRADE_MODE_DISABLED`` (paper or
-                unverified account), ``VALIDATION_FAILED``,
-                ``STEP_UP_REQUIRED`` or ``LIVE_TRADING_DISABLED``.
+            ExecutionError: ``NOT_FOUND`` (not audited),
+                ``TRADE_MODE_DISABLED`` (paper or unverified account),
+                ``VALIDATION_FAILED``, ``STEP_UP_REQUIRED`` or
+                ``LIVE_TRADING_DISABLED``.
         """
         account = self.get(principal, account_id)
         duration = self._arm_max_ms if duration_ms is None else duration_ms
@@ -580,7 +630,7 @@ class AccountService:
             )
         return await self._summary(account)
 
-    async def _arming_problem(  # noqa: PLR0911
+    async def _arming_problem(  # noqa: PLR0911 - one return per refusal reason, checked in a fixed order.
         self,
         principal: identity.Principal,
         account: accounts.Account,
@@ -590,12 +640,18 @@ class AccountService:
     ) -> errors.ExecutionError | None:
         """Finds the first reason an arming must be refused.
 
+        The conditions, in order: the account is not paper; the risk is
+        acknowledged; ``0 < duration_ms <= live_arm_max_ms``; the step-up
+        code verifies; LIVE trading is enabled on the deployment; the
+        account is CONNECTED with LIVE among its modes; and its adapter
+        negotiates AVAILABLE trading now.
+
         Args:
             principal: Caller.
             account: Account to arm.
             step_up_code: Step-up code.
             acknowledge_risk: Risk acknowledgement.
-            duration_ms: Requested lifetime.
+            duration_ms: Requested lifetime in milliseconds.
 
         Returns:
             The refusal, or ``None`` when the arming may be granted.
@@ -646,8 +702,9 @@ class AccountService:
     ) -> dict[str, object]:
         """Disarms manual LIVE orders on an account (always allowed).
 
-        Idempotent. Cancels, risk-reducing orders, the kill switch and
-        reconciliation keep working while an account is disarmed.
+        Idempotent, and audited on every call. Cancels, risk-reducing
+        orders, the kill switch and reconciliation keep working while an
+        account is disarmed.
 
         Args:
             principal: Caller.
@@ -655,6 +712,9 @@ class AccountService:
 
         Returns:
             Contract ``AccountSummary`` (``live_armed_until_ms`` null).
+
+        Raises:
+            ExecutionError: ``NOT_FOUND`` (see ``get``).
         """
         account = self.get(principal, account_id)
         with self._uow() as uow:
@@ -671,6 +731,10 @@ class AccountService:
         always: bool = False,
     ) -> None:
         """Revokes the account's arming inside a transaction and audits it.
+
+        A stored, unrevoked arming is marked revoked even when it has
+        already expired. ``live_arming.revoked`` is audited only when a
+        valid arming was revoked, or when ``always`` is set.
 
         Args:
             uow: Active unit of work.
@@ -739,7 +803,7 @@ def _duration_text(duration_ms: int) -> str:
     """Formats an arming duration for messages.
 
     Args:
-        duration_ms: Duration.
+        duration_ms: Duration in milliseconds.
 
     Returns:
         ``8 hours``, ``90 minutes`` or ``1500 ms``.

@@ -1,10 +1,12 @@
-# Fails unless an image reference is *not* anonymously pullable from GHCR.
+# Fails when an image reference can be pulled anonymously from GHCR, or
+# when GHCR cannot be asked.
 #
 # The engine images contain the private indicator library (and, built with
 # broker extras, SinoPac's SDK, which may not be redistributed), so their
 # GHCR packages must stay private even though the repository is public.
 # GHCR answers an anonymous manifest request with 200 for a public package
-# and 403 for a private or missing one; anything else fails closed.
+# and 401, 403 or 404 for a private or missing one; on any other answer
+# GHCR is asked up to three times, then the check fails closed.
 name: Private image check
 description: Fails when a GHCR image can be pulled without credentials.
 

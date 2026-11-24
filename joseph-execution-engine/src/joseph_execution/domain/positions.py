@@ -1,7 +1,11 @@
 # Copyright 2026 apoman123
 # SPDX-License-Identifier: MIT
 
-"""One-way netted positions derived from fills."""
+"""One-way netted positions derived from fills.
+
+PnL (profit and loss) is price difference times base quantity, so it is in
+the instrument's quote currency.
+"""
 
 from __future__ import annotations
 
@@ -19,30 +23,34 @@ def position_id(account_id: str, instrument_id: str, mode: str) -> str:
     Args:
         account_id: Account.
         instrument_id: Instrument.
-        mode: Order mode.
+        mode: Order mode value; each mode has its own position.
 
     Returns:
-        Stable id like ``pos_...``.
+        Stable id like ``pos_3f1c2a9b0d4e5f60``.
     """
     return ids.stable_id("pos", account_id, instrument_id, mode)
 
 
 @dataclasses.dataclass(slots=True)
 class Position:
-    """Net position; ``signed_qty`` > 0 long, < 0 short.
+    """A net position; ``signed_qty`` > 0 is long, < 0 short.
+
+    Mutable: ``apply_fill`` updates it in place.
 
     Attributes:
-        position_id: Deterministic id.
+        position_id: Deterministic id (``position_id``).
         tenant_id: Owning tenant.
         account_id: Account.
         instrument_id: Instrument.
         mode: Order mode (positions never mix modes).
         signed_qty: Signed base quantity.
-        entry_price: Average entry of the open quantity.
-        realized_pnl: Realized PnL net of fees.
+        entry_price: Average entry price of the open quantity; ``None``
+            when flat.
+        realized_pnl: Cumulative realized PnL net of fees.
         fees_paid: Cumulative fees.
-        leverage: Leverage of the latest opening order.
-        updated_at_ms: Last change.
+        leverage: Leverage of the latest order that opened or increased it.
+        updated_at_ms: Last change, UTC epoch milliseconds; never moves
+            backwards.
         unknown: True when local state disagrees with the venue.
     """
 
@@ -61,7 +69,7 @@ class Position:
 
     @property
     def side(self) -> str:
-        """Returns ``long``, ``short`` or ``flat``."""
+        """The side label: ``long``, ``short`` or ``flat``."""
         if self.signed_qty > decimals.ZERO:
             return "long"
         if self.signed_qty < decimals.ZERO:
@@ -70,10 +78,10 @@ class Position:
 
     @property
     def quantity(self) -> decimal.Decimal:
-        """Returns the absolute position size."""
+        """The absolute position size in base units."""
         return abs(self.signed_qty)
 
-    def apply_fill(  # noqa: PLR0917
+    def apply_fill(  # noqa: PLR0917 - one fill's side, quantity, price, fee and time; callers pass them positionally.
         self,
         side: enums.OrderSide,
         quantity: decimal.Decimal,
@@ -82,15 +90,22 @@ class Position:
         now_ms: int,
         leverage: decimal.Decimal | None = None,
     ) -> decimal.Decimal:
-        """Nets a fill into the position.
+        """Nets a fill into the position, in place.
+
+        A fill on the position's side (or into a flat position) increases
+        it at the size-weighted average entry price. An opposite fill
+        reduces it and realizes PnL on the closed quantity at the old entry
+        price; any remainder past zero opens the other side at the fill
+        price.
 
         Args:
             side: Fill side.
             quantity: Base quantity (positive).
             price: Fill price.
-            fee: Fee charged for the fill.
+            fee: Fee charged for the fill (positive = paid).
             now_ms: Fill time.
-            leverage: Leverage of the order, applied when increasing.
+            leverage: Leverage of the order, recorded when the fill opens or
+                increases the position; ``None`` keeps the current value.
 
         Returns:
             PnL realized by this fill, net of its fee.
@@ -133,14 +148,15 @@ class Position:
             mark: Mark price or ``None``.
 
         Returns:
-            Unrealized PnL, or ``None`` if unknown.
+            Unrealized PnL; zero for a flat position, ``None`` for an open
+            one without a mark or entry price.
         """
         if mark is None or self.entry_price is None:
             return None if self.signed_qty else decimals.ZERO
         return (mark - self.entry_price) * self.signed_qty
 
     def margin(self) -> decimal.Decimal:
-        """Returns the margin in use (entry notional / leverage)."""
+        """Returns the margin in use: entry notional / leverage, 0 when flat."""
         if self.entry_price is None:
             return decimals.ZERO
         return self.entry_price * self.quantity / self.leverage
@@ -151,9 +167,10 @@ class Position:
         """Serializes to the contract ``Position``.
 
         Args:
-            mark: Mark price for unrealized PnL.
+            mark: Mark price for unrealized PnL, if known.
             now_ms: Snapshot time.
-            stale: Whether the mark is stale or the position unknown.
+            stale: Whether the mark is stale; an ``unknown`` position is
+                reported stale either way.
 
         Returns:
             JSON-compatible dict.
@@ -168,6 +185,7 @@ class Position:
             "mark_price": decimals.fmt_optional(mark),
             "unrealized_pnl": decimals.fmt_optional(self.unrealized_pnl(mark)),
             "realized_pnl": decimals.fmt(self.realized_pnl),
+            # Liquidation price and funding are not tracked locally.
             "liquidation_price": None,
             "margin": decimals.fmt(self.margin()),
             "leverage": decimals.fmt(self.leverage),

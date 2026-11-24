@@ -17,6 +17,7 @@ from joseph_execution.domain import tracing
 
 _LOG = logging.getLogger(__name__)
 
+# HTTP status of each contract error code; codes missing here map to 400.
 STATUS_BY_CODE: dict[str, int] = {
     "VALIDATION_FAILED": 422,
     "INVALID_TICK_SIZE": 422,
@@ -61,11 +62,11 @@ def body(
     Args:
         code: Contract error code.
         message: Message.
-        retryable: Retry hint.
-        field_errors: Field errors.
+        retryable: Whether the same request may succeed when retried.
+        field_errors: Per-field errors as ``{"field", "message"}`` dicts.
 
     Returns:
-        Contract error body.
+        Contract error body carrying the request's trace id.
     """
     return {
         "code": code,
@@ -79,6 +80,12 @@ def body(
 
 def install(app: fastapi.FastAPI) -> None:
     """Registers exception handlers.
+
+    Every error leaves the API as a contract ``ErrorResponse``: an
+    ``ExecutionError`` with its code (status from ``STATUS_BY_CODE``),
+    request validation errors as ``VALIDATION_FAILED`` (422), framework
+    HTTP errors by status, and anything else as ``INTERNAL`` (500) with
+    details only in the log.
 
     Args:
         app: Application.

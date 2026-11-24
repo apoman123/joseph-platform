@@ -3,9 +3,12 @@
 
 """Order aggregate with an explicit state machine.
 
-Transitions not listed in ``TRANSITIONS`` raise ``InvalidTransitionError``.
-Terminal states are absorbing. Fills are idempotent by venue fill id and the
-filled quantity can never exceed the order quantity.
+Invariants enforced here: a state change not listed in ``TRANSITIONS``
+raises ``InvalidTransitionError``; terminal states (FILLED, REJECTED,
+CANCELED, EXPIRED, FAILED) are absorbing; a fill is applied at most once per
+venue fill id; and the filled quantity never exceeds the order quantity.
+Every mutation bumps ``Order.version``, which repositories use for
+optimistic concurrency.
 """
 
 from __future__ import annotations
@@ -19,6 +22,13 @@ from joseph_execution.domain import errors
 
 S = enums.OrderState
 
+# The happy path is DRAFT -> VALIDATED -> RESERVED -> SUBMITTING ->
+# ACKNOWLEDGED -> PARTIALLY_FILLED -> FILLED. A submit whose venue outcome is
+# unknown goes to UNKNOWN_RECONCILING, from which reconciliation may
+# resubmit (SUBMITTING) or apply whatever the venue reports. CANCEL_PENDING
+# returns to ACKNOWLEDGED or PARTIALLY_FILLED when the venue refuses the
+# cancel. The self-loops on PARTIALLY_FILLED and CANCEL_PENDING admit
+# further fills.
 TRANSITIONS: dict[enums.OrderState, frozenset[enums.OrderState]] = {
     S.DRAFT: frozenset({S.VALIDATED, S.REJECTED}),
     S.VALIDATED: frozenset({S.RESERVED, S.REJECTED}),
@@ -86,7 +96,8 @@ def can_transition(current: enums.OrderState, target: enums.OrderState) -> bool:
         target: Requested state.
 
     Returns:
-        True when ``target`` is reachable in one step.
+        True when ``target`` is reachable in one step; a state reaches
+        itself only where ``TRANSITIONS`` lists the self-loop.
     """
     return target in TRANSITIONS[current]
 
@@ -103,11 +114,11 @@ class Fill:
         exchange_fill_id: Venue fill id (idempotency key per account).
         side: Order side.
         price: Fill price.
-        quantity_base: Filled base quantity.
+        quantity_base: Filled base quantity (positive).
         fee: Fee paid (positive) or rebate (negative) in quote currency.
         fee_asset: Fee currency.
         liquidity: ``maker`` or ``taker``.
-        ts_ms: Venue fill time.
+        ts_ms: Venue fill time, UTC epoch milliseconds.
         mode: Order mode.
         realized_pnl: PnL realized by this fill, net of its fee.
     """
@@ -166,14 +177,15 @@ class Order:
         side: Side.
         order_type: Type.
         time_in_force: Time in force.
-        quantity_base: Order quantity.
+        quantity_base: Order quantity in base units.
         reduce_only: Reduce-only flag.
         state: Current state.
-        created_at_ms: Creation time.
-        updated_at_ms: Last update time.
+        created_at_ms: Creation time, UTC epoch milliseconds.
+        updated_at_ms: Last update time; never moves backwards.
         version: Optimistic concurrency version (increments on mutation).
-        filled_base: Cumulative filled quantity.
-        avg_fill_price: Volume-weighted fill price.
+        filled_base: Cumulative filled quantity, at most ``quantity_base``.
+        avg_fill_price: Volume-weighted fill price (``None`` before the
+            first fill).
         limit_price: Limit price.
         trigger_price: Trigger price.
         trigger_basis: Trigger basis.
@@ -184,7 +196,8 @@ class Order:
         signal_id: Originating signal.
         submit_attempts: Number of venue submissions.
         manual_intervention: True when automatic recovery stopped.
-        fill_ids: Venue fill ids already applied.
+        fill_ids: Venue fill ids already applied (the fill idempotency
+            set).
     """
 
     order_id: str
@@ -220,7 +233,7 @@ class Order:
 
     @property
     def remaining_base(self) -> decimal.Decimal:
-        """Returns the unfilled quantity."""
+        """The unfilled base quantity."""
         return self.quantity_base - self.filled_base
 
     def transition(
@@ -231,10 +244,12 @@ class Order:
         Args:
             target: Requested state.
             now_ms: Mutation time.
-            reason: Optional explanation stored as ``state_reason``.
+            reason: Optional explanation stored as ``state_reason``;
+                ``None`` keeps the previous reason.
 
         Raises:
-            InvalidTransitionError: If the transition is illegal.
+            InvalidTransitionError: If ``TRANSITIONS`` does not allow the
+                transition; the order is then unchanged.
         """
         if not can_transition(self.state, target):
             raise errors.InvalidTransitionError(self.state.value, target.value)
@@ -246,18 +261,26 @@ class Order:
     def apply_fill(self, fill: Fill, now_ms: int) -> bool:
         """Applies a fill idempotently and advances the fill state.
 
-        Fills on terminal orders are recorded (venue truth) without changing
-        the terminal state.
+        A new fill updates the filled quantity and average price, then moves
+        a live order to FILLED when complete, keeps CANCEL_PENDING while a
+        cancel is pending, or else moves it to PARTIALLY_FILLED. Fills on
+        terminal orders are recorded (venue truth) without changing the
+        terminal state.
 
         Args:
             fill: Venue fill.
             now_ms: Mutation time.
 
         Returns:
-            True if the fill was new, False for a duplicate.
+            True if the fill was new, False for a duplicate (nothing
+            changes).
 
         Raises:
-            ExecutionError: If the fill would exceed the order quantity.
+            ExecutionError: ``VALIDATION_FAILED`` for a non-positive fill
+                quantity, or ``CONFLICT`` if the fill would exceed the order
+                quantity; the order is then unchanged.
+            InvalidTransitionError: If the order was never submitted (DRAFT,
+                VALIDATED or RESERVED); the fill is already counted then.
         """
         if fill.exchange_fill_id in self.fill_ids:
             return False
@@ -296,8 +319,12 @@ class Order:
     def acknowledge(self, exchange_order_id: str | None, now_ms: int) -> None:
         """Records a venue acknowledgement when still pre-ack.
 
+        Only SUBMITTING and UNKNOWN_RECONCILING orders move to ACKNOWLEDGED;
+        in any other state only the venue order id and version change.
+
         Args:
-            exchange_order_id: Venue order id.
+            exchange_order_id: Venue order id; ``None`` or empty keeps the
+                current one.
             now_ms: Mutation time.
         """
         if exchange_order_id:
@@ -318,13 +345,15 @@ class Order:
 
         Args:
             now_ms: Mutation time.
-            limit_price: New limit price.
-            trigger_price: New trigger price.
-            quantity_base: New total quantity (>= filled quantity).
+            limit_price: New limit price; ``None`` keeps the current one.
+            trigger_price: New trigger price; ``None`` keeps the current one.
+            quantity_base: New total quantity, which must exceed the filled
+                quantity; ``None`` keeps the current one.
 
         Raises:
-            ExecutionError: If the order is not working or the quantity
-                would fall below the filled quantity.
+            ExecutionError: ``CONFLICT`` if the order is not working, or
+                ``VALIDATION_FAILED`` if the quantity would not exceed the
+                filled quantity.
         """
         if not self.state.is_working:
             raise errors.ExecutionError(
@@ -347,7 +376,8 @@ class Order:
         """Bumps the version and update time.
 
         Args:
-            now_ms: Mutation time.
+            now_ms: Mutation time; an earlier time leaves ``updated_at_ms``
+                as it is.
         """
         self.version += 1
         self.updated_at_ms = max(self.updated_at_ms, now_ms)

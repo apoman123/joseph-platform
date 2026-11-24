@@ -1,7 +1,11 @@
 # Copyright 2026 apoman123
 # SPDX-License-Identifier: MIT
 
-"""Persistence ports. One ``UnitOfWork`` is one ACID transaction."""
+"""Persistence ports. One ``UnitOfWork`` is one ACID transaction.
+
+Repositories are reached through a unit of work and are valid only inside
+its ``with`` block. Times are UTC epoch milliseconds.
+"""
 
 from __future__ import annotations
 
@@ -12,6 +16,7 @@ from collections.abc import Callable
 from collections.abc import Mapping
 from collections.abc import Sequence
 from typing import Protocol
+from typing import TypeAlias
 
 from joseph_execution.domain import accounts
 from joseph_execution.domain import audit
@@ -26,12 +31,13 @@ from joseph_execution.domain import risk
 
 @dataclasses.dataclass(frozen=True, slots=True)
 class StoredIntent:
-    """An intent with its risk decision as persisted.
+    """An intent with its risk decision, as persisted.
 
     Attributes:
         intent: Immutable intent.
         decision: Risk decision taken when it was created.
-        body_hash: Hash of the request body (idempotency comparison).
+        body_hash: ``OrderIntentRequest.body_hash`` of the request, compared
+            when an idempotency key is reused.
     """
 
     intent: intents.OrderIntent
@@ -41,17 +47,19 @@ class StoredIntent:
 
 @dataclasses.dataclass(frozen=True, slots=True)
 class OutboxItem:
-    """Pending side effect toward a venue.
+    """A side effect toward a venue, recorded with the change that needs it.
 
     Attributes:
-        outbox_id: Row id.
+        outbox_id: Row id; increases in insertion order.
         aggregate_id: Order id.
         event_key: Unique key within the aggregate (e.g. ``submit``).
-        kind: ``SUBMIT``, ``RECONCILE`` or ``CANCEL``.
-        status: ``PENDING``, ``DONE``, ``MANUAL`` or ``FAILED``.
+        kind: ``SUBMIT`` or ``RECONCILE``; the dispatcher reconciles
+            every kind other than ``SUBMIT``.
+        status: ``PENDING``, ``DONE``, ``MANUAL`` or ``FAILED``; only
+            ``PENDING`` items are dispatched.
         attempts: Attempts so far.
-        next_attempt_ms: Earliest next attempt.
-        last_error: Last error text.
+        next_attempt_ms: Earliest time of the next attempt.
+        last_error: Last error text, if any.
     """
 
     outbox_id: int
@@ -65,7 +73,7 @@ class OutboxItem:
 
 
 class AccountRepository(Protocol):
-    """Accounts."""
+    """The store of accounts."""
 
     def get(self, account_id: str) -> accounts.Account | None:
         """Loads an account.
@@ -107,7 +115,7 @@ class AccountRepository(Protocol):
 
 
 class CredentialRepository(Protocol):
-    """Encrypted credential envelopes."""
+    """The store of encrypted credential envelopes (never plaintext)."""
 
     def add(
         self,
@@ -123,7 +131,7 @@ class CredentialRepository(Protocol):
             credential_id: Id.
             tenant_id: Tenant.
             account_id: Account.
-            envelope: Sealed fields.
+            envelope: Fields from ``CredentialVault.seal``.
             created_at_ms: Time.
         """
         ...
@@ -142,6 +150,9 @@ class CredentialRepository(Protocol):
     def delete_for_account(self, account_id: str) -> int:
         """Crypto-shreds all envelopes of an account.
 
+        Each envelope carries its own wrapped data key, so deleting it
+        leaves nothing to decrypt.
+
         Args:
             account_id: Account.
 
@@ -152,13 +163,18 @@ class CredentialRepository(Protocol):
 
 
 class IntentRepository(Protocol):
-    """Order intents (unique per tenant and idempotency key)."""
+    """The store of order intents (unique per tenant and idempotency key)."""
 
     def add(self, stored: StoredIntent) -> None:
         """Inserts an intent.
 
         Args:
             stored: Intent with decision.
+
+        Raises:
+            ExecutionError: With ``IDEMPOTENCY_CONFLICT`` when the tenant
+                already has an intent with the same idempotency key; the
+                OMS then replays the stored one.
         """
         ...
 
@@ -195,7 +211,7 @@ class IntentRepository(Protocol):
         Args:
             tenant_id: Tenant.
             signal_id: Signal.
-            deployment_id: Deployment (``None`` for manual intents).
+            deployment_id: Deployment; ``None`` counts intents without one.
 
         Returns:
             Count.
@@ -204,22 +220,33 @@ class IntentRepository(Protocol):
 
 
 class OrderRepository(Protocol):
-    """Orders (unique per account and client order id)."""
+    """The store of orders (unique per account and client order id)."""
 
     def add(self, order: orders.Order) -> None:
         """Inserts an order.
 
         Args:
             order: Order.
+
+        Raises:
+            ExecutionError: With ``DUPLICATE_INTENT`` when the account
+                already has an order with the same client order id.
         """
         ...
 
     def save(self, order: orders.Order, expected_version: int) -> None:
         """Updates an order with optimistic concurrency.
 
+        The order's own ``version`` was bumped by its mutation; the row is
+        written only if it still holds ``expected_version``.
+
         Args:
             order: Mutated order.
-            expected_version: Version the caller loaded.
+            expected_version: Version the caller loaded, before mutating.
+
+        Raises:
+            ExecutionError: With ``CONFLICT`` when the stored row changed
+                since it was loaded.
         """
         ...
 
@@ -248,7 +275,7 @@ class OrderRepository(Protocol):
         """
         ...
 
-    def list(  # noqa: PLR0917
+    def list(  # noqa: PLR0917 - optional query filters mirrored by every implementation; callers pass them by keyword.
         self,
         tenant_id: str | None = None,
         account_id: str | None = None,
@@ -259,22 +286,24 @@ class OrderRepository(Protocol):
     ) -> list[orders.Order]:
         """Lists orders, newest first.
 
+        Every filter left ``None`` matches all orders.
+
         Args:
             tenant_id: Tenant filter (``None`` only for system workers).
             account_id: Account filter.
-            states: State filter.
+            states: State filter; empty also matches every state.
             intent_id: Intent filter.
-            parent_order_id: Parent filter.
+            parent_order_id: Parent filter (protective child orders).
             limit: Maximum rows.
 
         Returns:
-            Orders.
+            Orders, newest first by creation time.
         """
         ...
 
 
 class FillRepository(Protocol):
-    """Fills (unique per account and venue fill id)."""
+    """The store of fills (unique per account and venue fill id)."""
 
     def add(self, fill: orders.Fill, tenant_id: str) -> bool:
         """Inserts a fill.
@@ -284,7 +313,8 @@ class FillRepository(Protocol):
             tenant_id: Tenant.
 
         Returns:
-            False when the venue fill id was already recorded.
+            True when inserted; False when the venue fill id was already
+            recorded (nothing changes).
         """
         ...
 
@@ -309,20 +339,21 @@ class FillRepository(Protocol):
         ...
 
     def realized_since(self, account_id: str, since_ms: int) -> decimal.Decimal:
-        """Sums realized PnL of fills since a time.
+        """Sums realized PnL (profit and loss) of fills since a time.
 
         Args:
             account_id: Account.
-            since_ms: Lower bound.
+            since_ms: Earliest fill time included.
 
         Returns:
-            Realized PnL.
+            Realized PnL of the account's fills at or after ``since_ms``;
+            zero when there are none.
         """
         ...
 
 
 class PositionRepository(Protocol):
-    """Positions."""
+    """The store of positions (one per account, instrument and mode)."""
 
     def get(
         self, account_id: str, instrument_id: str, mode: enums.OrderMode
@@ -367,7 +398,7 @@ class PositionRepository(Protocol):
         """Lists positions.
 
         Args:
-            tenant_id: Tenant filter.
+            tenant_id: Tenant filter (``None`` only for system workers).
             account_id: Account filter.
             include_flat: Include zero positions.
 
@@ -378,9 +409,9 @@ class PositionRepository(Protocol):
 
 
 class ReservationRepository(Protocol):
-    """Margin reservations for working orders."""
+    """The store of margin reservations for working orders."""
 
-    def add(  # noqa: PLR0917
+    def add(  # noqa: PLR0917 - one reservation row's fields; the OMS passes them positionally.
         self,
         reservation_id: str,
         tenant_id: str,
@@ -402,6 +433,9 @@ class ReservationRepository(Protocol):
             amount: Reserved margin (>= 0).
             created_at_ms: Time.
             mode: Order mode the margin belongs to.
+
+        Raises:
+            ValueError: If ``amount`` is negative.
         """
         ...
 
@@ -413,7 +447,7 @@ class ReservationRepository(Protocol):
             now_ms: Time.
 
         Returns:
-            Rows released.
+            Rows released; 0 when the order had no active reservation.
         """
         ...
 
@@ -424,7 +458,7 @@ class ReservationRepository(Protocol):
 
         Args:
             account_id: Account.
-            mode: Optional mode filter.
+            mode: Mode filter; ``None`` sums every mode.
 
         Returns:
             Total (never negative).
@@ -438,27 +472,32 @@ class ReservationRepository(Protocol):
             order_id: Order.
 
         Returns:
-            Amount or ``None``.
+            Amount, or ``None`` when the order has no active reservation.
         """
         ...
 
 
 class OutboxRepository(Protocol):
-    """Transactional outbox for venue side effects."""
+    """The transactional outbox of venue side effects.
+
+    Items are written in the same transaction as the state change that
+    needs them and dispatched afterwards, so a crash between the two never
+    loses a side effect.
+    """
 
     def add(
         self, aggregate_id: str, event_key: str, kind: str, now_ms: int
     ) -> bool:
-        """Adds an item (idempotent on aggregate and key).
+        """Adds a pending item (idempotent on aggregate and key).
 
         Args:
             aggregate_id: Order id.
-            event_key: Key.
-            kind: Kind.
-            now_ms: Time.
+            event_key: Key, unique within the aggregate.
+            kind: ``OutboxItem.kind``.
+            now_ms: Time; the item is due at once.
 
         Returns:
-            False if it already existed.
+            True when added; False if the item already existed.
         """
         ...
 
@@ -467,14 +506,15 @@ class OutboxRepository(Protocol):
 
         Args:
             now_ms: Time.
-            limit: Maximum.
+            limit: Maximum items.
 
         Returns:
-            Items.
+            ``PENDING`` items with ``next_attempt_ms <= now_ms``, oldest
+            first.
         """
         ...
 
-    def update(  # noqa: PLR0917
+    def update(  # noqa: PLR0917 - the item's new status, attempts, schedule and error; the OMS passes them positionally.
         self,
         outbox_id: int,
         status: str,
@@ -488,10 +528,10 @@ class OutboxRepository(Protocol):
         Args:
             outbox_id: Row id.
             status: New status.
-            attempts: Attempts.
-            next_attempt_ms: Next attempt.
-            last_error: Error text.
-            kind: Optional new kind.
+            attempts: Attempts so far.
+            next_attempt_ms: Earliest time of the next attempt.
+            last_error: Error text, or ``None``.
+            kind: New kind, or ``None`` to keep it.
         """
         ...
 
@@ -502,13 +542,13 @@ class OutboxRepository(Protocol):
             aggregate_id: Order id.
 
         Returns:
-            Items.
+            Items, oldest first.
         """
         ...
 
 
 class AuditRepository(Protocol):
-    """Append-only audit store."""
+    """The append-only audit store (one hash chain per tenant)."""
 
     def last_hash(self, tenant_id: str) -> str:
         """Returns the latest chain hash of a tenant.
@@ -517,15 +557,16 @@ class AuditRepository(Protocol):
             tenant_id: Tenant.
 
         Returns:
-            Hash or the genesis hash.
+            Hash of the tenant's last record, or ``audit.GENESIS_HASH``
+            when it has none.
         """
         ...
 
     def append(self, event: audit.AuditEvent) -> None:
-        """Appends a record.
+        """Appends a record; records are never updated or deleted.
 
         Args:
-            event: Record.
+            event: Record chained to ``last_hash`` in the same unit of work.
         """
         ...
 
@@ -557,10 +598,10 @@ class AuditRepository(Protocol):
 
 
 class KillSwitchRepository(Protocol):
-    """Kill switch states."""
+    """The store of kill switch states."""
 
     def upsert(self, switch: kill_switch.KillSwitch) -> None:
-        """Saves a switch.
+        """Saves a switch, replacing the one of the same scope and target.
 
         Args:
             switch: State.
@@ -574,13 +615,13 @@ class KillSwitchRepository(Protocol):
             tenant_id: Tenant.
 
         Returns:
-            Switches.
+            The tenant's switches, engaged or not.
         """
         ...
 
 
 class RiskLimitRepository(Protocol):
-    """User-configured risk limits per account."""
+    """The store of user-configured risk limits per account."""
 
     def get(self, tenant_id: str, account_id: str) -> dict[str, str] | None:
         """Loads limits.
@@ -590,7 +631,8 @@ class RiskLimitRepository(Protocol):
             account_id: Account.
 
         Returns:
-            Limits as decimal strings, or ``None``.
+            Stored limits by name, as decimal strings, or ``None`` when the
+            account has none.
         """
         ...
 
@@ -601,19 +643,19 @@ class RiskLimitRepository(Protocol):
         limits: Mapping[str, str],
         now_ms: int,
     ) -> None:
-        """Stores limits.
+        """Stores limits, replacing the account's previous ones.
 
         Args:
             tenant_id: Tenant.
             account_id: Account.
-            limits: Limits.
+            limits: Limits by name, as decimal strings.
             now_ms: Time.
         """
         ...
 
 
 class DeploymentRepository(Protocol):
-    """Strategy deployments."""
+    """The store of strategy deployments."""
 
     def add(self, deployment: deployments.Deployment) -> None:
         """Inserts a deployment.
@@ -649,7 +691,8 @@ class DeploymentRepository(Protocol):
 
         Args:
             tenant_id: Tenant.
-            strategy_version_id: Optional filter.
+            strategy_version_id: Strategy version filter; ``None`` lists
+                all of the tenant's deployments.
 
         Returns:
             Deployments.
@@ -658,7 +701,7 @@ class DeploymentRepository(Protocol):
 
 
 class LiveArmingRepository(Protocol):
-    """Current LIVE arming of each account (one row per tenant account)."""
+    """The store of each account's current LIVE arming (one per account)."""
 
     def get(
         self, tenant_id: str, account_id: str
@@ -684,71 +727,75 @@ class LiveArmingRepository(Protocol):
 
 
 class UnitOfWork(Protocol):
-    """Transaction boundary exposing every repository."""
+    """A transaction boundary exposing every repository.
+
+    Use one per ``with`` block; work done inside commits together or not at
+    all.
+    """
 
     @property
     def accounts(self) -> AccountRepository:
-        """Returns the accounts repository."""
+        """The accounts repository."""
         ...
 
     @property
     def credentials(self) -> CredentialRepository:
-        """Returns the credentials repository."""
+        """The credentials repository."""
         ...
 
     @property
     def intents(self) -> IntentRepository:
-        """Returns the intents repository."""
+        """The intents repository."""
         ...
 
     @property
     def orders(self) -> OrderRepository:
-        """Returns the orders repository."""
+        """The orders repository."""
         ...
 
     @property
     def fills(self) -> FillRepository:
-        """Returns the fills repository."""
+        """The fills repository."""
         ...
 
     @property
     def positions(self) -> PositionRepository:
-        """Returns the positions repository."""
+        """The positions repository."""
         ...
 
     @property
     def reservations(self) -> ReservationRepository:
-        """Returns the reservations repository."""
+        """The reservations repository."""
         ...
 
     @property
     def outbox(self) -> OutboxRepository:
-        """Returns the outbox repository."""
+        """The outbox repository."""
         ...
 
     @property
     def audit(self) -> AuditRepository:
-        """Returns the audit repository."""
+        """The audit repository."""
         ...
 
     @property
     def kill_switches(self) -> KillSwitchRepository:
-        """Returns the kill switches repository."""
+        """The kill switches repository."""
         ...
 
     @property
     def risk_limits(self) -> RiskLimitRepository:
-        """Returns the risk limits repository."""
+        """The risk limits repository."""
         ...
 
     @property
     def deployments(self) -> DeploymentRepository:
-        """Returns the deployments repository."""
+        """The deployments repository."""
         ...
 
     @property
     def live_arming(self) -> LiveArmingRepository:
-        """Returns the account LIVE arming repository."""
+        """The account LIVE arming repository."""
         ...
 
     def __enter__(self) -> UnitOfWork:
@@ -761,7 +808,7 @@ class UnitOfWork(Protocol):
         exc: BaseException | None,
         tb: types.TracebackType | None,
     ) -> None:
-        """Commits on success, rolls back on error.
+        """Commits on success, rolls back on error; never suppresses it.
 
         Args:
             exc_type: Exception type.
@@ -771,5 +818,5 @@ class UnitOfWork(Protocol):
         ...
 
 
-UnitOfWorkFactory = Callable[[], UnitOfWork]
+UnitOfWorkFactory: TypeAlias = Callable[[], UnitOfWork]
 """Creates a new unit of work (transaction)."""

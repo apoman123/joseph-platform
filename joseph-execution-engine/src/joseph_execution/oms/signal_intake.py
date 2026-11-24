@@ -29,11 +29,35 @@ from joseph_execution.ports import market as market_port
 from joseph_execution.ports import repositories
 from joseph_execution.ports import services
 
+# User id of the principal that submits intents derived from signals.
 STRATEGY_USER = "strategy-engine"
 
 
+def _summarize(
+    deployment: deployments.Deployment,
+    outcome: oms_service.SubmitResult,
+) -> dict[str, object]:
+    """Summarizes one deployment's outcome.
+
+    Args:
+        deployment: Deployment the intent was submitted for.
+        outcome: Submission result.
+
+    Returns:
+        Result row with the deployment, intent, risk decision, order ids
+        and replay flag.
+    """
+    return {
+        "deployment_id": deployment.deployment_id,
+        "intent_id": outcome.intent.intent_id,
+        "decision": outcome.decision.decision.value,
+        "order_ids": [o.order_id for o in outcome.orders],
+        "replayed": outcome.replayed,
+    }
+
+
 class SignalIntakeService:
-    """Handles ``POST /internal/v1/signals``."""
+    """Service behind ``POST /internal/v1/signals``."""
 
     def __init__(
         self,
@@ -47,9 +71,9 @@ class SignalIntakeService:
 
         Args:
             uow_factory: Unit of work factory.
-            oms: OMS.
+            oms: Order management service (OMS) that submits the intents.
             market_data: Market gateway (sizing references).
-            audit_log: Audit log.
+            audit_log: Audit log for rejected signals.
             clock: Time source.
         """
         self._uow = uow_factory
@@ -61,11 +85,21 @@ class SignalIntakeService:
     async def ingest(self, body: Mapping[str, object]) -> dict[str, object]:
         """Processes one signal.
 
+        A failure for one deployment (``ExecutionError`` while building or
+        submitting its intent) is audited as ``signal.rejected`` and
+        reported in its result row; the other deployments still run.
+
         Args:
             body: Contract ``Signal``.
 
         Returns:
-            Per-deployment results.
+            ``{"signal_id", "accepted": True, "results"}`` with one row per
+            candidate deployment, either a summary or an ``error``; a
+            non-entry signal gets no results and a ``note``.
+
+        Raises:
+            ExecutionError: ``VALIDATION_FAILED`` when ``body`` is not a
+                valid signal.
         """
         signal = signals.SignalView.from_contract(body)
         if signal.kind != "ENTRY_CONFIRMED":
@@ -75,6 +109,8 @@ class SignalIntakeService:
                 "results": [],
                 "note": "non-entry signals create no orders",
             }
+        # AUTO_LIVE deployments awaiting consent are submitted too, so the
+        # Risk Gateway records the block instead of the signal vanishing.
         with self._uow() as uow:
             candidates = [
                 d
@@ -92,9 +128,11 @@ class SignalIntakeService:
         for deployment in candidates:
             key = f"signal:{signal.signal_id}:{deployment.deployment_id}"
             try:
+                # The first intent for a key wins: a redelivered signal may
+                # size differently, so it is not compared with the original.
                 existing = self._oms.lookup(principal, key)
                 if existing is not None:
-                    results.append(self._summarize(deployment, existing))
+                    results.append(_summarize(deployment, existing))
                     continue
                 request = await self._build_request(signal, deployment)
                 outcome = await self._oms.submit_intent(
@@ -102,6 +140,7 @@ class SignalIntakeService:
                     request,
                     key,
                     deployment_id=deployment.deployment_id,
+                    # Clamped at 0 against clock skew with the market engine.
                     signal_age_ms=max(
                         0, self._clock.now_ms() - signal.bar_close_ms
                     ),
@@ -129,33 +168,11 @@ class SignalIntakeService:
                     }
                 )
                 continue
-            results.append(self._summarize(deployment, outcome))
+            results.append(_summarize(deployment, outcome))
         return {
             "signal_id": signal.signal_id,
             "accepted": True,
             "results": results,
-        }
-
-    @staticmethod
-    def _summarize(
-        deployment: deployments.Deployment,
-        outcome: oms_service.SubmitResult,
-    ) -> dict[str, object]:
-        """Summarizes one deployment's outcome.
-
-        Args:
-            deployment: Deployment.
-            outcome: Submission result.
-
-        Returns:
-            Result row.
-        """
-        return {
-            "deployment_id": deployment.deployment_id,
-            "intent_id": outcome.intent.intent_id,
-            "decision": outcome.decision.decision.value,
-            "order_ids": [o.order_id for o in outcome.orders],
-            "replayed": outcome.replayed,
         }
 
     async def _build_request(
@@ -165,15 +182,22 @@ class SignalIntakeService:
     ) -> intents.OrderIntentRequest:
         """Sizes a market entry with venue-held protection.
 
+        The entry reference is the signal's entry price, else the current
+        quote. The stop becomes a mark-based stop-loss and the target a
+        single take-profit for the whole quantity, both rounded to the
+        instrument tick.
+
         Args:
-            signal: Signal.
-            deployment: Deployment.
+            signal: Entry signal.
+            deployment: Deployment the intent is for.
 
         Returns:
-            Request.
+            A market IOC (immediate-or-cancel) opening request at leverage 1.
 
         Raises:
-            ExecutionError: ``VALIDATION_FAILED`` or ``MARKET_STALE``.
+            ExecutionError: ``MARKET_STALE`` without instrument metadata or
+                an entry reference, ``VALIDATION_FAILED`` for a stop on the
+                wrong side of the entry or when sizing is impossible.
         """
         instrument = await self._market.instrument(signal.instrument_id)
         if instrument is None:
@@ -239,11 +263,14 @@ class SignalIntakeService:
     ) -> decimal.Decimal:
         """Computes the order quantity.
 
+        ``FIXED_QTY`` uses the configured quantity. ``RISK_PCT`` risks
+        ``risk_pct`` percent of the account equity between entry and stop.
+
         Args:
-            deployment: Deployment.
+            deployment: Deployment with the sizing model and limits.
             instrument: Instrument.
-            entry: Entry reference.
-            stop: Stop price.
+            entry: Entry reference price.
+            stop: Stop price, if any.
 
         Returns:
             Quantity floored to the lot and capped by max notional.
@@ -253,7 +280,8 @@ class SignalIntakeService:
         """
         sizing = deployment.sizing
         if sizing.model == "FIXED_QTY":
-            assert sizing.fixed_qty is not None
+            if sizing.fixed_qty is None:
+                raise AssertionError("FIXED_QTY sizing has a quantity")
             raw = sizing.fixed_qty
         else:
             if stop is None:
@@ -262,14 +290,15 @@ class SignalIntakeService:
                 )
             with self._uow() as uow:
                 account = uow.accounts.get(deployment.account_id)
-            assert account is not None and sizing.risk_pct is not None
+            if account is None or sizing.risk_pct is None:
+                raise AssertionError("RISK_PCT sizing has an account and pct")
             val = await valuation.value_account(
                 self._uow,
                 self._market,
                 account,
                 deployment.mode.order_mode,
                 self._clock.now_ms(),
-                60_000,
+                60_000,  # Marks up to one minute old are good enough here.
             )
             if val.equity is None:
                 raise errors.ExecutionError(

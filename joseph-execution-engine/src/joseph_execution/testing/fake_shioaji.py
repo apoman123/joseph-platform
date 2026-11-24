@@ -6,7 +6,10 @@
 Mirrors the Shioaji 1.7 behaviours the adapter depends on: ``place_order``
 returns a live ``Trade`` and the order/deal callbacks report the outcome
 (``op_code`` "00" = success); Common quantities are lots and IntradayOdd
-quantities are shares.
+quantities are shares. Deviations: calls return at once (no ``timeout``),
+the contract tree holds five fixed stocks, and the test drivers (``deal``,
+``session_event`` and the public attributes) script what the broker would
+decide.
 """
 
 from __future__ import annotations
@@ -363,7 +366,7 @@ class FakeShioaji:
 
     @property
     def contracts(self) -> FakeContracts:
-        """Returns the contract tree."""
+        """The contract tree (``api.contracts``)."""
         return self._contracts
 
     def set_order_callback(self, callback: Callable[[Any, Any], None]) -> None:
@@ -397,7 +400,8 @@ class FakeShioaji:
             code: ``00`` success.
             message: Text.
         """
-        assert self.order_cb is not None
+        if self.order_cb is None:
+            raise AssertionError("set_order_callback() before ordering")
         self.order_cb(
             "SORDER",
             {
@@ -617,7 +621,8 @@ class FakeShioaji:
             if trade.status.deal_quantity >= trade.order.quantity
             else "PartFilled"
         )
-        assert self.order_cb is not None
+        if self.order_cb is None:
+            raise AssertionError("set_order_callback() before dealing")
         self.order_cb(
             "SDEAL",
             {
@@ -637,7 +642,8 @@ class FakeShioaji:
         Args:
             code: Event code.
         """
-        assert self.event_cb is not None
+        if self.event_cb is None:
+            raise AssertionError("set_event_callback() before session events")
         self.event_cb(0, code, "info", "event")
 
 

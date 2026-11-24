@@ -22,11 +22,11 @@ from joseph_execution.domain import ids
 
 @dataclasses.dataclass(frozen=True, slots=True)
 class StopLossSpec:
-    """Protective stop specification.
+    """A protective stop-loss leg.
 
     Attributes:
         trigger: Trigger price.
-        basis: Price basis (mark or last).
+        basis: Price the trigger is compared with (mark or last).
     """
 
     trigger: decimal.Decimal
@@ -35,11 +35,12 @@ class StopLossSpec:
 
 @dataclasses.dataclass(frozen=True, slots=True)
 class TakeProfitSpec:
-    """Take-profit leg.
+    """A take-profit leg.
 
     Attributes:
         trigger: Limit price of the take-profit order.
-        fraction: Fraction of the filled quantity (0 < f <= 1).
+        fraction: Fraction of the filled quantity (0 < f <= 1); the legs of
+            one bracket add up to at most 1.
     """
 
     trigger: decimal.Decimal
@@ -60,13 +61,17 @@ class Bracket:
 
     @property
     def empty(self) -> bool:
-        """Returns True when no protective leg is requested."""
+        """Whether no protective leg is requested."""
         return self.stop_loss is None and not self.take_profit
 
 
 @dataclasses.dataclass(frozen=True, slots=True)
 class OrderIntentRequest:
-    """Client-submitted (or strategy-generated) order draft.
+    """A client-submitted (or strategy-generated) order draft.
+
+    Construction validates the structural invariants (``__post_init__``);
+    the Risk Gateway checks everything that depends on state or market
+    data.
 
     Attributes:
         account_id: Target account.
@@ -74,20 +79,24 @@ class OrderIntentRequest:
         side: Buy or sell.
         position_effect: Open, close or reduce.
         order_type: Market, limit, stop market or stop limit.
-        quantity_base: Base quantity.
+        quantity_base: Base-asset quantity (positive).
         time_in_force: Time in force.
-        reduce_only: Venue reduce-only flag.
+        reduce_only: Venue reduce-only flag; required for close and
+            reduce intents.
         mode: PAPER, SHADOW or LIVE.
         source: Origin of the intent.
-        limit_price: Limit price for limit orders.
-        trigger_price: Trigger for stop orders.
+        limit_price: Limit price; set exactly for limit and stop-limit
+            orders.
+        trigger_price: Trigger price; set exactly for stop-market and
+            stop-limit orders.
         trigger_basis: Trigger basis for stop orders.
         margin_mode: Margin mode.
-        leverage: Requested leverage.
+        leverage: Requested leverage (positive; 1 means unlevered).
         bracket: Protective legs.
-        strategy_version_id: Strategy version for STRATEGY intents.
-        signal_id: Originating signal for STRATEGY intents.
-        expires_at_ms: Optional intent expiry.
+        strategy_version_id: Strategy version; required for STRATEGY
+            intents.
+        signal_id: Originating signal; required for STRATEGY intents.
+        expires_at_ms: Optional intent expiry, UTC epoch milliseconds.
         preview_token: Token from a preview binding these parameters.
         outside_rth: Allow execution outside regular trading hours
             (Interactive Brokers ``outsideRth``; securities only).
@@ -119,7 +128,8 @@ class OrderIntentRequest:
         """Validates structural invariants.
 
         Raises:
-            ExecutionError: With ``VALIDATION_FAILED`` on inconsistent input.
+            ExecutionError: With ``VALIDATION_FAILED`` on inconsistent input;
+                ``details["problems"]`` lists every problem found.
         """
         problems: list[str] = []
         if self.quantity_base <= decimals.ZERO:
@@ -175,13 +185,14 @@ class OrderIntentRequest:
 
     @property
     def price_hint(self) -> decimal.Decimal | None:
-        """Returns the limit, else trigger price, if any."""
+        """The limit price, else the trigger price; ``None`` for market."""
         return self.limit_price or self.trigger_price
 
     def body_hash(self) -> str:
         """Hashes the request without the preview token.
 
-        Used to detect an idempotency key reused with a different body.
+        Used to detect an idempotency key reused with a different body; the
+        preview token is not part of the hashed body.
 
         Returns:
             Hex SHA-256 of the canonical request.
@@ -199,13 +210,14 @@ class OrderIntentRequest:
         bracket: dict[str, object] | None = None
         if not self.bracket.empty:
             stop = self.bracket.stop_loss
-            bracket = {
-                "stop_loss": None
-                if stop is None
-                else {
+            stop_body: dict[str, object] | None = None
+            if stop is not None:
+                stop_body = {
                     "trigger": decimals.fmt(stop.trigger),
                     "basis": stop.basis.value,
-                },
+                }
+            bracket = {
+                "stop_loss": stop_body,
                 "take_profit": [
                     {
                         "trigger": decimals.fmt(leg.trigger),
@@ -248,6 +260,8 @@ class OrderIntentRequest:
     def from_contract(cls, body: Mapping[str, object]) -> OrderIntentRequest:
         """Builds a request from a contract-shaped dict.
 
+        Optional fields fall back to the defaults of the dataclass.
+
         Args:
             body: Contract ``OrderIntentRequest`` object.
 
@@ -255,7 +269,8 @@ class OrderIntentRequest:
             The domain request.
 
         Raises:
-            ExecutionError: With ``VALIDATION_FAILED`` on bad values.
+            ExecutionError: With ``VALIDATION_FAILED`` when a field is
+                missing or invalid, or the request breaks an invariant.
         """
         try:
             raw_bracket = body.get("bracket")
@@ -332,24 +347,26 @@ def _opt_str(value: object) -> str | None:
         value: Value or ``None``.
 
     Returns:
-        String or ``None``.
+        ``str(value)``, or ``None`` when ``value`` is ``None``.
     """
     return None if value is None else str(value)
 
 
 @dataclasses.dataclass(frozen=True, slots=True)
 class OrderIntent:
-    """Immutable, server-side order intent.
+    """An immutable, server-side order intent.
 
     Attributes:
         intent_id: UUIDv7 generated by the server.
         tenant_id: Owning tenant.
         user_id: Acting user (or service principal).
-        idempotency_key: Client-supplied idempotency key.
+        idempotency_key: Client-supplied idempotency key, unique per
+            tenant.
         client_order_id: Venue client order id of the primary order.
-        created_at_ms: Creation time.
+        created_at_ms: Creation time, UTC epoch milliseconds.
         request: The validated request.
-        deployment_id: Deployment for STRATEGY intents, if any.
+        deployment_id: Deployment for STRATEGY intents, if any; not part of
+            the contract form.
     """
 
     intent_id: str

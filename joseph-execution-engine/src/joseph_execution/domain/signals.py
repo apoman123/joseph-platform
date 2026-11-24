@@ -15,20 +15,20 @@ from joseph_execution.domain import errors
 
 @dataclasses.dataclass(frozen=True, slots=True)
 class SignalView:
-    """Fields of a contract ``Signal`` used to create strategy intents.
+    """The fields of a contract ``Signal`` used to create strategy intents.
 
     Attributes:
         signal_id: Signal id.
-        tenant_id: Tenant.
-        strategy_version_id: Strategy version.
-        instrument_id: Instrument.
+        tenant_id: Tenant that owns the strategy.
+        strategy_version_id: Immutable strategy version that emitted it.
+        instrument_id: Canonical instrument id.
         direction: ``LONG`` or ``SHORT``.
         kind: Signal kind; only ``ENTRY_CONFIRMED`` creates orders.
-        mode: Strategy execution mode.
-        bar_close_ms: Close of the signal bar.
-        entry_price: Planned entry.
-        stop_price: Planned stop.
-        target_price: Planned target.
+        mode: Strategy execution mode, as the market engine sent it.
+        bar_close_ms: Close time of the signal bar, UTC epoch milliseconds.
+        entry_price: Planned entry price, if any.
+        stop_price: Planned stop price, if any.
+        target_price: Planned target price, if any.
     """
 
     signal_id: str
@@ -48,13 +48,14 @@ class SignalView:
         """Parses a contract ``Signal``.
 
         Args:
-            body: Contract signal.
+            body: Contract ``Signal`` object.
 
         Returns:
             Signal view.
 
         Raises:
-            ExecutionError: With ``VALIDATION_FAILED`` on bad values.
+            ExecutionError: With ``VALIDATION_FAILED`` when a required field
+                is missing or a number is invalid.
         """
         try:
             return cls(

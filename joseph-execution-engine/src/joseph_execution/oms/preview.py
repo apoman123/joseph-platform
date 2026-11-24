@@ -1,7 +1,7 @@
 # Copyright 2026 apoman123
 # SPDX-License-Identifier: MIT
 
-"""Normalization, cost estimates and preview tokens."""
+"""Order normalization, cost estimates and signed preview tokens."""
 
 from __future__ import annotations
 
@@ -23,9 +23,12 @@ from joseph_execution.domain import market
 class FeeSchedule:
     """Fee assumptions for estimates (venue schedules vary per account).
 
+    Taiwan securities ignore these rates; their fee comes from
+    ``equities.taiwan_fee``.
+
     Attributes:
-        maker_bps: Maker fee in basis points.
-        taker_bps: Taker fee in basis points.
+        maker_bps: Maker fee in basis points (POST_ONLY orders).
+        taker_bps: Taker fee in basis points (every other order).
     """
 
     maker_bps: decimal.Decimal = decimal.Decimal(2)
@@ -36,12 +39,16 @@ class FeeSchedule:
 class Estimates:
     """Cost estimates of an order.
 
+    Fields are ``None`` when they cannot be known: notional, fee and margin
+    need both a reference price and instrument metadata.
+
     Attributes:
         reference_price: Expected execution price.
-        notional: Quantity x price x multiplier.
-        fee: Estimated fee.
-        slippage_pct: Estimated taker slippage (market orders).
-        margin_required: Margin needed (0 for reduce-only).
+        notional: Quantity x reference price x contract multiplier.
+        fee: Estimated fee, in the quote currency.
+        slippage_pct: Estimated slippage of a market order walking a fresh
+            book, in percent.
+        margin_required: ``notional / leverage + fee``; 0 for reduce-only.
     """
 
     reference_price: decimal.Decimal | None
@@ -54,14 +61,22 @@ class Estimates:
 def normalize(
     request: intents.OrderIntentRequest, instrument: market.InstrumentMeta
 ) -> tuple[intents.OrderIntentRequest, list[str]]:
-    """Rounds quantity down to the lot and prices to the tick.
+    """Rounds quantity down to the lot and prices to the nearest tick.
+
+    The tick is the one in force at each price (``tick_for``), so prices on
+    a tick ladder round to their own rung.
 
     Args:
         request: Draft request.
         instrument: Instrument metadata.
 
     Returns:
-        Normalized request and a warning per changed value.
+        The normalized request, with ``preview_token`` cleared, and one
+        warning per changed value.
+
+    Raises:
+        ExecutionError: ``INVALID_LOT_SIZE`` when the quantity rounds to
+            zero.
     """
     warnings: list[str] = []
     qty = decimals.floor_to_step(request.quantity_base, instrument.lot_size)
@@ -74,14 +89,14 @@ def normalize(
     def price(
         value: decimal.Decimal | None, label: str
     ) -> decimal.Decimal | None:
-        """Rounds one price to the tick and records a warning.
+        """Rounds one price to its tick and records a warning if changed.
 
         Args:
             value: Price or ``None``.
-            label: Field label.
+            label: Field label used in the warning.
 
         Returns:
-            Rounded price.
+            Rounded price, or ``None`` when ``value`` is ``None``.
         """
         if value is None:
             return None
@@ -99,12 +114,14 @@ def normalize(
     new_stop = None
     if stop is not None:
         trigger = price(stop.trigger, "Stop-loss")
-        assert trigger is not None
+        if trigger is None:
+            raise AssertionError("a stop-loss always has a trigger")
         new_stop = intents.StopLossSpec(trigger=trigger, basis=stop.basis)
     legs = []
     for leg in bracket.take_profit:
         trigger = price(leg.trigger, "Take-profit")
-        assert trigger is not None
+        if trigger is None:
+            raise AssertionError("a take-profit always has a trigger")
         legs.append(
             intents.TakeProfitSpec(trigger=trigger, fraction=leg.fraction)
         )
@@ -136,11 +153,15 @@ def estimate(
 ) -> Estimates:
     """Estimates execution price, notional, fee, slippage and margin.
 
+    Market orders are priced by walking a fresh book, falling back to the
+    best opposite quote and then the quote's reference price; other orders
+    use their limit price, else their trigger price.
+
     Args:
         request: Normalized request.
-        instrument: Instrument metadata.
-        quote: Latest quote.
-        book: Order book (market orders walk it).
+        instrument: Instrument metadata, if known.
+        quote: Latest quote, if any.
+        book: Order book, if any (market orders walk it).
         fees: Fee schedule.
         now_ms: Estimate time; selects the Taiwan transaction tax in force.
 
@@ -188,10 +209,14 @@ def estimate(
 
 
 class PreviewSigner:
-    """Issues and verifies HMAC preview tokens.
+    """Signer that issues and verifies HMAC preview tokens.
 
     A token binds the tenant, the normalized request and an expiry, so a
-    confirmed order cannot differ from what the user previewed.
+    confirmed order cannot differ from what the user previewed. Its form is
+    ``<expires_at_ms>.<hex HMAC-SHA256>``.
+
+    Attributes:
+        ttl_ms: Token lifetime in milliseconds.
     """
 
     def __init__(self, secret: bytes, ttl_ms: int = 30_000) -> None:
@@ -199,7 +224,7 @@ class PreviewSigner:
 
         Args:
             secret: Server-side HMAC key (never sent to clients).
-            ttl_ms: Token lifetime.
+            ttl_ms: Token lifetime in milliseconds.
         """
         self._secret = secret
         self.ttl_ms = ttl_ms
@@ -210,15 +235,15 @@ class PreviewSigner:
         request: intents.OrderIntentRequest,
         expires_at_ms: int,
     ) -> str:
-        """Computes the MAC.
+        """Computes the MAC over tenant, expiry and request.
 
         Args:
             tenant_id: Tenant.
-            request: Normalized request.
-            expires_at_ms: Expiry.
+            request: Normalized request; its ``preview_token`` is ignored.
+            expires_at_ms: Expiry, epoch milliseconds.
 
         Returns:
-            Hex MAC.
+            Hex HMAC-SHA256 digest.
         """
         body = request.to_contract()
         body.pop("preview_token", None)
@@ -230,12 +255,12 @@ class PreviewSigner:
     def sign(
         self, tenant_id: str, request: intents.OrderIntentRequest, now_ms: int
     ) -> tuple[str, int]:
-        """Creates a token.
+        """Creates a token that expires ``ttl_ms`` after ``now_ms``.
 
         Args:
             tenant_id: Tenant.
             request: Normalized request.
-            now_ms: Current time.
+            now_ms: Current time, epoch milliseconds.
 
         Returns:
             ``(token, expires_at_ms)``.
@@ -252,15 +277,20 @@ class PreviewSigner:
     ) -> None:
         """Verifies a token against the submitted request.
 
+        The MAC is checked before the expiry, so a lapsed token for a
+        different order reports ``PREVIEW_REQUIRED``. A token is still valid
+        at exactly its expiry time.
+
         Args:
             tenant_id: Tenant.
             request: Submitted request.
             token: Preview token.
-            now_ms: Current time.
+            now_ms: Current time, epoch milliseconds.
 
         Raises:
-            ExecutionError: ``PREVIEW_REQUIRED`` when the token does not
-                match the request, ``PREVIEW_EXPIRED`` when it lapsed.
+            ExecutionError: ``PREVIEW_REQUIRED`` when the token is malformed
+                or does not match the request, ``PREVIEW_EXPIRED`` when it
+                lapsed.
         """
         expires_text, _, mac = token.partition(".")
         try:

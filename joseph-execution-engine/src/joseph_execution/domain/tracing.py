@@ -1,7 +1,11 @@
 # Copyright 2026 apoman123
 # SPDX-License-Identifier: MIT
 
-"""Request trace id propagation via ``contextvars``."""
+"""Request trace id propagation via ``contextvars``.
+
+A context variable (rather than a global) keeps concurrent requests on one
+event loop from seeing each other's trace id.
+"""
 
 from __future__ import annotations
 
@@ -16,7 +20,7 @@ def current_trace_id() -> str:
     """Returns the trace id bound to the current context.
 
     Returns:
-        Trace id or ``"no-trace"``.
+        Trace id, or ``"no-trace"`` when none is bound.
     """
     return _TRACE_ID.get()
 
@@ -28,7 +32,7 @@ def bind_trace_id(trace_id: str) -> contextvars.Token[str]:
         trace_id: Trace identifier.
 
     Returns:
-        Token to restore the previous value.
+        Token that ``reset_trace_id`` takes to restore the previous value.
     """
     return _TRACE_ID.set(trace_id)
 

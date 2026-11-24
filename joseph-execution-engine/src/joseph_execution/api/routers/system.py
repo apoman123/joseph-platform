@@ -14,12 +14,14 @@ from starlette import websockets
 
 from joseph_execution.api import auth
 from joseph_execution.api import errors as api_errors
+from joseph_execution.api import services
 from joseph_execution.platform import streams
 
+# Channels a client may subscribe to; unknown names are dropped.
 _STREAM_CHANNELS = {"orders", "fills", "positions", "account", "risk"}
 
 
-def build_router() -> fastapi.APIRouter:  # noqa: PLR0915
+def build_router() -> fastapi.APIRouter:  # noqa: PLR0915 - the route handlers are defined inside to register on this router; the statements are theirs.
     """Builds the system router.
 
     Returns:
@@ -62,19 +64,32 @@ def build_router() -> fastapi.APIRouter:  # noqa: PLR0915
         )
 
     @router.websocket("/v1/stream/user")
-    async def user_stream(websocket: fastapi.WebSocket) -> None:  # noqa: PLR0915
+    async def user_stream(websocket: fastapi.WebSocket) -> None:  # noqa: PLR0915 - the reader and writer coroutines share the socket and subscription, so they live inside the handler.
         """Streams tenant-scoped order/fill/position/risk events.
 
+        An unauthenticated connection gets one ``error`` envelope and is
+        closed with code 1008 (policy violation). Client messages:
+        ``{"action": "ping"}`` is answered with a heartbeat;
+        ``{"action": "subscribe", "channels": [...], "last_sequence": n}``
+        sets the channel and account filters (the first ``account_id``
+        wins) and is answered with ``subscribed`` and the current
+        sequence; with an integer ``last_sequence`` the events after it are
+        then replayed, or ``snapshot_required`` is sent when they are no
+        longer retained. Without
+        events for ``stream_heartbeat_s`` the server sends a heartbeat.
+        Control envelopes do not consume a sequence number.
+
         Args:
-            websocket: Connection (token in ``?token=`` or header).
+            websocket: Connection (token in ``?token=`` or the
+                ``Authorization`` header).
         """
-        svc: object = websocket.app.state.services
+        svc: services.ApiServices = websocket.app.state.services
         token = websocket.query_params.get("token") or auth.bearer(
             websocket.headers.get("authorization")
         )
-        principal = auth.resolve_token(svc, token)  # type: ignore[arg-type]
+        principal = auth.resolve_token(svc, token)
         await websocket.accept()
-        hub: streams.UserStreamHub = svc.hub  # type: ignore[attr-defined]
+        hub: streams.UserStreamHub = svc.hub
         if principal is None:
             await websocket.send_json(
                 hub.envelope(
@@ -88,7 +103,7 @@ def build_router() -> fastapi.APIRouter:  # noqa: PLR0915
             await websocket.close(code=1008)
             return
         sub = hub.subscribe(principal.tenant_id)
-        heartbeat = svc.settings.stream_heartbeat_s  # type: ignore[attr-defined]
+        heartbeat = svc.settings.stream_heartbeat_s
 
         async def reader() -> None:
             """Handles subscribe/ping messages."""
@@ -182,6 +197,7 @@ def build_router() -> fastapi.APIRouter:  # noqa: PLR0915
                 with contextlib.suppress(
                     asyncio.CancelledError,
                     websockets.WebSocketDisconnect,
+                    # Starlette raises it for I/O on an already closed socket.
                     RuntimeError,
                 ):
                     await task

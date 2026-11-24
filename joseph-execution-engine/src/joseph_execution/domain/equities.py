@@ -128,7 +128,7 @@ DISPLAY_NAMES: Mapping[str, str] = {
 TAIWAN_BROKERAGE_RATE = decimal.Decimal("0.001425")
 """Statutory maximum brokerage commission (0.1425%) before discounts."""
 
-_DAY_MS = 86_400_000
+_DAY_MS = 86_400_000  # One UTC day in milliseconds.
 
 
 def _name(code: str) -> str:
@@ -179,7 +179,7 @@ def parse_instrument_id(instrument_id: str) -> InstrumentRef:
         instrument_id: Canonical id such as ``twse:stock:2330``.
 
     Returns:
-        Parts.
+        Parts; the symbol keeps any further ``:``.
     """
     venue, _, rest = instrument_id.partition(":")
     market_type, _, symbol = rest.partition(":")
@@ -231,7 +231,8 @@ def instrument_currency(instrument_id: str, quote: str | None = None) -> str:
         quote: Quote currency from instrument metadata, if known.
 
     Returns:
-        Exchange currency for securities, else the quote (``USD`` default).
+        ``quote`` when given, else the currency of the instrument's
+        exchange venue, else ``USD``.
     """
     venue = parse_instrument_id(instrument_id).venue
     if quote:
@@ -252,13 +253,19 @@ class Route:
     message: str
 
 
-def route(  # noqa: PLR0911
+def route(  # noqa: PLR0911 - one return per routing rule, in precedence order.
     account_venue: str,
     is_paper: bool,
     account_currency: str,
     instrument_id: str,
 ) -> Route:
     """Decides whether an account may trade an instrument.
+
+    Rules in order: rate series are never tradable; a paper account trades
+    exchange listings that settle in its currency, and only the USD paper
+    account trades other (simulated venue) instruments; broker accounts
+    trade only the exchanges of ``BROKER_EXCHANGES``; venue accounts trade
+    only their own venue.
 
     Args:
         account_venue: Account venue (``mock`` for paper accounts).
@@ -267,7 +274,7 @@ def route(  # noqa: PLR0911
         instrument_id: Canonical instrument id.
 
     Returns:
-        Verdict with a clear explanation.
+        Verdict with a plain-language explanation.
     """
     ref = parse_instrument_id(instrument_id)
     if is_rate(instrument_id):
@@ -332,6 +339,9 @@ def ceil_to_step(
 
     Returns:
         Smallest multiple of ``step`` not below ``value``.
+
+    Raises:
+        ValueError: If ``step`` is not positive.
     """
     return -decimals.floor_to_step(-value, step)
 
@@ -346,7 +356,10 @@ def round_to_tick(
         instrument: Instrument metadata.
 
     Returns:
-        Price on the tick grid.
+        Price on the tick grid (half-even on a tie).
+
+    Raises:
+        ValueError: If the tick at ``price`` is not positive.
     """
     return decimals.round_to_step(price, instrument.tick_for(price))
 
@@ -366,7 +379,7 @@ def on_tick(price: decimal.Decimal, instrument: market.InstrumentMeta) -> bool:
 
 @dataclasses.dataclass(frozen=True, slots=True)
 class PriceLimits:
-    """Daily price limits of one session.
+    """The daily price limits of one session, both inclusive.
 
     Attributes:
         reference: Reference price (previous close).
@@ -414,7 +427,8 @@ def price_limits(
         instrument: Instrument metadata with ``price_limit_pct``.
 
     Returns:
-        Limits, or ``None`` when the instrument has no daily limit.
+        Limits, or ``None`` when the instrument has no daily limit or the
+        reference price is not positive.
     """
     pct = instrument.price_limit_pct
     if pct is None or reference <= decimals.ZERO:
@@ -469,7 +483,7 @@ def lot_kind(
 
 @dataclasses.dataclass(frozen=True, slots=True)
 class SessionState:
-    """Market state at one instant.
+    """The market state at one instant.
 
     Attributes:
         open: Whether a session is in progress.
@@ -544,12 +558,14 @@ def settlement_ms(
 def fallback_settlement_ms(trade_ms: int, days: int) -> int:
     """Approximates settlement by skipping weekends (no holiday data).
 
+    Weekdays are counted by UTC date.
+
     Args:
         trade_ms: Trade time.
         days: Settlement cycle in business days.
 
     Returns:
-        Trade time plus ``days`` weekdays.
+        Trade time plus whole days until ``days`` weekdays have passed.
     """
     result = trade_ms
     remaining = days
@@ -568,14 +584,15 @@ def fallback_settlement_ms(trade_ms: int, days: int) -> int:
 
 @dataclasses.dataclass(frozen=True, slots=True)
 class CashBalance:
-    """Cash buying power of a securities (cash) account.
+    """The cash buying power of a securities (cash) account.
 
     Attributes:
-        currency: Currency.
+        currency: Currency of the amounts.
         available: Cash available for new purchases after open orders.
         settled: Settled cash, if known.
         unsettled: Net unsettled amount (negative = payable), if known.
-        source: Where the figures come from.
+        source: Where the figures come from: the adapter name for broker
+            figures, ``joseph`` when computed locally.
     """
 
     currency: str
@@ -651,7 +668,7 @@ so the suspension does not cover them (the pending bill would, from
 
 @dataclasses.dataclass(frozen=True, slots=True)
 class TaxWindow:
-    """Taipei trade dates, both inclusive, in which a tax rule applies.
+    """A range of Taipei trade dates, both inclusive, for a tax rule.
 
     Attributes:
         first: First trade date.

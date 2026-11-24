@@ -30,8 +30,12 @@ def main() -> int:
     """Writes or checks the OpenAPI document.
 
     Returns:
-        Process exit code.
+        Process exit code: 0 on success, 1 when ``--check`` finds the
+        committed document out of date.
     """
+    # An explicit mapping ignores the caller's environment: an in-memory
+    # engine with development defaults needs no secrets or database, and
+    # the routes (hence the document) do not depend on settings.
     settings = config.from_env(
         {"JOSEPH_DATABASE_URL": "sqlite://", "JOSEPH_BACKGROUND_TASKS": "false"}
     )
@@ -39,11 +43,11 @@ def main() -> int:
     text = json.dumps(app.openapi(), indent=2, sort_keys=True) + "\n"
     if "--check" in sys.argv:
         if not _OUT.exists() or _OUT.read_text(encoding="utf-8") != text:
-            print("execution-engine OpenAPI is out of date")  # noqa: T201
+            print("execution-engine OpenAPI is out of date")  # noqa: T201 - command-line output of the script.
             return 1
         return 0
     _OUT.write_text(text, encoding="utf-8")
-    print(f"wrote {_OUT}")  # noqa: T201
+    print(f"wrote {_OUT}")  # noqa: T201 - command-line output of the script.
     return 0
 
 

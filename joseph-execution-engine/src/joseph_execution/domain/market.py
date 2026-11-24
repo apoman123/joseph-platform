@@ -5,6 +5,8 @@
 
 These are snapshots fetched from the market engine (or a static DEMO
 gateway). The execution engine never computes indicators or signals.
+Quantities are in base units, prices in the quote currency, and times are
+UTC epoch milliseconds.
 """
 
 from __future__ import annotations
@@ -34,7 +36,9 @@ class TickStep:
 
 @dataclasses.dataclass(frozen=True, slots=True)
 class TradingSession:
-    """One exchange session ``[open_ms, close_ms)`` (``TradingSession``).
+    """One exchange session, open over ``[open_ms, close_ms)``.
+
+    Contract ``TradingSession``.
 
     Attributes:
         day: Exchange-local trading date (ISO ``YYYY-MM-DD``).
@@ -66,11 +70,11 @@ class InstrumentMeta:
         instrument_id: Canonical instrument id.
         venue: Venue code.
         tick_size: Price increment.
-        lot_size: Quantity increment (base units).
-        min_qty: Minimum quantity.
+        lot_size: Quantity increment.
+        min_qty: Minimum order quantity.
         status: Trading status.
         contract_multiplier: Base units per contract.
-        min_notional: Minimum order notional, if any.
+        min_notional: Minimum order notional in the quote currency, if any.
         max_qty: Maximum order quantity, if any.
         max_leverage: Venue leverage cap, if known.
         quote: Quote currency.
@@ -107,7 +111,7 @@ class InstrumentMeta:
 
     @property
     def market_type(self) -> str:
-        """Returns the market type segment of the instrument id."""
+        """The middle part of the ``venue:market_type:symbol`` id, or ``""``."""
         parts = self.instrument_id.split(":", 2)
         return parts[1] if len(parts) == 3 else ""
 
@@ -123,8 +127,9 @@ class InstrumentMeta:
             price: Price.
 
         Returns:
-            The ladder tick of the highest rung at or below ``price``, else
-            ``tick_size``.
+            The tick of the highest ladder rung whose ``min_price`` is at or
+            below ``price``; ``tick_size`` without a ladder or below its
+            lowest rung.
         """
         tick = self.tick_size
         for step in sorted(self.tick_ladder):
@@ -135,16 +140,16 @@ class InstrumentMeta:
 
 @dataclasses.dataclass(frozen=True, slots=True)
 class MarketQuote:
-    """Latest prices with provenance.
+    """The latest prices of an instrument, with provenance.
 
     Attributes:
         instrument_id: Canonical instrument id.
         feed_state: Provenance of the snapshot.
         as_of_ms: Observation time.
-        mark: Mark price.
-        last: Last trade price.
-        best_bid: Best bid.
-        best_ask: Best ask.
+        mark: Mark price, if known.
+        last: Last trade price, if known.
+        best_bid: Best bid, if known.
+        best_ask: Best ask, if known.
     """
 
     instrument_id: str
@@ -162,13 +167,13 @@ class MarketQuote:
             now_ms: Current time.
 
         Returns:
-            Non-negative age in milliseconds.
+            Age in milliseconds; 0 when ``as_of_ms`` is in the future.
         """
         return max(0, now_ms - self.as_of_ms)
 
     @property
     def reference_price(self) -> decimal.Decimal | None:
-        """Returns mark, else last, else mid; ``None`` if all missing."""
+        """The mark, else the last trade, else the bid/ask mid; or ``None``."""
         if self.mark is not None:
             return self.mark
         if self.last is not None:
@@ -179,7 +184,7 @@ class MarketQuote:
 
     @property
     def spread_pct(self) -> decimal.Decimal | None:
-        """Returns the bid/ask spread in percent of mid, if available."""
+        """The bid/ask spread in percent of a positive mid, else ``None``."""
         if self.best_bid is None or self.best_ask is None:
             return None
         mid = (self.best_bid + self.best_ask) / 2
@@ -190,7 +195,7 @@ class MarketQuote:
 
 @dataclasses.dataclass(frozen=True, slots=True)
 class BookView:
-    """Order book levels as ``(price, quantity)``; best first.
+    """Order book levels as ``(price, quantity)`` pairs, best first.
 
     Attributes:
         instrument_id: Canonical instrument id.
@@ -213,10 +218,11 @@ class BookView:
 
         Args:
             side: Taker side (buy consumes asks).
-            quantity: Base quantity.
+            quantity: Base quantity; must be positive.
 
         Returns:
-            Volume-weighted price, or ``None`` if depth is insufficient.
+            Volume-weighted average price of the levels the order would
+            consume, or ``None`` if the book is too thin to fill it.
         """
         levels = self.asks if side is enums.OrderSide.BUY else self.bids
         remaining = quantity
@@ -239,7 +245,9 @@ class BookView:
             quantity: Base quantity.
 
         Returns:
-            Slippage in percent, or ``None`` when depth is insufficient.
+            Distance of the average fill price from the best level, in
+            percent; ``None`` for an empty side, a non-positive quantity or
+            a book too thin to fill it.
         """
         levels = self.asks if side is enums.OrderSide.BUY else self.bids
         if not levels or quantity <= decimals.ZERO:

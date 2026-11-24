@@ -1,5 +1,6 @@
 version: 2
 # The market engine's git dependency on the private apoman123/PineScripts.
+# The token is a Dependabot secret: Dependabot cannot read Actions secrets.
 registries:
   pinescripts:
     type: git

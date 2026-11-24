@@ -10,23 +10,27 @@ from typing import Protocol
 
 
 class Clock(Protocol):
-    """Current UTC time source."""
+    """A source of the current UTC time (injected so tests can fix it)."""
 
     def now_ms(self) -> int:
-        """Returns UTC epoch milliseconds."""
+        """Returns the current time in UTC epoch milliseconds."""
         ...
 
 
 class IdGenerator(Protocol):
-    """Generates unique identifiers."""
+    """A generator of unique identifiers."""
 
     def new_id(self) -> str:
-        """Returns a new UUIDv7."""
+        """Returns a new, unique UUIDv7 (time-ordered)."""
         ...
 
 
 class EventPublisher(Protocol):
-    """Publishes tenant-scoped user-stream events."""
+    """A publisher of tenant-scoped user-stream events.
+
+    ``publish`` is synchronous and must not block: the OMS calls it on the
+    order path, after committing the change the event reports.
+    """
 
     def publish(
         self,
@@ -39,17 +43,18 @@ class EventPublisher(Protocol):
         """Publishes an event.
 
         Args:
-            tenant_id: Tenant whose stream receives it.
+            tenant_id: Tenant whose stream receives it; no other tenant
+                may see it.
             event_type: Stream type such as ``order.updated``.
             channel: Channel such as ``orders``.
             payload: Contract payload.
-            account_id: Related account for channel filters.
+            account_id: Related account for subscribers' account filters.
         """
         ...
 
 
 class Metrics(Protocol):
-    """Counter and gauge sink."""
+    """A sink for counters and gauges."""
 
     def increment(
         self, name: str, labels: Mapping[str, str] | None = None
@@ -58,7 +63,7 @@ class Metrics(Protocol):
 
         Args:
             name: Metric name.
-            labels: Label values.
+            labels: Label values by label name, if any.
         """
         ...
 
@@ -72,14 +77,18 @@ class Metrics(Protocol):
 
         Args:
             name: Metric name.
-            value: Value.
-            labels: Label values.
+            value: New value; replaces the previous one.
+            labels: Label values by label name, if any.
         """
         ...
 
 
 class StepUpVerifier(Protocol):
-    """Verifies a step-up (MFA) code for sensitive actions."""
+    """A verifier of step-up (MFA, multi-factor) codes for sensitive actions.
+
+    Arming LIVE trading and granting AUTO_LIVE consent depend on it, so it
+    must fail closed.
+    """
 
     def verify(self, user_id: str, code: str) -> bool:
         """Checks a step-up code.
@@ -89,13 +98,17 @@ class StepUpVerifier(Protocol):
             code: One-time code.
 
         Returns:
-            True when valid.
+            True only for a valid code; False otherwise, including when
+            verification is not configured.
         """
         ...
 
 
 class CredentialVault(Protocol):
-    """Encrypts and decrypts venue credentials (server side only)."""
+    """Encrypts and decrypts venue credentials (server side only).
+
+    Plaintext never leaves the engine; only envelopes are persisted.
+    """
 
     def seal(self, secret: Mapping[str, str]) -> Mapping[str, str]:
         """Encrypts a credential payload.
@@ -112,9 +125,13 @@ class CredentialVault(Protocol):
         """Decrypts an envelope.
 
         Args:
-            envelope: Stored envelope.
+            envelope: Stored envelope from ``seal``.
 
         Returns:
             Plaintext fields.
+
+        Raises:
+            ExecutionError: With ``FORBIDDEN`` when the envelope fails
+                authentication (tampered, or sealed under another key).
         """
         ...

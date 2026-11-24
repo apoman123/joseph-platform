@@ -4,15 +4,16 @@
 """Private venue streams for live accounts, applied through the OMS.
 
 The supervisor keeps one ``stream_account_events`` task per live account
-that has working orders or an open position (the accounts the reconciler
-also watches) and applies order and fill events with
-``OmsService.apply_venue_events``, which is idempotent: duplicates are
-ignored by fill id, and the REST snapshot each adapter replays after a
-reconnect fills any gap. Position and balance events are counted; the
-reconciler compares positions against venue truth on its own schedule.
+that has working orders or an open position (a subset of the accounts the
+reconciler watches) and applies order and fill events with
+``OmsService.apply_venue_events`` of the order management service (OMS),
+which is idempotent: duplicates are ignored by fill id, and the REST
+snapshot each adapter replays after a reconnect fills any gap. Position
+and balance events are only counted; the reconciler compares positions
+against venue truth on its own schedule.
 
-A stream that fails is restarted after a delay; an account that leaves
-scope (everything flat and finished) has its stream cancelled.
+A stream that ends or fails is restarted after a delay; an account that
+leaves scope (everything flat and finished) has its stream cancelled.
 """
 
 from __future__ import annotations
@@ -34,10 +35,11 @@ _LOG = logging.getLogger(__name__)
 
 
 class LiveStreamSupervisor:
-    """Runs and restarts private streams of live accounts.
+    """Supervisor that runs and restarts private streams of live accounts.
 
     Attributes:
-        applied: Order/fill events applied (tests and metrics).
+        applied: Order and fill events the OMS reported as changing state,
+            summed over the supervisor's lifetime.
     """
 
     def __init__(
@@ -55,11 +57,12 @@ class LiveStreamSupervisor:
 
         Args:
             uow_factory: Unit of work factory.
-            resolver: Adapter resolver.
-            oms: OMS.
+            resolver: Resolves the LIVE adapter of an account.
+            oms: Order management service that applies the events.
             metrics: Metrics sink.
-            poll_s: Interval between scope refreshes.
-            restart_s: Delay before restarting a failed stream.
+            poll_s: Seconds between scope refreshes.
+            restart_s: Seconds before restarting a stream that ended or
+                failed.
             venues: Venues whose accounts get a stream (``None`` = all).
                 Brokers have their own event pump and are left out.
         """
@@ -76,8 +79,12 @@ class LiveStreamSupervisor:
     def scope(self) -> list[accounts.Account]:
         """Lists live accounts with working orders or open positions.
 
+        Open LIVE positions count, and non-terminal LIVE orders among the
+        newest 2,000 orders.
+
         Returns:
-            Accounts (disconnected accounts excluded).
+            The accounts, sorted by id; paper and disconnected accounts and
+            accounts of venues outside ``venues`` are left out.
         """
         with self._uow() as uow:
             ids: set[str] = {
@@ -101,15 +108,18 @@ class LiveStreamSupervisor:
         ]
 
     def running(self) -> list[str]:
-        """Lists accounts with a live stream task.
+        """Lists accounts whose stream task is still running.
 
         Returns:
-            Account ids.
+            Account ids, sorted.
         """
         return sorted(a for a, t in self._tasks.items() if not t.done())
 
     async def sync(self) -> None:
-        """Starts streams for accounts in scope and stops the others."""
+        """Starts streams for accounts in scope and stops the others.
+
+        A task that already finished is replaced by a new one.
+        """
         wanted = {a.account_id: a for a in self.scope()}
         for account_id in list(self._tasks):
             task = self._tasks[account_id]
@@ -130,7 +140,7 @@ class LiveStreamSupervisor:
             while True:
                 try:
                     await self.sync()
-                except Exception:
+                except Exception:  # noqa: BLE001 - isolation point: logged with traceback; supervision retries on the next poll.
                     _LOG.exception("live stream supervision failed")
                 await asyncio.sleep(self._poll_s)
         finally:
@@ -146,10 +156,13 @@ class LiveStreamSupervisor:
         self._tasks.clear()
 
     async def _pump(self, account: accounts.Account) -> None:
-        """Consumes one account's stream, restarting after failures.
+        """Consumes one account's stream until cancelled.
+
+        The stream is restarted ``restart_s`` seconds after it ends or
+        fails; failures are logged and counted, never raised.
 
         Args:
-            account: Account.
+            account: Live account to stream.
         """
         labels = {"venue": account.venue}
         while True:
@@ -166,7 +179,7 @@ class LiveStreamSupervisor:
                     err.code,
                 )
                 self._metrics.increment("live_stream_failures_total", labels)
-            except Exception:
+            except Exception:  # noqa: BLE001 - isolation point: logged with traceback; the stream restarts after restart_s.
                 _LOG.exception("live stream of %s crashed", account.account_id)
                 self._metrics.increment("live_stream_failures_total", labels)
             await asyncio.sleep(self._restart_s)
@@ -177,12 +190,12 @@ class LiveStreamSupervisor:
         event: trading.VenueEvent,
         labels: dict[str, str],
     ) -> None:
-        """Applies one event.
+        """Counts one event and applies it when it carries an order or fill.
 
         Args:
-            account_id: Account.
+            account_id: Account the event belongs to.
             event: Venue event.
-            labels: Metric labels.
+            labels: Metric labels of the account's venue.
         """
         self._metrics.increment("live_stream_events_total", labels)
         if event.order is None and event.fill is None:

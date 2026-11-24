@@ -12,6 +12,8 @@ from joseph_execution.api import auth
 from joseph_execution.api import schemas
 from joseph_execution.domain import identity
 
+# Shared parameter default; a module constant keeps calls out of argument
+# defaults (ruff B008).
 _Principal = fastapi.Depends(auth.principal)
 
 

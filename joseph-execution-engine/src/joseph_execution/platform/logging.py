@@ -9,6 +9,9 @@ import logging
 import re
 import threading
 
+# Secret-looking fragments redacted even when the value was never
+# registered: bearer tokens, and key=value or "key": "value" pairs whose key
+# names a credential.
 _PATTERNS = (
     re.compile(r"(?i)(bearer\s+)[A-Za-z0-9._~+/=-]+"),
     re.compile(
@@ -30,6 +33,9 @@ class SecretRegistry:
     def add(self, value: str) -> None:
         """Registers a secret value (short values are ignored).
 
+        Values shorter than 6 characters are not registered: redacting them
+        everywhere would garble ordinary log text.
+
         Args:
             value: Plaintext secret.
         """
@@ -48,6 +54,8 @@ class SecretRegistry:
         """
         with self._lock:
             values = sorted(self._values, key=len, reverse=True)
+        # Longest first, so a secret that contains another one is redacted
+        # whole rather than leaving its remainder in the text.
         for value in values:
             text = text.replace(value, "[REDACTED]")
         for pattern in _PATTERNS:
@@ -55,6 +63,8 @@ class SecretRegistry:
         return text
 
 
+# Process-wide on purpose: config and the credential vault register secrets
+# as they load them, and the filter installed by install() reads them.
 SECRETS = SecretRegistry()
 
 
@@ -73,6 +83,10 @@ class RedactingFilter(logging.Filter):
     def filter(self, record: logging.LogRecord) -> bool:
         """Redacts the record in place.
 
+        The message is formatted with its arguments first, then scrubbed
+        and stored without arguments, so secrets passed as ``%s`` arguments
+        are redacted too.
+
         Args:
             record: Log record.
 
@@ -86,7 +100,10 @@ class RedactingFilter(logging.Filter):
 
 
 def install(registry: SecretRegistry = SECRETS) -> RedactingFilter:
-    """Installs the redaction filter on the root logger's handlers.
+    """Installs the redaction filter on the root logger and its handlers.
+
+    Configures basic INFO logging first when the root logger has no
+    handlers.
 
     Args:
         registry: Secret registry.
@@ -98,6 +115,8 @@ def install(registry: SecretRegistry = SECRETS) -> RedactingFilter:
     root = logging.getLogger()
     if not root.handlers:
         logging.basicConfig(level=logging.INFO)
+    # Logger filters only see records logged on that logger itself; records
+    # propagated from child loggers reach the handlers, so filter both.
     for handler in root.handlers:
         handler.addFilter(redactor)
     root.addFilter(redactor)

@@ -1,10 +1,14 @@
 # Copyright 2026 apoman123
 # SPDX-License-Identifier: MIT
 
-"""Individual pre-trade checks (V5 §8 risk table).
+"""Individual pre-trade risk checks and the default pipeline.
 
 Each check is a pure function of a ``RiskContext`` returning one
-``RiskCheckResult``. Missing inputs produce UNKNOWN, never PASS.
+``RiskCheckResult``. A missing input never yields PASS: the check returns
+UNKNOWN (which blocks), FAIL, or SKIP where another check already covers
+the gap (missing instrument metadata). Many checks relax for
+risk-reducing orders (``RiskContext.risk_reducing``) so that positions can
+always be closed: they return WARN or SKIP instead of failing.
 """
 
 from __future__ import annotations
@@ -13,6 +17,7 @@ import dataclasses
 import datetime
 import decimal
 from collections.abc import Callable
+from typing import TypeAlias
 
 from joseph_execution.domain import decimals
 from joseph_execution.domain import enums
@@ -22,17 +27,30 @@ from joseph_execution.risk import context
 
 Domain = enums.RiskDomain
 Outcome = enums.CheckOutcome
-Check = Callable[[context.RiskContext], risk.RiskCheckResult]
+Check: TypeAlias = Callable[[context.RiskContext], risk.RiskCheckResult]
 
+# Feeds fresh enough for LIVE orders; any other feed state only WARNs for
+# PAPER/SHADOW orders.
 _FRESH_FEEDS = (enums.FeedState.LIVE,)
-_DISPLAY_FEEDS = (
-    enums.FeedState.POLL,
-    enums.FeedState.DEMO,
-    enums.FeedState.REPLAY,
-)
 
 
-def _result(  # noqa: PLR0917
+def _text(value: object) -> str | None:
+    """Formats a value for display.
+
+    Args:
+        value: Value.
+
+    Returns:
+        Text, with decimals in plain notation, or ``None`` for ``None``.
+    """
+    if value is None:
+        return None
+    if isinstance(value, decimal.Decimal):
+        return decimals.fmt(value)
+    return str(value)
+
+
+def _result(  # noqa: PLR0917 - every check passes the result fields positionally, in RiskCheckResult order.
     check: str,
     domain: enums.RiskDomain,
     outcome: enums.CheckOutcome,
@@ -47,55 +65,44 @@ def _result(  # noqa: PLR0917
         check: Check name.
         domain: Domain.
         outcome: Outcome.
-        message: Explanation.
-        code: Error code.
+        message: Explanation shown to the user.
+        code: Error code reported when the check does not pass.
         observed: Observed value.
         limit: Limit value.
 
     Returns:
         Result.
     """
-
-    def text(value: object) -> str | None:
-        """Formats a value for display.
-
-        Args:
-            value: Value.
-
-        Returns:
-            Text or ``None``.
-        """
-        if value is None:
-            return None
-        if isinstance(value, decimal.Decimal):
-            return decimals.fmt(value)
-        return str(value)
-
     return risk.RiskCheckResult(
         check=check,
         domain=domain,
         outcome=outcome,
         message=message,
         code=code,
-        observed=text(observed),
-        limit=text(limit),
+        observed=_text(observed),
+        limit=_text(limit),
     )
 
 
-def mode_allowed(ctx: context.RiskContext) -> risk.RiskCheckResult:  # noqa: PLR0911
-    """Checks the order mode against account, flags and consent.
+def mode_allowed(ctx: context.RiskContext) -> risk.RiskCheckResult:  # noqa: PLR0911 - one return per LIVE gate, checked in a fixed order.
+    """Checks the order mode against the account, the LIVE gates and consent.
 
-    LIVE needs the global gate and an AVAILABLE adapter. Strategy orders
-    also need an enabled AUTO_LIVE deployment with valid consent; manual
-    orders (ticket, chart, quick trade) need a valid account LIVE arming,
-    except risk-reducing orders, which stay allowed (WARN) while disarmed
-    like under a kill switch. Emergency flattening is never manual.
+    The gates, in order: the account is known; its modes include the
+    order's mode; PAPER and SHADOW orders then pass. A LIVE order also
+    needs ``live_trading_enabled`` and adapter capabilities with status
+    AVAILABLE. A STRATEGY order then needs an AUTO_LIVE deployment that is
+    ENABLED and has consent valid for the account's venue at ``now_ms``. A
+    manual order (ticket, chart, quick trade) needs an ARMED account LIVE
+    arming; without one, a risk-reducing order is still allowed with a
+    warning, as under a kill switch. EMERGENCY orders (kill switch
+    flattening) are not manual and need no arming.
 
     Args:
         ctx: Risk context.
 
     Returns:
-        Result.
+        UNKNOWN without an account; FAIL at the first unmet gate (WARN for
+        an unarmed risk-reducing manual order); else PASS.
     """
     name = "mode.allowed"
     req = ctx.request
@@ -192,13 +199,14 @@ def mode_allowed(ctx: context.RiskContext) -> risk.RiskCheckResult:  # noqa: PLR
 
 
 def identity_scope(ctx: context.RiskContext) -> risk.RiskCheckResult:
-    """Checks that the caller's tenant owns the account.
+    """Checks that the caller's tenant owns a usable account.
 
     Args:
         ctx: Risk context.
 
     Returns:
-        Result.
+        FAIL when the account is missing, belongs to another tenant, or is
+        DISCONNECTED or PENDING_VERIFICATION; else PASS.
     """
     name = "identity.account_scope"
     account = ctx.account
@@ -240,7 +248,9 @@ def account_margin(ctx: context.RiskContext) -> risk.RiskCheckResult:
         ctx: Risk context.
 
     Returns:
-        Result.
+        SKIP for securities (see ``account_cash``) and risk-reducing orders;
+        UNKNOWN when free or required margin is unknown; FAIL when the order
+        needs more margin than is free; else PASS.
     """
     name = "account.margin"
     if ctx.security:
@@ -292,7 +302,8 @@ def account_state_known(ctx: context.RiskContext) -> risk.RiskCheckResult:
         ctx: Risk context.
 
     Returns:
-        Result.
+        PASS when nothing is being reconciled; WARN for a risk-reducing
+        order while reconciling; else FAIL.
     """
     name = "account.state_known"
     if not ctx.account_state_unknown:
@@ -325,7 +336,8 @@ def market_status(ctx: context.RiskContext) -> risk.RiskCheckResult:
         ctx: Risk context.
 
     Returns:
-        Result.
+        UNKNOWN without instrument metadata; FAIL unless the instrument
+        status is TRADING; else PASS.
     """
     name = "market.instrument_status"
     inst = ctx.instrument
@@ -356,13 +368,17 @@ def data_quote_fresh(ctx: context.RiskContext) -> risk.RiskCheckResult:
     """Checks quote freshness and provenance.
 
     LIVE orders require LIVE data. PAPER/SHADOW orders accept polled, replay
-    or demo data with a warning.
+    or demo data with a warning. Risk-reducing orders never fail it.
 
     Args:
         ctx: Risk context.
 
     Returns:
-        Result.
+        UNKNOWN without a reference price; FAIL when the quote is older than
+        ``max_quote_age_ms`` or its feed is STALE, UNAVAILABLE or
+        CONNECTING; PASS for a fresh LIVE feed; for other feeds FAIL for a
+        LIVE order, else WARN. Each UNKNOWN or FAIL is a WARN instead for a
+        risk-reducing order.
     """
     name = "data.quote_fresh"
     quote = ctx.quote
@@ -426,7 +442,9 @@ def size_quantity(ctx: context.RiskContext) -> risk.RiskCheckResult:
         ctx: Risk context.
 
     Returns:
-        Result.
+        UNKNOWN without instrument metadata; FAIL when the base quantity is
+        not a multiple of the lot size, is below ``min_qty`` or above
+        ``max_qty``; else PASS.
     """
     name = "size.quantity"
     inst = ctx.instrument
@@ -475,13 +493,14 @@ def size_quantity(ctx: context.RiskContext) -> risk.RiskCheckResult:
 
 
 def size_tick(ctx: context.RiskContext) -> risk.RiskCheckResult:
-    """Checks that limit and trigger prices sit on the tick grid.
+    """Checks that limit, trigger and bracket prices sit on the tick grid.
 
     Args:
         ctx: Risk context.
 
     Returns:
-        Result.
+        SKIP when the order carries no price; UNKNOWN without instrument
+        metadata; FAIL for the first price off the tick grid; else PASS.
     """
     name = "size.tick"
     inst = ctx.instrument
@@ -522,7 +541,9 @@ def size_min_notional(ctx: context.RiskContext) -> risk.RiskCheckResult:
         ctx: Risk context.
 
     Returns:
-        Result.
+        SKIP when no minimum is published (or metadata is missing; the
+        quantity check catches that); UNKNOWN when the notional is unknown;
+        FAIL below the minimum unless risk-reducing; else PASS.
     """
     name = "size.min_notional"
     inst = ctx.instrument
@@ -565,7 +586,9 @@ def size_leverage(ctx: context.RiskContext) -> risk.RiskCheckResult:
         ctx: Risk context.
 
     Returns:
-        Result.
+        FAIL when the requested leverage exceeds the lowest cap among the
+        account limit, the instrument maximum and the deployment limit;
+        else PASS.
     """
     name = "size.leverage"
     caps = [ctx.limits.max_leverage]
@@ -595,13 +618,17 @@ def size_leverage(ctx: context.RiskContext) -> risk.RiskCheckResult:
 
 
 def size_price_band(ctx: context.RiskContext) -> risk.RiskCheckResult:
-    """Checks that the limit price is within a band around the mark.
+    """Checks that the order price is within a band around the mark.
+
+    The limit price is checked, or the trigger price when there is none.
 
     Args:
         ctx: Risk context.
 
     Returns:
-        Result.
+        SKIP without a limit or trigger price; UNKNOWN without a reference
+        price; FAIL when the price deviates from the reference price by
+        more than ``max_price_deviation_pct``; else PASS.
     """
     name = "size.price_band"
     price = ctx.request.limit_price or ctx.request.trigger_price
@@ -643,7 +670,10 @@ def size_order_type(ctx: context.RiskContext) -> risk.RiskCheckResult:
         ctx: Risk context.
 
     Returns:
-        Result.
+        UNKNOWN without capabilities; FAIL for an unsupported order type or
+        time in force, or for a reduce-only order the venue cannot mark
+        reduce-only (except a sell on a long-only securities account);
+        else PASS.
     """
     name = "size.order_type"
     caps = ctx.capabilities
@@ -674,14 +704,15 @@ def size_order_type(ctx: context.RiskContext) -> risk.RiskCheckResult:
             "UNSUPPORTED_ORDER_TYPE",
             req.time_in_force.value,
         )
+    # A long-only securities account cannot open a short: the broker
+    # rejects uncovered sells, so a reduce-only sell stays reducing even
+    # without a native reduce-only flag.
     long_only_sell = (
         ctx.security
         and not caps.short_selling
         and req.side is enums.OrderSide.SELL
     )
     if req.reduce_only and not caps.native_reduce_only and not long_only_sell:
-        # A long-only securities account cannot open a short: the broker
-        # rejects uncovered sells, so a reduce-only sell stays reducing.
         return _result(
             name,
             Domain.SIZE,
@@ -699,7 +730,8 @@ def size_reduce_only(ctx: context.RiskContext) -> risk.RiskCheckResult:
         ctx: Risk context.
 
     Returns:
-        Result.
+        SKIP for orders that are not reduce-only; PASS when the order is
+        risk-reducing; else FAIL.
     """
     name = "size.reduce_only"
     req = ctx.request
@@ -723,14 +755,20 @@ def size_reduce_only(ctx: context.RiskContext) -> risk.RiskCheckResult:
     )
 
 
-def exposure_limits(ctx: context.RiskContext) -> risk.RiskCheckResult:  # noqa: PLR0911
+def exposure_limits(ctx: context.RiskContext) -> risk.RiskCheckResult:  # noqa: PLR0911 - one return per exposure limit, checked in a fixed order.
     """Checks gross, position and open-position limits.
 
     Args:
         ctx: Risk context.
 
     Returns:
-        Result.
+        SKIP for risk-reducing orders; UNKNOWN when the order or gross
+        notional is unknown; FAIL, in this order, when the gross notional
+        plus the order exceeds ``max_account_notional``, the position's
+        notional plus the order exceeds ``max_position_notional``, the order
+        exceeds the deployment's ``max_notional``, or a new position would
+        exceed the lower of the account and deployment open-position
+        limits; else PASS.
     """
     name = "exposure.notional"
     if ctx.risk_reducing:
@@ -756,6 +794,8 @@ def exposure_limits(ctx: context.RiskContext) -> risk.RiskCheckResult:  # noqa: 
             gross,
             ctx.limits.max_account_notional,
         )
+    # Without a reference price the position counts as zero here; such an
+    # order (not risk-reducing) is already UNKNOWN in data_quote_fresh.
     current = decimals.ZERO
     ref = None if ctx.quote is None else ctx.quote.reference_price
     if ctx.position is not None and ref is not None:
@@ -811,7 +851,9 @@ def exposure_daily_loss(ctx: context.RiskContext) -> risk.RiskCheckResult:
         ctx: Risk context.
 
     Returns:
-        Result.
+        SKIP for risk-reducing orders; UNKNOWN when the daily PnL is
+        unknown; FAIL once the realized loss since 00:00 UTC reaches the
+        lower of the account and deployment limits; else PASS.
     """
     name = "exposure.daily_loss"
     if ctx.risk_reducing:
@@ -856,7 +898,8 @@ def liquidity_spread(ctx: context.RiskContext) -> risk.RiskCheckResult:
         ctx: Risk context.
 
     Returns:
-        Result.
+        UNKNOWN (WARN when risk-reducing) without a spread; FAIL when wider
+        than ``max_spread_pct`` unless risk-reducing; else PASS.
     """
     name = "liquidity.spread"
     spread = None if ctx.quote is None else ctx.quote.spread_pct
@@ -892,7 +935,11 @@ def liquidity_slippage(ctx: context.RiskContext) -> risk.RiskCheckResult:
         ctx: Risk context.
 
     Returns:
-        Result.
+        SKIP for orders that are not MARKET orders. For market orders, FAIL
+        when the book is missing, flagged stale or older than
+        ``max_book_age_ms``, when it is too thin to estimate slippage, or
+        when the estimate exceeds ``max_slippage_pct``; each FAIL is a WARN
+        (the last a PASS) for a risk-reducing order; else PASS.
     """
     name = "liquidity.slippage"
     if ctx.request.order_type is not enums.OrderType.MARKET:
@@ -946,14 +993,21 @@ def liquidity_slippage(ctx: context.RiskContext) -> risk.RiskCheckResult:
     )
 
 
-def decision_quality(ctx: context.RiskContext) -> risk.RiskCheckResult:  # noqa: PLR0911
+def decision_quality(ctx: context.RiskContext) -> risk.RiskCheckResult:  # noqa: PLR0911 - one return per deployment or signal condition, checked in a fixed order.
     """Checks deployment, instrument allow-list and signal age.
 
     Args:
         ctx: Risk context.
 
     Returns:
-        Result.
+        SKIP for orders whose source is not STRATEGY. FAIL when the
+        deployment is missing or neither ENABLED nor PENDING_CONSENT, is
+        bound to another strategy version, has another order mode, or does
+        not allow the instrument (an AUTO_LIVE deployment allows only the
+        instruments it lists, so an empty list allows none; other
+        deployments are unrestricted while their list is empty). Then
+        UNKNOWN when the signal age is unknown, FAIL when it exceeds
+        ``max_signal_age_ms``; else PASS.
     """
     name = "decision.strategy"
     req = ctx.request
@@ -1034,7 +1088,9 @@ def duplicate_guard(ctx: context.RiskContext) -> risk.RiskCheckResult:
         ctx: Risk context.
 
     Returns:
-        Result.
+        FAIL when an intent already exists for the order's signal, or when
+        a STRATEGY order's strategy version already has a working opening
+        order on the instrument; else PASS.
     """
     name = "duplicate.guard"
     req = ctx.request
@@ -1070,7 +1126,10 @@ def connectivity(ctx: context.RiskContext) -> risk.RiskCheckResult:
         ctx: Risk context.
 
     Returns:
-        Result.
+        UNKNOWN when health is unknown; FAIL when the adapter is
+        UNAVAILABLE or STALE, or when recent venue rejects reach
+        ``reject_spike_threshold``; for DEGRADED, FAIL for a LIVE order that
+        is not risk-reducing, else WARN; PASS when HEALTHY.
     """
     name = "connectivity.adapter"
     health = ctx.adapter_health
@@ -1121,13 +1180,17 @@ def connectivity(ctx: context.RiskContext) -> risk.RiskCheckResult:
 def kill_switch_guard(ctx: context.RiskContext) -> risk.RiskCheckResult:
     """Blocks new exposure under an engaged kill switch.
 
-    Risk-reducing orders stay allowed (and audited).
+    The platform emergency halt counts as a switch covering every order;
+    otherwise every engaged tenant switch that covers the order's account
+    or strategy version (``KillSwitch.applies_to``) counts. Risk-reducing
+    orders stay allowed, with a warning recorded on the decision.
 
     Args:
         ctx: Risk context.
 
     Returns:
-        Result.
+        PASS when no switch covers the order; WARN for a risk-reducing
+        order; else FAIL.
     """
     name = "kill_switch.engaged"
     req = ctx.request
@@ -1168,7 +1231,11 @@ def protection(ctx: context.RiskContext) -> risk.RiskCheckResult:
         ctx: Risk context.
 
     Returns:
-        Result.
+        For LIVE orders from a STRATEGY (auto-live): FAIL when the venue has
+        no native stop-loss or the order carries no stop-loss leg, else
+        PASS. For other orders: SKIP without protective legs, PASS when the
+        venue holds stop-losses natively, else WARN (software-managed legs
+        are not guaranteed).
     """
     name = "protection.stop_loss"
     req = ctx.request
@@ -1224,7 +1291,8 @@ def protection(ctx: context.RiskContext) -> risk.RiskCheckResult:
 
 # ---------------------------------------------------------------------------
 # Broker routing and exchange-listed securities. These checks SKIP for
-# crypto instruments (except that DAY and outside-RTH need an exchange).
+# crypto instruments, except that DAY and outside-RTH (regular trading
+# hours) orders FAIL there because they need an exchange session.
 # ---------------------------------------------------------------------------
 
 
@@ -1252,7 +1320,10 @@ def routing_venue(ctx: context.RiskContext) -> risk.RiskCheckResult:
         ctx: Risk context.
 
     Returns:
-        Result.
+        UNKNOWN without an account; FAIL when ``equities.route`` refuses the
+        instrument for the account, or when the adapter lists its tradable
+        exchanges and the instrument's exchange is not among them; else
+        PASS.
     """
     name = "routing.venue"
     account = ctx.account
@@ -1298,7 +1369,7 @@ def routing_venue(ctx: context.RiskContext) -> risk.RiskCheckResult:
     return _result(name, Domain.ACCOUNT, Outcome.PASS, verdict.message)
 
 
-def market_session(ctx: context.RiskContext) -> risk.RiskCheckResult:  # noqa: PLR0911, PLR0912
+def market_session(ctx: context.RiskContext) -> risk.RiskCheckResult:  # noqa: PLR0911, PLR0912 - one branch per session rule, checked in a fixed order.
     """Applies exchange-session rules from the instrument's calendar.
 
     Market orders while the exchange is closed are rejected, or queue as
@@ -1309,7 +1380,14 @@ def market_session(ctx: context.RiskContext) -> risk.RiskCheckResult:  # noqa: P
         ctx: Risk context.
 
     Returns:
-        Result.
+        For crypto instruments: FAIL for DAY or outside-RTH orders, else
+        SKIP. For securities: FAIL for an outside-RTH order the account
+        cannot flag or that is not LIMIT or STOP_LIMIT; UNKNOWN (WARN when
+        risk-reducing) without a session calendar; PASS inside a session.
+        While closed: a DAY MARKET order WARNs (it queues for the next
+        open) when queueing is configured and supported, and every other
+        MARKET order FAILs; IOC/FOK orders FAIL; any other order
+        (outside-RTH or resting) WARNs.
     """
     name = "market.session"
     req = ctx.request
@@ -1436,17 +1514,21 @@ def market_session(ctx: context.RiskContext) -> risk.RiskCheckResult:  # noqa: P
     )
 
 
-def size_board_lot(ctx: context.RiskContext) -> risk.RiskCheckResult:  # noqa: PLR0911
+def size_board_lot(ctx: context.RiskContext) -> risk.RiskCheckResult:  # noqa: PLR0911 - one return per lot rule, checked in a fixed order.
     """Checks board lots and intraday odd-lot rules (TWSE, TPEx).
 
-    Common orders are whole board lots (1000 shares); intraday odd-lot
-    orders are 1-999 shares, limit and ROD (DAY) only.
+    Common orders are whole board lots (1000 shares on TWSE and TPEx);
+    intraday odd-lot orders are 1-999 shares, limit and ROD (rest of day,
+    i.e. DAY) only.
 
     Args:
         ctx: Risk context.
 
     Returns:
-        Result.
+        SKIP unless the instrument is a security with a board lot; PASS for
+        whole board lots; FAIL for a mix of board and odd lots. For odd
+        lots: UNKNOWN without capabilities; FAIL unless the account
+        supports odd lots and the order is a DAY LIMIT order; else PASS.
     """
     name = "size.board_lot"
     inst = ctx.instrument
@@ -1533,7 +1615,9 @@ def size_price_limit(ctx: context.RiskContext) -> risk.RiskCheckResult:
         ctx: Risk context.
 
     Returns:
-        Result.
+        SKIP for crypto instruments, instruments without a daily limit and
+        orders without a limit price; UNKNOWN without the previous close;
+        FAIL outside the band around it; else PASS.
     """
     name = "size.price_limit"
     inst = ctx.instrument
@@ -1583,14 +1667,18 @@ def size_price_limit(ctx: context.RiskContext) -> risk.RiskCheckResult:
     )
 
 
-def account_cash(ctx: context.RiskContext) -> risk.RiskCheckResult:  # noqa: PLR0911
+def account_cash(ctx: context.RiskContext) -> risk.RiskCheckResult:  # noqa: PLR0911 - one return per cash condition, checked in a fixed order.
     """Checks cash buying power and currency for securities (no margin).
 
     Args:
         ctx: Risk context.
 
     Returns:
-        Result.
+        SKIP for crypto instruments and for sells covered by the long
+        position; UNKNOWN without the cash balance; FAIL when the
+        instrument's currency is not the cash currency; UNKNOWN without the
+        order notional; FAIL when notional plus estimated fee exceeds the
+        available cash; else PASS.
     """
     name = "account.cash"
     req = ctx.request
@@ -1664,7 +1752,9 @@ def size_cash_account(ctx: context.RiskContext) -> risk.RiskCheckResult:
         ctx: Risk context.
 
     Returns:
-        Result.
+        SKIP for crypto instruments; UNKNOWN without capabilities; FAIL for
+        leverage other than 1 on a cash account, or for a sell larger than
+        the long position without short selling; else PASS.
     """
     name = "size.cash_account"
     req = ctx.request
@@ -1722,7 +1812,9 @@ def protection_bracket(ctx: context.RiskContext) -> risk.RiskCheckResult:
         ctx: Risk context.
 
     Returns:
-        Result.
+        SKIP without protective legs; UNKNOWN without capabilities; FAIL
+        when the venue lacks STOP_MARKET (for a stop-loss), LIMIT (for
+        take-profits) or GTC; else PASS.
     """
     name = "protection.bracket_orders"
     bracket = ctx.request.bracket
@@ -1769,12 +1861,16 @@ def protection_bracket(ctx: context.RiskContext) -> risk.RiskCheckResult:
 
 @dataclasses.dataclass(frozen=True, slots=True)
 class CheckSpec:
-    """Registered check.
+    """A check in the pipeline and the decision its FAIL leads to.
+
+    A FAIL leads to BLOCK unless one of the flags is set; UNKNOWN always
+    leads to BLOCK.
 
     Attributes:
         fn: Check function.
-        pause_on_fail: A FAIL pauses trading instead of blocking.
-        reject_on_fail: A FAIL rejects the order as invalid.
+        pause_on_fail: A FAIL leads to PAUSE (trading paused) instead.
+        reject_on_fail: A FAIL leads to REJECT (the order is invalid as
+            submitted); takes precedence over ``pause_on_fail``.
     """
 
     fn: Check
@@ -1813,4 +1909,4 @@ PIPELINE: tuple[CheckSpec, ...] = (
     CheckSpec(protection),
     CheckSpec(protection_bracket, reject_on_fail=True),
 )
-"""Ordered, mandatory check pipeline (deny by default)."""
+"""Default pipeline: every check runs for every intent, in this order."""

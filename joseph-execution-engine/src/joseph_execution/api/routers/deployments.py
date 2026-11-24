@@ -14,6 +14,8 @@ from joseph_execution.domain import deployments
 from joseph_execution.domain import enums
 from joseph_execution.domain import identity
 
+# Shared parameter default; a module constant keeps calls out of argument
+# defaults (ruff B008).
 _Principal = fastapi.Depends(auth.principal)
 
 

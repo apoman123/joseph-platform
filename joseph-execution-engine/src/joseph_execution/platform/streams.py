@@ -25,9 +25,10 @@ class Subscription:
 
     Attributes:
         tenant_id: Tenant whose events it may receive.
-        queue: Outgoing envelopes.
+        queue: Outgoing envelopes (unbounded).
         channels: Channel filter (empty = all).
-        account_id: Optional account filter.
+        account_id: Optional account filter; events without an account
+            always pass it.
     """
 
     tenant_id: str
@@ -48,6 +49,8 @@ class Subscription:
             True when the event should be delivered.
         """
         if self.channels and envelope.get("channel") not in self.channels:
+            # Kill switch changes reach every client of the tenant, whatever
+            # channels it subscribed to.
             return envelope.get("type") in ("risk.kill_switch",)
         return not (
             self.account_id and account_id and (account_id != self.account_id)
@@ -55,14 +58,18 @@ class Subscription:
 
 
 class UserStreamHub:
-    """In-process publisher implementing ``EventPublisher``."""
+    """In-process publisher implementing ``EventPublisher``.
+
+    State lives in this process only: sequences and replay rings restart
+    from zero with the process.
+    """
 
     def __init__(self, clock: services.Clock, retention: int = 1000) -> None:
         """Initializes the hub.
 
         Args:
             clock: Time source.
-            retention: Replay ring size per tenant.
+            retention: Replay ring size per tenant, in envelopes.
         """
         self._clock = clock
         self._retention = retention
@@ -87,7 +94,9 @@ class UserStreamHub:
             event_type: Type.
             channel: Channel.
             payload: Payload.
-            advance: Consume a sequence number.
+            advance: Consume a sequence number. Control envelopes
+                (heartbeats, acknowledgements, errors) pass False and carry
+                the current sequence.
 
         Returns:
             Envelope.
@@ -116,6 +125,9 @@ class UserStreamHub:
         account_id: str | None = None,
     ) -> None:
         """Publishes to the tenant's subscribers only.
+
+        The envelope takes the tenant's next sequence number and is kept in
+        the replay ring, so clients that reconnect can catch up.
 
         Args:
             tenant_id: Tenant.
@@ -165,7 +177,10 @@ class UserStreamHub:
             last_sequence: Last sequence the client processed.
 
         Returns:
-            Envelopes, or ``None`` when the gap exceeds retention.
+            The retained envelopes after ``last_sequence`` that pass the
+            subscription's filters (empty when the client is up to date),
+            or ``None`` when the gap exceeds retention and the client must
+            refetch snapshots.
         """
         ring = self._rings.get(sub.tenant_id, collections.deque())
         current = self._sequence.get(sub.tenant_id, 0)
@@ -188,6 +203,6 @@ class UserStreamHub:
             tenant_id: Tenant.
 
         Returns:
-            Sequence.
+            Sequence, 0 before the first event.
         """
         return self._sequence.get(tenant_id, 0)

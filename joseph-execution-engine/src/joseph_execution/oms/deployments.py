@@ -1,7 +1,12 @@
 # Copyright 2026 apoman123
 # SPDX-License-Identifier: MIT
 
-"""Deployment and AUTO_LIVE consent service."""
+"""Deployment service: creation, disabling and AUTO_LIVE consent.
+
+A deployment binds one immutable strategy version to one account in one
+mode. AUTO_LIVE deployments send LIVE orders only while they carry a valid
+consent, which this service grants after its LIVE gates pass.
+"""
 
 from __future__ import annotations
 
@@ -16,13 +21,14 @@ from joseph_execution.ports import repositories
 from joseph_execution.ports import services
 from joseph_execution.ports import trading
 
+# Longest AUTO_LIVE consent a user can grant at once: 7 days.
 _MAX_CONSENT_MS = 7 * 86_400_000
 
 
 class DeploymentService:
-    """Creates, disables and grants consent for deployments."""
+    """Service that creates, disables and grants consent for deployments."""
 
-    def __init__(  # noqa: PLR0917
+    def __init__(  # noqa: PLR0917 - seven injected collaborators and flags; bootstrap passes them positionally.
         self,
         uow_factory: repositories.UnitOfWorkFactory,
         resolver: trading.AdapterResolver,
@@ -40,8 +46,10 @@ class DeploymentService:
             audit_log: Audit log.
             clock: Time source.
             id_gen: Id generator.
-            step_up: Step-up verifier.
-            live_trading_enabled: Global LIVE gate.
+            step_up: Verifier of step-up (multi-factor authentication, MFA)
+                codes.
+            live_trading_enabled: Global LIVE gate; consent is refused while
+                it is off.
         """
         self._uow = uow_factory
         self._resolver = resolver
@@ -54,18 +62,18 @@ class DeploymentService:
     def list(
         self, principal: identity.Principal
     ) -> list[deployments.Deployment]:
-        """Lists tenant deployments.
+        """Lists the caller's tenant deployments.
 
         Args:
             principal: Caller.
 
         Returns:
-            Deployments.
+            Deployments of the caller's tenant.
         """
         with self._uow() as uow:
             return uow.deployments.list(principal.tenant_id)
 
-    def create(  # noqa: PLR0917
+    def create(  # noqa: PLR0917 - public API; the deployments router passes the deployment fields positionally.
         self,
         principal: identity.Principal,
         strategy_version_id: str,
@@ -74,24 +82,29 @@ class DeploymentService:
         limits: deployments.DeploymentLimits,
         sizing: deployments.SizingModel,
     ) -> deployments.Deployment:
-        """Creates a deployment.
+        """Creates a deployment and audits it.
 
-        PAPER/SHADOW deployments are enabled immediately; AUTO_LIVE starts
-        in PENDING_CONSENT and never inherits consent from another version.
+        PAPER/SHADOW deployments are enabled immediately and need the
+        account to permit their order mode; AUTO_LIVE starts in
+        PENDING_CONSENT (its LIVE gates are checked when consent is
+        granted) and never inherits consent from another version.
 
         Args:
             principal: Caller.
             strategy_version_id: Immutable version id ``<id>:v<n>``.
-            account_id: Account.
-            mode: Mode.
-            limits: Limits.
-            sizing: Sizing.
+            account_id: Account of the caller's tenant.
+            mode: Deployment mode.
+            limits: Deployment limits.
+            sizing: Sizing model.
 
         Returns:
-            Deployment.
+            The new deployment.
 
         Raises:
-            ExecutionError: ``NOT_FOUND`` or ``TRADE_MODE_DISABLED``.
+            ExecutionError: ``VALIDATION_FAILED`` for a mutable strategy id,
+                ``NOT_FOUND`` for a missing or foreign account, or
+                ``TRADE_MODE_DISABLED`` when the account does not permit
+                the mode.
         """
         if ":v" not in strategy_version_id:
             raise errors.ExecutionError(
@@ -143,18 +156,19 @@ class DeploymentService:
         principal: identity.Principal,
         deployment_id: str,
     ) -> deployments.Deployment:
-        """Loads a tenant-owned deployment.
+        """Loads a deployment owned by the caller's tenant.
 
         Args:
             uow: Unit of work.
             principal: Caller.
-            deployment_id: Id.
+            deployment_id: Deployment id.
 
         Returns:
-            Deployment.
+            The deployment.
 
         Raises:
-            ExecutionError: ``NOT_FOUND``.
+            ExecutionError: ``NOT_FOUND`` for a missing or foreign
+                deployment.
         """
         deployment = uow.deployments.get(deployment_id)
         if deployment is None or deployment.tenant_id != principal.tenant_id:
@@ -164,14 +178,18 @@ class DeploymentService:
     def disable(
         self, principal: identity.Principal, deployment_id: str
     ) -> deployments.Deployment:
-        """Disables a deployment and drops any live consent.
+        """Disables a deployment, drops any live consent and audits it.
 
         Args:
             principal: Caller.
-            deployment_id: Id.
+            deployment_id: Deployment id.
 
         Returns:
             Updated deployment.
+
+        Raises:
+            ExecutionError: ``NOT_FOUND`` for a missing or foreign
+                deployment.
         """
         now = self._clock.now_ms()
         with self._uow() as uow:
@@ -195,7 +213,7 @@ class DeploymentService:
             )
         return updated
 
-    async def grant_live_consent(
+    async def grant_live_consent(  # noqa: PLR0912 - the LIVE consent gates stay in one ordered if/elif chain.
         self,
         principal: identity.Principal,
         deployment_id: str,
@@ -205,25 +223,38 @@ class DeploymentService:
     ) -> deployments.Deployment:
         """Grants scoped, expiring AUTO_LIVE consent (fails closed).
 
+        The gates run in this order and the first failure wins: the
+        deployment is AUTO_LIVE, is not DISABLED or REVOKED, the risk is
+        acknowledged, ``0 < duration_ms <= 7 days``, the limits carry an
+        instrument allow-list, the step-up code verifies, the global LIVE
+        gate is on, the account permits LIVE, and the venue adapter reports
+        trading AVAILABLE with native stop-loss orders. Every refusal is
+        audited as ``live_consent.denied`` before it is raised. The consent
+        is bound to a hash of account, venue, strategy version, limits and
+        expiry, so changing any of them voids it.
+
         Args:
             principal: Caller.
             deployment_id: AUTO_LIVE deployment.
             step_up_code: Step-up (MFA) code.
             acknowledge_risk: Explicit risk acknowledgement.
-            duration_ms: Consent lifetime (max 7 days).
+            duration_ms: Consent lifetime in milliseconds (max 7 days).
 
         Returns:
-            Enabled deployment.
+            The deployment, ENABLED with the new consent.
 
         Raises:
-            ExecutionError: ``STEP_UP_REQUIRED``, ``LIVE_TRADING_DISABLED``,
-                ``VALIDATION_FAILED`` or ``NOT_FOUND``.
+            ExecutionError: ``NOT_FOUND``, ``VALIDATION_FAILED``,
+                ``CONFLICT`` (disabled), ``STEP_UP_REQUIRED``,
+                ``LIVE_TRADING_DISABLED`` or ``UNSUPPORTED`` (no native
+                stop-loss).
         """
         now = self._clock.now_ms()
         with self._uow() as uow:
             current = self._owned(uow, principal, deployment_id)
             account = uow.accounts.get(current.account_id)
-        assert account is not None
+        if account is None:
+            raise AssertionError("a deployment always has an account")
         problem: errors.ExecutionError | None = None
         if current.mode is not enums.DeploymentMode.AUTO_LIVE:
             problem = errors.ExecutionError(

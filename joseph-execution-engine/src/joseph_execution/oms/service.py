@@ -1,10 +1,17 @@
 # Copyright 2026 apoman123
 # SPDX-License-Identifier: MIT
 
-"""Order management service: the only owner of venue order side effects.
+"""Order management service (OMS): the only owner of venue order side effects.
 
 Pathway: ``OrderIntent -> RiskGateway -> OMS (outbox) -> TradingAdapter``.
 
+* Every intent and every amendment is evaluated by the Risk Gateway, which
+  denies by default: only an ALLOW decision creates an order, and
+  protective children come only from the bracket of an allowed intent.
+  The LIVE gates (global LIVE flag, account arming, AUTO_LIVE consent),
+  the emergency halt and the kill switches are risk checks, so every
+  intent passes through them. Manual LIVE orders must also carry a valid
+  preview token.
 * Intent, risk decision, order, reservation and outbox row are written in
   one transaction.
 * The outbox is processed at least once; an order is only sent from
@@ -51,6 +58,8 @@ from joseph_execution.risk import limits as risk_limits
 _LOG = logging.getLogger(__name__)
 S = enums.OrderState
 _DAY_MS = 86_400_000
+# States from RESERVED until terminal: the order holds a reservation and
+# may still trade.
 _OPEN_STATES = (
     S.RESERVED,
     S.SUBMITTING,
@@ -66,14 +75,20 @@ class OmsSettings:
     """OMS configuration.
 
     Attributes:
-        live_trading_enabled: Global LIVE gate (default False).
+        live_trading_enabled: Global LIVE gate (default False); passed to
+            the risk checks.
         emergency_halt: Platform halt (blocks all new exposure).
-        fees: Fee assumptions.
-        submit_timeout_s: Venue submit timeout.
-        max_resubmits: Resubmissions allowed after confirmed absence.
-        retry_backoff_ms: Base backoff for reconciliation retries.
-        max_reconcile_attempts: Attempts before manual intervention.
-        inline_dispatch: Send right after commit (else worker only).
+        fees: Fee assumptions of the cost estimates.
+        submit_timeout_s: Timeout of each venue submit, cancel and order
+            query, in seconds.
+        max_resubmits: Resubmissions allowed after the venue confirms an
+            order absent.
+        retry_backoff_ms: Base delay of reconciliation retries, in
+            milliseconds; it doubles per attempt up to 64 times the base.
+        max_reconcile_attempts: Failed venue queries before an order is
+            flagged for manual intervention.
+        inline_dispatch: Send right after commit (else only the outbox
+            worker sends).
         queue_closed_market_orders: Let DAY market orders for securities
             queue for the next open while the exchange is closed (where
             the broker allows it); otherwise they are rejected.
@@ -100,9 +115,10 @@ class SubmitResult:
     """Outcome of an intent submission.
 
     Attributes:
-        intent: Intent.
-        decision: Risk decision.
-        orders: Orders created for the intent (current state).
+        intent: Stored intent.
+        decision: Risk decision recorded with the intent.
+        orders: Orders of the intent (primary and protective) in their
+            current state, oldest first; empty when risk denied it.
         replayed: True when an idempotency key was replayed.
     """
 
@@ -131,14 +147,15 @@ class PreviewResult:
 
     Attributes:
         allowed: Whether the risk decision is ALLOW.
-        normalized: Normalized request.
+        normalized: Normalized request the token binds.
         estimates: Cost estimates.
-        quote: Quote used.
+        quote: Quote used, if any.
         decision: Risk decision.
-        warnings: Warnings.
+        warnings: Normalization warnings, then the messages of WARN checks.
         token: Preview token.
-        expires_at_ms: Token expiry.
-        protection: Protection info.
+        expires_at_ms: Token expiry, epoch milliseconds.
+        protection: Contract ``ProtectionInfo``: how protective orders
+            would be held.
     """
 
     allowed: bool
@@ -153,6 +170,8 @@ class PreviewResult:
 
     def to_contract(self) -> dict[str, object]:
         """Serializes to the contract ``OrderPreview``.
+
+        Unknown notional, fee and margin are serialized as ``"0"``.
 
         Returns:
             JSON-compatible dict.
@@ -184,9 +203,13 @@ class PreviewResult:
 
 
 class OmsService:
-    """Application service for orders, fills and positions."""
+    """Application service for orders, fills and positions.
 
-    def __init__(  # noqa: PLR0917
+    Attributes:
+        settings: OMS configuration.
+    """
+
+    def __init__(  # noqa: PLR0917 - eleven injected collaborators; bootstrap passes them positionally.
         self,
         uow_factory: repositories.UnitOfWorkFactory,
         gateway: risk_gateway.RiskGateway,
@@ -204,16 +227,16 @@ class OmsService:
 
         Args:
             uow_factory: Unit of work factory.
-            gateway: Risk Gateway.
-            resolver: Adapter resolver.
-            market_data: Market gateway.
+            gateway: Risk Gateway that authorizes every order.
+            resolver: Resolves the adapter of an account and order mode.
+            market_data: Market data gateway (instruments, quotes, books).
             audit_log: Audit log.
             clock: Time source.
             id_gen: Id generator.
-            publisher: User stream publisher.
+            publisher: Publisher of user stream events.
             metrics: Metrics sink.
             signer: Preview token signer.
-            settings: Settings.
+            settings: OMS configuration.
         """
         self._uow = uow_factory
         self._gateway = gateway
@@ -226,7 +249,11 @@ class OmsService:
         self._metrics = metrics
         self._signer = signer
         self.settings = settings
+        # Orders this process is dispatching or reconciling; a concurrent
+        # second call for the same order returns at once.
         self._inflight: set[str] = set()
+        # Lot size per instrument from fetched metadata; protective
+        # take-profit legs are floored to it.
         self._lots: dict[str, decimal.Decimal] = {}
 
     # ------------------------------------------------------------------
@@ -268,7 +295,7 @@ class OmsService:
             states: Optional state filter.
 
         Returns:
-            Orders, newest first.
+            Orders of the caller's tenant, newest first (at most 500).
         """
         with self._uow() as uow:
             return uow.orders.list(
@@ -287,7 +314,7 @@ class OmsService:
             account_id: Optional account filter.
 
         Returns:
-            Fills, newest first.
+            Fills of the caller's tenant, newest first (at most 500).
         """
         with self._uow() as uow:
             return uow.fills.list(principal.tenant_id, account_id=account_id)
@@ -302,7 +329,8 @@ class OmsService:
             account_id: Optional account filter.
 
         Returns:
-            Contract ``Position`` objects.
+            Contract ``Position`` objects; the mark is ``None`` without a
+            quote, and marks older than 15 seconds are flagged stale.
         """
         with self._uow() as uow:
             items = uow.positions.list(
@@ -331,6 +359,9 @@ class OmsService:
     ) -> PreviewResult:
         """Normalizes, estimates and risk-checks a draft without side effects.
 
+        Nothing is stored. Without instrument metadata the draft is not
+        normalized and the risk checks that need metadata fail closed.
+
         Args:
             principal: Caller.
             request: Draft.
@@ -338,6 +369,10 @@ class OmsService:
 
         Returns:
             Preview with a token binding the normalized request.
+
+        Raises:
+            ExecutionError: ``NOT_FOUND`` for a missing or foreign account,
+                ``INVALID_LOT_SIZE`` when the quantity rounds to zero.
         """
         account = self._owned_account(principal, request.account_id)
         instrument = await self._instrument(request.instrument_id)
@@ -366,10 +401,10 @@ class OmsService:
             warnings=tuple(warnings),
             token=token,
             expires_at_ms=expires,
-            protection=self._protection(ctx.capabilities, normalized),
+            protection=_protection(ctx.capabilities, normalized),
         )
 
-    async def submit_intent(  # noqa: PLR0912, PLR0915
+    async def submit_intent(  # noqa: PLR0912, PLR0915 - the order path stays in one function so its gates and writes read in order.
         self,
         principal: identity.Principal,
         request: intents.OrderIntentRequest,
@@ -380,12 +415,34 @@ class OmsService:
     ) -> SubmitResult:
         """Submits an intent through the Risk Gateway.
 
+        Steps, in order:
+
+        1. The stripped key must be 1-200 characters. A key already used
+           with the same body returns the stored result (``replayed``);
+           with a different body it raises ``IDEMPOTENCY_CONFLICT``.
+        2. The account, and the deployment if given, must belong to the
+           caller's tenant.
+        3. A preview token, if present, must match the request (without
+           the token) and be unexpired. A manual LIVE order without a token
+           is refused.
+        4. The Risk Gateway evaluates the request; its decision is final.
+        5. One transaction stores the intent, decision and body hash and
+           audits ``intent.created``. If ALLOW, it also adds the order in
+           RESERVED, a reservation of the estimated margin (0 when
+           unknown) and a SUBMIT outbox item; otherwise it audits
+           ``risk.blocked`` and creates no order. A concurrent submission
+           with the same key that wins the race is replayed.
+        6. After commit, new orders are published and, with
+           ``inline_dispatch``, sent at once.
+
+        A denied intent is returned, not raised.
+
         Args:
             principal: Caller.
             request: Confirmed request (strictly validated; no rounding).
             idempotency_key: Unique key per user action.
             deployment_id: Deployment for STRATEGY intents.
-            signal_age_ms: Age of the originating signal.
+            signal_age_ms: Age of the originating signal, in milliseconds.
 
         Returns:
             Submission result (``replayed`` for a repeated key).
@@ -465,7 +522,8 @@ class OmsService:
                 if decision.allowed:
                     order = self._new_order(intent, now)
                     uow.orders.add(order)
-                    assert decision.reservation_id is not None
+                    if decision.reservation_id is None:
+                        raise AssertionError("an allowed decision is reserved")
                     uow.reservations.add(
                         decision.reservation_id,
                         principal.tenant_id,
@@ -490,6 +548,8 @@ class OmsService:
                         payload={"decision": decision.to_contract()},
                     )
         except errors.ExecutionError as err:
+            # The intent store rejects a key a concurrent request committed
+            # first; same body -> replay it, different body -> conflict.
             if err.code == "IDEMPOTENCY_CONFLICT":
                 replay = self._replay(principal, key, body_hash)
                 if replay is not None:
@@ -567,14 +627,15 @@ class OmsService:
         Args:
             principal: Caller.
             intent_id: Intent.
-            replayed: Replay flag.
+            replayed: Replay flag of the result.
 
         Returns:
-            Result.
+            The intent, its decision and its orders, oldest first.
         """
         with self._uow() as uow:
             stored = uow.intents.get(intent_id)
-            assert stored is not None
+            if stored is None:
+                raise AssertionError("the intent was stored before loading")
             related = uow.orders.list(
                 tenant_id=principal.tenant_id, intent_id=intent_id
             )
@@ -586,14 +647,15 @@ class OmsService:
     def _new_order(
         self, intent: intents.OrderIntent, now_ms: int
     ) -> orders.Order:
-        """Creates the primary order and walks it to RESERVED.
+        """Creates the intent's order and walks it to RESERVED.
 
         Args:
             intent: Intent.
-            now_ms: Time.
+            now_ms: Time, epoch milliseconds.
 
         Returns:
-            Order in RESERVED.
+            Unsaved order in RESERVED (DRAFT -> VALIDATED -> RESERVED), with
+            role CLOSE for closing and reducing intents, else PRIMARY.
         """
         req = intent.request
         role = (
@@ -658,11 +720,13 @@ class OmsService:
     ) -> market.InstrumentMeta | None:
         """Fetches instrument metadata, mapping failures to ``None``.
 
+        Remembers the lot size for protective orders.
+
         Args:
             instrument_id: Instrument.
 
         Returns:
-            Metadata or ``None``.
+            Metadata, or ``None`` when unknown or the gateway fails.
         """
         try:
             meta = await self._market.instrument(instrument_id)
@@ -672,7 +736,7 @@ class OmsService:
             self._lots[instrument_id] = meta.lot_size
         return meta
 
-    async def _build_context(  # noqa: PLR0917
+    async def _build_context(  # noqa: PLR0917 - preview, submit and amend pass the same six risk inputs positionally.
         self,
         principal: identity.Principal,
         account: accounts.Account,
@@ -683,18 +747,22 @@ class OmsService:
     ) -> tuple[risk_context.RiskContext, preview_lib.Estimates]:
         """Gathers every input of the risk checks.
 
+        Unknown values stay ``None`` so the checks that need them fail
+        closed.
+
         Args:
             principal: Caller.
             account: Account.
             request: Request.
-            instrument: Instrument metadata.
+            instrument: Instrument metadata, if known.
             deployment: Deployment, if any.
-            signal_age_ms: Signal age, if any.
+            signal_age_ms: Signal age in milliseconds, if any.
 
         Returns:
-            Context and estimates.
+            The risk context and the request's cost estimates.
         """
         now = self._clock.now_ms()
+        # The daily loss limit counts realized profit and loss from 00:00 UTC.
         day_start = now - (now % _DAY_MS)
         with self._uow() as uow:
             lim = risk_limits.from_mapping(
@@ -739,6 +807,8 @@ class OmsService:
                     and not o.reduce_only
                 )
             window_start = now - lim.reject_window_ms
+            # Reading threshold + 1 of the newest rejects is enough to tell
+            # whether the spike threshold is exceeded.
             rejects = sum(
                 1
                 for o in uow.orders.list(
@@ -811,6 +881,8 @@ class OmsService:
             ),
             live_arming=arming,
         )
+        # Securities are bought with cash: sessions, price limits and the
+        # broker's cash view replace the margin valuation.
         if ctx.security:
             inputs = await equity_inputs.gather(
                 self._market,
@@ -833,40 +905,6 @@ class OmsService:
             )
         return ctx, est
 
-    @staticmethod
-    def _protection(
-        caps: accounts.TradingCapabilities | None,
-        request: intents.OrderIntentRequest,
-    ) -> dict[str, object]:
-        """Describes how protective orders would be held.
-
-        Args:
-            caps: Capabilities.
-            request: Request.
-
-        Returns:
-            Contract ``ProtectionInfo``.
-        """
-        native_sl = bool(caps and caps.native_stop_loss)
-        native_tp = bool(caps and caps.native_take_profit)
-        if request.bracket.empty:
-            note = "No protective orders requested."
-        elif native_sl and native_tp:
-            note = (
-                "Stop-loss and take-profit are placed at the venue as "
-                "reduce-only trigger orders after the entry fills."
-            )
-        else:
-            note = (
-                "Protective orders are software-managed by Joseph and are "
-                "not guaranteed; Auto-Live refuses this path."
-            )
-        return {
-            "native_stop_loss": native_sl,
-            "native_take_profit": native_tp,
-            "note": note,
-        }
-
     # ------------------------------------------------------------------
     # Dispatch (outbox worker)
     # ------------------------------------------------------------------
@@ -874,11 +912,14 @@ class OmsService:
     async def dispatch_pending(self, limit: int = 50) -> int:
         """Processes due outbox items (submits and reconciliations).
 
+        Items of orders this process already has in flight are skipped. A
+        failing item is logged and the remaining items still run.
+
         Args:
-            limit: Maximum items.
+            limit: Maximum items to fetch.
 
         Returns:
-            Number of items processed.
+            Number of due items fetched, skipped ones included.
         """
         with self._uow() as uow:
             items = uow.outbox.due(self._clock.now_ms(), limit)
@@ -890,7 +931,7 @@ class OmsService:
                     await self.dispatch_order(item.aggregate_id)
                 else:
                     await self.reconcile_order(item.aggregate_id)
-            except Exception:
+            except Exception:  # noqa: BLE001 - isolation point: logged with traceback; one failing item must not stop the batch.
                 _LOG.exception("outbox item %s failed", item.outbox_id)
         return len(items)
 
@@ -904,7 +945,7 @@ class OmsService:
             order_id: Order.
 
         Returns:
-            Item or ``None``.
+            The last item, or ``None`` when the order has none.
         """
         items = uow.outbox.for_aggregate(order_id)
         return items[-1] if items else None
@@ -916,13 +957,15 @@ class OmsService:
         status: str = "DONE",
         error: str | None = None,
     ) -> None:
-        """Marks all pending outbox items of an order.
+        """Sets every PENDING outbox item of an order to a final status.
+
+        Each item counts one more attempt.
 
         Args:
             uow: Unit of work.
             order_id: Order.
-            status: New status.
-            error: Error text.
+            status: New status: ``DONE``, ``FAILED`` or ``MANUAL``.
+            error: Error text to store, if any.
         """
         for item in uow.outbox.for_aggregate(order_id):
             if item.status == "PENDING":
@@ -936,6 +979,11 @@ class OmsService:
 
     async def dispatch_order(self, order_id: str) -> None:
         """Sends a RESERVED order to its venue adapter exactly once.
+
+        Returns at once when this process is already dispatching or
+        reconciling the order. The order moves to SUBMITTING in its own
+        transaction before the venue call, so a redelivered outbox item
+        never sends it twice.
 
         Args:
             order_id: Order.
@@ -951,6 +999,10 @@ class OmsService:
     async def _dispatch(self, order_id: str) -> None:
         """Implements ``dispatch_order`` for one non-inflight order.
 
+        A non-RESERVED order is not sent: SUBMITTING moves to
+        UNKNOWN_RECONCILING, UNKNOWN_RECONCILING is left to
+        reconciliation, and any other state finishes its outbox items.
+
         Args:
             order_id: Order.
         """
@@ -960,6 +1012,8 @@ class OmsService:
             if order is None:
                 return
             if order.state is not S.RESERVED:
+                # SUBMITTING without a result means an earlier send was
+                # interrupted: the venue may hold the order, so reconcile.
                 if order.state is S.SUBMITTING:
                     self._to_unknown(
                         uow,
@@ -972,7 +1026,8 @@ class OmsService:
                 return
             account = uow.accounts.get(order.account_id)
             stored = uow.intents.get(order.intent_id)
-            assert account is not None and stored is not None
+            if account is None or stored is None:
+                raise AssertionError("an order has its account and intent")
             version = order.version
             order.transition(S.SUBMITTING, now)
             order.submit_attempts += 1
@@ -996,10 +1051,16 @@ class OmsService:
     ) -> None:
         """Calls the adapter for an order already marked SUBMITTING.
 
+        ``AdapterUnavailableError`` means the order was definitely not sent
+        and fails it. A timeout, ``OSError`` or any other exception leaves
+        the outcome unknown and moves it to UNKNOWN_RECONCILING. Otherwise
+        the venue result is applied (REJECTED when not accepted), after
+        pulling fills the result reports but does not carry.
+
         Args:
             order: Order snapshot.
             account: Account.
-            intent: Intent.
+            intent: Intent the order belongs to.
         """
         adapter = self._resolver.resolve(account, order.mode)
         request = trading.VenueOrderRequest(
@@ -1028,7 +1089,7 @@ class OmsService:
         except (errors.AdapterTimeoutError, TimeoutError, OSError) as err:
             self._mark_unknown(order.order_id, f"submit outcome unknown: {err}")
             return
-        except Exception as err:
+        except Exception as err:  # noqa: BLE001 - isolation point: any other adapter error leaves the outcome unknown, so the order is reconciled.
             self._mark_unknown(
                 order.order_id, f"submit raised {type(err).__name__}"
             )
@@ -1045,9 +1106,12 @@ class OmsService:
     def _fail(self, order_id: str, reason: str) -> None:
         """Marks an order FAILED (definitely not sent) and releases margin.
 
+        Also fails its pending outbox items and audits ``order.failed``.
+        Missing and terminal orders are left alone.
+
         Args:
             order_id: Order.
-            reason: Reason.
+            reason: Reason stored on the order and its outbox items.
         """
         now = self._clock.now_ms()
         with self._uow() as uow:
@@ -1071,11 +1135,15 @@ class OmsService:
     ) -> None:
         """Moves an order to UNKNOWN_RECONCILING inside a transaction.
 
+        The order's latest outbox item becomes a RECONCILE item due after
+        ``retry_backoff_ms``; without one, a RECONCILE item due now is
+        added.
+
         Args:
-            uow: Unit of work.
-            order: Order.
-            now: Time.
-            reason: Reason.
+            uow: Unit of work of the caller's transaction.
+            order: Order (mutated).
+            now: Time, epoch milliseconds.
+            reason: Reason stored on the order and the outbox item.
         """
         version = order.version
         order.transition(S.UNKNOWN_RECONCILING, now, reason)
@@ -1102,9 +1170,11 @@ class OmsService:
     def _mark_unknown(self, order_id: str, reason: str) -> None:
         """Records an unknown submit outcome; never resubmits blindly.
 
+        Only an order still in SUBMITTING is moved.
+
         Args:
             order_id: Order.
-            reason: Reason.
+            reason: Reason stored on the order.
         """
         now = self._clock.now_ms()
         with self._uow() as uow:
@@ -1120,11 +1190,12 @@ class OmsService:
         """Pulls venue fills of an order (REST reconciliation).
 
         Args:
-            adapter: Adapter.
+            adapter: Adapter of the order's account and mode.
             order: Order.
 
         Returns:
-            Fills of the order.
+            Fills of the order since it was created; empty when the venue
+            query raises ``ExecutionError``.
         """
         try:
             fills = await adapter.list_recent_fills(
@@ -1136,6 +1207,15 @@ class OmsService:
 
     async def reconcile_order(self, order_id: str) -> None:
         """Resolves an UNKNOWN_RECONCILING (or stuck cancel) order.
+
+        Returns at once when this process already has the order in
+        flight. A terminal order, or one neither UNKNOWN_RECONCILING nor
+        CANCEL_PENDING, only finishes its outbox items. A venue that cannot
+        be queried by client order id (or whose capabilities are unknown)
+        flags the order for manual intervention; a failed query is retried
+        with backoff. When the venue has no record, an UNKNOWN_RECONCILING
+        order is resubmitted within the budget and a CANCEL_PENDING order
+        fails; otherwise the venue state and fills are applied.
 
         Args:
             order_id: Order.
@@ -1167,7 +1247,8 @@ class OmsService:
                 return
             account = uow.accounts.get(order.account_id)
             stored = uow.intents.get(order.intent_id)
-        assert account is not None and stored is not None
+        if account is None or stored is None:
+            raise AssertionError("an order has its account and intent")
         adapter = self._resolver.resolve(account, order.mode)
         try:
             caps = await adapter.capabilities(order.account_id)
@@ -1202,9 +1283,11 @@ class OmsService:
     def _manual(self, order_id: str, reason: str) -> None:
         """Stops automatic recovery and flags manual intervention.
 
+        The order keeps its state; its pending outbox items become MANUAL.
+
         Args:
             order_id: Order.
-            reason: Reason.
+            reason: Reason stored on the order and its outbox items.
         """
         now = self._clock.now_ms()
         with self._uow() as uow:
@@ -1215,6 +1298,8 @@ class OmsService:
             order.manual_intervention = True
             order.state_reason = reason
             order.updated_at_ms = now
+            # No transition bumps the version here, so do it by hand for
+            # the optimistic-concurrency save.
             order.version += 1
             uow.orders.save(order, version)
             self._finish_outbox(uow, order_id, "MANUAL", reason)
@@ -1233,11 +1318,16 @@ class OmsService:
     ) -> None:
         """Schedules another reconciliation attempt with backoff.
 
+        The delay is ``retry_backoff_ms * 2 ** min(attempts, 6)``. Once
+        ``max_reconcile_attempts`` is reached the order is flagged for
+        manual intervention instead. Without an outbox item nothing is
+        scheduled.
+
         Args:
             order_id: Order.
-            item: Outbox item.
-            now: Time.
-            reason: Reason.
+            item: The order's latest outbox item, if any.
+            now: Time, epoch milliseconds.
+            reason: Reason stored on the outbox item.
         """
         if item is None:
             return
@@ -1259,10 +1349,14 @@ class OmsService:
     ) -> None:
         """Resubmits an order the venue confirmed it never received.
 
+        The order fails instead once ``submit_attempts`` (the first send
+        included) exceeds ``max_resubmits``. It is re-read and resent only
+        if still UNKNOWN_RECONCILING.
+
         Args:
             order: Order in UNKNOWN_RECONCILING.
             account: Account.
-            intent: Intent.
+            intent: Intent the order belongs to.
         """
         now = self._clock.now_ms()
         if order.submit_attempts > self.settings.max_resubmits:
@@ -1298,15 +1392,17 @@ class OmsService:
     ) -> int:
         """Applies private-stream events idempotently.
 
-        Duplicates are ignored by venue fill id; out-of-order terminal
-        reports first pull the missing fills from the venue.
+        Duplicates are ignored by venue fill id; a status report that shows
+        more filled than recorded first pulls the missing fills from the
+        venue. Events of unknown client orders are skipped (fills with a
+        warning).
 
         Args:
             account_id: Account.
             events: Events in delivery order.
 
         Returns:
-            Number of events that changed state.
+            Number of fill and order events that changed state.
         """
         changed = 0
         for event in events:
@@ -1331,7 +1427,8 @@ class OmsService:
                 if event.order.filled_base > order.filled_base:
                     with self._uow() as uow:
                         account = uow.accounts.get(account_id)
-                    assert account is not None
+                    if account is None:
+                        raise AssertionError("an order has its account")
                     adapter = self._resolver.resolve(account, order.mode)
                     fills = await self._fetch_fills(adapter, order)
                 if await self._apply_state(
@@ -1350,7 +1447,8 @@ class OmsService:
             fills: Venue fills.
 
         Returns:
-            New fills applied.
+            Fills that were new; duplicates and fills of unknown client
+            orders are skipped.
         """
         applied = 0
         for fill in fills:
@@ -1368,10 +1466,10 @@ class OmsService:
 
         Args:
             account_id: Account.
-            client_order_id: Client id.
+            client_order_id: Client order id.
 
         Returns:
-            Order or ``None``.
+            The order, or ``None`` when the account has no such order.
         """
         with self._uow() as uow:
             return uow.orders.get_by_client_id(account_id, client_order_id)
@@ -1405,7 +1503,7 @@ class OmsService:
             order_id: Order.
             state: Venue state.
             fills: Fills to apply first.
-            rejected: The submit was rejected.
+            rejected: True when the venue rejected the submit.
 
         Returns:
             True if the order changed.
@@ -1423,14 +1521,23 @@ class OmsService:
     ) -> tuple[bool, list[orders.Order]]:
         """Applies venue truth to an order in one transaction.
 
+        New fills are recorded first, then the status report. On a change
+        the order is saved; a terminal order releases its reservation and
+        finishes its outbox items (an ACKNOWLEDGED or PARTIALLY_FILLED one
+        only finishes them); protective children are spawned and the
+        change is audited. Fills, order and position are published after
+        commit.
+
         Args:
             order_id: Order.
             state: Venue state, if any.
-            fills: Fills.
-            rejected: Submit rejected.
+            fills: Venue fills.
+            rejected: True when the venue rejected the submit.
 
         Returns:
-            ``(changed, orders to act on after commit)``.
+            ``(changed, orders to act on after commit)``: the order and any
+            new protective children, or ``(False, [])`` when nothing
+            changed.
         """
         now = self._clock.now_ms()
         with self._uow() as uow:
@@ -1446,8 +1553,8 @@ class OmsService:
             ):
                 order.exchange_order_id = state.exchange_order_id
             new_fills = []
-            for vf in fills:
-                fill = self._record_fill(uow, order, vf, now)
+            for venue_fill in fills:
+                fill = self._record_fill(uow, order, venue_fill, now)
                 if fill is not None:
                     new_fills.append(fill)
             if state is not None:
@@ -1498,12 +1605,13 @@ class OmsService:
 
         Args:
             uow: Unit of work.
-            order: Order (mutated).
+            order: Order (mutated: fill ids, filled quantity and state).
             venue_fill: Venue fill.
-            now: Time.
+            now: Time, epoch milliseconds.
 
         Returns:
-            The new fill, or ``None`` for duplicates.
+            The new fill, or ``None`` for a duplicate (fill id known to the
+            order or to the fill store).
         """
         if venue_fill.exchange_fill_id in order.fill_ids:
             return None
@@ -1563,14 +1671,22 @@ class OmsService:
     ) -> None:
         """Applies a venue status report (fills already applied).
 
+        Terminal orders do not change. A rejection moves to REJECTED where
+        allowed. An acknowledgement, or a fill report on an order still
+        SUBMITTING or UNKNOWN_RECONCILING, acknowledges it; an
+        acknowledgement of a CANCEL_PENDING order means the cancel failed,
+        so it returns to ACKNOWLEDGED or PARTIALLY_FILLED. CANCELED and
+        EXPIRED apply only to an order that is not fully filled. Fill
+        states need nothing more: the fills already moved the order.
+
         Args:
-            uow: Unit of work.
+            uow: Unit of work (unused).
             order: Order (mutated).
             state: Venue state.
-            now: Time.
-            rejected: Submit rejected.
+            now: Time, epoch milliseconds.
+            rejected: True when the venue rejected the submit.
         """
-        del uow
+        del uow  # Unused.
         if order.state.is_terminal:
             return
         if state.exchange_order_id:
@@ -1605,13 +1721,21 @@ class OmsService:
     ) -> list[orders.Order]:
         """Creates reduce-only SL/TP children once a primary order is done.
 
+        Runs once per primary order, when it is terminal with fills and its
+        intent has a bracket: a stop-loss (SL) for the whole filled
+        quantity and one limit take-profit (TP) per leg, each leg floored
+        to the lot and all legs together capped at the filled quantity.
+        Children are GTC (good-till-cancelled) orders on the exit side with
+        a zero reservation.
+
         Args:
             uow: Unit of work.
-            order: Primary order (terminal with fills).
-            now: Time.
+            order: Order that just changed.
+            now: Time, epoch milliseconds.
 
         Returns:
-            New child orders (RESERVED, queued in the outbox).
+            New child orders (RESERVED, queued in the outbox), or an empty
+            list when none are due.
         """
         if order.role is not enums.OrderRole.PRIMARY or not (
             order.state.is_terminal and order.filled_base > 0
@@ -1626,7 +1750,7 @@ class OmsService:
         children: list[orders.Order] = []
         exit_side = order.side.opposite
 
-        def child(  # noqa: PLR0917
+        def child(  # noqa: PLR0917 - the fields of one child order; both call sites pass them in order.
             role: enums.OrderRole,
             suffix: str,
             qty: decimal.Decimal,
@@ -1690,6 +1814,8 @@ class OmsService:
                 )
             )
         remaining = order.filled_base
+        # Without cached metadata, the precision of the order quantity
+        # stands in for the lot.
         lot_step = self._lots.get(order.instrument_id) or _quantum(
             order.quantity_base
         )
@@ -1736,8 +1862,9 @@ class OmsService:
     async def _after_change(self, changed: list[orders.Order]) -> None:
         """Runs follow-ups after a committed change.
 
-        Dispatches new protective children and cancels OCO siblings when a
-        protective order fills.
+        Dispatches new protective children (with ``inline_dispatch``) and,
+        when a protective order fills, cancels its one-cancels-other (OCO)
+        siblings.
 
         Args:
             changed: Orders changed or created.
@@ -1772,6 +1899,8 @@ class OmsService:
     ) -> orders.Order:
         """Requests cancellation of a tenant order.
 
+        Terminal and CANCEL_PENDING orders are left as they are.
+
         Args:
             principal: Caller.
             order_id: Order.
@@ -1790,12 +1919,19 @@ class OmsService:
     async def _cancel(self, order_id: str, actor: str) -> None:
         """Cancels an order on behalf of an actor.
 
+        A RESERVED order was never sent, so it is canceled locally and its
+        reservation released. A working order moves to CANCEL_PENDING
+        before the venue call; a timeout queues a RECONCILE item, a venue
+        error returns it to its working state, and a venue answer is
+        applied with any missing fills.
+
         Args:
             order_id: Order.
             actor: Audit actor.
 
         Raises:
-            ExecutionError: ``ORDER_UNKNOWN`` while reconciling.
+            ExecutionError: ``ORDER_UNKNOWN`` (retryable) while the order is
+                SUBMITTING or UNKNOWN_RECONCILING.
         """
         now = self._clock.now_ms()
         with self._uow() as uow:
@@ -1833,7 +1969,8 @@ class OmsService:
             self._audit_order(
                 uow, order, "order.cancel_requested", {"actor": actor}
             )
-        assert account is not None
+        if account is None:
+            raise AssertionError("an order has its account")
         self._publish_order(order)
         adapter = self._resolver.resolve(account, order.mode)
         try:
@@ -1851,7 +1988,7 @@ class OmsService:
             with self._uow() as uow:
                 fresh = uow.orders.get(order_id)
                 if fresh is not None and fresh.state is S.CANCEL_PENDING:
-                    v = fresh.version
+                    fresh_version = fresh.version
                     fresh.transition(
                         previous
                         if previous in (S.ACKNOWLEDGED, S.PARTIALLY_FILLED)
@@ -1859,14 +1996,14 @@ class OmsService:
                         now,
                         f"cancel failed: {err.message}",
                     )
-                    uow.orders.save(fresh, v)
+                    uow.orders.save(fresh, fresh_version)
             return
         fills = []
         if state.filled_base > order.filled_base:
             fills = await self._fetch_fills(adapter, order)
         await self._apply_state(order_id, state, fills, rejected=False)
 
-    async def amend_order(  # noqa: PLR0917
+    async def amend_order(  # noqa: PLR0917 - public API; the trading router and tests pass the amend fields positionally.
         self,
         principal: identity.Principal,
         order_id: str,
@@ -1877,21 +2014,29 @@ class OmsService:
     ) -> orders.Order:
         """Amends a working order after re-validation and risk.
 
+        Only ACKNOWLEDGED and PARTIALLY_FILLED orders on a venue that
+        supports amend qualify. New values are not rounded: prices must be
+        on the tick grid and the quantity a multiple of the lot. The
+        amended order is re-checked by the Risk Gateway as a fresh draft;
+        failures in the DUPLICATE domain are ignored because the order
+        being amended is itself open.
+
         Args:
             principal: Caller.
             order_id: Order.
-            limit_price: New limit price.
-            trigger_price: New trigger price.
-            quantity_base: New quantity.
-            expected_version: Optimistic concurrency guard.
+            limit_price: New limit price, or ``None`` to keep it.
+            trigger_price: New trigger price, or ``None`` to keep it.
+            quantity_base: New total quantity, or ``None`` to keep it.
+            expected_version: Optimistic concurrency guard, if any.
 
         Returns:
             Amended order.
 
         Raises:
-            ExecutionError: ``CONFLICT``, ``UNSUPPORTED``,
-                ``INVALID_TICK_SIZE``, ``INVALID_LOT_SIZE`` or
-                ``RISK_LIMIT``.
+            ExecutionError: ``NOT_FOUND``, ``CONFLICT``, ``UNSUPPORTED``,
+                ``MARKET_STALE``, ``INVALID_TICK_SIZE``,
+                ``INVALID_LOT_SIZE``, or the primary code of a failing risk
+                check (``RISK_LIMIT`` when it has none).
         """
         order = self.get_order(principal, order_id)
         if expected_version is not None and expected_version != order.version:
@@ -1929,7 +2074,8 @@ class OmsService:
             )
         with self._uow() as uow:
             stored = uow.intents.get(order.intent_id)
-        assert stored is not None
+        if stored is None:
+            raise AssertionError("an order has its intent")
         base = stored.intent.request
         draft = dataclasses.replace(
             base,
@@ -1979,7 +2125,8 @@ class OmsService:
         now = self._clock.now_ms()
         with self._uow() as uow:
             fresh = uow.orders.get(order_id)
-            assert fresh is not None
+            if fresh is None:
+                raise AssertionError("orders are never deleted")
             version = fresh.version
             fresh.amend(now, limit_price, trigger_price, quantity_base)
             if state.exchange_order_id:
@@ -2003,7 +2150,7 @@ class OmsService:
     # Close
     # ------------------------------------------------------------------
 
-    async def close_request(  # noqa: PLR0917
+    async def close_request(  # noqa: PLR0917 - public API; routers, the kill switch and tests pass these positionally.
         self,
         principal: identity.Principal,
         position_id: str,
@@ -2014,6 +2161,11 @@ class OmsService:
     ) -> intents.OrderIntentRequest:
         """Builds a reduce-only close that can never flip the position.
 
+        Securities on board-lot markets close whole board lots first (see
+        ``_security_close_qty``). A partial fraction is floored to the lot.
+        Market closes are IOC (immediate-or-cancel); limit closes are DAY
+        for securities and GTC otherwise. Nothing is submitted.
+
         Args:
             principal: Caller.
             position_id: Position.
@@ -2023,11 +2175,14 @@ class OmsService:
             source: Intent source.
 
         Returns:
-            Close request.
+            Close request; ``position_effect`` is CLOSE when it covers the
+            whole position, else REDUCE.
 
         Raises:
-            ExecutionError: ``NOT_FOUND``, ``CONFLICT`` (flat) or
-                ``VALIDATION_FAILED``.
+            ExecutionError: ``NOT_FOUND``, ``CONFLICT`` (flat),
+                ``VALIDATION_FAILED``, ``MARKET_STALE`` (partial close
+                without metadata) or ``INVALID_LOT_SIZE`` (fraction rounds
+                to zero).
         """
         if not (decimals.ZERO < fraction <= decimals.ONE):
             raise errors.ExecutionError(
@@ -2092,13 +2247,13 @@ class OmsService:
         action: str,
         payload: dict[str, object],
     ) -> None:
-        """Audits an order change.
+        """Audits an order change as ``system:oms``.
 
         Args:
-            uow: Unit of work.
+            uow: Unit of work of the change.
             order: Order.
-            action: Action.
-            payload: Payload.
+            action: Action name, such as ``order.submitted``.
+            payload: Details; the client order id and mode are added.
         """
         self._audit.record(
             uow,
@@ -2132,8 +2287,10 @@ class OmsService:
     def _publish_position(self, order: orders.Order) -> None:
         """Publishes ``position.updated`` for an order's position.
 
+        The event carries no mark and is flagged stale.
+
         Args:
-            order: Order.
+            order: Order whose position changed.
         """
         with self._uow() as uow:
             pos = uow.positions.get(
@@ -2174,7 +2331,8 @@ def _security_close_qty(
     lot = None if instrument is None else instrument.board_lot
     kind = equities.lot_kind(held, lot)
     if kind is equities.LotKind.MIXED:
-        assert lot is not None
+        if lot is None:
+            raise AssertionError("a MIXED holding has a board lot")
         return decimals.floor_to_step(held, lot)
     if kind is equities.LotKind.ODD and order_type is enums.OrderType.MARKET:
         raise errors.ExecutionError(
@@ -2187,15 +2345,53 @@ def _security_close_qty(
 def _quantum(value: decimal.Decimal) -> decimal.Decimal:
     """Returns the smallest increment implied by a decimal's exponent.
 
+    Trailing zeros do not count, and integers give 1.
+
     Args:
-        value: Quantity such as ``0.010``.
+        value: Finite quantity such as ``0.010``.
 
     Returns:
-        Increment such as ``0.001``.
+        Increment such as ``0.01``.
     """
     exponent = value.normalize().as_tuple().exponent
-    assert isinstance(exponent, int)
+    if not isinstance(exponent, int):
+        raise AssertionError("order quantities are finite")
     return decimal.Decimal(1).scaleb(min(exponent, 0))
+
+
+def _protection(
+    caps: accounts.TradingCapabilities | None,
+    request: intents.OrderIntentRequest,
+) -> dict[str, object]:
+    """Describes how protective orders would be held.
+
+    Args:
+        caps: Negotiated capabilities; ``None`` (unknown) counts as no
+            native protective orders.
+        request: Request.
+
+    Returns:
+        Contract ``ProtectionInfo``.
+    """
+    native_sl = bool(caps and caps.native_stop_loss)
+    native_tp = bool(caps and caps.native_take_profit)
+    if request.bracket.empty:
+        note = "No protective orders requested."
+    elif native_sl and native_tp:
+        note = (
+            "Stop-loss and take-profit are placed at the venue as "
+            "reduce-only trigger orders after the entry fills."
+        )
+    else:
+        note = (
+            "Protective orders are software-managed by Joseph and are "
+            "not guaranteed; Auto-Live refuses this path."
+        )
+    return {
+        "native_stop_loss": native_sl,
+        "native_take_profit": native_tp,
+        "note": note,
+    }
 
 
 async def _venue_balances(

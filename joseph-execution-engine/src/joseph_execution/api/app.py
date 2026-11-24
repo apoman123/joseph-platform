@@ -5,6 +5,7 @@
 
 from __future__ import annotations
 
+import asyncio
 import contextlib
 import re
 from collections.abc import AsyncIterator
@@ -13,6 +14,7 @@ from collections.abc import Callable
 from collections.abc import Coroutine
 from collections.abc import Sequence
 from typing import Any
+from typing import TypeAlias
 
 import fastapi
 from fastapi.middleware import cors
@@ -27,9 +29,12 @@ from joseph_execution.api.routers import trading
 from joseph_execution.domain import ids
 from joseph_execution.domain import tracing
 
+# A client trace id is reused only when it is short and log-safe; any other
+# value is replaced by a fresh id.
 _TRACE = re.compile(r"^[A-Za-z0-9._:-]{1,64}$")
 
-BackgroundTask = Callable[[], Coroutine[Any, Any, None]]
+BackgroundTask: TypeAlias = Callable[[], Coroutine[Any, Any, None]]
+"""Factory of a long-running background coroutine."""
 
 
 def create_app(
@@ -40,7 +45,8 @@ def create_app(
 
     Args:
         svc: Services.
-        background: Long-running coroutines started with the app.
+        background: Factories of long-running coroutines, started as tasks
+            when the app starts and cancelled when it stops.
 
     Returns:
         Application.
@@ -57,8 +63,6 @@ def create_app(
             Control while the app runs.
         """
         del app
-        import asyncio  # noqa: PLC0415 - only needed for lifespan.
-
         tasks: list[asyncio.Task[None]] = [
             asyncio.create_task(job()) for job in background
         ]
@@ -79,6 +83,8 @@ def create_app(
         lifespan=lifespan,
     )
     app.state.services = svc
+    # Credentials travel in the Authorization header, never in cookies, so
+    # browsers need no credentialed CORS.
     app.add_middleware(
         cors.CORSMiddleware,
         allow_origins=list(svc.settings.cors_origins),

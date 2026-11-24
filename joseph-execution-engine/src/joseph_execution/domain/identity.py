@@ -10,11 +10,11 @@ import dataclasses
 
 @dataclasses.dataclass(frozen=True, slots=True)
 class Principal:
-    """Authenticated subject; every query and mutation is tenant scoped.
+    """An authenticated caller; every query and mutation is tenant scoped.
 
     Attributes:
-        tenant_id: Owning tenant.
-        user_id: Acting user.
+        tenant_id: Tenant the caller acts for.
+        user_id: Acting user (or service principal) within the tenant.
     """
 
     tenant_id: str
@@ -22,5 +22,5 @@ class Principal:
 
     @property
     def actor(self) -> str:
-        """Returns the audit actor label ``user:<id>``."""
+        """The audit actor label, ``user:<user_id>``."""
         return f"user:{self.user_id}"

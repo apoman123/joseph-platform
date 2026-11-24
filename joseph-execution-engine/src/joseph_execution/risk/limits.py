@@ -1,7 +1,13 @@
 # Copyright 2026 apoman123
 # SPDX-License-Identifier: MIT
 
-"""Risk limits: user values clamped by platform hard caps."""
+"""Risk limits: user values clamped by platform hard caps.
+
+Money limits (notional and daily loss) are sized in USD and scaled into the
+account currency by ``money_factor``. The other limits carry their unit in
+their name (``_pct`` percent, ``_ms`` milliseconds) or are counts and
+multiples.
+"""
 
 from __future__ import annotations
 
@@ -14,7 +20,7 @@ from joseph_execution.domain import errors
 from joseph_execution.domain import risk
 
 POLICY_VERSION = "risk-policy-2026.11.1"
-"""Policy id recorded on every decision (2026.11.1: account LIVE arming)."""
+"""Policy id recorded on every decision (2026.11.1 added LIVE arming)."""
 
 _D = decimal.Decimal
 _DEFAULT_MAX_ACCOUNT_NOTIONAL = decimal.Decimal(1_000_000)
@@ -30,20 +36,29 @@ _DEFAULT_MAX_PRICE_DEVIATION_PCT = decimal.Decimal(10)
 class RiskLimits:
     """Per-account limits enforced for manual and automated orders.
 
+    The defaults are the USD-sized values of an account without stored
+    limits. Deployment limits can only tighten them.
+
     Attributes:
-        max_account_notional: Gross notional across positions and the order.
-        max_position_notional: Notional of the resulting position.
-        max_open_positions: Concurrent open positions.
-        max_daily_loss: Daily realized loss that pauses new exposure.
+        max_account_notional: Cap on the gross notional of the account's
+            positions plus the order (account currency).
+        max_position_notional: Cap on the position's current notional plus
+            the order (account currency).
+        max_open_positions: Concurrent non-flat positions.
+        max_daily_loss: Realized loss since 00:00 UTC (a positive amount in
+            the account currency) at which new exposure pauses.
         max_leverage: Leverage cap.
-        max_spread_pct: Maximum bid/ask spread (percent).
-        max_slippage_pct: Maximum estimated market-order slippage.
-        max_price_deviation_pct: Limit price band around the mark.
+        max_spread_pct: Maximum bid/ask spread in percent of the mid.
+        max_slippage_pct: Maximum estimated market-order slippage in percent
+            of the best price.
+        max_price_deviation_pct: Maximum distance of a limit or trigger
+            price from the reference price, in percent.
         max_quote_age_ms: Quote freshness budget.
-        max_book_age_ms: Book freshness budget.
+        max_book_age_ms: Order book freshness budget.
         max_signal_age_ms: Strategy signal age budget.
-        reject_spike_threshold: Rejects per window that pause trading.
-        reject_window_ms: Window for the reject spike detector.
+        reject_spike_threshold: Venue rejects inside ``reject_window_ms``
+            at which trading pauses.
+        reject_window_ms: Window of the reject spike detector.
     """
 
     max_account_notional: decimal.Decimal = _DEFAULT_MAX_ACCOUNT_NOTIONAL
@@ -64,7 +79,7 @@ class RiskLimits:
         """Serializes limits as strings.
 
         Returns:
-            Field name to decimal/int string.
+            Field name to its value as a plain decimal or integer string.
         """
         result: dict[str, str] = {}
         for field in dataclasses.fields(self):
@@ -77,6 +92,7 @@ class RiskLimits:
         return result
 
 
+# Hard caps (USD-sized) that no stored or user-supplied limit can exceed.
 PLATFORM_HARD_LIMITS = RiskLimits(
     max_account_notional=_D(5_000_000),
     max_position_notional=_D(1_000_000),
@@ -94,6 +110,7 @@ PLATFORM_HARD_LIMITS = RiskLimits(
 )
 
 
+# Limits in money terms, scaled by money_factor for non-USD accounts.
 _MONEY_FIELDS = (
     "max_account_notional",
     "max_position_notional",
@@ -133,7 +150,8 @@ def in_currency(
         twd_limit_factor: Factor of TWD accounts.
 
     Returns:
-        Limits with notional and loss limits scaled by ``money_factor``.
+        Limits with notional and loss limits scaled by ``money_factor``;
+        ``base`` itself when the factor is 1.
     """
     factor = money_factor(currency, twd_limit_factor)
     if factor == decimals.ONE:
@@ -158,7 +176,7 @@ def hard_limits(
     return in_currency(PLATFORM_HARD_LIMITS, currency, twd_limit_factor)
 
 
-def from_mapping(
+def from_mapping(  # noqa: GPY013 - the ValueError is caught below and re-raised as ExecutionError.
     values: Mapping[str, str] | None,
     currency: str = "USD",
     twd_limit_factor: decimal.Decimal = risk.DEFAULT_TWD_LIMIT_FACTOR,
@@ -166,9 +184,12 @@ def from_mapping(
     """Builds limits from stored values, clamped to platform hard caps.
 
     Unknown keys are rejected so typos cannot silently disable a limit.
+    A value above its hard cap is lowered to the cap, not rejected; keys
+    that are not given keep their (currency-scaled) defaults.
 
     Args:
-        values: Stored or user-supplied values; ``None`` for defaults.
+        values: Stored or user-supplied values as strings; ``None`` or
+            empty for the defaults.
         currency: Account currency of money limits (defaults and hard caps
             scale with ``money_factor``).
         twd_limit_factor: Factor of TWD accounts.
@@ -177,7 +198,8 @@ def from_mapping(
         Effective limits.
 
     Raises:
-        ExecutionError: ``VALIDATION_FAILED`` for unknown keys or bad values.
+        ExecutionError: ``VALIDATION_FAILED`` for unknown keys, unparsable
+            values or negative values.
     """
     base = in_currency(RiskLimits(), currency, twd_limit_factor)
     caps = hard_limits(currency, twd_limit_factor)
@@ -207,4 +229,4 @@ def from_mapping(
                 "VALIDATION_FAILED", f"invalid value for {key}: {raw!r}"
             ) from err
         updates[key] = value
-    return dataclasses.replace(base, **updates)  # type: ignore[arg-type]
+    return dataclasses.replace(base, **updates)  # type: ignore[arg-type]  # each value has its field's type (int or Decimal), parsed above

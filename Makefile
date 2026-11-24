@@ -1,11 +1,14 @@
 # Joseph platform task runner. `make help` lists targets.
-# Requires: uv (Python 3.12+), Node 20+ with corepack (pnpm 10).
+# Requires: uv (Python 3.12+), Node 20.11+ with corepack (pnpm 10).
 
 SHELL := /bin/bash
+# corepack fetches the pnpm pinned in package.json without a prompt.
 export COREPACK_ENABLE_DOWNLOAD_PROMPT := 0
 ME := joseph-market-engine
 EE := joseph-execution-engine
 TERM_DIR := joseph-terminal
+# Local-only tokens, equal to the execution engine's development defaults;
+# override them on the command line, e.g. `make dev DEV_TOKEN=...`.
 DEV_TOKEN ?= dev-local-token
 SERVICE_TOKEN ?= dev-service-token
 
@@ -100,7 +103,8 @@ ci: lint typecheck test ## Everything CI runs
 	cd $(EE) && uv run python scripts/export_openapi.py --check
 
 # PineScripts access for the market-engine build: the token in
-# PINESCRIPTS_TOKEN if set, else the local ssh-agent.
+# PINESCRIPTS_TOKEN if set, else the local ssh-agent. Make splits function
+# arguments at commas, so the comma inside --secret comes from $(comma).
 comma := ,
 PINESCRIPTS_ACCESS = $(if $(PINESCRIPTS_TOKEN),--secret id=pinescripts_token$(comma)env=PINESCRIPTS_TOKEN,--ssh default)
 
