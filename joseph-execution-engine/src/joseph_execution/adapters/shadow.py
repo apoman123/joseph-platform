@@ -26,14 +26,17 @@ class ShadowRecord:
     """One hypothetical order.
 
     Attributes:
-        client_order_id: Client id.
-        instrument_id: Instrument.
-        side: Side.
-        quantity_base: Quantity.
-        decision_mark: Mark at decision time.
-        hypothetical_price: Hypothetical first fill price.
-        deviation_bps: Deviation of the fill from the mark (bps).
-        ts_ms: Time.
+        client_order_id: Client order id.
+        instrument_id: Canonical instrument id.
+        side: Order side (``OrderSide`` value).
+        quantity_base: Order quantity in base units.
+        decision_mark: Reference price when the order was decided, or
+            ``None`` without a quote.
+        hypothetical_price: Price of the simulated first fill, or ``None``
+            when the simulation did not fill.
+        deviation_bps: Fill price minus mark, relative to the mark, in basis
+            points; ``None`` when either price is missing.
+        ts_ms: Recording time, UTC epoch milliseconds.
     """
 
     client_order_id: str
@@ -59,7 +62,7 @@ class ShadowAdapter(paper.PaperTradingAdapter):
         """Initializes the adapter.
 
         Args:
-            market_data: Market gateway.
+            market_data: Market gateway for quotes.
             clock: Time source.
         """
         super().__init__(market_data, clock, name="shadow")
@@ -68,13 +71,14 @@ class ShadowAdapter(paper.PaperTradingAdapter):
     async def capabilities(
         self, account_id: str
     ) -> accounts.TradingCapabilities:
-        """Returns capabilities with a shadow note.
+        """Returns the paper capabilities with a shadow-mode note.
 
         Args:
-            account_id: Account.
+            account_id: Account to negotiate for.
 
         Returns:
-            Capabilities.
+            The simulator's capabilities; the shadow note replaces its
+            notes.
         """
         caps = await super().capabilities(account_id)
         return dataclasses.replace(
@@ -90,8 +94,12 @@ class ShadowAdapter(paper.PaperTradingAdapter):
     ) -> trading.VenueSubmitResult:
         """Records a hypothetical order and simulates its fill.
 
+        The mark is read before the simulation runs, so the deviation
+        compares the fill with the price at decision time. Appends one
+        ``ShadowRecord`` to ``records``.
+
         Args:
-            request: Order.
+            request: Order that would have been sent.
 
         Returns:
             Simulated result.

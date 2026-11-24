@@ -36,6 +36,7 @@ from collections.abc import Awaitable
 from collections.abc import Callable
 from collections.abc import Sequence
 from typing import Protocol
+from typing import TypeAlias
 
 import websockets
 
@@ -65,7 +66,8 @@ class WsConnection(Protocol):
         ...
 
 
-ConnectFn = Callable[
+# Opens a connection to a URL; adapters take one so tests can inject fakes.
+ConnectFn: TypeAlias = Callable[
     [str], contextlib.AbstractAsyncContextManager[WsConnection]
 ]
 
@@ -74,6 +76,9 @@ def default_connect(
     url: str,
 ) -> contextlib.AbstractAsyncContextManager[WsConnection]:
     """Opens a WebSocket with protocol-level pings enabled.
+
+    Opening times out after 10 s, pings go every 20 s with a 20 s timeout,
+    and frames may be up to 4 MiB (account snapshots can be large).
 
     Args:
         url: WebSocket URL.
@@ -125,12 +130,13 @@ class PrivateStreamSpec:
             may be a coroutine function when parsing needs lookups.
         resync: Fetches the REST snapshot replayed after each subscribe.
         ping_message: Application-level ping frame, if the venue needs one.
-        ping_interval_s: Interval between pings.
-        idle_timeout_s: Reconnect when nothing arrives for this long.
+        ping_interval_s: Interval between pings, in seconds.
+        idle_timeout_s: Reconnect when nothing arrives for this many
+            seconds.
         keepalive: Periodic hook (e.g. listen-key keepalive).
-        keepalive_interval_s: Interval between keepalives.
-        max_session_s: Reconnect proactively after this long (venues that
-            cut connections at a fixed age).
+        keepalive_interval_s: Interval between keepalives, in seconds.
+        max_session_s: Reconnect proactively after this many seconds
+            (venues that cut connections at a fixed age).
     """
 
     name: str
@@ -194,8 +200,9 @@ async def run_private_stream(  # noqa: PLR0912, PLR0915 - recovery loop.
         spec: Venue stream description.
         connect: WebSocket connector (injectable for tests).
         max_failures: Consecutive failures before giving up.
-        base_delay_s: First backoff delay.
-        max_delay_s: Backoff cap.
+        base_delay_s: First backoff delay in seconds; it doubles per
+            failure.
+        max_delay_s: Backoff cap in seconds.
         monotonic: Monotonic clock (injectable).
         sleep: Sleep function (injectable).
         jitter: Uniform ``[0, 1)`` source for full jitter (injectable).
@@ -205,8 +212,10 @@ async def run_private_stream(  # noqa: PLR0912, PLR0915 - recovery loop.
         ``(update, from_resync)`` pairs.
 
     Raises:
-        VenueRejectedError: Login was refused (bad key or permission).
-        AdapterUnavailableError: After ``max_failures`` failures.
+        VenueRejectedError: Login was refused (bad key or permission); never
+            retried.
+        AdapterUnavailableError: After ``max_failures`` consecutive
+            failures.
     """
     counters = stats if stats is not None else StreamStats()
     failures = 0
@@ -253,7 +262,7 @@ async def run_private_stream(  # noqa: PLR0912, PLR0915 - recovery loop.
                             )
                         except errors.VenueRejectedError:
                             raise
-                        except Exception:
+                        except Exception:  # noqa: BLE001 - isolation point: a malformed frame is counted and skipped, the stream keeps running
                             counters.parse_errors += 1
                             _LOG.warning("%s: unparsable frame", spec.name)
                             updates = ()
@@ -283,7 +292,7 @@ async def run_private_stream(  # noqa: PLR0912, PLR0915 - recovery loop.
                         last_keep = now
         except errors.VenueRejectedError:
             raise
-        except Exception as err:
+        except Exception as err:  # noqa: BLE001 - isolation point: any connection failure backs off and reconnects until max_failures
             failures += 1
             counters.failures += 1
             _LOG.warning(
@@ -298,4 +307,6 @@ async def run_private_stream(  # noqa: PLR0912, PLR0915 - recovery loop.
                     f"{spec.name} failed {failures} times in a row"
                 ) from None
             delay = min(max_delay_s, base_delay_s * 2 ** (failures - 1))
+            # Full jitter: a uniform wait in [0, delay) spreads reconnects of
+            # many streams after a venue-wide outage.
             await sleep(delay * jitter())

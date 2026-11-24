@@ -47,10 +47,13 @@ from joseph_execution.ports import market as market_port
 from joseph_execution.ports import services
 from joseph_execution.ports import trading
 
-S = enums.OrderState
+_State = enums.OrderState
 _ALL_TYPES = tuple(enums.OrderType)
 _ALL_TIF = tuple(enums.TimeInForce)
 _DAY_MS = 86_400_000
+# Calendar window fetched around now: back far enough to find the session a
+# DAY order was accepted in, ahead far enough to reach the T+n settlement
+# session across long exchange holidays.
 _SESSION_BACK_MS = 5 * _DAY_MS
 _SESSION_AHEAD_MS = 15 * _DAY_MS
 
@@ -60,18 +63,24 @@ class FaultPlan:
     """Fault injection switches (counters decrement when consumed).
 
     Attributes:
-        drop_ack_next: Accept the order, then raise a timeout.
-        timeout_before_next: Raise a timeout without accepting.
-        reject_next: Reject the next orders.
-        unavailable: Refuse everything (adapter down).
+        drop_ack_next: Submits to accept and then answer with a timeout (the
+            ACK is lost).
+        timeout_before_next: Submits to answer with a timeout without
+            accepting them.
+        reject_next: Submits to reject.
+        unavailable: Refuse submits and report ``UNAVAILABLE`` health
+            (adapter down).
         duplicate_events: Emit every stream event twice.
         reverse_events: Emit each event batch in reverse order.
         drop_fill_events: Do not emit fill events (status only).
-        fill_before_cancel_next: Fill the order before a cancel lands.
-        cancel_timeout_next: Process the cancel, then raise a timeout.
+        fill_before_cancel_next: Cancels that lose the race: the order fills
+            before the cancel lands.
+        cancel_timeout_next: Cancels to process and then answer with a
+            timeout.
         query_by_client_id: Whether the venue supports client-id queries.
-        query_fails_next: Client-id queries raise a timeout.
-        partial_fill_fraction: Fraction of remaining filled per tick.
+        query_fails_next: Client-id queries to answer with a timeout.
+        partial_fill_fraction: Fraction of the remaining quantity a resting
+            order fills per ``tick``; ``None`` fills it completely.
     """
 
     drop_ack_next: int = 0
@@ -93,14 +102,14 @@ class _SimOrder:
     """Order resting in the simulator.
 
     Attributes:
-        request: Venue request.
+        request: Venue request (replaced by amendments).
         exchange_order_id: Simulated venue id.
         status: Current status.
-        filled: Cumulative fill.
+        filled: Cumulative filled quantity in base units.
         triggered: Whether a stop order triggered.
         reason: Status reason.
-        ts_ms: Last update.
-        accepted_ms: Acceptance time.
+        ts_ms: Last update, UTC epoch milliseconds.
+        accepted_ms: Acceptance time, UTC epoch milliseconds.
         expires_at_ms: Close at which a DAY order expires, once known.
     """
 
@@ -132,7 +141,7 @@ class _SimOrder:
     @property
     def open(self) -> bool:
         """Whether the order can still fill."""
-        return self.status in (S.ACKNOWLEDGED, S.PARTIALLY_FILLED)
+        return self.status in (_State.ACKNOWLEDGED, _State.PARTIALLY_FILLED)
 
 
 @dataclasses.dataclass(frozen=True, slots=True)
@@ -140,8 +149,8 @@ class _Pending:
     """A securities cash flow awaiting settlement.
 
     Attributes:
-        settles_at_ms: Settlement time.
-        amount: Cash flow (negative = payable).
+        settles_at_ms: Settlement time, UTC epoch milliseconds.
+        amount: Cash flow net of fees (negative = payable).
     """
 
     settles_at_ms: int
@@ -154,7 +163,8 @@ class _SimAccount:
 
     Attributes:
         orders: Orders by client id.
-        positions: Signed quantity and entry per instrument.
+        positions: Signed quantity and average entry price (``None`` when
+            flat) per instrument.
         fills: Fills in time order.
         events: Undelivered stream events.
         realized: Realized PnL net of fees.
@@ -197,9 +207,9 @@ class PaperTradingAdapter:
         Args:
             market_data: Market gateway for prices and books.
             clock: Time source.
-            name: Adapter name.
-            maker_bps: Maker fee.
-            taker_bps: Taker fee.
+            name: Adapter name, used in ids and notes.
+            maker_bps: Maker fee in basis points of notional.
+            taker_bps: Taker fee in basis points of notional.
             starting_equity: Equity reported by ``account_snapshot``.
             starting_cash: Starting cash by currency of non-USD paper
                 accounts (e.g. ``{"TWD": 3000000}``).
@@ -219,11 +229,11 @@ class PaperTradingAdapter:
 
     @property
     def name(self) -> str:
-        """Returns the adapter name."""
+        """The adapter name."""
         return self._name
 
     def _acct(self, account_id: str) -> _SimAccount:
-        """Returns (creating) simulator state of an account.
+        """Returns the simulator state of an account, creating it if new.
 
         Args:
             account_id: Account.
@@ -292,13 +302,15 @@ class PaperTradingAdapter:
     async def account_snapshot(
         self, account_id: str
     ) -> trading.VenueAccountSnapshot:
-        """Returns simulated balances.
+        """Returns simulated balances, settling cash flows that are due.
 
         Args:
             account_id: Account.
 
         Returns:
-            Snapshot.
+            Snapshot: equity is starting cash plus realized PnL (net of
+            fees); securities accounts also report settled and unsettled
+            cash.
         """
         state = self._acct(account_id)
         now = self._clock.now_ms()
@@ -359,10 +371,10 @@ class PaperTradingAdapter:
 
         Args:
             account_id: Account.
-            since_ms: Lower bound.
+            since_ms: Earliest fill time, UTC epoch milliseconds.
 
         Returns:
-            Fills.
+            Fills in time order.
         """
         return [f for f in self._acct(account_id).fills if f.ts_ms >= since_ms]
 
@@ -397,6 +409,9 @@ class PaperTradingAdapter:
     ) -> trading.VenueSubmitResult:
         """Accepts and possibly fills an order.
 
+        Idempotent: a client order id that is already known returns the
+        existing order's state.
+
         Args:
             request: Order.
 
@@ -423,7 +438,7 @@ class PaperTradingAdapter:
         order = _SimOrder(
             request=request,
             exchange_order_id=f"{self._name}-{self._seq}",
-            status=S.ACKNOWLEDGED,
+            status=_State.ACKNOWLEDGED,
             filled=decimals.ZERO,
             triggered=False,
             reason=None,
@@ -433,7 +448,7 @@ class PaperTradingAdapter:
         state.orders[request.client_order_id] = order
         if faults.reject_next:
             faults.reject_next -= 1
-            order.status = S.REJECTED
+            order.status = _State.REJECTED
             order.reason = "simulated venue reject"
             self._emit(
                 request.account_id,
@@ -486,7 +501,7 @@ class PaperTradingAdapter:
                     maker=True,
                 )
         if order.open:
-            order.status = S.CANCELED
+            order.status = _State.CANCELED
             order.reason = "canceled by user"
             order.ts_ms = self._clock.now_ms()
             self._emit(
@@ -515,9 +530,9 @@ class PaperTradingAdapter:
         Args:
             account_id: Account.
             client_order_id: Client id.
-            limit_price: New limit.
-            trigger_price: New trigger.
-            quantity_base: New quantity.
+            limit_price: New limit, or ``None`` to keep it.
+            trigger_price: New trigger, or ``None`` to keep it.
+            quantity_base: New quantity, or ``None`` to keep it.
 
         Returns:
             State.
@@ -547,13 +562,13 @@ class PaperTradingAdapter:
     async def stream_account_events(
         self, account_id: str
     ) -> AsyncIterator[trading.VenueEvent]:
-        """Streams events by polling the buffer.
+        """Streams events by polling the buffer every 50 ms.
 
         Args:
             account_id: Account.
 
         Yields:
-            Events.
+            Events, with stream faults applied; the stream never ends.
         """
         while True:
             for event in self.drain_events(account_id):
@@ -574,7 +589,10 @@ class PaperTradingAdapter:
         if self.faults.drop_fill_events:
             events = [e for e in events if e.fill is None]
         if self.faults.duplicate_events:
-            events = [e for e in events for _ in range(2)]
+            doubled: list[trading.VenueEvent] = []
+            for event in events:
+                doubled.extend((event, event))
+            events = doubled
         if self.faults.reverse_events:
             events.reverse()
         return events
@@ -629,15 +647,20 @@ class PaperTradingAdapter:
         except errors.ExecutionError:
             return None
 
-    async def _process(  # noqa: PLR0912, PLR0915
+    async def _process(  # noqa: PLR0912, PLR0915 - one matching pass whose checks must run in this order
         self, account_id: str, order: _SimOrder, initial: bool
     ) -> list[trading.VenueFill]:
         """Matches an order against the market.
 
+        In order: session rules (securities), the quote, the reduce-only or
+        long-only cap, the stop trigger, then the market or limit match.
+        Updates ``order`` in place and emits its state when it was just
+        submitted, filled or finished.
+
         Args:
             account_id: Account.
-            order: Order.
-            initial: True on submission.
+            order: Order (status, fill and trigger change in place).
+            initial: True on submission, False on a later ``tick``.
 
         Returns:
             Fills produced.
@@ -665,7 +688,7 @@ class PaperTradingAdapter:
         remaining = req.quantity_base - order.filled
         cap = self._reduce_cap(account_id, req)
         if cap is not None and cap <= 0:
-            order.status = S.CANCELED
+            order.status = _State.CANCELED
             order.reason = (
                 "long-only account holds no shares to sell"
                 if security and not req.reduce_only
@@ -693,7 +716,8 @@ class PaperTradingAdapter:
                 else quote.last
             )
             price = basis or quote.reference_price
-            assert req.trigger_price is not None
+            if req.trigger_price is None:
+                raise AssertionError("stop orders carry a trigger price")
             hit = price is not None and (
                 price >= req.trigger_price
                 if req.side is enums.OrderSide.BUY
@@ -720,7 +744,7 @@ class PaperTradingAdapter:
             if price is not None and meta is not None:
                 price = await self._exchange_price(meta, price)
             if price is None:
-                order.status = S.CANCELED
+                order.status = _State.CANCELED
                 order.reason = "no liquidity for market order"
             else:
                 produced.append(
@@ -732,10 +756,11 @@ class PaperTradingAdapter:
                 enums.TimeInForce.IOC,
                 enums.TimeInForce.FOK,
             ):
-                order.status = S.CANCELED
+                order.status = _State.CANCELED
                 order.reason = "IOC remainder canceled"
         else:
-            assert req.limit_price is not None
+            if req.limit_price is None:
+                raise AssertionError("limit orders carry a limit price")
             best = (
                 quote.best_ask
                 if req.side is enums.OrderSide.BUY
@@ -749,12 +774,13 @@ class PaperTradingAdapter:
             if (
                 crosses
                 and initial
-                and req.time_in_force is (enums.TimeInForce.POST_ONLY)
+                and req.time_in_force is enums.TimeInForce.POST_ONLY
             ):
-                order.status = S.REJECTED
+                order.status = _State.REJECTED
                 order.reason = "post-only order would take liquidity"
             elif crosses:
-                assert best is not None
+                if best is None:
+                    raise AssertionError("a crossing order has a best price")
                 qty = remaining
                 if not initial and self.faults.partial_fill_fraction:
                     qty = await self._partial(req.instrument_id, remaining)
@@ -768,7 +794,7 @@ class PaperTradingAdapter:
                 enums.TimeInForce.IOC,
                 enums.TimeInForce.FOK,
             ):
-                order.status = S.CANCELED
+                order.status = _State.CANCELED
                 order.reason = "IOC limit did not cross"
         order.ts_ms = self._clock.now_ms()
         if initial or produced or not order.open:
@@ -813,15 +839,16 @@ class PaperTradingAdapter:
     ) -> decimal.Decimal | None:
         """Returns the maximum fill of a reduce-only order.
 
+        Long-only securities accounts also cap every sell at the shares
+        held.
+
         Args:
             account_id: Account.
             req: Request.
 
-        Long-only securities accounts also cap every sell at the shares
-        held.
-
         Returns:
-            Cap, or ``None`` when uncapped.
+            Cap in base units (zero when nothing can be reduced), or
+            ``None`` when uncapped.
         """
         long_only = (
             equities.is_security(req.instrument_id)
@@ -844,13 +871,16 @@ class PaperTradingAdapter:
     ) -> decimal.Decimal | None:
         """Prices a taker fill by walking the book.
 
+        Falls back to the best opposite price, then the reference price,
+        when the book is missing, stale or too thin.
+
         Args:
             req: Request.
-            quantity: Quantity.
-            quote: Quote fallback.
+            quantity: Quantity in base units.
+            quote: Quote used for the fallback.
 
         Returns:
-            Average price or ``None``.
+            Average price, or ``None`` when no price is known.
         """
         try:
             book = await self._market.order_book(req.instrument_id, 50)
@@ -913,6 +943,11 @@ class PaperTradingAdapter:
     ) -> bool:
         """Applies session rules to a securities order before matching.
 
+        Expires a DAY order at its session close and cancels IOC/FOK orders
+        while the exchange is closed (or its calendar is unknown); other
+        orders wait. Emits the order's state on any change and on
+        submission.
+
         Args:
             account_id: Account.
             order: Order (status may change).
@@ -934,14 +969,14 @@ class PaperTradingAdapter:
                 sessions, order.accepted_ms
             )
         if order.expires_at_ms is not None and now >= order.expires_at_ms:
-            order.status = S.EXPIRED
+            order.status = _State.EXPIRED
             order.reason = "DAY order expired at the close"
         elif sessions is None or not equities.session_state(sessions, now).open:
             if req.time_in_force in (
                 enums.TimeInForce.IOC,
                 enums.TimeInForce.FOK,
             ):
-                order.status = S.CANCELED
+                order.status = _State.CANCELED
                 order.reason = "exchange closed; IOC/FOK canceled"
             elif not initial:
                 return False
@@ -984,7 +1019,7 @@ class PaperTradingAdapter:
         )
         return price if limits is None else limits.clamp(price)
 
-    async def _book(  # noqa: PLR0917
+    async def _book(  # noqa: PLR0917 - private helper that _process calls positionally
         self,
         account_id: str,
         order: _SimOrder,
@@ -995,11 +1030,15 @@ class PaperTradingAdapter:
     ) -> trading.VenueFill:
         """Books a fill with securities fees and settlement when needed.
 
+        Taiwan securities pay the estimated brokerage fee and transaction
+        tax; settlement falls on the T+n session, or n weekdays later
+        without a calendar.
+
         Args:
             account_id: Account.
             order: Order.
-            quantity: Quantity.
-            price: Price.
+            quantity: Quantity in base units.
+            price: Fill price.
             maker: Maker (True) or taker.
             meta: Instrument metadata of a security, else ``None``.
 
@@ -1057,9 +1096,9 @@ class PaperTradingAdapter:
 
         Args:
             account_id: Account.
-            order: Order.
-            quantity: Quantity.
-            price: Price.
+            order: Order (fill and status change in place).
+            quantity: Quantity in base units.
+            price: Fill price.
             maker: Maker (True) or taker.
             fee: Fee override (securities), else maker/taker rates.
             fee_asset: Fee currency.
@@ -1088,14 +1127,17 @@ class PaperTradingAdapter:
         )
         order.filled += quantity
         order.status = (
-            S.FILLED
+            _State.FILLED
             if order.filled >= req.quantity_base
-            else S.PARTIALLY_FILLED
+            else _State.PARTIALLY_FILLED
         )
         qty, entry = state.positions.get(
             req.instrument_id, (decimals.ZERO, None)
         )
         delta = quantity if req.side is enums.OrderSide.BUY else -quantity
+        # Opening or adding averages the entry price. Reducing realizes PnL
+        # against the old entry; a flip opens the remainder at the fill
+        # price.
         if qty == 0 or (qty > 0) == (delta > 0):
             cost = (entry or decimals.ZERO) * abs(qty) + price * quantity
             new_qty = qty + delta

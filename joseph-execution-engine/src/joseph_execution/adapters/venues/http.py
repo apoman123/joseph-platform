@@ -14,9 +14,10 @@ Maps transport failures onto the OMS's safety semantics:
   ``RateLimitedError``, and every budget of the venue's limiter pauses for
   ``Retry-After`` (or a default).
 
-Error messages never include the URL, query or headers, so signatures and
-API keys cannot leak through exceptions. JSON numbers are parsed as
-``Decimal`` so no float reaches an order path.
+Error messages name only the venue, method and path, never the query
+string or headers, so signatures and API keys cannot leak through
+exceptions. JSON numbers are parsed as ``Decimal`` so no float reaches an
+order path.
 """
 
 from __future__ import annotations
@@ -34,7 +35,9 @@ from joseph_execution.adapters.venues import ratelimit
 from joseph_execution.domain import errors
 
 _LOG = logging.getLogger(__name__)
+# Pause in seconds after a 429/418 whose Retry-After is missing or unparsable.
 _DEFAULT_PENALTY_S = 10.0
+# Failures raised before any byte of the request left the process.
 _NOT_SENT = (httpx.ConnectError, httpx.ConnectTimeout, httpx.PoolTimeout)
 
 
@@ -72,7 +75,8 @@ def _retry_after(headers: Mapping[str, str]) -> float:
         headers: Lower-cased headers.
 
     Returns:
-        Seconds (default when absent or unparsable).
+        Seconds, at least 1; ``_DEFAULT_PENALTY_S`` when the header is
+        absent or unparsable.
     """
     try:
         return max(float(headers.get("retry-after", "")), 1.0)
@@ -81,7 +85,13 @@ def _retry_after(headers: Mapping[str, str]) -> float:
 
 
 class VenueHttp:
-    """Rate-limited HTTP client bound to one venue base URL."""
+    """Rate-limited HTTP client bound to one venue base URL.
+
+    Attributes:
+        venue: Venue code, used in messages.
+        base_url: Base URL without a trailing slash.
+        limiter: Rate limiter every request acquires budget from.
+    """
 
     def __init__(
         self,
@@ -98,7 +108,8 @@ class VenueHttp:
             venue: Venue code (for messages).
             base_url: Base URL without a trailing slash.
             limiter: Venue limiter.
-            timeout_s: Per-request timeout.
+            timeout_s: Per-request timeout in seconds; connecting is capped
+                at 5 s.
             transport: Optional transport (tests).
         """
         self.venue = venue
@@ -131,6 +142,9 @@ class VenueHttp:
     ) -> Response:
         """Sends one request after acquiring rate budget.
 
+        A 429 or 418 answer pauses every budget of the venue's limiter
+        before ``RateLimitedError`` is raised.
+
         Args:
             method: HTTP method.
             path: Path starting with ``/``.
@@ -152,6 +166,8 @@ class VenueHttp:
         url = f"{self.base_url}{path}"
         if query:
             url = f"{url}?{query}"
+        # ``from None`` below drops httpx's exception, whose text contains
+        # the full URL including the signed query string.
         try:
             reply = await self._client.request(
                 method,

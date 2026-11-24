@@ -18,6 +18,7 @@ from joseph_execution.domain import enums
 from joseph_execution.domain import market
 from joseph_execution.ports import services
 
+# Short alias for the literal tables below.
 _D = decimal.Decimal
 
 MOCK_INSTRUMENTS: tuple[market.InstrumentMeta, ...] = (
@@ -53,6 +54,7 @@ MOCK_INSTRUMENTS: tuple[market.InstrumentMeta, ...] = (
     ),
 )
 
+# Starting marks of the demo instruments (illustrative, not market data).
 _MARKS = {
     "mock:perp:BTCUSD": _D(95000),
     "mock:perp:ETHUSD": _D(3400),
@@ -104,8 +106,11 @@ class StaticMarketDataGateway:
     ) -> market.MarketQuote:
         """Sets a quote around a mark.
 
+        The mark is rounded to the instrument's tick first; bid and ask sit
+        ``spread_ticks`` ticks below and above it.
+
         Args:
-            instrument_id: Instrument.
+            instrument_id: Canonical instrument id (must be registered).
             mark: Mark price.
             spread_ticks: Half-spread in ticks.
             as_of_ms: Fixed quote time; when omitted the quote stays fresh
@@ -133,10 +138,10 @@ class StaticMarketDataGateway:
         return quote
 
     def set_quote(self, quote: market.MarketQuote) -> None:
-        """Sets an explicit quote.
+        """Sets an explicit quote and pins its time.
 
         Args:
-            quote: Quote.
+            quote: Quote, stored as given.
         """
         self._quotes[quote.instrument_id] = quote
         self._pinned.add(quote.instrument_id)
@@ -149,7 +154,7 @@ class StaticMarketDataGateway:
         """Registers an instrument (tests and demos).
 
         Args:
-            meta: Metadata.
+            meta: Metadata; replaces any earlier entry with the same id.
             mark: Optional initial mark.
         """
         self._instruments[meta.instrument_id] = meta
@@ -163,7 +168,7 @@ class StaticMarketDataGateway:
 
         Args:
             calendar: Calendar id.
-            sessions: Sessions.
+            sessions: Sessions in any order (stored sorted by open time).
         """
         self._calendars[calendar] = tuple(
             sorted(sessions, key=lambda s: s.open_ms)
@@ -175,7 +180,7 @@ class StaticMarketDataGateway:
         """Sets the previous session close of an instrument.
 
         Args:
-            instrument_id: Instrument.
+            instrument_id: Canonical instrument id.
             close: Close, or ``None`` to make it unknown.
         """
         if close is None:
@@ -187,8 +192,8 @@ class StaticMarketDataGateway:
         """Marks an instrument's book stale.
 
         Args:
-            instrument_id: Instrument.
-            stale: Stale flag.
+            instrument_id: Canonical instrument id.
+            stale: True to mark the book stale, False to clear the flag.
         """
         if stale:
             self._stale_books.add(instrument_id)
@@ -199,7 +204,7 @@ class StaticMarketDataGateway:
         """Moves every mark by a random step (DEMO animation).
 
         Args:
-            max_bps: Maximum move in basis points.
+            max_bps: Maximum move in basis points, either way.
         """
         for instrument_id, quote in list(self._quotes.items()):
             if quote.mark is None:
@@ -213,7 +218,7 @@ class StaticMarketDataGateway:
         """Returns instrument metadata.
 
         Args:
-            instrument_id: Instrument.
+            instrument_id: Canonical instrument id.
 
         Returns:
             Metadata or ``None``.
@@ -228,7 +233,7 @@ class StaticMarketDataGateway:
         Unpinned quotes are reported as observed now.
 
         Args:
-            instrument_id: Instrument.
+            instrument_id: Canonical instrument id.
 
         Returns:
             Quote or ``None``.
@@ -253,11 +258,12 @@ class StaticMarketDataGateway:
         """Synthesizes a book around the quote.
 
         Args:
-            instrument_id: Instrument.
+            instrument_id: Canonical instrument id.
             depth: Levels per side.
 
         Returns:
-            Book or ``None``.
+            Book of at most 20 one-tick levels per side, 1000 lots each, or
+            ``None`` without a two-sided quote.
         """
         quote = await self.quote(instrument_id)
         meta = self._instruments.get(instrument_id)
@@ -265,7 +271,7 @@ class StaticMarketDataGateway:
             quote is None
             or meta is None
             or quote.best_bid is None
-            or (quote.best_ask is None)
+            or quote.best_ask is None
         ):
             return None
         size = meta.lot_size * 1000
@@ -293,8 +299,8 @@ class StaticMarketDataGateway:
 
         Args:
             calendar: Calendar id.
-            from_ms: Window start.
-            to_ms: Window end.
+            from_ms: Window start, UTC epoch milliseconds.
+            to_ms: Window end, UTC epoch milliseconds.
 
         Returns:
             Sessions, ``()`` for ``24x7``, ``None`` when not configured.
@@ -316,7 +322,7 @@ class StaticMarketDataGateway:
         """Returns the configured previous close.
 
         Args:
-            instrument_id: Instrument.
+            instrument_id: Canonical instrument id.
 
         Returns:
             Close or ``None``.

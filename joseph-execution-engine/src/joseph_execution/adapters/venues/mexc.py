@@ -81,21 +81,29 @@ from joseph_execution.domain import errors
 from joseph_execution.ports import trading
 
 _LOG = logging.getLogger(__name__)
-S = enums.OrderState
+_State = enums.OrderState
 VENUE = "mexc"
 REST_URL = "https://api.mexc.com"
 WS_URL = "wss://contract.mexc.com/edge"
 """Default stream endpoint (JSON pushes; binary pushes are parsed too)."""
 WS_PROTOBUF_URL = f"{WS_URL}?Trans-Protocol=Protobuf"
 """Protobuf endpoint (requests, acks and errors stay JSON text)."""
+# Contract detail allows one request per 5 s; sizes rarely change.
 _DETAIL_TTL_S = 3600.0
-_STATUS = {1: S.ACKNOWLEDGED, 2: S.ACKNOWLEDGED, 3: S.FILLED, 4: S.CANCELED}
+# MEXC order ``state`` values; any other value (5, invalid) counts as
+# rejected.
+_STATUS = {
+    1: _State.ACKNOWLEDGED,
+    2: _State.ACKNOWLEDGED,
+    3: _State.FILLED,
+    4: _State.CANCELED,
+}
 _PLAN_STATUS = {
-    1: S.ACKNOWLEDGED,
-    2: S.CANCELED,
-    3: S.ACKNOWLEDGED,
-    4: S.EXPIRED,
-    5: S.REJECTED,
+    1: _State.ACKNOWLEDGED,
+    2: _State.CANCELED,
+    3: _State.ACKNOWLEDGED,
+    4: _State.EXPIRED,
+    5: _State.REJECTED,
 }
 _TYPE = {
     enums.TimeInForce.GTC: 1,
@@ -103,6 +111,7 @@ _TYPE = {
     enums.TimeInForce.IOC: 3,
     enums.TimeInForce.FOK: 4,
 }
+# MEXC error codes (``code`` in error bodies) grouped by meaning.
 _MARGIN = {2005, 2008, 2044, 6002, 6009}
 _PERMISSION = {
     401,
@@ -131,10 +140,11 @@ _TICK = {2007}
 
 
 def budgets() -> list[ratelimit.Budget]:
-    """Returns the documented budgets.
+    """Returns the documented per-key budgets.
 
     Returns:
-        ``create`` (4/2 s), ``query`` (20/2 s) and ``detail`` (1/5 s).
+        ``create`` (4/2 s) and ``query`` (20/2 s). The contract detail
+        budget (1/5 s) belongs to the shared REST client.
     """
     return [
         ratelimit.Budget("create", 4, 2.0),
@@ -152,7 +162,8 @@ def map_error(  # noqa: PLR0911 - one return per error family.
         payload: ``{"success": false, "code": 2005, "message": "..."}``.
 
     Returns:
-        Domain error.
+        Domain error (never containing credentials). Codes in ``_UNKNOWN``
+        and HTTP 5xx mean the outcome is unknown (``AdapterTimeoutError``).
     """
     code = status
     message = str(payload)[:200]
@@ -242,8 +253,104 @@ class MexcSession(live.Session):
     symbols: dict[str, str] = dataclasses.field(default_factory=dict)
 
 
+def _fill(
+    row: Mapping[str, Any],
+    cid: str,
+    contract_size: decimal.Decimal,
+    ts: int,
+) -> trading.VenueFill:
+    """Converts a deal row (REST ``order_deals`` or WS ``order.deal``).
+
+    Args:
+        row: Deal.
+        cid: Client id.
+        contract_size: Base units per contract.
+        ts: Deal time, UTC epoch milliseconds.
+
+    Returns:
+        Fill (fee positive when paid).
+    """
+    taker = row.get("isTaker", row.get("taker", True))
+    return trading.VenueFill(
+        exchange_fill_id=str(row.get("id")),
+        client_order_id=cid,
+        price=wire.dec(row.get("price")),
+        quantity_base=wire.dec(row.get("vol")) * contract_size,
+        fee=wire.dec(row.get("fee")),
+        fee_asset=str(row.get("feeCurrency") or "USDT"),
+        liquidity="taker" if taker else "maker",
+        ts_ms=ts,
+    )
+
+
+def _asset_update(data: Mapping[str, Any], ts: int) -> list[ws.StreamUpdate]:
+    """Converts ``push.personal.asset`` (USDT only).
+
+    Args:
+        data: Push data.
+        ts: Push time, UTC epoch milliseconds.
+
+    Returns:
+        Balance update (equity = available + position margin + frozen);
+        empty for other currencies.
+    """
+    if data.get("currency") != "USDT":
+        return []
+    available = wire.dec(data.get("availableBalance"))
+    equity = (
+        available
+        + wire.dec(data.get("positionMargin"))
+        + wire.dec(data.get("frozenBalance"))
+    )
+    return [
+        ws.StreamUpdate(
+            balance=trading.VenueAccountSnapshot(equity, available, "USDT", ts)
+        )
+    ]
+
+
+def _plan_update(
+    session: MexcSession, data: Mapping[str, Any], ts: int
+) -> list[ws.StreamUpdate]:
+    """Converts ``push.personal.plan.order``.
+
+    Args:
+        session: Session (its order id map learns a triggered order).
+        data: Push data.
+        ts: Push time, UTC epoch milliseconds.
+
+    Returns:
+        Terminal plan states (a triggered plan maps its real order); empty
+        for unknown or still-working plans.
+    """
+    plan_id = str(data.get("id"))
+    cid = session.plans.get(plan_id)
+    if cid is None:
+        return []
+    oid = data.get("orderId")
+    if oid not in (None, "", 0, "0"):
+        session.order_ids[str(oid)] = cid
+    status = _PLAN_STATUS.get(int(data.get("state", 1)), _State.REJECTED)
+    if status is _State.ACKNOWLEDGED:
+        return []
+    return [
+        ws.StreamUpdate(
+            order=trading.VenueOrderState(
+                cid, f"plan:{plan_id}", status, decimals.ZERO, None, ts
+            )
+        )
+    ]
+
+
 class MexcFuturesAdapter(live.LiveVenueAdapter[MexcSession]):
-    """MEXC USDT-M perpetual futures (mainnet only)."""
+    """MEXC USDT-M perpetual futures (mainnet only).
+
+    Attributes:
+        REQUIRED_FIELDS: Credential fields the venue needs (API key and
+            secret).
+        SANDBOX_NAME: ``None``: MEXC has no test environment, so accounts
+            that ask for one fail closed.
+    """
 
     REQUIRED_FIELDS = ("api_key", "api_secret")
     SANDBOX_NAME = None
@@ -333,6 +440,9 @@ class MexcFuturesAdapter(live.LiveVenueAdapter[MexcSession]):
 
         Returns:
             ``data``.
+
+        Raises:
+            ExecutionError: Mapped venue errors.
         """
         reply = await self._client().request(
             "GET", path, query=query, costs={cost: 1}
@@ -357,6 +467,15 @@ class MexcFuturesAdapter(live.LiveVenueAdapter[MexcSession]):
         budget: str = "query",
     ) -> Any:
         """Sends a signed request and unwraps ``data``.
+
+        MEXC's signing rule: lowercase hex HMAC-SHA256, keyed with the API
+        secret, of the API key, the ``Request-Time`` milliseconds and the
+        parameter string, concatenated. For POST the parameter string is
+        the compact JSON body; for GET it is the parameters sorted by name,
+        empty values dropped, joined with ``&`` and not URL-encoded, and
+        the same string is sent as the query. Headers carry the key, time,
+        signature and ``Recv-Window`` in seconds (MEXC allows up to 60;
+        the option is kept within 5-30).
 
         Args:
             session: Session.
@@ -485,9 +604,9 @@ class MexcFuturesAdapter(live.LiveVenueAdapter[MexcSession]):
         contract = await self.contract(symbol)
         filled = wire.dec(row.get("dealVol")) * contract.contract_size
         state = int(row.get("state", 2))
-        status = _STATUS.get(state, S.REJECTED)
-        if status is S.ACKNOWLEDGED and filled > 0:
-            status = S.PARTIALLY_FILLED
+        status = _STATUS.get(state, _State.REJECTED)
+        if status is _State.ACKNOWLEDGED and filled > 0:
+            status = _State.PARTIALLY_FILLED
         cid = self._cid(session, row.get("externalOid"), row.get("orderId"))
         session.symbols[cid] = symbol
         error_code = row.get("errorCode")
@@ -508,7 +627,7 @@ class MexcFuturesAdapter(live.LiveVenueAdapter[MexcSession]):
         Args:
             sandbox: Unused (no sandbox).
         """
-        del sandbox
+        del sandbox  # Unused.
         await self._public("/api/v1/contract/ping")
 
     async def _probe_permissions(self, session: MexcSession) -> tuple[str, ...]:
@@ -683,39 +802,9 @@ class MexcFuturesAdapter(live.LiveVenueAdapter[MexcSession]):
                 cid = session.order_ids.get(str(row.get("orderId")))
                 if ts < since_ms or cid is None:
                     continue
-                fills.append(self._fill(row, cid, contract.contract_size, ts))
+                fills.append(_fill(row, cid, contract.contract_size, ts))
         fills.sort(key=lambda f: f.ts_ms)
         return fills
-
-    @staticmethod
-    def _fill(
-        row: Mapping[str, Any],
-        cid: str,
-        contract_size: decimal.Decimal,
-        ts: int,
-    ) -> trading.VenueFill:
-        """Converts a deal row (REST ``order_deals`` or WS ``order.deal``).
-
-        Args:
-            row: Deal.
-            cid: Client id.
-            contract_size: Base units per contract.
-            ts: Deal time.
-
-        Returns:
-            Fill (fee positive when paid).
-        """
-        taker = row.get("isTaker", row.get("taker", True))
-        return trading.VenueFill(
-            exchange_fill_id=str(row.get("id")),
-            client_order_id=cid,
-            price=wire.dec(row.get("price")),
-            quantity_base=wire.dec(row.get("vol")) * contract_size,
-            fee=wire.dec(row.get("fee")),
-            fee_asset=str(row.get("feeCurrency") or "USDT"),
-            liquidity="taker" if taker else "maker",
-            ts_ms=ts,
-        )
 
     def _symbol_for(self, session: MexcSession, cid: str) -> str:
         """Finds the symbol of a client order id.
@@ -814,7 +903,9 @@ class MexcFuturesAdapter(live.LiveVenueAdapter[MexcSession]):
             return trading.VenueOrderState(
                 client_order_id=cid,
                 exchange_order_id=f"plan:{plan_id}",
-                status=_PLAN_STATUS.get(int(row.get("state", 1)), S.REJECTED),
+                status=_PLAN_STATUS.get(
+                    int(row.get("state", 1)), _State.REJECTED
+                ),
                 filled_base=decimals.ZERO,
                 reason=None,
                 ts_ms=int(row.get("updateTime") or 0),
@@ -859,6 +950,8 @@ class MexcFuturesAdapter(live.LiveVenueAdapter[MexcSession]):
     ) -> trading.VenueSubmitResult:
         """Places ``order/create`` or ``planorder/place/v2``.
 
+        Every refusal listed under Raises happens before anything is sent.
+
         Args:
             session: Session.
             request: Order.
@@ -867,8 +960,10 @@ class MexcFuturesAdapter(live.LiveVenueAdapter[MexcSession]):
             Acknowledgement.
 
         Raises:
-            OrderRejectedError: Size not a whole number of contracts or the
-                contract disallows API trading (before sending).
+            VenuePermissionError: The contract disallows API trading.
+            OrderRejectedError: Size not a whole number of contracts.
+            AdapterUnavailableError: ``UNSUPPORTED_ORDER_TYPE`` for a
+                post-only market order.
         """
         symbol = self._symbol(request.instrument_id)
         contract = await self.contract(symbol)
@@ -917,7 +1012,8 @@ class MexcFuturesAdapter(live.LiveVenueAdapter[MexcSession]):
             )
             body["price"] = wire.text(wire.dec(ticker.get("lastPrice")))
         else:
-            assert request.limit_price is not None
+            if request.limit_price is None:
+                raise AssertionError("limit orders carry a limit price")
             body["type"] = _TYPE[request.time_in_force]
             body["price"] = wire.text(request.limit_price)
         body["externalOid"] = wire.compact_id_of(cid)
@@ -943,7 +1039,7 @@ class MexcFuturesAdapter(live.LiveVenueAdapter[MexcSession]):
             trading.VenueOrderState(
                 cid,
                 str(oid),
-                S.ACKNOWLEDGED,
+                _State.ACKNOWLEDGED,
                 decimals.ZERO,
                 None,
                 self._now_ms(),
@@ -970,7 +1066,8 @@ class MexcFuturesAdapter(live.LiveVenueAdapter[MexcSession]):
         Returns:
             Acknowledgement with ``plan:<id>`` as the venue id.
         """
-        assert request.trigger_price is not None
+        if request.trigger_price is None:
+            raise AssertionError("stop orders carry a trigger price")
         stop_market = request.order_type is enums.OrderType.STOP_MARKET
         body.update(
             {
@@ -984,7 +1081,8 @@ class MexcFuturesAdapter(live.LiveVenueAdapter[MexcSession]):
             }
         )
         if not stop_market:
-            assert request.limit_price is not None
+            if request.limit_price is None:
+                raise AssertionError("STOP_LIMIT orders carry a limit price")
             body["price"] = wire.text(request.limit_price)
         data = await self._private(
             session,
@@ -1002,7 +1100,7 @@ class MexcFuturesAdapter(live.LiveVenueAdapter[MexcSession]):
             trading.VenueOrderState(
                 cid,
                 f"plan:{plan_id}",
-                S.ACKNOWLEDGED,
+                _State.ACKNOWLEDGED,
                 decimals.ZERO,
                 None,
                 self._now_ms(),
@@ -1040,7 +1138,7 @@ class MexcFuturesAdapter(live.LiveVenueAdapter[MexcSession]):
             return trading.VenueOrderState(
                 client_order_id,
                 f"plan:{plan_id}",
-                S.CANCELED,
+                _State.CANCELED,
                 decimals.ZERO,
                 "canceled",
                 self._now_ms(),
@@ -1069,9 +1167,9 @@ class MexcFuturesAdapter(live.LiveVenueAdapter[MexcSession]):
             raise errors.OrderRejectedError(
                 "order vanished", venue=VENUE, code="NOT_FOUND"
             )
-        if final.status in (S.ACKNOWLEDGED, S.PARTIALLY_FILLED):
+        if final.status in (_State.ACKNOWLEDGED, _State.PARTIALLY_FILLED):
             return dataclasses.replace(
-                final, status=S.CANCEL_PENDING, reason="cancel accepted"
+                final, status=_State.CANCEL_PENDING, reason="cancel accepted"
             )
         return final
 
@@ -1092,11 +1190,14 @@ class MexcFuturesAdapter(live.LiveVenueAdapter[MexcSession]):
             trigger_price: New trigger.
             quantity_base: New quantity.
 
+        Returns:
+            Nothing; the call is always refused.
+
         Raises:
-            OrderRejectedError: Always.
+            OrderRejectedError: ``UNSUPPORTED``, always.
         """
-        del session, client_order_id, limit_price, trigger_price
-        del quantity_base
+        del session, client_order_id, limit_price, trigger_price  # Unused.
+        del quantity_base  # Unused.
         raise errors.OrderRejectedError(
             "MEXC one-way mode does not support order editing",
             venue=VENUE,
@@ -1136,16 +1237,16 @@ class MexcFuturesAdapter(live.LiveVenueAdapter[MexcSession]):
             cid = self._cid(
                 session, data.get("externalOid"), data.get("orderId")
             )
-            fill = self._fill(
+            fill = _fill(
                 data, cid, contract.contract_size, int(data.get("timestamp", 0))
             )
             updates = [ws.StreamUpdate(fill=fill)]
         elif channel == "push.personal.position":
             updates = [await self._position_update(data)]
         elif channel == "push.personal.asset":
-            updates = self._asset_update(data, ts)
+            updates = _asset_update(data, ts)
         elif channel == "push.personal.plan.order":
-            updates = self._plan_update(session, data, ts)
+            updates = _plan_update(session, data, ts)
         else:
             updates = []
         return updates
@@ -1176,67 +1277,6 @@ class MexcFuturesAdapter(live.LiveVenueAdapter[MexcSession]):
             )
         )
 
-    @staticmethod
-    def _asset_update(
-        data: Mapping[str, Any], ts: int
-    ) -> list[ws.StreamUpdate]:
-        """Converts ``push.personal.asset`` (USDT only).
-
-        Args:
-            data: Push data.
-            ts: Push time.
-
-        Returns:
-            Balance update (equity = available + position margin + frozen).
-        """
-        if data.get("currency") != "USDT":
-            return []
-        available = wire.dec(data.get("availableBalance"))
-        equity = (
-            available
-            + wire.dec(data.get("positionMargin"))
-            + wire.dec(data.get("frozenBalance"))
-        )
-        return [
-            ws.StreamUpdate(
-                balance=trading.VenueAccountSnapshot(
-                    equity, available, "USDT", ts
-                )
-            )
-        ]
-
-    @staticmethod
-    def _plan_update(
-        session: MexcSession, data: Mapping[str, Any], ts: int
-    ) -> list[ws.StreamUpdate]:
-        """Converts ``push.personal.plan.order``.
-
-        Args:
-            session: Session.
-            data: Push data.
-            ts: Push time.
-
-        Returns:
-            Terminal plan states (a triggered plan maps its real order).
-        """
-        plan_id = str(data.get("id"))
-        cid = session.plans.get(plan_id)
-        if cid is None:
-            return []
-        oid = data.get("orderId")
-        if oid not in (None, "", 0, "0"):
-            session.order_ids[str(oid)] = cid
-        status = _PLAN_STATUS.get(int(data.get("state", 1)), S.REJECTED)
-        if status is S.ACKNOWLEDGED:
-            return []
-        return [
-            ws.StreamUpdate(
-                order=trading.VenueOrderState(
-                    cid, f"plan:{plan_id}", status, decimals.ZERO, None, ts
-                )
-            )
-        ]
-
     def _stream_spec(self, session: MexcSession) -> ws.PrivateStreamSpec:
         """Describes the private stream.
 
@@ -1247,19 +1287,28 @@ class MexcFuturesAdapter(live.LiveVenueAdapter[MexcSession]):
             Spec (login, default personal pushes, ping every 15 s; MEXC
             closes connections without a ping for one minute).
         """
+        ws_url = self._ws_url
 
         async def url() -> str:
             """Returns the stream URL."""
-            return self._ws_url
+            return ws_url
 
         async def on_open(connection: ws.WsConnection) -> None:
             """Logs in and waits for ``rs.login``.
+
+            The login signs the API key followed by ``reqTime`` (now, in
+            milliseconds) with HMAC-SHA256 under the API secret, as
+            lowercase hex, which MEXC's WebSocket login requires. After it,
+            MEXC pushes every personal channel without a subscription. Up
+            to five frames are read for the answer.
 
             Args:
                 connection: Connection.
 
             Raises:
                 VenuePermissionError: Login refused.
+                AdapterUnavailableError: No login answer within five
+                    frames.
             """
             key = session.credentials.get("api_key")
             now = str(self._now_ms())
@@ -1293,7 +1342,7 @@ class MexcFuturesAdapter(live.LiveVenueAdapter[MexcSession]):
             raise errors.AdapterUnavailableError("mexc login timed out")
 
         async def resync() -> Sequence[ws.StreamUpdate]:
-            """Replays the REST snapshot."""
+            """Returns the REST snapshot replayed as stream updates."""
             return await self._resync(session)
 
         return ws.PrivateStreamSpec(

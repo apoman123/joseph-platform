@@ -148,6 +148,8 @@ class WindowLimiter:
             RateLimitedError: When the wait would exceed ``max_wait_s``;
                 nothing has been sent.
         """
+        # The lock is held while sleeping, so waiting requests go out in
+        # arrival order and a later caller cannot take the room first.
         async with self._lock:
             while True:
                 now = self._now()
@@ -171,7 +173,8 @@ class WindowLimiter:
         """Pauses every budget (venue 429/418 or ``Retry-After``).
 
         Args:
-            seconds: Pause length.
+            seconds: Pause length in seconds (negative counts as zero); a
+                longer pause already in force is kept.
         """
         self._blocked_until = max(
             self._blocked_until, self._now() + max(seconds, 0.0)
@@ -186,4 +189,6 @@ class WindowLimiter:
         """
         local = self.used(name)
         if used > local:
+            # Recorded as consumed now, so the extra units expire a full
+            # window later: conservative when the venue's window is older.
             self._events[name].append((self._now(), used - local))

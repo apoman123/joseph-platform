@@ -57,7 +57,8 @@ from joseph_execution.ports import services
 from joseph_execution.ports import trading
 
 _LOG = logging.getLogger(__name__)
-S = enums.OrderState
+# A failed permission probe is cached far shorter than a passing one, so a
+# key whose permissions were just fixed is retried soon.
 _FAILED_PROBE_TTL_S = 30.0
 
 
@@ -69,15 +70,20 @@ class VenueOptions:
         live_trading_enabled: The global LIVE gate (defense in depth).
         sandbox: Use the venue's test environment unless the account's
             credentials say otherwise.
-        timeout_s: HTTP timeout.
-        recv_window_ms: Signed-request validity window (Binance, MEXC).
-        market_slippage_bps: Worst-price band for venues whose market
-            orders are aggressive limits (Hyperliquid, Lighter).
-        fills_lookback_ms: History scanned when fills are requested from
-            ``since_ms=0`` (reconciliation).
-        health_ttl_s: Public health probe cache.
-        permission_ttl_s: Signed permission probe cache.
-        max_rate_wait_s: Longest wait for rate budget before refusing.
+        timeout_s: HTTP timeout in seconds.
+        recv_window_ms: Signed-request validity window in milliseconds
+            (Binance, MEXC).
+        market_slippage_bps: Worst-price band in basis points for venues
+            whose market orders are aggressive limits (Hyperliquid,
+            Lighter).
+        fills_lookback_ms: Longest fill history scanned, in milliseconds;
+            earlier ``since_ms`` values (such as reconciliation's
+            ``since_ms=0``) are clamped to it.
+        health_ttl_s: Lifetime of a cached public health probe, in seconds.
+        permission_ttl_s: Lifetime of a cached passing permission probe, in
+            seconds.
+        max_rate_wait_s: Longest wait for rate budget before refusing, in
+            seconds.
     """
 
     live_trading_enabled: bool = False
@@ -96,7 +102,7 @@ class Session:
     """Per-account state of a live adapter.
 
     Attributes:
-        account_id: Account.
+        account_id: Account the session trades for.
         credentials: Decrypted credentials (redacted in ``repr``).
         sandbox: True when the session targets the test environment.
         stream: Private stream counters.
@@ -112,7 +118,7 @@ def reason(err: errors.ExecutionError) -> str:
     """Formats an error as a capability note or reject reason.
 
     Args:
-        err: Error.
+        err: Error to format.
 
     Returns:
         ``CODE: message``.
@@ -191,7 +197,7 @@ class LiveVenueAdapter[SessionT: Session](abc.ABC):
 
     @property
     def name(self) -> str:
-        """Returns the venue code."""
+        """The venue code."""
         return self._documented.venue
 
     def _url(self, key: str, default: str) -> str:
@@ -208,7 +214,7 @@ class LiveVenueAdapter[SessionT: Session](abc.ABC):
 
     @property
     def options(self) -> VenueOptions:
-        """Returns the deployment options."""
+        """The deployment options."""
         return self._options
 
     # ------------------------------------------------------------------
@@ -238,11 +244,16 @@ class LiveVenueAdapter[SessionT: Session](abc.ABC):
     ) -> str | None:
         """Checks credentials before any network use.
 
+        Venues extend this with format checks; any problem makes the
+        account fail closed (``_guard`` refuses, ``capabilities`` reports
+        ``TRADING_UNAVAILABLE``).
+
         Args:
-            credentials: Credentials.
+            credentials: Credentials to check.
 
         Returns:
-            A user-facing problem, or ``None``.
+            A user-facing problem (never containing a secret), or ``None``
+            when the credentials are usable.
         """
         missing = credentials.missing(self.REQUIRED_FIELDS)
         if missing:
@@ -476,16 +487,26 @@ class LiveVenueAdapter[SessionT: Session](abc.ABC):
     ) -> SessionT:
         """Records a call and refuses it before sending when unsafe.
 
+        This is where the adapter fails closed. The LIVE gate is checked
+        first, and only for trading calls, so cancels and reads keep working
+        with the gate off; then the account must have stored, complete
+        credentials. No request is sent on any refusal.
+
         Args:
-            account_id: Account.
-            method: Port method name.
-            trading_call: True for calls that create or change exposure.
+            account_id: Account the call is for.
+            method: Port method name, recorded in ``calls``.
+            trading_call: True for calls that create or change exposure
+                (submit, amend).
 
         Returns:
-            Session.
+            The account's session.
 
         Raises:
-            AdapterUnavailableError: Gate off, no or incomplete credentials.
+            AdapterUnavailableError: ``LIVE_TRADING_DISABLED`` when the gate
+                is off for a trading call or no credentials are stored;
+                ``AUTH_SCOPE_MISSING`` when ``_credential_problem`` reports
+                one (incomplete or malformed credentials, or a test
+                environment the venue does not have).
         """
         self.calls.append(method)
         if trading_call and not self._options.live_trading_enabled:
@@ -535,11 +556,15 @@ class LiveVenueAdapter[SessionT: Session](abc.ABC):
     async def _permissions(self, session: SessionT) -> tuple[str, ...]:
         """Returns the cached permission probe of a session.
 
+        A passing probe is reused for ``permission_ttl_s``, a failing one
+        for ``_FAILED_PROBE_TTL_S``; a credential change (new fingerprint)
+        always probes again.
+
         Args:
-            session: Session.
+            session: Session to probe.
 
         Returns:
-            Notes.
+            Notes describing the negotiated account.
 
         Raises:
             ExecutionError: The cached or fresh probe failure.
@@ -662,7 +687,9 @@ class LiveVenueAdapter[SessionT: Session](abc.ABC):
         credentials or a closed gate causes no venue call at all.
 
         Returns:
-            The last observed state while fresh, else ``UNAVAILABLE``.
+            The last observed state while it is younger than twice
+            ``health_ttl_s``; ``UNAVAILABLE`` when the gate is off, nothing
+            was observed yet or the observation is stale.
         """
         if not self._options.live_trading_enabled or self._last_health is None:
             return enums.HealthState.UNAVAILABLE
@@ -734,14 +761,21 @@ class LiveVenueAdapter[SessionT: Session](abc.ABC):
     ) -> trading.VenueSubmitResult:
         """Submits an order; venue rejections become REJECTED results.
 
+        A definitive ``VenueRejectedError`` is returned as a ``REJECTED``
+        result rather than raised, so the OMS never treats it as an unknown
+        outcome and resubmits; a permission rejection also drops the cached
+        probe.
+
         Args:
-            request: Order.
+            request: Order to place.
 
         Returns:
-            Venue response.
+            Venue response, or a ``REJECTED`` result.
 
         Raises:
-            AdapterUnavailableError: Refused before sending.
+            AdapterUnavailableError: Refused before sending (gate off, no
+                usable credentials, or an order type or time in force the
+                venue does not document).
             AdapterTimeoutError: Outcome unknown.
         """
         session = await self._guard(
@@ -772,7 +806,7 @@ class LiveVenueAdapter[SessionT: Session](abc.ABC):
                 trading.VenueOrderState(
                     client_order_id=request.client_order_id,
                     exchange_order_id=None,
-                    status=S.REJECTED,
+                    status=enums.OrderState.REJECTED,
                     filled_base=decimals.ZERO,
                     reason=reason(err),
                     ts_ms=self._now_ms(),
@@ -784,14 +818,18 @@ class LiveVenueAdapter[SessionT: Session](abc.ABC):
     ) -> trading.VenueOrderState:
         """Cancels an order; an already-finished order reports its state.
 
+        Not a trading call: cancels still work with the LIVE gate off, so
+        resting orders can be withdrawn after the gate is switched off.
+
         Args:
-            account_id: Account.
-            client_order_id: Client id.
+            account_id: Account that owns the order.
+            client_order_id: Client order id.
 
         Returns:
             State after the cancel (``FILLED`` when a fill won the race).
 
         Raises:
+            AdapterUnavailableError: No stored or usable credentials.
             OrderRejectedError: ``NOT_FOUND`` when the venue has no record.
         """
         session = await self._guard(account_id, "cancel_order")
@@ -816,17 +854,20 @@ class LiveVenueAdapter[SessionT: Session](abc.ABC):
         """Amends a working order natively.
 
         Args:
-            account_id: Account.
-            client_order_id: Client id.
-            limit_price: New limit.
-            trigger_price: New trigger.
-            quantity_base: New quantity.
+            account_id: Account that owns the order.
+            client_order_id: Client order id.
+            limit_price: New limit price, or ``None`` to keep it.
+            trigger_price: New trigger price, or ``None`` to keep it.
+            quantity_base: New quantity in base units, or ``None`` to keep
+                it.
 
         Returns:
             State after the amendment.
 
         Raises:
-            AdapterUnavailableError: Gate off or no credentials.
+            AdapterUnavailableError: Gate off, no usable credentials, or
+                the venue has no native amend (``UNSUPPORTED``); nothing
+                was sent.
             VenueRejectedError: The venue refused the amendment.
         """
         session = await self._guard(
@@ -889,14 +930,15 @@ class LiveVenueAdapter[SessionT: Session](abc.ABC):
     async def _resync(self, session: SessionT) -> list[ws.StreamUpdate]:
         """Builds the post-connect snapshot replay.
 
-        Open orders and recent fills let the OMS catch up on anything that
-        happened while disconnected; positions and the balance follow.
+        Fills from the last hour (or the shorter lookback) come first, then
+        open orders, positions and the balance, so the OMS catches up on
+        anything that happened while the stream was disconnected.
 
         Args:
-            session: Session.
+            session: Session to replay.
 
         Returns:
-            Updates.
+            Updates in replay order.
         """
         since = self._now_ms() - min(self._options.fills_lookback_ms, 3_600_000)
         updates: list[ws.StreamUpdate] = [

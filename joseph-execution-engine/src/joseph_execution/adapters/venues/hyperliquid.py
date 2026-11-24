@@ -72,11 +72,13 @@ from joseph_execution.domain import errors
 from joseph_execution.ports import trading
 
 _LOG = logging.getLogger(__name__)
-S = enums.OrderState
+_State = enums.OrderState
 VENUE = "hyperliquid"
 REST_URL = "https://api.hyperliquid.xyz"
 TESTNET_REST_URL = "https://api.hyperliquid-testnet.xyz"
 _META_TTL_S = 600.0
+# Signed actions carry ``expiresAfter`` one minute past their nonce, so a
+# delayed request cannot execute later than that.
 _EXPIRY_MS = 60_000
 _ZERO_ADDRESS = "0x0000000000000000000000000000000000000000"
 _TIF = {
@@ -84,8 +86,10 @@ _TIF = {
     enums.TimeInForce.IOC: "Ioc",
     enums.TimeInForce.POST_ONLY: "Alo",
 }
+# Venue statuses of working orders, and of finished orders that did not
+# cancel or reject (``_status_of`` maps every other status).
 _OPEN = ("open", "triggered")
-_DONE = {"filled": S.FILLED}
+_DONE = {"filled": _State.FILLED}
 
 
 def _libs() -> tuple[Any, Any, Any]:
@@ -145,6 +149,13 @@ def action_hash(
 ) -> bytes:
     """Hashes an L1 action exactly like the SDK's ``action_hash``.
 
+    The hashed bytes are the msgpack encoding of the action, the nonce as a
+    big-endian u64, then ``0x00`` without a vault or ``0x01`` and the
+    20-byte vault address, then, with an expiry, ``0x00`` and
+    ``expires_after`` as a big-endian u64. Hyperliquid recomputes this hash
+    from the request, so any difference in field order or encoding makes
+    the signature invalid.
+
     Args:
         action: Action (dict insertion order is the msgpack field order).
         vault_address: Vault or sub-account address, if trading for one.
@@ -203,7 +214,7 @@ def l1_payload(connection_id: bytes, is_mainnet: bool) -> dict[str, Any]:
     }
 
 
-def sign_l1_action(  # noqa: PLR0917
+def sign_l1_action(  # noqa: PLR0917 - mirrors the SDK's positional sign_l1_action; the signing vector tests call it so
     private_key: str,
     action: Mapping[str, Any],
     vault_address: str | None,
@@ -212,6 +223,10 @@ def sign_l1_action(  # noqa: PLR0917
     is_mainnet: bool,
 ) -> dict[str, Any]:
     """Signs an L1 action (SDK ``sign_l1_action``).
+
+    The API wallet key signs, as EIP-712, a phantom ``Agent`` whose
+    ``connectionId`` is ``action_hash`` of the action (``l1_payload``).
+    The key stays in this process; only the signature is sent.
 
     Args:
         private_key: API wallet private key (hex).
@@ -320,14 +335,17 @@ class HyperliquidSession(live.Session):
     )
 
 
-def map_error(text: str) -> errors.ExecutionError:  # noqa: PLR0911
+def map_error(text: str) -> errors.ExecutionError:  # noqa: PLR0911 - one return per error family.
     """Maps a Hyperliquid error string to a domain error.
+
+    Hyperliquid answers with free-text errors, so the mapping matches
+    phrases from its documented error responses.
 
     Args:
         text: Venue message.
 
     Returns:
-        Domain error.
+        Domain error (never containing credentials).
     """
     message = text[:200]
     lowered = message.lower()
@@ -360,7 +378,7 @@ def map_error(text: str) -> errors.ExecutionError:  # noqa: PLR0911
 
 def _status_of(
     name: str, orig: decimal.Decimal, remaining: decimal.Decimal
-) -> S:
+) -> _State:
     """Maps an ``orderStatus``/``orderUpdates`` status.
 
     Args:
@@ -373,16 +391,70 @@ def _status_of(
         OMS state.
     """
     if name in _OPEN:
-        return S.PARTIALLY_FILLED if remaining < orig else S.ACKNOWLEDGED
+        return (
+            _State.PARTIALLY_FILLED if remaining < orig else _State.ACKNOWLEDGED
+        )
     if name in _DONE:
         return _DONE[name]
     if name == "rejected" or name.endswith("Rejected"):
-        return S.REJECTED
-    return S.CANCELED
+        return _State.REJECTED
+    return _State.CANCELED
+
+
+def _balance(
+    state: Mapping[str, Any], ts_ms: int
+) -> trading.VenueAccountSnapshot:
+    """Builds a balance from a clearinghouse state.
+
+    Args:
+        state: ``clearinghouseState``.
+        ts_ms: Fallback time, UTC epoch milliseconds.
+
+    Returns:
+        Snapshot (available = account value - margin used).
+    """
+    summary = state.get("marginSummary") or {}
+    equity = wire.dec(summary.get("accountValue"))
+    used = wire.dec(summary.get("totalMarginUsed"))
+    return trading.VenueAccountSnapshot(
+        equity=equity,
+        available_margin=max(decimals.ZERO, equity - used),
+        currency="USDC",
+        ts_ms=int(state.get("time") or ts_ms),
+    )
+
+
+def _fill(row: Mapping[str, Any], cid: str) -> trading.VenueFill:
+    """Converts a ``WsFill``/``userFills`` row.
+
+    Args:
+        row: Fill.
+        cid: Client id.
+
+    Returns:
+        Fill (fee positive when paid, negative for rebates).
+    """
+    return trading.VenueFill(
+        exchange_fill_id=str(row.get("tid")),
+        client_order_id=cid,
+        price=wire.dec(row.get("px")),
+        quantity_base=wire.dec(row.get("sz")),
+        fee=wire.dec(row.get("fee")),
+        fee_asset=str(row.get("feeToken") or "USDC"),
+        liquidity="taker" if row.get("crossed") else "maker",
+        ts_ms=int(row.get("time", 0)),
+    )
 
 
 class HyperliquidAdapter(live.LiveVenueAdapter[HyperliquidSession]):
-    """Hyperliquid perpetuals via ``/exchange`` (agent-signed) and ``/info``."""
+    """Hyperliquid perpetuals via ``/exchange`` (agent-signed) and ``/info``.
+
+    Attributes:
+        REQUIRED_FIELDS: Credential fields the venue needs (the API wallet
+            key and the master account address).
+        SANDBOX_NAME: Name of the venue's test environment, shown in
+            sandbox notes.
+    """
 
     REQUIRED_FIELDS = ("agent_private_key", "account_address")
     SANDBOX_NAME = "the Hyperliquid testnet"
@@ -439,6 +511,9 @@ class HyperliquidAdapter(live.LiveVenueAdapter[HyperliquidSession]):
         self, credentials: creds_lib.VenueCredentials
     ) -> str | None:
         """Adds signing-library and address checks.
+
+        The account's own key is refused: only a separately approved API
+        wallet may sign, so the adapter never signs with the master key.
 
         Args:
             credentials: Credentials.
@@ -560,6 +635,9 @@ class HyperliquidAdapter(live.LiveVenueAdapter[HyperliquidSession]):
     def _nonce(self, session: HyperliquidSession) -> int:
         """Returns a strictly increasing millisecond nonce.
 
+        Hyperliquid rejects a nonce its signer has already used, so two
+        actions in the same millisecond get consecutive nonces.
+
         Args:
             session: Session.
 
@@ -574,6 +652,11 @@ class HyperliquidAdapter(live.LiveVenueAdapter[HyperliquidSession]):
         self, session: HyperliquidSession, action: dict[str, Any]
     ) -> Any:
         """Signs and posts an action to ``/exchange``.
+
+        The API wallet signs the action for the master account with a fresh
+        nonce, no vault and an expiry ``_EXPIRY_MS`` after the nonce
+        (``sign_l1_action``, testnet when the session is sandboxed); the
+        body repeats the action, nonce, expiry and signature.
 
         Args:
             session: Session.
@@ -630,6 +713,9 @@ class HyperliquidAdapter(live.LiveVenueAdapter[HyperliquidSession]):
 
         Args:
             sandbox: Testnet.
+
+        Raises:
+            AdapterUnavailableError: The venue returned no mids.
         """
         mids = await self._info(sandbox, {"type": "allMids"}, weight=2)
         if not isinstance(mids, Mapping) or not mids:
@@ -688,29 +774,6 @@ class HyperliquidAdapter(live.LiveVenueAdapter[HyperliquidSession]):
         )
         return state if isinstance(state, Mapping) else {}
 
-    @staticmethod
-    def _balance(
-        state: Mapping[str, Any], ts_ms: int
-    ) -> trading.VenueAccountSnapshot:
-        """Builds a balance from a clearinghouse state.
-
-        Args:
-            state: ``clearinghouseState``.
-            ts_ms: Fallback time.
-
-        Returns:
-            Snapshot (available = account value - margin used).
-        """
-        summary = state.get("marginSummary") or {}
-        equity = wire.dec(summary.get("accountValue"))
-        used = wire.dec(summary.get("totalMarginUsed"))
-        return trading.VenueAccountSnapshot(
-            equity=equity,
-            available_margin=max(decimals.ZERO, equity - used),
-            currency="USDC",
-            ts_ms=int(state.get("time") or ts_ms),
-        )
-
     async def _snapshot(
         self, session: HyperliquidSession
     ) -> trading.VenueAccountSnapshot:
@@ -722,7 +785,7 @@ class HyperliquidAdapter(live.LiveVenueAdapter[HyperliquidSession]):
         Returns:
             Snapshot.
         """
-        return self._balance(await self._state(session), self._now_ms())
+        return _balance(await self._state(session), self._now_ms())
 
     def _positions_of(
         self, state: Mapping[str, Any]
@@ -805,7 +868,7 @@ class HyperliquidAdapter(live.LiveVenueAdapter[HyperliquidSession]):
         remaining = wire.dec(order.get("sz"))
         mapped = _status_of(status, orig, remaining)
         filled = orig - remaining
-        if mapped is S.FILLED:
+        if mapped is _State.FILLED:
             filled = orig
         return trading.VenueOrderState(
             client_order_id=self._cid_of(
@@ -814,7 +877,7 @@ class HyperliquidAdapter(live.LiveVenueAdapter[HyperliquidSession]):
             exchange_order_id=str(order.get("oid")),
             status=mapped,
             filled_base=filled,
-            reason=None if mapped is not S.REJECTED else status,
+            reason=None if mapped is not _State.REJECTED else status,
             ts_ms=ts_ms,
         )
 
@@ -882,31 +945,9 @@ class HyperliquidAdapter(live.LiveVenueAdapter[HyperliquidSession]):
             cid = session.oids.get(str(row.get("oid")))
             if cid is None:
                 continue
-            fills.append(self._fill(row, cid))
+            fills.append(_fill(row, cid))
         fills.sort(key=lambda f: f.ts_ms)
         return fills
-
-    @staticmethod
-    def _fill(row: Mapping[str, Any], cid: str) -> trading.VenueFill:
-        """Converts a ``WsFill``/``userFills`` row.
-
-        Args:
-            row: Fill.
-            cid: Client id.
-
-        Returns:
-            Fill (fee positive when paid, negative for rebates).
-        """
-        return trading.VenueFill(
-            exchange_fill_id=str(row.get("tid")),
-            client_order_id=cid,
-            price=wire.dec(row.get("px")),
-            quantity_base=wire.dec(row.get("sz")),
-            fee=wire.dec(row.get("fee")),
-            fee_asset=str(row.get("feeToken") or "USDC"),
-            liquidity="taker" if row.get("crossed") else "maker",
-            ts_ms=int(row.get("time", 0)),
-        )
 
     async def _status(
         self, session: HyperliquidSession, client_order_id: str
@@ -1033,7 +1074,8 @@ class HyperliquidAdapter(live.LiveVenueAdapter[HyperliquidSession]):
             )
             order_type: dict[str, Any] = {"limit": {"tif": "Ioc"}}
         elif kind is enums.OrderType.LIMIT:
-            assert request.limit_price is not None
+            if request.limit_price is None:
+                raise AssertionError("LIMIT orders carry a limit price")
             price = request.limit_price
             tif = _TIF.get(request.time_in_force)
             if tif is None:
@@ -1042,7 +1084,8 @@ class HyperliquidAdapter(live.LiveVenueAdapter[HyperliquidSession]):
                 )
             order_type = {"limit": {"tif": tif}}
         else:
-            assert request.trigger_price is not None
+            if request.trigger_price is None:
+                raise AssertionError("stop orders carry a trigger price")
             if not valid_price(request.trigger_price, asset.sz_decimals):
                 raise errors.OrderRejectedError(
                     "trigger price breaks the 5-significant-figure rule",
@@ -1057,7 +1100,10 @@ class HyperliquidAdapter(live.LiveVenueAdapter[HyperliquidSession]):
                     aggressive,
                 )
             else:
-                assert request.limit_price is not None
+                if request.limit_price is None:
+                    raise AssertionError(
+                        "STOP_LIMIT orders carry a limit price"
+                    )
                 price = request.limit_price
             trigger = {
                 "isMarket": market,
@@ -1152,7 +1198,7 @@ class HyperliquidAdapter(live.LiveVenueAdapter[HyperliquidSession]):
                 trading.VenueOrderState(
                     cid,
                     str(filled.get("oid")),
-                    S.FILLED if done else S.PARTIALLY_FILLED,
+                    _State.FILLED if done else _State.PARTIALLY_FILLED,
                     total,
                     None,
                     now,
@@ -1165,7 +1211,7 @@ class HyperliquidAdapter(live.LiveVenueAdapter[HyperliquidSession]):
             trading.VenueOrderState(
                 cid,
                 str(resting.get("oid")),
-                S.ACKNOWLEDGED,
+                _State.ACKNOWLEDGED,
                 decimals.ZERO,
                 None,
                 now,
@@ -1196,13 +1242,13 @@ class HyperliquidAdapter(live.LiveVenueAdapter[HyperliquidSession]):
         result = self._result(session, request, statuses[0])
         if (
             request.order_type is enums.OrderType.MARKET
-            and result.state.status is S.PARTIALLY_FILLED
+            and result.state.status is _State.PARTIALLY_FILLED
         ):
             result = dataclasses.replace(
                 result,
                 state=dataclasses.replace(
                     result.state,
-                    status=S.CANCELED,
+                    status=_State.CANCELED,
                     reason="IOC remainder canceled",
                 ),
             )
@@ -1219,6 +1265,10 @@ class HyperliquidAdapter(live.LiveVenueAdapter[HyperliquidSession]):
 
         Returns:
             State re-read after the cancel.
+
+        Raises:
+            OrderRejectedError: ``NOT_FOUND`` when the venue has no such
+                order, before or after the cancel.
         """
         known = self._directory.find(session.account_id, client_order_id)
         coin = None if known is None else self._symbol(known.instrument_id)
@@ -1271,6 +1321,10 @@ class HyperliquidAdapter(live.LiveVenueAdapter[HyperliquidSession]):
 
         Returns:
             State re-read after the modification.
+
+        Raises:
+            OrderRejectedError: ``CONFLICT`` when the order is not open;
+                ``NOT_FOUND`` when it cannot be read back.
         """
         found = await self._status(session, client_order_id)
         if found is None or found.get("status") != "open":
@@ -1282,6 +1336,13 @@ class HyperliquidAdapter(live.LiveVenueAdapter[HyperliquidSession]):
         asset = await self._asset(session, coin)
         known = self._directory.find(session.account_id, client_order_id)
         kind = known.order_type if known is not None else enums.OrderType.LIMIT
+        venue_tif = current.get("tif")
+        if venue_tif in (None, "Gtc"):
+            time_in_force = enums.TimeInForce.GTC
+        elif venue_tif == "Alo":
+            time_in_force = enums.TimeInForce.POST_ONLY
+        else:
+            time_in_force = enums.TimeInForce.IOC
         request = trading.VenueOrderRequest(
             account_id=session.account_id,
             instrument_id=self._instrument(coin),
@@ -1291,11 +1352,7 @@ class HyperliquidAdapter(live.LiveVenueAdapter[HyperliquidSession]):
             else enums.OrderSide.SELL,
             order_type=kind,
             quantity_base=quantity_base or wire.dec(current.get("sz")),
-            time_in_force=enums.TimeInForce.GTC
-            if current.get("tif") in (None, "Gtc")
-            else enums.TimeInForce.POST_ONLY
-            if current.get("tif") == "Alo"
-            else enums.TimeInForce.IOC,
+            time_in_force=time_in_force,
             reduce_only=bool(current.get("reduceOnly")),
             limit_price=limit_price or wire.opt_dec(current.get("limitPx")),
             trigger_price=trigger_price
@@ -1360,7 +1417,7 @@ class HyperliquidAdapter(live.LiveVenueAdapter[HyperliquidSession]):
                 cid = session.oids.get(str(row.get("oid")))
                 if cid is None:
                     continue
-                updates.append(ws.StreamUpdate(fill=self._fill(row, cid)))
+                updates.append(ws.StreamUpdate(fill=_fill(row, cid)))
             return updates
         if channel == "clearinghouseState" and isinstance(data, Mapping):
             state = data.get("clearinghouseState") or {}
@@ -1368,7 +1425,7 @@ class HyperliquidAdapter(live.LiveVenueAdapter[HyperliquidSession]):
                 ws.StreamUpdate(position=p) for p in self._positions_of(state)
             ]
             updates.append(
-                ws.StreamUpdate(balance=self._balance(state, self._now_ms()))
+                ws.StreamUpdate(balance=_balance(state, self._now_ms()))
             )
             return updates
         return []
@@ -1409,7 +1466,7 @@ class HyperliquidAdapter(live.LiveVenueAdapter[HyperliquidSession]):
                 )
 
         async def resync() -> Sequence[ws.StreamUpdate]:
-            """Replays the REST snapshot."""
+            """Returns the REST snapshot replayed as stream updates."""
             return await self._resync(session)
 
         return ws.PrivateStreamSpec(

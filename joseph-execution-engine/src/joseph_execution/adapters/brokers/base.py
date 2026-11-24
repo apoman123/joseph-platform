@@ -9,8 +9,10 @@
   Shioaji 250 orders/10 s and 25 queries/5 s).
 * ``FailClosedBrokerAdapter`` declares a broker's documented capabilities
   but refuses every call before anything is sent (Cathay until its SDK
-  arrives; any broker while the deployment gates it).
-* Helpers decode Joseph client order ids and mask account numbers.
+  arrives). Gated IBKR and SinoPac adapters refuse calls themselves, with
+  ``gated_error`` and ``unavailable``.
+* Helpers decode Joseph client order ids, mask account numbers and convert
+  between broker floats and exact decimals.
 """
 
 from __future__ import annotations
@@ -26,13 +28,14 @@ from collections.abc import Awaitable
 from collections.abc import Callable
 from collections.abc import Sequence
 from typing import Protocol
+from typing import TypeAlias
 
 from joseph_execution.domain import accounts
 from joseph_execution.domain import enums
 from joseph_execution.domain import errors
 from joseph_execution.ports import trading
 
-AccountLookup = Callable[[str], str | None]
+AccountLookup: TypeAlias = Callable[[str], str | None]
 """Maps a Joseph account id to its broker account number (or ``None``)."""
 
 
@@ -43,7 +46,7 @@ class BrokerAdapter(trading.TradingAdapter, Protocol):
         """Binds a Joseph account so broker events route to it.
 
         Args:
-            account_id: Joseph account.
+            account_id: Joseph account to bind.
 
         Returns:
             True when the broker account number is known.
@@ -54,7 +57,7 @@ class BrokerAdapter(trading.TradingAdapter, Protocol):
         """Lists Joseph accounts with buffered events.
 
         Returns:
-            Account ids.
+            Joseph account ids.
         """
         ...
 
@@ -65,7 +68,7 @@ class BrokerAdapter(trading.TradingAdapter, Protocol):
             account_id: Joseph account.
 
         Returns:
-            Events.
+            Events in arrival order; empty when none are buffered.
         """
         ...
 
@@ -73,7 +76,7 @@ class BrokerAdapter(trading.TradingAdapter, Protocol):
         """Re-reads broker state and buffers changes.
 
         Returns:
-            Events buffered.
+            Number of events buffered.
         """
         ...
 
@@ -92,7 +95,8 @@ def is_joseph_client_id(text: str) -> bool:
         text: Order reference (IBKR ``orderRef``).
 
     Returns:
-        True for ids made by ``ids.client_order_id`` (plus child suffix).
+        True for ids made by ``ids.client_order_id``, with or without a
+        child suffix.
     """
     return _CLIENT_ID.match(text) is not None
 
@@ -104,10 +108,11 @@ def client_order_ms(client_order_id: str) -> int | None:
     48 bits are the creation time in milliseconds.
 
     Args:
-        client_order_id: Client id.
+        client_order_id: Client order id.
 
     Returns:
-        Creation time, or ``None`` for foreign ids.
+        Creation time in epoch milliseconds, or ``None`` for ids Joseph did
+        not make.
     """
     match = _CLIENT_ID.match(client_order_id)
     return None if match is None else int(match.group(1), 16)
@@ -117,10 +122,11 @@ def mask(account_number: str) -> str:
     """Masks a broker account number for notes and logs.
 
     Args:
-        account_number: Account number.
+        account_number: Broker account number.
 
     Returns:
-        Text keeping only the last four characters.
+        ``***`` followed by the last four characters, or ``***`` alone when
+        the number has four characters or fewer.
     """
     tail = account_number[-4:]
     return f"***{tail}" if len(account_number) > 4 else "***"
@@ -220,7 +226,7 @@ class EventBuffer:
         """Returns the next sequence number.
 
         Returns:
-            Sequence.
+            Sequence number, increasing across all accounts.
         """
         self._seq += 1
         return self._seq
@@ -228,12 +234,15 @@ class EventBuffer:
     def order(self, account_id: str, state: trading.VenueOrderState) -> bool:
         """Buffers an order update unless it repeats the last one.
 
+        An update repeats the last one when its status and filled quantity
+        are unchanged.
+
         Args:
             account_id: Joseph account.
-            state: Venue state.
+            state: Venue state of the order.
 
         Returns:
-            True when buffered.
+            True when buffered, False for a repeat.
         """
         key = f"{account_id}|{state.client_order_id}"
         last = self._last.get(key)
@@ -253,10 +262,10 @@ class EventBuffer:
 
         Args:
             account_id: Joseph account.
-            fill: Fill.
+            fill: Venue fill.
 
         Returns:
-            True when buffered.
+            True when buffered, False when the fill id was already seen.
         """
         if fill.exchange_fill_id in self._fills:
             return False
@@ -273,7 +282,7 @@ class EventBuffer:
             account_id: Joseph account.
 
         Returns:
-            Events in arrival order.
+            Events in arrival order; empty when none are buffered.
         """
         return self._events.pop(account_id, [])
 
@@ -281,21 +290,21 @@ class EventBuffer:
         """Lists accounts with buffered events.
 
         Returns:
-            Account ids.
+            Joseph account ids.
         """
         return [a for a, events in self._events.items() if events]
 
     async def stream(
         self, account_id: str, poll_s: float = 0.1
     ) -> AsyncIterator[trading.VenueEvent]:
-        """Streams events by polling the buffer.
+        """Streams events by polling the buffer; never ends on its own.
 
         Args:
             account_id: Joseph account.
-            poll_s: Poll interval.
+            poll_s: Poll interval in seconds.
 
         Yields:
-            Events.
+            Events of the account in arrival order.
         """
         while True:
             for event in self.drain(account_id):
@@ -304,7 +313,12 @@ class EventBuffer:
 
 
 class Pacer:
-    """Sliding-window rate limiter (at most ``limit`` per ``window_s``)."""
+    """Sliding-window rate limiter (at most ``limit`` per ``window_s``).
+
+    Attributes:
+        waits: Number of times ``acquire`` had to sleep (tests and
+            diagnostics).
+    """
 
     def __init__(
         self,
@@ -316,10 +330,10 @@ class Pacer:
         """Initializes the pacer.
 
         Args:
-            limit: Requests per window (0 disables pacing).
+            limit: Requests per window (0 or less disables pacing).
             window_s: Window length in seconds.
-            clock: Monotonic clock.
-            sleep: Async sleep.
+            clock: Monotonic clock in seconds.
+            sleep: Async sleep (tests inject a fake).
         """
         self._limit = limit
         self._window = window_s
@@ -333,6 +347,8 @@ class Pacer:
         """Waits until one more request fits the window."""
         if self._limit <= 0:
             return
+        # The lock is held while sleeping, so waiting callers are served in
+        # arrival order.
         async with self._lock:
             while True:
                 now = self._clock()
@@ -348,6 +364,11 @@ class Pacer:
 class FailClosedBrokerAdapter:
     """Documented broker capabilities without any ability to trade.
 
+    Fail-closed by construction: it has no SDK client and no connection.
+    Every account and trading call records its name in ``calls`` and raises
+    ``AdapterUnavailableError`` (code ``LIVE_TRADING_DISABLED``) before
+    anything is sent, and ``capabilities`` reports TRADING_UNAVAILABLE.
+
     Attributes:
         calls: Names of methods invoked (used by safety tests).
     """
@@ -359,7 +380,8 @@ class FailClosedBrokerAdapter:
 
         Args:
             documented: Capabilities the broker would offer.
-            reason: Why trading is unavailable (shown to users).
+            reason: Why trading is unavailable (shown to users and in every
+                refusal).
         """
         self._documented = documented
         self._reason = reason
@@ -367,17 +389,17 @@ class FailClosedBrokerAdapter:
 
     @property
     def name(self) -> str:
-        """Returns the broker code."""
+        """The broker code."""
         return self._documented.venue
 
     def _refuse(self, method: str) -> errors.AdapterUnavailableError:
         """Records a call and builds the refusal.
 
         Args:
-            method: Method name.
+            method: Name of the refused method.
 
         Returns:
-            Error to raise.
+            ``LIVE_TRADING_DISABLED`` error for the caller to raise.
         """
         self.calls.append(method)
         return gated_error(self.name, self._reason)
@@ -388,12 +410,12 @@ class FailClosedBrokerAdapter:
         """Returns documented capabilities with TRADING_UNAVAILABLE.
 
         Args:
-            account_id: Account.
+            account_id: Joseph account (every account is refused).
 
         Returns:
-            Capabilities.
+            Documented capabilities with the reason appended to the notes.
         """
-        del account_id
+        del account_id  # Unused.
         return unavailable(self._documented, self._reason)
 
     async def health(self) -> enums.HealthState:
@@ -406,11 +428,15 @@ class FailClosedBrokerAdapter:
         """Refuses.
 
         Args:
-            account_id: Account.
+            account_id: Joseph account.
+
+        Returns:
+            Nothing; the call is always refused.
 
         Raises:
             AdapterUnavailableError: Always.
         """
+        del account_id  # Unused.
         raise self._refuse("account_snapshot")
 
     async def list_open_orders(
@@ -419,11 +445,15 @@ class FailClosedBrokerAdapter:
         """Refuses.
 
         Args:
-            account_id: Account.
+            account_id: Joseph account.
+
+        Returns:
+            Nothing; the call is always refused.
 
         Raises:
             AdapterUnavailableError: Always.
         """
+        del account_id  # Unused.
         raise self._refuse("list_open_orders")
 
     async def list_positions(
@@ -432,11 +462,15 @@ class FailClosedBrokerAdapter:
         """Refuses.
 
         Args:
-            account_id: Account.
+            account_id: Joseph account.
+
+        Returns:
+            Nothing; the call is always refused.
 
         Raises:
             AdapterUnavailableError: Always.
         """
+        del account_id  # Unused.
         raise self._refuse("list_positions")
 
     async def list_recent_fills(
@@ -445,12 +479,16 @@ class FailClosedBrokerAdapter:
         """Refuses.
 
         Args:
-            account_id: Account.
-            since_ms: Lower bound.
+            account_id: Joseph account.
+            since_ms: Earliest fill time in epoch milliseconds.
+
+        Returns:
+            Nothing; the call is always refused.
 
         Raises:
             AdapterUnavailableError: Always.
         """
+        del account_id, since_ms  # Unused.
         raise self._refuse("list_recent_fills")
 
     async def submit_order(
@@ -459,11 +497,15 @@ class FailClosedBrokerAdapter:
         """Refuses before sending anything.
 
         Args:
-            request: Order.
+            request: Venue order request.
+
+        Returns:
+            Nothing; the call is always refused.
 
         Raises:
             AdapterUnavailableError: Always.
         """
+        del request  # Unused.
         raise self._refuse("submit_order")
 
     async def cancel_order(
@@ -472,12 +514,16 @@ class FailClosedBrokerAdapter:
         """Refuses.
 
         Args:
-            account_id: Account.
-            client_order_id: Client id.
+            account_id: Joseph account.
+            client_order_id: Client order id.
+
+        Returns:
+            Nothing; the call is always refused.
 
         Raises:
             AdapterUnavailableError: Always.
         """
+        del account_id, client_order_id  # Unused.
         raise self._refuse("cancel_order")
 
     async def amend_order(
@@ -491,15 +537,20 @@ class FailClosedBrokerAdapter:
         """Refuses.
 
         Args:
-            account_id: Account.
-            client_order_id: Client id.
-            limit_price: Limit.
-            trigger_price: Trigger.
-            quantity_base: Quantity.
+            account_id: Joseph account.
+            client_order_id: Client order id.
+            limit_price: New limit price, if any.
+            trigger_price: New trigger price, if any.
+            quantity_base: New quantity, if any.
+
+        Returns:
+            Nothing; the call is always refused.
 
         Raises:
             AdapterUnavailableError: Always.
         """
+        del account_id, client_order_id  # Unused.
+        del limit_price, trigger_price, quantity_base  # Unused.
         raise self._refuse("amend_order")
 
     async def get_order_by_client_id(
@@ -508,28 +559,33 @@ class FailClosedBrokerAdapter:
         """Refuses.
 
         Args:
-            account_id: Account.
-            client_order_id: Client id.
+            account_id: Joseph account.
+            client_order_id: Client order id.
+
+        Returns:
+            Nothing; the call is always refused.
 
         Raises:
             AdapterUnavailableError: Always.
         """
+        del account_id, client_order_id  # Unused.
         raise self._refuse("get_order_by_client_id")
 
     async def stream_account_events(
         self, account_id: str
     ) -> AsyncIterator[trading.VenueEvent]:
-        """Refuses.
+        """Refuses on the first iteration; nothing is streamed.
 
         Args:
-            account_id: Account.
+            account_id: Joseph account.
+
+        Yields:
+            Nothing; the call is always refused.
 
         Raises:
             AdapterUnavailableError: Always.
-
-        Yields:
-            Nothing.
         """
+        del account_id  # Unused.
         raise self._refuse("stream_account_events")
         yield  # pragma: no cover
 
@@ -537,12 +593,12 @@ class FailClosedBrokerAdapter:
         """Returns no events (nothing is ever sent).
 
         Args:
-            account_id: Account.
+            account_id: Joseph account.
 
         Returns:
             Empty list.
         """
-        del account_id
+        del account_id  # Unused.
         return []
 
     def event_accounts(self) -> list[str]:
@@ -557,12 +613,12 @@ class FailClosedBrokerAdapter:
         """Accepts no account bindings.
 
         Args:
-            account_id: Account.
+            account_id: Joseph account.
 
         Returns:
             False.
         """
-        del account_id
+        del account_id  # Unused.
         return False
 
     async def resync(self) -> int:

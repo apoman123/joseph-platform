@@ -66,6 +66,7 @@ from collections.abc import Mapping
 from collections.abc import Sequence
 from typing import Any
 from typing import Protocol
+from typing import TypeAlias
 
 from joseph_execution.adapters.venues import credentials as creds_lib
 from joseph_execution.adapters.venues import http
@@ -79,11 +80,12 @@ from joseph_execution.domain import errors
 from joseph_execution.ports import trading
 
 _LOG = logging.getLogger(__name__)
-S = enums.OrderState
+_State = enums.OrderState
 VENUE = "lighter"
 REST_URL = "https://mainnet.zklighter.elliot.ai"
 TESTNET_REST_URL = "https://api.testnet.lighter.xyz"
 CHAIN_IDS = {False: 304, True: 300}
+# Order type, time-in-force and expiry codes of the SDK's ``SignerClient``.
 ORDER_LIMIT = 0
 ORDER_MARKET = 1
 ORDER_STOP_LOSS = 2
@@ -95,7 +97,9 @@ DEFAULT_EXPIRY = -1
 IOC_EXPIRY = 0
 INDEX_BITS = 48
 _META_TTL_S = 600.0
+# Auth token lifetime in seconds, below Lighter's 8-hour maximum.
 _TOKEN_S = 7 * 3600
+# Cancel statuses that mean the venue refused the order rather than a cancel.
 _TERMINAL_REJECT = {
     "canceled-post-only",
     "canceled-reduce-only",
@@ -104,6 +108,7 @@ _TERMINAL_REJECT = {
     "canceled-invalid-balance",
     "canceled-too-much-slippage",
 }
+# Lighter error codes (``code`` in error bodies) grouped by meaning.
 _MARGIN = {21739, 21508, 21507, 21301, 21111, 21112}
 _PERMISSION = {21120, 21108, 21109, 21110, 20013, 21136, 52002}
 _RATE = {23000, 21506, 30009, 30010}
@@ -175,7 +180,9 @@ class Signer(Protocol):
         ...
 
 
-SignerFactory = Callable[[str, int, int, str, int], Signer]
+# Builds a signer from (url, account_index, api_key_index, key, chain_id);
+# tests inject fakes, production uses ``sdk_signer``.
+SignerFactory: TypeAlias = Callable[[str, int, int, str, int], Signer]
 
 
 def sdk_signer(
@@ -214,7 +221,7 @@ def sdk_signer(
             nonce_management_type=nonces.NonceManagerType.NONE,
             chain_id=chain_id,
         )
-    except Exception as err:
+    except Exception as err:  # noqa: BLE001 - the native signer raises arbitrary types; every failure fails closed, and from None drops its text, which may echo the key
         raise errors.AdapterUnavailableError(
             f"the Lighter signer could not load the key ({type(err).__name__})",
             code="AUTH_SCOPE_MISSING",
@@ -243,7 +250,8 @@ def map_error(status: int, payload: Any) -> errors.ExecutionError:
         payload: ``{"code": 21739, "message": "..."}``.
 
     Returns:
-        Domain error.
+        Domain error (never containing credentials). HTTP 5xx means the
+        outcome is unknown (``AdapterTimeoutError``).
     """
     code = status
     message = str(payload)[:200]
@@ -348,7 +356,7 @@ def _scaled(value: decimal.Decimal, places: int) -> int | None:
     return int(scaled)
 
 
-def _status(name: str) -> S:
+def _status(name: str) -> _State:
     """Maps a Lighter order status.
 
     Args:
@@ -358,18 +366,25 @@ def _status(name: str) -> S:
         OMS state (``ACKNOWLEDGED`` for in-progress/pending/open).
     """
     if name == "filled":
-        return S.FILLED
+        return _State.FILLED
     if name == "canceled-expired":
-        return S.EXPIRED
+        return _State.EXPIRED
     if name in _TERMINAL_REJECT:
-        return S.REJECTED
+        return _State.REJECTED
     if name.startswith("canceled"):
-        return S.CANCELED
-    return S.ACKNOWLEDGED
+        return _State.CANCELED
+    return _State.ACKNOWLEDGED
 
 
 class LighterAdapter(live.LiveVenueAdapter[LighterSession]):
-    """Lighter perpetuals with the official native signer."""
+    """Lighter perpetuals with the official native signer.
+
+    Attributes:
+        REQUIRED_FIELDS: Credential fields the venue needs (the API private
+            key, the account index and the API key index).
+        SANDBOX_NAME: Name of the venue's test environment, shown in
+            sandbox notes.
+    """
 
     REQUIRED_FIELDS = ("api_private_key", "account_index", "api_key_index")
     SANDBOX_NAME = "the Lighter testnet"
@@ -509,6 +524,10 @@ class LighterAdapter(live.LiveVenueAdapter[LighterSession]):
     def _token(self, session: LighterSession) -> str:
         """Returns a cached auth token (7 h, refreshed 5 min early).
 
+        The signer derives the token locally from the API key; it goes in
+        the ``Authorization`` header and the stream subscriptions, never in
+        logs.
+
         Args:
             session: Session.
 
@@ -549,6 +568,9 @@ class LighterAdapter(live.LiveVenueAdapter[LighterSession]):
 
         Returns:
             Payload.
+
+        Raises:
+            ExecutionError: Mapped venue errors.
         """
         if isinstance(session_or_env, LighterSession):
             sandbox = session_or_env.sandbox
@@ -641,6 +663,13 @@ class LighterAdapter(live.LiveVenueAdapter[LighterSession]):
     ) -> str:
         """Signs with the next nonce and posts ``/api/v1/sendTx``.
 
+        The key's lock is held from reading the nonce to recording the next
+        one, so transactions of one API key never share a nonce. A
+        rejection that consumes no nonce keeps it; an invalid nonce is
+        fetched again and the transaction re-signed once; an unknown
+        outcome clears it, so the next transaction fetches a fresh one
+        instead of resending.
+
         Args:
             session: Session.
             sign: Signs a transaction for a nonce; returns
@@ -708,6 +737,9 @@ class LighterAdapter(live.LiveVenueAdapter[LighterSession]):
 
         Args:
             sandbox: Testnet.
+
+        Raises:
+            ExecutionError: Mapped venue errors.
         """
         reply = await self._client(sandbox).request(
             "GET", "/", costs={"requests": 1}
@@ -759,6 +791,9 @@ class LighterAdapter(live.LiveVenueAdapter[LighterSession]):
 
         Returns:
             Account object.
+
+        Raises:
+            VenuePermissionError: Lighter has no account with that index.
         """
         payload = await self._get(
             session,
@@ -867,9 +902,11 @@ class LighterAdapter(live.LiveVenueAdapter[LighterSession]):
         status = str(row.get("status"))
         mapped = _status(status)
         filled = wire.dec(row.get("filled_base_amount"))
-        if mapped is S.ACKNOWLEDGED and filled > 0:
-            mapped = S.PARTIALLY_FILLED
+        if mapped is _State.ACKNOWLEDGED and filled > 0:
+            mapped = _State.PARTIALLY_FILLED
         ts = int(row.get("updated_at") or row.get("timestamp") or 0)
+        # Some Lighter timestamps are in seconds; a value below 1e10 cannot
+        # be milliseconds of a current date.
         if ts and ts < 10_000_000_000:
             ts *= 1000
         return trading.VenueOrderState(
@@ -877,7 +914,9 @@ class LighterAdapter(live.LiveVenueAdapter[LighterSession]):
             exchange_order_id=str(row.get("order_index")),
             status=mapped,
             filled_base=filled,
-            reason=status if mapped in (S.REJECTED, S.CANCELED) else None,
+            reason=status
+            if mapped in (_State.REJECTED, _State.CANCELED)
+            else None,
             ts_ms=ts,
         )
 
@@ -897,6 +936,7 @@ class LighterAdapter(live.LiveVenueAdapter[LighterSession]):
             "/api/v1/accountActiveOrders",
             [
                 ("account_index", str(session.account_index)),
+                # 255 selects every market.
                 ("market_id", "255"),
             ],
             auth=True,
@@ -1091,7 +1131,8 @@ class LighterAdapter(live.LiveVenueAdapter[LighterSession]):
             price = worst.quantize(quantum, rounding=rounding)
             order_type, venue_tif, expiry = ORDER_MARKET, TIF_IOC, IOC_EXPIRY
         elif kind is enums.OrderType.LIMIT:
-            assert request.limit_price is not None
+            if request.limit_price is None:
+                raise AssertionError("LIMIT orders carry a limit price")
             price = request.limit_price
             order_type = ORDER_LIMIT
             venue_tif = {
@@ -1100,7 +1141,8 @@ class LighterAdapter(live.LiveVenueAdapter[LighterSession]):
             }.get(tif, TIF_GTT)
             expiry = IOC_EXPIRY if venue_tif == TIF_IOC else DEFAULT_EXPIRY
         else:
-            assert request.trigger_price is not None
+            if request.trigger_price is None:
+                raise AssertionError("stop orders carry a trigger price")
             scaled_trigger = _scaled(
                 request.trigger_price, market.price_decimals
             )
@@ -1120,7 +1162,10 @@ class LighterAdapter(live.LiveVenueAdapter[LighterSession]):
                 price = worst.quantize(quantum, rounding=rounding)
                 order_type, venue_tif = ORDER_STOP_LOSS, TIF_IOC
             else:
-                assert request.limit_price is not None
+                if request.limit_price is None:
+                    raise AssertionError(
+                        "STOP_LIMIT orders carry a limit price"
+                    )
                 price = request.limit_price
                 order_type, venue_tif = ORDER_STOP_LOSS_LIMIT, TIF_GTT
             expiry = DEFAULT_EXPIRY
@@ -1198,7 +1243,7 @@ class LighterAdapter(live.LiveVenueAdapter[LighterSession]):
             trading.VenueOrderState(
                 cid,
                 None,
-                S.ACKNOWLEDGED,
+                _State.ACKNOWLEDGED,
                 decimals.ZERO,
                 "accepted by lighter",
                 self._now_ms(),
@@ -1239,6 +1284,10 @@ class LighterAdapter(live.LiveVenueAdapter[LighterSession]):
         Returns:
             ``CANCEL_PENDING`` (the sequencer confirms through the stream),
             or the venue state when the order already finished.
+
+        Raises:
+            OrderRejectedError: ``NOT_FOUND`` when Lighter has no such
+                order.
         """
         current = await self._query(session, client_order_id)
         if current is None:
@@ -1260,7 +1309,7 @@ class LighterAdapter(live.LiveVenueAdapter[LighterSession]):
             ),
         )
         return dataclasses.replace(
-            current, status=S.CANCEL_PENDING, reason="cancel accepted"
+            current, status=_State.CANCEL_PENDING, reason="cancel accepted"
         )
 
     async def _amend(
@@ -1282,6 +1331,10 @@ class LighterAdapter(live.LiveVenueAdapter[LighterSession]):
 
         Returns:
             Current state (the modification lands asynchronously).
+
+        Raises:
+            OrderRejectedError: ``NOT_FOUND`` when Lighter has no such
+                order; ``VALIDATION_FAILED`` when the amendment is off the grid.
         """
         payload = await self._get(
             session,
@@ -1392,9 +1445,10 @@ class LighterAdapter(live.LiveVenueAdapter[LighterSession]):
             session: Session.
 
         Returns:
-            Spec (authenticated ``account_all_orders``, plus
+            Spec (authenticated ``account_all_orders``,
             ``account_all_trades`` and ``account_all_positions``; a
-            ``{"type": "ping"}`` every 60 s).
+            ``{"type": "ping"}`` every 60 s; a reconnect after 6.5 h,
+            before the 7 h token used to subscribe expires).
         """
         url = (
             self._urls[session.sandbox].replace("https://", "wss://")
@@ -1427,7 +1481,7 @@ class LighterAdapter(live.LiveVenueAdapter[LighterSession]):
                 await connection.send(json.dumps(message))
 
         async def resync() -> Sequence[ws.StreamUpdate]:
-            """Replays the REST snapshot."""
+            """Returns the REST snapshot replayed as stream updates."""
             return await self._resync(session)
 
         return ws.PrivateStreamSpec(

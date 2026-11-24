@@ -70,7 +70,7 @@ from joseph_execution.domain import errors
 from joseph_execution.ports import trading
 
 _LOG = logging.getLogger(__name__)
-S = enums.OrderState
+_State = enums.OrderState
 VENUE = "binance"
 REST_URL = "https://fapi.binance.com"
 TESTNET_REST_URL = "https://demo-fapi.binance.com"
@@ -79,13 +79,13 @@ TESTNET_WS_URL = "wss://demo-fstream.binance.com/private/ws/"
 SAPI_URL = "https://api.binance.com"
 _SEVEN_DAYS_MS = 7 * 86_400_000
 _STATUS = {
-    "NEW": S.ACKNOWLEDGED,
-    "PARTIALLY_FILLED": S.PARTIALLY_FILLED,
-    "FILLED": S.FILLED,
-    "CANCELED": S.CANCELED,
-    "REJECTED": S.REJECTED,
-    "EXPIRED": S.EXPIRED,
-    "EXPIRED_IN_MATCH": S.EXPIRED,
+    "NEW": _State.ACKNOWLEDGED,
+    "PARTIALLY_FILLED": _State.PARTIALLY_FILLED,
+    "FILLED": _State.FILLED,
+    "CANCELED": _State.CANCELED,
+    "REJECTED": _State.REJECTED,
+    "EXPIRED": _State.EXPIRED,
+    "EXPIRED_IN_MATCH": _State.EXPIRED,
 }
 _TIF = {
     enums.TimeInForce.GTC: "GTC",
@@ -93,17 +93,20 @@ _TIF = {
     enums.TimeInForce.FOK: "FOK",
     enums.TimeInForce.POST_ONLY: "GTX",
 }
+# Binance error codes (``code`` in error bodies) grouped by meaning.
 _MARGIN_NOT_ENOUGH = (-2018, -2019, -2027, -2028)
 _PERMISSION = (-1002, -1022, -2014, -2015, -4088, -4109)
 _RATE = (-1003, -1008, -1015)
 _NOT_FOUND = (-2011, -2013)
 _LOT = (-4003, -4004, -4005)
 _TICK = (-4014,)
+# "No need to change margin type" / "position side": the setting already
+# holds, so the configuration step succeeded.
 _IGNORABLE = (-4046, -4059)
 
 
 def budgets() -> list[ratelimit.Budget]:
-    """Returns the documented IP budget.
+    """Returns the documented IP budget (2400 request weight per minute).
 
     Returns:
         Budgets.
@@ -115,7 +118,7 @@ def order_budgets() -> list[ratelimit.Budget]:
     """Returns the documented per-account order budgets.
 
     Returns:
-        Budgets.
+        Budgets: 300 orders per 10 s and 1200 per minute.
     """
     return [
         ratelimit.Budget("orders_10s", 300, 10.0),
@@ -133,7 +136,9 @@ def map_error(  # noqa: PLR0911, PLR0912 - one branch per error family.
         payload: ``{"code": -2019, "msg": "..."}`` or text.
 
     Returns:
-        Domain error (never containing credentials).
+        Domain error (never containing credentials). HTTP 5xx means the
+        outcome is unknown (``AdapterTimeoutError``); ``-1021`` (timestamp
+        outside ``recvWindow``) means the request was not executed.
     """
     code = 0
     message = str(payload)[:200]
@@ -231,13 +236,13 @@ def _state(
     Returns:
         State.
     """
-    status = _STATUS.get(str(row.get("status")), S.ACKNOWLEDGED)
+    status = _STATUS.get(str(row.get("status")), _State.ACKNOWLEDGED)
     return trading.VenueOrderState(
         client_order_id=client_order_id,
         exchange_order_id=str(row["orderId"]) if "orderId" in row else None,
         status=status,
         filled_base=wire.dec(row.get("executedQty")),
-        reason=None if status is not S.REJECTED else "rejected by binance",
+        reason=None if status is not _State.REJECTED else "rejected by binance",
         ts_ms=int(row.get("updateTime") or row.get("time") or 0),
     )
 
@@ -263,14 +268,14 @@ def _algo_state(
             state, exchange_order_id=f"algo:{row.get('algoId')}"
         )
     mapped = {
-        "NEW": S.ACKNOWLEDGED,
-        "TRIGGERING": S.ACKNOWLEDGED,
-        "TRIGGERED": S.ACKNOWLEDGED,
-        "CANCELED": S.CANCELED,
-        "REJECTED": S.REJECTED,
-        "EXPIRED": S.EXPIRED,
-        "FINISHED": S.CANCELED,
-    }.get(status, S.ACKNOWLEDGED)
+        "NEW": _State.ACKNOWLEDGED,
+        "TRIGGERING": _State.ACKNOWLEDGED,
+        "TRIGGERED": _State.ACKNOWLEDGED,
+        "CANCELED": _State.CANCELED,
+        "REJECTED": _State.REJECTED,
+        "EXPIRED": _State.EXPIRED,
+        "FINISHED": _State.CANCELED,
+    }.get(status, _State.ACKNOWLEDGED)
     return trading.VenueOrderState(
         client_order_id=cid,
         exchange_order_id=f"algo:{row.get('algoId')}",
@@ -281,8 +286,24 @@ def _algo_state(
     )
 
 
+async def _on_open(connection: ws.WsConnection) -> None:
+    """Sends nothing on open: the listen key in the URL selects the account.
+
+    Args:
+        connection: Connection.
+    """
+    del connection  # Unused.
+
+
 class BinanceFuturesAdapter(live.LiveVenueAdapter[BinanceSession]):
-    """Binance USDⓈ-M futures over REST and the private user stream."""
+    """Binance USDⓈ-M futures over REST and the private user stream.
+
+    Attributes:
+        REQUIRED_FIELDS: Credential fields the venue needs (API key and
+            secret).
+        SANDBOX_NAME: Name of the venue's test environment, shown in
+            sandbox notes.
+    """
 
     REQUIRED_FIELDS = ("api_key", "api_secret")
     SANDBOX_NAME = "the Binance USDⓈ-M futures testnet"
@@ -339,6 +360,9 @@ class BinanceFuturesAdapter(live.LiveVenueAdapter[BinanceSession]):
 
     def _sapi_client(self) -> http.VenueHttp:
         """Returns the spot-domain client used for key permissions.
+
+        ``apiRestrictions`` lives on ``api.binance.com``, which has its own
+        IP budget (600 weight per minute is assumed here).
 
         Returns:
             Client.
@@ -429,13 +453,27 @@ class BinanceFuturesAdapter(live.LiveVenueAdapter[BinanceSession]):
     ) -> Any:
         """Sends a SIGNED request, resyncing the clock once on ``-1021``.
 
+        Binance's SIGNED rule: the query string is the business parameters
+        in order, then ``recvWindow`` and ``timestamp`` (local time plus the
+        measured server offset), RFC 3986-encoded. Its HMAC-SHA256 with the
+        API secret, as lowercase hex, is appended as ``signature``, and the
+        API key goes in the ``X-MBX-APIKEY`` header. The signature covers
+        the exact string sent, so it is rebuilt for every attempt.
+
+        A ``-1021`` answer (timestamp outside ``recvWindow``) means Binance
+        did not execute the request, so the offset is measured again and
+        the request is signed and sent once more. Requests to the spot
+        domain (``client`` given) neither measure the offset first nor
+        retry.
+
         Args:
             session: Session.
             method: HTTP method.
             path: Path.
             params: Business parameters in order.
             weight: Request weight.
-            order: Counts against the order budgets.
+            order: Counts against the order budgets (and costs no IP
+                weight, as Binance documents for order endpoints).
             client: Alternative client (spot domain).
 
         Returns:
@@ -716,6 +754,8 @@ class BinanceFuturesAdapter(live.LiveVenueAdapter[BinanceSession]):
         Returns:
             Fills of known client orders, oldest first.
         """
+        # userTrades refuses a startTime more than seven days back; one
+        # minute of margin keeps the request valid when it arrives.
         start = max(since_ms, self._now_ms() - _SEVEN_DAYS_MS + 60_000)
         symbols = set(session.traded)
         for known in self._directory.recent(session.account_id, start):
@@ -791,7 +831,8 @@ class BinanceFuturesAdapter(live.LiveVenueAdapter[BinanceSession]):
             cid: Client id.
 
         Returns:
-            True for stop orders.
+            True for stop orders. Without an OMS record, protective
+            stop-loss legs (``-sl`` suffix) count as conditional.
         """
         known = self._directory.find(session.account_id, cid)
         if known is not None:
@@ -921,7 +962,7 @@ class BinanceFuturesAdapter(live.LiveVenueAdapter[BinanceSession]):
         )
         session.configured[symbol] = wanted
 
-    async def _submit(
+    async def _submit(  # noqa: PLR0912 - order-path mapping kept in one function; order paths are not split in a style pass
         self, session: BinanceSession, request: trading.VenueOrderRequest
     ) -> trading.VenueSubmitResult:
         """Places ``POST /fapi/v1/order`` or ``POST /fapi/v1/algoOrder``.
@@ -953,7 +994,8 @@ class BinanceFuturesAdapter(live.LiveVenueAdapter[BinanceSession]):
             enums.OrderType.STOP_LIMIT,
         )
         if conditional:
-            assert request.trigger_price is not None
+            if request.trigger_price is None:
+                raise AssertionError("stop orders carry a trigger price")
             params = [
                 ("algoType", "CONDITIONAL"),
                 *params,
@@ -974,7 +1016,10 @@ class BinanceFuturesAdapter(live.LiveVenueAdapter[BinanceSession]):
                 ("clientAlgoId", cid),
             ]
             if kind is enums.OrderType.STOP_LIMIT:
-                assert request.limit_price is not None
+                if request.limit_price is None:
+                    raise AssertionError(
+                        "STOP_LIMIT orders carry a limit price"
+                    )
                 params += [
                     ("price", wire.text(request.limit_price)),
                     ("timeInForce", tif),
@@ -993,7 +1038,8 @@ class BinanceFuturesAdapter(live.LiveVenueAdapter[BinanceSession]):
                 ("newOrderRespType", "RESULT"),
             ]
             if kind is enums.OrderType.LIMIT:
-                assert request.limit_price is not None
+                if request.limit_price is None:
+                    raise AssertionError("LIMIT orders carry a limit price")
                 params += [
                     ("price", wire.text(request.limit_price)),
                     ("timeInForce", tif),
@@ -1017,7 +1063,9 @@ class BinanceFuturesAdapter(live.LiveVenueAdapter[BinanceSession]):
         else:
             self._remember(session, symbol, cid, row.get("orderId"))
             state = _state(row, cid)
-        return trading.VenueSubmitResult(state.status is not S.REJECTED, state)
+        return trading.VenueSubmitResult(
+            state.status is not _State.REJECTED, state
+        )
 
     async def _cancel(
         self, session: BinanceSession, client_order_id: str
@@ -1030,6 +1078,10 @@ class BinanceFuturesAdapter(live.LiveVenueAdapter[BinanceSession]):
 
         Returns:
             State.
+
+        Raises:
+            OrderRejectedError: ``NOT_FOUND`` when a canceled conditional
+                order can no longer be queried.
         """
         symbol = self._symbol_for(session, client_order_id)
         if self._is_algo(session, client_order_id):
@@ -1083,6 +1135,8 @@ class BinanceFuturesAdapter(live.LiveVenueAdapter[BinanceSession]):
                 code="UNSUPPORTED",
             )
         symbol = self._symbol_for(session, client_order_id)
+        # PUT needs side, quantity and price, so unchanged values come from
+        # the order itself.
         current = await self._signed(
             session,
             "GET",
@@ -1118,6 +1172,9 @@ class BinanceFuturesAdapter(live.LiveVenueAdapter[BinanceSession]):
 
     async def _listen_key(self, session: BinanceSession, method: str) -> str:
         """Creates or extends the listen key (USER_STREAM, weight 1).
+
+        USER_STREAM endpoints take the API key header only; they are not
+        signed.
 
         Args:
             session: Session.
@@ -1180,7 +1237,7 @@ class BinanceFuturesAdapter(live.LiveVenueAdapter[BinanceSession]):
         oid = str(o.get("i"))
         cid = session.order_ids.get(oid) or str(o.get("c"))
         self._remember(session, str(o.get("s")), cid, oid)
-        status = _STATUS.get(str(o.get("X")), S.ACKNOWLEDGED)
+        status = _STATUS.get(str(o.get("X")), _State.ACKNOWLEDGED)
         ts = int(o.get("T", 0))
         updates = []
         if o.get("x") == "TRADE" and wire.dec(o.get("l")) > 0:
@@ -1206,7 +1263,7 @@ class BinanceFuturesAdapter(live.LiveVenueAdapter[BinanceSession]):
                     status=status,
                     filled_base=wire.dec(o.get("z")),
                     reason=None
-                    if status is not S.EXPIRED
+                    if status is not _State.EXPIRED
                     else f"expired (reason {o.get('er', '?')})",
                     ts_ms=ts,
                 )
@@ -1233,14 +1290,18 @@ class BinanceFuturesAdapter(live.LiveVenueAdapter[BinanceSession]):
         if status in ("TRIGGERING", "TRIGGERED"):
             return []
         mapped = {
-            "NEW": S.ACKNOWLEDGED,
-            "CANCELED": S.CANCELED,
-            "REJECTED": S.REJECTED,
-            "EXPIRED": S.EXPIRED,
+            "NEW": _State.ACKNOWLEDGED,
+            "CANCELED": _State.CANCELED,
+            "REJECTED": _State.REJECTED,
+            "EXPIRED": _State.EXPIRED,
         }.get(status)
         filled = wire.dec(o.get("aq"))
         if status == "FINISHED":
-            mapped = S.FILLED if filled >= wire.dec(o.get("q")) else S.CANCELED
+            mapped = (
+                _State.FILLED
+                if filled >= wire.dec(o.get("q"))
+                else _State.CANCELED
+            )
         if mapped is None:
             return []
         return [
@@ -1311,26 +1372,18 @@ class BinanceFuturesAdapter(live.LiveVenueAdapter[BinanceSession]):
             """Returns a fresh stream URL."""
             return f"{base}{await self._listen_key(session, 'POST')}"
 
-        async def on_open(connection: ws.WsConnection) -> None:
-            """Nothing to send: the listen key selects the account.
-
-            Args:
-                connection: Connection.
-            """
-            del connection
-
         async def keepalive() -> None:
             """Extends the listen key."""
             await self._listen_key(session, "PUT")
 
         async def resync() -> Sequence[ws.StreamUpdate]:
-            """Replays the REST snapshot."""
+            """Returns the REST snapshot replayed as stream updates."""
             return await self._resync(session)
 
         return ws.PrivateStreamSpec(
             name="binance user stream",
             url=url,
-            on_open=on_open,
+            on_open=_on_open,
             parse=lambda frame: self.parse(session, frame),
             resync=resync,
             idle_timeout_s=600.0,

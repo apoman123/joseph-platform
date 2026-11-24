@@ -5,7 +5,8 @@
 
 Each secret gets a fresh data key; the data key is wrapped by the master
 key (``JOSEPH_VAULT_MASTER_KEY``). In production the master key belongs in
-a KMS/HSM; this adapter keeps it in process memory only.
+a key management service or hardware security module (KMS/HSM); this
+adapter keeps it in process memory only.
 """
 
 from __future__ import annotations
@@ -20,6 +21,7 @@ from cryptography.hazmat.primitives.ciphers import aead
 
 from joseph_execution.domain import errors
 
+# Envelope format version, stored as ``v`` in every sealed envelope.
 _VERSION = "1"
 
 
@@ -27,10 +29,10 @@ def _b64(data: bytes) -> str:
     """Encodes bytes as URL-safe base64.
 
     Args:
-        data: Bytes.
+        data: Bytes to encode.
 
     Returns:
-        Text.
+        ASCII text.
     """
     return base64.urlsafe_b64encode(data).decode("ascii")
 
@@ -39,10 +41,10 @@ def _unb64(text: str) -> bytes:
     """Decodes URL-safe base64.
 
     Args:
-        text: Text.
+        text: Text from ``_b64``.
 
     Returns:
-        Bytes.
+        Decoded bytes.
     """
     return base64.urlsafe_b64decode(text.encode("ascii"))
 
@@ -80,11 +82,19 @@ class AesGcmVault:
     def seal(self, secret: Mapping[str, str]) -> Mapping[str, str]:
         """Encrypts credential fields.
 
+        The fields are serialized as JSON with sorted keys and encrypted
+        under a fresh 256-bit data key with a random 96-bit nonce. The data
+        key is then encrypted under the master key with the key id as
+        associated data, so an envelope only opens under the key id it
+        names. Every plaintext value is passed to ``on_secret`` first, so
+        it is redacted from logs from then on.
+
         Args:
             secret: Plaintext fields.
 
         Returns:
-            Envelope safe to persist.
+            Envelope safe to persist: version, algorithm, key id, wrapped
+            data key, both nonces and the ciphertext, base64-encoded.
         """
         if self._on_secret is not None:
             for value in secret.values():
@@ -108,15 +118,21 @@ class AesGcmVault:
     def open(self, envelope: Mapping[str, str]) -> dict[str, str]:
         """Decrypts an envelope.
 
+        Decrypted values are passed to ``on_secret`` so they are redacted
+        from logs.
+
         Args:
-            envelope: Stored envelope.
+            envelope: Stored envelope from ``seal``.
 
         Returns:
             Plaintext fields.
 
         Raises:
-            ExecutionError: ``FORBIDDEN`` when authentication fails.
+            ExecutionError: ``FORBIDDEN`` when the envelope is malformed or
+                fails authentication (wrong master key or tampering).
         """
+        # Every failure (missing field, bad base64, wrong key, tampering)
+        # becomes the same error, which says nothing about the cause.
         try:
             data_key = self._kek.decrypt(
                 _unb64(envelope["wrap_nonce"]),

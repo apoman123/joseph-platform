@@ -73,27 +73,28 @@ from joseph_execution.domain import errors
 from joseph_execution.ports import trading
 
 _LOG = logging.getLogger(__name__)
-S = enums.OrderState
+_State = enums.OrderState
 VENUE = "bitget"
 CATEGORY = "USDT-FUTURES"
 REST_URL = "https://api.bitget.com"
 WS_URL = "wss://ws.bitget.com/v3/ws/private"
 DEMO_WS_URL = "wss://wspap.bitget.com/v3/ws/private"
+# ``code`` of every successful Bitget answer.
 _OK = "00000"
 _STATUS = {
-    "live": S.ACKNOWLEDGED,
-    "new": S.ACKNOWLEDGED,
-    "partially_filled": S.PARTIALLY_FILLED,
-    "filled": S.FILLED,
-    "cancelled": S.CANCELED,
-    "canceled": S.CANCELED,
+    "live": _State.ACKNOWLEDGED,
+    "new": _State.ACKNOWLEDGED,
+    "partially_filled": _State.PARTIALLY_FILLED,
+    "filled": _State.FILLED,
+    "cancelled": _State.CANCELED,
+    "canceled": _State.CANCELED,
 }
 _TRIGGER_STATUS = {
-    "pending": S.ACKNOWLEDGED,
-    "submitting": S.ACKNOWLEDGED,
-    "success": S.ACKNOWLEDGED,
-    "failed": S.REJECTED,
-    "cancelled": S.CANCELED,
+    "pending": _State.ACKNOWLEDGED,
+    "submitting": _State.ACKNOWLEDGED,
+    "success": _State.ACKNOWLEDGED,
+    "failed": _State.REJECTED,
+    "cancelled": _State.CANCELED,
 }
 _TIF = {
     enums.TimeInForce.GTC: "gtc",
@@ -101,6 +102,7 @@ _TIF = {
     enums.TimeInForce.FOK: "fok",
     enums.TimeInForce.POST_ONLY: "post_only",
 }
+# Bitget error codes (``code`` in error bodies) grouped by meaning.
 _MARGIN = {"25202", "25203", "12001", "43012", "40754", "40798", "40800"}
 _PERMISSION = {
     "40006",
@@ -125,7 +127,8 @@ def budgets() -> list[ratelimit.Budget]:
     """Returns the documented per-UID budgets.
 
     Returns:
-        ``trade`` (10/s) and ``query`` (20/s) budgets.
+        ``trade`` (10/s) and ``query`` (20/s) budgets, plus ``ip`` (6000
+        per minute, the low end of the documented per-IP limit).
     """
     return [
         ratelimit.Budget("trade", 10, 1.0),
@@ -144,7 +147,10 @@ def map_error(  # noqa: PLR0911 - one return per error family.
         payload: ``{"code": "...", "msg": "..."}`` or text.
 
     Returns:
-        Domain error.
+        Domain error (never containing credentials). Codes in ``_UNKNOWN``
+        and HTTP 5xx mean the outcome is unknown (``AdapterTimeoutError``);
+        ``40008`` (timestamp out of range) means the request was not
+        executed.
     """
     code = str(status)
     message = str(payload)[:200]
@@ -194,6 +200,12 @@ def map_error(  # noqa: PLR0911 - one return per error family.
 def sign(secret: str, timestamp: str, method: str, path: str, body: str) -> str:
     """Computes ``ACCESS-SIGN``.
 
+    Bitget's signing rule: Base64 of the HMAC-SHA256, keyed with the API
+    secret, of ``timestamp + METHOD + path + body`` concatenated without
+    separators. REST requests use the millisecond timestamp and the
+    request path with its unencoded query; the WebSocket login signs the
+    second timestamp, ``GET`` and ``/user/verify`` with an empty body.
+
     Args:
         secret: API secret.
         timestamp: Milliseconds (REST) or seconds (WS login).
@@ -229,7 +241,14 @@ class BitgetSession(live.Session):
 
 
 class BitgetFuturesAdapter(live.LiveVenueAdapter[BitgetSession]):
-    """Bitget UTA USDT-M futures over REST v3 and the v3 private stream."""
+    """Bitget UTA USDT-M futures over REST v3 and the v3 private stream.
+
+    Attributes:
+        REQUIRED_FIELDS: Credential fields the venue needs (API key, secret
+            and passphrase).
+        SANDBOX_NAME: Name of the venue's test environment, shown in
+            sandbox notes.
+    """
 
     REQUIRED_FIELDS = ("api_key", "api_secret", "passphrase")
     SANDBOX_NAME = "Bitget demo trading (paptrading)"
@@ -252,6 +271,9 @@ class BitgetFuturesAdapter(live.LiveVenueAdapter[BitgetSession]):
 
     def _client(self) -> http.VenueHttp:
         """Returns the REST client (one host for live and demo).
+
+        Its own budget covers public endpoints only; signed requests are
+        limited by the session's per-UID limiter and cost nothing here.
 
         Returns:
             Client.
@@ -318,6 +340,14 @@ class BitgetFuturesAdapter(live.LiveVenueAdapter[BitgetSession]):
     ) -> Any:
         """Sends a signed request and unwraps ``data``.
 
+        The query is the sorted parameters joined without URL-encoding, as
+        Bitget signs it, and is sent exactly as signed; every value used
+        here (symbols, ids, numbers, categories) is URL-safe. The body is
+        compact JSON. ``sign`` covers the millisecond timestamp, method,
+        path with query and body; the key, signature, timestamp and
+        passphrase go in the ``ACCESS-*`` headers, and demo trading adds
+        ``paptrading: 1``.
+
         Args:
             session: Session.
             method: ``GET`` or ``POST``.
@@ -378,7 +408,7 @@ class BitgetFuturesAdapter(live.LiveVenueAdapter[BitgetSession]):
         Args:
             sandbox: Demo trading (same host).
         """
-        del sandbox
+        del sandbox  # Unused.
         reply = await self._client().request(
             "GET", "/api/v3/market/time", costs={"public": 1}
         )
@@ -524,7 +554,7 @@ class BitgetFuturesAdapter(live.LiveVenueAdapter[BitgetSession]):
         Returns:
             State.
         """
-        status = _STATUS.get(str(row.get("orderStatus")), S.ACKNOWLEDGED)
+        status = _STATUS.get(str(row.get("orderStatus")), _State.ACKNOWLEDGED)
         reason = str(row.get("cancelReason") or "") or None
         return trading.VenueOrderState(
             client_order_id=self._cid(
@@ -554,7 +584,9 @@ class BitgetFuturesAdapter(live.LiveVenueAdapter[BitgetSession]):
         return trading.VenueOrderState(
             client_order_id=cid,
             exchange_order_id=f"trigger:{row.get('orderId')}",
-            status=_TRIGGER_STATUS.get(str(row.get("status")), S.ACKNOWLEDGED),
+            status=_TRIGGER_STATUS.get(
+                str(row.get("status")), _State.ACKNOWLEDGED
+            ),
             filled_base=decimals.ZERO,
             reason=None,
             ts_ms=int(row.get("updatedTime") or row.get("createdTime") or 0),
@@ -625,6 +657,8 @@ class BitgetFuturesAdapter(live.LiveVenueAdapter[BitgetSession]):
     ) -> list[trading.VenueFill]:
         """Reads ``GET /api/v3/trade/fills`` (cursor pages of 100).
 
+        Reads at most ten pages (1000 fills) per call.
+
         Args:
             session: Session.
             since_ms: Lower bound (30-day window).
@@ -632,6 +666,8 @@ class BitgetFuturesAdapter(live.LiveVenueAdapter[BitgetSession]):
         Returns:
             Fills, oldest first.
         """
+        # Bitget keeps 30 days of fills; one day of margin keeps startTime
+        # inside the window.
         start = max(since_ms, self._now_ms() - 29 * 86_400_000)
         fills: list[trading.VenueFill] = []
         cursor = ""
@@ -676,7 +712,8 @@ class BitgetFuturesAdapter(live.LiveVenueAdapter[BitgetSession]):
             cid: Client id.
 
         Returns:
-            True for stop orders.
+            True for stop orders. Without a local or OMS record, protective
+            stop-loss legs (``-sl`` suffix) count as trigger orders.
         """
         if cid in session.triggers:
             return True
@@ -787,6 +824,10 @@ class BitgetFuturesAdapter(live.LiveVenueAdapter[BitgetSession]):
 
         Returns:
             Acknowledgement (Bitget answers with ids only).
+
+        Raises:
+            AdapterUnavailableError: ``UNSUPPORTED_ORDER_TYPE`` for a
+                post-only market order (nothing is sent).
         """
         symbol = self._symbol(request.instrument_id)
         kind = request.order_type
@@ -817,7 +858,8 @@ class BitgetFuturesAdapter(live.LiveVenueAdapter[BitgetSession]):
             "reduceOnly": "yes" if request.reduce_only else "no",
         }
         if kind in (enums.OrderType.STOP_MARKET, enums.OrderType.STOP_LIMIT):
-            assert request.trigger_price is not None
+            if request.trigger_price is None:
+                raise AssertionError("stop orders carry a trigger price")
             body.update(
                 {
                     "type": "trigger",
@@ -831,7 +873,10 @@ class BitgetFuturesAdapter(live.LiveVenueAdapter[BitgetSession]):
                 }
             )
             if kind is enums.OrderType.STOP_LIMIT:
-                assert request.limit_price is not None
+                if request.limit_price is None:
+                    raise AssertionError(
+                        "STOP_LIMIT orders carry a limit price"
+                    )
                 body["triggerOrderPrice"] = wire.text(request.limit_price)
             session.triggers.add(cid)
             path = "/api/v3/trade/place-strategy-order"
@@ -840,7 +885,8 @@ class BitgetFuturesAdapter(live.LiveVenueAdapter[BitgetSession]):
                 "market" if kind is enums.OrderType.MARKET else "limit"
             )
             if kind is enums.OrderType.LIMIT:
-                assert request.limit_price is not None
+                if request.limit_price is None:
+                    raise AssertionError("LIMIT orders carry a limit price")
                 body["price"] = wire.text(request.limit_price)
                 body["timeInForce"] = _TIF[request.time_in_force]
             path = "/api/v3/trade/place-order"
@@ -864,7 +910,7 @@ class BitgetFuturesAdapter(live.LiveVenueAdapter[BitgetSession]):
             trading.VenueOrderState(
                 client_order_id=cid,
                 exchange_order_id=f"{prefix}{oid}" if oid else None,
-                status=S.ACKNOWLEDGED,
+                status=_State.ACKNOWLEDGED,
                 filled_base=decimals.ZERO,
                 reason=None,
                 ts_ms=self._now_ms(),
@@ -905,15 +951,15 @@ class BitgetFuturesAdapter(live.LiveVenueAdapter[BitgetSession]):
             return trading.VenueOrderState(
                 client_order_id,
                 None,
-                S.CANCEL_PENDING,
+                _State.CANCEL_PENDING,
                 decimals.ZERO,
                 "cancel accepted by bitget",
                 self._now_ms(),
             )
-        if state.status in (S.ACKNOWLEDGED, S.PARTIALLY_FILLED):
+        if state.status in (_State.ACKNOWLEDGED, _State.PARTIALLY_FILLED):
             # Accepted but not processed yet: the stream reports the end.
             return dataclasses.replace(
-                state, status=S.CANCEL_PENDING, reason="cancel accepted"
+                state, status=_State.CANCEL_PENDING, reason="cancel accepted"
             )
         return state
 
@@ -938,7 +984,9 @@ class BitgetFuturesAdapter(live.LiveVenueAdapter[BitgetSession]):
             State re-read after the modification.
 
         Raises:
-            OrderRejectedError: For trigger orders.
+            OrderRejectedError: ``UNSUPPORTED`` for trigger orders or a
+                trigger change; ``NOT_FOUND`` when the modified order
+                cannot be read back.
         """
         if trigger_price is not None or self._is_trigger(
             session, client_order_id
@@ -1057,11 +1105,18 @@ class BitgetFuturesAdapter(live.LiveVenueAdapter[BitgetSession]):
         async def on_open(connection: ws.WsConnection) -> None:
             """Logs in and subscribes, waiting for the login ack.
 
+            The login carries the API key, passphrase, a timestamp in
+            seconds and ``sign`` over that timestamp, ``GET`` and
+            ``/user/verify``, as Bitget's WebSocket login requires. Up to
+            five frames are read for the answer.
+
             Args:
                 connection: Connection.
 
             Raises:
                 VenuePermissionError: Login refused.
+                AdapterUnavailableError: No login answer within five
+                    frames.
             """
             timestamp = str(self._now_ms() // 1000)
             creds = session.credentials
@@ -1119,7 +1174,7 @@ class BitgetFuturesAdapter(live.LiveVenueAdapter[BitgetSession]):
             )
 
         async def resync() -> Sequence[ws.StreamUpdate]:
-            """Replays the REST snapshot."""
+            """Returns the REST snapshot replayed as stream updates."""
             return await self._resync(session)
 
         return ws.PrivateStreamSpec(

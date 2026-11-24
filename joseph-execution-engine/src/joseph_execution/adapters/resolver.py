@@ -1,7 +1,11 @@
 # Copyright 2026 apoman123
 # SPDX-License-Identifier: MIT
 
-"""Adapter resolver used by the OMS (composition detail)."""
+"""Adapter resolver used by the order management system (OMS).
+
+A composition detail: the OMS asks the registry which adapter serves an
+account in a given order mode.
+"""
 
 from __future__ import annotations
 
@@ -12,6 +16,9 @@ from joseph_execution.domain import accounts
 from joseph_execution.domain import enums
 from joseph_execution.ports import trading
 
+# Capabilities of the fail-closed fallback for LIVE orders on a venue with no
+# registered adapter. Every crypto venue and broker is registered, so in
+# practice this serves the paper-only demo venue (``mock``).
 _UNKNOWN_VENUE = accounts.TradingCapabilities(
     venue="mock",
     status=enums.TradingStatus.TRADING_UNAVAILABLE,
@@ -32,7 +39,13 @@ _UNKNOWN_VENUE = accounts.TradingCapabilities(
 
 
 class AdapterRegistry:
-    """Maps (account, mode) to an adapter: PAPER, SHADOW or LIVE venue."""
+    """Maps (account, mode) to an adapter: PAPER, SHADOW or LIVE venue.
+
+    Attributes:
+        paper: Adapter for PAPER orders (the simulator).
+        shadow: Adapter for SHADOW orders (records, never sends).
+        live: LIVE adapters keyed by venue or broker code.
+    """
 
     def __init__(
         self,
@@ -45,7 +58,7 @@ class AdapterRegistry:
         Args:
             paper: Paper simulator.
             shadow: Shadow recorder.
-            live: Live adapters by venue.
+            live: LIVE adapters keyed by venue or broker code (copied).
         """
         self.paper = paper
         self.shadow = shadow
@@ -58,11 +71,14 @@ class AdapterRegistry:
         """Returns the adapter for an account and mode.
 
         Args:
-            account: Account.
-            mode: Mode.
+            account: Account the order is for; its venue selects the LIVE
+                adapter.
+            mode: Order mode.
 
         Returns:
-            Adapter; unknown live venues get a fail-closed adapter.
+            The paper or shadow adapter for those modes; for LIVE, the
+            venue's adapter, or a fail-closed adapter that refuses every
+            call when the venue has none.
         """
         if mode is enums.OrderMode.PAPER:
             return self.paper
