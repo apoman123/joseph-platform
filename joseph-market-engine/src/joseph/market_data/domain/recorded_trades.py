@@ -30,6 +30,7 @@ import dataclasses
 import decimal
 from collections.abc import Iterable
 from collections.abc import Sequence
+from typing import TypeAlias
 
 from joseph.domain import decimals
 from joseph.domain import instruments
@@ -44,15 +45,16 @@ MINUTE_MS = 60_000
 VOLUME_TOLERANCE = decimal.Decimal("0.000001")
 """Relative difference tolerated between recorded and kline volume."""
 
-Interval = tuple[int, int]
+Interval: TypeAlias = tuple[int, int]
+"""Half-open ``[from_ms, to_ms)`` interval in venue time, epoch milliseconds."""
 
 
 def ceil_to(ts_ms: int, unit_ms: int) -> int:
     """Rounds a time up to a multiple of ``unit_ms``.
 
     Args:
-        ts_ms: Time.
-        unit_ms: Unit length.
+        ts_ms: Time, epoch milliseconds.
+        unit_ms: Unit length in milliseconds.
 
     Returns:
         Smallest multiple of ``unit_ms`` not below ``ts_ms``.
@@ -64,8 +66,8 @@ def floor_to(ts_ms: int, unit_ms: int) -> int:
     """Rounds a time down to a multiple of ``unit_ms``.
 
     Args:
-        ts_ms: Time.
-        unit_ms: Unit length.
+        ts_ms: Time, epoch milliseconds.
+        unit_ms: Unit length in milliseconds.
 
     Returns:
         Largest multiple of ``unit_ms`` not above ``ts_ms``.
@@ -159,7 +161,7 @@ def clip(intervals: Sequence[Interval], before_ms: int) -> list[Interval]:
 
     Args:
         intervals: Disjoint ascending intervals.
-        before_ms: Cut-off.
+        before_ms: Retention cut-off, epoch milliseconds.
 
     Returns:
         Intervals restricted to ``[before_ms, inf)``.
@@ -202,7 +204,7 @@ def archivable_seconds(
         coverage: Trades complete over an interval.
         instrument: Instrument.
         source: Provenance label of the aggregates.
-        now_ms: Receipt time.
+        now_ms: Receipt time stamped on the aggregates, epoch milliseconds.
 
     Returns:
         ``(aggregates, whole-second coverage)``; the coverage is ``None``
@@ -246,8 +248,8 @@ def _flat(
     Args:
         previous: Last recorded 1s aggregate before the bar.
         timeframe: Seconds timeframe.
-        start_ms: Bar start.
-        now_ms: Receipt time.
+        start_ms: Bar start, epoch milliseconds.
+        now_ms: Receipt time, epoch milliseconds.
 
     Returns:
         Flat final candle (the live builder's convention).
@@ -290,11 +292,11 @@ def rebuild_seconds(
             ascending.
         coverage: Disjoint ascending coverage intervals.
         timeframe: Seconds timeframe to build.
-        start_ms: Inclusive start.
-        end_ms: Exclusive end.
+        start_ms: Inclusive start, epoch milliseconds.
+        end_ms: Exclusive end, epoch milliseconds.
         previous: Last archived aggregate before ``start_ms`` (for the
             close of leading empty buckets).
-        now_ms: Receipt time stamped on flat bars.
+        now_ms: Receipt time stamped on flat bars, epoch milliseconds.
 
     Returns:
         Final bars of every bucket wholly inside one coverage interval.
@@ -330,6 +332,8 @@ def rebuild_seconds(
                 )
             else:
                 prior = seconds[lo - 1] if lo > 0 else previous
+                # Flat only after a trade recorded in this coverage interval:
+                # before it the price is unknown, so nothing is filled.
                 if prior is not None and prior.start_ms >= low:
                     out.append(_flat(prior, timeframe, cursor, now_ms))
             cursor = bucket_end
@@ -341,7 +345,7 @@ class MinuteFlow:
     """Recorded trade totals of one minute (an archive roll-up).
 
     Attributes:
-        start_ms: Minute start.
+        start_ms: Minute start, epoch milliseconds.
         base_volume: Recorded base volume.
         taker_buy_base_volume: Recorded buyer-aggressor volume, ``None``
             when a trade of the minute had no published side.
@@ -399,8 +403,8 @@ def span_flow(
     Args:
         flows: Minute totals, ascending (may extend beyond the span).
         coverage: Disjoint ascending coverage intervals.
-        start_ms: Span start (minute aligned).
-        end_ms: Span end (minute aligned).
+        start_ms: Span start, epoch milliseconds (minute aligned).
+        end_ms: Span exclusive end, epoch milliseconds (minute aligned).
 
     Returns:
         Totals, or ``None`` when the span is not wholly covered, is not
@@ -447,9 +451,9 @@ def with_true_delta(
         flow: Recorded totals of its span (``None`` when not covered).
 
     Returns:
-        The bar with ``taker_buy_base_volume`` and ``taker = method`` when
-        the recorded volume matches the bar's, otherwise ``candle``
-        unchanged.
+        The bar with ``taker_buy_base_volume`` (capped at the bar's volume)
+        and ``taker_buy_method = taker`` when the recorded volume matches the
+        bar's, otherwise ``candle`` unchanged.
     """
     if (
         flow is None

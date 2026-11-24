@@ -38,7 +38,7 @@ class MarketDataPort(Protocol):
 
     @property
     def venue(self) -> instruments.Venue:
-        """Returns the venue this adapter serves."""
+        """The venue this adapter serves."""
         ...
 
     def capabilities(self) -> capabilities.VenueCapabilities:
@@ -66,8 +66,8 @@ class MarketDataPort(Protocol):
         Args:
             instrument: Exact venue instrument.
             timeframe: Resolution.
-            start_ms: Inclusive start.
-            end_ms: Exclusive end.
+            start_ms: Inclusive start, epoch milliseconds.
+            end_ms: Exclusive end, epoch milliseconds.
             limit: Optional maximum number of most recent bars.
 
         Returns:
@@ -106,7 +106,7 @@ class MarketDataPort(Protocol):
             depth: Levels per side requested.
 
         Returns:
-            Order book.
+            Order-book snapshot.
         """
         ...
 
@@ -191,8 +191,8 @@ class MarketDataPort(Protocol):
 
         Args:
             instrument: Exact venue instrument.
-            start_ms: Inclusive start.
-            end_ms: Exclusive end.
+            start_ms: Inclusive start, epoch milliseconds.
+            end_ms: Exclusive end, epoch milliseconds.
             limit: Optional maximum number of most recent trades.
 
         Returns:
@@ -225,8 +225,8 @@ class SparseBarsPort(MarketDataPort, Protocol):
         Args:
             instrument: Exact venue instrument.
             timeframe: Resolution.
-            start_ms: Inclusive start.
-            end_ms: Exclusive end.
+            start_ms: Inclusive start, epoch milliseconds.
+            end_ms: Exclusive end, epoch milliseconds.
             limit: Optional maximum number of most recent bars.
 
         Returns:
@@ -282,8 +282,8 @@ class CandleSource(Protocol):
         Args:
             instrument_id: Exact venue instrument.
             timeframe: Resolution.
-            start_ms: Inclusive start.
-            end_ms: Exclusive end.
+            start_ms: Inclusive start, epoch milliseconds.
+            end_ms: Exclusive end, epoch milliseconds.
 
         Returns:
             Ascending final candles.

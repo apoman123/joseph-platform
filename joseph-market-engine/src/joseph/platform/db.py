@@ -4,10 +4,11 @@
 """SQLAlchemy Core persistence primitives: engine, outbox and inbox.
 
 The transactional outbox stores events in the same transaction as the state
-change that produced them; a relay delivers them at least once. The inbox
-records processed idempotency keys so consumers can ignore redeliveries.
-SQLite is used for development and tests; PostgreSQL works unchanged via
-``JOSEPH_DATABASE_URL``.
+change that produced them, for a relay to deliver at least once (``pending``,
+then ``mark_delivered`` or ``mark_failed``); no relay runs in this engine
+yet. The inbox records processed idempotency keys so consumers can ignore
+redeliveries. SQLite is used for development and tests; PostgreSQL works
+unchanged via ``JOSEPH_DATABASE_URL``.
 """
 
 from __future__ import annotations
@@ -15,6 +16,7 @@ from __future__ import annotations
 import dataclasses
 import json
 import pathlib
+import sqlite3
 from collections.abc import Sequence
 
 import sqlalchemy as sa
@@ -67,14 +69,16 @@ def _enable_sqlite_wal(engine: sa.Engine) -> None:
     """
 
     @sa.event.listens_for(engine, "connect")
-    def _on_connect(dbapi_connection: object, _record: object) -> None:
+    def _on_connect(
+        dbapi_connection: sqlite3.Connection, _record: object
+    ) -> None:
         """Applies the pragmas to a new DB-API connection.
 
         Args:
             dbapi_connection: Raw sqlite3 connection.
             _record: Pool record (unused).
         """
-        cursor = dbapi_connection.cursor()  # type: ignore[attr-defined]
+        cursor = dbapi_connection.cursor()
         cursor.execute("PRAGMA journal_mode=WAL")
         cursor.execute("PRAGMA synchronous=NORMAL")
         cursor.execute(f"PRAGMA busy_timeout={_SQLITE_BUSY_TIMEOUT_MS}")
@@ -94,8 +98,10 @@ def create_engine(url: str) -> sa.Engine:
     """
     kwargs: dict[str, object] = {"future": True}
     if url.startswith("sqlite"):
+        # Pooled connections are used from more than one thread.
         kwargs["connect_args"] = {"check_same_thread": False}
         if url in ("sqlite://", "sqlite:///:memory:"):
+            # An in-memory database lives in one connection; share it.
             kwargs["poolclass"] = sa.pool.StaticPool
         else:
             path = url.split("///", 1)[-1]
@@ -129,7 +135,11 @@ class OutboxRecord:
 
 
 class OutboxRepository:
-    """Transactional outbox over SQLAlchemy Core."""
+    """Transactional outbox over SQLAlchemy Core.
+
+    Rows move from ``PENDING`` to ``DELIVERED``, or to ``DEAD`` after
+    ``max_attempts`` failed deliveries.
+    """
 
     def __init__(self, engine: sa.Engine, max_attempts: int = 8) -> None:
         """Initializes the repository.
@@ -149,6 +159,9 @@ class OutboxRepository:
         event: events.DomainEvent,
     ) -> bool:
         """Appends an event inside the caller's transaction.
+
+        Nothing is committed here: the row is written when the caller's
+        transaction commits.
 
         Args:
             connection: Open connection within the business transaction.
@@ -199,7 +212,7 @@ class OutboxRepository:
                 .order_by(OUTBOX.c.seq)
                 .limit(limit)
             ).mappings()
-            return [self._to_record(row) for row in rows]
+            return [_to_record(row) for row in rows]
 
     def mark_delivered(self, seq: int) -> None:
         """Marks a record delivered.
@@ -219,10 +232,11 @@ class OutboxRepository:
 
         Args:
             seq: Row number.
-            error: Short failure description (never secrets).
+            error: Short failure description (never secrets); stored
+                truncated to 500 characters.
 
         Returns:
-            The new state.
+            The new state, ``PENDING`` or ``DEAD``.
         """
         with self._engine.begin() as connection:
             row = connection.execute(
@@ -237,33 +251,35 @@ class OutboxRepository:
             )
             return state
 
-    @staticmethod
-    def _to_record(row: sa.RowMapping) -> OutboxRecord:
-        """Maps a row to an ``OutboxRecord``.
 
-        Args:
-            row: Result row.
+def _to_record(row: sa.RowMapping) -> OutboxRecord:
+    """Maps an outbox row to an ``OutboxRecord``.
 
-        Returns:
-            The record.
-        """
-        event = events.DomainEvent(
-            event_type=row["event_type"],
-            payload=json.loads(row["payload"]),
-            idempotency_key=f"{row['aggregate_id']}|{row['event_key']}",
-            ts_ms=int(row["ts_ms"]),
-            schema_version=int(row["schema_version"]),
-            event_id=row["event_id"],
-            correlation_id=row["correlation_id"],
-        )
-        return OutboxRecord(
-            seq=int(row["seq"]),
-            event=event,
-            aggregate_id=row["aggregate_id"],
-            event_key=row["event_key"],
-            state=row["state"],
-            attempts=int(row["attempts"]),
-        )
+    The event's idempotency key is rebuilt as ``aggregate_id|event_key``.
+
+    Args:
+        row: Result row of ``OUTBOX``.
+
+    Returns:
+        The record.
+    """
+    event = events.DomainEvent(
+        event_type=row["event_type"],
+        payload=json.loads(row["payload"]),
+        idempotency_key=f"{row['aggregate_id']}|{row['event_key']}",
+        ts_ms=int(row["ts_ms"]),
+        schema_version=int(row["schema_version"]),
+        event_id=row["event_id"],
+        correlation_id=row["correlation_id"],
+    )
+    return OutboxRecord(
+        seq=int(row["seq"]),
+        event=event,
+        aggregate_id=row["aggregate_id"],
+        event_key=row["event_key"],
+        state=row["state"],
+        attempts=int(row["attempts"]),
+    )
 
 
 class InboxRepository:
@@ -285,7 +301,7 @@ class InboxRepository:
         Args:
             consumer: Consumer name.
             idempotency_key: Event idempotency key.
-            now_ms: Processing time.
+            now_ms: Processing time, epoch milliseconds.
 
         Returns:
             True on first processing, False for a duplicate.
@@ -315,7 +331,7 @@ class InboxRepository:
             consumer: Consumer name.
 
         Returns:
-            Keys in insertion order.
+            Keys ordered by processing time.
         """
         with self._engine.connect() as connection:
             rows = connection.execute(

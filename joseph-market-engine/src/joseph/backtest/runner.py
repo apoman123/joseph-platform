@@ -35,8 +35,9 @@ from joseph.strategy.domain import tristate
 from joseph.strategy.domain import versions
 
 MAX_RANGE_MS = 400 * 86_400_000
-"""Longest backtest range accepted."""
+"""Longest backtest range accepted (400 days, in ms)."""
 
+# Least trustworthy first: ``worst_feed`` reports the first state present.
 _FEED_PRIORITY = (
     quality.FeedState.STALE,
     quality.FeedState.UNAVAILABLE,
@@ -55,11 +56,16 @@ class BacktestRequest:
     Attributes:
         version: Strategy version number.
         instrument_id: Canonical instrument id.
-        from_ms: Inclusive start.
-        to_ms: Exclusive end.
-        fee_bps: Fee per side (defaults to the strategy estimate or 0).
-        slippage_bps: Slippage on market fills.
-        max_hold_bars: Bars before a timeout exit.
+        from_ms: Inclusive start of the evaluated range (bar start), epoch
+            ms.
+        to_ms: Exclusive end, epoch ms; at most ``MAX_RANGE_MS`` after
+            ``from_ms``.
+        fee_bps: Fee per side in basis points (``None`` uses the
+            strategy's fee estimate, or 0).
+        slippage_bps: Adverse slippage in basis points on every fill except
+            target exits.
+        max_hold_bars: Signal bars held, entry bar included, before a
+            timeout exit.
     """
 
     version: int
@@ -79,14 +85,16 @@ class BacktestReport:
         backtest_id: Deterministic id of the run parameters.
         strategy_version_id: Evaluated version.
         instrument_id: Instrument.
-        from_ms: Inclusive start.
-        to_ms: Exclusive end.
+        from_ms: Inclusive start, epoch ms.
+        to_ms: Exclusive end, epoch ms.
         bars_evaluated: Signal bars evaluated inside the range.
-        signals: Signals emitted.
+        signals: Signals emitted by bars inside the range.
         trades: Simulated trades.
         metrics: Aggregates.
-        missing_bars: Bars missing inside the evaluated frames.
-        feed_state: Worst provenance of the frames.
+        missing_bars: Session-calendar bars missing between the in-range
+            frames.
+        feed_state: Worst provenance of the in-range frames
+            (``UNAVAILABLE`` when there are none).
         assumptions: Simulation assumptions.
         evaluator_version: Evaluator semantics version.
     """
@@ -133,7 +141,10 @@ def clean_frames(
     instrument_id: str,
     plan: compiler.CompiledStrategy,
 ) -> list[structures.BarFrame]:
-    """Orders frames, keeps the highest revision per bar, drops others.
+    """Keeps one final frame per signal bar of one series, oldest first.
+
+    Frames of other instruments or timeframes and non-final frames are
+    dropped; of several frames for one bar, the highest revision wins.
 
     Args:
         frames: Provider output.
@@ -231,8 +242,12 @@ class BacktestRunner:
             The report.
 
         Raises:
-            errors.ValidationFailedError: For invalid ranges or instruments.
-            strategy_errors.StrategyValidationError: For invalid versions.
+            errors.ValidationFailedError: If the range is empty, longer than
+                ``MAX_RANGE_MS`` or starts before the instrument's calendar,
+                or the instrument is malformed, untradable or outside the
+                strategy universe.
+            strategy_errors.StrategyValidationError: If the version does not
+                compile against the current plugin catalog.
         """
         if request.to_ms <= request.from_ms:
             raise errors.ValidationFailedError("to_ms must be after from_ms")
@@ -288,6 +303,10 @@ class BacktestRunner:
         )
         signals: list[signal_domain.Signal] = []
         evaluated = 0
+        # Warm-up frames also step the processor, so its windows and setup
+        # state are primed; their signals are discarded and only bars inside
+        # the range are counted. Point-in-time qualification is not
+        # replayed (see ``simulator.ASSUMPTIONS``).
         for frame in frames:
             market = (
                 None

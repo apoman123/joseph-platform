@@ -7,7 +7,9 @@ from __future__ import annotations
 
 import datetime
 import json
+from collections.abc import Mapping
 from collections.abc import Sequence
+from typing import Any
 
 import sqlalchemy as sa
 
@@ -33,6 +35,7 @@ OUTBOX = sa.Table(
     sa.Column("delivered_at_ms", sa.BigInteger, nullable=True),
     sa.Index("ix_alert_outbox_due", "status", "next_attempt_ms"),
 )
+"""One row per delivery of a signal to a channel and target."""
 
 SUBSCRIPTIONS = sa.Table(
     "alert_subscriptions",
@@ -41,6 +44,7 @@ SUBSCRIPTIONS = sa.Table(
     sa.Column("tenant_id", sa.String(128), nullable=False, index=True),
     sa.Column("body_json", sa.Text, nullable=False),
 )
+"""One row per subscription; the body is the whole subscription as JSON."""
 
 
 def create_schema(engine: sa.Engine) -> None:
@@ -102,7 +106,8 @@ class SqlOutbox:
             record: Pending delivery.
 
         Returns:
-            True when added.
+            True when added, False when the idempotency key or delivery id
+            already exists.
         """
         try:
             with self.engine.begin() as conn:
@@ -133,13 +138,17 @@ class SqlOutbox:
     ) -> Sequence[model.DeliveryRecord]:
         """Claims due deliveries inside one transaction.
 
+        Each lease update matches the ``next_attempt_ms`` that was read, so
+        it does not extend a lease another worker took meanwhile. The record
+        is returned either way: delivery stays at least once.
+
         Args:
-            now_ms: Current time.
+            now_ms: Current time in UTC epoch ms.
             limit: Maximum records.
-            lease_ms: Lease duration.
+            lease_ms: Lease duration in ms.
 
         Returns:
-            Claimed records.
+            Claimed records as read before the lease, oldest due first.
         """
         query = (
             sa.select(OUTBOX)
@@ -174,8 +183,8 @@ class SqlOutbox:
 
         Args:
             delivery_id: Delivery id.
-            now_ms: Delivery time.
-            attempts: Attempts made.
+            now_ms: Delivery time in UTC epoch ms.
+            attempts: Attempts made including this one.
         """
         with self.engine.begin() as conn:
             conn.execute(
@@ -202,9 +211,9 @@ class SqlOutbox:
 
         Args:
             delivery_id: Delivery id.
-            attempts: Attempts made.
-            error: Redacted error.
-            next_attempt_ms: Retry time.
+            attempts: Attempts made including this one.
+            error: Redacted error; the first 2,000 characters are stored.
+            next_attempt_ms: Retry time in UTC epoch ms.
             dead: Dead-letter the delivery.
         """
         status = (
@@ -229,7 +238,7 @@ class SqlOutbox:
             delivery_id: Delivery id.
 
         Returns:
-            Record or ``None``.
+            The record, or ``None`` for an unknown id.
         """
         with self.engine.connect() as conn:
             row = conn.execute(
@@ -244,7 +253,7 @@ class SqlOutbox:
             limit: Maximum records.
 
         Returns:
-            Records.
+            Up to ``limit`` dead records, oldest first.
         """
         query = (
             sa.select(OUTBOX)
@@ -256,6 +265,25 @@ class SqlOutbox:
             return [_to_record(row) for row in conn.execute(query)]
 
 
+def _quiet_json(quiet: model.QuietHours | None) -> dict[str, object] | None:
+    """Converts quiet hours to their stored JSON object.
+
+    Args:
+        quiet: Quiet hours, or ``None``.
+
+    Returns:
+        The JSON object (ISO times), or ``None`` without quiet hours.
+    """
+    if quiet is None:
+        return None
+    return {
+        "start": quiet.start.isoformat(),
+        "end": quiet.end.isoformat(),
+        "tz": quiet.tz,
+        "bypass_severities": sorted(quiet.bypass_severities),
+    }
+
+
 def _subscription_json(subscription: model.Subscription) -> str:
     """Serializes a subscription.
 
@@ -263,9 +291,8 @@ def _subscription_json(subscription: model.Subscription) -> str:
         subscription: Subscription.
 
     Returns:
-        JSON text.
+        JSON text with sorted keys and sets as sorted lists.
     """
-    quiet = subscription.quiet_hours
     return json.dumps(
         {
             "subscription_id": subscription.subscription_id,
@@ -276,21 +303,37 @@ def _subscription_json(subscription: model.Subscription) -> str:
             "min_severity": subscription.min_severity,
             "strategy_ids": sorted(subscription.strategy_ids),
             "enabled": subscription.enabled,
-            "quiet_hours": None
-            if quiet is None
-            else {
-                "start": quiet.start.isoformat(),
-                "end": quiet.end.isoformat(),
-                "tz": quiet.tz,
-                "bypass_severities": sorted(quiet.bypass_severities),
-            },
+            "quiet_hours": _quiet_json(subscription.quiet_hours),
         },
         sort_keys=True,
     )
 
 
+def _quiet_from_json(
+    quiet: Mapping[str, Any] | None,
+) -> model.QuietHours | None:
+    """Restores quiet hours from their stored JSON object.
+
+    Args:
+        quiet: Stored object, or ``None``.
+
+    Returns:
+        Quiet hours, or ``None`` without them.
+    """
+    if quiet is None:
+        return None
+    return model.QuietHours(
+        start=datetime.time.fromisoformat(quiet["start"]),
+        end=datetime.time.fromisoformat(quiet["end"]),
+        tz=quiet.get("tz", "UTC"),
+        bypass_severities=frozenset(quiet.get("bypass_severities", [])),
+    )
+
+
 def _subscription_from_json(text: str) -> model.Subscription:
     """Parses a stored subscription.
+
+    Fields missing from older rows take the model defaults.
 
     Args:
         text: JSON text.
@@ -299,7 +342,6 @@ def _subscription_from_json(text: str) -> model.Subscription:
         Subscription.
     """
     data = json.loads(text)
-    quiet = data.get("quiet_hours")
     return model.Subscription(
         subscription_id=data["subscription_id"],
         tenant_id=data["tenant_id"],
@@ -309,14 +351,7 @@ def _subscription_from_json(text: str) -> model.Subscription:
         min_severity=data.get("min_severity", "INFO"),
         strategy_ids=frozenset(data.get("strategy_ids", [])),
         enabled=bool(data.get("enabled", True)),
-        quiet_hours=None
-        if quiet is None
-        else model.QuietHours(
-            start=datetime.time.fromisoformat(quiet["start"]),
-            end=datetime.time.fromisoformat(quiet["end"]),
-            tz=quiet.get("tz", "UTC"),
-            bypass_severities=frozenset(quiet.get("bypass_severities", [])),
-        ),
+        quiet_hours=_quiet_from_json(data.get("quiet_hours")),
     )
 
 
@@ -342,7 +377,7 @@ class SqlSubscriptionRepository:
             tenant_id: Owning tenant.
 
         Returns:
-            Subscriptions.
+            The tenant's subscriptions in no particular order.
         """
         query = sa.select(SUBSCRIPTIONS.c.body_json).where(
             SUBSCRIPTIONS.c.tenant_id == tenant_id
@@ -354,7 +389,9 @@ class SqlSubscriptionRepository:
             ]
 
     def upsert(self, subscription: model.Subscription) -> None:
-        """Creates or replaces a subscription.
+        """Creates or replaces a subscription by its id.
+
+        Updates first and inserts when no row matched, in one transaction.
 
         Args:
             subscription: Subscription.

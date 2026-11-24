@@ -18,10 +18,12 @@ _LOG = logging.getLogger(__name__)
 
 
 class CachedQualificationGate:
-    """Implements the strategy ``QualificationGate`` port.
+    """Qualification gate answering from cached screening reports.
 
-    The strategy runtime asks synchronously; the live pipeline refreshes the
-    cache asynchronously. Missing data is UNKNOWN, never qualified.
+    Implements the strategy ``QualificationGate`` port. The strategy runtime
+    asks synchronously; the live pipeline refreshes the cache
+    asynchronously. Missing data is UNKNOWN, never qualified. An instrument
+    that drops out of a venue's report keeps its last cached status.
     """
 
     def __init__(
@@ -44,6 +46,9 @@ class CachedQualificationGate:
     async def refresh(self, venues: Iterable[instruments.Venue]) -> None:
         """Reloads reports for venues (errors leave the cache untouched).
 
+        Continuous qualification is measured from the first refresh that
+        saw an instrument QUALIFIED; any other status resets it.
+
         Args:
             venues: Venues to refresh.
         """
@@ -51,7 +56,7 @@ class CachedQualificationGate:
         for venue in set(venues):
             try:
                 report = await self._service.report(venue)
-            except Exception:
+            except Exception:  # noqa: BLE001 - isolation point: a failing venue keeps its cached report and the other venues still refresh
                 _LOG.warning("qualification refresh failed for %s", venue)
                 continue
             ranked: list[str] = []
@@ -94,11 +99,14 @@ class CachedQualificationGate:
 
         Args:
             instrument_id: Canonical instrument id.
-            at_ms: Bar close.
-            min_minutes: Minimum continuous qualification time.
+            at_ms: Bar close, epoch ms.
+            min_minutes: Minimum continuous qualification time in minutes;
+                0 disables the check.
 
         Returns:
-            TRUE, FALSE, or UNKNOWN when no report covers the instrument.
+            UNKNOWN when no report covers the instrument or its data is
+            insufficient; FALSE when it is rejected or has been qualified for
+            less than ``min_minutes``; otherwise TRUE.
         """
         status = self._status.get(instrument_id)
         if status is None or status is policy.Status.INSUFFICIENT_DATA:

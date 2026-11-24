@@ -1,7 +1,7 @@
 # Copyright 2026 apoman123
 # SPDX-License-Identifier: MIT
 
-"""In-memory alert repositories."""
+"""In-memory alert repositories for tests (bootstrap wires the SQL ones)."""
 
 from __future__ import annotations
 
@@ -26,12 +26,12 @@ class InMemorySubscriptionRepository:
             tenant_id: Owning tenant.
 
         Returns:
-            Subscriptions.
+            The tenant's subscriptions in insertion order.
         """
         return [s for s in self._rows.values() if s.tenant_id == tenant_id]
 
     def upsert(self, subscription: model.Subscription) -> None:
-        """Creates or replaces a subscription.
+        """Creates or replaces a subscription by its id.
 
         Args:
             subscription: Subscription.
@@ -55,7 +55,7 @@ class InMemoryOutbox:
             record: Pending delivery.
 
         Returns:
-            True when added.
+            True when added, False when the idempotency key exists.
         """
         with self._lock:
             if record.idempotency_key in self._keys:
@@ -70,12 +70,12 @@ class InMemoryOutbox:
         """Claims due pending deliveries.
 
         Args:
-            now_ms: Current time.
+            now_ms: Current time in UTC epoch ms.
             limit: Maximum records.
-            lease_ms: Lease duration.
+            lease_ms: Lease duration in ms.
 
         Returns:
-            Claimed records (as they were before leasing).
+            Claimed records (as they were before leasing), oldest due first.
         """
         with self._lock:
             due = sorted(
@@ -104,8 +104,11 @@ class InMemoryOutbox:
 
         Args:
             delivery_id: Delivery id.
-            now_ms: Delivery time.
-            attempts: Attempts made.
+            now_ms: Delivery time in UTC epoch ms.
+            attempts: Attempts made including this one.
+
+        Raises:
+            KeyError: For an unknown delivery id.
         """
         with self._lock:
             record = self._rows[delivery_id]
@@ -130,10 +133,13 @@ class InMemoryOutbox:
 
         Args:
             delivery_id: Delivery id.
-            attempts: Attempts made.
+            attempts: Attempts made including this one.
             error: Redacted error.
-            next_attempt_ms: Retry time.
+            next_attempt_ms: Retry time in UTC epoch ms.
             dead: Dead-letter the delivery.
+
+        Raises:
+            KeyError: For an unknown delivery id.
         """
         with self._lock:
             record = self._rows[delivery_id]
@@ -156,7 +162,7 @@ class InMemoryOutbox:
             delivery_id: Delivery id.
 
         Returns:
-            Record or ``None``.
+            The record, or ``None`` for an unknown id.
         """
         with self._lock:
             return self._rows.get(delivery_id)
@@ -168,7 +174,7 @@ class InMemoryOutbox:
             limit: Maximum records.
 
         Returns:
-            Records.
+            Up to ``limit`` dead records in enqueue order.
         """
         with self._lock:
             return [

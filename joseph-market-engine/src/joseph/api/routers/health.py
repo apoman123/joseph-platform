@@ -13,6 +13,8 @@ from joseph.platform import config
 from joseph.platform import metrics as metrics_lib
 
 SERVICE = "joseph-market-engine"
+# Reported by ``/health`` and as the OpenAPI version; kept equal to the
+# project version in ``pyproject.toml``.
 VERSION = "0.5.0"
 
 
@@ -23,13 +25,15 @@ def build_router(
 ) -> fastapi.APIRouter:
     """Builds ``/health`` and ``/metrics``.
 
+    Both routes are public (no bearer token).
+
     Args:
         market_data: Market-data service (for venue health).
-        metrics: Metrics registry.
-        settings: Settings.
+        metrics: Metrics registry to render.
+        settings: Settings (``demo_only`` is reported).
 
     Returns:
-        Router.
+        Router serving ``/health`` and ``/metrics``.
     """
     router = fastapi.APIRouter(tags=["health"])
 
@@ -37,8 +41,12 @@ def build_router(
     async def health() -> dict[str, object]:
         """Reports liveness and per-venue feed health.
 
+        The status is always ``ok`` with HTTP 200 while the process serves
+        requests; a degraded venue feed shows only in ``venues``.
+
         Returns:
-            Health document.
+            Health document: ``status``, ``service``, ``version``,
+            ``demo_only`` and ``venues`` (venue id to feed state).
         """
         venues = {
             caps.venue.value: feed.state.value
@@ -57,7 +65,7 @@ def build_router(
         """Exposes Prometheus metrics.
 
         Returns:
-            Text exposition document.
+            Prometheus text exposition document.
         """
         return metrics.render()
 

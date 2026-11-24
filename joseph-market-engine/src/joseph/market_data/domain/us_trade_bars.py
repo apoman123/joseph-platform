@@ -6,8 +6,9 @@
 US trades carry sale conditions that decide which parts of a bar a trade
 may update. The table below is the one Alpaca documents for its own minute
 bars (https://docs.alpaca.markets/docs/market-data-faq, "How are bars
-aggregated?", rules for bar type ``M``), derived from the CTS (tapes A/B)
-and UTP (tape C) specifications:
+aggregated?", rules for bar type ``M``), derived from the CTS (Consolidated
+Tape System, tapes A/B) and UTP (Unlisted Trading Privileges, tape C)
+specifications:
 
 =====  ===============================  =====  ====  =====  ======
 Cond.  Meaning                          Tape   O/C   H/L    Volume
@@ -176,7 +177,7 @@ def _closing_session(
 
     Args:
         calendar: Instrument calendar.
-        ts_ms: Instant.
+        ts_ms: Instant, epoch milliseconds.
 
     Returns:
         The session when ``close <= ts_ms < close + CLOSING_WINDOW_MS``,
@@ -203,7 +204,7 @@ def closing_window_end(
 
     Args:
         instrument_id: Instrument.
-        end_ms: Exclusive end of a trade window.
+        end_ms: Exclusive end of a trade window, epoch milliseconds.
 
     Returns:
         The end of the closing window containing ``end_ms``, else
@@ -227,10 +228,11 @@ def settled_until(
     Args:
         instrument_id: Instrument.
         timeframe: Seconds resolution.
-        delivered_ms: Exclusive end of the complete trades.
+        delivered_ms: Exclusive end of the complete trades, epoch
+            milliseconds.
 
     Returns:
-        Settled time (bars ending by it are final).
+        Settled time, epoch milliseconds (bars ending by it are final).
     """
     calendar = sessions.for_instrument(instrument_id)
     found = _closing_session(calendar, delivered_ms)
@@ -244,7 +246,8 @@ def update_rule(conditions: Iterable[str], tape: str | None) -> UpdateRule:
 
     Args:
         conditions: Sale condition codes.
-        tape: Tape (``A``, ``B``, ``C``, ``O``).
+        tape: Tape (``A``, ``B``, ``C``, ``O``), or ``None`` when unknown
+            (tape-specific rules then do not apply).
 
     Returns:
         Strictest rule over the conditions (regular when none apply).
@@ -264,11 +267,11 @@ class TapeTrade:
 
     Attributes:
         trade_id: Unique id (exchange code and trade id).
-        ts_ms: Trade time.
+        ts_ms: Trade time, epoch milliseconds.
         price: Price.
         size: Shares.
         conditions: Sale conditions.
-        tape: Tape.
+        tape: Tape, or ``None`` when unknown.
         side: Classified side.
     """
 
@@ -294,7 +297,7 @@ class _Bucket:
         buy: Classified buy volume.
         unknown: True when a volume trade was unclassified.
         count: Volume-updating trades.
-        last_ts: Newest trade time.
+        last_ts: Newest trade time, epoch milliseconds.
         open_key: Ordering key of the open.
         close_key: Ordering key of the close.
         final: True once closed.
@@ -321,6 +324,7 @@ class SecondsBarBuilder:
         instrument_id: Instrument.
         timeframe: Seconds resolution.
         source: Provenance label.
+        feed_state: Provenance state of emitted bars.
         outside_session: Trades skipped as outside every session.
         duplicates: Trades ignored as already seen.
     """
@@ -367,9 +371,9 @@ class SecondsBarBuilder:
         """Starts a new coverage segment, forgetting open bars.
 
         Args:
-            complete_from_ms: Time from which every trade will be delivered,
-                or ``None`` when unknown (the first trade's bar is then
-                partial and never emitted).
+            complete_from_ms: Time, epoch milliseconds, from which every
+                trade will be delivered, or ``None`` when unknown (the first
+                trade's bar is then partial and never emitted).
         """
         self._buckets = {s: b for s, b in self._buckets.items() if b.final}
         self._starts = sorted(self._buckets)
@@ -422,10 +426,11 @@ class SecondsBarBuilder:
 
         Args:
             trades: Trades of the instrument.
-            now_ms: Receipt time.
+            now_ms: Receipt time, epoch milliseconds.
 
         Returns:
-            Bars whose values or finality changed, ascending.
+            Bars whose values or finality changed, ascending; every bar
+            before the newest one becomes final.
         """
         touched: set[int] = set()
         for trade in trades:
@@ -508,10 +513,12 @@ class SecondsBarBuilder:
         session's last bar only once its closing window was delivered.
 
         Args:
-            delivered_ms: Trades before this time have all been delivered.
+            delivered_ms: Trades before this time, epoch milliseconds, have
+                all been delivered.
 
         Returns:
-            ``(from, to)``, or ``None`` before the segment's first trade.
+            ``(from_ms, to_ms)``, or ``None`` before the segment's first
+            trade or while nothing after the partial bar is settled.
         """
         if self._complete_from is None:
             return None
@@ -532,11 +539,12 @@ class SecondsBarBuilder:
         closing window (the closing print is stamped after the close).
 
         Args:
-            proven_ms: Trades before this time have all been delivered.
-            now_ms: Receipt time.
+            proven_ms: Trades before this time, epoch milliseconds, have all
+                been delivered.
+            now_ms: Receipt time, epoch milliseconds.
 
         Returns:
-            Newly final bars.
+            Newly final bars, ascending.
         """
         touched = set()
         for start in self._starts:
@@ -551,17 +559,19 @@ class SecondsBarBuilder:
 
         Args:
             touched: Bucket starts.
-            now_ms: Receipt time.
+            now_ms: Receipt time, epoch milliseconds.
 
         Returns:
-            Candles (buckets without a price or partial are skipped).
+            Candles, ascending (buckets without a price or partial are
+            skipped).
         """
         out = []
         for start in sorted(touched):
             bucket = self._buckets[start]
             if start == self._partial or bucket.open is None:
                 continue
-            assert bucket.close is not None
+            if bucket.close is None:
+                raise AssertionError("a bucket with an open has a close")
             high = bucket.high if bucket.high is not None else bucket.open
             low = bucket.low if bucket.low is not None else bucket.open
             out.append(
@@ -596,6 +606,8 @@ class SecondsBarBuilder:
         for start in self._starts[:cut]:
             del self._buckets[start]
         del self._starts[:cut]
+        # Bounds the id memory; a duplicate arriving just after the clear is
+        # not detected.
         if len(self._seen) > 50 * self._retention:
             self._seen.clear()
 
@@ -610,7 +622,7 @@ def bars_from_trades(
     source: str,
     now_ms: int,
 ) -> list[market.Candle]:
-    """Builds the bars of a complete trade interval ``[from, to)``.
+    """Builds the bars of a complete trade interval ``[from_ms, to_ms)``.
 
     Bars ending by ``to_ms`` are final, except a session's last bar, which
     is final only once ``to_ms`` passed its closing window (read the window
@@ -622,10 +634,11 @@ def bars_from_trades(
         trades: Every trade of the interval, ascending.
         instrument_id: Instrument.
         timeframe: Seconds resolution.
-        from_ms: Inclusive start of the complete interval.
-        to_ms: Exclusive end of the complete interval.
+        from_ms: Inclusive start of the complete interval, epoch
+            milliseconds.
+        to_ms: Exclusive end of the complete interval, epoch milliseconds.
         source: Provenance label.
-        now_ms: Receipt time.
+        now_ms: Receipt time, epoch milliseconds.
 
     Returns:
         Ascending bars.
@@ -653,7 +666,7 @@ def closing_prints(
 
     Args:
         trades: Trades read around the close.
-        close_ms: Session close.
+        close_ms: Session close, epoch milliseconds.
 
     Returns:
         Trades with condition ``6`` stamped in
@@ -680,7 +693,7 @@ def closing_slot(
 
     Args:
         instrument_id: Instrument.
-        close_ms: Session close.
+        close_ms: Session close, epoch milliseconds.
 
     Returns:
         ``(start, close)`` of the session's last minute bar.
@@ -713,8 +726,8 @@ def fold_closing_prints(
         prints: Closing prints in time order (``closing_prints``).
         instrument_id: Instrument.
         timeframe: Bar resolution.
-        start_ms: Bar start.
-        now_ms: Receipt time.
+        start_ms: Bar start, epoch milliseconds.
+        now_ms: Receipt time, epoch milliseconds.
         source: Provenance label of a bar created from prints alone.
         is_final: Finality of the result.
 
@@ -794,9 +807,9 @@ def with_closing_prints(
             printed none); each folds into that session's last minute.
         pending: Closes whose prints are not known yet: their sessions'
             last minute bars are not final.
-        now_ms: Receipt time.
+        now_ms: Receipt time, epoch milliseconds.
         settled_before_ms: A last minute bar created from prints alone is
-            final when it ends by then.
+            final when it ends by then, epoch milliseconds.
         source: Provenance label of bars created from prints alone.
 
     Returns:

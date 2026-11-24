@@ -12,7 +12,7 @@ from joseph.alerts.domain import model
 
 
 class SubscriptionRepository(Protocol):
-    """Store of alert subscriptions."""
+    """A store of alert subscriptions."""
 
     def list_for_tenant(self, tenant_id: str) -> Sequence[model.Subscription]:
         """Lists a tenant's subscriptions.
@@ -21,12 +21,13 @@ class SubscriptionRepository(Protocol):
             tenant_id: Owning tenant.
 
         Returns:
-            Subscriptions.
+            Every subscription of the tenant, enabled or not, in no
+            particular order; empty when there are none.
         """
         ...
 
     def upsert(self, subscription: model.Subscription) -> None:
-        """Creates or replaces a subscription.
+        """Creates or replaces a subscription by its id.
 
         Args:
             subscription: Subscription.
@@ -35,7 +36,7 @@ class SubscriptionRepository(Protocol):
 
 
 class OutboxRepository(Protocol):
-    """Durable at-least-once delivery outbox."""
+    """A durable at-least-once delivery outbox."""
 
     def enqueue(self, record: model.DeliveryRecord) -> bool:
         """Adds a delivery unless its idempotency key exists.
@@ -57,12 +58,12 @@ class OutboxRepository(Protocol):
         ``lease_ms``) so concurrent workers do not pick them up twice.
 
         Args:
-            now_ms: Current time.
+            now_ms: Current time in UTC epoch ms.
             limit: Maximum records.
-            lease_ms: Lease duration.
+            lease_ms: Lease duration in ms.
 
         Returns:
-            Due records.
+            Due records as read before the lease, oldest due first.
         """
         ...
 
@@ -73,7 +74,7 @@ class OutboxRepository(Protocol):
 
         Args:
             delivery_id: Delivery id.
-            now_ms: Delivery time.
+            now_ms: Delivery time in UTC epoch ms.
             attempts: Attempts made including this one.
         """
         ...
@@ -93,7 +94,7 @@ class OutboxRepository(Protocol):
             delivery_id: Delivery id.
             attempts: Attempts made including this one.
             error: Redacted error.
-            next_attempt_ms: When to retry.
+            next_attempt_ms: When to retry, in UTC epoch ms.
             dead: Move to the dead-letter state instead of retrying.
         """
         ...
@@ -105,7 +106,7 @@ class OutboxRepository(Protocol):
             delivery_id: Delivery id.
 
         Returns:
-            Record or ``None``.
+            The record, or ``None`` for an unknown id.
         """
         ...
 
@@ -116,13 +117,17 @@ class OutboxRepository(Protocol):
             limit: Maximum records.
 
         Returns:
-            Records.
+            Up to ``limit`` dead records, oldest first.
         """
         ...
 
 
 class ChannelSender(Protocol):
-    """Delivers a record on one channel."""
+    """A sender that delivers outbox records on one channel.
+
+    Attributes:
+        channel: The channel this sender serves.
+    """
 
     channel: model.Channel
 
@@ -133,6 +138,7 @@ class ChannelSender(Protocol):
             record: Delivery.
 
         Raises:
-            model.DeliveryError: On failure (with a redacted message).
+            model.DeliveryError: On failure, with a redacted message and
+                whether a retry may succeed.
         """
         ...

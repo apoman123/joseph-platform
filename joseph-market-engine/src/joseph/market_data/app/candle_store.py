@@ -17,6 +17,7 @@ from __future__ import annotations
 import bisect
 import threading
 from collections.abc import Iterable
+from typing import TypeAlias
 
 from joseph.domain import instruments
 from joseph.domain import market
@@ -24,9 +25,10 @@ from joseph.domain import sessions
 from joseph.domain import timeframes
 from joseph.market_data.domain import candles as candle_rules
 
-SeriesKey = tuple[instruments.InstrumentId, timeframes.Timeframe]
+SeriesKey: TypeAlias = tuple[instruments.InstrumentId, timeframes.Timeframe]
 MAX_COVERAGE_SPANS = 1_000
 """Disjoint coverage spans kept per series (the oldest are dropped)."""
+# Open upper bound for clipping: later than any epoch-millisecond time.
 _FOREVER_MS = 2**63
 
 
@@ -64,6 +66,10 @@ class CandleStore:
     Seconds series grow by up to 86,400 bars a day, so they have their own,
     smaller bound (two hours of 1s bars by default, which still holds a
     full 5,000-bar batch).
+
+    Attributes:
+        revisions: Number of final bars replaced by a final bar with other
+            values (``MergeAction.REVISED``) since the store was created.
     """
 
     def __init__(
@@ -74,8 +80,10 @@ class CandleStore:
         """Initializes the store.
 
         Args:
-            max_bars_per_series: Oldest bars beyond this are evicted.
-            max_seconds_bars_per_series: Bound for seconds timeframes.
+            max_bars_per_series: Bars kept per series of a minute or
+                longer timeframe; the oldest beyond it are evicted.
+            max_seconds_bars_per_series: The same bound for seconds
+                timeframes.
         """
         self._max = max_bars_per_series
         self._max_seconds = max_seconds_bars_per_series
@@ -86,11 +94,15 @@ class CandleStore:
     def upsert(self, candle: market.Candle) -> candle_rules.MergeResult:
         """Merges one candle.
 
+        Evicts the oldest bars of the series (and the coverage over them)
+        when the merge pushes it past its bound.
+
         Args:
             candle: Candle to store.
 
         Returns:
-            Merge result.
+            The merge outcome; the stored bar is unchanged when
+            ``result.changed`` is false.
         """
         key = (candle.instrument_id, candle.timeframe)
         with self._lock:
@@ -124,10 +136,11 @@ class CandleStore:
         """Merges many candles in time order.
 
         Args:
-            rows: Candles.
+            rows: Candles of any series, in any order.
 
         Returns:
-            Merge results in input order after sorting by start.
+            One merge result per candle, ordered by start and then by
+            receive time (the order they were merged in).
         """
         return [
             self.upsert(c)
@@ -146,9 +159,10 @@ class CandleStore:
         sparse bars record coverage.
 
         Args:
-            instrument: Instrument.
-            timeframe: Resolution.
-            spans: Covered spans.
+            instrument: Instrument of the series.
+            timeframe: Resolution of the series.
+            spans: Covered half-open ``[start_ms, end_ms)`` spans; merged
+                with the recorded ones.
         """
         added = list(spans)
         if not added:
@@ -170,10 +184,10 @@ class CandleStore:
         """Returns the recorded coverage inside ``[start, end)``.
 
         Args:
-            instrument: Instrument.
-            timeframe: Resolution.
-            start_ms: Inclusive start.
-            end_ms: Exclusive end.
+            instrument: Instrument of the series.
+            timeframe: Resolution of the series.
+            start_ms: Inclusive start, epoch milliseconds.
+            end_ms: Exclusive end, epoch milliseconds.
 
         Returns:
             Disjoint ascending spans, minus the slots of non-final bars
@@ -200,16 +214,16 @@ class CandleStore:
         start_ms: int,
         end_ms: int,
     ) -> list[market.Candle]:
-        """Returns stored bars starting in [start, end).
+        """Returns stored bars starting in ``[start, end)``.
 
         Args:
-            instrument: Instrument.
-            timeframe: Resolution.
-            start_ms: Inclusive start.
-            end_ms: Exclusive end.
+            instrument: Instrument of the series.
+            timeframe: Resolution of the series.
+            start_ms: Inclusive start, epoch milliseconds.
+            end_ms: Exclusive end, epoch milliseconds.
 
         Returns:
-            Ascending candles.
+            Candles ascending by start, final or not; empty when none.
         """
         with self._lock:
             series = self._series.get((instrument, timeframe))
@@ -227,11 +241,12 @@ class CandleStore:
         """Returns the newest stored bar.
 
         Args:
-            instrument: Instrument.
-            timeframe: Resolution.
+            instrument: Instrument of the series.
+            timeframe: Resolution of the series.
 
         Returns:
-            Candle or ``None``.
+            The bar with the latest start (final or not), or ``None`` when
+            the series holds no bar.
         """
         with self._lock:
             series = self._series.get((instrument, timeframe))
@@ -254,13 +269,13 @@ class CandleStore:
         This drives repair fetches.
 
         Args:
-            instrument: Instrument.
-            timeframe: Resolution.
-            start_ms: Inclusive start.
+            instrument: Instrument of the series.
+            timeframe: Resolution of the series.
+            start_ms: Inclusive start, epoch milliseconds.
             end_ms: Exclusive end (typically the current bar start).
 
         Returns:
-            Missing ranges.
+            Missing half-open ``(start_ms, end_ms)`` ranges, ascending.
         """
         finals = [
             c.start_ms

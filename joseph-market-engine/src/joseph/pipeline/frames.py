@@ -97,14 +97,18 @@ def fetch_windows(
 ) -> dict[timeframes.Timeframe, int]:
     """Chooses the fetch start for every required timeframe.
 
+    Timeframes up to the signal timeframe start at ``start_ms``; higher
+    ones start ``_AUX_LOOKBACK_BARS`` of their own bars earlier.
+
     Args:
         required: Timeframes the engine consumes.
         signal_tf: Signal timeframe.
-        start_ms: First signal bar (including warm-up) to compute.
+        start_ms: Start (epoch ms) of the first signal bar to compute,
+            warm-up included.
         calendar: Session calendar of the instrument.
 
     Returns:
-        Fetch start per timeframe.
+        Fetch start (epoch ms) per timeframe.
     """
     windows: dict[timeframes.Timeframe, int] = {}
     for tf in required:
@@ -156,7 +160,8 @@ class EngineFrameProvider:
         Args:
             instrument_id: Exact venue instrument.
             requirements: Plugins and timeframes to compute.
-            settings: Overrides replacing the configured ones.
+            settings: Overrides replacing the configured ones (``None`` keeps
+                the configured ones).
 
         Returns:
             Fresh engine.
@@ -176,6 +181,8 @@ class EngineFrameProvider:
         requirements: compiler.EngineRequirements,
     ) -> engine_lib.IndicatorEngine:
         """Creates an engine with the instrument's tick size injected.
+
+        When the tick size cannot be resolved, plugins infer it from prices.
 
         Args:
             instrument_id: Exact venue instrument.
@@ -207,8 +214,8 @@ class EngineFrameProvider:
             engine: Engine whose ``required_timeframes`` drive the fetch.
             instrument_id: Exact venue instrument.
             signal_tf: Signal timeframe.
-            start_ms: First signal bar start (warm-up included).
-            end_ms: Exclusive end.
+            start_ms: First signal bar start, epoch ms (warm-up included).
+            end_ms: Exclusive end, epoch ms.
 
         Returns:
             Candles per timeframe, final only, ending at or before
@@ -246,11 +253,12 @@ class EngineFrameProvider:
             instrument_id: Exact venue instrument.
             signal_tf: Signal timeframe.
             requirements: Plugins and timeframes to compute.
-            from_ms: Inclusive start of the evaluated range.
-            to_ms: Exclusive end.
+            from_ms: Inclusive start of the evaluated range, epoch ms.
+            to_ms: Exclusive end, epoch ms.
 
         Returns:
-            Frames, oldest first; warm-up frames precede ``from_ms``.
+            Frames whose bars start before ``to_ms``, oldest first; up to
+            ``requirements.history_bars`` warm-up frames precede ``from_ms``.
         """
         engine = await self.engine_for(instrument_id, requirements)
         calendar = engine.calendar

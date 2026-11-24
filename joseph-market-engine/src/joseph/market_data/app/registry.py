@@ -18,6 +18,7 @@ from joseph.domain import errors as domain_errors
 from joseph.domain import instruments
 from joseph.market_data.app import ports
 
+# Search rank of each status: tradable instruments first, delisted last.
 _STATUS_ORDER = {
     instruments.InstrumentStatus.TRADING: 0,
     instruments.InstrumentStatus.PRE_LAUNCH: 1,
@@ -28,7 +29,13 @@ _STATUS_ORDER = {
 
 
 class InstrumentRegistry:
-    """Looks up and searches instruments of the configured venues."""
+    """Looks up and searches instruments of the configured venues.
+
+    Attributes:
+        errors: Last error message of each venue whose instrument list could
+            not be fetched; a venue's entry is removed once it answers
+            again.
+    """
 
     def __init__(
         self, adapters: Mapping[instruments.Venue, ports.MarketDataPort]
@@ -43,13 +50,16 @@ class InstrumentRegistry:
 
     @property
     def venues(self) -> tuple[instruments.Venue, ...]:
-        """Returns configured venues in declaration order."""
+        """The configured venues, in declaration order."""
         return tuple(self._adapters)
 
     async def all_instruments(
         self, venue: instruments.Venue | None = None
     ) -> list[instruments.Instrument]:
         """Lists instruments of one or all venues.
+
+        Without a filter, a venue that fails with a ``JosephError`` is
+        skipped and its message kept in ``errors``.
 
         Args:
             venue: Optional venue filter.
@@ -59,6 +69,8 @@ class InstrumentRegistry:
 
         Raises:
             domain_errors.NotFoundError: If ``venue`` is not configured.
+            domain_errors.JosephError: If ``venue`` is given and its adapter
+                fails.
         """
         targets = [venue] if venue is not None else list(self._adapters)
         for target in targets:
@@ -92,10 +104,11 @@ class InstrumentRegistry:
             instrument_id: Canonical id.
 
         Returns:
-            Instrument.
+            The instrument with its precision metadata.
 
         Raises:
             domain_errors.NotFoundError: If unknown or the venue is disabled.
+            domain_errors.JosephError: If the venue's adapter fails.
         """
         for row in await self.all_instruments(instrument_id.venue):
             if row.instrument_id == instrument_id:
@@ -112,13 +125,21 @@ class InstrumentRegistry:
         """Searches by base asset, native id, display symbol or name.
 
         Args:
-            query: Case-insensitive text such as ``btc``.
+            query: Case-insensitive text such as ``btc``; ``None`` or blank
+                matches every instrument.
             venue: Optional venue filter.
             market_type: Optional market-type filter.
             limit: Maximum results.
 
         Returns:
-            Exact-venue instruments, best matches first.
+            Exact-venue instruments, best matches first: an exact base or
+            native id match, then a base prefix match, then by status,
+            venue order and native id.
+
+        Raises:
+            domain_errors.NotFoundError: If ``venue`` is not configured.
+            domain_errors.JosephError: If ``venue`` is given and its adapter
+                fails.
         """
         needle = (query or "").strip().upper()
         venue_rank = {v: i for i, v in enumerate(self._adapters)}

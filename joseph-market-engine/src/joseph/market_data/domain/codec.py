@@ -21,6 +21,10 @@ def candle_from_contract(
 ) -> market.Candle:
     """Decodes a contract ``Candle`` object.
 
+    Absent optional fields default to the values of a replayed recording:
+    ``source`` ``replay``, ``feed_state`` ``REPLAY``, ``received_at_ms`` and
+    ``revision`` 0, and ``None`` for the rest.
+
     Args:
         payload: JSON object matching ``market.schema.json#/$defs/Candle``.
         feed_state: Optional provenance override (e.g. ``REPLAY``).

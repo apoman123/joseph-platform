@@ -21,7 +21,7 @@ from joseph.signals.domain import signal as signal_domain
 
 
 class Channel(enum.StrEnum):
-    """Delivery channels."""
+    """A delivery channel (values are stored and sent on the wire)."""
 
     UI = "UI"
     TELEGRAM = "TELEGRAM"
@@ -41,7 +41,7 @@ FORWARDED_MODES: frozenset[str] = frozenset({"PAPER", "SHADOW", "AUTO_LIVE"})
 
 
 class DeliveryStatus(enum.StrEnum):
-    """State of an outbox delivery."""
+    """The state of an outbox delivery."""
 
     PENDING = "PENDING"
     DELIVERED = "DELIVERED"
@@ -53,7 +53,8 @@ class DeliveryError(Exception):
 
     Attributes:
         retryable: Whether retrying may succeed.
-        retry_after_ms: Venue-requested delay, if any.
+        retry_after_ms: Delay in ms the channel asked for (``Retry-After``),
+            or ``None``.
     """
 
     def __init__(
@@ -68,7 +69,8 @@ class DeliveryError(Exception):
         Args:
             message: Redacted explanation (never contains secrets).
             retryable: Whether retrying may succeed.
-            retry_after_ms: Requested delay before retrying.
+            retry_after_ms: Requested delay in ms before retrying, or
+                ``None`` to use the backoff.
         """
         super().__init__(message)
         self.retryable = retryable
@@ -77,11 +79,12 @@ class DeliveryError(Exception):
 
 @dataclasses.dataclass(frozen=True, slots=True)
 class QuietHours:
-    """Daily window in which push notifications are held back.
+    """A daily window in which push notifications are held back.
 
     Attributes:
-        start: Local start time.
-        end: Local end time (may be earlier than ``start`` to span midnight).
+        start: Local start time, inclusive.
+        end: Local end time, exclusive (may be earlier than ``start`` to
+            span midnight; equal to ``start`` means never quiet).
         tz: IANA time zone, e.g. ``Asia/Taipei``.
         bypass_severities: Severities delivered even when quiet.
     """
@@ -118,10 +121,11 @@ class Subscription:
         channel: Delivery channel.
         target: Chat id, LINE user id, e-mail address or webhook URL.
         kinds: Signal kinds to receive (empty = all).
-        min_severity: Lowest severity delivered.
+        min_severity: Lowest severity delivered (``INFO``, ``WARNING``,
+            ``ENTRY`` or ``CRITICAL``).
         strategy_ids: Strategies to receive (empty = all).
         enabled: Whether active.
-        quiet_hours: Optional quiet-hours window.
+        quiet_hours: Optional quiet-hours window (push channels only).
     """
 
     subscription_id: str
@@ -141,7 +145,9 @@ class Subscription:
             signal: Signal.
 
         Returns:
-            True when the signal matches.
+            True when the subscription is enabled, belongs to the signal's
+            tenant, its kind and strategy filters admit the signal and the
+            signal's severity is at least ``min_severity``.
         """
         if not self.enabled or signal.tenant_id != self.tenant_id:
             return False
@@ -165,12 +171,12 @@ class DeliveryRecord:
         channel: Channel.
         target: Recipient.
         payload: Contract ``Signal`` dict.
-        created_at_ms: Enqueue time.
+        created_at_ms: Enqueue time in UTC epoch ms.
         status: Delivery status.
         attempts: Attempts made.
-        next_attempt_ms: Earliest next attempt.
-        last_error: Redacted last error.
-        delivered_at_ms: Delivery time.
+        next_attempt_ms: Earliest next attempt in UTC epoch ms.
+        last_error: Redacted last error, or ``None``.
+        delivered_at_ms: Delivery time in UTC epoch ms, or ``None``.
     """
 
     delivery_id: str
@@ -210,7 +216,7 @@ def new_delivery(
         signal: Signal.
         channel: Channel.
         target: Recipient.
-        now_ms: Enqueue time.
+        now_ms: Enqueue time in UTC epoch ms; the record is due at once.
 
     Returns:
         The record.
@@ -230,7 +236,7 @@ def new_delivery(
 
 @dataclasses.dataclass(frozen=True, slots=True)
 class RouteResult:
-    """Routing decision.
+    """The routing decision for one signal.
 
     Attributes:
         deliveries: Deliveries to enqueue.
@@ -252,15 +258,21 @@ def route(
 ) -> RouteResult:
     """Decides deliveries for a newly recorded signal.
 
+    UI and execution deliveries are implicit: UI and EXECUTION
+    subscriptions are ignored. A subscription that matches the signal is
+    suppressed when the strategy does not allow its channel, or during its
+    quiet hours on a push channel unless the severity bypasses them.
+    Subscriptions are visited in id order so the result is deterministic.
+
     Args:
         signal: Signal.
         subscriptions: Candidate subscriptions.
-        strategy_channels: Channels the strategy allows.
-        now_ms: Current time (quiet hours).
+        strategy_channels: Channel names the strategy allows.
+        now_ms: Current time in UTC epoch ms (quiet hours).
         ui_target: Target for the implicit UI delivery; ``None`` disables
             it.
-        forward_execution: Whether entries of PAPER/SHADOW/AUTO_LIVE
-            strategies go to the execution engine.
+        forward_execution: Whether ``ENTRY_CONFIRMED`` signals of
+            PAPER/SHADOW/AUTO_LIVE strategies go to the execution engine.
 
     Returns:
         Deliveries and suppressions.
@@ -305,15 +317,16 @@ def route(
 def backoff_ms(
     attempts: int, base_ms: int = 2_000, cap_ms: int = 300_000
 ) -> int:
-    """Exponential backoff for a delivery.
+    """Computes the exponential backoff before a delivery's next attempt.
 
     Args:
         attempts: Attempts already made (>= 1).
-        base_ms: Delay after the first failure.
-        cap_ms: Maximum delay.
+        base_ms: Delay in ms after the first failure; it doubles per
+            further attempt.
+        cap_ms: Maximum delay in ms.
 
     Returns:
-        Delay before the next attempt.
+        Delay in ms before the next attempt.
     """
     exponent: int = max(0, attempts - 1)
     delay: int = base_ms * (2**exponent)
@@ -336,6 +349,7 @@ def redact(text: str, secrets: Iterable[str]) -> str:
     return text
 
 
+# Message titles by signal kind; other kinds print their raw name.
 _TITLES = {
     "ENTRY_CONFIRMED": "Entry confirmed",
     "ENTRY_BLOCKED": "Entry blocked",
@@ -356,7 +370,7 @@ def format_text(payload: Mapping[str, object]) -> str:
         payload: Contract ``Signal`` dict.
 
     Returns:
-        Plain text (at most 4000 characters).
+        Plain text, cut to 4,000 characters (Telegram allows 4,096).
     """
     kind = str(payload.get("kind", ""))
     close_ms = payload.get("bar_close_ms")

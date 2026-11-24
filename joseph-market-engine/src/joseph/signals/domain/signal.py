@@ -32,6 +32,7 @@ SEVERITY_BY_KIND: Mapping[str, str] = {
 }
 """Contract severity of each signal kind."""
 
+# Order used by minimum-severity routing; unknown severities rank as INFO.
 _SEVERITY_RANK: Mapping[str, int] = {
     "INFO": 0,
     "WARNING": 1,
@@ -47,7 +48,7 @@ def severity_rank(severity: str) -> int:
         severity: Contract severity.
 
     Returns:
-        0 (INFO) to 3 (CRITICAL).
+        0 (INFO) to 3 (CRITICAL); 0 for an unknown severity.
     """
     return _SEVERITY_RANK.get(severity, 0)
 
@@ -74,7 +75,7 @@ def dedupe_key(
         kind: Signal kind.
 
     Returns:
-        Pipe-joined key.
+        The parts joined with ``|`` in argument order.
     """
     return "|".join(
         (
@@ -116,6 +117,7 @@ def _strip(
     return {k: v for k, v in mapping.items() if k not in drop}
 
 
+# Candle fields that say how a bar arrived, not what it is.
 _CANDLE_PROVENANCE = frozenset(
     {"received_at_ms", "feed_state", "source", "event_ts_ms"}
 )
@@ -124,8 +126,9 @@ _CANDLE_PROVENANCE = frozenset(
 def inputs_snapshot_hash(frames: Sequence[structures.BarFrame]) -> str:
     """Hashes the market inputs of an evaluation.
 
-    Provenance (receipt time, feed state, source) is excluded, so live and
-    replayed copies of the same confirmed bars hash identically.
+    Provenance (receipt and event times, feed state, source, and the
+    snapshots' data quality) is excluded, so live and replayed copies of the
+    same confirmed bars hash identically.
 
     Args:
         frames: Evaluated frames, oldest first.
@@ -156,7 +159,7 @@ def inputs_snapshot_hash(frames: Sequence[structures.BarFrame]) -> str:
 
 
 def _event_id(event: structures.StructureEvent) -> str:
-    """Sort key for events.
+    """Returns an event's id, which orders the events before hashing.
 
     Args:
         event: Structure event.
@@ -177,16 +180,16 @@ class Signal:
         tenant_id: Owning tenant.
         strategy_id: Strategy slug.
         strategy_version_id: Immutable version id.
-        setup_id: Setup id.
+        setup_id: Setup id, or ``None`` for signals without a setup.
         instrument_id: Canonical instrument id.
         direction: ``LONG`` or ``SHORT``.
         timeframe: Signal timeframe.
-        kind: Signal kind.
+        kind: Signal kind (a key of ``SEVERITY_BY_KIND``).
         setup_state: Setup state after the bar.
-        severity: Severity.
-        bar_start_ms: Evaluated bar start.
-        bar_close_ms: Evaluated bar close.
-        evaluated_at_ms: Evaluation time.
+        severity: ``INFO``, ``WARNING``, ``ENTRY`` or ``CRITICAL``.
+        bar_start_ms: Evaluated bar start in UTC epoch ms.
+        bar_close_ms: Evaluated bar close in UTC epoch ms.
+        evaluated_at_ms: Evaluation time in UTC epoch ms.
         inputs_snapshot_hash: Hash of the evaluated inputs.
         rule_version: Definition hash.
         evaluator_version: Evaluator semantics version.
@@ -194,10 +197,10 @@ class Signal:
         reason_tree: Contract ``ReasonNode`` dict.
         aoi_ids: Touched AOIs.
         range_ids: Bound dealing ranges.
-        entry_price: Projected entry.
-        stop_price: Projected stop.
-        target_price: Projected target.
-        rr: Net reward/risk.
+        entry_price: Projected entry, or ``None``.
+        stop_price: Projected stop, or ``None``.
+        target_price: Projected target, or ``None``.
+        rr: Net reward/risk, or ``None``.
         risk_status: ``PASS``, ``FAIL``, ``UNKNOWN`` or ``NOT_APPLICABLE``.
         risk_reasons: Risk notes or blockers.
         mode: Strategy activation mode.
@@ -301,6 +304,7 @@ class Signal:
 
         Raises:
             ValueError: If required fields are malformed.
+            KeyError: If a required field is missing.
         """
         risk_eval = data.get("risk_evaluation")
         if not isinstance(risk_eval, Mapping):

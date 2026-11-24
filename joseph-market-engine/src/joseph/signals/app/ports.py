@@ -14,14 +14,16 @@ from joseph.signals.domain import signal as signal_domain
 
 @dataclasses.dataclass(frozen=True, slots=True)
 class SignalFilter:
-    """Query filters (mirrors the terminal ``listSignals`` parameters).
+    """Signal query filters (mirrors the terminal ``listSignals`` parameters).
+
+    Unset (``None`` or empty) filters admit every signal.
 
     Attributes:
         strategy_id: Restrict to one strategy.
         kinds: Restrict to signal kinds.
         instrument_id: Restrict to one instrument.
-        from_ms: Inclusive lower bound on bar close.
-        to_ms: Exclusive upper bound on bar close.
+        from_ms: Inclusive lower bound on bar close, in UTC epoch ms.
+        to_ms: Exclusive upper bound on bar close, in UTC epoch ms.
         limit: Maximum rows.
     """
 
@@ -34,7 +36,7 @@ class SignalFilter:
 
 
 class SignalRepository(Protocol):
-    """Durable store of signals with a unique ``(tenant, dedupe_key)``."""
+    """A durable store of signals with a unique ``(tenant, dedupe_key)``."""
 
     def add(self, signal: signal_domain.Signal) -> bool:
         """Stores a signal unless its dedupe key already exists.
@@ -57,7 +59,7 @@ class SignalRepository(Protocol):
             signal_id: Signal id.
 
         Returns:
-            The signal or ``None``.
+            The signal, or ``None`` when absent or owned by another tenant.
         """
         ...
 
@@ -71,6 +73,7 @@ class SignalRepository(Protocol):
             filters: Filters.
 
         Returns:
-            Matching signals ordered by bar close descending.
+            At most ``filters.limit`` matching signals of the tenant, by bar
+            close descending and then by id.
         """
         ...

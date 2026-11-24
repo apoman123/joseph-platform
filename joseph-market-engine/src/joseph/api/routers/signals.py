@@ -23,6 +23,9 @@ def build_router(
 ) -> fastapi.APIRouter:
     """Builds the signal router.
 
+    The route requires a bearer token; ``get_principal`` answers 401
+    without a valid one.
+
     Args:
         signals: Signal service.
         get_principal: Authentication dependency.
@@ -49,16 +52,23 @@ def build_router(
         """Lists the caller's signals, newest first.
 
         Args:
-            principal: Caller.
+            principal: Caller; only their tenant's signals are listed.
             strategy_id: Strategy filter.
-            kind: Comma-separated signal kinds.
+            kind: Comma-separated signal kinds; empty parts are ignored.
             instrument_id: Instrument filter.
-            from_ms: Inclusive lower bound on bar close.
-            to_ms: Exclusive upper bound on bar close.
-            limit: Maximum rows.
+            from_ms: Inclusive lower bound on bar close, UTC epoch
+                milliseconds.
+            to_ms: Exclusive upper bound on bar close, UTC epoch
+                milliseconds.
+            limit: Maximum rows (1..500, 422 outside).
 
         Returns:
-            Contract ``SignalList``.
+            Contract ``SignalList``; ``next_cursor`` is always ``None``
+            because the route does not paginate.
+
+        Raises:
+            errors.ValidationFailedError: If ``from_ms`` is not before
+                ``to_ms`` (422).
         """
         kinds = tuple(k for k in (kind or "").split(",") if k)
         found = signals.query(

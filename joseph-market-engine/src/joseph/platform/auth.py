@@ -3,9 +3,10 @@
 
 """Bearer-token authentication (framework independent).
 
-Development deployments map static tokens to principals. Production replaces
-``TokenAuthenticator`` with an OIDC verifier behind the same interface.
-Token comparison is constant time.
+Static development tokens (``JOSEPH_DEV_TOKENS``) map to principals; this
+is the only authenticator so far, and an identity-provider (for example
+OIDC) verifier would implement the same two methods. Token comparison is
+constant time.
 """
 
 from __future__ import annotations
@@ -19,7 +20,11 @@ from joseph.platform import config
 
 
 class TokenAuthenticator:
-    """Resolves bearer tokens to principals."""
+    """Resolves bearer tokens to principals.
+
+    With no tokens configured every token is rejected, so every protected
+    route answers 401.
+    """
 
     def __init__(self, tokens: Iterable[config.DevToken]) -> None:
         """Initializes the authenticator.
@@ -36,6 +41,8 @@ class TokenAuthenticator:
 
     def authenticate(self, token: str | None) -> identity.Principal:
         """Authenticates a bearer token.
+
+        Each comparison is constant time; the first matching token wins.
 
         Args:
             token: Raw token text (without the ``Bearer`` prefix).

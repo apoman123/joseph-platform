@@ -14,10 +14,11 @@ import httpx
 from joseph.domain import errors
 
 TRENDING_URL = "https://api.coingecko.com/api/v3/search/trending"
+"""CoinGecko's public trending-search endpoint (no API key)."""
 
 
 class CoinGeckoTrending:
-    """Fetches trending base-asset symbols."""
+    """A ``TrendingPort`` that reads CoinGecko's trending coins."""
 
     def __init__(
         self, client: httpx.AsyncClient | None = None, timeout_s: float = 10.0
@@ -25,8 +26,10 @@ class CoinGeckoTrending:
         """Initializes the source.
 
         Args:
-            client: Optional injected client.
-            timeout_s: Request timeout.
+            client: Injected client, owned by the caller; ``None`` creates
+                one that ``close`` closes.
+            timeout_s: Request timeout in seconds for a created client
+                (ignored with an injected one).
         """
         self._owns = client is None
         self._client = client or httpx.AsyncClient(timeout=timeout_s)
@@ -35,10 +38,12 @@ class CoinGeckoTrending:
         """Returns upper-case trending symbols.
 
         Returns:
-            Symbols such as ``{"BTC", "SOL"}``.
+            Symbols such as ``{"BTC", "SOL"}``; coins without a symbol are
+            skipped.
 
         Raises:
-            errors.VenueUnavailableError: If the request fails.
+            errors.VenueUnavailableError: If the request fails, returns an
+                error status or the body is not JSON.
         """
         try:
             response = await self._client.get(TRENDING_URL)
@@ -55,6 +60,6 @@ class CoinGeckoTrending:
         )
 
     async def close(self) -> None:
-        """Closes the client if owned."""
+        """Closes the client if this source created it."""
         if self._owns:
             await self._client.aclose()

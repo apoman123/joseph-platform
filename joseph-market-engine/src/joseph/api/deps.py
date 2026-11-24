@@ -22,7 +22,8 @@ def get_authenticator(request: fastapi.Request) -> auth.TokenAuthenticator:
         Authenticator stored on ``app.state``.
 
     Raises:
-        errors.UnauthenticatedError: If authentication is not configured.
+        errors.UnauthenticatedError: If no authenticator is installed on
+            ``app.state`` (rendered as a 401 ``ErrorResponse``).
     """
     authenticator = getattr(request.app.state, "authenticator", None)
     if not isinstance(authenticator, auth.TokenAuthenticator):
@@ -31,7 +32,7 @@ def get_authenticator(request: fastapi.Request) -> auth.TokenAuthenticator:
 
 
 def get_principal(request: fastapi.Request) -> identity.Principal:
-    """FastAPI dependency authenticating the ``Authorization`` header.
+    """Authenticates the ``Authorization: Bearer`` header (FastAPI dependency).
 
     Usage: ``principal = fastapi.Depends(deps.get_principal)``.
 

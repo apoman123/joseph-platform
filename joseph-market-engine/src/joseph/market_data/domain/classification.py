@@ -64,9 +64,9 @@ def quote_rule(
         ``BUY`` above the midpoint, ``SELL`` below it, ``UNKNOWN`` at the
         midpoint or without a valid quote.
     """
-    if not valid_quote(bid, ask):
+    if bid is None or ask is None or not valid_quote(bid, ask):
         return Side.UNKNOWN
-    assert bid is not None and ask is not None
+    # Twice the price against bid + ask: the midpoint test without a division.
     doubled = price * 2
     if doubled > bid + ask:
         return Side.BUY
@@ -86,8 +86,8 @@ def tick_test(
             ``price`` (``None`` when there is none).
 
     Returns:
-        ``BUY`` on an (zero-)uptick, ``SELL`` on a (zero-)downtick,
-        ``UNKNOWN`` without a reference.
+        ``BUY`` on an uptick or zero-uptick, ``SELL`` on a downtick or
+        zero-downtick, ``UNKNOWN`` without a reference.
     """
     if reference is None or reference == price:
         return Side.UNKNOWN

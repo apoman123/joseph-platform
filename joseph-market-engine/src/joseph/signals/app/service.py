@@ -48,14 +48,16 @@ class SignalService:
         """Lists the principal's signals.
 
         Args:
-            principal: Caller.
-            filters: Filters.
+            principal: Caller; only their tenant's signals are returned.
+            filters: Strategy, kind, instrument, bar-close range and limit
+                filters.
 
         Returns:
-            Signals newest first.
+            Signals newest first (by bar close).
 
         Raises:
-            errors.ValidationFailedError: If the range or limit is invalid.
+            errors.ValidationFailedError: If the limit is outside
+                ``1..MAX_LIMIT`` or ``from_ms`` is not before ``to_ms``.
         """
         if not 1 <= filters.limit <= MAX_LIMIT:
             raise errors.ValidationFailedError(

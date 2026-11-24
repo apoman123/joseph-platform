@@ -50,6 +50,7 @@ from collections.abc import Callable
 from collections.abc import Mapping
 from collections.abc import Sequence
 from typing import Protocol
+from typing import TypeAlias
 from typing import runtime_checkable
 
 from joseph.domain import clock as clock_lib
@@ -70,12 +71,18 @@ _LOG = logging.getLogger(__name__)
 _S1 = timeframes.Timeframe.S1
 _SECOND = recorded_trades.SECOND_MS
 _DAY_MS = 86_400_000
+# The REST backfill walks back from this far before now: venues publish
+# the newest trades to their REST history with a short delay.
 _PUBLISH_LAG_MS = 1_000
+# Poll step of ``wait_recorded``, in seconds.
 _WAIT_STEP_S = 0.05
+# An archive day whose import failed is not retried for 30 minutes.
 _RETRY_FAILED_MS = 1_800_000
 
-Sleep = Callable[[float], Awaitable[None]]
-Sink = Callable[[list[market.Candle], list[recorded_trades.Interval]], None]
+Sleep: TypeAlias = Callable[[float], Awaitable[None]]
+Sink: TypeAlias = Callable[
+    [list[market.Candle], list[recorded_trades.Interval]], None
+]
 
 
 @contextlib.asynccontextmanager
@@ -116,9 +123,13 @@ class TradeEventPort(Protocol):
         """Streams coverage-tagged trade events.
 
         Args:
-            instrument: Instrument.
-            tracker: Optional health tracker.
-            prime_from_ms: Optional first-connection backfill start.
+            instrument: Instrument to stream.
+            tracker: Optional health tracker updated by the stream.
+            prime_from_ms: Optional venue time, epoch milliseconds, from
+                which the first connection backfills over REST.
+
+        Returns:
+            Async iterator of coverage starts, trades and delivery proofs.
         """
         ...
 
@@ -132,10 +143,14 @@ class TradeEventPort(Protocol):
         """Fetches the newest complete trades of a range.
 
         Args:
-            instrument: Instrument.
-            start_ms: Inclusive start.
-            end_ms: Exclusive end.
-            max_pages: Request budget.
+            instrument: Instrument to fetch.
+            start_ms: Inclusive start, epoch milliseconds.
+            end_ms: Exclusive end, epoch milliseconds.
+            max_pages: Request budget (the adapter's default when ``None``).
+
+        Returns:
+            The trades of the complete suffix of the range, with the
+            interval they cover.
         """
         ...
 
@@ -159,6 +174,9 @@ class DayArchive(Protocol):
 
         Args:
             ts_ms: Epoch milliseconds.
+
+        Returns:
+            The day in the archive's time zone.
         """
         ...
 
@@ -167,6 +185,9 @@ class DayArchive(Protocol):
 
         Args:
             day: Archive day.
+
+        Returns:
+            Half-open ``(start_ms, end_ms)`` of the day.
         """
         ...
 
@@ -180,10 +201,14 @@ class DayArchive(Protocol):
         """Archives one complete past day of trades.
 
         Args:
-            instrument: Instrument.
-            day: UTC date.
-            sink: Archive writer.
-            received_ms: Receipt time.
+            instrument: Instrument to import.
+            day: Archive day (see ``day_of``), wholly in the past.
+            sink: Archive writer bound to the instrument.
+            received_ms: Receipt time stamped on the aggregates, epoch
+                milliseconds.
+
+        Returns:
+            True when imported, False when the day is not published.
         """
         ...
 
@@ -191,7 +216,10 @@ class DayArchive(Protocol):
         """Deletes cached days before a cut-off.
 
         Args:
-            before_ms: Cut-off.
+            before_ms: Retention cut-off, epoch milliseconds.
+
+        Returns:
+            Number of cached days deleted.
         """
         ...
 
@@ -205,16 +233,22 @@ class RecorderSettings:
     """Recording policy.
 
     Attributes:
-        retention_ms: Archived history kept (older data is pruned).
+        retention_ms: Archived history kept, in milliseconds (older data is
+            pruned).
         max_instruments: Instruments recorded live at the same time.
         backfill_max_calls: REST trade-history calls per backfill (each up
             to the adapter's page budget).
-        lease_ms: How long a touch keeps an instrument recording.
-        flush_interval_ms: Archive write interval while recording.
-        grace_ms: Delivery grace before a second counts as complete.
-        retry_s: Delay before restarting a failed trade stream.
-        supervise_s: Interval of lease expiry and retention checks.
-        prune_interval_ms: Interval between retention prunes.
+        lease_ms: How long a touch keeps an instrument recording, in
+            milliseconds.
+        flush_interval_ms: Archive write interval while recording, in
+            milliseconds.
+        grace_ms: Delivery grace before a second counts as complete, in
+            milliseconds.
+        retry_s: Delay before restarting a failed trade stream, in seconds.
+        supervise_s: Interval of lease expiry and retention checks, in
+            seconds.
+        prune_interval_ms: Interval between retention prunes, in
+            milliseconds.
         archive_backfill_days: Past days imported from an official day
             archive when recording starts.
         archive_request_days: Past days imported on demand per request.
@@ -240,14 +274,16 @@ class _Recording:
     """Live recording state of one instrument.
 
     Attributes:
-        instrument: Instrument.
+        instrument: Instrument recorded.
         tracker: Health of the recording stream (gaps, reconnects).
-        lease_until_ms: Recording stops after this unless touched again.
-        task: Recording task.
+        lease_until_ms: Recording stops after this clock time unless touched
+            again.
+        task: Recording task (``None`` until started).
         builder: 1s builder of the current coverage segment.
-        segment_from: Whole-second start of the current segment.
-        proven: Whole-second end up to which delivery is proven.
-        pending: Complete 1s aggregates not yet written.
+        segment_from: Whole-second venue time where the current segment
+            starts, or ``None`` before it is known.
+        proven: Whole-second venue time up to which delivery is proven.
+        pending: Complete 1s aggregates not yet written, by start.
         flushed_ms: Clock time of the last archive write.
     """
 
@@ -260,6 +296,18 @@ class _Recording:
     proven: int | None = None
     pending: dict[int, market.Candle] = dataclasses.field(default_factory=dict)
     flushed_ms: int = 0
+
+
+def _keep(recording: _Recording, bars: Sequence[market.Candle]) -> None:
+    """Collects complete 1s aggregates for the next write.
+
+    Args:
+        recording: Recording state; its ``pending`` aggregates are updated.
+        bars: Bars changed by the builder.
+    """
+    for bar in bars:
+        if recorded_trades.archivable(bar):
+            recording.pending[bar.start_ms] = bar
 
 
 class TradeRecorder:
@@ -283,16 +331,19 @@ class TradeRecorder:
     ) -> None:
         """Initializes a stopped recorder.
 
+        Only adapters with a native trade stream and an aggressor side
+        are recorded; the others are ignored.
+
         Args:
             adapters: Venue adapters (raw, not wrapped).
-            archive: Archive.
+            archive: Archive to write and read.
             clock: Time source.
-            settings: Recording policy.
+            settings: Recording policy (defaults when ``None``).
             day_archives: Official day archives (one per venue).
-            sleep: Sleep function (injectable for tests).
+            sleep: Sleep function taking seconds (injectable for tests).
         """
         self.archive = archive
-        self.settings = settings or RecorderSettings()
+        self.settings = settings if settings is not None else RecorderSettings()
         self._clock = clock
         self._sleep = sleep
         self._day_archives = {a.venue: a for a in day_archives}
@@ -330,7 +381,7 @@ class TradeRecorder:
 
     @property
     def delta_venues(self) -> frozenset[instruments.Venue]:
-        """Returns venues whose 1m+ bars get recorded true delta."""
+        """The venues whose 1m-and-above bars get recorded true delta."""
         return self.reader.delta_venues
 
     def recordable(self, instrument: instruments.InstrumentId) -> bool:
@@ -385,14 +436,22 @@ class TradeRecorder:
         return tuple(notes)
 
     def start(self) -> None:
-        """Starts supervision: startup backfill, retention, always-on."""
+        """Starts supervision: startup backfill, retention, always-on.
+
+        Must run inside an event loop: it creates the supervisor task.
+        Calling it again while started does nothing.
+        """
         if self._started:
             return
         self._started = True
         self._supervisor = asyncio.create_task(self._supervise())
 
     async def stop(self) -> None:
-        """Stops every recording (flushing it) and supervision."""
+        """Stops every recording (flushing it) and supervision.
+
+        Cancels the recording and supervisor tasks and waits for them, then
+        writes each open segment and closes the day archives.
+        """
         self._started = False
         tasks = [r.task for r in self._recordings.values() if r.task]
         if self._supervisor is not None:
@@ -400,6 +459,8 @@ class TradeRecorder:
         for task in tasks:
             task.cancel()
         for task in tasks:
+            # A task that already died of an unexpected error must not stop
+            # the shutdown of the others.
             with contextlib.suppress(asyncio.CancelledError, Exception):
                 await task
         for recording in self._recordings.values():
@@ -412,11 +473,16 @@ class TradeRecorder:
     def touch(self, instrument: instruments.InstrumentId) -> bool:
         """Starts or extends recording of an instrument in use.
 
+        A new recording runs as a background task; the lease ends
+        ``lease_ms`` after the latest touch.
+
         Args:
-            instrument: Instrument.
+            instrument: Instrument in use.
 
         Returns:
-            True when the instrument is being recorded.
+            True when the instrument is being recorded; False when the
+            recorder is stopped, the venue is not recorded or
+            ``max_instruments`` recordings already run.
         """
         if not self._started or not self.recordable(instrument):
             return False
@@ -440,7 +506,7 @@ class TradeRecorder:
         """Checks whether an instrument is being recorded live.
 
         Args:
-            instrument: Instrument.
+            instrument: Instrument to check.
 
         Returns:
             True while its recording runs.
@@ -457,10 +523,16 @@ class TradeRecorder:
         return [r.tracker.snapshot(now) for r in self._recordings.values()]
 
     async def _supervise(self) -> None:
-        """Runs startup work, then expires leases and prunes periodically."""
+        """Runs startup work, then expires leases and prunes periodically.
+
+        Runs until ``stop`` cancels it. Startup backfills archived
+        instruments that are not recording, one after another.
+        """
         self.prune_now()
         for instrument in self.settings.always:
             if self.touch(instrument):
+                # A lease that never runs out: ``always`` instruments record
+                # for the life of the recorder.
                 self._recordings[instrument].lease_until_ms = 2**62
         for instrument in self.archive.instruments():
             if instrument not in self._recordings and self.recordable(
@@ -479,6 +551,9 @@ class TradeRecorder:
 
     def expire(self) -> list[instruments.InstrumentId]:
         """Stops recordings whose lease ran out.
+
+        Their open segments are written now; the cancelled tasks finish in
+        the background.
 
         Returns:
             Instruments that stopped recording.
@@ -522,8 +597,17 @@ class TradeRecorder:
     async def _run(self, recording: _Recording) -> None:
         """Records an instrument until cancelled, restarting failed streams.
 
+        Each round backfills, then consumes the trade stream primed from the
+        backfill's coverage end. When the stream fails with a venue error or
+        ends, the segment is written and closed, and a new round starts
+        after ``retry_s`` seconds. Cancellation writes the open segment and
+        propagates.
+
         Args:
             recording: Recording state.
+
+        Raises:
+            asyncio.CancelledError: When the recording is stopped.
         """
         port = self._ports[recording.instrument.venue]
         while True:
@@ -557,6 +641,11 @@ class TradeRecorder:
     ) -> None:
         """Applies one trade-stream event to a recording.
 
+        A coverage start closes the current segment and opens a new one;
+        trades go into the 1s builder; any other frame proves delivery up to
+        its receipt time minus ``grace_ms`` and finalizes the seconds before
+        it. Pending aggregates are written every ``flush_interval_ms``.
+
         Args:
             recording: Recording state.
             event: Coverage start, trades or a delivery proof.
@@ -573,16 +662,19 @@ class TradeRecorder:
                 recording.builder = self._builder(recording.instrument)
                 recording.builder.start_segment(None)
             if recording.segment_from is None and event.trades:
+                # Trades of the first trade's own second may have been sent
+                # before the stream connected, so coverage starts at the
+                # next whole second.
                 first = event.trades[0].venue_event_ts_ms
                 start = recorded_trades.ceil_to(first + 1, _SECOND)
                 recording.segment_from = recording.proven = start
-            self._keep(
+            _keep(
                 recording,
                 recording.builder.add(event.trades, event.received_ms),
             )
         elif recording.builder is not None:
             through = event.received_ms - self.settings.grace_ms
-            self._keep(
+            _keep(
                 recording,
                 recording.builder.finalize_through(through, event.received_ms),
             )
@@ -601,11 +693,13 @@ class TradeRecorder:
         """Creates the 1s builder of a new coverage segment.
 
         Args:
-            instrument: Instrument.
+            instrument: Instrument recorded.
 
         Returns:
-            Builder.
+            A builder of 1s bars labelled ``<venue>.trades``.
         """
+        # Complete bars move to ``pending`` as soon as they are built, so the
+        # builder needs only a short window (ten minutes of 1s bars).
         return trade_bars.TradeBarBuilder(
             instrument,
             _S1,
@@ -613,20 +707,11 @@ class TradeRecorder:
             retention_bars=600,
         )
 
-    @staticmethod
-    def _keep(recording: _Recording, bars: Sequence[market.Candle]) -> None:
-        """Collects complete 1s aggregates for the next write.
-
-        Args:
-            recording: Recording state.
-            bars: Bars changed by the builder.
-        """
-        for bar in bars:
-            if recorded_trades.archivable(bar):
-                recording.pending[bar.start_ms] = bar
-
     def _flush(self, recording: _Recording) -> None:
         """Writes proven-complete aggregates and coverage to the archive.
+
+        Writes the segment's coverage up to ``proven`` and the pending
+        aggregates before it; later aggregates stay pending.
 
         Args:
             recording: Recording state.
@@ -654,10 +739,11 @@ class TradeRecorder:
         """Returns how far the live recording has proven delivery.
 
         Args:
-            instrument: Instrument.
+            instrument: Instrument to check.
 
         Returns:
-            Whole-second venue time, or ``None`` when not recording.
+            Whole-second venue time, epoch milliseconds, or ``None`` when
+            not recording (or before a segment starts).
         """
         recording = self._recordings.get(instrument)
         return None if recording is None else recording.proven
@@ -670,14 +756,19 @@ class TradeRecorder:
     ) -> bool:
         """Waits until the live recording has archived trades up to a time.
 
+        Polls every ``_WAIT_STEP_S`` seconds and writes the archive once
+        the time is proven.
+
         Args:
-            instrument: Instrument.
-            end_ms: Venue time that must be proven complete.
-            timeout_s: Longest wait.
+            instrument: Instrument to wait for.
+            end_ms: Venue time, epoch milliseconds, that must be proven
+                complete.
+            timeout_s: Longest wait, in seconds.
 
         Returns:
-            True when archived through ``end_ms`` (False when not recording
-            or it did not get there in time).
+            True when archived through ``end_ms``; False when not
+            recording, when the segment starts at or after ``end_ms`` (it
+            can never cover it) or when the wait timed out.
         """
         steps = max(1, int(timeout_s / _WAIT_STEP_S))
         for _ in range(steps + 1):
@@ -698,10 +789,10 @@ class TradeRecorder:
         """Returns an archive writer bound to one instrument.
 
         Args:
-            instrument: Instrument.
+            instrument: Instrument the writer stores for.
 
         Returns:
-            Writer.
+            Writer calling ``archive.put`` for the instrument.
         """
 
         def sink(
@@ -722,8 +813,10 @@ class TradeRecorder:
     ) -> int | None:
         """Runs a backfill, recording but tolerating failures.
 
+        A venue error is logged and treated as no backfill.
+
         Args:
-            instrument: Instrument.
+            instrument: Instrument to backfill.
 
         Returns:
             Venue time to prime the live stream from, or ``None``.
@@ -739,12 +832,20 @@ class TradeRecorder:
     ) -> int | None:
         """Fills the gap since the newest coverage, newest trades first.
 
+        Past days come from the venue's day archive first, if it has one;
+        the rest is walked back from now over the REST trade history, at
+        most ``backfill_max_calls`` calls, and never further back than the
+        retention.
+
         Args:
-            instrument: Instrument.
+            instrument: Instrument of a recorded venue.
 
         Returns:
             The newest coverage end (a prime point for the live stream) when
             the venue has a REST trade history, else ``None``.
+
+        Raises:
+            errors.JosephError: If a REST trade-history call fails.
         """
         port = self._ports[instrument.venue]
         now = self._clock.now_ms()
@@ -805,11 +906,13 @@ class TradeRecorder:
         walk.
 
         Args:
-            instrument: Instrument.
-            from_ms: Oldest time of interest.
-            now_ms: Current time.
+            instrument: Instrument to import.
+            from_ms: Oldest time of interest, epoch milliseconds (never
+                before the retention).
+            now_ms: Current time, epoch milliseconds.
             max_days: Most days to import.
-            until_ms: Newest time of interest (defaults to now).
+            until_ms: Newest time of interest, epoch milliseconds (defaults
+                to now).
 
         Returns:
             Number of days imported.
@@ -845,9 +948,9 @@ class TradeRecorder:
 
         Args:
             archive: Day archive of the instrument's venue.
-            instrument: Instrument.
+            instrument: Instrument to import.
             day: Archive day.
-            now_ms: Current time.
+            now_ms: Current time, epoch milliseconds.
 
         Returns:
             True when imported, False when the day is not published, and
@@ -888,14 +991,17 @@ class TradeRecorder:
     ) -> list[market.Candle]:
         """Returns archived seconds bars, importing archive days on demand.
 
+        At most ``archive_request_days`` days are imported per call.
+
         Args:
-            instrument: Instrument.
+            instrument: Instrument to read.
             timeframe: Seconds timeframe.
-            start_ms: Inclusive start.
-            end_ms: Exclusive end.
+            start_ms: Inclusive start, epoch milliseconds.
+            end_ms: Exclusive end, epoch milliseconds.
 
         Returns:
-            Ascending final candles of complete buckets.
+            Ascending final candles of complete buckets; empty for an empty
+            range.
         """
         if end_ms <= start_ms:
             return []
@@ -913,7 +1019,14 @@ class TradeRecorder:
         )
 
     def enrich(self, rows: Sequence[market.Candle]) -> list[market.Candle]:
-        """See ``trade_archive.RecordedTrades.enrich``."""
+        """Attaches recorded true delta to fully covered final bars.
+
+        Args:
+            rows: Candles of one or more series.
+
+        Returns:
+            Candles in the same order (see ``ArchiveReader.enrich``).
+        """
         return self.reader.enrich(rows)
 
 
@@ -924,7 +1037,7 @@ def recording_settings_note(settings: RecorderSettings) -> str:
         settings: Recording policy.
 
     Returns:
-        One sentence.
+        One sentence naming the retention in whole days.
     """
     days = settings.retention_ms // _DAY_MS
     return (

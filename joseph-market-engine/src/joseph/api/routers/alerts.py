@@ -23,12 +23,15 @@ def build_router(
 ) -> fastapi.APIRouter:
     """Builds the alert subscription router.
 
+    Both routes require a bearer token; ``get_principal`` answers 401
+    without a valid one.
+
     Args:
         service: Subscription service.
         get_principal: Authentication dependency.
 
     Returns:
-        Router.
+        Router serving ``GET`` and ``PUT`` on ``/v1/alerts/subscriptions``.
     """
     router = fastapi.APIRouter(tags=["alerts"])
     principal_dep = Annotated[
@@ -40,10 +43,11 @@ def build_router(
         """Lists the caller's subscriptions.
 
         Args:
-            principal: Caller.
+            principal: Caller; only their tenant's subscriptions are listed.
 
         Returns:
-            Contract ``AlertSubscriptionList``.
+            Contract ``AlertSubscriptionList``: subscriptions on
+            user-managed channels and the channels with server credentials.
         """
         return service.list(principal)
 
@@ -56,12 +60,16 @@ def build_router(
         """Creates or replaces a subscription.
 
         Args:
-            principal: Caller.
-            subscription_id: Identifier.
+            principal: Caller; the subscription belongs to their tenant.
+            subscription_id: Identifier from the path.
             body: Contract ``AlertSubscription``.
 
         Returns:
             Stored contract ``AlertSubscription``.
+
+        Raises:
+            errors.ValidationFailedError: If the id or a body field is
+                invalid (422).
         """
         return service.upsert(principal, subscription_id, body)
 

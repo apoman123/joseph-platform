@@ -4,7 +4,8 @@
 """Minimal Prometheus text-format metrics registry (no third-party deps).
 
 Supports counters, gauges and histograms with string labels. Rendering
-follows the Prometheus text exposition format 0.0.4.
+follows the Prometheus text exposition format 0.0.4. Updates take a lock,
+so metrics may be updated from worker threads as well as the event loop.
 """
 
 from __future__ import annotations
@@ -13,9 +14,11 @@ import bisect
 import threading
 from collections.abc import Iterable
 from collections.abc import Sequence
+from typing import TypeAlias
 from typing import cast
 
-LabelKey = tuple[tuple[str, str], ...]
+# Label set as sorted ``(name, value)`` pairs, usable as a dict key.
+LabelKey: TypeAlias = tuple[tuple[str, str], ...]
 
 _DEFAULT_BUCKETS: tuple[float, ...] = (
     0.005,
@@ -57,19 +60,23 @@ def _format_labels(key: LabelKey, extra: Iterable[tuple[str, str]] = ()) -> str:
     pairs = list(key) + list(extra)
     if not pairs:
         return ""
+    # chr(92) is a backslash, escaped by doubling; chr(34) is a double
+    # quote, dropped rather than escaped.
     escaped = (
         f'{name}="{value.replace(chr(92), chr(92) * 2).replace(chr(34), "")}"'
         for name, value in pairs
     )
-    return "{" + ",".join(escaped) + "}"
+    body = ",".join(escaped)
+    return f"{{{body}}}"
 
 
 class _ScalarMetric:
     """Shared storage for single-value-per-label-set metrics.
 
     Attributes:
+        kind: Prometheus metric type written on the ``# TYPE`` line.
         name: Metric name.
-        help_text: Description.
+        help_text: Description written on the ``# HELP`` line.
     """
 
     kind = "untyped"
@@ -79,7 +86,7 @@ class _ScalarMetric:
 
         Args:
             name: Metric name.
-            help_text: Description.
+            help_text: Description written on the ``# HELP`` line.
         """
         self.name = name
         self.help_text = help_text
@@ -120,7 +127,11 @@ class _ScalarMetric:
 
 
 class Counter(_ScalarMetric):
-    """Monotonically increasing counter."""
+    """Monotonically increasing counter.
+
+    Attributes:
+        kind: Always ``counter``.
+    """
 
     kind = "counter"
 
@@ -140,7 +151,11 @@ class Counter(_ScalarMetric):
 
 
 class Gauge(_ScalarMetric):
-    """Value that can go up and down."""
+    """Value that can go up and down.
+
+    Attributes:
+        kind: Always ``gauge``.
+    """
 
     kind = "gauge"
 
@@ -168,9 +183,10 @@ class Histogram:
     """Cumulative-bucket histogram.
 
     Attributes:
+        kind: Always ``histogram``.
         name: Metric name.
-        help_text: Description.
-        buckets: Upper bounds (ascending).
+        help_text: Description written on the ``# HELP`` line.
+        buckets: Inclusive upper bounds, ascending; ``+Inf`` is implied.
     """
 
     kind = "histogram"
@@ -185,8 +201,8 @@ class Histogram:
 
         Args:
             name: Metric name.
-            help_text: Description.
-            buckets: Ascending bucket upper bounds.
+            help_text: Description written on the ``# HELP`` line.
+            buckets: Bucket upper bounds, in any order (they are sorted).
         """
         self.name = name
         self.help_text = help_text
@@ -204,7 +220,10 @@ class Histogram:
         """
         key = _labels(labels)
         with self._lock:
+            # One slot per bound plus a last one for values above them all.
             counts = self._counts.setdefault(key, [0] * (len(self.buckets) + 1))
+            # bisect_left puts a value equal to a bound in that bound's
+            # slot, matching the inclusive ``le`` of Prometheus buckets.
             counts[bisect.bisect_left(self.buckets, value)] += 1
             self._sums[key] = self._sums.get(key, 0.0) + value
 
@@ -220,6 +239,8 @@ class Histogram:
             sums = dict(self._sums)
         for key, counts in items:
             running = 0
+            # ``counts`` has one more slot than ``buckets``; it is the
+            # ``+Inf`` bucket added after the loop.
             for bound, count in zip(self.buckets, counts, strict=False):
                 running += count
                 lines.append(
@@ -236,7 +257,7 @@ class Histogram:
         return lines
 
 
-Metric = Counter | Gauge | Histogram
+Metric: TypeAlias = Counter | Gauge | Histogram
 
 
 class MetricsRegistry:
@@ -285,6 +306,9 @@ class MetricsRegistry:
 
     def _register(self, candidate: Metric) -> Metric:
         """Registers ``candidate`` unless a metric with its name exists.
+
+        A second request for an existing name returns the first metric, so
+        modules can declare the metrics they use independently.
 
         Args:
             candidate: Newly constructed metric.

@@ -61,18 +61,20 @@ class MarketDataCapabilities:
 
 @dataclasses.dataclass(frozen=True, slots=True)
 class VenueCapabilities:
-    """Contract ``VenueCapabilities``.
+    """What one venue serves (contract ``VenueCapabilities``).
 
     Attributes:
         venue: Venue id.
         display_name: Human-readable name.
         market_types: Supported product types.
         market_data: Feature matrix.
-        timeframes: Candle resolutions served UTC aligned, either as native
-            klines or built from the venue's public trades.
+        timeframes: Candle resolutions served, aligned to the venue's
+            session calendar (UTC epoch for 24x7 venues): native klines, bars
+            built from the venue's public trades, or aggregated bars.
         notes: Caveats such as unverified or unsupported features.
         docs_url: Official API documentation.
-        verified_at_ms: When the capabilities were last verified live.
+        verified_at_ms: When the capabilities were last verified live, epoch
+            milliseconds; ``None`` when not recorded.
         trade_built_timeframes: Subset of ``timeframes`` that the engine
             builds from the venue's public trade stream (seconds bars),
             because the venue publishes no such klines.
@@ -113,7 +115,7 @@ class VenueCapabilities:
 
     @property
     def calendar(self) -> str:
-        """Returns the venue's session calendar id."""
+        """The venue's session calendar id (contract ``CalendarId``)."""
         return instruments.calendar_code(self.venue)
 
     def supports_timeframe(self, timeframe: timeframes_lib.Timeframe) -> bool:

@@ -5,7 +5,8 @@
 
 ``oi_change_pct`` is the percent change of open-interest notional against
 the oldest observation kept in the window (24 hours by default). This is a
-documented ASSUMPTION: V5 leaves the comparison horizon to the rule author.
+documented ASSUMPTION: the original design plan (V5) leaves the comparison
+horizon to the rule author.
 """
 
 from __future__ import annotations
@@ -20,7 +21,10 @@ _HUNDRED = decimal.Decimal(100)
 
 
 class SnapshotMarketContext:
-    """Implements the strategy ``MarketContextProvider`` port."""
+    """Rolling in-memory market observations per instrument.
+
+    Implements the strategy ``MarketContextProvider`` port.
+    """
 
     def __init__(
         self,
@@ -32,9 +36,12 @@ class SnapshotMarketContext:
         """Initializes the recorder.
 
         Args:
-            window_ms: Observation history kept per instrument.
-            max_points: Hard cap of observations per instrument.
-            max_age_ms: Oldest acceptable observation for a bar close.
+            window_ms: Observation history kept per instrument, in ms; also
+                the horizon of ``oi_change_pct``.
+            max_points: Hard cap of observations per instrument; the oldest
+                are dropped first.
+            max_age_ms: Maximum age, in ms, of an observation the evaluator
+                accepts for a bar close.
         """
         self._window_ms = window_ms
         self._max_age_ms = max_age_ms
@@ -97,7 +104,9 @@ class SnapshotMarketContext:
             at_ms: Bar close.
 
         Returns:
-            Context, or ``None`` when nothing was observed.
+            Context with the observations taken at or before ``at_ms`` (may
+            be empty), or ``None`` when nothing was observed for the
+            instrument.
         """
         points = self._points.get(instrument_id)
         if not points:

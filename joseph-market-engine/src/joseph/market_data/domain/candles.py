@@ -29,13 +29,14 @@ import dataclasses
 import enum
 from collections.abc import Iterable
 from collections.abc import Sequence
+from typing import TypeAlias
 
 from joseph.domain import market
 from joseph.domain import sessions
 from joseph.domain import timeframes
 
-Span = tuple[int, int]
-"""Half-open ``[from_ms, to_ms)`` interval."""
+Span: TypeAlias = tuple[int, int]
+"""Half-open ``[from_ms, to_ms)`` interval in epoch milliseconds."""
 
 
 class MergeAction(enum.StrEnum):
@@ -304,8 +305,9 @@ def find_gaps(
     Args:
         starts: Bar start times present (any order, duplicates allowed).
         timeframe: Bar resolution.
-        from_ms: Inclusive range start (rounded up to a bar boundary).
-        to_ms: Exclusive range end.
+        from_ms: Inclusive range start, epoch milliseconds (rounded up to a
+            bar boundary).
+        to_ms: Exclusive range end, epoch milliseconds.
         calendar: Session calendar of the series (``sessions.for_instrument``;
             UTC-aligned bars by default).
         covered: Coverage of a sparse-bar series: a missing bar whose slot
@@ -333,11 +335,10 @@ def find_gaps(
     spans = merge_spans(covered)
     if not spans:
         return gaps
-    return [
-        piece
-        for gap in gaps
-        for piece in _uncovered_bars(gap, spans, timeframe, calendar)
-    ]
+    pieces: list[Span] = []
+    for gap in gaps:
+        pieces.extend(_uncovered_bars(gap, spans, timeframe, calendar))
+    return pieces
 
 
 class StreamCoverage:
@@ -360,13 +361,14 @@ class StreamCoverage:
         """Records a bar delivered by the connection.
 
         Args:
-            start_ms: Bar start (any bar of the stream, also outside
-                sessions).
-            end_ms: Bar end.
+            start_ms: Bar start, epoch milliseconds (any bar of the stream,
+                also outside sessions).
+            end_ms: Bar exclusive end, epoch milliseconds.
 
         Returns:
-            The span newly proven, or ``None`` (first bar of the chain, or
-            a repeat of an older bar).
+            The span newly proven, from the previous bar's end to this bar's
+            end, or ``None`` (first bar of the chain, or a repeat of an older
+            bar, which leaves the chain unchanged).
         """
         if self._end is None:
             self._end = end_ms

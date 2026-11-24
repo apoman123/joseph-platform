@@ -44,6 +44,9 @@ from joseph.market_data.domain import aggregation
 from joseph.market_data.domain import capabilities as capabilities_lib
 from joseph.market_data.domain import health
 
+# Shortest interval between two REST backfills of missing child bars in
+# an aggregated stream, so a child the venue never publishes does not cost
+# a request per update.
 _RETRY_MISSING_MS = 10_000
 
 
@@ -54,19 +57,23 @@ def _clip(
 
     Args:
         rows: Ascending bars.
-        start_ms: Inclusive start.
-        end_ms: Exclusive end.
-        limit: Optional maximum.
+        start_ms: Inclusive start, epoch milliseconds.
+        end_ms: Exclusive end, epoch milliseconds.
+        limit: Optional maximum number of bars; the newest are kept.
 
     Returns:
-        Ascending bars.
+        The kept bars, ascending.
     """
     kept = [c for c in rows if start_ms <= c.start_ms < end_ms]
     return kept[-limit:] if limit is not None else kept
 
 
 class DerivedBarsAdapter:
-    """``MarketDataPort`` adding aggregated timeframes and recorded delta."""
+    """``MarketDataPort`` adding aggregated timeframes and recorded delta.
+
+    Attributes:
+        inner: The wrapped venue adapter.
+    """
 
     def __init__(
         self,
@@ -81,8 +88,10 @@ class DerivedBarsAdapter:
         Args:
             inner: Venue adapter.
             clock: Time source.
-            recorder: Optional trade recorder (true delta, notes).
-            delta_wait_s: Longest wait for the recorder at a bar close.
+            recorder: Optional trade recorder: the source of true delta and
+                of the recording notes added to the capabilities.
+            delta_wait_s: Longest wait, in seconds, for the recorder to
+                cover a bar that just closed.
         """
         self.inner = inner
         self._clock = clock
@@ -91,7 +100,7 @@ class DerivedBarsAdapter:
 
     @property
     def venue(self) -> instruments.Venue:
-        """Returns the venue served by the wrapped adapter."""
+        """The venue served by the wrapped adapter."""
         return self.inner.venue
 
     # Capabilities --------------------------------------------------------
@@ -106,7 +115,8 @@ class DerivedBarsAdapter:
             caps: Capabilities of the wrapped adapter.
 
         Returns:
-            ``{aggregated timeframe: native child timeframe}``.
+            ``{aggregated timeframe: native child timeframe}``; empty when
+            the venue has no REST history to fold.
         """
         if not caps.market_data.rest_history:
             return {}
@@ -137,7 +147,9 @@ class DerivedBarsAdapter:
         """Returns the venue's capabilities plus what the engine derives.
 
         Returns:
-            Capabilities.
+            The wrapped adapter's capabilities, unchanged when nothing is
+            derived or recorded; otherwise with the aggregated timeframes,
+            ``trade_delta`` and notes explaining both added.
         """
         caps = self.inner.capabilities()
         derived = self.derived(caps)
@@ -202,13 +214,17 @@ class DerivedBarsAdapter:
             caps: Capabilities of the wrapped adapter.
 
         Returns:
-            Bars in the same order.
+            Bars in the same order; covered final bars carry the recorded
+            taker volume.
         """
         recorder = self._recorder
         if recorder is None or not rows or not self._delta(caps):
             return list(rows)
         instrument = rows[0].instrument_id
         now = self._clock.now_ms()
+        # Only bars that closed within twice the wait (seconds to ms) can
+        # still be waiting for the recorder; older ones are covered or never
+        # will be, so waiting for them would only add latency.
         horizon = int(self._delta_wait_s * 2_000)
         fresh = [
             c.end_ms
@@ -235,14 +251,15 @@ class DerivedBarsAdapter:
         """Fetches native or aggregated bars (see ``MarketDataPort``).
 
         Args:
-            instrument: Instrument.
-            timeframe: Resolution.
-            start_ms: Inclusive start.
-            end_ms: Exclusive end.
-            limit: Optional maximum bars.
+            instrument: Exact venue instrument.
+            timeframe: Native or aggregated resolution.
+            start_ms: Inclusive start, epoch milliseconds.
+            end_ms: Exclusive end, epoch milliseconds.
+            limit: Optional maximum number of most recent bars.
 
         Returns:
-            Ascending candles.
+            Ascending candles; an aggregated period missing a child bar is
+            left out (a gap).
         """
         caps = self.inner.capabilities()
         child = self.derived(caps).get(timeframe)
@@ -278,9 +295,9 @@ class DerivedBarsAdapter:
         """Streams native or aggregated bars (see ``MarketDataPort``).
 
         Args:
-            instrument: Instrument.
-            timeframe: Resolution.
-            tracker: Optional health tracker.
+            instrument: Exact venue instrument.
+            timeframe: Native or aggregated resolution.
+            tracker: Optional health tracker, updated by the native stream.
 
         Returns:
             Async iterator of candle updates.
@@ -333,8 +350,15 @@ class DerivedBarsAdapter:
     ) -> AsyncGenerator[market.Candle, None]:
         """Streams aggregated bars from the child stream.
 
+        Seeds the current period with its child bars over REST, then folds
+        every child update. When an update shows child bars missing before
+        it, they are backfilled over REST at most once per
+        ``_RETRY_MISSING_MS``; a failed backfill is recorded on the tracker
+        and the stream goes on. Closing the generator closes the child
+        stream.
+
         Args:
-            instrument: Instrument.
+            instrument: Exact venue instrument.
             timeframe: Aggregated timeframe.
             child: Native child timeframe.
             tracker: Optional health tracker (of the child stream).
@@ -384,35 +408,72 @@ class DerivedBarsAdapter:
     # Delegated -----------------------------------------------------------
 
     async def list_instruments(self) -> list[instruments.Instrument]:
-        """See ``MarketDataPort.list_instruments``."""
+        """Lists the wrapped adapter's instruments (``MarketDataPort``).
+
+        Returns:
+            Instruments with precision metadata.
+        """
         return await self.inner.list_instruments()
 
     async def fetch_snapshot(
         self, instrument: instruments.InstrumentId
     ) -> market.MarketSnapshot:
-        """See ``MarketDataPort.fetch_snapshot``."""
+        """Fetches the latest snapshot from the wrapped adapter.
+
+        Args:
+            instrument: Exact venue instrument.
+
+        Returns:
+            Snapshot with missing fields left ``None``.
+        """
         return await self.inner.fetch_snapshot(instrument)
 
     async def fetch_snapshots(self) -> list[market.MarketSnapshot]:
-        """See ``MarketDataPort.fetch_snapshots``."""
+        """Fetches every snapshot in bulk from the wrapped adapter.
+
+        Returns:
+            Snapshots; per-symbol-only data may be ``None``.
+        """
         return await self.inner.fetch_snapshots()
 
     async def fetch_order_book(
         self, instrument: instruments.InstrumentId, depth: int
     ) -> market.OrderBook:
-        """See ``MarketDataPort.fetch_order_book``."""
+        """Fetches an order-book snapshot from the wrapped adapter.
+
+        Args:
+            instrument: Exact venue instrument.
+            depth: Levels per side requested.
+
+        Returns:
+            Order-book snapshot.
+        """
         return await self.inner.fetch_order_book(instrument, depth)
 
     async def fetch_open_interest(
         self, instrument: instruments.InstrumentId
     ) -> market.OpenInterest:
-        """See ``MarketDataPort.fetch_open_interest``."""
+        """Fetches open interest from the wrapped adapter.
+
+        Args:
+            instrument: Exact venue instrument.
+
+        Returns:
+            Open interest with USD notional.
+        """
         return await self.inner.fetch_open_interest(instrument)
 
     async def fetch_funding(
         self, instrument: instruments.InstrumentId
     ) -> market.Funding:
-        """See ``MarketDataPort.fetch_funding``."""
+        """Fetches the current funding rate from the wrapped adapter.
+
+        Args:
+            instrument: Exact venue instrument.
+
+        Returns:
+            Funding observation.
+        """
         return await self.inner.fetch_funding(instrument)
 
     def stream_trades(
@@ -420,7 +481,15 @@ class DerivedBarsAdapter:
         instrument: instruments.InstrumentId,
         tracker: health.FeedHealthTracker | None = None,
     ) -> AsyncIterator[market.Trade]:
-        """See ``MarketDataPort.stream_trades``."""
+        """Streams public trades from the wrapped adapter.
+
+        Args:
+            instrument: Exact venue instrument.
+            tracker: Optional health tracker updated by the stream.
+
+        Returns:
+            Async iterator of trades with the venue's aggressor side.
+        """
         return self.inner.stream_trades(instrument, tracker)
 
     async def fetch_trades(
@@ -430,13 +499,23 @@ class DerivedBarsAdapter:
         end_ms: int,
         limit: int | None = None,
     ) -> list[market.Trade]:
-        """See ``MarketDataPort.fetch_trades``."""
+        """Fetches public trades from the wrapped adapter.
+
+        Args:
+            instrument: Exact venue instrument.
+            start_ms: Inclusive start, epoch milliseconds.
+            end_ms: Exclusive end, epoch milliseconds.
+            limit: Optional maximum number of most recent trades.
+
+        Returns:
+            Ascending trades.
+        """
         return await self.inner.fetch_trades(
             instrument, start_ms, end_ms, limit
         )
 
     async def close(self) -> None:
-        """See ``MarketDataPort.close``."""
+        """Closes the wrapped adapter."""
         await self.inner.close()
 
 
@@ -448,19 +527,21 @@ def wrap(
 ) -> dict[instruments.Venue, ports.MarketDataPort]:
     """Wraps every crypto venue adapter.
 
-    DEMO, exchange venues (TWSE, TPEx, Nasdaq, NYSE, Cboe) and rate venues
-    (Treasury) are left as is: their adapters aggregate on their own session
+    The mock venue (DEMO mode), exchange venues (TWSE, TPEx, Nasdaq, NYSE,
+    Cboe) and rate venues (Treasury) are left as is: their adapters aggregate
+    on their own session
     calendars (where a minute without trades has no bar, so a missing child
     is not a gap), and they publish no aggressor side, so recorded trades
     must never add a taker delta to their classified bars.
 
     Args:
-        adapters: Raw adapters.
+        adapters: Raw adapters by venue.
         clock: Time source.
-        recorder: Optional trade recorder.
+        recorder: Optional trade recorder shared by the wrappers.
 
     Returns:
-        Adapters in the same order.
+        A new mapping with the same venues in the same order, crypto
+        adapters wrapped in ``DerivedBarsAdapter``.
     """
     unwrapped = {
         instruments.Venue.MOCK,

@@ -3,15 +3,26 @@
 
 """Conservative fill simulation and performance metrics for backtests.
 
-Assumptions (also reported in every ``BacktestReport``):
+Assumptions (the ``ASSUMPTIONS`` text is reported in every
+``BacktestReport``):
 
-* Entries fill at the open of the bar after the signal bar, plus slippage.
-* A trade whose entry gaps beyond its stop is skipped.
-* Stops fill at the stop (or the open when a bar gaps through it) minus
-  slippage; targets fill at the target without slippage.
+* Entries fill at the open of the bar after the signal bar, with adverse
+  slippage. A signal whose next bar does not start at the signal bar's close
+  (a session break or a data gap) opens no trade.
+* A trade whose slipped entry is at or beyond its stop is skipped.
+* Stops fill at the stop (or at the open when a bar after the entry bar gaps
+  through it) with adverse slippage; targets fill at the target without
+  slippage.
 * When one bar touches both stop and target, the stop is assumed first.
+* A trade still open after ``max_hold_bars`` exits at that bar's close
+  (``TIMEOUT``), and at the last frame's close when the data ends
+  (``END_OF_DATA``), both with adverse slippage.
 * Fees are charged on entry and exit notional at ``fee_bps`` per side.
 * One position at a time; signals during an open trade are skipped.
+
+Prices are per unit of the instrument. Results are in R, the distance
+between the slipped entry and the stop, so they do not depend on position
+size.
 """
 
 from __future__ import annotations
@@ -25,9 +36,16 @@ from joseph.domain import structures
 from joseph.signals.domain import signal as signal_domain
 
 _BPS = decimal.Decimal(10_000)
+"""Basis points per whole."""
+
 _R_QUANTUM = decimal.Decimal("0.0001")
+"""Resolution of reported R values (4 decimals)."""
+
 _PRICE_QUANTUM = decimal.Decimal("0.00000001")
+"""Resolution of reported fill prices (8 decimals)."""
+
 ZERO = decimal.Decimal(0)
+"""Decimal zero."""
 
 ASSUMPTIONS: tuple[str, ...] = (
     "Entry fills at the next bar open plus slippage_bps.",
@@ -49,9 +67,11 @@ class SimulationParams:
     """Simulation parameters.
 
     Attributes:
-        fee_bps: Fee per side in basis points.
-        slippage_bps: Slippage on market fills in basis points.
-        max_hold_bars: Bars after which a trade exits at the close.
+        fee_bps: Fee per side in basis points of the fill notional.
+        slippage_bps: Adverse slippage in basis points of the fill price,
+            applied to every fill except target exits.
+        max_hold_bars: Bars held, entry bar included, after which an open
+            trade exits at the close.
     """
 
     fee_bps: decimal.Decimal
@@ -66,15 +86,15 @@ class Trade:
     Attributes:
         signal_id: Entry signal.
         direction: ``LONG`` or ``SHORT``.
-        entry_ms: Entry bar start.
-        entry_price: Fill price.
-        stop_price: Stop.
-        target_price: Target.
-        exit_ms: Exit bar close.
-        exit_price: Exit price.
+        entry_ms: Entry bar start, epoch ms.
+        entry_price: Entry fill price, slippage included.
+        stop_price: Stop price of the signal.
+        target_price: Target price of the signal.
+        exit_ms: Exit bar close, epoch ms.
+        exit_price: Exit fill price, slippage included.
         exit_reason: ``STOP``, ``TARGET``, ``TIMEOUT`` or ``END_OF_DATA``.
-        r_multiple: Net R after fees.
-        fees_r: Fees in R.
+        r_multiple: Net result in R, after fees.
+        fees_r: Entry and exit fees in R.
         hold_bars: Bars held including entry and exit bars.
     """
 
@@ -97,19 +117,18 @@ class Trade:
         Returns:
             JSON-compatible dict.
         """
-        fmt = _fmt
         return {
             "signal_id": self.signal_id,
             "direction": self.direction,
             "entry_ms": self.entry_ms,
-            "entry_price": fmt(self.entry_price),
-            "stop_price": fmt(self.stop_price),
-            "target_price": fmt(self.target_price),
+            "entry_price": _fmt(self.entry_price),
+            "stop_price": _fmt(self.stop_price),
+            "target_price": _fmt(self.target_price),
             "exit_ms": self.exit_ms,
-            "exit_price": fmt(self.exit_price),
+            "exit_price": _fmt(self.exit_price),
             "exit_reason": self.exit_reason,
-            "r_multiple": fmt(self.r_multiple),
-            "fees_r": fmt(self.fees_r),
+            "r_multiple": _fmt(self.r_multiple),
+            "fees_r": _fmt(self.fees_r),
             "hold_bars": self.hold_bars,
         }
 
@@ -121,12 +140,24 @@ def _fmt(value: decimal.Decimal) -> str:
         value: Decimal.
 
     Returns:
-        Plain decimal text.
+        Plain decimal text without trailing zeros; ``"0"`` for zero.
     """
     text = format(value.normalize(), "f")
     if "." in text:
         text = text.rstrip("0").rstrip(".")
     return "0" if text in ("", "-0") else text
+
+
+def _fmt_optional(value: decimal.Decimal | None) -> str | None:
+    """Formats an optional decimal.
+
+    Args:
+        value: Decimal or ``None``.
+
+    Returns:
+        Text, or ``None`` when ``value`` is ``None``.
+    """
+    return None if value is None else _fmt(value)
 
 
 @dataclasses.dataclass(frozen=True, slots=True)
@@ -137,12 +168,14 @@ class Metrics:
         trades: Number of trades.
         wins: Trades with positive net R.
         losses: Trades with non-positive net R.
-        win_rate: Wins / trades.
-        expectancy_r: Mean net R.
-        profit_factor: Gross positive R / gross negative R.
-        max_drawdown_r: Largest peak-to-trough of cumulative R.
-        avg_r: Mean net R.
-        avg_hold_bars: Mean bars held.
+        win_rate: Wins / trades, as a fraction (``None`` without trades).
+        expectancy_r: Mean net R (``None`` without trades).
+        profit_factor: Gross positive R / gross negative R (``None`` when
+            no trade lost R).
+        max_drawdown_r: Largest peak-to-trough drop of cumulative R,
+            measured from a starting peak of 0.
+        avg_r: Mean net R, equal to ``expectancy_r``.
+        avg_hold_bars: Mean bars held (``None`` without trades).
     """
 
     trades: int
@@ -161,28 +194,16 @@ class Metrics:
         Returns:
             JSON-compatible dict.
         """
-
-        def opt(value: decimal.Decimal | None) -> str | None:
-            """Formats an optional decimal.
-
-            Args:
-                value: Decimal or ``None``.
-
-            Returns:
-                Text or ``None``.
-            """
-            return None if value is None else _fmt(value)
-
         return {
             "trades": self.trades,
             "wins": self.wins,
             "losses": self.losses,
-            "win_rate": opt(self.win_rate),
-            "expectancy_r": opt(self.expectancy_r),
-            "profit_factor": opt(self.profit_factor),
+            "win_rate": _fmt_optional(self.win_rate),
+            "expectancy_r": _fmt_optional(self.expectancy_r),
+            "profit_factor": _fmt_optional(self.profit_factor),
             "max_drawdown_r": _fmt(self.max_drawdown_r),
-            "avg_r": opt(self.avg_r),
-            "avg_hold_bars": opt(self.avg_hold_bars),
+            "avg_r": _fmt_optional(self.avg_r),
+            "avg_hold_bars": _fmt_optional(self.avg_hold_bars),
         }
 
 
@@ -210,16 +231,16 @@ def compute_metrics(trades: Sequence[Trade]) -> Metrics:
     count = len(trades)
     if count == 0:
         return Metrics(0, 0, 0, None, None, None, ZERO, None, None)
-    rs = [t.r_multiple for t in trades]
-    wins = sum(1 for r in rs if r > 0)
+    r_values = [t.r_multiple for t in trades]
+    wins = sum(1 for r in r_values if r > 0)
     losses = count - wins
-    total = sum(rs, ZERO)
+    total = sum(r_values, ZERO)
     mean = _q(total / count)
-    positive = sum((r for r in rs if r > 0), ZERO)
-    negative = -sum((r for r in rs if r < 0), ZERO)
+    positive = sum((r for r in r_values if r > 0), ZERO)
+    negative = -sum((r for r in r_values if r < 0), ZERO)
     profit_factor = None if negative == 0 else _q(positive / negative)
     peak = cumulative = drawdown = ZERO
-    for r in rs:
+    for r in r_values:
         cumulative += r
         peak = max(peak, cumulative)
         drawdown = max(drawdown, peak - cumulative)
@@ -252,10 +273,12 @@ def _exit_for_bar(
         long: Trade direction.
         stop: Stop price.
         target: Target price.
-        is_entry_bar: Whether this is the entry bar (entered at the open).
+        is_entry_bar: Whether this is the entry bar. Its open is the entry,
+            so it cannot gap through the stop.
 
     Returns:
-        ``(reason, raw_price)`` or ``None`` when the trade stays open.
+        ``(reason, price before slippage)``, or ``None`` when the trade
+        stays open.
     """
     if long:
         gap = not is_entry_bar and candle.open <= stop
@@ -281,9 +304,12 @@ def simulate(
 ) -> list[Trade]:
     """Simulates trades for ENTRY_CONFIRMED signals.
 
+    Only signals with both a stop and a target trade, in signal-bar close
+    order, one position at a time (see the module assumptions).
+
     Args:
         signals: Signals from the backtest run.
-        frames: Frames used for the run, oldest first.
+        frames: Frames used for the run, oldest first (warm-up included).
         params: Simulation parameters.
 
     Returns:
@@ -330,10 +356,10 @@ def _simulate_one(
 
     Args:
         sig: Entry signal (with stop and target).
-        frames: Frames.
-        index: Entry bar index.
+        frames: Frames of the run, oldest first.
+        index: Index of the entry bar in ``frames``.
         params: Simulation parameters.
-        slip_rate: Slippage as a fraction.
+        slip_rate: Slippage as a fraction of the price.
 
     Returns:
         The trade, or ``None`` when the entry gapped beyond the stop.
@@ -361,6 +387,7 @@ def _simulate_one(
             exit_reason, exit_price, exit_index = "TIMEOUT", candle.close, j
             break
     else:
+        # No exit before the data ended: close at the last frame.
         exit_price = frames[-1].candle.close
     if exit_reason != "TARGET":
         adjust = exit_price * slip_rate

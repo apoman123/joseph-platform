@@ -29,7 +29,7 @@ class RegistryTickSizes:
         Args:
             registry: Instrument registry.
             clock: Time source for cache expiry.
-            ttl_ms: Cache lifetime.
+            ttl_ms: Cache lifetime in ms.
         """
         self._registry = registry
         self._clock = clock
@@ -47,7 +47,13 @@ class RegistryTickSizes:
             instrument_id: Exact venue instrument.
 
         Returns:
-            Tick size, or ``None`` when unknown or non-positive.
+            Tick size, or ``None`` when the registry reports a non-positive
+            one. Both outcomes are cached for ``ttl_ms``; lookup failures
+            are not.
+
+        Raises:
+            errors.NotFoundError: If the instrument is unknown or its
+                venue is disabled (propagated from the registry).
         """
         now = self._clock.now_ms()
         cached = self._cache.get(instrument_id)

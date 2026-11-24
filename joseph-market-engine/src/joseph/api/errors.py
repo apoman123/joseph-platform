@@ -21,6 +21,8 @@ from joseph.domain import errors
 
 _LOG = logging.getLogger(__name__)
 
+# HTTP status per contract error code. A ``JosephError`` whose code is not
+# listed here is answered with 400.
 STATUS_BY_CODE: dict[str, int] = {
     "VALIDATION_FAILED": 422,
     "NOT_FOUND": 404,
@@ -44,7 +46,8 @@ def trace_id_of(request: fastapi.Request) -> str:
         request: Current request.
 
     Returns:
-        Trace id (``"unknown"`` outside the middleware).
+        Trace id the ``trace`` middleware stored, or ``"unknown"`` when the
+        request did not pass through it.
     """
     return str(getattr(request.state, "trace_id", "unknown"))
 
@@ -61,11 +64,11 @@ def error_body(
     """Builds a contract ``ErrorResponse`` body.
 
     Args:
-        code: Contract error code.
+        code: Contract error code, a key of ``STATUS_BY_CODE``.
         message: Plain-language, actionable message.
         trace_id: Request trace id.
-        retryable: Whether retrying may succeed.
-        field_errors: ``(field, message)`` pairs.
+        retryable: Whether retrying the same request may succeed.
+        field_errors: ``(field, message)`` pairs for invalid inputs.
         source_status: Optional upstream status text.
 
     Returns:
@@ -86,16 +89,21 @@ def error_body(
 async def _domain_handler(
     request: fastapi.Request, exc: Exception
 ) -> responses.JSONResponse:
-    """Handles ``JosephError``.
+    """Renders a ``JosephError`` as its contract ``ErrorResponse``.
+
+    The status comes from ``STATUS_BY_CODE`` (400 for an unlisted code). An
+    error with an ``issues`` list (``StrategyValidationError``) fills
+    ``field_errors`` from its ``path`` and ``message`` entries.
 
     Args:
-        request: Request.
-        exc: Raised error.
+        request: Request that raised the error.
+        exc: The raised error; always a ``JosephError``.
 
     Returns:
         JSON error response.
     """
-    assert isinstance(exc, errors.JosephError)
+    if not isinstance(exc, errors.JosephError):
+        raise AssertionError("registered for JosephError only")
     status = STATUS_BY_CODE.get(exc.code, 400)
     body = error_body(
         exc.code, exc.message, trace_id_of(request), retryable=exc.retryable
@@ -113,16 +121,18 @@ async def _domain_handler(
 async def _validation_handler(
     request: fastapi.Request, exc: Exception
 ) -> responses.JSONResponse:
-    """Handles request validation errors.
+    """Renders a FastAPI request validation error as ``VALIDATION_FAILED``.
 
     Args:
-        request: Request.
-        exc: Validation error.
+        request: Request whose parameters or body failed validation.
+        exc: The raised error; always a ``RequestValidationError``.
 
     Returns:
-        422 response with field errors.
+        422 response with one field error per failed location, the field
+        named by its dotted ``loc`` path (for example ``query.limit``).
     """
-    assert isinstance(exc, fastapi_exceptions.RequestValidationError)
+    if not isinstance(exc, fastapi_exceptions.RequestValidationError):
+        raise AssertionError("registered for RequestValidationError only")
     fields = [
         (".".join(str(p) for p in err.get("loc", ())), str(err.get("msg")))
         for err in exc.errors()
@@ -142,16 +152,21 @@ async def _validation_handler(
 async def _http_handler(
     request: fastapi.Request, exc: Exception
 ) -> responses.JSONResponse:
-    """Handles framework HTTP errors (404 routes, 405 methods).
+    """Renders a framework HTTP error (unknown route, wrong method).
+
+    The original status is kept. 401, 403 and 404 map to their contract
+    codes; any other status (for example 405) is reported as
+    ``VALIDATION_FAILED``.
 
     Args:
-        request: Request.
-        exc: HTTP exception.
+        request: Request that failed.
+        exc: The raised error; always a Starlette ``HTTPException``.
 
     Returns:
-        Contract error response.
+        Contract error response, never retryable.
     """
-    assert isinstance(exc, starlette_exceptions.HTTPException)
+    if not isinstance(exc, starlette_exceptions.HTTPException):
+        raise AssertionError("registered for HTTPException only")
     code = {401: "UNAUTHENTICATED", 403: "FORBIDDEN", 404: "NOT_FOUND"}.get(
         exc.status_code, "VALIDATION_FAILED"
     )
@@ -166,14 +181,17 @@ async def _http_handler(
 async def _internal_handler(
     request: fastapi.Request, exc: Exception
 ) -> responses.JSONResponse:
-    """Handles unexpected exceptions without leaking details.
+    """Renders an unexpected exception without leaking details.
+
+    Only the exception type and the trace id are logged; the message and
+    the traceback are not.
 
     Args:
-        request: Request.
-        exc: Exception.
+        request: Request that failed.
+        exc: The unexpected exception.
 
     Returns:
-        500 response.
+        500 ``INTERNAL`` response, marked retryable.
     """
     _LOG.error(
         "unhandled %s (trace %s)", type(exc).__name__, trace_id_of(request)
@@ -193,7 +211,7 @@ def install(app: fastapi.FastAPI) -> None:
     """Registers every error handler on an app.
 
     Args:
-        app: FastAPI application.
+        app: FastAPI application to configure.
     """
     app.add_exception_handler(errors.JosephError, _domain_handler)
     app.add_exception_handler(

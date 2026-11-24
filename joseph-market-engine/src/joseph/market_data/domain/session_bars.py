@@ -62,21 +62,22 @@ def candle(
     Args:
         instrument_id: Instrument.
         timeframe: Resolution.
-        start_ms: Session-aligned bar start.
+        start_ms: Session-aligned bar start, epoch milliseconds.
         open_: Open.
         high: High.
         low: Low.
         close: Close.
         base_volume: Base volume.
-        now_ms: Receipt time.
+        now_ms: Receipt time, epoch milliseconds.
         source: Provenance label.
         is_final: Explicit finality (``None`` derives it from the end).
         feed_state: Provenance state.
         quote_turnover: Optional quote turnover.
         trade_count: Optional trade count.
-        event_ts_ms: Optional source event time.
+        event_ts_ms: Optional source event time, epoch milliseconds.
         taker_buy_base_volume: Optional buy volume.
-        taker_buy_method: How the buy volume was obtained.
+        taker_buy_method: How the buy volume was obtained (dropped when
+            there is no buy volume).
 
     Returns:
         Candle.
@@ -147,9 +148,10 @@ def _merge(
     Args:
         group: Ascending constituents of the bar.
         timeframe: Aggregate resolution.
-        start_ms: Aggregate bar start.
-        now_ms: Receipt time.
-        covered_to_ms: Constituent data is complete before this time.
+        start_ms: Aggregate bar start, epoch milliseconds.
+        now_ms: Receipt time, epoch milliseconds.
+        covered_to_ms: Constituent data is complete before this time, epoch
+            milliseconds.
         source: Provenance label (defaults to the first constituent's).
 
     Returns:
@@ -203,9 +205,10 @@ def aggregate(
         bars: Constituent bars of one instrument (any order; duplicates by
             start keep the last).
         timeframe: Target resolution (must tile the constituents).
-        now_ms: Receipt time.
-        covered_to_ms: Time before which the constituent data is complete
-            (e.g. the close of the latest published session).
+        now_ms: Receipt time, epoch milliseconds.
+        covered_to_ms: Time before which the constituent data is complete,
+            epoch milliseconds (e.g. the close of the latest published
+            session).
         source: Optional provenance label of the aggregates.
 
     Returns:
