@@ -76,10 +76,10 @@ import {
   type ToolPlugin,
 } from '@joseph/drawing-core';
 
-/** Engine plugin id. */
+/** Engine indicator plugin id of the series request. */
 export const REGRESSION_CHANNEL_PLUGIN = 'regression_channel';
 
-/** Price source sent to the engine. */
+/** Price source sent to the engine: bar closes. */
 export const REGRESSION_SOURCE = 'close';
 
 /** Notice when both anchors fall on one bar. */
@@ -105,15 +105,15 @@ export const REGRESSION_INPUTS: readonly ToolInput[] = [
   },
 ];
 
-/** Engine values of the channel at the t2 bar (decimal strings). */
+/** Engine values of the channel at the t2 bar (prices as decimal strings). */
 export interface ChannelValues {
-  /** First bar of the regression (UTC ms). */
+  /** Start of the regression's first bar, epoch milliseconds (UTC). */
   startMs: number;
-  /** t2 bar (UTC ms). */
+  /** Start of the t2 bar, epoch milliseconds (UTC). */
   endMs: number;
-  /** Centre at the first bar. */
+  /** Centre-line price at the first bar. */
   start: string;
-  /** Centre at the t2 bar. */
+  /** Centre-line price at the t2 bar. */
   end: string;
   /** Upper line at the first bar. */
   upperStart: string;
@@ -125,11 +125,11 @@ export interface ChannelValues {
   lowerEnd: string;
   /** Pearson's R, when published. */
   pearsonR: string | null;
-  /** Residual standard deviation, when published. */
+  /** Residual standard deviation in price units, when published. */
   stdev: string | null;
-  /** Slope per bar, when published. */
+  /** Slope in price units per bar, when published. */
   slope: string | null;
-  /** Bars in the regression. */
+  /** Bars in the regression, when published. */
   bars: number | null;
 }
 
@@ -162,11 +162,13 @@ export function anchorOrder(
 }
 
 /**
- * Bar starts of t1 and t2 on a timeframe.
+ * Returns the bar starts of t1 and t2 on a timeframe.
  * @param doc Drawing.
- * @param timeframe Chart timeframe.
+ * @param timeframe Chart timeframe; each anchor time is rounded to the
+ *     nearest bar start on it.
  * @param calendar Session calendar of the instrument (default UTC bars).
- * @return `[t1Bar, t2Bar]` or null.
+ * @return `[t1Bar, t2Bar]` in epoch milliseconds, or null without two
+ *     anchors.
  */
 export function channelBars(
   doc: Pick<DrawingDocument, 'anchors'>,
@@ -198,6 +200,7 @@ export function regressionRequest(
 ): DrawingSeriesRequest | null {
   const bars = channelBars(doc, timeframe, calendar);
   if (!bars) return null;
+  // The input always exists; the fallback only satisfies index checks.
   const deviations = REGRESSION_INPUTS[0];
   return {
     pluginId: REGRESSION_CHANNEL_PLUGIN,
@@ -211,15 +214,18 @@ export function regressionRequest(
 }
 
 /**
- * Interprets a series state.
- * @param doc Drawing.
+ * Interprets a series state as channel lines or a notice.
+ * @param doc Drawing (its anchors decide the same-bar notice).
  * @param series Series state (null before any request).
- * @return Lines to draw or a notice.
+ * @return Engine values at the t2 bar, or a notice (same bar, loading,
+ *     error, refusal or no values yet).
  */
 export function channelView(
   doc: Pick<DrawingDocument, 'anchors'>,
   series: DrawingSeriesState | null
 ): ChannelView {
+  // Checked before the series status: whatever the engine answers, the user
+  // must first move an anchor.
   if (series) {
     const bars = channelBars(doc, series.timeframe, series.calendar);
     if (bars && bars[0] === bars[1]) {
@@ -231,6 +237,7 @@ export function channelView(
   const endMs = series.request.fromMs;
   const point = seriesPointAt(series.points, endMs);
   if (!point) {
+    // The engine publishes the channel on the t2 bar once that bar has closed.
     if (
       series.asOfMs === null ||
       series.asOfMs <=
@@ -282,7 +289,7 @@ export function channelView(
   };
 }
 
-/** Channel lines in pixels. */
+/** Channel lines in CSS pixels, each from the first bar to the t2 bar. */
 interface ChannelPixels {
   /** Centre line. */
   centre: [Point, Point];
@@ -293,10 +300,10 @@ interface ChannelPixels {
 }
 
 /**
- * Projects the channel to pixels.
- * @param transform Transform.
+ * Projects the channel's line ends to CSS pixels.
+ * @param transform Current chart transform.
  * @param values Engine values.
- * @return Pixel lines, or null when off the time scale.
+ * @return Pixel lines, or null when an end is off the time or price scale.
  */
 function channelPixels(
   transform: PixelTransform,
@@ -323,11 +330,12 @@ function channelPixels(
 }
 
 /**
- * Handle positions (index = anchor index).
+ * Returns the handle positions, indexed like the anchors.
+ * They sit on the centre line's ends when drawn, else at the anchors.
  * @param doc Drawing.
- * @param transform Transform.
- * @param lines Channel pixels when drawn.
- * @return Handles.
+ * @param transform Current chart transform.
+ * @param lines Channel pixels when drawn, else null.
+ * @return Handles in CSS pixels; empty when the anchors cannot be placed.
  */
 function handlesOf(
   doc: DrawingDocument,
@@ -344,11 +352,13 @@ function handlesOf(
 }
 
 /**
- * X positions of the anchor bar markers.
+ * Returns the x positions of the dashed anchor-bar markers.
  * @param doc Drawing.
- * @param transform Transform.
- * @param series Series state.
- * @return X positions.
+ * @param transform Current chart transform.
+ * @param series Series state; null marks the raw anchor times instead of
+ *     their bars.
+ * @return X positions in CSS pixels; anchors off the time scale are left
+ *     out.
  */
 function markerXs(
   doc: DrawingDocument,
@@ -364,11 +374,11 @@ function markerXs(
 }
 
 /**
- * Where the notice text starts: right of the earlier anchor, beside it
- * vertically and inside the plot.
- * @param transform Transform.
+ * Returns where the notice text starts, beside the left-most handle.
+ * It starts 8 px right of it, level with it and kept 16 px inside the plot.
+ * @param transform Current chart transform (plot height).
  * @param handles Handle positions (anchors while nothing is drawn).
- * @return Text origin, or null without anchors.
+ * @return Text origin in CSS pixels, or null without anchors.
  */
 function noticeAt(
   transform: PixelTransform,
@@ -397,6 +407,7 @@ export const regressionChannelTool: ToolPlugin = {
     color: palette.user,
     line_width: 1,
     line_style: 'solid',
+    // A hex alpha byte on the `#rrggbb` user color: 0x14, about 8 % opacity.
     fill_color: `${palette.user}14`,
   }),
   defaultProps: () => inputDefaults(REGRESSION_INPUTS),
@@ -444,10 +455,12 @@ export const regressionChannelTool: ToolPlugin = {
     strokePath(ctx, lines.lower);
     ctx.setLineDash([6, 4]);
     strokePath(ctx, lines.centre);
+    // The input always exists; the fallback only satisfies index checks.
     const showPearson = REGRESSION_INPUTS[1]
       ? readInput(doc, REGRESSION_INPUTS[1]) === true
       : false;
     if (showPearson && view.values.pearsonR !== null) {
+      // Keeps the label (about 110 px wide) inside the plot's right edge.
       drawLabel(
         ctx,
         `Pearson's R ${Decimal.parse(view.values.pearsonR).toFixed(3)}`,

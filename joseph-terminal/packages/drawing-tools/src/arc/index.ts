@@ -5,7 +5,7 @@
  */
 
 /**
- * @fileoverview Arc.
+ * @fileoverview Arc: a circular arc through three anchors.
  *
  * - Anchors: 3, the start, a point the arc passes through, and the end.
  * - Geometry: the circular arc through the three anchors in pixel space
@@ -30,9 +30,11 @@ import {
 } from '@joseph/drawing-core';
 
 /**
- * Sampled path of the arc for the anchor pixels placed so far.
+ * Returns the sampled arc path for the anchor pixels placed so far.
  * @param points Anchor pixels (2 while creating, 3 when complete).
- * @return Path vertices from start to end.
+ * @return Path vertices in CSS pixels from start to end; the segment
+ *     start-through while the end is pending; empty with fewer than two
+ *     points.
  */
 export function arcPath(points: readonly Point[]): Point[] {
   const [a, b, c] = points;

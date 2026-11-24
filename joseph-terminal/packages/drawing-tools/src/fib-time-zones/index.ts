@@ -41,9 +41,10 @@ export const FIB_TIME_ZONE_NUMBERS: readonly number[] = [
 
 /**
  * Computes zone start times.
- * @param startMs Zone 0 time (anchor A).
- * @param unitMs Zone unit (B - A), may be negative.
- * @param numbers Fibonacci numbers.
+ * @param startMs Zone 0 time (anchor A), epoch milliseconds.
+ * @param unitMs Zone unit (B - A) in milliseconds; negative runs back in
+ *     time.
+ * @param numbers Fibonacci numbers (`FIB_TIME_ZONE_NUMBERS` by default).
  * @return Number/time pairs; times before the epoch and duplicates (zero
  *     unit) are dropped.
  */
@@ -64,10 +65,11 @@ export function timeZoneTimes(
 }
 
 /**
- * Zone lines that fall on the plot.
+ * Returns the zone lines that fall on the plot.
  * @param doc Document.
- * @param transform Transform.
- * @return Number and x of each visible line.
+ * @param transform Current chart transform.
+ * @return Fibonacci number and x (CSS pixels) of each line within the plot
+ *     width; empty without two anchors.
  */
 function visibleLines(
   doc: DrawingDocument,

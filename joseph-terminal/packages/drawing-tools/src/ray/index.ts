@@ -5,8 +5,9 @@
  */
 
 /**
- * @fileoverview Ray: a line through two anchors that continues to the right
- * edge of the chart.
+ * @fileoverview Ray: a line from the first anchor through the second that
+ * continues past it to the plot edge. `extend_left` also extends it back
+ * past the first anchor; turning `extend_right` off leaves a segment.
  */
 
 import {

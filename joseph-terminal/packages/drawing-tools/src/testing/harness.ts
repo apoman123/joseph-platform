@@ -5,7 +5,9 @@
  */
 
 /**
- * @fileoverview Shared test harness for drawing tools (test-only module).
+ * @fileoverview Shared test harness for drawing tools (test-only module): a
+ * linear pixel transform, a render state, document building and a canvas
+ * context that records every call.
  */
 
 import type {DrawingAnchor, DrawingDocument} from '@joseph/contracts';
@@ -16,7 +18,11 @@ import {
   type ToolPlugin,
 } from '@joseph/drawing-core';
 
-/** Linear transform: 10px per minute; price 200 at y=0 and 100 at y=500. */
+/**
+ * Linear transform on a 1000 x 500 px plot.
+ * 10 px per minute from time 0 at x = 0; price 200 at y = 0 and 100 at
+ * y = 500.
+ */
 export const TRANSFORM: PixelTransform = {
   width: 1000,
   height: 500,
@@ -26,7 +32,7 @@ export const TRANSFORM: PixelTransform = {
   yToPrice: y => 200 - (y / 500) * 100,
 };
 
-/** Render state used by tests. */
+/** Render state used by tests: selected, tick 0.1, 1-minute bars. */
 export const STATE: RenderState = {
   selected: true,
   preview: false,
@@ -44,9 +50,10 @@ export const STATE: RenderState = {
 
 /**
  * Builds a document for a tool, expanding anchors like the controller.
- * @param tool Tool.
- * @param anchors User anchors.
- * @return Document.
+ * @param tool Tool under test.
+ * @param anchors Anchors as the user places them (before `expandAnchors`).
+ * @return Document `d1` on `mock:perp:BTCUSD` with the tool's default style
+ *     and props.
  */
 export function makeDoc(
   tool: ToolPlugin,
@@ -72,24 +79,26 @@ export function makeDoc(
 
 /** Recorded canvas operation. */
 export interface Op {
-  /** Method or `set:prop`. */
+  /** Context method name, or `set:<property>` for a property write. */
   op: string;
-  /** Arguments. */
+  /** Call arguments, or the written value. */
   args: unknown[];
 }
 
 /**
- * Renders a document into a recording context.
- * @param tool Tool.
- * @param doc Document.
- * @return Recorded operations.
+ * Renders a document with `TRANSFORM` and `STATE` into a recording context.
+ * @param tool Tool under test.
+ * @param doc Document to render.
+ * @return Recorded operations in call order.
  */
 export function renderOps(tool: ToolPlugin, doc: DrawingDocument): Op[] {
   const ops: Op[] = [];
+  // Deliberate partial mock: the proxy stands in for every context member.
   const ctx = new Proxy<Record<string, unknown>>(
     {},
     {
       get(target, prop: string) {
+        // 6 px per character, like `LABEL_CHAR_WIDTH_PX`.
         if (prop === 'measureText') {
           return (text: string) => ({width: text.length * 6});
         }
@@ -111,16 +120,16 @@ export function renderOps(tool: ToolPlugin, doc: DrawingDocument): Op[] {
 /**
  * Collects text drawn by a render.
  * @param ops Recorded operations.
- * @return Texts.
+ * @return Texts passed to `fillText`, in draw order.
  */
 export function texts(ops: readonly Op[]): string[] {
   return ops.filter(o => o.op === 'fillText').map(o => String(o.args[0]));
 }
 
 /**
- * Asserts the manifest basics shared by every tool.
- * @param tool Tool.
- * @return Problems found.
+ * Checks the manifest basics shared by every tool.
+ * @param tool Tool under test.
+ * @return Problems found; empty when the manifest is valid.
  */
 export function manifestProblems(tool: ToolPlugin): string[] {
   const m = tool.manifest;
@@ -128,6 +137,8 @@ export function manifestProblems(tool: ToolPlugin): string[] {
   if (!/^[a-z][a-z0-9-]*$/.test(m.id)) problems.push('id must be kebab-case');
   if (m.version < 1) problems.push('version must be >= 1');
   if (m.anchorCount < 1) problems.push('anchorCount must be >= 1');
+  // Names with an acronym (two capitals in a row, e.g. "Anchored VWAP") are
+  // exempt from the sentence-case check.
   if (
     m.displayName !==
       m.displayName.charAt(0).toUpperCase() +

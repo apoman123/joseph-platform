@@ -20,15 +20,18 @@ import {
   type ToolPlugin,
 } from '@joseph/drawing-core';
 
-/** Arrowhead length in pixels per unit of line width. */
+/**
+ * Base arrowhead barb length in CSS pixels; each unit of line width adds
+ * 2 px.
+ */
 const HEAD_PX = 9;
 
 /**
  * Computes the two barbs of an arrowhead.
- * @param from Tail.
- * @param to Tip.
- * @param length Barb length in pixels.
- * @return Left and right barb ends.
+ * @param from Tail, in CSS pixels.
+ * @param to Tip, in CSS pixels.
+ * @param length Barb length in CSS pixels.
+ * @return Barb ends on either side of the shaft, in CSS pixels.
  */
 export function arrowHead(
   from: Point,
@@ -36,6 +39,7 @@ export function arrowHead(
   length: number
 ): [Point, Point] {
   const angle = Math.atan2(to.y - from.y, to.x - from.x);
+  // Each barb is π/7 (about 26 degrees) off the shaft.
   const spread = Math.PI / 7;
   return [
     {

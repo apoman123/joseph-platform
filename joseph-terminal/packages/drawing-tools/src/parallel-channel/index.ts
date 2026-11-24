@@ -6,7 +6,8 @@
 
 /**
  * @fileoverview Parallel channel: base line A-B plus a parallel line through
- * the third anchor C.
+ * the third anchor C, a dashed centre line halfway between them and an
+ * optional fill. While C is pending only A-B is drawn.
  */
 
 import {
@@ -21,11 +22,12 @@ import {
 } from '@joseph/drawing-core';
 
 /**
- * Computes the parallel line through `c`.
- * @param a Base start.
- * @param b Base end.
- * @param c Point on the parallel line.
- * @return Parallel line endpoints.
+ * Computes the parallel line through `c`, offset vertically from the base.
+ * @param a Base start, in CSS pixels.
+ * @param b Base end, in CSS pixels.
+ * @param c Point on the parallel line, in CSS pixels.
+ * @return Parallel line endpoints at the x of `a` and `b`. A vertical base
+ *     (no x extent) is shifted by the y offset of `c` from `a`.
  */
 export function parallelThrough(a: Point, b: Point, c: Point): [Point, Point] {
   const dx = b.x - a.x;
@@ -52,6 +54,7 @@ export const parallelChannelTool: ToolPlugin = {
     color: palette.user,
     line_width: 1,
     line_style: 'solid',
+    // A hex alpha byte on the `#rrggbb` user color: 0x1a, about 10 % opacity.
     fill_color: `${palette.user}1a`,
   }),
   render(ctx, doc, transform, state) {

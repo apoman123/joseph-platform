@@ -5,7 +5,7 @@
  */
 
 /**
- * @fileoverview Circle.
+ * @fileoverview Circle: a round circle from a centre and a radius point.
  *
  * - Anchors: 2, the centre and a point on the circumference.
  * - Geometry: a true circle in pixel space whose radius is the pixel
@@ -28,21 +28,21 @@ import {
 } from '@joseph/drawing-core';
 
 /**
- * Radius of the circle through `edge` around `center`.
- * @param center Centre.
- * @param edge Point on the circumference.
- * @return Radius in pixels.
+ * Returns the radius of the circle through `edge` around `center`.
+ * @param center Centre, in CSS pixels.
+ * @param edge Point on the circumference, in CSS pixels.
+ * @return Radius in CSS pixels.
  */
 export function circleRadius(center: Point, edge: Point): number {
   return distance(center, edge);
 }
 
 /**
- * Distance from a point to a circle's circumference.
- * @param p Point.
- * @param center Centre.
- * @param radius Radius.
- * @return Distance in pixels.
+ * Returns the distance from a point to a circle's circumference.
+ * @param p Point, in CSS pixels.
+ * @param center Centre, in CSS pixels.
+ * @param radius Radius in CSS pixels.
+ * @return Distance in CSS pixels (inside or outside the circle).
  */
 export function distanceToCircle(
   p: Point,
@@ -66,6 +66,7 @@ export const circleTool: ToolPlugin = {
     color: palette.user,
     line_width: 1,
     line_style: 'solid',
+    // A hex alpha byte on the `#rrggbb` user color: 0x26, about 15 % opacity.
     fill_color: `${palette.user}26`,
   }),
   render(ctx, doc, transform, state) {

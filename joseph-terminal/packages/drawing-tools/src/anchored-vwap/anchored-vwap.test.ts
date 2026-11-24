@@ -56,10 +56,10 @@ function ready(
 }
 
 /**
- * Builds a point with VWAP and band 1 values.
- * @param minute Bar start minute.
- * @param vwap VWAP or null.
- * @return Point.
+ * Builds a point with VWAP and band 1 values (band 1 at VWAP +/- 2).
+ * @param minute Bar start, in minutes since the epoch.
+ * @param vwap VWAP, or null for a bar without values.
+ * @return Series point.
  */
 function point(minute: number, vwap: number | null): IndicatorSeriesPoint {
   return {
@@ -82,16 +82,17 @@ function point(minute: number, vwap: number | null): IndicatorSeriesPoint {
 const READY = ready([point(2, 150), point(3, 152), point(4, 154)]);
 
 /**
- * Renders with a series into a recording context.
- * @param series Series state.
- * @return Recorded operations.
+ * Renders the fixture drawing with a series into a recording context.
+ * @param series Series state, or null before any request.
+ * @return Recorded operations in call order.
  */
 function render(series: DrawingSeriesState | null): Op[] {
   const ops: Op[] = [];
+  // Deliberate partial mock: the proxy stands in for every context member.
   const ctx = new Proxy(
     {},
     {
-      get(target, prop: string) {
+      get(_target, prop: string) {
         if (prop === 'measureText') {
           return (text: string) => ({width: text.length * 6});
         }

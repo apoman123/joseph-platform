@@ -20,7 +20,7 @@ import {
 
 /**
  * Formats a UTC time for the label.
- * @param timeMs UTC ms.
+ * @param timeMs Time, epoch milliseconds.
  * @return `YYYY-MM-DD HH:MM UTC`.
  */
 function formatUtc(timeMs: number): string {

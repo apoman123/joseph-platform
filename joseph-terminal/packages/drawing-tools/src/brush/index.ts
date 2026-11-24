@@ -23,8 +23,8 @@ import {
 
 /**
  * Strokes a smooth curve through points (quadratic curves via midpoints).
- * @param ctx Context.
- * @param points Points.
+ * @param ctx Canvas context.
+ * @param points Stroke points in CSS pixels.
  */
 export function strokeSmooth(
   ctx: CanvasRenderingContext2D,
@@ -34,6 +34,8 @@ export function strokeSmooth(
   if (!first) return;
   ctx.beginPath();
   ctx.moveTo(first.x, first.y);
+  // Each interior point is a control point and the curve passes through the
+  // midpoints between neighbours, so the stroke has no corners.
   for (let i = 1; i < points.length - 1; i += 1) {
     const p = points[i];
     const next = points[i + 1];
@@ -79,6 +81,8 @@ export const brushTool: ToolPlugin = {
     if (points.length < 2) return null;
     const first = points[0];
     const last = points.at(-1);
+    // Only the stroke's ends have handles; the last one maps back to the
+    // last anchor index.
     if (first && last) {
       const handle = hitHandles([first, last], point, tolerance);
       if (handle) {

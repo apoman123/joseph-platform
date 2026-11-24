@@ -47,12 +47,12 @@ export interface PitchforkGeometry {
 
 /**
  * Computes the median line and tines of a pitchfork.
- * @param p1 Pivot.
- * @param p2 First reaction point.
- * @param p3 Second reaction point.
- * @param width Plot width.
- * @param height Plot height.
- * @return Geometry in pixels.
+ * @param p1 Pivot, in CSS pixels.
+ * @param p2 First reaction point, in CSS pixels.
+ * @param p3 Second reaction point, in CSS pixels.
+ * @param width Plot width in CSS pixels (rays are clipped to it).
+ * @param height Plot height in CSS pixels (rays are clipped to it).
+ * @return Geometry in CSS pixels.
  */
 export function pitchforkTines(
   p1: Point,
@@ -103,6 +103,7 @@ export const pitchforkTool: ToolPlugin = {
     color: palette.user,
     line_width: 1,
     line_style: 'solid',
+    // A hex alpha byte on the `#rrggbb` user color: 0x14, about 8 % opacity.
     fill_color: `${palette.user}14`,
   }),
   render(ctx, doc, transform, state) {

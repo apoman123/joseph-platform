@@ -33,7 +33,7 @@ import {
   type ToolPlugin,
 } from '@joseph/drawing-core';
 
-/** Default circle levels. */
+/** Default circle levels, as multiples of the A-B radius. */
 export const FIB_CIRCLE_LEVELS = [
   '0.236',
   '0.382',
@@ -48,10 +48,12 @@ export const FIB_CIRCLE_LEVELS = [
 /**
  * Reads levels from props.
  * @param props Drawing props.
- * @return Level ratios.
+ * @return `props.levels` when it is a non-empty list of decimal strings,
+ *     else `FIB_CIRCLE_LEVELS`.
  */
 function levelsOf(props: Record<string, unknown> | undefined): string[] {
   const levels = props?.levels;
+  // The cast is safe: `every` checks that each level is a decimal string.
   return Array.isArray(levels) &&
     levels.length > 0 &&
     levels.every(l => typeof l === 'string' && Decimal.isValid(l))
@@ -61,10 +63,10 @@ function levelsOf(props: Record<string, unknown> | undefined): string[] {
 
 /**
  * Computes the circle radii.
- * @param center Centre (anchor A).
- * @param onUnit Point on the 1.0 circle (anchor B).
- * @param levels Level ratios.
- * @return Level/radius pairs in pixels.
+ * @param center Centre (anchor A), in CSS pixels.
+ * @param onUnit Point on the 1.0 circle (anchor B), in CSS pixels.
+ * @param levels Level ratios as decimal strings.
+ * @return Level/radius pairs, radius in CSS pixels, in `levels` order.
  */
 export function circleRadii(
   center: Point,

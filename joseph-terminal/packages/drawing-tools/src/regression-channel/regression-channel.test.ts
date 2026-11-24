@@ -80,12 +80,13 @@ function ready(
 }
 
 /**
- * Collects drawn texts with a series.
- * @param series Series state.
- * @return Texts.
+ * Renders the fixture drawing with a series and collects the drawn text.
+ * @param series Series state, or null before any request.
+ * @return Texts passed to `fillText`, in draw order.
  */
 function drawnTexts(series: DrawingSeriesState | null): string[] {
   const ops: Op[] = [];
+  // Deliberate partial mock: the proxy stands in for every context member.
   const ctx = new Proxy(
     {},
     {
@@ -156,6 +157,7 @@ describe('regression-channel', () => {
     const hidden = {...DOC, props: {show_pearson: false}};
     const ops: string[] = [];
     tool.render(
+      // Deliberate partial mock that records only `fillText`.
       new Proxy(
         {},
         {
