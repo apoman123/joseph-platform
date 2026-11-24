@@ -5,9 +5,10 @@
  */
 
 /**
- * @fileoverview Strategy feature: visual Rule AST builder with server
- * validation, immutable versions, backtests and activation in alert, paper
- * or shadow mode. Automatic live trading cannot be enabled from here.
+ * @fileoverview Strategy feature: visual builder for the rule AST (abstract
+ * syntax tree) with server validation, immutable versions, backtests and
+ * activation in alert, paper or shadow mode. Automatic live trading cannot
+ * be enabled from here.
  */
 
 import {createElement} from 'react';
@@ -41,7 +42,7 @@ export const STRATEGY_FEATURE: WebFeature = {
   activate(ctx) {
     const editor = createStrategyEditor(ctx);
     /**
-     * Slot view bound to the feature's editor.
+     * Renders the strategy panel bound to the feature's editor.
      * @param props Slot props.
      * @return Element.
      */

@@ -44,9 +44,9 @@ export interface StrategyEditorState {
   versions: StrategyVersion[];
   /** Whether the draft differs from the latest saved version. */
   dirty: boolean;
-  /** Request in flight. */
+  /** Request in flight, or null. */
   busy: 'validate' | 'save' | 'activate' | 'pause' | 'load' | null;
-  /** Last status message. */
+  /** Last status message, or null. */
   message: {tone: 'info' | 'warning' | 'danger'; text: string} | null;
 }
 
@@ -66,36 +66,43 @@ export interface StrategyEditor {
   applyTemplate(templateId: string): void;
   /**
    * Validates the draft on the server.
-   * @return Promise resolving when done.
+   * @return Promise resolving when done. It never rejects: the outcome or
+   *     the error becomes `message`, issues become `serverIssues`.
    */
   validateOnServer(): Promise<void>;
   /**
-   * Saves the draft as a new immutable version.
-   * @return Promise resolving when done.
+   * Saves the draft as a new immutable version; refused locally while the
+   * client validation fails.
+   * @return Promise resolving when done. It never rejects: the outcome or
+   *     the error becomes `message`, field errors become `serverIssues`.
    */
   save(): Promise<void>;
   /**
    * Reloads versions from the server.
-   * @return Promise resolving when done.
+   * @return Promise resolving when done. It never rejects: on failure the
+   *     strategy counts as unsaved (no versions, dirty).
    */
   loadVersions(): Promise<void>;
   /**
    * Activates a version.
    * @param request Version and mode.
-   * @return Promise resolving when done.
+   * @return Promise resolving when done. It never rejects: the outcome or
+   *     the error becomes `message`.
    */
   activate(request: ActivateRequest): Promise<void>;
   /**
    * Pauses the active version.
-   * @return Promise resolving when done.
+   * @return Promise resolving when done. It never rejects: the outcome or
+   *     the error becomes `message`.
    */
   pause(): Promise<void>;
 }
 
 /**
- * Canonical JSON used to compare drafts with saved versions.
+ * Canonical JSON used to compare drafts with saved versions: the server may
+ * return object keys in another order than the draft has them.
  * @param value JSON value.
- * @return Text.
+ * @return JSON text with every object's keys sorted.
  */
 function canonical(value: unknown): string {
   return JSON.stringify(value, (_key, v: unknown) =>
@@ -202,6 +209,8 @@ export function createStrategyEditor(ctx: WebFeatureContext): StrategyEditor {
           try {
             saved = await ctx.clients.strategy.createStrategy(def);
           } catch (err) {
+            // The strategy already exists on the server (its versions were
+            // not loaded here): save the draft as its next version.
             if (err instanceof ApiError && err.body.code === 'CONFLICT') {
               saved = await ctx.clients.strategy.createVersion(
                 def.strategy_id,

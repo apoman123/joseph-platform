@@ -14,7 +14,7 @@ import type {WebFeature, WebSlotProps} from '../../shell/react-bindings';
 import {ScreenerPanel} from './screener-panel';
 
 /**
- * Slot view for the screener.
+ * Renders the screener panel with the slot's context.
  * @param props Slot props.
  * @return Element.
  */
