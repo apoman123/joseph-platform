@@ -62,6 +62,9 @@ def to_optional_decimal(value: object) -> decimal.Decimal | None:
 
     Returns:
         The decimal value, or ``None`` when the input is missing.
+
+    Raises:
+        ValueError: If a present value is not a finite number.
     """
     if value is None or value == "":
         return None
@@ -72,6 +75,7 @@ def format_decimal(value: decimal.Decimal) -> str:
     """Formats a decimal as a plain contract ``DecimalString``.
 
     Trailing zeros are removed and exponent notation is never produced.
+    Values with more than 38 significant digits are rounded half-even to 38.
 
     Args:
         value: Finite decimal to format.
@@ -128,6 +132,9 @@ def round_to_step(
 ) -> decimal.Decimal:
     """Rounds ``value`` to the nearest multiple of ``step`` (half-even).
 
+    A value exactly halfway between two ticks goes to the even multiple, so
+    rounding many prices introduces no upward or downward bias.
+
     Args:
         value: Value to round, typically a price.
         step: Positive tick size.
@@ -152,7 +159,8 @@ def is_multiple_of(value: decimal.Decimal, step: decimal.Decimal) -> bool:
         step: Positive increment.
 
     Returns:
-        True when ``value / step`` is integral.
+        True when ``value / step`` is integral; False when ``step`` is not
+        positive.
     """
     if step <= ZERO:
         return False

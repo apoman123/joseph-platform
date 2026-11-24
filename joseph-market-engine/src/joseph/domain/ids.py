@@ -16,6 +16,9 @@ import threading
 import time
 import uuid
 
+# Process-wide state of ``uuid7``: ordering must hold across every caller in
+# the process, so the last timestamp and counter are module globals guarded
+# by the lock.
 _LOCK = threading.Lock()
 _LAST_MS = 0
 _SEQ = 0
@@ -24,7 +27,10 @@ _SEQ = 0
 def uuid7(now_ms: int | None = None) -> str:
     """Generates a monotonic RFC 9562 version-7 UUID string.
 
-    Within one millisecond a 12-bit counter keeps identifiers ordered.
+    Within one millisecond a 12-bit counter keeps identifiers ordered. When
+    the clock stands still or steps back, the last timestamp is reused with
+    the next counter value; when the counter wraps, the timestamp advances by
+    one millisecond. Identifiers therefore never go backwards in a process.
 
     Args:
         now_ms: Optional timestamp override (UTC epoch ms), used in tests.
@@ -41,6 +47,8 @@ def uuid7(now_ms: int | None = None) -> str:
             if _SEQ == 0:
                 ms += 1
         else:
+            # A random 10-bit start leaves at least 3072 increments of the
+            # 12-bit counter before it wraps within the millisecond.
             _SEQ = int.from_bytes(os.urandom(2), "big") & 0x03FF
         _LAST_MS = ms
         seq = _SEQ

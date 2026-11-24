@@ -61,7 +61,11 @@ class InstrumentStatus(enum.StrEnum):
 
 
 class AssetClass(enum.StrEnum):
-    """Asset class used to choose qualification thresholds."""
+    """Asset class used to choose qualification thresholds.
+
+    ``RWA`` marks crypto-venue contracts on real-world assets such as
+    commodities, currencies and indices, as the venue classifies them.
+    """
 
     CRYPTO = "CRYPTO"
     RWA = "RWA"
@@ -276,7 +280,7 @@ class Instrument:
 
     @property
     def calendar(self) -> str:
-        """Returns the session calendar id."""
+        """The session calendar id (contract ``CalendarId``)."""
         return calendar_code(
             self.instrument_id.venue, self.instrument_id.market_type
         )
@@ -288,7 +292,8 @@ class Instrument:
             price: Price.
 
         Returns:
-            The ladder tick at ``price``, else ``tick_size``.
+            The tick of the highest ladder rung whose ``min_price`` is at or
+            below ``price``; ``tick_size`` when no rung applies.
         """
         tick = self.tick_size
         for step in sorted(self.tick_ladder):
@@ -298,7 +303,7 @@ class Instrument:
 
     @property
     def instrument_id(self) -> InstrumentId:
-        """Returns the canonical identifier."""
+        """The canonical identifier, ``key.instrument_id``."""
         return self.key.instrument_id
 
     def to_contract(self) -> dict[str, object]:

@@ -20,7 +20,10 @@ from joseph.domain import sessions
 from joseph.domain import timeframes
 
 _SPREAD_QUANTUM = decimal.Decimal("0.000001")
-"""Spread percentages are reported to 1e-6 % (display precision)."""
+"""Spread percentages are reported to 1e-6 % (display precision).
+
+The quantization uses the current decimal context, which rounds half-even.
+"""
 
 
 class BuyVolumeMethod(enum.StrEnum):
@@ -36,8 +39,11 @@ class BuyVolumeMethod(enum.StrEnum):
 class Candle:
     """OHLCV bar over ``[start_ms, end_ms)``.
 
-    Only ``is_final`` bars may confirm signals. A correction of the same bar
-    increments ``revision``; it never retroactively erases fired signals.
+    Boundaries follow the instrument's session calendar
+    (``sessions.for_instrument``), so an exchange bar may be cut short at the
+    session close. Only ``is_final`` bars may confirm signals. A correction
+    of the same bar increments ``revision``; it never retroactively erases
+    fired signals.
 
     Attributes:
         instrument_id: Exact venue instrument.
@@ -92,7 +98,8 @@ class Candle:
         """Validates bar invariants.
 
         Raises:
-            ValueError: If boundaries or OHLC relationships are inconsistent.
+            ValueError: If boundaries, OHLC relationships or volumes are
+                inconsistent.
         """
         calendar = sessions.for_instrument(self.instrument_id)
         if not calendar.is_aligned(self.timeframe, self.start_ms):
@@ -115,29 +122,33 @@ class Candle:
 
     @property
     def buy_volume_method(self) -> BuyVolumeMethod | None:
-        """Returns how the buy volume was obtained (``None`` without one)."""
+        """How the buy volume was obtained; ``None`` without a buy volume.
+
+        An unset ``taker_buy_method`` reads as ``TAKER`` once a buy volume
+        is present.
+        """
         if self.taker_buy_base_volume is None:
             return None
         return self.taker_buy_method or BuyVolumeMethod.TAKER
 
     @property
     def body_high(self) -> decimal.Decimal:
-        """Returns ``max(open, close)``."""
+        """The top of the candle body, ``max(open, close)``."""
         return max(self.open, self.close)
 
     @property
     def body_low(self) -> decimal.Decimal:
-        """Returns ``min(open, close)``."""
+        """The bottom of the candle body, ``min(open, close)``."""
         return min(self.open, self.close)
 
     @property
     def is_bullish(self) -> bool:
-        """Returns True when close > open."""
+        """Whether the bar closed above its open."""
         return self.close > self.open
 
     @property
     def is_bearish(self) -> bool:
-        """Returns True when close < open."""
+        """Whether the bar closed below its open."""
         return self.close < self.open
 
     def to_contract(self) -> dict[str, object]:
@@ -236,7 +247,8 @@ class OrderBook:
         source: Origin such as ``binance.rest``.
         stale: True if the book failed sequence checks or aged out.
         venue_sequence: Last applied venue sequence/update id.
-        checksum_verified: ``None`` when the venue has no checksum.
+        checksum_verified: Whether the book matched the venue's checksum;
+            ``None`` when the venue has no checksum.
     """
 
     instrument_id: instruments.InstrumentId
@@ -251,12 +263,12 @@ class OrderBook:
 
     @property
     def best_bid(self) -> decimal.Decimal | None:
-        """Returns the best bid price, or ``None`` for an empty side."""
+        """The best bid price, or ``None`` when there are no bids."""
         return self.bids[0].price if self.bids else None
 
     @property
     def best_ask(self) -> decimal.Decimal | None:
-        """Returns the best ask price, or ``None`` for an empty side."""
+        """The best ask price, or ``None`` when there are no asks."""
         return self.asks[0].price if self.asks else None
 
     def to_contract(self) -> dict[str, object]:
@@ -272,17 +284,17 @@ class OrderBook:
             "received_at_ms": self.received_at_ms,
             "bids": [
                 [
-                    decimals.format_decimal(lvl.price),
-                    decimals.format_decimal(lvl.quantity),
+                    decimals.format_decimal(level.price),
+                    decimals.format_decimal(level.quantity),
                 ]
-                for lvl in self.bids
+                for level in self.bids
             ],
             "asks": [
                 [
-                    decimals.format_decimal(lvl.price),
-                    decimals.format_decimal(lvl.quantity),
+                    decimals.format_decimal(level.price),
+                    decimals.format_decimal(level.quantity),
                 ]
-                for lvl in self.asks
+                for level in self.asks
             ],
             "depth": max(len(self.bids), len(self.asks)),
             "stale": self.stale,
@@ -324,7 +336,10 @@ class Funding:
 
     @property
     def normalized_8h_pct(self) -> decimal.Decimal:
-        """Returns ``rate * 100 * 8 / interval_hours`` for comparison only."""
+        """The rate in percent per 8 hours, ``rate * 100 * 8 / interval_hours``.
+
+        Only for comparing venues with different funding intervals.
+        """
         interval = decimals.to_decimal(self.interval_hours)
         return self.rate * decimals.HUNDRED * decimal.Decimal(8) / interval
 
@@ -423,7 +438,10 @@ class MarketSnapshot:
 
     @property
     def spread_pct(self) -> decimal.Decimal | None:
-        """Returns ``(ask - bid) / mid * 100`` or ``None`` if unavailable."""
+        """The spread in percent of the mid, ``(ask - bid) / mid * 100``.
+
+        ``None`` when either side is missing or the mid is not positive.
+        """
         if self.best_bid is None or self.best_ask is None:
             return None
         mid = (self.best_bid + self.best_ask) / 2

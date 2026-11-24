@@ -8,8 +8,12 @@ lists every day the market traded, so ad hoc closures such as typhoon days
 are captured. Future closures come from TWSE's published market holiday
 schedule. The output is ``src/joseph/domain/calendar_data/xtai.json``.
 
-Usage:
+Usage, from the ``joseph-market-engine`` directory (needs network access)::
+
     uv run python scripts/generate_xtai_calendar.py [--start 2005-01]
+
+``--start`` (``YYYY-MM``, default ``2005-01``) is the first month of the
+observed record; the table starts on its first day.
 
 TWSE throttles clients that send more than a few requests every five
 seconds, so requests are paced; a full run takes about ten minutes.
@@ -35,7 +39,10 @@ _OUT = (
     pathlib.Path(__file__).resolve().parents[1]
     / "src/joseph/domain/calendar_data/xtai.json"
 )
+# Pause between requests, under TWSE's request throttle.
 _PAUSE_S = 2.2
+# The holiday schedule also lists the year's first and last trading days
+# ("start of trading", "last trading"); those are sessions, not closures.
 _TRADING_NAMES = ("開始交易", "最後交易")
 _TPE = zoneinfo.ZoneInfo("Asia/Taipei")
 
@@ -76,7 +83,8 @@ def _month_trading_days(
         Trading days (empty for a month without data).
 
     Raises:
-        RuntimeError: If TWSE answers with an unexpected status.
+        RuntimeError: If TWSE answers five attempts with a status other
+            than 200.
     """
     for attempt in range(5):
         response = client.get(
@@ -106,7 +114,7 @@ def _scheduled_closures(client: httpx.Client) -> set[datetime.date]:
     response = client.get(_SCHEDULE_OPENAPI)
     if response.status_code == 200:
         for item in response.json():
-            raw = item["Date"]
+            raw = item["Date"]  # ROC date "yyyMMdd", e.g. "1140101".
             text = f"{int(raw[:3]) + 1911}-{raw[3:5]}-{raw[5:7]}"
             rows.append((text, item["Name"]))
     for year in (_today().year, _today().year + 1):
@@ -129,11 +137,15 @@ def _scheduled_closures(client: httpx.Client) -> set[datetime.date]:
 
 
 def main() -> None:
-    """Runs the generator."""
+    """Runs the generator and writes ``xtai.json``."""
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("--start", default="2005-01")
+    parser.add_argument(
+        "--start",
+        default="2005-01",
+        help="first month of the observed record, YYYY-MM",
+    )
     args = parser.parse_args()
-    start_year, start_month = (int(p) for p in args.start.split("-"))
+    start_year, start_month = (int(part) for part in args.start.split("-"))
     today = _today()
     traded: set[datetime.date] = set()
     with httpx.Client(timeout=30, headers={"User-Agent": "joseph"}) as client:
@@ -171,7 +183,7 @@ def main() -> None:
     }
     _OUT.parent.mkdir(parents=True, exist_ok=True)
     _OUT.write_text(json.dumps(payload, indent=1) + "\n", encoding="utf-8")
-    print(  # noqa: T201
+    print(  # noqa: T201 - CLI script output
         f"wrote {_OUT}: {len(closures)} observed closures, "
         f"{len(future)} scheduled, {len(weekend_sessions)} weekend sessions"
     )

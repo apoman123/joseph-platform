@@ -19,8 +19,11 @@ publication follow the rules of ``sessions._bond_holidays``.
 The output is ``src/joseph/domain/calendar_data/usbond.json`` with the keys
 of ``xtai.json``.
 
-Usage:
+Usage, from the ``joseph-market-engine`` directory (needs network access)::
+
     uv run python scripts/generate_usbond_calendar.py [--start 1990]
+
+``--start`` (a year, default 1990) is the first year of the observed record.
 
 The script does not import ``joseph``: the engine loads the table it
 writes at import time.
@@ -84,7 +87,8 @@ def parse_dates(text: str) -> set[datetime.date]:
     for row in rows[1:]:
         if not row or not row[0].strip():
             continue
-        if not any(c.strip() and c.strip().upper() != "N/A" for c in row[1:]):
+        cells = (cell.strip() for cell in row[1:])
+        if not any(cell and cell.upper() != "N/A" for cell in cells):
             continue
         month, day, year = (int(part) for part in row[0].split("/"))
         dates.add(datetime.date(year, month, day))
@@ -127,13 +131,19 @@ def _year_dates(client: httpx.Client, year: int) -> set[datetime.date]:
 
 
 def main() -> None:
-    """Runs the generator.
+    """Runs the generator and writes ``usbond.json``.
 
     Raises:
-        RuntimeError: If a past year has no published row.
+        RuntimeError: If a past year has no published row, or Treasury
+            keeps failing for a year.
     """
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("--start", type=int, default=_FIRST_YEAR)
+    parser.add_argument(
+        "--start",
+        type=int,
+        default=_FIRST_YEAR,
+        help="first year of the observed record",
+    )
     args = parser.parse_args()
     today = _today()
     published: set[datetime.date] = set()
@@ -172,7 +182,7 @@ def main() -> None:
     }
     _OUT.parent.mkdir(parents=True, exist_ok=True)
     _OUT.write_text(json.dumps(payload, indent=1) + "\n", encoding="utf-8")
-    print(  # noqa: T201
+    print(  # noqa: T201 - CLI script output
         f"wrote {_OUT}: {len(published)} published days through "
         f"{observed_through}, {len(closures)} weekday closures, "
         f"{len(weekend_sessions)} weekend sessions"

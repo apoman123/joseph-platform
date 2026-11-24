@@ -36,6 +36,8 @@ import pathlib
 import zoneinfo
 from collections.abc import Callable
 from collections.abc import Iterable
+from typing import TypeAlias
+from typing import override
 
 from joseph.domain import instruments
 from joseph.domain import timeframes
@@ -43,6 +45,8 @@ from joseph.domain import timeframes
 Timeframe = timeframes.Timeframe
 
 _DATA_DIR = pathlib.Path(__file__).with_name("calendar_data")
+# Days searched for a neighbouring session before giving up; far longer than
+# any real run of closed days (holidays plus weekends).
 _MAX_SCAN_DAYS = 60
 _DAY = datetime.timedelta(days=1)
 _PERIODIC = (Timeframe.D1, Timeframe.W1, Timeframe.MN1)
@@ -102,7 +106,7 @@ class BarCalendar(abc.ABC):
 
     @property
     def continuous(self) -> bool:
-        """Returns True when the market never closes."""
+        """Whether the market never closes."""
         return self.calendar_id is CalendarId.CONTINUOUS
 
     def ceil(self, tf: Timeframe, ts_ms: int) -> int:
@@ -128,6 +132,10 @@ class BarCalendar(abc.ABC):
 
         Returns:
             Bar start in UTC epoch milliseconds.
+
+        Raises:
+            ValueError: If no session opens at or before ``ts_ms`` (exchange
+                calendars only).
         """
 
     @abc.abstractmethod
@@ -140,6 +148,10 @@ class BarCalendar(abc.ABC):
 
         Returns:
             Exclusive bar end.
+
+        Raises:
+            ValueError: If no session opens at or before ``start_ms``
+                (exchange calendars only).
         """
 
     @abc.abstractmethod
@@ -154,6 +166,10 @@ class BarCalendar(abc.ABC):
 
         Returns:
             The start of the bar ``bars`` bars away.
+
+        Raises:
+            ValueError: If the move leaves the calendar's coverage (exchange
+                calendars only).
         """
 
     @abc.abstractmethod
@@ -244,56 +260,113 @@ class BarCalendar(abc.ABC):
 
 
 class ContinuousCalendar(BarCalendar):
-    """Always-open market with UTC-aligned bars (``Timeframe`` rules)."""
+    """Always-open market with UTC-aligned bars (``Timeframe`` rules).
+
+    Attributes:
+        calendar_id: Always ``CalendarId.CONTINUOUS``.
+    """
 
     calendar_id = CalendarId.CONTINUOUS
 
+    @override
     def floor(self, tf: Timeframe, ts_ms: int) -> int:
         """See base class."""
         return tf.floor(ts_ms)
 
+    @override
     def end_of(self, tf: Timeframe, start_ms: int) -> int:
         """See base class."""
         return tf.end_of(start_ms)
 
+    @override
     def shift(self, tf: Timeframe, start_ms: int, bars: int) -> int:
         """See base class."""
         return tf.shift(start_ms, bars)
 
+    @override
     def bars_between(self, tf: Timeframe, start_ms: int, end_ms: int) -> int:
         """See base class."""
         return tf.bars_between(start_ms, end_ms)
 
+    @override
     def ceil(self, tf: Timeframe, ts_ms: int) -> int:
         """See base class."""
         start = tf.floor(ts_ms)
         return start if start == ts_ms else tf.end_of(start)
 
+    @override
     def is_open(self, ts_ms: int) -> bool:
         """See base class."""
-        del ts_ms
+        del ts_ms  # Unused.
         return True
 
+    @override
     def sessions(self, from_ms: int, to_ms: int) -> list[Session]:
         """See base class."""
-        del from_ms, to_ms
+        del from_ms, to_ms  # Unused.
         return []
 
+    @override
     def contains(self, big: Timeframe, small: Timeframe) -> bool:
         """See base class."""
         return big.contains(small)
 
+    @override
     def last_closed_start(self, tf: Timeframe, as_of_ms: int) -> int | None:
         """See base class."""
         return timeframes.last_closed_start(tf, as_of_ms)
 
 
-ClosedDay = Callable[[datetime.date], bool]
-EarlyClose = Callable[[datetime.date], datetime.time | None]
+ClosedDay: TypeAlias = Callable[[datetime.date], bool]
+"""Predicate that is True for a weekday without a session."""
+
+EarlyClose: TypeAlias = Callable[[datetime.date], datetime.time | None]
+"""Local close time of a shortened session, or ``None`` for a full one."""
+
+
+def _no_early_close(day: datetime.date) -> datetime.time | None:
+    """Reports that no session closes early (the default ``EarlyClose``).
+
+    Args:
+        day: Session date.
+
+    Returns:
+        Always ``None``.
+    """
+    del day  # Unused.
+    return None
+
+
+def _bar_count(tf: Timeframe, session: Session) -> int:
+    """Counts the intraday bars of a session.
+
+    Args:
+        tf: Intraday timeframe.
+        session: Session.
+
+    Returns:
+        Bar count (the last one may be short).
+    """
+    length = session.close_ms - session.open_ms
+    return -(-length // tf.duration_ms)
 
 
 class ExchangeCalendar(BarCalendar):
-    """Session calendar of an exchange with holidays and early closes."""
+    """Session calendar of an exchange with holidays and early closes.
+
+    Sessions are computed on demand and cached per local date.
+
+    Attributes:
+        calendar_id: Identifier.
+        tz: Exchange time zone.
+        open_time: Regular local open.
+        close_time: Regular local close (early closes come from the
+            ``early_close`` rule).
+        first_day: First local date the calendar covers; earlier dates have
+            no session.
+        close_grace_ms: Prints up to this long after a session close belong
+            to the session's last bar.
+    """
 
     def __init__(
         self,
@@ -328,7 +401,7 @@ class ExchangeCalendar(BarCalendar):
         self.open_time = open_time
         self.close_time = close_time
         self._is_closed = is_closed
-        self._early_close = early_close or (lambda day: None)
+        self._early_close = early_close or _no_early_close
         self._weekend = frozenset(weekend_sessions)
         self.first_day = first_day
         self.close_grace_ms = close_grace_ms
@@ -471,6 +544,9 @@ class ExchangeCalendar(BarCalendar):
 
         Returns:
             A session with ``close_ms > ts_ms``.
+
+        Raises:
+            ValueError: If no session follows within the scan window.
         """
         try:
             found = self.session_at_or_before(ts_ms)
@@ -484,6 +560,7 @@ class ExchangeCalendar(BarCalendar):
             raise
         return found if ts_ms < found.close_ms else self.next_session(found)
 
+    @override
     def is_open(self, ts_ms: int) -> bool:
         """See base class."""
         try:
@@ -492,6 +569,7 @@ class ExchangeCalendar(BarCalendar):
             return False
         return ts_ms < found.close_ms
 
+    @override
     def sessions(self, from_ms: int, to_ms: int) -> list[Session]:
         """See base class."""
         result: list[Session] = []
@@ -505,6 +583,7 @@ class ExchangeCalendar(BarCalendar):
 
     # Bars ---------------------------------------------------------------
 
+    @override
     def contains(self, big: Timeframe, small: Timeframe) -> bool:
         """See base class."""
         if small.duration_ms >= big.duration_ms:
@@ -514,20 +593,6 @@ class ExchangeCalendar(BarCalendar):
         if big in _PERIODIC:
             return True
         return big.duration_ms % small.duration_ms == 0
-
-    @staticmethod
-    def _count(tf: Timeframe, session: Session) -> int:
-        """Returns the number of intraday bars in a session.
-
-        Args:
-            tf: Intraday timeframe.
-            session: Session.
-
-        Returns:
-            Bar count (the last one may be short).
-        """
-        length = session.close_ms - session.open_ms
-        return -(-length // tf.duration_ms)
 
     def _period_key(self, tf: Timeframe, day: datetime.date) -> object:
         """Returns the grouping key of a periodic bar.
@@ -586,12 +651,13 @@ class ExchangeCalendar(BarCalendar):
             current = following
         return current
 
+    @override
     def floor(self, tf: Timeframe, ts_ms: int) -> int:
         """See base class."""
         found = self.session_at_or_before(ts_ms)
         if tf in _PERIODIC:
             return self._period_first(tf, found).open_ms
-        count = self._count(tf, found)
+        count = _bar_count(tf, found)
         if ts_ms >= found.close_ms + self.close_grace_ms:
             index = count - 1
         else:
@@ -619,10 +685,11 @@ class ExchangeCalendar(BarCalendar):
         if ts_ms <= found.open_ms:
             return found, 0
         index = math.ceil((ts_ms - found.open_ms) / tf.duration_ms)
-        if index < self._count(tf, found):
+        if index < _bar_count(tf, found):
             return found, index
         return self.next_session(found), 0
 
+    @override
     def end_of(self, tf: Timeframe, start_ms: int) -> int:
         """See base class."""
         found = self.session_at_or_before(start_ms)
@@ -630,6 +697,7 @@ class ExchangeCalendar(BarCalendar):
             return self._period_last(tf, found).close_ms
         return min(start_ms + tf.duration_ms, found.close_ms)
 
+    @override
     def shift(self, tf: Timeframe, start_ms: int, bars: int) -> int:
         """See base class."""
         current, index = self._ceil(tf, start_ms)
@@ -640,14 +708,15 @@ class ExchangeCalendar(BarCalendar):
                 current = self._period_first(tf, self.previous_session(current))
             return current.open_ms
         index += bars
-        while index >= (count := self._count(tf, current)):
+        while index >= (count := _bar_count(tf, current)):
             index -= count
             current = self.next_session(current)
         while index < 0:
             current = self.previous_session(current)
-            index += self._count(tf, current)
+            index += _bar_count(tf, current)
         return current.open_ms + index * tf.duration_ms
 
+    @override
     def bars_between(self, tf: Timeframe, start_ms: int, end_ms: int) -> int:
         """See base class."""
         if end_ms <= start_ms:
@@ -662,7 +731,7 @@ class ExchangeCalendar(BarCalendar):
         current = self._first_session_from(start_ms)
         step = tf.duration_ms
         while current.open_ms < end_ms:
-            count = self._count(tf, current)
+            count = _bar_count(tf, current)
             low = max(start_ms, current.open_ms) - current.open_ms
             high = min(end_ms - current.open_ms, count * step)
             first = -(-low // step)
@@ -698,6 +767,9 @@ def _nth_weekday(year: int, month: int, weekday: int, n: int) -> datetime.date:
 
 def _easter(year: int) -> datetime.date:
     """Returns Western Easter Sunday (anonymous Gregorian algorithm).
+
+    The single-letter names are the algorithm's published notation
+    (Meeus/Jones/Butcher); ``el`` stands for its ``l``.
 
     Args:
         year: Year.
@@ -800,6 +872,9 @@ def _nyse_closed(day: datetime.date) -> bool:
 def _nyse_early_close(day: datetime.date) -> datetime.time | None:
     """Returns the 13:00 early close, if ``day`` has one.
 
+    The day after Thanksgiving closes early, and so do July 3 and
+    December 24 when they fall on Monday to Thursday.
+
     Args:
         day: Session date.
 
@@ -849,7 +924,14 @@ def _bond_holidays(year: int) -> frozenset[datetime.date]:
 
 @dataclasses.dataclass(frozen=True, slots=True)
 class _TableData:
-    """Closures and weekend sessions loaded from a generated table."""
+    """Closures and weekend sessions loaded from a generated table.
+
+    Attributes:
+        first_day: First date of the record (``observed_from``).
+        closures: Weekdays without a session.
+        weekend_sessions: Saturdays and Sundays that traded.
+        covered_through: Last date the table covers, observed or scheduled.
+    """
 
     first_day: datetime.date
     closures: frozenset[datetime.date]

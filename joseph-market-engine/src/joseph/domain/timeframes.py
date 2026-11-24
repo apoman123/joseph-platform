@@ -51,7 +51,7 @@ class Timeframe(enum.StrEnum):
 
     @property
     def duration_ms(self) -> int:
-        """Returns the bar length in milliseconds.
+        """The bar length in milliseconds.
 
         Exact for fixed-length timeframes. For ``1M`` it is the longest
         possible month (31 days): use it to order timeframes or to size
@@ -61,12 +61,12 @@ class Timeframe(enum.StrEnum):
 
     @property
     def is_calendar(self) -> bool:
-        """Returns True when bar length varies with the calendar (``1M``)."""
+        """Whether the bar length varies with the calendar (``1M``)."""
         return self is Timeframe.MN1
 
     @property
     def is_seconds(self) -> bool:
-        """Returns True for sub-minute timeframes (built from trades)."""
+        """Whether the timeframe is sub-minute (bars built from trades)."""
         return self.duration_ms < _MINUTE_MS
 
     def floor(self, ts_ms: int) -> int:
@@ -149,6 +149,9 @@ class Timeframe(enum.StrEnum):
         """
         if other.duration_ms >= self.duration_ms:
             return False
+        # Weeks and months start at 00:00 UTC, so any timeframe that divides
+        # a day tiles them; a week (7 days) does not divide a day, so weekly
+        # bars never nest in monthly ones.
         if self in (Timeframe.W1, Timeframe.MN1):
             return _DAY_MS % other.duration_ms == 0
         return self.duration_ms % other.duration_ms == 0

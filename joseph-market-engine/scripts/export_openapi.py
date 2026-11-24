@@ -3,8 +3,15 @@
 
 """Exports the market engine's OpenAPI document into the contracts package.
 
-Usage: ``uv run python scripts/export_openapi.py [--check]``. With
-``--check`` the command fails when the committed document is out of date.
+Usage, from the ``joseph-market-engine`` directory::
+
+    uv run python scripts/export_openapi.py [--check]
+
+Without arguments the document is regenerated from a DEMO-only application
+(in-memory SQLite, no pipeline) and written to
+``joseph-terminal/packages/contracts/openapi/market-engine.openapi.json``.
+With ``--check`` nothing is written and the exit status is 1 when the
+committed document is missing or differs from the generated one (CI).
 """
 
 from __future__ import annotations
@@ -31,7 +38,8 @@ def main() -> int:
     """Writes or checks the OpenAPI document.
 
     Returns:
-        Process exit code.
+        Process exit code: 0 when the document was written or is up to date,
+        1 when ``--check`` finds it out of date.
     """
     settings = dataclasses.replace(
         config.Settings(),
@@ -43,11 +51,11 @@ def main() -> int:
     text = json.dumps(app.openapi(), indent=2, sort_keys=True) + "\n"
     if "--check" in sys.argv:
         if not _OUT.exists() or _OUT.read_text(encoding="utf-8") != text:
-            print("market-engine OpenAPI is out of date")  # noqa: T201
+            print("market-engine OpenAPI is out of date")  # noqa: T201 - CLI script output
             return 1
         return 0
     _OUT.write_text(text, encoding="utf-8")
-    print(f"wrote {_OUT}")  # noqa: T201
+    print(f"wrote {_OUT}")  # noqa: T201 - CLI script output
     return 0
 
 
