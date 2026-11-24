@@ -37,9 +37,9 @@ const BTC = 'mock:perp:BTCUSD';
 const ETH = 'mock:perp:ETHUSD';
 
 /**
- * Builds a drawing.
+ * Builds a two-anchor trendline drawing.
  * @param id Drawing id.
- * @param instrumentId Instrument.
+ * @param instrumentId Instrument; the DEMO BTCUSD perpetual by default.
  * @return Document.
  */
 function drawing(id: string, instrumentId = BTC): DrawingDocument {

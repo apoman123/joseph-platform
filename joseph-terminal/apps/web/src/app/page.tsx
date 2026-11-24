@@ -5,14 +5,14 @@
  */
 
 /**
- * @fileoverview Terminal route.
+ * @fileoverview Home route (`/`): the terminal, loaded on the client only.
  */
 
 import type {ReactElement} from 'react';
 import {ClientTerminal} from './client-terminal';
 
 /**
- * Home page rendering the terminal.
+ * Renders the terminal at the home route.
  * @return Page.
  */
 export default function Page(): ReactElement {

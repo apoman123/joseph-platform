@@ -12,10 +12,14 @@
 import {createStore, type ReadableStore} from '@joseph/feature-registry';
 
 /**
- * Creates a lazily started store.
- * @param initial Initial value.
- * @param start Starts producing values; returns a stop function.
- * @return Readable store.
+ * Creates a lazily started store: `start` runs when the first listener
+ * subscribes and its stop function when the last one leaves; a later first
+ * subscriber starts it again.
+ * @param initial Value before anything has been produced.
+ * @param start Starts producing values through `set`; returns a stop
+ *     function.
+ * @return Readable store; `get` keeps returning the last value while
+ *     stopped.
  */
 export function createLazyStore<T>(
   initial: T,

@@ -56,6 +56,8 @@ export function importWorkspaceFile(
   const before = new Map(
     current.charts.map(c => [c.chart_id, c.instrument_id])
   );
+  // Keep this browser's workspace id: drawings and settings are stored
+  // under it, not under the id in the file.
   runtime.dispatch({
     type: 'replace',
     workspace: {...result.workspace, workspace_id: workspaceId},
@@ -77,6 +79,7 @@ export function importWorkspaceFile(
       }
       store.reset(repository.load(chart.instrument_id));
     }
+    // Views keyed on the revision (such as the object list) re-read.
     runtime.drawing.revision.update(n => n + 1);
   }
   const upgraded = result.migrated ? ' (upgraded from an older format)' : '';
@@ -96,7 +99,7 @@ export function importWorkspaceFile(
   return `Imported the workspace${upgraded} and ${count} drawing${count === 1 ? '' : 's'} on ${instruments} instrument${instruments === 1 ? '' : 's'}; they replace the drawings saved for ${instruments === 1 ? 'that instrument' : 'those instruments'}.${kept}${dropped}`;
 }
 
-/** Height of the provenance header added to screenshots. */
+/** Height in CSS pixels of the provenance header added to screenshots. */
 const HEADER_PX = 28;
 
 /** Provenance words used in screenshot headers. */
@@ -111,10 +114,11 @@ const FEED_WORDS: Readonly<Record<FeedState, string>> = {
 };
 
 /**
- * Builds the screenshot header line.
+ * Builds the screenshot header line: symbol, venue, timeframe, provenance
+ * and capture time.
  * @param chart Chart state.
  * @param feedState Provenance shown on the chart.
- * @param nowMs Clock.
+ * @param nowMs Capture time (UTC ms).
  * @return Header text.
  */
 export function screenshotCaption(
@@ -130,8 +134,9 @@ export function screenshotCaption(
 /**
  * Builds a download file name for a chart screenshot.
  * @param chart Chart state.
- * @param nowMs Clock.
- * @return File name such as `joseph-BTCUSD-5m-20261122-1504.png`.
+ * @param nowMs Capture time (UTC ms).
+ * @return File name such as `joseph-BTCUSD-5m-20261122-1504.png`; symbol
+ *     characters unsafe in file names become `_`.
  */
 export function screenshotFileName(chart: ChartState, nowMs: number): string {
   const {venueMarketId} = parseInstrumentId(chart.instrument_id);
@@ -147,7 +152,8 @@ export function screenshotFileName(chart: ChartState, nowMs: number): string {
 /**
  * Loads an image from a data URL.
  * @param url Data URL.
- * @return Image.
+ * @return Image, once decoded.
+ * @throws `Error` (as a rejection) when the image cannot be decoded.
  */
 function loadImage(url: string): Promise<HTMLImageElement> {
   return new Promise((resolve, reject) => {
@@ -163,8 +169,10 @@ function loadImage(url: string): Promise<HTMLImageElement> {
  * Adds a provenance header above a chart image.
  * @param imageUrl Chart PNG data URL.
  * @param caption Header text.
- * @param colors Background and text colors.
- * @return Composed PNG data URL (the original when canvas is unavailable).
+ * @param colors Background and text colours and the font family.
+ * @return Composed PNG data URL, or the original when no 2D canvas context
+ *     is available.
+ * @throws `Error` (as a rejection) when the chart image cannot be decoded.
  */
 export async function composeScreenshot(
   imageUrl: string,
@@ -193,6 +201,7 @@ export async function composeScreenshot(
  * @param fileName File name.
  */
 function download(url: string, fileName: string): void {
+  // Some browsers download only from a link that is in the document.
   const link = document.createElement('a');
   link.href = url;
   link.download = fileName;
@@ -203,7 +212,9 @@ function download(url: string, fileName: string): void {
 }
 
 /**
- * Chart tools feature.
+ * Creates the chart tools feature: commands and hotkeys for screenshots,
+ * bar replay, session separators, the data window, fitting the chart and
+ * workspace import.
  * @param runtime Terminal runtime.
  * @return Feature.
  */
@@ -326,6 +337,7 @@ export function chartToolsFeature(runtime: TerminalRuntime): WebFeature {
         for (const dispose of disposers.splice(0).reverse()) {
           dispose();
         }
+        // Replay belongs to this feature: removing it ends every replay.
         runtime.replay.set({});
       };
     },
