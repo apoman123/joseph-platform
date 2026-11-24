@@ -68,6 +68,31 @@ def _clip(
     return kept[-limit:] if limit is not None else kept
 
 
+def derived(
+    caps: capabilities_lib.VenueCapabilities,
+) -> dict[timeframes.Timeframe, timeframes.Timeframe]:
+    """Maps each timeframe the engine aggregates to its native child.
+
+    Args:
+        caps: Capabilities of the wrapped adapter.
+
+    Returns:
+        ``{aggregated timeframe: native child timeframe}``; empty when
+        the venue has no REST history to fold.
+    """
+    if not caps.market_data.rest_history:
+        return {}
+    native = [
+        tf
+        for tf in caps.timeframes
+        if tf not in caps.trade_built_timeframes
+        and tf not in caps.aggregated_timeframes
+    ]
+    return aggregation.derived_timeframes(
+        sessions.for_venue(caps.venue), native
+    )
+
+
 class DerivedBarsAdapter:
     """``MarketDataPort`` adding aggregated timeframes and recorded delta.
 
@@ -105,31 +130,6 @@ class DerivedBarsAdapter:
 
     # Capabilities --------------------------------------------------------
 
-    @staticmethod
-    def derived(
-        caps: capabilities_lib.VenueCapabilities,
-    ) -> dict[timeframes.Timeframe, timeframes.Timeframe]:
-        """Maps each timeframe the engine aggregates to its native child.
-
-        Args:
-            caps: Capabilities of the wrapped adapter.
-
-        Returns:
-            ``{aggregated timeframe: native child timeframe}``; empty when
-            the venue has no REST history to fold.
-        """
-        if not caps.market_data.rest_history:
-            return {}
-        native = [
-            tf
-            for tf in caps.timeframes
-            if tf not in caps.trade_built_timeframes
-            and tf not in caps.aggregated_timeframes
-        ]
-        return aggregation.derived_timeframes(
-            sessions.for_venue(caps.venue), native
-        )
-
     def _delta(self, caps: capabilities_lib.VenueCapabilities) -> bool:
         """Checks whether recorded true delta applies to a venue.
 
@@ -152,18 +152,17 @@ class DerivedBarsAdapter:
             ``trade_delta`` and notes explaining both added.
         """
         caps = self.inner.capabilities()
-        derived = self.derived(caps)
+        folded = derived(caps)
         delta = self._delta(caps)
         records = self._recorder is not None and (
             self._recorder.records_venue(caps.venue)
         )
-        if not derived and not delta and not records:
+        if not folded and not delta and not records:
             return caps
         notes = list(caps.notes)
-        if derived:
+        if folded:
             pairs = ", ".join(
-                f"{tf.value} from {child.value}"
-                for tf, child in derived.items()
+                f"{tf.value} from {child.value}" for tf, child in folded.items()
             )
             notes.append(
                 f"Aggregated by the engine, equal to native bars: {pairs}. "
@@ -186,12 +185,12 @@ class DerivedBarsAdapter:
             timeframes=tuple(
                 tf
                 for tf in timeframes.Timeframe
-                if tf in caps.timeframes or tf in derived
+                if tf in caps.timeframes or tf in folded
             ),
             aggregated_timeframes=tuple(
                 tf
                 for tf in timeframes.Timeframe
-                if tf in caps.aggregated_timeframes or tf in derived
+                if tf in caps.aggregated_timeframes or tf in folded
             ),
             market_data=dataclasses.replace(
                 caps.market_data,
@@ -262,7 +261,7 @@ class DerivedBarsAdapter:
             left out (a gap).
         """
         caps = self.inner.capabilities()
-        child = self.derived(caps).get(timeframe)
+        child = derived(caps).get(timeframe)
         if child is None:
             rows = await self.inner.fetch_candles(
                 instrument, timeframe, start_ms, end_ms, limit
@@ -307,7 +306,7 @@ class DerivedBarsAdapter:
                 the (child) timeframe.
         """
         caps = self.inner.capabilities()
-        child = self.derived(caps).get(timeframe)
+        child = derived(caps).get(timeframe)
         if child is None:
             stream = self.inner.stream_candles(instrument, timeframe, tracker)
             if timeframe.is_seconds or not self._delta(caps):

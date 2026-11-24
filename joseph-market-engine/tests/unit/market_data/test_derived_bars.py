@@ -707,4 +707,4 @@ def test_aggregation_needs_rest_history() -> None:
         caps,
         market_data=dataclasses.replace(caps.market_data, rest_history=False),
     )
-    assert derived_bars.DerivedBarsAdapter.derived(no_rest) == {}
+    assert derived_bars.derived(no_rest) == {}

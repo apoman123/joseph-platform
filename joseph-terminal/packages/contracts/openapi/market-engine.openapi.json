@@ -495,7 +495,7 @@
       },
       "BacktestBody": {
         "additionalProperties": false,
-        "description": "Body mirroring the contract ``BacktestRequest``.\n\nAttributes:\n    version: Version number.\n    instrument_id: Canonical instrument id.\n    from_ms: Inclusive start.\n    to_ms: Exclusive end.\n    fee_bps: Fee per side.\n    slippage_bps: Slippage on market fills.\n    max_hold_bars: Timeout in bars.",
+        "description": "Body mirroring the contract ``BacktestRequest``.\n\nUnknown fields are rejected (422).\n\nAttributes:\n    version: Strategy version number to evaluate.\n    instrument_id: Canonical instrument id.\n    from_ms: Inclusive start, UTC epoch milliseconds.\n    to_ms: Exclusive end, UTC epoch milliseconds.\n    fee_bps: Fee per side in basis points; when omitted, the\n        strategy's fee estimate or 0.\n    slippage_bps: Slippage on market fills in basis points; the\n        runner's default when omitted.\n    max_hold_bars: Bars before a timeout exit (1..10000); the runner's\n        default when omitted.",
         "properties": {
           "fee_bps": {
             "anyOf": [
@@ -836,7 +836,7 @@
       },
       "CrossesNode": {
         "additionalProperties": false,
-        "description": "``left`` crossed ``right`` between the previous and current bar.\n\nAttributes:\n    op: Discriminator ``CROSSES``.\n    id: Stable editor id.\n    label: Optional display label.\n    left: Moving operand.\n    right: Reference operand.\n    direction: ``ABOVE`` or ``BELOW``.",
+        "description": "``left`` crossed ``right`` between the previous and current bar.\n\n``ABOVE``: at or below on the previous bar, above on the current one;\n``BELOW`` mirrors it.\n\nAttributes:\n    op: Discriminator ``CROSSES``.\n    id: Stable editor id.\n    label: Optional display label.\n    left: Moving operand.\n    right: Reference operand.\n    direction: ``ABOVE`` or ``BELOW``.",
         "properties": {
           "direction": {
             "enum": [
@@ -939,7 +939,7 @@
       },
       "DataPolicy": {
         "additionalProperties": false,
-        "description": "Input freshness policy.\n\nAttributes:\n    max_data_age_ms: Maximum age of the evaluated bar at evaluation.\n    allow_rest_poll: Whether polled (POLL) candles are acceptable.",
+        "description": "Input freshness policy.\n\nAttributes:\n    max_data_age_ms: Maximum time from the evaluated bar's close to the\n        evaluation; an older bar evaluates to UNKNOWN.\n    allow_rest_poll: Whether polled (POLL) candles are acceptable.",
         "properties": {
           "allow_rest_poll": {
             "default": true,
@@ -2374,7 +2374,7 @@
   "paths": {
     "/health": {
       "get": {
-        "description": "Reports liveness and per-venue feed health.\n\nReturns:\n    Health document.",
+        "description": "Reports liveness and per-venue feed health.\n\nThe status is always ``ok`` with HTTP 200 while the process serves\nrequests; a degraded venue feed shows only in ``venues``.\n\nReturns:\n    Health document: ``status``, ``service``, ``version``,\n    ``demo_only`` and ``venues`` (venue id to feed state).",
         "operationId": "health_health_get",
         "responses": {
           "200": {
@@ -2398,7 +2398,7 @@
     },
     "/metrics": {
       "get": {
-        "description": "Exposes Prometheus metrics.\n\nReturns:\n    Text exposition document.",
+        "description": "Exposes Prometheus metrics.\n\nReturns:\n    Prometheus text exposition document.",
         "operationId": "metrics_endpoint_metrics_get",
         "responses": {
           "200": {
@@ -2420,7 +2420,7 @@
     },
     "/v1/alerts/subscriptions": {
       "get": {
-        "description": "Lists the caller's subscriptions.\n\nArgs:\n    principal: Caller.\n\nReturns:\n    Contract ``AlertSubscriptionList``.",
+        "description": "Lists the caller's subscriptions.\n\nArgs:\n    principal: Caller; only their tenant's subscriptions are listed.\n\nReturns:\n    Contract ``AlertSubscriptionList``: subscriptions on\n    user-managed channels and the channels with server credentials.",
         "operationId": "list_subscriptions_v1_alerts_subscriptions_get",
         "responses": {
           "200": {
@@ -2444,7 +2444,7 @@
     },
     "/v1/alerts/subscriptions/{subscription_id}": {
       "put": {
-        "description": "Creates or replaces a subscription.\n\nArgs:\n    principal: Caller.\n    subscription_id: Identifier.\n    body: Contract ``AlertSubscription``.\n\nReturns:\n    Stored contract ``AlertSubscription``.",
+        "description": "Creates or replaces a subscription.\n\nArgs:\n    principal: Caller; the subscription belongs to their tenant.\n    subscription_id: Identifier from the path.\n    body: Contract ``AlertSubscription``.\n\nReturns:\n    Stored contract ``AlertSubscription``.\n\nRaises:\n    errors.ValidationFailedError: If the id or a body field is\n        invalid (422).",
         "operationId": "put_subscription_v1_alerts_subscriptions__subscription_id__put",
         "parameters": [
           {
@@ -2501,7 +2501,7 @@
     },
     "/v1/aois": {
       "get": {
-        "description": "Returns AOIs and recent events (contract AoiList).",
+        "description": "Returns areas of interest (AOIs) and recent events.\n\nArgs:\n    instrument_id: Canonical instrument id.\n    tf: Timeframe value, such as ``1h``.\n    plugin_set: Query ``set``: comma-separated plugin ids; all\n        usable plugins when absent.\n    at_ms: Point in time, UTC epoch milliseconds; the latest closed\n        bar when absent.\n    settings: JSON object mapping plugin ids to setting overrides.\n\nReturns:\n    Contract ``AoiList``.\n\nRaises:\n    errors.ValidationFailedError: If a parameter or a setting\n        override is invalid (422).\n    errors.MissingDataError: If no closed candle is available (422).",
         "operationId": "get_aois_v1_aois_get",
         "parameters": [
           {
@@ -2604,7 +2604,7 @@
     },
     "/v1/calendars/{calendar_id}/sessions": {
       "get": {
-        "description": "Lists the trading sessions of a calendar in a window.\n\nThe window ``[from_ms, to_ms)`` may span at most 400 days. A 24x7\ncalendar never closes and returns no sessions.\n\nArgs:\n    calendar_id: Contract ``CalendarId`` (``24x7``, ``XTAI``,\n        ``XNYS``, ``USBOND``).\n    from_ms: Inclusive window start.\n    to_ms: Exclusive window end.\n\nReturns:\n    Contract ``SessionList``.",
+        "description": "Lists the trading sessions of a calendar in a window.\n\nThe window ``[from_ms, to_ms)`` may span at most 400 days. A 24x7\ncalendar never closes and returns no sessions.\n\nArgs:\n    calendar_id: Contract ``CalendarId`` (``24x7``, ``XTAI``,\n        ``XNYS``, ``USBOND``).\n    from_ms: Inclusive window start, UTC epoch milliseconds.\n    to_ms: Exclusive window end, UTC epoch milliseconds.\n\nReturns:\n    Contract ``SessionList``.\n\nRaises:\n    errors.NotFoundError: For an unknown calendar (404).\n    errors.ValidationFailedError: For an empty or too long window\n        (422).",
         "operationId": "calendar_sessions_v1_calendars__calendar_id__sessions_get",
         "parameters": [
           {
@@ -2669,7 +2669,7 @@
     },
     "/v1/candles": {
       "get": {
-        "description": "Returns historical candles with provenance and gaps.\n\nArgs:\n    instrument_id: Canonical instrument id.\n    tf: Timeframe.\n    from_ms: Inclusive start.\n    to_ms: Exclusive end.\n    limit: Maximum bars.\n    feed_mode: Optional ``REPLAY`` to read recordings.\n\nReturns:\n    Contract ``CandleBatch``.",
+        "description": "Returns historical candles with provenance and gaps.\n\nArgs:\n    instrument_id: Canonical instrument id.\n    tf: Timeframe value, such as ``1h``.\n    from_ms: Inclusive start, UTC epoch milliseconds.\n    to_ms: Exclusive end, UTC epoch milliseconds.\n    limit: Maximum bars (default 500, max 5000).\n    feed_mode: Contract ``FeedMode`` (``AUTO`` when absent);\n        ``REPLAY`` reads recordings, the other modes the venue.\n\nReturns:\n    Contract ``CandleBatch``.\n\nRaises:\n    errors.ValidationFailedError: On an invalid id, timeframe,\n        range, limit or ``feed_mode`` (422).\n    errors.NotFoundError: If the venue is not enabled (404).\n    errors.MissingDataError: For ``REPLAY`` without a replay source\n        (422).",
         "operationId": "candles_v1_candles_get",
         "parameters": [
           {
@@ -2787,7 +2787,7 @@
     },
     "/v1/indicators/plugins": {
       "get": {
-        "description": "Lists usable indicator plugins (contract IndicatorPluginList).",
+        "description": "Lists usable indicator plugins.\n\nReturns:\n    Contract ``IndicatorPluginList``.",
         "operationId": "list_plugins_v1_indicators_plugins_get",
         "responses": {
           "200": {
@@ -2811,7 +2811,7 @@
     },
     "/v1/indicators/series": {
       "get": {
-        "description": "Returns one plugin's per-bar values (contract IndicatorSeries).",
+        "description": "Returns one plugin's published values on every closed bar.\n\nArgs:\n    instrument_id: Canonical instrument id.\n    tf: Timeframe value, such as ``1h``.\n    plugin: Plugin id.\n    from_ms: First bar start, UTC epoch milliseconds; the default\n        lookback window when absent.\n    settings: JSON object mapping plugin ids to setting overrides;\n        only the entry for ``plugin`` is used.\n\nReturns:\n    Contract ``IndicatorSeries``.\n\nRaises:\n    errors.NotFoundError: If the plugin id is unknown (404).\n    errors.UnsupportedError: If the plugin is disabled or removed\n        (422).\n    errors.ValidationFailedError: If a parameter or a setting\n        override is invalid (422).",
         "operationId": "get_series_v1_indicators_series_get",
         "parameters": [
           {
@@ -2907,7 +2907,7 @@
     },
     "/v1/indicators/snapshot": {
       "get": {
-        "description": "Returns indicator snapshots (contract IndicatorSnapshotList).",
+        "description": "Returns indicator snapshots as of a point in time.\n\nArgs:\n    instrument_id: Canonical instrument id.\n    tf: Timeframe value, such as ``1h``.\n    plugin_set: Query ``set``: comma-separated plugin ids; all\n        usable plugins when absent.\n    at_ms: Point in time, UTC epoch milliseconds; the latest closed\n        bar when absent.\n    settings: JSON object mapping plugin ids to setting overrides.\n\nReturns:\n    Contract ``IndicatorSnapshotList``.\n\nRaises:\n    errors.ValidationFailedError: If a parameter or a setting\n        override is invalid (422).\n    errors.MissingDataError: If no closed candle is available (422).",
         "operationId": "get_snapshots_v1_indicators_snapshot_get",
         "parameters": [
           {
@@ -3010,7 +3010,7 @@
     },
     "/v1/instruments": {
       "get": {
-        "description": "Searches exact-venue instruments.\n\nArgs:\n    venue: Optional venue.\n    market_type: Optional market type.\n    q: Optional search text.\n    limit: Maximum results.\n\nReturns:\n    Contract ``InstrumentList``.",
+        "description": "Searches exact-venue instruments.\n\nArgs:\n    venue: Optional contract ``Venue`` filter.\n    market_type: Optional contract ``MarketType`` filter.\n    q: Optional search text.\n    limit: Maximum results (1..5000, 422 outside).\n\nReturns:\n    Contract ``InstrumentList``.\n\nRaises:\n    errors.ValidationFailedError: On an unknown ``venue`` or\n        ``market_type`` (422).",
         "operationId": "list_instruments_v1_instruments_get",
         "parameters": [
           {
@@ -3106,7 +3106,7 @@
     },
     "/v1/market/orderbook": {
       "get": {
-        "description": "Returns an order-book snapshot.\n\nArgs:\n    instrument_id: Canonical instrument id.\n    depth: Levels per side.\n\nReturns:\n    Contract ``OrderBook``.",
+        "description": "Returns an order-book snapshot.\n\nArgs:\n    instrument_id: Canonical instrument id.\n    depth: Levels per side (1..1000, 422 outside).\n\nReturns:\n    Contract ``OrderBook``.\n\nRaises:\n    errors.ValidationFailedError: On a malformed id (422).\n    errors.NotFoundError: If the venue is not enabled (404).",
         "operationId": "orderbook_v1_market_orderbook_get",
         "parameters": [
           {
@@ -3163,7 +3163,7 @@
     },
     "/v1/market/qualification": {
       "get": {
-        "description": "Returns qualification results with every gate's evidence.\n\nArgs:\n    venue: Optional venue.\n    status: Optional status filter.\n    refresh: Force a fresh scan.\n\nReturns:\n    Contract ``QualificationReport``.",
+        "description": "Returns qualification results with every gate's evidence.\n\nArgs:\n    venue: Optional contract ``Venue`` filter.\n    status: Optional qualification status filter.\n    refresh: Whether to scan again instead of using records\n        cached within the service's time to live.\n\nReturns:\n    Contract ``QualificationReport``.\n\nRaises:\n    errors.ValidationFailedError: On an unknown ``venue`` or\n        ``status`` (422).",
         "operationId": "qualification_report_v1_market_qualification_get",
         "parameters": [
           {
@@ -3241,7 +3241,7 @@
     },
     "/v1/market/snapshot": {
       "get": {
-        "description": "Returns the latest market snapshot.\n\nArgs:\n    instrument_id: Canonical instrument id.\n\nReturns:\n    Contract ``MarketSnapshot``.",
+        "description": "Returns the latest market snapshot (cached for one second).\n\nArgs:\n    instrument_id: Canonical instrument id.\n\nReturns:\n    Contract ``MarketSnapshot``, flagged stale when older than the\n    service's ``stale_after_ms``.\n\nRaises:\n    errors.ValidationFailedError: On a malformed id (422).\n    errors.NotFoundError: If the venue is not enabled (404).",
         "operationId": "snapshot_v1_market_snapshot_get",
         "parameters": [
           {
@@ -3286,7 +3286,7 @@
     },
     "/v1/signals": {
       "get": {
-        "description": "Lists the caller's signals, newest first.\n\nArgs:\n    principal: Caller.\n    strategy_id: Strategy filter.\n    kind: Comma-separated signal kinds.\n    instrument_id: Instrument filter.\n    from_ms: Inclusive lower bound on bar close.\n    to_ms: Exclusive upper bound on bar close.\n    limit: Maximum rows.\n\nReturns:\n    Contract ``SignalList``.",
+        "description": "Lists the caller's signals, newest first.\n\nArgs:\n    principal: Caller; only their tenant's signals are listed.\n    strategy_id: Strategy filter.\n    kind: Comma-separated signal kinds; empty parts are ignored.\n    instrument_id: Instrument filter.\n    from_ms: Inclusive lower bound on bar close, UTC epoch\n        milliseconds.\n    to_ms: Exclusive upper bound on bar close, UTC epoch\n        milliseconds.\n    limit: Maximum rows (1..500, 422 outside).\n\nReturns:\n    Contract ``SignalList``; ``next_cursor`` is always ``None``\n    because the route does not paginate.\n\nRaises:\n    errors.ValidationFailedError: If ``from_ms`` is not before\n        ``to_ms`` (422).",
         "operationId": "list_signals_v1_signals_get",
         "parameters": [
           {
@@ -3416,7 +3416,7 @@
     },
     "/v1/strategies": {
       "get": {
-        "description": "Lists the latest version of each strategy.\n\nArgs:\n    principal: Caller.\n\nReturns:\n    Contract ``StrategyVersionList``.",
+        "description": "Lists the latest version of each strategy.\n\nArgs:\n    principal: Caller; only their tenant's strategies are listed.\n\nReturns:\n    Contract ``StrategyVersionList``.",
         "operationId": "list_strategies_v1_strategies_get",
         "responses": {
           "200": {
@@ -3438,7 +3438,7 @@
         ]
       },
       "post": {
-        "description": "Stores a new strategy as version 1.\n\nArgs:\n    definition: Rule AST v2 definition.\n    principal: Caller.\n\nReturns:\n    Contract ``StrategyVersion``.",
+        "description": "Stores a new strategy as version 1 (201).\n\nA semantically invalid definition is still stored, as a DRAFT.\n\nArgs:\n    definition: Rule AST v2 definition.\n    principal: Caller; needs the ``strategy:write`` scope.\n\nReturns:\n    Contract ``StrategyVersion``.\n\nRaises:\n    errors.ConflictError: If the strategy id already exists (409).\n    errors.ForbiddenError: If the caller may not write (403).",
         "operationId": "create_strategy_v1_strategies_post",
         "requestBody": {
           "content": {
@@ -3482,7 +3482,7 @@
     },
     "/v1/strategies/validate": {
       "post": {
-        "description": "Validates a definition without storing it.\n\nArgs:\n    definition: Definition.\n    principal: Caller.\n\nReturns:\n    Contract ``ValidationResult``.",
+        "description": "Validates a definition without storing it.\n\nArgs:\n    definition: Rule AST v2 definition.\n    principal: Caller.\n\nReturns:\n    Contract ``ValidationResult``; an invalid definition is a 200\n    response with ``valid`` false, not an error.",
         "operationId": "validate_definition_v1_strategies_validate_post",
         "requestBody": {
           "content": {
@@ -3526,7 +3526,7 @@
     },
     "/v1/strategies/{strategy_id}": {
       "get": {
-        "description": "Lists every version of one strategy.\n\nArgs:\n    strategy_id: Strategy slug.\n    principal: Caller.\n\nReturns:\n    Contract ``StrategyVersionList``.",
+        "description": "Lists every version of one strategy.\n\nArgs:\n    strategy_id: Strategy slug.\n    principal: Caller.\n\nReturns:\n    Contract ``StrategyVersionList``.\n\nRaises:\n    errors.NotFoundError: If the caller's tenant has no such\n        strategy (404).",
         "operationId": "get_strategy_v1_strategies__strategy_id__get",
         "parameters": [
           {
@@ -3572,7 +3572,7 @@
     },
     "/v1/strategies/{strategy_id}/activate": {
       "post": {
-        "description": "Activates a version in ALERT_ONLY, PAPER or SHADOW mode.\n\nArgs:\n    strategy_id: Strategy slug.\n    body: Version and mode.\n    principal: Caller.\n\nReturns:\n    Contract ``StrategyVersion``.",
+        "description": "Activates a version in ALERT_ONLY, PAPER or SHADOW mode.\n\nArgs:\n    strategy_id: Strategy slug.\n    body: Version, mode and optional instruments.\n    principal: Caller; needs the ``strategy:write`` scope.\n\nReturns:\n    Contract ``StrategyVersion``.\n\nRaises:\n    strategy_errors.TradeModeDisabledError: For ``AUTO_LIVE`` (409\n        ``TRADE_MODE_DISABLED``).\n    errors.ValidationFailedError: For an unknown mode or instrument,\n        or a version invalid against the current catalog (422).\n    errors.NotFoundError: If the version does not exist (404).\n    errors.ForbiddenError: If the caller may not write (403).",
         "operationId": "activate_v1_strategies__strategy_id__activate_post",
         "parameters": [
           {
@@ -3628,7 +3628,7 @@
     },
     "/v1/strategies/{strategy_id}/backtests": {
       "post": {
-        "description": "Runs a backtest with the production evaluator.\n\nArgs:\n    strategy_id: Strategy slug.\n    body: Parameters.\n    principal: Caller.\n\nReturns:\n    Contract ``BacktestReport``.",
+        "description": "Runs a backtest with the production evaluator.\n\nArgs:\n    strategy_id: Strategy slug.\n    body: Parameters; omitted options take the runner's defaults.\n    principal: Caller; only their own versions can be run.\n\nReturns:\n    Contract ``BacktestReport``.\n\nRaises:\n    errors.NotFoundError: If the version is not the caller's (404).\n    errors.ValidationFailedError: If the range or the strategy is\n        invalid for a backtest (422).",
         "operationId": "run_backtest_v1_strategies__strategy_id__backtests_post",
         "parameters": [
           {
@@ -3684,7 +3684,7 @@
     },
     "/v1/strategies/{strategy_id}/pause": {
       "post": {
-        "description": "Pauses the active version.\n\nArgs:\n    strategy_id: Strategy slug.\n    principal: Caller.\n\nReturns:\n    Contract ``StrategyVersion``.",
+        "description": "Pauses the active version.\n\nArgs:\n    strategy_id: Strategy slug.\n    principal: Caller; needs the ``strategy:write`` scope.\n\nReturns:\n    Contract ``StrategyVersion``.\n\nRaises:\n    errors.ConflictError: If no version is active (409).\n    errors.ForbiddenError: If the caller may not write (403).",
         "operationId": "pause_v1_strategies__strategy_id__pause_post",
         "parameters": [
           {
@@ -3730,7 +3730,7 @@
     },
     "/v1/strategies/{strategy_id}/validate": {
       "post": {
-        "description": "Re-validates a stored version against the current catalog.\n\nArgs:\n    strategy_id: Strategy slug.\n    principal: Caller.\n    body: Optional version selector.\n\nReturns:\n    Contract ``ValidationResult``.",
+        "description": "Re-validates a stored version against the current catalog.\n\nA version that no longer validates becomes UNSUPPORTED and is\ndeactivated.\n\nArgs:\n    strategy_id: Strategy slug.\n    principal: Caller.\n    body: Optional version selector; the latest version when\n        omitted.\n\nReturns:\n    Contract ``ValidationResult``.\n\nRaises:\n    errors.NotFoundError: If the strategy or version does not exist\n        (404).",
         "operationId": "revalidate_v1_strategies__strategy_id__validate_post",
         "parameters": [
           {
@@ -3793,7 +3793,7 @@
     },
     "/v1/strategies/{strategy_id}/versions": {
       "post": {
-        "description": "Stores a new immutable version.\n\nArgs:\n    strategy_id: Strategy slug.\n    definition: Edited definition.\n    principal: Caller.\n\nReturns:\n    Contract ``StrategyVersion``.",
+        "description": "Stores a new immutable version (201).\n\nA definition identical to the latest version returns that version\ninstead of creating a duplicate.\n\nArgs:\n    strategy_id: Strategy slug.\n    definition: Edited definition; its ``strategy_id`` must match\n        the path.\n    principal: Caller; needs the ``strategy:write`` scope.\n\nReturns:\n    Contract ``StrategyVersion``.\n\nRaises:\n    errors.ValidationFailedError: If the definition's id differs\n        from the path (422).\n    errors.NotFoundError: If the strategy does not exist (404).\n    errors.ForbiddenError: If the caller may not write (403).",
         "operationId": "create_version_v1_strategies__strategy_id__versions_post",
         "parameters": [
           {
