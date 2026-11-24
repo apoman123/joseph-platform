@@ -46,7 +46,7 @@ export interface PatternRatio {
 
 /** An extra line drawn and hit-tested with the pattern. */
 export interface PatternGuide {
-  /** Vertices in pixels. */
+  /** Vertices in CSS pixels. */
   points: Point[];
   /** Whether the guide is dashed. */
   dashed: boolean;
@@ -61,9 +61,9 @@ export interface PatternSpec {
   /** Polygons (anchor indices) filled with `style.fill_color`. */
   fills?: ReadonlyArray<readonly number[]>;
   /**
-   * Guide lines derived from the anchor pixels (necklines, boundaries).
-   * @param points Anchor pixels (complete pattern).
-   * @param transform Transform (plot size).
+   * Derives guide lines from the anchor pixels (necklines, boundaries).
+   * @param points Anchor points in CSS pixels (complete pattern).
+   * @param transform Transforms of the current frame (for the plot size).
    * @return Guides.
    */
   guides?: (
@@ -71,31 +71,33 @@ export interface PatternSpec {
     transform: PixelTransform
   ) => PatternGuide[];
   /**
-   * Extra filled shapes derived from the anchor pixels (for example the
+   * Derives extra filled shapes from the anchor pixels (for example the
    * area between two boundary lines), filled like `fills`.
-   * @param points Anchor pixels (complete pattern).
-   * @param transform Transform (plot size).
-   * @return Polygons in pixels.
+   * @param points Anchor points in CSS pixels (complete pattern).
+   * @param transform Transforms of the current frame (for the plot size).
+   * @return Polygons in CSS pixels.
    */
   fillShapes?: (
     points: readonly Point[],
     transform: PixelTransform
   ) => Point[][];
   /**
-   * Object-list description when the pattern has no ratios.
-   * @param anchors Anchors.
+   * Returns the object-list description when the pattern has no ratios.
+   * @param anchors Anchors of the drawing.
    * @return Description.
    */
   describe?: (anchors: readonly DrawingAnchor[]) => string;
 }
 
 /**
- * Exact ratio `|leg| / |reference|` of anchor prices, to three decimals.
- * @param anchors Anchors.
+ * Returns the exact ratio `|leg| / |reference|` of anchor prices, to three
+ * decimals.
+ * @param anchors Anchors of the drawing.
  * @param leg Measured leg as anchor indices.
  * @param of Reference leg as anchor indices.
  * @return Ratio text, or null when an anchor is missing or the reference
  *     leg is flat.
+ * @throws `RangeError` when a used anchor price is not a decimal string.
  */
 export function legRatio(
   anchors: readonly DrawingAnchor[],
@@ -119,11 +121,12 @@ export function legRatio(
 }
 
 /**
- * Vertical label offset for an anchor: above a local high, below a local
- * low (screen y grows downward).
- * @param points Anchor pixels.
+ * Returns the vertical label offset for an anchor: above a local high,
+ * below a local low (screen y grows downward).
+ * @param points Anchor points in CSS pixels.
  * @param index Anchor index.
- * @return Offset in pixels (negative = above).
+ * @return Offset in CSS pixels, -12 (above) or 12 (below); above when the
+ *     anchor has no neighbours.
  */
 export function labelOffset(points: readonly Point[], index: number): number {
   const point = points[index];
@@ -137,13 +140,14 @@ export function labelOffset(points: readonly Point[], index: number): number {
 }
 
 /**
- * Pixel polygons to fill: the spec's anchor-index fills (skipping
- * incomplete ones) plus its derived shapes once the pattern is complete.
+ * Returns the pixel polygons to fill: the spec's anchor-index fills
+ * (skipping incomplete ones) plus its derived shapes once the pattern is
+ * complete.
  * @param spec Pattern spec.
- * @param points Anchor pixels.
- * @param transform Transform.
+ * @param points Anchor points in CSS pixels.
+ * @param transform Transforms of the current frame.
  * @param complete Whether every anchor is placed.
- * @return Polygons.
+ * @return Polygons in CSS pixels with at least three vertices each.
  */
 export function patternFillPolygons(
   spec: PatternSpec,
@@ -159,10 +163,12 @@ export function patternFillPolygons(
 }
 
 /**
- * One-line summary of a pattern's ratios, e.g. `AB/XA 0.618, BC/AB 0.5`.
+ * Returns a one-line summary of a pattern's ratios, e.g.
+ * `AB/XA 0.618, BC/AB 0.500`.
  * @param spec Pattern spec.
- * @param anchors Anchors.
- * @return Summary (empty when the pattern has no ratios).
+ * @param anchors Anchors of the drawing.
+ * @return Summary (empty when no ratio can be computed).
+ * @throws `RangeError` when a used anchor price is not a decimal string.
  */
 export function ratioSummary(
   spec: PatternSpec,
@@ -181,10 +187,12 @@ export function ratioSummary(
 }
 
 /**
- * Paints a pattern.
- * @param ctx Context.
- * @param doc Document.
- * @param transform Transform.
+ * Paints a pattern: fills, the zig-zag, ratio connectors, guides (once
+ * complete), anchor labels and handles. Nothing is drawn unless there are
+ * at least two anchors and all of them can be placed.
+ * @param ctx 2D context in CSS-pixel space.
+ * @param doc Drawing to paint.
+ * @param transform Transforms of the frame being painted.
  * @param state Render state.
  * @param spec Pattern spec.
  * @param anchorCount Anchors of the complete pattern.
@@ -269,13 +277,14 @@ export function renderPattern(
  * Hit-tests a pattern: handles first (handle index = anchor index), then
  * legs, ratio connectors, guides and (when filled) the inside of its
  * polygons.
- * @param doc Document.
- * @param transform Transform.
- * @param point Pointer.
- * @param tolerance Tolerance in pixels.
+ * @param doc Drawing to test.
+ * @param transform Transforms of the current frame.
+ * @param point Pointer position in CSS pixels.
+ * @param tolerance Hit tolerance in CSS pixels.
  * @param spec Pattern spec.
- * @param anchorCount Anchors of the complete pattern (guides need all).
- * @return Hit or null.
+ * @param anchorCount Anchors of the complete pattern (guides need all);
+ *     defaults to the number of labels.
+ * @return The part hit, or null for a miss.
  */
 export function hitTestPattern(
   doc: DrawingDocument,
@@ -320,8 +329,9 @@ export function hitTestPattern(
  * Creates a pattern tool from a manifest and a spec.
  * @param manifest Manifest (`anchorCount` = anchors of the full pattern).
  * @param spec Pattern spec.
- * @param fill Default fill: `on` (translucent course color), `off` (fill key
- *     present but null, so the style bar offers it) or `none` (no fill key).
+ * @param fill Default fill: `on` (the user mark color at 10% opacity),
+ *     `off` (fill key present but null, so the style bar offers it) or
+ *     `none` (no fill key).
  * @return Tool plugin.
  */
 export function createPatternTool(

@@ -6,13 +6,17 @@
 
 /**
  * @fileoverview Pixel-space geometry and hit testing for drawings.
+ *
+ * Every point, length and tolerance here is in CSS pixels relative to the
+ * plot's top-left corner, with y growing downward (see `surface.ts`).
+ * Nothing in this file knows about time or price.
  */
 
-/** Point in CSS pixels. */
+/** Point in CSS pixels, plot-relative. */
 export interface Point {
-  /** X. */
+  /** X in CSS pixels, growing to the right. */
   x: number;
-  /** Y. */
+  /** Y in CSS pixels, growing downward. */
   y: number;
 }
 
@@ -22,27 +26,29 @@ export const MOUSE_TOLERANCE_PX = 6;
 export const TOUCH_TOLERANCE_PX = 14;
 
 /**
- * Euclidean distance.
+ * Returns the Euclidean distance between two points.
  * @param a First point.
  * @param b Second point.
- * @return Distance in pixels.
+ * @return Distance in CSS pixels.
  */
 export function distance(a: Point, b: Point): number {
   return Math.hypot(a.x - b.x, a.y - b.y);
 }
 
 /**
- * Distance from a point to a segment.
- * @param p Point.
+ * Returns the distance from a point to the closest point of a segment.
+ * @param p Point to measure from.
  * @param a Segment start.
  * @param b Segment end.
- * @return Distance in pixels.
+ * @return Distance in CSS pixels (to `a` when the segment has zero length).
  */
 export function distanceToSegment(p: Point, a: Point, b: Point): number {
   const dx = b.x - a.x;
   const dy = b.y - a.y;
   const lengthSquared = dx * dx + dy * dy;
   if (lengthSquared === 0) return distance(p, a);
+  // Projects `p` onto the segment's line as a fraction `t` of a-to-b,
+  // clamped to [0, 1] so points beyond either end measure to that end.
   const t = Math.max(
     0,
     Math.min(1, ((p.x - a.x) * dx + (p.y - a.y) * dy) / lengthSquared)
@@ -51,13 +57,15 @@ export function distanceToSegment(p: Point, a: Point, b: Point): number {
 }
 
 /**
- * Extends a segment to the plot edges.
+ * Extends a segment along its line to the plot's left and/or right edge.
  * @param a First point.
  * @param b Second point.
- * @param width Plot width.
- * @param extendLeft Extend beyond `a`.
- * @param extendRight Extend beyond `b`.
- * @return Possibly extended endpoints.
+ * @param width Plot width in CSS pixels (the right edge's x).
+ * @param extendLeft Whether to extend beyond `a`.
+ * @param extendRight Whether to extend beyond `b`.
+ * @return `[start, end]`: an extended end moves to x = 0 or x = `width`
+ *     (its y may then lie outside the plot); other ends are unchanged.
+ *     Vertical segments are never extended.
  */
 export function extendSegment(
   a: Point,
@@ -70,28 +78,30 @@ export function extendSegment(
   if (dx === 0) return [a, b];
   const slope = (b.y - a.y) / dx;
   const atX = (x: number): Point => ({x, y: a.y + slope * (x - a.x)});
+  // "Beyond a" is the edge on a's side of the segment: the right edge when
+  // the segment was drawn right to left.
   const leftward = dx > 0 ? 0 : width;
   const rightward = dx > 0 ? width : 0;
   return [extendLeft ? atX(leftward) : a, extendRight ? atX(rightward) : b];
 }
 
-/** Axis-aligned rectangle. */
+/** Axis-aligned rectangle in CSS pixels. */
 export interface Rect {
-  /** Left. */
+  /** Left edge x. */
   x: number;
-  /** Top. */
+  /** Top edge y. */
   y: number;
-  /** Width. */
+  /** Width, rightward from `x`. */
   width: number;
-  /** Height. */
+  /** Height, downward from `y`. */
   height: number;
 }
 
 /**
- * Builds a normalized rectangle from two corners.
- * @param a Corner.
+ * Builds a normalized rectangle from two opposite corners.
+ * @param a One corner.
  * @param b Opposite corner.
- * @return Rectangle with non-negative size.
+ * @return Rectangle with non-negative width and height.
  */
 export function rectFromPoints(a: Point, b: Point): Rect {
   return {
@@ -103,11 +113,11 @@ export function rectFromPoints(a: Point, b: Point): Rect {
 }
 
 /**
- * Whether a point lies inside a rectangle expanded by a tolerance.
- * @param p Point.
- * @param rect Rectangle.
- * @param tolerance Expansion in pixels.
- * @return True when inside.
+ * Returns whether a point lies inside a rectangle expanded by a tolerance.
+ * @param p Point to test.
+ * @param rect Normalized rectangle.
+ * @param tolerance Expansion on every side, in CSS pixels.
+ * @return True when inside or on the expanded border.
  */
 export function pointInRect(p: Point, rect: Rect, tolerance = 0): boolean {
   return (
@@ -119,10 +129,10 @@ export function pointInRect(p: Point, rect: Rect, tolerance = 0): boolean {
 }
 
 /**
- * Distance from a point to a rectangle's border.
- * @param p Point.
- * @param rect Rectangle.
- * @return Distance in pixels.
+ * Returns the distance from a point to a rectangle's border (not its area).
+ * @param p Point to measure from.
+ * @param rect Normalized rectangle.
+ * @return Distance in CSS pixels to the nearest edge, positive inside too.
  */
 export function distanceToRectBorder(p: Point, rect: Rect): number {
   const corners: Point[] = [
@@ -140,10 +150,10 @@ export function distanceToRectBorder(p: Point, rect: Rect): number {
 
 /**
  * Finds the index of the handle under a point.
- * @param p Point.
- * @param handles Handle positions.
- * @param tolerance Hit radius.
- * @return Handle index or -1.
+ * @param p Pointer position.
+ * @param handles Handle centres.
+ * @param tolerance Hit radius in CSS pixels.
+ * @return Index of the nearest handle within the radius, or -1 for none.
  */
 export function handleAt(
   p: Point,
@@ -166,8 +176,9 @@ export function handleAt(
  * Reduces a sequence to at most `max` items, always keeping the first and
  * last and sampling the rest evenly (freehand strokes).
  * @param items Items in order.
- * @param max Maximum items (at least 2).
- * @return Reduced copy.
+ * @param max Maximum items; fractions are floored and values below 2 count
+ *     as 2.
+ * @return Reduced copy (a plain copy when already short enough).
  */
 export function decimate<T>(items: readonly T[], max: number): T[] {
   const limit = Math.max(2, Math.floor(max));
@@ -182,11 +193,12 @@ export function decimate<T>(items: readonly T[], max: number): T[] {
 }
 
 /**
- * Distance from a point to a polyline (optionally closed into a polygon).
- * @param p Point.
+ * Returns the distance from a point to a polyline, optionally closed.
+ * @param p Point to measure from.
  * @param points Vertices in order.
  * @param closed Whether the last vertex connects back to the first.
- * @return Distance in pixels (Infinity for no vertices).
+ * @return Distance in CSS pixels (to the vertex when there is only one,
+ *     Infinity when there are none).
  */
 export function distanceToPolyline(
   p: Point,
@@ -206,12 +218,14 @@ export function distanceToPolyline(
 }
 
 /**
- * Whether a point lies inside a polygon (even-odd rule).
- * @param p Point.
+ * Returns whether a point lies inside a polygon (even-odd rule).
+ * @param p Point to test.
  * @param polygon Vertices in order (implicitly closed).
  * @return True when inside.
  */
 export function pointInPolygon(p: Point, polygon: readonly Point[]): boolean {
+  // Ray casting: count the edges that a horizontal ray from `p` to the right
+  // crosses; an odd count means inside.
   let inside = false;
   for (let i = 0, j = polygon.length - 1; i < polygon.length; j = i, i += 1) {
     const a = polygon[i];
@@ -228,12 +242,12 @@ export function pointInPolygon(p: Point, polygon: readonly Point[]): boolean {
 }
 
 /**
- * End point of a ray from `origin` through `through`, clipped to the plot
- * rectangle `[0, width] x [0, height]` (fans, pitchfork tines).
+ * Returns the end point of a ray from `origin` through `through`, clipped to
+ * the plot rectangle `[0, width] x [0, height]` (fans, pitchfork tines).
  * @param origin Ray start.
  * @param through Second point giving the direction.
- * @param width Plot width.
- * @param height Plot height.
+ * @param width Plot width in CSS pixels.
+ * @param height Plot height in CSS pixels.
  * @return Where the ray leaves the plot; `through` itself when the
  *     direction is zero or `through` already lies beyond the plot edge.
  */
@@ -246,6 +260,8 @@ export function rayToEdge(
   const dx = through.x - origin.x;
   const dy = through.y - origin.y;
   if (dx === 0 && dy === 0) return through;
+  // Ray parameter (in multiples of origin-to-through) at which the ray
+  // crosses each edge it heads towards; the nearest crossing is the exit.
   const exits: number[] = [];
   if (dx > 0) exits.push((width - origin.x) / dx);
   if (dx < 0) exits.push(-origin.x / dx);
@@ -257,12 +273,12 @@ export function rayToEdge(
 }
 
 /**
- * Intersection of two infinite lines.
+ * Returns the intersection of two infinite lines, each given by two points.
  * @param a1 First line, point 1.
  * @param a2 First line, point 2.
  * @param b1 Second line, point 1.
  * @param b2 Second line, point 2.
- * @return Intersection, or null when the lines are parallel.
+ * @return Intersection, or null when the lines are parallel (or nearly so).
  */
 export function lineIntersection(
   a1: Point,
@@ -270,6 +286,7 @@ export function lineIntersection(
   b1: Point,
   b2: Point
 ): Point | null {
+  // Cramer's rule; `d` is the cross product of the two directions.
   const d = (a1.x - a2.x) * (b1.y - b2.y) - (a1.y - a2.y) * (b1.x - b2.x);
   if (Math.abs(d) < 1e-9) return null;
   const t = ((a1.x - b1.x) * (b1.y - b2.y) - (a1.y - b1.y) * (b1.x - b2.x)) / d;
@@ -279,10 +296,11 @@ export function lineIntersection(
 /**
  * Samples an axis-aligned ellipse into a closed polygon.
  * @param center Centre.
- * @param rx Horizontal radius.
- * @param ry Vertical radius.
+ * @param rx Horizontal radius in CSS pixels.
+ * @param ry Vertical radius in CSS pixels.
  * @param segments Number of vertices.
- * @return Vertices (the first is not repeated).
+ * @return Vertices starting at the rightmost point; the first is not
+ *     repeated at the end.
  */
 export function sampleEllipse(
   center: Point,
@@ -302,11 +320,12 @@ export function sampleEllipse(
 }
 
 /**
- * Circle through three points.
+ * Returns the circle through three points.
  * @param a First point.
  * @param b Second point.
  * @param c Third point.
- * @return Centre and radius, or null when the points are collinear.
+ * @return Centre and radius in CSS pixels, or null when the points are
+ *     collinear (or nearly so).
  */
 export function circumcircle(
   a: Point,
@@ -332,7 +351,7 @@ export function circumcircle(
  * @param b Point on the arc.
  * @param c End.
  * @param segments Number of segments.
- * @return Points from `a` to `c`.
+ * @return `segments + 1` points from `a` to `c`, or `[a, c]` when collinear.
  */
 export function sampleArc(
   a: Point,
@@ -346,6 +365,7 @@ export function sampleArc(
   const tau = 2 * Math.PI;
   const angle = (p: Point) => Math.atan2(p.y - center.y, p.x - center.x);
   const start = angle(a);
+  // Angle of `p` measured from `a`'s angle, normalized to [0, 2 pi).
   const offset = (p: Point) => (((angle(p) - start) % tau) + tau) % tau;
   const through = offset(b);
   const end = offset(c);
@@ -365,10 +385,11 @@ export function sampleArc(
 /**
  * Samples a quadratic Bézier curve.
  * @param a Start.
- * @param control Control point.
+ * @param control Control point (the curve bends towards it without passing
+ *     through it).
  * @param b End.
  * @param segments Number of segments.
- * @return Points from `a` to `b`.
+ * @return `segments + 1` points from `a` to `b`.
  */
 export function sampleQuadratic(
   a: Point,

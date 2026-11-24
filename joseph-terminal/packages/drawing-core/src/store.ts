@@ -30,22 +30,22 @@ export interface DrawingCommand {
   readonly mergeKey: string | null;
   /**
    * Applies the command.
-   * @param state Current state.
+   * @param state Current state; not modified.
    * @return Next state.
    */
   apply(state: DrawingState): DrawingState;
   /**
    * Reverts the command.
-   * @param state Current state.
-   * @return Previous state.
+   * @param state State the command produced; not modified.
+   * @return State before the command.
    */
   revert(state: DrawingState): DrawingState;
 }
 
 /**
- * Sorts drawings by z index, then creation time.
- * @param drawings Drawings.
- * @return Sorted copy.
+ * Sorts drawings by z index, then creation time (paint order).
+ * @param drawings Drawings in any order.
+ * @return Sorted copy, ascending.
  */
 function ordered(drawings: readonly DrawingDocument[]): DrawingDocument[] {
   return [...drawings].sort(
@@ -54,9 +54,9 @@ function ordered(drawings: readonly DrawingDocument[]): DrawingDocument[] {
 }
 
 /**
- * Command that adds a drawing.
+ * Builds the command that adds a drawing.
  * @param doc Drawing to add.
- * @return Command.
+ * @return Command (never merged).
  */
 export function createCommand(doc: DrawingDocument): DrawingCommand {
   return {
@@ -71,9 +71,9 @@ export function createCommand(doc: DrawingDocument): DrawingCommand {
 }
 
 /**
- * Command that deletes a drawing.
- * @param doc Drawing to delete (current version).
- * @return Command.
+ * Builds the command that deletes a drawing.
+ * @param doc Drawing to delete, as currently stored (restored on undo).
+ * @return Command (never merged).
  */
 export function deleteCommand(doc: DrawingDocument): DrawingCommand {
   return {
@@ -88,12 +88,12 @@ export function deleteCommand(doc: DrawingDocument): DrawingCommand {
 }
 
 /**
- * Command that replaces a drawing (move, resize, style, lock, visibility,
- * reorder, text).
+ * Builds the command that replaces a drawing (move, resize, style, lock,
+ * visibility, reorder, text).
  * @param before Current document.
  * @param after Replacement with the same id.
  * @param label History label.
- * @param mergeKey Merge key for gestures, or null.
+ * @param mergeKey Merge key shared by the commands of one gesture, or null.
  * @return Command.
  */
 export function updateCommand(
@@ -133,8 +133,8 @@ export class DrawingStore {
 
   /**
    * Creates the store.
-   * @param initial Initial state.
-   * @param historyLimit Maximum undo entries.
+   * @param initial Initial state; drawings are sorted into z order.
+   * @param historyLimit Maximum undo entries; the oldest is dropped first.
    */
   constructor(
     initial: DrawingState = {drawings: [], opaque: []},
@@ -145,7 +145,7 @@ export class DrawingStore {
 
   /**
    * Returns the current state.
-   * @return State.
+   * @return State (immutable; replaced on every change).
    */
   get(): DrawingState {
     return this.state;
@@ -154,7 +154,7 @@ export class DrawingStore {
   /**
    * Finds a drawing.
    * @param id Drawing id.
-   * @return Document or undefined.
+   * @return Document, or undefined when no readable drawing has the id.
    */
   find(id: string): DrawingDocument | undefined {
     return this.state.drawings.find(d => d.drawing_id === id);
@@ -162,8 +162,8 @@ export class DrawingStore {
 
   /**
    * Subscribes to changes.
-   * @param listener Listener.
-   * @return Disposer.
+   * @param listener Called with the new state after every change.
+   * @return Disposer that unsubscribes.
    */
   subscribe(listener: (state: DrawingState) => void): () => void {
     this.listeners.add(listener);
@@ -183,12 +183,15 @@ export class DrawingStore {
   }
 
   /**
-   * Executes a command and records it.
-   * @param command Command.
+   * Executes a command and records it, merging it into the previous entry
+   * when both share a non-null merge key. Clears the redo stack.
+   * @param command Command to apply.
    */
   execute(command: DrawingCommand): void {
     this.setState(command.apply(this.state));
     this.redoStack.length = 0;
+    // Only the latest entry can absorb a command, so a gesture interrupted
+    // by any other command starts a new entry.
     const last = this.undoStack.at(-1);
     const lastKey = last?.commands.at(-1)?.mergeKey ?? null;
     if (last && command.mergeKey !== null && command.mergeKey === lastKey) {
@@ -200,12 +203,15 @@ export class DrawingStore {
   }
 
   /**
-   * Updates a drawing unless it is locked (unlocking is always allowed).
+   * Updates a drawing. A locked drawing accepts an update only when it
+   * unlocks the drawing or leaves its anchors, style, text and props alone
+   * (visibility, z order).
    * @param id Drawing id.
-   * @param change Produces the replacement document.
+   * @param change Produces the replacement document from the current one.
    * @param label History label.
-   * @param mergeKey Merge key for gestures.
-   * @return True when applied.
+   * @param mergeKey Merge key shared by the updates of one gesture, or null.
+   * @return True when applied; false for an unknown id or a refused edit of
+   *     a locked drawing.
    */
   update(
     id: string,
@@ -227,7 +233,7 @@ export class DrawingStore {
   /**
    * Deletes a drawing unless it is locked.
    * @param id Drawing id.
-   * @return True when deleted.
+   * @return True when deleted; false for an unknown id or a locked drawing.
    */
   remove(id: string): boolean {
     const doc = this.find(id);
@@ -269,7 +275,7 @@ export class DrawingStore {
   }
 
   /**
-   * Whether undo is possible.
+   * Returns whether undo is possible.
    * @return True when the undo stack is not empty.
    */
   canUndo(): boolean {
@@ -277,7 +283,7 @@ export class DrawingStore {
   }
 
   /**
-   * Whether redo is possible.
+   * Returns whether redo is possible.
    * @return True when the redo stack is not empty.
    */
   canRedo(): boolean {
@@ -285,8 +291,8 @@ export class DrawingStore {
   }
 
   /**
-   * Publishes a new state.
-   * @param state State.
+   * Replaces the state and notifies listeners.
+   * @param state New state.
    */
   private setState(state: DrawingState): void {
     this.state = state;
@@ -297,15 +303,19 @@ export class DrawingStore {
 }
 
 /**
- * Whether only visibility/lock/z-order changed (allowed on locked drawings).
- * @param before Before.
- * @param after After.
- * @return True when geometry, style and text are unchanged.
+ * Returns whether an update leaves a drawing's content alone, so that only
+ * flags such as visibility, lock or z order changed (allowed on locked
+ * drawings).
+ * @param before Document before the update.
+ * @param after Document after the update.
+ * @return True when anchors, style, text and props are unchanged.
  */
 function onlyFlagsChanged(
   before: DrawingDocument,
   after: DrawingDocument
 ): boolean {
+  // Compares the JSON data structurally: edits spread the previous object,
+  // so unchanged values keep their key order.
   return (
     JSON.stringify(before.anchors) === JSON.stringify(after.anchors) &&
     JSON.stringify(before.style) === JSON.stringify(after.style) &&

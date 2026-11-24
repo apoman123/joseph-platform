@@ -17,16 +17,22 @@ import type {DrawingStore} from './store';
 // eslint-disable-next-line @typescript-eslint/naming-convention -- "Z order" is two words: Z + Order.
 export type ZOrderMove = 'forward' | 'backward' | 'front' | 'back';
 
-/** Sequence used to give each multi-document edit its own merge key. */
+/**
+ * Sequence that gives each multi-document edit its own merge key, so the
+ * updates of one reorder become one undo entry but two reorders never
+ * merge.
+ */
 let editSeq = 0;
 
 /**
  * Computes new z indices for a move. Drawings are renumbered 1..n in their
  * current order first, so ties and gaps never block a move.
  * @param drawings Drawings in z order (ascending).
- * @param id Drawing to move.
- * @param move Move.
- * @return New z index per drawing id (only changed entries).
+ * @param id Id of the drawing to move.
+ * @param move One step forward or backward, or all the way to the front or
+ *     back.
+ * @return New z index per drawing id (only changed entries; empty when the
+ *     id is unknown or nothing changes).
  */
 export function zOrderChanges(
   drawings: readonly DrawingDocument[],
@@ -55,12 +61,13 @@ export function zOrderChanges(
 }
 
 /**
- * Moves a drawing in z order as one undo entry.
+ * Moves a drawing in z order as one undo entry (allowed on locked
+ * drawings).
  * @param store Drawing store.
  * @param id Drawing id.
- * @param move Move.
- * @param nowMs Clock.
- * @return True when anything changed.
+ * @param move One step forward or backward, or to the front or back.
+ * @param nowMs Update time in epoch ms.
+ * @return True when any z index changed.
  */
 export function reorderDrawing(
   store: DrawingStore,
@@ -89,7 +96,7 @@ export function reorderDrawing(
  * @param store Drawing store.
  * @param id Drawing id.
  * @param patch Style fields to change.
- * @param nowMs Clock.
+ * @param nowMs Update time in epoch ms.
  * @param mergeKey Optional key merging a continuous edit (color drag).
  * @return True when applied.
  */
@@ -109,11 +116,12 @@ export function restyleDrawing(
 }
 
 /**
- * Replaces a drawing's text (text notes, labels).
+ * Replaces a drawing's text (text notes, labels). Locked drawings are not
+ * changed.
  * @param store Drawing store.
  * @param id Drawing id.
- * @param text New text (trimmed to the schema's 2000 characters).
- * @param nowMs Clock.
+ * @param text New text, truncated to the schema's 2000-character maximum.
+ * @param nowMs Update time in epoch ms.
  * @return True when applied.
  */
 export function retextDrawing(
@@ -134,8 +142,8 @@ export function retextDrawing(
  * Locked drawings are not changed.
  * @param store Drawing store.
  * @param id Drawing id.
- * @param patch Props to set.
- * @param nowMs Clock.
+ * @param patch Props to set; other props are kept.
+ * @param nowMs Update time in epoch ms.
  * @return True when applied.
  */
 export function setDrawingInputs(
@@ -148,6 +156,7 @@ export function setDrawingInputs(
     id,
     doc => ({
       ...doc,
+      // The generated contract types `props` as `{}`; it is a JSON object.
       props: {...(doc.props as Record<string, unknown> | undefined), ...patch},
       updated_at_ms: nowMs,
     }),
@@ -159,8 +168,9 @@ export function setDrawingInputs(
  * Shows/hides or locks/unlocks one drawing (allowed on locked drawings).
  * @param store Drawing store.
  * @param id Drawing id.
- * @param flags Flags to set.
- * @param nowMs Clock.
+ * @param flags Flags to set; omitted ones keep their value. The history
+ *     label names the lock change when `locked` is given.
+ * @param nowMs Update time in epoch ms.
  * @return True when applied.
  */
 export function setDrawingFlags(

@@ -33,7 +33,7 @@ import type {
 } from './surface';
 import {ToolRegistry, formatPrice, type ToolPlugin} from './tool';
 
-/** Linear transform: 10px per minute from t=0; price 200 at y=0, 100 at y=500. */
+/** Linear transform: 10 px per minute; price 200 at y=0, 100 at y=500. */
 const TRANSFORM: PixelTransform = {
   width: 1000,
   height: 500,
@@ -52,15 +52,16 @@ class TestSurface implements DrawingSurface {
   } = {};
 
   /**
-   * Subscribes.
-   * @param event Event.
-   * @param handler Handler.
-   * @return Disposer.
+   * Subscribes to a pointer event.
+   * @param event Event name.
+   * @param handler Called by `fire`.
+   * @return Disposer that unsubscribes.
    */
   on<E extends keyof SurfaceEventMap>(
     event: E,
     handler: (payload: SurfaceEventMap[E]) => void
   ): () => void {
+    // TypeScript cannot narrow the mapped type by the generic key `E`.
     const list = (this.handlers[event] ??= []) as Array<
       (e: SurfaceEventMap[E]) => void
     >;
@@ -71,9 +72,9 @@ class TestSurface implements DrawingSurface {
   }
 
   /**
-   * Adds a layer.
-   * @param layer Layer.
-   * @return Disposer.
+   * Records a canvas layer.
+   * @param layer Layer to record.
+   * @return Disposer that removes it.
    */
   addCanvasLayer(layer: SurfaceCanvasLayer): () => void {
     this.layers.push(layer);
@@ -82,31 +83,31 @@ class TestSurface implements DrawingSurface {
     };
   }
 
-  /** No-op. */
+  /** Ignores repaint requests. */
   invalidate(): void {}
 
   /**
-   * Records interactivity.
-   * @param enabled Flag.
+   * Records whether chart pan/zoom is enabled.
+   * @param enabled Whether pan/zoom is enabled.
    */
   setInteractive(enabled: boolean): void {
     this.interactive = enabled;
   }
 
   /**
-   * Returns the transform.
-   * @return Transform.
+   * Returns the fixed test transform.
+   * @return `TRANSFORM`.
    */
   transform(): PixelTransform {
     return TRANSFORM;
   }
 
   /**
-   * Fires a pointer event.
+   * Fires a primary-button pointer event at a pixel position.
    * @param kind Event kind.
-   * @param x X.
-   * @param y Y.
-   * @return The event.
+   * @param x X in CSS pixels.
+   * @param y Y in CSS pixels.
+   * @return The event, with `prevented` set when a handler prevented it.
    */
   fire(
     kind: keyof SurfaceEventMap,
@@ -171,9 +172,9 @@ const SEGMENT_TOOL: ToolPlugin = {
 };
 
 /**
- * Builds a document.
- * @param id Id.
- * @param extra Overrides.
+ * Builds a segment drawing from 150 at t=0 to 160 at 10 minutes.
+ * @param id Drawing id.
+ * @param extra Field overrides.
  * @return Document.
  */
 function doc(
@@ -200,9 +201,9 @@ function doc(
 }
 
 /**
- * Builds a controller on a test surface.
- * @param store Store.
- * @return Controller and surface.
+ * Builds a controller with the segment tool on a test surface.
+ * @param store Drawing store to edit.
+ * @return Surface, tool registry, controller and store.
  */
 function setup(store = new DrawingStore()) {
   const surface = new TestSurface();

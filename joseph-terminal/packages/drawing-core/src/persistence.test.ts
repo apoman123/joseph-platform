@@ -196,6 +196,7 @@ describe('drawing import', () => {
           doc('ok'),
           doc('eth', {instrument_id: ETH}),
           doc('anchors', {anchors: tooMany}),
+          // Deliberately invalid values; assertions bypass the contract types.
           doc('color', {
             style: {color: 'red', line_width: 1, line_style: 'solid'},
           }),
