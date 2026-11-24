@@ -1,11 +1,12 @@
 # Copyright 2026 apoman123
 # SPDX-License-Identifier: MIT
 
-"""Notification channel adapters.
+"""Notification channel adapters, one ``ChannelSender`` per channel.
 
 Every sender raises ``DeliveryError`` with a redacted message: bot tokens,
 access tokens, SMTP passwords, webhook secrets and service tokens never
-appear in errors or logs.
+appear in errors or logs. Whether a failure is retried, and when, is the
+outbox worker's decision based on ``DeliveryError.retryable``.
 """
 
 from __future__ import annotations
@@ -22,12 +23,15 @@ import uuid
 from collections.abc import Awaitable
 from collections.abc import Callable
 from collections.abc import Mapping
+from typing import TypeAlias
 
 import httpx
 
 from joseph.alerts.domain import model
 
 _TIMEOUT = httpx.Timeout(10.0)
+# Client errors that mean "try again later" (timeout, too early, rate
+# limited); every 5xx is retryable as well.
 _RETRYABLE_STATUS = frozenset({408, 425, 429})
 
 
@@ -42,10 +46,13 @@ def _status_error(
         secrets: Values to redact.
 
     Returns:
-        Error; 5xx, 408, 425 and 429 are retryable.
+        Error with at most 200 characters of the redacted body; 5xx, 408,
+        425 and 429 are retryable, and a ``Retry-After`` in seconds becomes
+        ``retry_after_ms``.
     """
     retry_after: int | None = None
     header = response.headers.get("retry-after")
+    # Only the delta-seconds form; an HTTP-date falls back to the backoff.
     if header and header.isdigit():
         retry_after = int(header) * 1000
     retryable = response.status_code >= 500 or (
@@ -65,7 +72,7 @@ def _transport_error(
     """Maps a transport failure to a retryable delivery error.
 
     Args:
-        channel: Channel name.
+        channel: Channel name for the message.
         err: Original exception.
         secrets: Values to redact.
 
@@ -79,7 +86,7 @@ def _transport_error(
 
 
 class TelegramSender:
-    """Telegram Bot API ``sendMessage`` sender.
+    """A Telegram Bot API ``sendMessage`` sender.
 
     Attributes:
         channel: Always TELEGRAM.
@@ -97,8 +104,8 @@ class TelegramSender:
         """Initializes the sender.
 
         Args:
-            client: Shared HTTP client.
-            bot_token: Bot token (secret).
+            client: Shared HTTP client (owned by the caller).
+            bot_token: Bot token (secret); it is part of the request path.
             base_url: API base URL.
         """
         self._client = client
@@ -113,10 +120,12 @@ class TelegramSender:
         """Sends the formatted signal to a chat.
 
         Args:
-            record: Delivery whose target is the chat id.
+            record: Delivery whose target is the chat id or ``@channel``.
 
         Raises:
-            model.DeliveryError: On failure.
+            model.DeliveryError: On failure: retryable for transport errors
+                and retryable HTTP statuses, not retryable for other
+                statuses or a reply without ``"ok": true``.
         """
         secrets = (self._token,)
         url = f"{self._base}/bot{self._token}/sendMessage"
@@ -139,7 +148,7 @@ class TelegramSender:
 
 
 class LineSender:
-    """LINE Messaging API push sender.
+    """A LINE Messaging API push sender.
 
     LINE Notify was discontinued on 2025-03-31, so this uses the Messaging
     API with an ``X-Line-Retry-Key`` derived from the idempotency key; a
@@ -161,7 +170,7 @@ class LineSender:
         """Initializes the sender.
 
         Args:
-            client: Shared HTTP client.
+            client: Shared HTTP client (owned by the caller).
             channel_access_token: Channel access token (secret).
             base_url: API base URL.
         """
@@ -177,12 +186,15 @@ class LineSender:
         """Pushes the formatted signal to a LINE user or group.
 
         Args:
-            record: Delivery whose target is the LINE user id.
+            record: Delivery whose target is the LINE user, group or room
+                id.
 
         Raises:
-            model.DeliveryError: On failure.
+            model.DeliveryError: On failure: retryable for transport errors
+                and retryable HTTP statuses, not retryable otherwise.
         """
         secrets = (self._token,)
+        # Same key on every attempt, so LINE drops a retried duplicate.
         retry_key = str(
             uuid.uuid5(uuid.NAMESPACE_URL, f"joseph:{record.idempotency_key}")
         )
@@ -194,6 +206,7 @@ class LineSender:
                     "messages": [
                         {
                             "type": "text",
+                            # LINE rejects text messages over 5,000 chars.
                             "text": model.format_text(record.payload)[:5000],
                         }
                     ],
@@ -212,13 +225,14 @@ class LineSender:
 
 
 class WebhookSender:
-    """Generic HTTPS webhook with an HMAC-SHA256 signature.
+    """A generic HTTPS webhook sender with an HMAC-SHA256 signature.
 
     Headers: ``X-Joseph-Timestamp`` (UTC ms), ``X-Joseph-Signature``
     (``sha256=`` hex HMAC of ``"{timestamp}.{body}"``), ``X-Joseph-Delivery``
-    and ``Idempotency-Key``. Only ``https`` targets are accepted unless
-    ``allow_insecure_localhost`` is set for local development (limits SSRF
-    to plain-text internal endpoints).
+    and ``Idempotency-Key``. Only ``https`` targets are accepted, which keeps
+    the sender off plain-text internal endpoints (server-side request
+    forgery); ``allow_insecure_localhost`` also admits ``http://localhost``
+    and ``http://127.0.0.1`` for local development.
 
     Attributes:
         channel: Always WEBHOOK.
@@ -237,10 +251,12 @@ class WebhookSender:
         """Initializes the sender.
 
         Args:
-            client: Shared HTTP client.
-            secret: HMAC secret (secret).
-            allow_insecure_localhost: Permit ``http://localhost`` targets.
-            now_ms: Clock for the timestamp header.
+            client: Shared HTTP client (owned by the caller).
+            secret: HMAC key (secret).
+            allow_insecure_localhost: Permit ``http://localhost`` and
+                ``http://127.0.0.1`` targets.
+            now_ms: Clock for the timestamp header in UTC epoch ms;
+                ``None`` uses the system clock.
         """
         self._client = client
         self._secret = secret
@@ -252,7 +268,7 @@ class WebhookSender:
         return "WebhookSender(secret=***)"
 
     def _check_target(self, target: str) -> None:
-        """Validates the webhook URL.
+        """Validates the webhook URL before anything is sent.
 
         Args:
             target: URL.
@@ -278,7 +294,8 @@ class WebhookSender:
             body: Exact request body.
 
         Returns:
-            ``sha256=<hex>``.
+            ``sha256=<hex>``, the HMAC-SHA256 of ``"{timestamp_ms}."``
+            followed by ``body``.
         """
         message = f"{timestamp_ms}.".encode() + body
         digest = hmac.new(
@@ -289,11 +306,16 @@ class WebhookSender:
     async def send(self, record: model.DeliveryRecord) -> None:
         """Posts the signal JSON to the webhook URL.
 
+        The body is ``{"delivery_id", "signal"}`` as compact JSON with sorted
+        keys; any 2xx status counts as delivered.
+
         Args:
             record: Delivery whose target is the URL.
 
         Raises:
-            model.DeliveryError: On failure.
+            model.DeliveryError: On failure: not retryable for a disallowed
+                URL or a non-retryable status, retryable for transport errors
+                and retryable HTTP statuses.
         """
         self._check_target(record.target)
         secrets = (self._secret,)
@@ -341,7 +363,7 @@ class ExecutionForwarder:
         """Initializes the forwarder.
 
         Args:
-            client: Shared HTTP client.
+            client: Shared HTTP client (owned by the caller).
             base_url: Execution engine base URL (``JOSEPH_EXECUTION_URL``).
             service_token: Service-to-service token (secret).
         """
@@ -354,13 +376,17 @@ class ExecutionForwarder:
         return f"ExecutionForwarder(base_url={self._base!r}, token=***)"
 
     async def send(self, record: model.DeliveryRecord) -> None:
-        """Posts the contract signal.
+        """Posts the contract signal to ``/internal/v1/signals``.
+
+        The signal id is sent as ``Idempotency-Key``; 200, 201, 202 and
+        409 (a conflict with an earlier delivery) count as delivered.
 
         Args:
             record: Delivery whose payload is the signal.
 
         Raises:
-            model.DeliveryError: On failure.
+            model.DeliveryError: On failure: retryable for transport errors
+                and retryable HTTP statuses, not retryable otherwise.
         """
         secrets = (self._token,)
         signal_id = str(record.payload.get("signal_id", ""))
@@ -381,12 +407,12 @@ class ExecutionForwarder:
         raise _status_error("execution", response, secrets)
 
 
-SmtpFactory = Callable[[], smtplib.SMTP]
-"""Creates a connected SMTP client."""
+SmtpFactory: TypeAlias = Callable[[], smtplib.SMTP]
+"""Creates a connected SMTP client; the sender closes it after each message."""
 
 
 class EmailSender:
-    """SMTP e-mail sender (blocking client run in a worker thread).
+    """An SMTP e-mail sender (blocking client run in a worker thread).
 
     Attributes:
         channel: Always EMAIL.
@@ -406,11 +432,12 @@ class EmailSender:
         """Initializes the sender.
 
         Args:
-            smtp_factory: Returns a connected ``smtplib.SMTP``.
+            smtp_factory: Returns a connected ``smtplib.SMTP``; called once
+                per message.
             from_address: Sender address.
-            username: SMTP user.
+            username: SMTP user; login happens only with a password too.
             password: SMTP password (secret).
-            starttls: Upgrade the connection with STARTTLS.
+            starttls: Upgrade the connection with STARTTLS before login.
         """
         self._factory = smtp_factory
         self._from = from_address
@@ -423,7 +450,10 @@ class EmailSender:
         return f"EmailSender(from={self._from!r}, password=***)"
 
     def _send_blocking(self, record: model.DeliveryRecord) -> None:
-        """Sends synchronously.
+        """Builds the message and sends it over a new SMTP connection.
+
+        Blocks; ``send`` runs it in a worker thread. ``smtplib`` and socket
+        errors propagate to ``send``.
 
         Args:
             record: Delivery whose target is the e-mail address.
@@ -452,7 +482,9 @@ class EmailSender:
             record: Delivery whose target is the e-mail address.
 
         Raises:
-            model.DeliveryError: On failure.
+            model.DeliveryError: On failure: not retryable when the server
+                refuses the recipient, retryable for other SMTP and socket
+                errors.
         """
         secrets = tuple(s for s in (self._password,) if s)
         try:
@@ -466,12 +498,12 @@ class EmailSender:
             raise _transport_error("email", err, secrets) from None
 
 
-UiSink = Callable[[str, Mapping[str, object]], Awaitable[None]]
+UiSink: TypeAlias = Callable[[str, Mapping[str, object]], Awaitable[None]]
 """``(tenant_id, signal_payload)`` coroutine publishing to the UI stream."""
 
 
 class UiSender:
-    """Pushes signals to the authenticated user stream.
+    """A sender that pushes signals to the authenticated user stream.
 
     Attributes:
         channel: Always UI.
@@ -491,14 +523,15 @@ class UiSender:
         """Publishes the signal to the tenant's UI stream.
 
         Args:
-            record: Delivery.
+            record: Delivery; its target is not used, the tenant id selects
+                the stream.
 
         Raises:
-            model.DeliveryError: If the sink fails.
+            model.DeliveryError: If the sink fails (always retryable).
         """
         try:
             await self._sink(record.tenant_id, record.payload)
-        except Exception as err:
+        except Exception as err:  # noqa: BLE001 - isolation point: any sink failure becomes a retryable DeliveryError and the outbox retries it
             raise model.DeliveryError(
                 f"ui sink failed: {type(err).__name__}", retryable=True
             ) from None

@@ -22,6 +22,7 @@ import threading
 from collections.abc import Iterable
 from collections.abc import Sequence
 from typing import Protocol
+from typing import TypeAlias
 
 from joseph.domain import clock as clock_lib
 from joseph.domain import instruments
@@ -29,8 +30,9 @@ from joseph.domain import market
 from joseph.domain import timeframes
 from joseph.market_data.domain import recorded_trades
 
-Interval = recorded_trades.Interval
+Interval: TypeAlias = recorded_trades.Interval
 _FLOW_CACHE = 20_000
+"""Span flows ``ArchiveReader`` keeps cached (least recently used first out)."""
 
 
 class TradeArchive(Protocol):
@@ -45,7 +47,7 @@ class TradeArchive(Protocol):
         """Stores complete 1s aggregates and merges their coverage.
 
         Args:
-            instrument: Instrument.
+            instrument: Instrument the trades belong to.
             seconds: Final 1s aggregates with traded volume (upserted).
             covered: Whole-second intervals in which every trade is
                 recorded (united with the stored coverage).
@@ -58,12 +60,12 @@ class TradeArchive(Protocol):
         """Returns stored 1s aggregates starting in ``[start, end)``.
 
         Args:
-            instrument: Instrument.
-            start_ms: Inclusive start.
-            end_ms: Exclusive end.
+            instrument: Instrument to read.
+            start_ms: Inclusive start, epoch milliseconds.
+            end_ms: Exclusive end, epoch milliseconds.
 
         Returns:
-            Ascending 1s candles.
+            Ascending 1s candles; seconds without trades have none.
         """
         ...
 
@@ -73,11 +75,11 @@ class TradeArchive(Protocol):
         """Returns the newest stored 1s aggregate starting before a time.
 
         Args:
-            instrument: Instrument.
-            before_ms: Exclusive bound.
+            instrument: Instrument to read.
+            before_ms: Exclusive bound, epoch milliseconds.
 
         Returns:
-            Candle or ``None``.
+            The aggregate, or ``None`` when none is stored before it.
         """
         ...
 
@@ -87,9 +89,9 @@ class TradeArchive(Protocol):
         """Returns coverage intervals overlapping ``[start, end)``.
 
         Args:
-            instrument: Instrument.
-            start_ms: Inclusive start.
-            end_ms: Exclusive end.
+            instrument: Instrument to read.
+            start_ms: Inclusive start, epoch milliseconds.
+            end_ms: Exclusive end, epoch milliseconds.
 
         Returns:
             Disjoint ascending intervals (not clipped to the range).
@@ -102,9 +104,9 @@ class TradeArchive(Protocol):
         """Returns per-minute roll-ups of minutes starting in the range.
 
         Args:
-            instrument: Instrument.
-            start_ms: Inclusive start.
-            end_ms: Exclusive end.
+            instrument: Instrument to read.
+            start_ms: Inclusive start, epoch milliseconds.
+            end_ms: Exclusive end, epoch milliseconds.
 
         Returns:
             Ascending minute totals.
@@ -115,10 +117,10 @@ class TradeArchive(Protocol):
         """Returns the end of the newest coverage interval.
 
         Args:
-            instrument: Instrument.
+            instrument: Instrument to read.
 
         Returns:
-            Exclusive end, or ``None`` without coverage.
+            Exclusive end, epoch milliseconds, or ``None`` without coverage.
         """
         ...
 
@@ -134,7 +136,8 @@ class TradeArchive(Protocol):
         """Deletes aggregates and coverage before a retention cut-off.
 
         Args:
-            before_ms: Cut-off.
+            before_ms: Cut-off, epoch milliseconds: older aggregates are
+                deleted and coverage is cut at it.
 
         Returns:
             Number of 1s aggregates deleted.
@@ -143,7 +146,13 @@ class TradeArchive(Protocol):
 
 
 class _Series:
-    """Recorded data of one instrument (in memory)."""
+    """Recorded data of one instrument (in memory).
+
+    Attributes:
+        starts: Ascending starts of the stored 1s aggregates.
+        bars: Stored 1s aggregates by start.
+        coverage: Disjoint ascending coverage intervals.
+    """
 
     def __init__(self) -> None:
         """Initializes an empty series."""
@@ -166,7 +175,13 @@ class MemoryTradeArchive:
         seconds: Sequence[market.Candle],
         covered: Sequence[Interval],
     ) -> None:
-        """See ``TradeArchive.put``."""
+        """Stores complete 1s aggregates and merges their coverage.
+
+        Args:
+            instrument: Instrument the trades belong to.
+            seconds: Final 1s aggregates (upserted by start).
+            covered: Intervals in which every trade is recorded.
+        """
         with self._lock:
             series = self._series.setdefault(instrument, _Series())
             for bar in seconds:
@@ -183,9 +198,9 @@ class MemoryTradeArchive:
         """Returns stored aggregates in a range (lock held by caller).
 
         Args:
-            instrument: Instrument.
-            start_ms: Inclusive start.
-            end_ms: Exclusive end.
+            instrument: Instrument to read.
+            start_ms: Inclusive start, epoch milliseconds.
+            end_ms: Exclusive end, epoch milliseconds.
 
         Returns:
             Ascending candles.
@@ -200,14 +215,31 @@ class MemoryTradeArchive:
     def seconds(
         self, instrument: instruments.InstrumentId, start_ms: int, end_ms: int
     ) -> list[market.Candle]:
-        """See ``TradeArchive.seconds``."""
+        """Returns stored 1s aggregates starting in ``[start, end)``.
+
+        Args:
+            instrument: Instrument to read.
+            start_ms: Inclusive start, epoch milliseconds.
+            end_ms: Exclusive end, epoch milliseconds.
+
+        Returns:
+            Ascending 1s candles.
+        """
         with self._lock:
             return self._range(instrument, start_ms, end_ms)
 
     def previous(
         self, instrument: instruments.InstrumentId, before_ms: int
     ) -> market.Candle | None:
-        """See ``TradeArchive.previous``."""
+        """Returns the newest stored 1s aggregate starting before a time.
+
+        Args:
+            instrument: Instrument to read.
+            before_ms: Exclusive bound, epoch milliseconds.
+
+        Returns:
+            The aggregate, or ``None`` when none is stored before it.
+        """
         with self._lock:
             series = self._series.get(instrument)
             if series is None:
@@ -218,7 +250,16 @@ class MemoryTradeArchive:
     def coverage(
         self, instrument: instruments.InstrumentId, start_ms: int, end_ms: int
     ) -> list[Interval]:
-        """See ``TradeArchive.coverage``."""
+        """Returns coverage intervals overlapping ``[start, end)``.
+
+        Args:
+            instrument: Instrument to read.
+            start_ms: Inclusive start, epoch milliseconds.
+            end_ms: Exclusive end, epoch milliseconds.
+
+        Returns:
+            Disjoint ascending intervals (not clipped to the range).
+        """
         with self._lock:
             series = self._series.get(instrument)
             if series is None:
@@ -232,7 +273,16 @@ class MemoryTradeArchive:
     def minute_flows(
         self, instrument: instruments.InstrumentId, start_ms: int, end_ms: int
     ) -> list[recorded_trades.MinuteFlow]:
-        """See ``TradeArchive.minute_flows``."""
+        """Returns per-minute roll-ups of minutes starting in the range.
+
+        Args:
+            instrument: Instrument to read.
+            start_ms: Inclusive start, epoch milliseconds.
+            end_ms: Exclusive end, epoch milliseconds.
+
+        Returns:
+            Ascending minute totals.
+        """
         with self._lock:
             first = recorded_trades.floor_to(
                 start_ms, recorded_trades.MINUTE_MS
@@ -245,7 +295,14 @@ class MemoryTradeArchive:
         ]
 
     def covered_until(self, instrument: instruments.InstrumentId) -> int | None:
-        """See ``TradeArchive.covered_until``."""
+        """Returns the end of the newest coverage interval.
+
+        Args:
+            instrument: Instrument to read.
+
+        Returns:
+            Exclusive end, epoch milliseconds, or ``None`` without coverage.
+        """
         with self._lock:
             series = self._series.get(instrument)
             if series is None or not series.coverage:
@@ -253,12 +310,23 @@ class MemoryTradeArchive:
             return series.coverage[-1][1]
 
     def instruments(self) -> list[instruments.InstrumentId]:
-        """See ``TradeArchive.instruments``."""
+        """Lists instruments with recorded coverage.
+
+        Returns:
+            Instruments in the order they were first recorded.
+        """
         with self._lock:
             return [i for i, s in self._series.items() if s.coverage]
 
     def prune(self, before_ms: int) -> int:
-        """See ``TradeArchive.prune``."""
+        """Deletes aggregates and coverage before a retention cut-off.
+
+        Args:
+            before_ms: Cut-off, epoch milliseconds.
+
+        Returns:
+            Number of 1s aggregates deleted.
+        """
         deleted = 0
         with self._lock:
             for series in self._series.values():
@@ -286,10 +354,10 @@ class RecordedTrades(Protocol):
         """Returns archived seconds bars of a range (complete buckets).
 
         Args:
-            instrument: Instrument.
+            instrument: Instrument to read.
             timeframe: Seconds timeframe.
-            start_ms: Inclusive start.
-            end_ms: Exclusive end.
+            start_ms: Inclusive start, epoch milliseconds.
+            end_ms: Exclusive end, epoch milliseconds.
 
         Returns:
             Ascending final candles.
@@ -303,7 +371,8 @@ class RecordedTrades(Protocol):
             rows: Candles of one series.
 
         Returns:
-            Candles in the same order.
+            Candles in the same order; final 1m-and-above bars of delta
+            venues fully covered by recorded trades carry the true delta.
         """
         ...
 
@@ -326,8 +395,8 @@ class ArchiveReader:
         """Initializes the reader.
 
         Args:
-            archive: Archive.
-            clock: Time source.
+            archive: Archive to read.
+            clock: Time source (decides which buckets have closed).
             delta_venues: Venues whose klines lack taker volume and whose
                 trades are recorded.
         """
@@ -349,10 +418,10 @@ class ArchiveReader:
         """Rebuilds archived seconds bars of a range.
 
         Args:
-            instrument: Instrument.
+            instrument: Instrument to read.
             timeframe: Seconds timeframe.
-            start_ms: Inclusive start.
-            end_ms: Exclusive end.
+            start_ms: Inclusive start, epoch milliseconds.
+            end_ms: Exclusive end, epoch milliseconds.
 
         Returns:
             Ascending final candles of complete buckets.
@@ -378,7 +447,17 @@ class ArchiveReader:
         start_ms: int,
         end_ms: int,
     ) -> list[market.Candle]:
-        """See ``RecordedTrades.seconds_bars``."""
+        """Returns archived seconds bars of a range (``seconds_bars_now``).
+
+        Args:
+            instrument: Instrument to read.
+            timeframe: Seconds timeframe.
+            start_ms: Inclusive start, epoch milliseconds.
+            end_ms: Exclusive end, epoch milliseconds.
+
+        Returns:
+            Ascending final candles of complete buckets.
+        """
         return self.seconds_bars_now(instrument, timeframe, start_ms, end_ms)
 
     def _cached(
@@ -387,10 +466,10 @@ class ArchiveReader:
         """Returns a cached flow and refreshes its recency.
 
         Args:
-            key: ``(instrument, start, end)``.
+            key: ``(instrument, start_ms, end_ms)``.
 
         Returns:
-            Flow or ``None``.
+            The cached flow, or ``None`` when it is not cached.
         """
         flow = self._flows.get(key)
         if flow is not None:
@@ -405,8 +484,8 @@ class ArchiveReader:
         """Caches a flow of a fully covered span (stable once covered).
 
         Args:
-            key: ``(instrument, start, end)``.
-            flow: Flow.
+            key: ``(instrument, start_ms, end_ms)``.
+            flow: Flow of the span.
         """
         self._flows[key] = flow
         while len(self._flows) > _FLOW_CACHE:
@@ -418,12 +497,12 @@ class ArchiveReader:
         """Returns the recorded flow of one span when coverage is complete.
 
         Args:
-            instrument: Instrument.
-            start_ms: Span start.
-            end_ms: Span end.
+            instrument: Instrument to read.
+            start_ms: Inclusive span start, epoch milliseconds.
+            end_ms: Exclusive span end, epoch milliseconds.
 
         Returns:
-            Flow or ``None``.
+            The flow, or ``None`` when the span is not wholly covered.
         """
         return self._flows_for(instrument, [(start_ms, end_ms)])[0]
 
@@ -433,11 +512,11 @@ class ArchiveReader:
         """Computes flows of several spans with two archive queries.
 
         Args:
-            instrument: Instrument.
-            spans: ``(start, end)`` spans.
+            instrument: Instrument to read.
+            spans: Half-open ``(start_ms, end_ms)`` spans.
 
         Returns:
-            Flow (or ``None``) per span.
+            Flow per span, in order; ``None`` where coverage is incomplete.
         """
         results: list[recorded_trades.RecordedFlow | None] = [
             self._cached((instrument, a, b)) for a, b in spans
@@ -467,7 +546,17 @@ class ArchiveReader:
         return results
 
     def enrich(self, rows: Sequence[market.Candle]) -> list[market.Candle]:
-        """See ``RecordedTrades.enrich``."""
+        """Attaches recorded true delta to fully covered final bars.
+
+        Args:
+            rows: Candles of one or more series.
+
+        Returns:
+            Candles in the same order; final 1m-and-above bars of
+            ``delta_venues`` without taker volume carry the true delta when
+            recorded trades cover their whole span and the recorded volume
+            agrees with the bar's.
+        """
         out = list(rows)
         wanted = [
             i

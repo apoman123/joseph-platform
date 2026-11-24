@@ -14,14 +14,17 @@ from __future__ import annotations
 import decimal
 import enum
 from collections.abc import Iterable
+from typing import TypeAlias
 
 from joseph.domain import decimals
 from joseph.domain import instruments
 from joseph.domain import market
 
+# Order size the slippage check walks the book for, in USD.
 DEFAULT_SLIPPAGE_NOTIONAL_USD = decimal.Decimal(50_000)
 
-LevelInput = tuple[decimal.Decimal, decimal.Decimal]
+# One book level as ``(price, quantity)``; a quantity of zero removes it.
+LevelInput: TypeAlias = tuple[decimal.Decimal, decimal.Decimal]
 
 
 class ApplyResult(enum.StrEnum):
@@ -33,7 +36,11 @@ class ApplyResult(enum.StrEnum):
 
 
 class OrderBookBuilder:
-    """Snapshot + delta order book with sequence validation."""
+    """Snapshot + delta order book with sequence validation.
+
+    Attributes:
+        resyncs: Number of sequence breaks that required a new snapshot.
+    """
 
     def __init__(
         self,
@@ -46,7 +53,8 @@ class OrderBookBuilder:
         Args:
             instrument_id: Exact venue instrument.
             source: Provenance label.
-            max_age_ms: Age after which the book is stale.
+            max_age_ms: Milliseconds since the last receipt after which the
+                book is stale.
         """
         self._instrument_id = instrument_id
         self._source = source
@@ -81,11 +89,11 @@ class OrderBookBuilder:
         """Replaces the book with a snapshot.
 
         Args:
-            bids: Bid levels.
-            asks: Ask levels.
+            bids: Bid levels; levels with a zero quantity are skipped.
+            asks: Ask levels; levels with a zero quantity are skipped.
             sequence: Snapshot sequence (``lastUpdateId`` on Binance).
-            ts_ms: Venue time.
-            received_ms: Receipt time.
+            ts_ms: Venue time, epoch milliseconds.
+            received_ms: Receipt time, epoch milliseconds.
         """
         self._bids = {p: q for p, q in bids if q > decimals.ZERO}
         self._asks = {p: q for p, q in asks if q > decimals.ZERO}
@@ -145,8 +153,8 @@ class OrderBookBuilder:
             previous_final_update_id: ``pu``.
             bids: Bid level updates.
             asks: Ask level updates.
-            ts_ms: Venue event time.
-            received_ms: Receipt time.
+            ts_ms: Venue event time, epoch milliseconds.
+            received_ms: Receipt time, epoch milliseconds.
 
         Returns:
             The apply outcome.
@@ -182,8 +190,8 @@ class OrderBookBuilder:
             sequence: Delta sequence; must equal previous + 1.
             bids: Bid level updates.
             asks: Ask level updates.
-            ts_ms: Venue event time.
-            received_ms: Receipt time.
+            ts_ms: Venue event time, epoch milliseconds.
+            received_ms: Receipt time, epoch milliseconds.
 
         Returns:
             The apply outcome.
@@ -206,7 +214,8 @@ class OrderBookBuilder:
         """Materializes the current book.
 
         Args:
-            now_ms: Current time for the staleness check.
+            now_ms: Current time for the staleness check, epoch
+                milliseconds.
             depth: Levels per side.
 
         Returns:
@@ -311,13 +320,14 @@ def snapshot_book(
         instrument_id: Exact venue instrument.
         bids: Bid levels (any order).
         asks: Ask levels (any order).
-        ts_ms: Venue time.
-        received_ms: Receipt time.
+        ts_ms: Venue time, epoch milliseconds.
+        received_ms: Receipt time, epoch milliseconds.
         source: Provenance label.
         sequence: Optional venue sequence.
 
     Returns:
-        Order book (not stale at creation).
+        Order book (up to 10,000 levels per side); stale only when the sides
+        are crossed.
     """
     builder = OrderBookBuilder(instrument_id, source)
     builder.apply_snapshot(bids, asks, sequence, ts_ms, received_ms)

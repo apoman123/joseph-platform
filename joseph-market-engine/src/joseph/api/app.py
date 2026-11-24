@@ -32,12 +32,13 @@ class AppContainer(Protocol):
     """Services the HTTP layer needs (satisfied by ``bootstrap.Container``).
 
     Attributes:
-        settings: Settings.
-        market_data: Market-data service.
-        qualification: Qualification service.
-        stream_hub: Stream hub.
-        authenticator: Token authenticator.
-        metrics: Metrics registry.
+        settings: Engine settings (CORS origins, demo mode).
+        market_data: Market-data service behind the market routes.
+        qualification: Qualification service behind
+            ``/v1/market/qualification``.
+        stream_hub: Hub behind the market WebSocket.
+        authenticator: Bearer-token authenticator for protected routes.
+        metrics: Registry rendered by ``/metrics``.
     """
 
     settings: config.Settings
@@ -48,11 +49,11 @@ class AppContainer(Protocol):
     metrics: metrics_lib.MetricsRegistry
 
     async def astart(self) -> None:
-        """Starts background workers."""
+        """Starts background workers; called once at application startup."""
         ...
 
     async def aclose(self) -> None:
-        """Releases resources."""
+        """Stops workers and releases resources at application shutdown."""
         ...
 
 
@@ -60,6 +61,11 @@ def create_app(
     container: AppContainer, extra_routers: Sequence[fastapi.APIRouter] = ()
 ) -> fastapi.FastAPI:
     """Creates the market-engine ASGI app.
+
+    The app starts the container's workers when it starts serving and
+    closes the container when it shuts down. Every response carries an
+    ``X-Trace-Id`` header, and errors are rendered as the contract
+    ``ErrorResponse`` (see ``api.errors``).
 
     Args:
         container: Wired services.
@@ -74,8 +80,11 @@ def create_app(
     async def lifespan(_: fastapi.FastAPI) -> AsyncIterator[None]:
         """Starts workers on startup and closes the container on shutdown.
 
+        ``aclose`` runs on an orderly shutdown; it is not reached when
+        ``astart`` raises.
+
         Yields:
-            Control while the app runs.
+            Control while the app serves requests.
         """
         await container.astart()
         yield
@@ -112,9 +121,12 @@ def create_app(
     ) -> fastapi.Response:
         """Assigns a trace id and counts requests.
 
+        Requests are counted by route template (``unmatched`` for unknown
+        paths), not by raw path, which keeps the label set bounded.
+
         Args:
-            request: Request.
-            call_next: Next handler.
+            request: Incoming request.
+            call_next: Next handler in the middleware chain.
 
         Returns:
             Response with ``X-Trace-Id``.

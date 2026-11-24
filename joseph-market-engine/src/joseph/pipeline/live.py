@@ -40,6 +40,9 @@ _LOG = logging.getLogger(__name__)
 _FLUSH_GRACE_BARS = 2
 """Signal bars after which a frame is forced despite a stalled input."""
 
+_INITIAL_LOOKBACK_BARS = 3
+"""Bars fetched for a timeframe that has not been fed yet."""
+
 
 @dataclasses.dataclass
 class _EngineState:
@@ -48,7 +51,7 @@ class _EngineState:
     Attributes:
         engine: Indicator engine.
         requirements: Requirements the engine was built for.
-        last_end_ms: Latest fed candle end per timeframe.
+        last_end_ms: End (epoch ms) of the latest candle fed per timeframe.
     """
 
     engine: engine_lib.IndicatorEngine
@@ -76,7 +79,15 @@ class PipelineStats:
 
 
 class LiveSignalPipeline:
-    """Feeds closed candles of active universes through the signal path."""
+    """Polling loop that feeds closed candles to the strategy runtime.
+
+    One background task (``start``/``stop``) runs ``run_once`` every
+    ``interval_s``. Engines live only in memory: a restart warms them up
+    again from history, and the runtime's checkpoints keep setup state.
+
+    Attributes:
+        last_stats: Counters of the latest completed pass.
+    """
 
     def __init__(
         self,
@@ -99,9 +110,10 @@ class LiveSignalPipeline:
             gate: Qualification gate (also used by the runtime).
             context: Market context recorder (also used by the runtime).
             clock: Time source.
-            interval_s: Seconds between passes.
-            max_instruments_per_venue: Cap for universes without explicit
-                instruments.
+            interval_s: Seconds to wait after a pass before the next one.
+            max_instruments_per_venue: Top-ranked instruments taken per venue
+                when a universe has neither activation instruments nor a
+                whitelist.
         """
         self._runtime = runtime
         self._provider = provider
@@ -154,6 +166,10 @@ class LiveSignalPipeline:
     ) -> _EngineState:
         """Creates an engine and warms the runtime with history.
 
+        The warm-up frames go to ``StrategyRuntime.warm_up``, which fills
+        evaluation windows without stepping the setup state machine, so
+        they fire no signal.
+
         Args:
             instrument_id: Canonical instrument id.
             requirements: Merged requirements.
@@ -186,15 +202,18 @@ class LiveSignalPipeline:
 
         Args:
             instrument_id: Canonical instrument id.
-            state: Engine state.
-            stats: Pass counters.
+            state: Engine state; ``last_end_ms`` is advanced in place.
+            stats: Pass counters, updated in place.
         """
         now = self._clock.now_ms()
         calendar = state.engine.calendar
         fresh: list[market.Candle] = []
         for tf in state.engine.required_timeframes:
             since = state.last_end_ms.get(
-                tf, calendar.shift(tf, calendar.floor(tf, now), -3)
+                tf,
+                calendar.shift(
+                    tf, calendar.floor(tf, now), -_INITIAL_LOOKBACK_BARS
+                ),
             )
             rows = await self._market.get_candles(instrument_id, tf, since, now)
             fresh.extend(
@@ -202,6 +221,8 @@ class LiveSignalPipeline:
                 for c in rows
                 if c.is_final and c.end_ms > state.last_end_ms.get(tf, 0)
             )
+        # Event-time order, as in ``IndicatorEngine.run``: by close, and the
+        # shorter timeframe first when two candles close together.
         fresh.sort(key=lambda c: (c.end_ms, c.timeframe.duration_ms))
         delivered = []
         for candle in fresh:
@@ -215,6 +236,8 @@ class LiveSignalPipeline:
         delivered.extend(
             state.engine.flush(now - _FLUSH_GRACE_BARS * signal_tf.duration_ms)
         )
+        # The market context is best effort: without a snapshot the
+        # evaluator sees older (or no) observations, and frames still go out.
         with contextlib.suppress(Exception):
             self._context.record(await self._market.get_snapshot(instrument_id))
         for frame in delivered:
@@ -224,6 +247,11 @@ class LiveSignalPipeline:
 
     async def run_once(self) -> PipelineStats:
         """Executes one pass over every active universe.
+
+        Reloads the active plans, refreshes the qualification cache of their
+        venues, drops engines no plan targets any more, (re)builds engines
+        whose merged requirements changed and advances every target series.
+        A failing series is logged and counted; the others still run.
 
         Returns:
             Counters of the pass.
@@ -235,11 +263,10 @@ class LiveSignalPipeline:
             self._engines.clear()
             self.last_stats = stats
             return stats
-        venues = {
-            instruments.Venue(v.value)
-            for active in plans
-            for v in active.version.definition.universe.venues
-        }
+        venues: set[instruments.Venue] = set()
+        for active in plans:
+            for venue in active.version.definition.universe.venues:
+                venues.add(instruments.Venue(venue.value))
         await self._gate.refresh(venues)
         merged = frames_lib.merge_requirements(
             active.plan.requirements for active in plans
@@ -265,18 +292,22 @@ class LiveSignalPipeline:
                     self._engines[key] = state
                 await self._advance(instrument_id, state, stats)
                 stats.series += 1
-            except Exception:
+            except Exception:  # noqa: BLE001 - isolation point: one failing series must not stop the pass; logged with the traceback
                 stats.errors += 1
                 _LOG.exception("pipeline pass failed for %s", instrument_id)
         self.last_stats = stats
         return stats
 
     async def _loop(self) -> None:
-        """Runs passes until stopped."""
+        """Runs passes until ``stop`` sets the stopping event.
+
+        The wait between passes ends early when the event is set, so a stop
+        takes effect after the current pass, without cancelling it.
+        """
         while not self._stopping.is_set():
             try:
                 await self.run_once()
-            except Exception:
+            except Exception:  # noqa: BLE001 - isolation point: a failed pass must not end the loop; logged with the traceback
                 _LOG.exception("signal pipeline pass failed")
             with contextlib.suppress(asyncio.TimeoutError):
                 await asyncio.wait_for(
@@ -284,13 +315,22 @@ class LiveSignalPipeline:
                 )
 
     def start(self) -> None:
-        """Starts the background loop (idempotent)."""
+        """Starts the background loop (idempotent).
+
+        Must be called from inside the running event loop. A loop that has
+        already finished is replaced by a new one.
+        """
         if self._task is None or self._task.done():
             self._stopping.clear()
             self._task = asyncio.create_task(self._loop())
 
     async def stop(self) -> None:
-        """Stops the background loop and waits for it."""
+        """Stops the background loop and waits for it.
+
+        The current pass runs to completion. If the task was cancelled
+        elsewhere (for example at event-loop shutdown), the cancellation is
+        absorbed here.
+        """
         self._stopping.set()
         if self._task is not None:
             with contextlib.suppress(asyncio.CancelledError):

@@ -50,12 +50,15 @@ from joseph.market_data.domain import capabilities
 from joseph.market_data.domain import health
 
 DEFAULT_LIMIT = 500
+"""Bars a batch returns when the caller gives no limit."""
 MAX_LIMIT = 5_000
+"""Largest batch limit accepted."""
 _MAX_REFRESH_ROUNDS = 64
 """History calls per refresh (adapters may cap one call at 10,000 bars)."""
 MAX_SESSION_WINDOW_MS = 400 * 86_400_000
 """Longest window of ``calendar_sessions`` (400 days)."""
 _SNAPSHOT_TTL_MS = 1_000
+"""How long a fetched snapshot is served from the cache."""
 
 
 @dataclasses.dataclass(frozen=True, slots=True)
@@ -67,9 +70,10 @@ class CandleBatchResult:
         timeframe: Resolution.
         candles: Ascending candles (the last may be non-final).
         feed_state: Provenance of the batch.
-        source: Origin label.
-        as_of_ms: Query time.
-        gaps: Missing closed-bar ranges.
+        source: Origin label, e.g. ``binance.ws`` or ``binance.poll``.
+        as_of_ms: Query time, epoch milliseconds.
+        gaps: Missing closed-bar ranges as half-open ``(from_ms, to_ms)``
+            pairs.
     """
 
     instrument_id: instruments.InstrumentId
@@ -154,7 +158,7 @@ def closed_through(
     Args:
         calendar: Session calendar of the instrument.
         timeframe: Resolution.
-        now_ms: Current time.
+        now_ms: Current time, epoch milliseconds.
 
     Returns:
         ``(closed_end, last_start)``: the exclusive end of that bar (bars
@@ -174,8 +178,8 @@ def calendar_sessions(
 
     Args:
         calendar_id: Contract ``CalendarId``.
-        from_ms: Inclusive window start.
-        to_ms: Exclusive window end.
+        from_ms: Inclusive window start, epoch milliseconds.
+        to_ms: Exclusive window end, epoch milliseconds.
 
     Returns:
         Contract ``SessionList`` (empty sessions for ``24x7``).
@@ -211,7 +215,12 @@ def calendar_sessions(
 
 
 class MarketDataService:
-    """Read-side facade over adapters, store, registry and feeds."""
+    """Read-side facade over adapters, store, registry and feeds.
+
+    Attributes:
+        registry: Instrument registry of the enabled venues.
+        stale_after_ms: Snapshot staleness budget, in milliseconds.
+    """
 
     def __init__(
         self,
@@ -230,12 +239,12 @@ class MarketDataService:
 
         Args:
             adapters: Adapter per venue.
-            instrument_registry: Registry.
-            store: Candle store.
-            router: Feed router.
+            instrument_registry: Registry of the same venues.
+            store: Candle store shared with the router.
+            router: Feed router of the live sessions.
             clock: Time source.
-            replay: Optional replay source.
-            stale_after_ms: Snapshot staleness budget.
+            replay: Optional replay source for ``REPLAY`` batches.
+            stale_after_ms: Snapshot staleness budget, in milliseconds.
             max_refresh_bars: Most bars one ``get_candles`` repair fetches
                 across rounds (covers an anchored study's window).
             recorded: Optional recorded-trade archive (seconds history
@@ -264,7 +273,7 @@ class MarketDataService:
 
     @property
     def router(self) -> feed_router.FeedRouter:
-        """Returns the feed router."""
+        """The feed router of the live sessions."""
         return self._router
 
     def adapter(self, venue: instruments.Venue) -> ports.MarketDataPort:
@@ -274,7 +283,7 @@ class MarketDataService:
             venue: Venue.
 
         Returns:
-            Adapter.
+            The venue's adapter.
 
         Raises:
             errors.NotFoundError: If the venue is not enabled.
@@ -293,11 +302,16 @@ class MarketDataService:
 
         Returns:
             The awaited value.
+
+        Raises:
+            errors.JosephError: Whatever the call raised, unchanged.
         """
         tracker = self._router.rest_tracker(venue)
         try:
             result = await call
         except errors.JosephError as err:
+            # Only an unreachable venue is trouble for its health; other
+            # errors (unknown instrument, bad request) are the caller's.
             if isinstance(err, errors.VenueUnavailableError):
                 tracker.record_error(self._clock.now_ms(), err.message)
             raise
@@ -323,14 +337,14 @@ class MarketDataService:
         """Lists closed-bar gaps of the store worth requesting.
 
         Args:
-            instrument: Instrument.
-            timeframe: Resolution.
+            instrument: Instrument of the series.
+            timeframe: Resolution of the series.
             caps: Venue capabilities.
-            start_ms: Inclusive start.
-            closed_end: End of the newest closed bar in range.
+            start_ms: Inclusive start, epoch milliseconds.
+            closed_end: Exclusive end of the newest closed bar in range.
 
         Returns:
-            Gaps, oldest first.
+            Half-open ``(from_ms, to_ms)`` gaps, oldest first.
         """
         gaps = self._store.final_gaps(
             instrument, timeframe, start_ms, closed_end
@@ -363,10 +377,10 @@ class MarketDataService:
         """Fetches history into the store, recording sparse-bar coverage.
 
         Args:
-            instrument: Instrument.
-            timeframe: Resolution.
-            start_ms: Inclusive start.
-            end_ms: Exclusive end.
+            instrument: Instrument of the series.
+            timeframe: Resolution of the series.
+            start_ms: Inclusive start, epoch milliseconds.
+            end_ms: Exclusive end, epoch milliseconds.
 
         Returns:
             The fetch (dense venues prove no coverage and are never
@@ -408,11 +422,14 @@ class MarketDataService:
         complete ends it too: repeating it cannot return more, and its
         coverage already settles the quiet intervals.
 
+        Recorded seconds bars are loaded from the archive first. Seconds
+        bars of a venue without a REST trade history are never fetched.
+
         Args:
-            instrument: Instrument.
-            timeframe: Resolution.
-            start_ms: Inclusive start.
-            end_ms: Exclusive end.
+            instrument: Instrument of the series.
+            timeframe: Resolution of the series.
+            start_ms: Inclusive start, epoch milliseconds.
+            end_ms: Exclusive end, epoch milliseconds.
             max_bars: Bars after which no further round is started.
         """
         now = self._clock.now_ms()
@@ -477,14 +494,20 @@ class MarketDataService:
     ) -> Sequence[market.Candle]:
         """Returns final candles with start in [start, end) (CandleSource).
 
+        Missing bars are repaired from the venue first (see ``_refresh``).
+
         Args:
-            instrument_id: Instrument.
-            timeframe: Resolution.
-            start_ms: Inclusive start.
-            end_ms: Exclusive end.
+            instrument_id: Canonical instrument id or its string.
+            timeframe: Resolution or its contract string.
+            start_ms: Inclusive start, epoch milliseconds.
+            end_ms: Exclusive end, epoch milliseconds.
 
         Returns:
             Ascending final candles.
+
+        Raises:
+            errors.ValidationFailedError: If the id or timeframe is invalid.
+            errors.NotFoundError: If the venue is not enabled.
         """
         instrument = as_instrument_id(instrument_id)
         tf = as_timeframe(timeframe)
@@ -508,18 +531,24 @@ class MarketDataService:
         """Returns a candle batch with provenance and gaps.
 
         Args:
-            instrument_id: Instrument.
-            timeframe: Resolution.
-            from_ms: Inclusive start; defaults to ``limit`` bars back.
-            to_ms: Exclusive end; defaults to just after the live bar.
-            limit: Maximum bars (default 500, max 5000).
+            instrument_id: Canonical instrument id or its string.
+            timeframe: Resolution or its contract string.
+            from_ms: Inclusive start, epoch milliseconds; defaults to
+                ``limit`` bars back.
+            to_ms: Exclusive end, epoch milliseconds; defaults to just after
+                the live bar.
+            limit: Maximum bars (default 500, max 5000); the newest are
+                kept.
             feed_mode: ``REPLAY`` serves recordings; others use the venue.
 
         Returns:
-            Candle batch.
+            Candle batch whose gaps cover only closed bars.
 
         Raises:
-            errors.ValidationFailedError: On an invalid range or limit.
+            errors.ValidationFailedError: On an invalid id, timeframe, range
+                or limit, or a time outside the instrument's calendar.
+            errors.MissingDataError: For ``REPLAY`` without a replay source.
+            errors.NotFoundError: If the venue is not enabled.
         """
         instrument = as_instrument_id(instrument_id)
         tf = as_timeframe(timeframe)
@@ -536,13 +565,12 @@ class MarketDataService:
                 if to_ms is not None
                 else calendar.end_of(tf, calendar.floor(tf, now))
             )
-            start = (
-                from_ms
-                if from_ms is not None
-                else calendar.shift(
+            if from_ms is not None:
+                start = from_ms
+            else:
+                start = calendar.shift(
                     tf, calendar.floor(tf, end - 1), -(bars - 1)
                 )
-            )
         if end <= start:
             raise errors.ValidationFailedError("to_ms must be after from_ms")
         if feed_mode is quality.FeedMode.REPLAY:
@@ -591,7 +619,7 @@ class MarketDataService:
             rows: Stored candles of one series.
 
         Returns:
-            Candles in the same order.
+            Candles in the same order (``rows`` itself without an archive).
         """
         return rows if self._recorded is None else self._recorded.enrich(rows)
 
@@ -603,11 +631,12 @@ class MarketDataService:
         """Derives batch provenance from the venue and any live session.
 
         Args:
-            instrument: Instrument.
-            timeframe: Resolution.
+            instrument: Instrument of the series.
+            timeframe: Resolution of the series.
 
         Returns:
-            ``(feed_state, source)``.
+            ``(feed_state, source)``; the source names the transport, e.g.
+            ``binance.ws``, ``binance.poll`` or ``binance.trades``.
         """
         if instrument.venue is instruments.Venue.MOCK:
             return quality.FeedState.DEMO, "mock"
@@ -639,10 +668,14 @@ class MarketDataService:
         """Returns the latest snapshot (cached for one second).
 
         Args:
-            instrument_id: Instrument.
+            instrument_id: Canonical instrument id or its string.
 
         Returns:
-            Snapshot.
+            Snapshot with missing fields left ``None``.
+
+        Raises:
+            errors.ValidationFailedError: If the id is invalid.
+            errors.NotFoundError: If the venue is not enabled.
         """
         instrument = as_instrument_id(instrument_id)
         now = self._clock.now_ms()
@@ -662,14 +695,15 @@ class MarketDataService:
         """Returns an order-book snapshot.
 
         Args:
-            instrument_id: Instrument.
+            instrument_id: Canonical instrument id or its string.
             depth: Levels per side (1..1000).
 
         Returns:
-            Order book.
+            Order-book snapshot.
 
         Raises:
-            errors.ValidationFailedError: On an invalid depth.
+            errors.ValidationFailedError: On an invalid depth or id.
+            errors.NotFoundError: If the venue is not enabled.
         """
         if not 1 <= depth <= 1_000:
             raise errors.ValidationFailedError("depth must be 1..1000")
@@ -687,11 +721,16 @@ class MarketDataService:
 
         Args:
             calendar_id: Contract ``CalendarId``.
-            from_ms: Inclusive window start.
-            to_ms: Exclusive window end.
+            from_ms: Inclusive window start, epoch milliseconds.
+            to_ms: Exclusive window end, epoch milliseconds.
 
         Returns:
             Contract ``SessionList``.
+
+        Raises:
+            errors.NotFoundError: For an unknown calendar.
+            errors.ValidationFailedError: For an empty, negative or too long
+                window.
         """
         return calendar_sessions(calendar_id, from_ms, to_ms)
 
@@ -701,7 +740,7 @@ class MarketDataService:
         """Returns capabilities and health of every enabled venue.
 
         Returns:
-            ``(capabilities, health)`` pairs.
+            ``(capabilities, health)`` pairs in venue configuration order.
         """
         return [
             (adapter.capabilities(), self._router.venue_health(venue))

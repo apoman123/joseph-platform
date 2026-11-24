@@ -18,10 +18,14 @@ from joseph.domain import errors
 from joseph.domain import identity
 
 _EMAIL = re.compile(r"^[^@\s]+@[^@\s]+\.[^@\s]+$")
+# A numeric chat id (negative for groups) or a public @username.
 _TELEGRAM = re.compile(r"^-?[0-9]{1,20}$|^@[A-Za-z0-9_]{5,32}$")
+# LINE ids: U (user), C (group chat) or R (room) and 32 hex digits.
 _LINE = re.compile(r"^[UCR][0-9a-f]{32}$")
 _ID = re.compile(r"^[a-z0-9][a-z0-9-]{0,62}$")
 _SEVERITIES = ("INFO", "WARNING", "ENTRY", "CRITICAL")
+# UI and EXECUTION deliveries are implicit (routing adds them), so users can
+# only subscribe to these.
 _USER_CHANNELS = ("TELEGRAM", "LINE", "EMAIL", "WEBHOOK")
 
 
@@ -29,7 +33,7 @@ def _validate_target(channel: str, target: str) -> None:
     """Checks that a target is plausible for its channel.
 
     Args:
-        channel: Channel name.
+        channel: Channel name, one of ``_USER_CHANNELS``.
         target: Delivery target.
 
     Raises:
@@ -68,7 +72,7 @@ def _strings(value: object) -> frozenset[str]:
 
 
 def _parse_time(text: str) -> datetime.time:
-    """Parses ``HH:MM``.
+    """Parses an ISO time such as ``22:00`` (seconds are accepted too).
 
     Args:
         text: Time text.
@@ -90,9 +94,14 @@ def from_contract(
 ) -> model.Subscription:
     """Builds a domain subscription from a contract body.
 
+    Missing optional fields take their defaults (``min_severity`` INFO,
+    ``enabled``, CRITICAL bypassing quiet hours); a ``quiet_hours`` value
+    that is not an object means no quiet hours.
+
     Args:
         tenant_id: Owning tenant (from the authenticated principal).
-        subscription_id: Path identifier.
+        subscription_id: Path identifier: lower-case letters, digits and
+            hyphens, 1 to 63 characters, not starting with a hyphen.
         body: Contract ``AlertSubscription``.
 
     Returns:
@@ -149,6 +158,28 @@ def from_contract(
     )
 
 
+def _quiet_contract(
+    quiet: model.QuietHours | None,
+) -> dict[str, object] | None:
+    """Serializes quiet hours to the contract shape.
+
+    Args:
+        quiet: Quiet hours, or ``None``.
+
+    Returns:
+        The contract ``quiet_hours`` object (times as ``HH:MM``), or
+        ``None`` without quiet hours.
+    """
+    if quiet is None:
+        return None
+    return {
+        "start": quiet.start.strftime("%H:%M"),
+        "end": quiet.end.strftime("%H:%M"),
+        "tz": quiet.tz,
+        "bypass_severities": sorted(quiet.bypass_severities),
+    }
+
+
 def to_contract(subscription: model.Subscription) -> dict[str, object]:
     """Serializes a subscription to the contract shape.
 
@@ -156,9 +187,8 @@ def to_contract(subscription: model.Subscription) -> dict[str, object]:
         subscription: Domain subscription.
 
     Returns:
-        Contract ``AlertSubscription``.
+        Contract ``AlertSubscription`` (sets as sorted lists).
     """
-    quiet = subscription.quiet_hours
     return {
         "subscription_id": subscription.subscription_id,
         "channel": subscription.channel.value,
@@ -167,19 +197,12 @@ def to_contract(subscription: model.Subscription) -> dict[str, object]:
         "min_severity": subscription.min_severity,
         "strategy_ids": sorted(subscription.strategy_ids),
         "enabled": subscription.enabled,
-        "quiet_hours": None
-        if quiet is None
-        else {
-            "start": quiet.start.strftime("%H:%M"),
-            "end": quiet.end.strftime("%H:%M"),
-            "tz": quiet.tz,
-            "bypass_severities": sorted(quiet.bypass_severities),
-        },
+        "quiet_hours": _quiet_contract(subscription.quiet_hours),
     }
 
 
 class SubscriptionService:
-    """Lists and upserts the caller's subscriptions."""
+    """The alerts API's tenant-scoped view of subscriptions."""
 
     def __init__(
         self,
@@ -190,19 +213,22 @@ class SubscriptionService:
 
         Args:
             repository: Subscription store.
-            configured_channels: Channels with server credentials.
+            configured_channels: Names of the channels the server has
+                credentials for, reported to clients as
+                ``configured_channels``.
         """
         self._repository = repository
         self._configured = sorted(set(configured_channels))
 
     def list(self, principal: identity.Principal) -> dict[str, object]:
-        """Returns the caller's subscriptions.
+        """Returns the caller's subscriptions on user channels.
 
         Args:
             principal: Caller.
 
         Returns:
-            Contract ``AlertSubscriptionList``.
+            Contract ``AlertSubscriptionList``; UI and EXECUTION
+            subscriptions are left out.
         """
         rows: Sequence[model.Subscription] = self._repository.list_for_tenant(
             principal.tenant_id
@@ -225,12 +251,15 @@ class SubscriptionService:
         """Creates or replaces one of the caller's subscriptions.
 
         Args:
-            principal: Caller.
-            subscription_id: Identifier.
+            principal: Caller; the subscription belongs to its tenant.
+            subscription_id: Identifier from the path.
             body: Contract ``AlertSubscription``.
 
         Returns:
             Stored contract ``AlertSubscription``.
+
+        Raises:
+            errors.ValidationFailedError: If the body or id is invalid.
         """
         subscription = from_contract(principal.tenant_id, subscription_id, body)
         self._repository.upsert(subscription)

@@ -23,12 +23,17 @@ from collections.abc import Awaitable
 from collections.abc import Callable
 from collections.abc import Iterable
 from collections.abc import Mapping
+from typing import TypeAlias
 
 from joseph.domain import clock as clock_lib
 from joseph.domain import ids
 
-ChannelHook = Callable[[str], Awaitable[None]]
+# Coroutine function awaited with a channel key when the channel gains its
+# first or loses its last subscriber.
+ChannelHook: TypeAlias = Callable[[str], Awaitable[None]]
 
+# Channels whose envelopes must carry a tenant id and reach only that
+# tenant's subscribers.
 TENANT_SCOPED_CHANNELS = frozenset({"signals"})
 
 
@@ -84,11 +89,13 @@ class Envelope:
     Attributes:
         type: Event type such as ``candle.updated``.
         sequence: Hub-wide monotonic sequence (0 for control messages).
-        event_ts_ms: Event time.
+        event_ts_ms: Hub clock time when the envelope was built, epoch
+            milliseconds.
         payload: JSON-compatible body.
         channel: Channel key or ``None`` for control messages.
-        tenant_id: Owning tenant for scoped channels.
-        event_id: Unique id.
+        tenant_id: Tenant that may receive the envelope, or ``None`` for
+            every subscriber of the channel.
+        event_id: Unique id (UUIDv7).
         correlation_id: Optional correlation id.
     """
 
@@ -159,6 +166,10 @@ class Subscription:
     def offer(self, envelope: Envelope) -> None:
         """Queues an envelope or marks the subscription overflowed.
 
+        Never blocks. Once overflowed, every envelope is dropped until the
+        consumer clears ``overflowed`` (after telling the client to
+        resnapshot).
+
         Args:
             envelope: Envelope to deliver.
         """
@@ -171,7 +182,10 @@ class Subscription:
 
 
 class StreamHub:
-    """Sequence-numbered fan-out with a retention ring."""
+    """Sequence-numbered fan-out with a retention ring.
+
+    The hub holds no locks: use it from the event loop thread only.
+    """
 
     def __init__(
         self,
@@ -183,8 +197,9 @@ class StreamHub:
 
         Args:
             clock: Time source.
-            retention: Envelopes retained for resume.
-            max_queue: Per-subscriber queue bound.
+            retention: Envelopes retained for resume, across all channels.
+            max_queue: Per-subscriber queue bound; a subscriber with a full
+                queue is marked overflowed.
         """
         self._clock = clock
         self._ring: collections.deque[Envelope] = collections.deque(
@@ -199,7 +214,7 @@ class StreamHub:
 
     @property
     def last_sequence(self) -> int:
-        """Returns the most recently assigned sequence."""
+        """The most recently assigned sequence (0 before any publish)."""
         return self._sequence
 
     def add_channel_hooks(
@@ -228,11 +243,16 @@ class StreamHub:
     ) -> Envelope:
         """Publishes an envelope to a channel.
 
+        Publishing never waits for subscribers: each matching subscriber's
+        queue receives the envelope or the subscriber is marked overflowed.
+
         Args:
             channel: Channel key (see module docstring).
             event_type: Contract ``StreamEventType``.
             payload: JSON-compatible body.
-            tenant_id: Required for tenant-scoped channels.
+            tenant_id: Tenant allowed to receive the envelope; required for
+                tenant-scoped channels, and restricts delivery on any
+                channel.
             correlation_id: Optional correlation id.
 
         Returns:
@@ -328,8 +348,9 @@ class StreamHub:
             last_sequence: Last sequence the client processed.
 
         Returns:
-            Envelopes to resend, or ``None`` when the retention ring no longer
-            covers the gap and the client must refetch REST snapshots.
+            Envelopes to resend (empty when the client is up to date), or
+            ``None`` when the retention ring no longer covers the gap and
+            the client must refetch REST snapshots.
         """
         if last_sequence >= self._sequence:
             return []

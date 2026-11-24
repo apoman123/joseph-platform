@@ -1,7 +1,7 @@
 # Copyright 2026 apoman123
 # SPDX-License-Identifier: MIT
 
-"""Qualification policy (V5 §5), pure and deterministic.
+"""Qualification policy (design plan V5 §5), pure and deterministic.
 
 Hard gates use **strict** comparators: a value equal to its threshold fails.
 
@@ -71,7 +71,7 @@ POLICY_VERSION = "joseph-qualification/2026-11-v3"
 
 
 class Status(enum.StrEnum):
-    """Qualification status."""
+    """A qualification status."""
 
     QUALIFIED = "QUALIFIED"
     REJECTED = "REJECTED"
@@ -79,7 +79,7 @@ class Status(enum.StrEnum):
 
 
 class FundingRisk(enum.StrEnum):
-    """Funding risk classification."""
+    """A funding risk classification."""
 
     NORMAL = "NORMAL"
     WATCH = "WATCH"
@@ -90,7 +90,7 @@ class FundingRisk(enum.StrEnum):
 
 
 class Gate(enum.StrEnum):
-    """Hard gate names (contract ``GateName``)."""
+    """A hard gate name (contract ``GateName``)."""
 
     TURNOVER_24H = "TURNOVER_24H"
     OPEN_INTEREST_USD = "OPEN_INTEREST_USD"
@@ -147,6 +147,7 @@ class Thresholds:
 
 
 CRYPTO_THRESHOLDS = Thresholds(turnover_24h=_TURNOVER_CRYPTO_USD)
+"""Crypto and RWA perpetuals, and perpetuals of unknown asset class."""
 EQUITY_THRESHOLDS = Thresholds(turnover_24h=_TURNOVER_EQUITY_USD)
 """Equity perpetuals on crypto venues."""
 US_EQUITY_THRESHOLDS = Thresholds(
@@ -228,12 +229,14 @@ class QualificationPolicy:
         tw_bond: Thresholds for TWSE bond ETFs.
         tpex_equity: Thresholds for TPEx stocks and equity ETFs.
         tpex_bond: Thresholds for TPEx bond ETFs.
-        funding_watch_pct: ``|8h funding|`` at or above which is WATCH.
-        funding_high_risk_pct: ``|8h funding|`` at or above which is
-            HIGH_RISK.
+        funding_watch_pct: ``|8h funding|`` in percent at or above which
+            is WATCH.
+        funding_high_risk_pct: ``|8h funding|`` in percent at or above
+            which is HIGH_RISK.
         reject_high_funding_risk: Whether HIGH_RISK funding rejects.
-        max_data_age_ms: Inputs older than this count as missing.
-        slippage_notional_usd: Book-walk notional.
+        max_data_age_ms: Inputs older than this (in ms) count as missing.
+        slippage_notional_usd: Book-walk notional in USD for thresholds
+            without their own ``slippage_notional``.
     """
 
     version: str = POLICY_VERSION
@@ -298,7 +301,8 @@ class Observation:
 
     Attributes:
         value: Observed value, or ``None`` when unavailable.
-        as_of_ms: Observation time, or ``None`` when unavailable.
+        as_of_ms: Observation time in UTC epoch ms, or ``None`` when unknown
+            (a value without a time counts as fresh).
     """
 
     value: decimal.Decimal | None
@@ -316,11 +320,12 @@ class QualificationInput:
         turnover_24h_usd: 24h quote turnover in the thresholds' currency
             (USD, or TWD for TWSE and TPEx listings; the latest session
             for listed securities).
-        open_interest_usd: Open interest notional.
+        open_interest_usd: Open interest notional in USD.
         spread_pct: Best bid/ask spread in percent.
-        slippage_pct: Worst-side 50K slippage in percent.
+        slippage_pct: Worst-side slippage in percent for the thresholds'
+            book-walk notional (USD 50K, or TWD 1.5M on TWSE and TPEx).
         funding_8h_pct: 8h-normalized funding in percent.
-        funding_interval_hours: Funding interval.
+        funding_interval_hours: Funding interval in hours, or ``None``.
         trending: Whether a trending source lists the base asset.
         tradable: False when the venue status is not TRADING.
     """
@@ -349,7 +354,7 @@ class GateResult:
         comparator: ``"gt"`` or ``"lt"`` (strict).
         passed: True/False, or ``None`` when data is missing or stale.
         unit: ``USD``, ``TWD``, ``ratio`` or ``pct``.
-        as_of_ms: Observation time.
+        as_of_ms: Observation time in UTC epoch ms, or ``None``.
         reason: Human-readable explanation.
     """
 
@@ -390,15 +395,17 @@ class QualificationRecord:
         status: Final status.
         risk_tags: ``WATCH`` / ``HIGH_RISK`` tags.
         gates: Gate results.
-        funding_8h_pct: Normalized funding.
-        funding_interval_hours: Funding interval.
+        funding_8h_pct: Normalized funding in percent per 8 hours, or
+            ``None`` when unknown or not applicable.
+        funding_interval_hours: Funding interval in hours, or ``None``.
         funding_risk: Funding classification.
         asset_class: Asset class.
-        heat_score: Ordering score (never a gate).
+        heat_score: Ordering score (never a gate), or ``None`` without
+            turnover.
         policy_version: Policy version.
-        as_of_ms: Evaluation time.
+        as_of_ms: Evaluation time in UTC epoch ms.
         reasons: Plain-language reasons.
-        rank: 1-based rank within its report.
+        rank: 1-based rank within its report, or ``None`` before ``rank``.
     """
 
     instrument_id: instruments.InstrumentId
@@ -494,11 +501,12 @@ def _fresh(
 
     Args:
         observation: Gate input.
-        now_ms: Evaluation time.
+        now_ms: Evaluation time in UTC epoch ms.
         policy: Policy (age budget).
 
     Returns:
-        Value or ``None``.
+        The value, or ``None`` when missing or older than
+        ``max_data_age_ms``; a value without a time counts as fresh.
     """
     if observation.value is None:
         return None
@@ -539,11 +547,11 @@ def _gate(
         threshold: Threshold.
         comparator: ``"gt"`` or ``"lt"``.
         unit: Unit label.
-        now_ms: Evaluation time.
+        now_ms: Evaluation time in UTC epoch ms.
         policy: Policy.
 
     Returns:
-        Gate result.
+        Gate result; ``passed`` is ``None`` for a missing or stale input.
     """
     value = _fresh(observation, now_ms, policy)
     symbol = ">" if comparator == "gt" else "<"
@@ -577,9 +585,10 @@ def _gate(
 def heat_score(item: QualificationInput) -> float | None:
     """Computes the ordering score.
 
-    ASSUMPTION (original heat formula unavailable): ``10 * log10(turnover)``
-    plus up to 20 points for turnover/OI (capped at 5x) plus 5 when
-    trending. Used only for ordering; it never changes a status.
+    The formula is an assumption, since the original heat formula is
+    unavailable: ``10 * log10(turnover)`` plus up to 20 points for
+    turnover/OI (``4 * min(turnover / OI, 5)``) plus 5 when trending. Used
+    only for ordering; it never changes a status.
 
     Args:
         item: Qualification input.
@@ -604,13 +613,15 @@ def evaluate(
 ) -> QualificationRecord:
     """Qualifies one instrument.
 
+    The status rules are in the module docstring.
+
     Args:
         item: Inputs.
         policy: Policy.
-        now_ms: Evaluation time.
+        now_ms: Evaluation time in UTC epoch ms.
 
     Returns:
-        Qualification record.
+        Qualification record without a rank.
     """
     limits = policy.thresholds(item.asset_class, item.instrument_id)
     turnover = _fresh(item.turnover_24h_usd, now_ms, policy)
@@ -758,11 +769,14 @@ _STATUS_ORDER = {
 def rank(records: list[QualificationRecord]) -> list[QualificationRecord]:
     """Orders records (qualified first, then heat) and assigns ranks.
 
+    Within a status, a higher heat score comes first (no score counts as
+    0), then the instrument id.
+
     Args:
-        records: Records.
+        records: Records; not modified.
 
     Returns:
-        New ranked records.
+        New records with 1-based ranks, in rank order.
     """
     ordered = sorted(
         records,

@@ -43,6 +43,7 @@ import bisect
 import dataclasses
 import decimal
 from collections.abc import Iterable
+from typing import TypeAlias
 
 from joseph.domain import decimals
 from joseph.domain import instruments
@@ -52,8 +53,10 @@ from joseph.domain import sessions
 from joseph.domain import timeframes
 from joseph.market_data.domain import trades as trades_lib
 
-_Key = tuple[int, int]
-_EmitKey = tuple[object, ...]
+# Trade ordering key: (venue time in epoch milliseconds, arrival sequence).
+_Key: TypeAlias = tuple[int, int]
+# Fields of a bar whose change is worth re-emitting.
+_EmitKey: TypeAlias = tuple[object, ...]
 
 
 @dataclasses.dataclass(slots=True)
@@ -61,7 +64,7 @@ class _Bucket:
     """Running aggregate of the trades of one bar.
 
     Attributes:
-        start_ms: Bar start.
+        start_ms: Bar start, epoch milliseconds.
         open_key: Ordering key of the opening trade.
         open: Opening price.
         close_key: Ordering key of the closing trade.
@@ -74,7 +77,7 @@ class _Bucket:
         unknown_side: True when a trade had no published aggressor.
         count: Trade records.
         aggregated: True when any record aggregates several fills.
-        last_ts: Newest venue timestamp.
+        last_ts: Newest venue timestamp, epoch milliseconds.
         final: True once the bar is closed.
     """
 
@@ -99,7 +102,7 @@ class _Bucket:
         """Creates a bucket from its first trade.
 
         Args:
-            start_ms: Bar start.
+            start_ms: Bar start, epoch milliseconds.
             trade: First trade.
             seq: Arrival sequence number.
 
@@ -249,9 +252,9 @@ class TradeBarBuilder:
         previous segment are discarded (they may miss trades).
 
         Args:
-            complete_from_ms: Venue time from which every trade will be
-                delivered, or ``None`` when unknown (the first trade's
-                bucket is then partial).
+            complete_from_ms: Venue time, epoch milliseconds, from which
+                every trade will be delivered, or ``None`` when unknown (the
+                first trade's bucket is then partial).
 
         Returns:
             Number of open (non-final) bars discarded.
@@ -276,7 +279,7 @@ class TradeBarBuilder:
         """Returns the start of the bar that holds a trade time.
 
         Args:
-            ts_ms: Venue trade time.
+            ts_ms: Venue trade time, epoch milliseconds.
 
         Returns:
             Bar start, or ``None`` between sessions (outside the closing
@@ -318,10 +321,11 @@ class TradeBarBuilder:
 
         Args:
             trades: Trades of this instrument.
-            now_ms: Receipt time stamped on emitted bars.
+            now_ms: Receipt time stamped on emitted bars, epoch milliseconds.
 
         Returns:
-            Bars whose values or finality changed, ascending.
+            Bars whose values or finality changed, ascending; every bar
+            before the newest one becomes final.
 
         Raises:
             ValueError: If a trade belongs to another instrument.
@@ -361,13 +365,13 @@ class TradeBarBuilder:
             touched.add(start)
         if not touched:
             return []
-        newest = self._starts[-1]
+        # Every bucket but the newest has seen a trade of a later bucket, so
+        # it is closed; only the newest one may still grow.
         for start in self._starts[:-1]:
             bucket = self._buckets[start]
             if not bucket.final:
                 bucket.final = True
                 touched.add(start)
-        del newest
         emitted = self._emit(touched, now_ms)
         self._evict()
         return emitted
@@ -378,9 +382,10 @@ class TradeBarBuilder:
         """Finalizes bars ending at or before a proven delivery time.
 
         Args:
-            proven_ms: Venue time up to which every trade has been
-                delivered (for streams: latest frame receipt minus grace).
-            now_ms: Receipt time stamped on emitted bars.
+            proven_ms: Venue time, epoch milliseconds, up to which every
+                trade has been delivered (for streams: latest frame receipt
+                minus grace).
+            now_ms: Receipt time stamped on emitted bars, epoch milliseconds.
 
         Returns:
             Newly final bars, ascending.
@@ -413,18 +418,17 @@ class TradeBarBuilder:
 
         Args:
             touched: Real bucket starts whose state changed.
-            now_ms: Receipt time.
+            now_ms: Receipt time, epoch milliseconds.
 
         Returns:
             Changed bars, ascending.
         """
-        horizon = (
-            self.calendar.shift(
+        # Flat runs are filled only inside the retention window.
+        horizon: int | None = None
+        if self._starts:
+            horizon = self.calendar.shift(
                 self.timeframe, self._starts[-1], -self._retention
             )
-            if self._starts
-            else None
-        )
         candidates = set(touched)
         for start in touched:
             prev, _ = self._neighbors(start)
@@ -456,11 +460,12 @@ class TradeBarBuilder:
         """Builds the bar at ``start`` from its bucket or as a flat bar.
 
         Args:
-            start: Bar start.
-            now_ms: Receipt time.
+            start: Bar start, epoch milliseconds.
+            now_ms: Receipt time, epoch milliseconds.
 
         Returns:
-            Candle, or ``None`` when the bar is partial or not fillable.
+            Candle, or ``None`` when the bar is partial or not fillable (an
+            empty bar not between two real buckets).
         """
         end = self.calendar.end_of(self.timeframe, start)
         bucket = self._buckets.get(start)
@@ -553,9 +558,10 @@ def bars_from_coverage(
         instrument_id: Instrument.
         timeframe: Seconds resolution.
         source: Provenance label.
-        now_ms: Receipt time.
+        now_ms: Receipt time, epoch milliseconds.
         feed_state: Provenance state.
-        buy_volume_method: Origin of the trades' aggressor side.
+        buy_volume_method: Origin of the trades' aggressor side (``None``
+            means the venue's taker flag).
 
     Returns:
         Ascending bars inside the coverage.

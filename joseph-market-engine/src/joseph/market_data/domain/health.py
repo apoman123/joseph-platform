@@ -5,8 +5,9 @@
 
 Health is derived, never asserted: a feed is ``STALE`` once no message has
 arrived within its budget, ``DEGRADED`` while it runs on a fallback
-transport or after recent reconnects/gaps, ``UNAVAILABLE`` when the source
-cannot be reached, otherwise ``HEALTHY``.
+transport, within a minute of a reconnect, gap or error, or before its first
+message, ``UNAVAILABLE`` when the source cannot be reached, otherwise
+``HEALTHY``.
 """
 
 from __future__ import annotations
@@ -16,12 +17,13 @@ import dataclasses
 from joseph.domain import instruments
 from joseph.domain import quality
 
+# A reconnect, gap or error this recent (milliseconds) keeps a feed DEGRADED.
 _RECENT_TROUBLE_MS = 60_000
 
 
 @dataclasses.dataclass(frozen=True, slots=True)
 class FeedHealth:
-    """Contract ``FeedHealth``.
+    """Health of one venue feed at one moment (contract ``FeedHealth``).
 
     Attributes:
         venue: Venue.
@@ -29,11 +31,13 @@ class FeedHealth:
         feed_mode: Requested policy.
         feed_state: Provenance shown to users.
         transport: Active transport.
-        reconnects: Reconnect count.
-        gaps_detected: Detected gaps.
-        as_of_ms: Evaluation time.
-        last_message_ms: Last message receipt time.
-        lag_ms: ``as_of_ms - last_message_ms``.
+        reconnects: Reconnects since the tracker started.
+        gaps_detected: Missing bars detected since the tracker started.
+        as_of_ms: Evaluation time, epoch milliseconds.
+        last_message_ms: Last message receipt time, epoch milliseconds;
+            ``None`` before the first message.
+        lag_ms: ``as_of_ms - last_message_ms``, never negative; ``None``
+            before the first message.
         last_error: Last error summary.
     """
 
@@ -71,7 +75,22 @@ class FeedHealth:
 
 
 class FeedHealthTracker:
-    """Mutable accumulator of feed observations."""
+    """Mutable accumulator of one venue feed's observations.
+
+    Attributes:
+        venue: Venue being tracked.
+        feed_mode: Requested policy.
+        stale_after_ms: Silence budget in milliseconds before the feed is
+            stale.
+        transport: Transport now delivering data.
+        feed_state: Provenance of delivered data.
+        fallback: True while running on a degraded fallback transport.
+        reconnects: Reconnect attempts recorded.
+        gaps: Missing bars recorded.
+        last_message_ms: Last message receipt time, epoch milliseconds;
+            ``None`` before the first message.
+        last_error: Last error summary.
+    """
 
     def __init__(
         self,
@@ -84,7 +103,8 @@ class FeedHealthTracker:
         Args:
             venue: Venue being tracked.
             feed_mode: Requested policy.
-            stale_after_ms: Silence budget before the feed is stale.
+            stale_after_ms: Silence budget in milliseconds before the feed
+                is stale.
         """
         self.venue = venue
         self.feed_mode = feed_mode
@@ -121,7 +141,7 @@ class FeedHealthTracker:
         """Records a received message.
 
         Args:
-            now_ms: Receipt time.
+            now_ms: Receipt time, epoch milliseconds.
         """
         self.last_message_ms = now_ms
         self._unavailable = False
@@ -130,8 +150,8 @@ class FeedHealthTracker:
         """Records a reconnect attempt.
 
         Args:
-            now_ms: Attempt time.
-            error: Cause summary.
+            now_ms: Attempt time, epoch milliseconds.
+            error: Cause summary; ``None`` or empty keeps the last error.
         """
         self.reconnects += 1
         self._last_trouble_ms = now_ms
@@ -142,7 +162,7 @@ class FeedHealthTracker:
         """Records detected missing bars.
 
         Args:
-            now_ms: Detection time.
+            now_ms: Detection time, epoch milliseconds.
             bars: Number of missing bars.
         """
         self.gaps += bars
@@ -152,7 +172,7 @@ class FeedHealthTracker:
         """Records a transient error.
 
         Args:
-            now_ms: Error time.
+            now_ms: Error time, epoch milliseconds.
             error: Summary (never secrets).
         """
         self.last_error = error
@@ -162,7 +182,7 @@ class FeedHealthTracker:
         """Marks the source unreachable.
 
         Args:
-            now_ms: Time of the failure.
+            now_ms: Time of the failure, epoch milliseconds.
             error: Summary.
         """
         self._unavailable = True
@@ -174,10 +194,11 @@ class FeedHealthTracker:
         """Derives the current health.
 
         Args:
-            now_ms: Evaluation time.
+            now_ms: Evaluation time, epoch milliseconds.
 
         Returns:
-            Feed health.
+            Feed health; a ``LIVE`` or ``POLL`` feed state reads ``STALE``
+            while the feed is stale.
         """
         lag = (
             None

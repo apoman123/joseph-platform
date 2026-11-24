@@ -51,7 +51,8 @@ def _parse_set(raw: str | None) -> list[str] | None:
         raw: Raw parameter value.
 
     Returns:
-        Plugin ids, or ``None`` for all plugins.
+        Plugin ids, or ``None`` for all usable plugins when the parameter is
+        absent or blank.
     """
     if raw is None or not raw.strip():
         return None
@@ -109,6 +110,9 @@ def build_router(
         query_service: Point-in-time query service.
         registry: Plugin registry.
 
+    The routes are public (no bearer token). Invalid query values are
+    answered with 422 ``VALIDATION_FAILED``.
+
     Returns:
         Router with ``/v1/indicators/plugins``, ``/v1/indicators/snapshot``,
         ``/v1/indicators/series`` and ``/v1/aois``.
@@ -117,7 +121,11 @@ def build_router(
 
     @router.get("/v1/indicators/plugins")
     async def list_plugins() -> dict[str, object]:
-        """Lists usable indicator plugins (contract IndicatorPluginList)."""
+        """Lists usable indicator plugins.
+
+        Returns:
+            Contract ``IndicatorPluginList``.
+        """
         return registry.list_infos()
 
     @router.get("/v1/indicators/snapshot")
@@ -128,7 +136,25 @@ def build_router(
         at_ms: int | None = fastapi.Query(None, ge=0),
         settings: str | None = None,
     ) -> dict[str, object]:
-        """Returns indicator snapshots (contract IndicatorSnapshotList)."""
+        """Returns indicator snapshots as of a point in time.
+
+        Args:
+            instrument_id: Canonical instrument id.
+            tf: Timeframe value, such as ``1h``.
+            plugin_set: Query ``set``: comma-separated plugin ids; all
+                usable plugins when absent.
+            at_ms: Point in time, UTC epoch milliseconds; the latest closed
+                bar when absent.
+            settings: JSON object mapping plugin ids to setting overrides.
+
+        Returns:
+            Contract ``IndicatorSnapshotList``.
+
+        Raises:
+            errors.ValidationFailedError: If a parameter or a setting
+                override is invalid (422).
+            errors.MissingDataError: If no closed candle is available (422).
+        """
         instrument, timeframe = _parse_series(instrument_id, tf)
         return await query_service.snapshots(
             instrument,
@@ -146,8 +172,29 @@ def build_router(
         from_ms: int | None = fastapi.Query(None, ge=0),
         settings: str | None = None,
     ) -> dict[str, object]:
-        """Returns one plugin's per-bar values (contract IndicatorSeries)."""
+        """Returns one plugin's published values on every closed bar.
+
+        Args:
+            instrument_id: Canonical instrument id.
+            tf: Timeframe value, such as ``1h``.
+            plugin: Plugin id.
+            from_ms: First bar start, UTC epoch milliseconds; the default
+                lookback window when absent.
+            settings: JSON object mapping plugin ids to setting overrides;
+                only the entry for ``plugin`` is used.
+
+        Returns:
+            Contract ``IndicatorSeries``.
+
+        Raises:
+            errors.NotFoundError: If the plugin id is unknown (404).
+            errors.UnsupportedError: If the plugin is disabled or removed
+                (422).
+            errors.ValidationFailedError: If a parameter or a setting
+                override is invalid (422).
+        """
         instrument, timeframe = _parse_series(instrument_id, tf)
+        # Rejects an unknown or unusable plugin before any data is fetched.
         registry.get(plugin)
         overrides = _parse_settings(settings) or {}
         return await query_service.series(
@@ -162,7 +209,25 @@ def build_router(
         at_ms: int | None = fastapi.Query(None, ge=0),
         settings: str | None = None,
     ) -> dict[str, object]:
-        """Returns AOIs and recent events (contract AoiList)."""
+        """Returns areas of interest (AOIs) and recent events.
+
+        Args:
+            instrument_id: Canonical instrument id.
+            tf: Timeframe value, such as ``1h``.
+            plugin_set: Query ``set``: comma-separated plugin ids; all
+                usable plugins when absent.
+            at_ms: Point in time, UTC epoch milliseconds; the latest closed
+                bar when absent.
+            settings: JSON object mapping plugin ids to setting overrides.
+
+        Returns:
+            Contract ``AoiList``.
+
+        Raises:
+            errors.ValidationFailedError: If a parameter or a setting
+                override is invalid (422).
+            errors.MissingDataError: If no closed candle is available (422).
+        """
         instrument, timeframe = _parse_series(instrument_id, tf)
         return await query_service.aois(
             instrument,

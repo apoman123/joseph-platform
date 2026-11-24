@@ -34,6 +34,7 @@ import sqlalchemy as sa
 from joseph.alerts.adapters import channels as alert_channels
 from joseph.alerts.adapters import sql as alerts_sql
 from joseph.alerts.app import dispatcher as alert_dispatcher
+from joseph.alerts.app import ports as alert_ports
 from joseph.alerts.app import subscriptions as alert_subscriptions
 from joseph.alerts.domain import model as alert_model
 from joseph.api import app as api_app
@@ -152,7 +153,9 @@ class Container:
         metrics: Metrics registry.
         replay: Optional replay source.
         signal_stack: Indicator/strategy/signal/alert services.
-        closers: Extra async close hooks registered by integrators.
+        closers: Close hooks that ``aclose`` runs last, before disposing of
+            the database engine; a hook may return an awaitable, which is
+            awaited.
         recorder: Optional public-trade recorder.
     """
 
@@ -179,7 +182,14 @@ class Container:
     recorder: trade_recorder.TradeRecorder | None = None
 
     async def astart(self) -> None:
-        """Starts background workers (pipeline, alert outbox)."""
+        """Starts the background workers.
+
+        Starts the trade recorder, the alert outbox worker and, when
+        ``pipeline_enabled`` is set, the live signal pipeline. Each creates
+        asyncio tasks, so this runs inside the app's event loop (the
+        FastAPI lifespan). Feed sessions are not started here: the feed
+        router opens them on demand (``FeedRouter.acquire``).
+        """
         if self.recorder is not None:
             self.recorder.start()
         stack = self.signal_stack
@@ -190,7 +200,14 @@ class Container:
             stack.pipeline.start()
 
     async def aclose(self) -> None:
-        """Stops workers and feeds and closes network resources."""
+        """Stops workers and feeds and closes network resources.
+
+        Producers stop before what they use: the pipeline (which queues
+        alerts) before the outbox worker that delivers them, the worker
+        before the HTTP client of its senders, the feed sessions and the
+        trade recorder before the adapters they read from, and the database
+        engine last.
+        """
         stack = self.signal_stack
         if stack is not None:
             await stack.pipeline.stop()
@@ -220,7 +237,8 @@ def build_container(
     Args:
         settings: Settings (read from the environment when omitted).
         clock: Time source (system clock when omitted).
-        http_client: Optional shared HTTP client (tests inject respx).
+        http_client: Optional HTTP client shared by the venue adapters
+            (tests inject respx-backed ones); alert senders use their own.
         connect: WebSocket connector.
 
     Returns:
@@ -235,6 +253,7 @@ def build_container(
         if settings.trade_archive_url
         else None
     )
+    # Only the TWSE and TPEx adapters keep recorded minutes in a bar archive.
     exchange = {instruments.Venue.TWSE, instruments.Venue.TPEX}
     raw_adapters = factory.build_adapters(
         settings.active_venues,
@@ -286,6 +305,10 @@ def build_container(
     ) -> None:
         """Publishes candle updates and audits revisions.
 
+        Also marks the instrument as in use for the trade recorder. A
+        revised final candle increments the revision counter and publishes
+        a ``candle.revised`` domain event.
+
         Args:
             session: Producing session.
             candle: Stored candle.
@@ -317,7 +340,7 @@ def build_container(
             )
 
     async def on_health(feed: health.FeedHealth) -> None:
-        """Publishes feed health changes.
+        """Publishes feed health changes and updates the feed gauges.
 
         Args:
             feed: Health snapshot.
@@ -480,6 +503,7 @@ def _channel_policy(
             Channel names.
         """
         strategy_id, _, number = strategy_version_id.rpartition(":v")
+        # A malformed id or an unknown version still gets UI delivery.
         try:
             version = repository.get(tenant_id, strategy_id, int(number))
         except (ValueError, LookupError):
@@ -487,6 +511,7 @@ def _channel_policy(
         if version is None:
             return frozenset({"UI"})
         chosen = version.definition.notification.channels
+        # Accepts enum members as well as plain channel names.
         names = {str(getattr(c, "value", c)) for c in chosen or ()}
         return frozenset(names or {"UI"})
 
@@ -497,7 +522,7 @@ def _senders(
     settings: config.Settings,
     hub: streaming.StreamHub,
     client: httpx.AsyncClient,
-) -> Mapping[alert_model.Channel, object]:
+) -> Mapping[alert_model.Channel, alert_ports.ChannelSender]:
     """Builds alert senders for every configured channel.
 
     Args:
@@ -521,7 +546,7 @@ def _senders(
             "signals", "signal.created", dict(payload), tenant_id=tenant_id
         )
 
-    senders: dict[alert_model.Channel, object] = {
+    senders: dict[alert_model.Channel, alert_ports.ChannelSender] = {
         alert_model.Channel.UI: alert_channels.UiSender(ui_sink),
     }
     if settings.telegram_bot_token:
@@ -565,6 +590,9 @@ def _senders(
 def build_signal_stack(container: Container) -> SignalStack:
     """Wires indicators, strategies, signals, alerts and backtests.
 
+    Creates the strategy, signal and alert tables when they are missing, and
+    an HTTP client for the alert senders that ``Container.aclose`` closes.
+
     Args:
         container: Market-data container.
 
@@ -604,7 +632,7 @@ def build_signal_stack(container: Container) -> SignalStack:
     )
     worker = alert_dispatcher.OutboxWorker(
         outbox,
-        senders,  # type: ignore[arg-type]
+        senders,
         clock,
     )
     gate = pipeline_qualification.CachedQualificationGate(
@@ -674,7 +702,7 @@ def signal_routers(stack: SignalStack) -> list[fastapi.APIRouter]:
         stack: Signal stack.
 
     Returns:
-        Indicator, strategy, signal and backtest routers.
+        Indicator, strategy, signal, backtest and alert-subscription routers.
     """
     return [
         indicators_router.build_router(stack.indicator_queries, stack.plugins),
@@ -699,8 +727,12 @@ def create_application(
 ) -> fastapi.FastAPI:
     """Builds the ASGI app (uvicorn ``--factory`` entry point).
 
+    Configures secret-redacting logging first. The signal-stack routers are
+    mounted before ``extra_routers``.
+
     Args:
-        container: Optional pre-built container.
+        container: Optional pre-built container (built from the environment
+            when omitted).
         extra_routers: Additional routers to mount.
 
     Returns:

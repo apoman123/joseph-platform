@@ -36,21 +36,29 @@ _LOG = logging.getLogger(__name__)
 
 
 class TrendingPort(Protocol):
-    """Source of trending base-asset symbols (ordering bonus only)."""
+    """A source of trending base-asset symbols (ordering bonus only)."""
 
     async def symbols(self) -> frozenset[str]:
-        """Returns upper-case trending symbols."""
+        """Returns upper-case trending symbols.
+
+        Returns:
+            Symbols such as ``{"BTC", "SOL"}``.
+
+        Raises:
+            errors.JosephError: If the source is unavailable; the service
+                then ranks without a trending bonus.
+        """
         ...
 
 
 @dataclasses.dataclass(frozen=True, slots=True)
 class QualificationReport:
-    """Contract ``QualificationReport``.
+    """A qualification report (contract ``QualificationReport``).
 
     Attributes:
         policy_version: Policy version.
-        as_of_ms: Report time.
-        venue: Venue filter, if any.
+        as_of_ms: Report time in UTC epoch ms.
+        venue: Venue filter, or ``None`` for all venues.
         records: Ranked records.
     """
 
@@ -74,7 +82,11 @@ class QualificationReport:
 
 
 class QualificationService:
-    """Computes and caches qualification reports per venue."""
+    """Computes and caches qualification reports per venue.
+
+    Attributes:
+        policy: The qualification policy applied to every venue.
+    """
 
     def __init__(
         self,
@@ -91,13 +103,15 @@ class QualificationService:
         """Initializes the service.
 
         Args:
-            adapters: Adapter per venue.
+            adapters: Adapter per enabled venue.
             clock: Time source.
-            policy: Qualification policy (default parity policy).
-            top_n: Candidates per venue by turnover.
+            policy: Qualification policy; ``None`` uses the default parity
+                policy.
+            top_n: Candidates per venue, the highest by 24h quote turnover.
             trending: Optional trending source.
-            ttl_ms: Report cache lifetime.
-            concurrency: Concurrent per-candidate fetches.
+            ttl_ms: Lifetime of a venue's cached records, in ms.
+            concurrency: Maximum candidates whose book, open interest and
+                funding are fetched at the same time (across venues).
             book_depth: Book levels requested for the slippage walk.
         """
         self._adapters = dict(adapters)
@@ -135,6 +149,10 @@ class QualificationService:
         trending: frozenset[str],
     ) -> policy_lib.QualificationInput:
         """Collects gate inputs for one candidate.
+
+        A fetch that fails with a ``JosephError`` leaves its input missing.
+        A fresh book replaces the snapshot's spread and gives the slippage;
+        without one, slippage is missing.
 
         Args:
             adapter: Venue adapter.
@@ -218,11 +236,14 @@ class QualificationService:
     ) -> list[policy_lib.QualificationRecord]:
         """Scans one venue now (bypassing the cache).
 
+        Candidates are the venue's screened instruments that have a
+        snapshot (on Binance only USDT-quoted ones).
+
         Args:
             venue: Venue.
 
         Returns:
-            Ranked records.
+            Ranked records, one per candidate.
 
         Raises:
             errors.NotFoundError: If the venue is not enabled.
@@ -270,12 +291,16 @@ class QualificationService:
     ) -> list[policy_lib.QualificationRecord]:
         """Returns cached or fresh records for a venue.
 
+        One scan per venue runs at a time; concurrent callers wait for it
+        and, unless they ask for a refresh, get its result from the cache.
+
         Args:
             venue: Venue.
             refresh: Force a new scan.
 
         Returns:
-            Records.
+            Ranked records, cached when younger than ``ttl_ms`` and no
+            refresh is asked for.
         """
         lock = self._locks.setdefault(venue, asyncio.Lock())
         async with lock:
@@ -300,15 +325,22 @@ class QualificationService:
         """Builds a report for one or all venues.
 
         Venues that cannot be reached are skipped when reporting all venues
-        and raise when requested explicitly.
+        and raise when requested explicitly. Records of several venues are
+        ranked together.
 
         Args:
-            venue: Optional venue.
-            status: Optional status filter.
-            refresh: Force new scans.
+            venue: Venue to report, or ``None`` for every enabled venue
+                except rate series.
+            status: Keep only records with this status, or ``None`` for all.
+            refresh: Force new scans instead of cached records.
 
         Returns:
             Report.
+
+        Raises:
+            errors.NotFoundError: If ``venue`` is not enabled.
+            errors.UnsupportedError: If ``venue`` publishes rate series.
+            errors.VenueUnavailableError: If ``venue`` cannot be reached.
         """
         venues = (
             [venue]

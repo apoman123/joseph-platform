@@ -29,6 +29,7 @@ import contextlib
 import json
 from collections.abc import Mapping
 from typing import Any
+from typing import TypeAlias
 
 import fastapi
 from starlette import websockets as starlette_ws
@@ -41,8 +42,13 @@ from joseph.market_data.app import service as market_service
 from joseph.platform import auth
 from joseph.platform import streaming
 
+# Seconds between server heartbeats on an otherwise idle connection.
 HEARTBEAT_S = 15.0
-_SeriesLease = tuple[str, str, quality.FeedMode]
+
+# Feed session a candle channel holds: ``(instrument_id, timeframe,
+# feed_mode)``, released when the channel is unsubscribed or the socket
+# closes.
+_SeriesLease: TypeAlias = tuple[str, str, quality.FeedMode]
 
 
 def _error(
@@ -64,7 +70,18 @@ def _error(
 
 
 class _Connection:
-    """State of one WebSocket client."""
+    """State of one WebSocket client.
+
+    Attributes:
+        websocket: Accepted socket.
+        hub: Stream hub the client subscribes through.
+        router: Feed router that starts candle feed sessions.
+        market_data: Market-data service (venue health for ``feed_health``).
+        principal: Authenticated principal, or ``None`` for an anonymous
+            client (public channels only).
+        subscription: The client's hub subscription.
+        leases: Feed sessions held, by candle channel key.
+    """
 
     def __init__(
         self,
@@ -97,6 +114,9 @@ class _Connection:
     async def send(self, payload: Mapping[str, object]) -> None:
         """Sends one JSON frame.
 
+        The pump, the heartbeat and the receive loop all send on the same
+        socket; the lock keeps their frames from interleaving.
+
         Args:
             payload: Envelope dict.
         """
@@ -104,7 +124,12 @@ class _Connection:
             await self.websocket.send_text(json.dumps(payload))
 
     async def pump(self) -> None:
-        """Forwards queued envelopes, signalling overflow."""
+        """Forwards queued envelopes until cancelled, signalling overflow.
+
+        When the subscription overflowed, the queued envelopes are dropped
+        and one ``snapshot_required`` is sent instead, so the client
+        refetches rather than seeing a silent gap.
+        """
         queue = self.subscription.queue
         while True:
             if self.subscription.overflowed:
@@ -127,7 +152,7 @@ class _Connection:
             await self.send(envelope.to_contract())
 
     async def heartbeat(self) -> None:
-        """Sends periodic heartbeats."""
+        """Sends a heartbeat every ``HEARTBEAT_S`` seconds until cancelled."""
         while True:
             await asyncio.sleep(HEARTBEAT_S)
             await self.send(
@@ -146,7 +171,14 @@ class _Connection:
             Hub channel key.
 
         Raises:
-            errors.JosephError: If the channel cannot be served.
+            errors.UnauthenticatedError: For ``signals`` on an anonymous
+                connection.
+            errors.ValidationFailedError: For an unknown channel, a missing
+                or malformed instrument or timeframe, or an unknown
+                ``feed_mode``.
+            errors.JosephError: If the feed router cannot serve the
+                requested candle feed (``UnsupportedError``,
+                ``MissingDataError`` or ``NotFoundError``).
         """
         channel = str(spec.get("channel", ""))
         if channel == "signals" and self.principal is None:
@@ -184,6 +216,12 @@ class _Connection:
 
     async def subscribe(self, message: Mapping[str, Any]) -> None:
         """Handles a subscribe request.
+
+        Each spec that cannot be served is answered with its own ``error``
+        envelope; the others are still subscribed. A ``subscribed``
+        envelope then lists every channel, followed by the current venue
+        health when ``feed_health`` was requested and by the replay from
+        ``last_sequence`` (or ``snapshot_required``) when one was given.
 
         Args:
             message: Client message.
@@ -237,6 +275,8 @@ class _Connection:
 
     async def unsubscribe(self, message: Mapping[str, Any]) -> None:
         """Handles an unsubscribe request.
+
+        Malformed specs are skipped without an error envelope.
 
         Args:
             message: Client message.
@@ -301,13 +341,19 @@ def build_router(
         authenticator: Token authenticator for tenant-scoped channels.
 
     Returns:
-        Router.
+        Router serving ``/v1/stream/market``.
     """
     router = fastapi.APIRouter(tags=["stream"])
 
     @router.websocket("/v1/stream/market")
     async def market_stream(websocket: fastapi.WebSocket) -> None:
         """Serves the resumable market stream.
+
+        Without ``?token=`` the client is anonymous; an invalid token gets
+        an ``error`` envelope and the socket is closed with code 1008
+        (policy violation). The pump and heartbeat tasks run until the
+        client disconnects; they are then cancelled and every channel and
+        feed lease is released.
 
         Args:
             websocket: Incoming socket.
@@ -361,6 +407,9 @@ def build_router(
                         )
                     )
         except (starlette_ws.WebSocketDisconnect, RuntimeError):
+            # Using a socket that already closed raises a RuntimeError
+            # (``WebSocketDisconnected``) rather than WebSocketDisconnect;
+            # both end the session.
             pass
         finally:
             pump.cancel()

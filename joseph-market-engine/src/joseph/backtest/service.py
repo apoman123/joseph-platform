@@ -41,7 +41,7 @@ class BacktestService:
         """Runs a backtest of one of the principal's versions.
 
         Args:
-            principal: Caller.
+            principal: Caller; only its tenant's versions are visible.
             strategy_id: Strategy slug.
             request: Parameters.
 
@@ -50,6 +50,11 @@ class BacktestService:
 
         Raises:
             errors.NotFoundError: If the version is not the caller's.
+            errors.ValidationFailedError: If the request is invalid (from
+                ``BacktestRunner.run``).
+            strategy_errors.StrategyValidationError: If the version does not
+                compile against the current catalog (from
+                ``BacktestRunner.run``).
         """
         version = self.versions.get_version(
             principal, strategy_id, request.version

@@ -1,8 +1,8 @@
 # Copyright 2026 apoman123
 # SPDX-License-Identifier: MIT
 
-"""Notification channel adapters (UI stream, Telegram, LINE, email,.
+"""Alert repositories and notification channel adapters.
 
-Notification channel adapters (UI stream, Telegram, LINE, email, webhook,
-execution forwarder).
+Channels: UI stream, Telegram, LINE, e-mail, webhook and the execution
+engine forwarder.
 """

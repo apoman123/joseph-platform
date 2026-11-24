@@ -1,7 +1,12 @@
 # Copyright 2026 apoman123
 # SPDX-License-Identifier: MIT
 
-"""Signal routing into the outbox and the outbox delivery worker."""
+"""Signal routing into the outbox and the outbox delivery worker.
+
+``AlertDispatcher`` turns each newly recorded signal into durable outbox
+records (one per channel and target); ``OutboxWorker`` delivers them later,
+so a slow or failing channel never blocks signal recording.
+"""
 
 from __future__ import annotations
 
@@ -12,6 +17,7 @@ import logging
 from collections.abc import Callable
 from collections.abc import Mapping
 from collections.abc import Sequence
+from typing import TypeAlias
 
 from joseph.alerts.app import ports
 from joseph.alerts.domain import model
@@ -20,18 +26,18 @@ from joseph.signals.domain import signal as signal_domain
 
 _LOG = logging.getLogger(__name__)
 
-ChannelPolicy = Callable[[str, str], frozenset[str]]
+ChannelPolicy: TypeAlias = Callable[[str, str], frozenset[str]]
 """``(tenant_id, strategy_version_id) -> allowed channel names``."""
 
 
 def default_channels(
     tenant_id: str, strategy_version_id: str
 ) -> frozenset[str]:
-    """Default channel policy: UI only.
+    """Returns the default channel policy: UI only.
 
     Args:
         tenant_id: Tenant (unused).
-        strategy_version_id: Version (unused).
+        strategy_version_id: Strategy version (unused).
 
     Returns:
         ``{"UI"}``.
@@ -66,8 +72,10 @@ class AlertDispatcher:
             outbox: Delivery outbox.
             subscriptions: Subscription store.
             clock: Time source.
-            strategy_channels: Channels each strategy version allows.
-            ui_enabled: Whether to enqueue the implicit UI delivery.
+            strategy_channels: Channel names each strategy version allows;
+                a subscription on any other channel is suppressed.
+            ui_enabled: Whether to enqueue the implicit UI delivery (target
+                ``tenant:<tenant_id>``) when the strategy allows UI.
             forward_execution: Whether entries of PAPER/SHADOW/AUTO_LIVE
                 strategies are forwarded to the execution engine.
         """
@@ -89,21 +97,25 @@ class AlertDispatcher:
     def route(self, signal: signal_domain.Signal) -> model.RouteResult:
         """Routes a signal and enqueues its deliveries.
 
+        Deliveries already in the outbox (same idempotency key) are skipped
+        by the outbox; suppressed subscriptions are logged at INFO.
+
         Args:
             signal: Signal.
 
         Returns:
-            Routing result.
+            Routing result, including deliveries that were duplicates.
         """
         now = self._clock.now_ms()
+        ui_target: str | None = None
+        if self._ui_enabled:
+            ui_target = f"tenant:{signal.tenant_id}"
         result = model.route(
             signal,
             self.subscriptions.list_for_tenant(signal.tenant_id),
             self._channels(signal.tenant_id, signal.strategy_version_id),
             now,
-            ui_target=f"tenant:{signal.tenant_id}"
-            if self._ui_enabled
-            else None,
+            ui_target=ui_target,
             forward_execution=self._forward,
         )
         for record in result.deliveries:
@@ -119,7 +131,7 @@ class AlertDispatcher:
 
 
 class FanoutPublisher:
-    """Publishes each signal to several publishers in order.
+    """A publisher that hands each signal to several publishers in order.
 
     Attributes:
         publishers: Downstream publishers.
@@ -143,14 +155,14 @@ class FanoutPublisher:
         """
         for publisher in self.publishers:
             try:
-                await publisher.publish(signal)  # type: ignore[attr-defined]
-            except Exception:
+                await publisher.publish(signal)  # type: ignore[attr-defined]  # publishers are typed as object; each has async publish(signal)
+            except Exception:  # noqa: BLE001 - isolation point: one failing publisher must not stop the others
                 _LOG.exception("publisher %s failed", type(publisher).__name__)
 
 
 @dataclasses.dataclass(frozen=True, slots=True)
 class DeliveryStats:
-    """Counts from one worker pass.
+    """The counts of one outbox worker pass.
 
     Attributes:
         delivered: Successful deliveries.
@@ -166,9 +178,15 @@ class DeliveryStats:
 class OutboxWorker:
     """Delivers due outbox records with retries and a dead-letter state.
 
+    ``start`` runs passes in a background task; ``stop`` asks the loop to end
+    and waits for the pass in progress to finish. ``stop`` does not cancel
+    the task, so a send in flight completes (each HTTP sender times out
+    after 10 s).
+
     Attributes:
         outbox: Delivery outbox.
-        max_attempts: Attempts before dead-lettering.
+        max_attempts: Attempts after which a failing delivery is
+            dead-lettered.
     """
 
     def __init__(
@@ -186,12 +204,16 @@ class OutboxWorker:
 
         Args:
             outbox: Delivery outbox.
-            senders: Sender per channel.
+            senders: Sender per channel; records of a channel without one
+                are dead-lettered.
             clock: Time source.
-            max_attempts: Attempts before dead-lettering.
-            base_backoff_ms: First retry delay.
-            batch_size: Records per pass.
-            lease_ms: Claim lease per record.
+            max_attempts: Attempts after which a failing delivery is
+                dead-lettered.
+            base_backoff_ms: First retry delay in ms; it doubles per attempt
+                up to 5 minutes.
+            batch_size: Maximum records claimed per pass.
+            lease_ms: How long a claimed record stays hidden from other
+                workers, in ms.
         """
         self.outbox = outbox
         self._senders = dict(senders)
@@ -205,6 +227,12 @@ class OutboxWorker:
 
     async def run_once(self) -> DeliveryStats:
         """Delivers every due record once.
+
+        A ``DeliveryError`` is retried after the channel's ``Retry-After``
+        or the exponential backoff, and dead-lettered when it is not
+        retryable or the attempts are used up. Any other exception from a
+        sender ends the pass; the records it had claimed become due again
+        when their lease expires.
 
         Returns:
             Counts of this pass.
@@ -253,24 +281,26 @@ class OutboxWorker:
         return DeliveryStats(delivered=delivered, retried=retried, dead=dead)
 
     async def _loop(self, interval_s: float) -> None:
-        """Runs passes until stopped.
+        """Runs passes until ``stop`` sets the stopping event.
 
         Args:
-            interval_s: Pause between passes.
+            interval_s: Pause between passes in seconds; a stop request
+                ends the pause early.
         """
         while not self._stopping.is_set():
             try:
                 await self.run_once()
-            except Exception:
+            except Exception:  # noqa: BLE001 - isolation point: a failed pass is logged and the loop keeps delivering
                 _LOG.exception("outbox pass failed")
             with contextlib.suppress(TimeoutError):
                 await asyncio.wait_for(self._stopping.wait(), interval_s)
 
     def start(self, interval_s: float = 1.0) -> asyncio.Task[None]:
-        """Starts the background delivery loop.
+        """Starts the background delivery loop unless it is running.
 
         Args:
-            interval_s: Pause between passes.
+            interval_s: Pause between passes in seconds; ignored when the
+                loop is already running.
 
         Returns:
             The running task.
@@ -281,7 +311,10 @@ class OutboxWorker:
         return self._task
 
     async def stop(self) -> None:
-        """Stops the loop and waits for the current pass to finish."""
+        """Stops the loop and waits for the current pass to finish.
+
+        Calling it when the loop is not running is a no-op.
+        """
         self._stopping.set()
         if self._task is not None:
             await self._task

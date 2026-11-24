@@ -1,7 +1,7 @@
 # Copyright 2026 apoman123
 # SPDX-License-Identifier: MIT
 
-"""In-memory signal repository."""
+"""In-memory signal repository for tests (bootstrap wires the SQL one)."""
 
 from __future__ import annotations
 
@@ -13,14 +13,14 @@ from joseph.signals.domain import signal as signal_domain
 
 
 def matches(signal: signal_domain.Signal, filters: ports.SignalFilter) -> bool:
-    """Checks a signal against query filters.
+    """Checks a signal against query filters (the tenant is not checked).
 
     Args:
         signal: Signal.
-        filters: Filters.
+        filters: Filters; ``limit`` is ignored here.
 
     Returns:
-        True when the signal matches.
+        True when every set filter admits the signal.
     """
     if filters.strategy_id and signal.strategy_id != filters.strategy_id:
         return False
@@ -50,7 +50,7 @@ class InMemorySignalRepository:
             signal: Signal.
 
         Returns:
-            True when new.
+            True when new, False for a duplicate.
         """
         key = (signal.tenant_id, signal.dedupe_key)
         with self._lock:
@@ -69,7 +69,7 @@ class InMemorySignalRepository:
             signal_id: Signal id.
 
         Returns:
-            Signal or ``None``.
+            The signal, or ``None`` when absent or owned by another tenant.
         """
         with self._lock:
             for (tenant, _), signal in self._by_key.items():
@@ -87,7 +87,8 @@ class InMemorySignalRepository:
             filters: Filters.
 
         Returns:
-            Signals.
+            At most ``filters.limit`` signals, by bar close descending and
+            then by id.
         """
         with self._lock:
             found = [

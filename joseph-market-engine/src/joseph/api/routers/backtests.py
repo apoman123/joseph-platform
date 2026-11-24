@@ -21,14 +21,19 @@ from joseph.strategy.domain import ast
 class BacktestBody(pydantic.BaseModel):
     """Body mirroring the contract ``BacktestRequest``.
 
+    Unknown fields are rejected (422).
+
     Attributes:
-        version: Version number.
+        version: Strategy version number to evaluate.
         instrument_id: Canonical instrument id.
-        from_ms: Inclusive start.
-        to_ms: Exclusive end.
-        fee_bps: Fee per side.
-        slippage_bps: Slippage on market fills.
-        max_hold_bars: Timeout in bars.
+        from_ms: Inclusive start, UTC epoch milliseconds.
+        to_ms: Exclusive end, UTC epoch milliseconds.
+        fee_bps: Fee per side in basis points; when omitted, the
+            strategy's fee estimate or 0.
+        slippage_bps: Slippage on market fills in basis points; the
+            runner's default when omitted.
+        max_hold_bars: Bars before a timeout exit (1..10000); the runner's
+            default when omitted.
     """
 
     model_config = pydantic.ConfigDict(extra="forbid")
@@ -51,12 +56,15 @@ def build_router(
 ) -> fastapi.APIRouter:
     """Builds the backtest router.
 
+    The route requires a bearer token; ``get_principal`` answers 401
+    without a valid one.
+
     Args:
         backtests: Backtest service.
         get_principal: Authentication dependency.
 
     Returns:
-        Router.
+        Router serving ``POST /v1/strategies/{strategy_id}/backtests``.
     """
     router = fastapi.APIRouter(tags=["backtests"])
     principal_dep = Annotated[
@@ -75,12 +83,19 @@ def build_router(
 
         Args:
             strategy_id: Strategy slug.
-            body: Parameters.
-            principal: Caller.
+            body: Parameters; omitted options take the runner's defaults.
+            principal: Caller; only their own versions can be run.
 
         Returns:
             Contract ``BacktestReport``.
+
+        Raises:
+            errors.NotFoundError: If the version is not the caller's (404).
+            errors.ValidationFailedError: If the range or the strategy is
+                invalid for a backtest (422).
         """
+        # Built from the required fields only, so it carries the runner's
+        # defaults for the options the body leaves out.
         defaults = runner.BacktestRequest(
             version=body.version,
             instrument_id=body.instrument_id,

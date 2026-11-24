@@ -17,6 +17,8 @@ from joseph.domain import identity
 from joseph.strategy.app import version_service
 from joseph.strategy.domain import ast
 
+# Strategy slugs: lower-case alphanumerics and dashes, 1 to 63 characters;
+# a path that does not match is answered with 422.
 _STRATEGY_ID = r"^[a-z0-9][a-z0-9-]{0,62}$"
 
 
@@ -62,6 +64,10 @@ def build_router(
 ) -> fastapi.APIRouter:
     """Builds the strategy router.
 
+    Every route requires a bearer token; ``get_principal`` answers 401
+    without a valid one. Bodies that do not match the rule AST schema are
+    answered with 422 ``VALIDATION_FAILED``.
+
     Args:
         versions: Strategy version service.
         get_principal: FastAPI dependency returning the authenticated
@@ -80,14 +86,20 @@ def build_router(
     def create_strategy(
         definition: ast.StrategyDefinition, principal: principal_dep
     ) -> dict[str, object]:
-        """Stores a new strategy as version 1.
+        """Stores a new strategy as version 1 (201).
+
+        A semantically invalid definition is still stored, as a DRAFT.
 
         Args:
             definition: Rule AST v2 definition.
-            principal: Caller.
+            principal: Caller; needs the ``strategy:write`` scope.
 
         Returns:
             Contract ``StrategyVersion``.
+
+        Raises:
+            errors.ConflictError: If the strategy id already exists (409).
+            errors.ForbiddenError: If the caller may not write (403).
         """
         return versions.create(principal, definition).to_contract()
 
@@ -96,7 +108,7 @@ def build_router(
         """Lists the latest version of each strategy.
 
         Args:
-            principal: Caller.
+            principal: Caller; only their tenant's strategies are listed.
 
         Returns:
             Contract ``StrategyVersionList``.
@@ -114,13 +126,14 @@ def build_router(
         """Validates a definition without storing it.
 
         Args:
-            definition: Definition.
+            definition: Rule AST v2 definition.
             principal: Caller.
 
         Returns:
-            Contract ``ValidationResult``.
+            Contract ``ValidationResult``; an invalid definition is a 200
+            response with ``valid`` false, not an error.
         """
-        del principal
+        del principal  # Unused: the dependency only enforces sign-in.
         return versions.validate(definition).to_contract()
 
     @router.get("/{strategy_id}")
@@ -135,6 +148,10 @@ def build_router(
 
         Returns:
             Contract ``StrategyVersionList``.
+
+        Raises:
+            errors.NotFoundError: If the caller's tenant has no such
+                strategy (404).
         """
         return {
             "versions": [
@@ -149,15 +166,25 @@ def build_router(
         definition: ast.StrategyDefinition,
         principal: principal_dep,
     ) -> dict[str, object]:
-        """Stores a new immutable version.
+        """Stores a new immutable version (201).
+
+        A definition identical to the latest version returns that version
+        instead of creating a duplicate.
 
         Args:
             strategy_id: Strategy slug.
-            definition: Edited definition.
-            principal: Caller.
+            definition: Edited definition; its ``strategy_id`` must match
+                the path.
+            principal: Caller; needs the ``strategy:write`` scope.
 
         Returns:
             Contract ``StrategyVersion``.
+
+        Raises:
+            errors.ValidationFailedError: If the definition's id differs
+                from the path (422).
+            errors.NotFoundError: If the strategy does not exist (404).
+            errors.ForbiddenError: If the caller may not write (403).
         """
         return versions.create_version(
             principal, strategy_id, definition
@@ -171,13 +198,21 @@ def build_router(
     ) -> dict[str, object]:
         """Re-validates a stored version against the current catalog.
 
+        A version that no longer validates becomes UNSUPPORTED and is
+        deactivated.
+
         Args:
             strategy_id: Strategy slug.
             principal: Caller.
-            body: Optional version selector.
+            body: Optional version selector; the latest version when
+                omitted.
 
         Returns:
             Contract ``ValidationResult``.
+
+        Raises:
+            errors.NotFoundError: If the strategy or version does not exist
+                (404).
         """
         version = None if body is None else body.version
         return versions.revalidate(
@@ -192,11 +227,19 @@ def build_router(
 
         Args:
             strategy_id: Strategy slug.
-            body: Version and mode.
-            principal: Caller.
+            body: Version, mode and optional instruments.
+            principal: Caller; needs the ``strategy:write`` scope.
 
         Returns:
             Contract ``StrategyVersion``.
+
+        Raises:
+            strategy_errors.TradeModeDisabledError: For ``AUTO_LIVE`` (409
+                ``TRADE_MODE_DISABLED``).
+            errors.ValidationFailedError: For an unknown mode or instrument,
+                or a version invalid against the current catalog (422).
+            errors.NotFoundError: If the version does not exist (404).
+            errors.ForbiddenError: If the caller may not write (403).
         """
         return versions.activate(
             principal, strategy_id, body.version, body.mode, body.instruments
@@ -210,10 +253,14 @@ def build_router(
 
         Args:
             strategy_id: Strategy slug.
-            principal: Caller.
+            principal: Caller; needs the ``strategy:write`` scope.
 
         Returns:
             Contract ``StrategyVersion``.
+
+        Raises:
+            errors.ConflictError: If no version is active (409).
+            errors.ForbiddenError: If the caller may not write (403).
         """
         return versions.pause(principal, strategy_id).to_contract()
 

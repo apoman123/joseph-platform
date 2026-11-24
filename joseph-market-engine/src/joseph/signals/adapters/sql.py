@@ -31,6 +31,7 @@ SIGNALS = sa.Table(
     sa.UniqueConstraint("tenant_id", "dedupe_key", name="uq_signals_dedupe"),
     sa.Index("ix_signals_tenant_close", "tenant_id", "bar_close_ms"),
 )
+"""One row per signal: filter columns plus the contract body as JSON."""
 
 
 def create_schema(engine: sa.Engine) -> None:
@@ -64,7 +65,8 @@ class SqlSignalRepository:
             signal: Signal.
 
         Returns:
-            True when stored, False for a duplicate.
+            True when stored, False for a duplicate (same dedupe key or
+            signal id).
         """
         try:
             with self.engine.begin() as conn:
@@ -97,7 +99,7 @@ class SqlSignalRepository:
             signal_id: Signal id.
 
         Returns:
-            Signal or ``None``.
+            The signal, or ``None`` when absent or owned by another tenant.
         """
         query = sa.select(SIGNALS.c.body_json).where(
             SIGNALS.c.tenant_id == tenant_id, SIGNALS.c.signal_id == signal_id
@@ -118,7 +120,8 @@ class SqlSignalRepository:
             filters: Filters.
 
         Returns:
-            Signals.
+            At most ``filters.limit`` signals, by bar close descending and
+            then by id.
         """
         table = SIGNALS
         conditions = [table.c.tenant_id == tenant_id]

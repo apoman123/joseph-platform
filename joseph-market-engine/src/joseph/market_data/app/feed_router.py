@@ -49,6 +49,7 @@ from collections.abc import AsyncIterator
 from collections.abc import Awaitable
 from collections.abc import Callable
 from collections.abc import Mapping
+from typing import TypeAlias
 
 from joseph.domain import clock as clock_lib
 from joseph.domain import errors
@@ -66,11 +67,11 @@ from joseph.market_data.domain import health
 
 _LOG = logging.getLogger(__name__)
 
-CandleHandler = Callable[
+CandleHandler: TypeAlias = Callable[
     ["FeedSession", market.Candle, candle_rules.MergeAction], Awaitable[None]
 ]
-HealthHandler = Callable[[health.FeedHealth], Awaitable[None]]
-Sleep = Callable[[float], Awaitable[None]]
+HealthHandler: TypeAlias = Callable[[health.FeedHealth], Awaitable[None]]
+Sleep: TypeAlias = Callable[[float], Awaitable[None]]
 
 
 class SessionState(enum.StrEnum):
@@ -127,7 +128,7 @@ _ALLOWED: dict[SessionState, frozenset[SessionState]] = {
     SessionState.STOPPED: frozenset(),
 }
 
-SessionKey = tuple[
+SessionKey: TypeAlias = tuple[
     instruments.InstrumentId, timeframes.Timeframe, quality.FeedMode
 ]
 
@@ -137,13 +138,14 @@ class FeedSession:
     """Mutable state of one running series feed.
 
     Attributes:
-        instrument: Instrument.
-        timeframe: Resolution.
+        instrument: Instrument of the series.
+        timeframe: Resolution of the series.
         mode: Requested policy.
         tracker: Health tracker of this session.
         state: Current state.
-        refs: Number of acquirers.
-        task: Background task.
+        refs: Number of acquirers that have not released it yet.
+        task: Background task running the session (``None`` until
+            started).
         history: Ordered states visited (for observability and tests).
     """
 
@@ -158,11 +160,14 @@ class FeedSession:
 
     @property
     def key(self) -> SessionKey:
-        """Returns the session key."""
+        """The session key ``(instrument, timeframe, mode)``."""
         return (self.instrument, self.timeframe, self.mode)
 
     def transition(self, new_state: SessionState) -> None:
         """Moves to a new state, enforcing the transition table.
+
+        Staying in the same state is a no-op, except ``POLLING``: a fresh
+        polling round is recorded in ``history`` again.
 
         Args:
             new_state: Target state.
@@ -181,7 +186,13 @@ class FeedSession:
 
 
 class FeedRouter:
-    """Starts, shares and stops series feeds according to ``FeedMode``."""
+    """Starts, shares and stops series feeds according to ``FeedMode``.
+
+    One session runs per ``(instrument, timeframe, mode)``, as a background
+    task created by the first ``acquire`` (so inside a running event loop).
+    Sessions are reference-counted: the last ``release`` (or ``close``)
+    cancels the task and waits for it to end.
+    """
 
     def __init__(
         self,
@@ -205,14 +216,21 @@ class FeedRouter:
             store: Candle store receiving every update.
             clock: Time source.
             replay: Optional replay source for ``REPLAY`` mode.
-            on_candle: Awaited for every changed candle.
-            on_health: Awaited when a session changes state.
-            poll_interval_s: REST polling interval (minimum 1s).
-            native_retry_s: Delay before retrying native after fallback.
-            max_poll_failures: Failures before a polling session is
-                ``UNAVAILABLE``.
-            sleep: Sleep function (injectable for tests).
-            stale_after_ms: Silence budget for health.
+            on_candle: Awaited with the session, the stored candle and the
+                merge action for every candle that changed the store.
+            on_health: Awaited with the session's health snapshot when the
+                session changes state.
+            poll_interval_s: REST polling interval in seconds; values below
+                1 are raised to 1.
+            native_retry_s: Seconds an ``AUTO`` session polls before it
+                retries native, and the pause between ``NATIVE_WS``
+                retries.
+            max_poll_failures: Consecutive failed polls before a polling
+                session is ``UNAVAILABLE``.
+            sleep: Sleep function taking seconds (injectable for tests).
+            stale_after_ms: Silence, in milliseconds, after which a
+                session's health is stale (REST trackers allow 20 times as
+                much).
         """
         self._adapters = dict(adapters)
         self._store = store
@@ -235,7 +253,7 @@ class FeedRouter:
             venue: Venue.
 
         Returns:
-            Adapter.
+            The venue's adapter.
 
         Raises:
             errors.NotFoundError: If the venue is not enabled.
@@ -254,12 +272,14 @@ class FeedRouter:
         """Checks that a mode can serve a series, without starting it.
 
         Args:
-            instrument: Instrument.
-            timeframe: Resolution.
+            instrument: Instrument of the series.
+            timeframe: Resolution of the series.
             mode: Requested policy.
 
         Raises:
-            errors.UnsupportedError: For unsupported native/vendor requests.
+            errors.UnsupportedError: If the venue lacks the timeframe, or the
+                mode needs a transport the venue (or the engine, for
+                ``EXTERNAL_VENDOR``) does not offer.
             errors.MissingDataError: For ``REPLAY`` without a recording.
             errors.NotFoundError: If the venue is not enabled.
         """
@@ -315,13 +335,21 @@ class FeedRouter:
     ) -> FeedSession:
         """Starts (or joins) a series feed.
 
+        Each call must be paired with one ``release``.
+
         Args:
-            instrument: Instrument.
-            timeframe: Resolution.
+            instrument: Instrument of the series.
+            timeframe: Resolution of the series.
             mode: Requested policy.
 
         Returns:
             The shared session.
+
+        Raises:
+            errors.UnsupportedError: If the mode cannot serve the series
+                (see ``validate``).
+            errors.MissingDataError: For ``REPLAY`` without a recording.
+            errors.NotFoundError: If the venue is not enabled.
         """
         self.validate(instrument, timeframe, mode)
         key = (instrument, timeframe, mode)
@@ -348,10 +376,12 @@ class FeedRouter:
     ) -> None:
         """Releases one reference, stopping the feed at zero.
 
+        Releasing a series without a session is a no-op.
+
         Args:
-            instrument: Instrument.
-            timeframe: Resolution.
-            mode: Requested policy.
+            instrument: Instrument of the series.
+            timeframe: Resolution of the series.
+            mode: Policy it was acquired with.
         """
         session = self._sessions.get((instrument, timeframe, mode))
         if session is None:
@@ -361,7 +391,7 @@ class FeedRouter:
             await self._stop(session)
 
     async def _stop(self, session: FeedSession) -> None:
-        """Cancels a session task.
+        """Unregisters a session, cancels its task and waits for it to end.
 
         Args:
             session: Session to stop.
@@ -369,6 +399,8 @@ class FeedRouter:
         self._sessions.pop(session.key, None)
         if session.task is not None:
             session.task.cancel()
+            # The task's own failures were already logged and recorded on
+            # its tracker by ``_run``; stopping must not raise them again.
             with contextlib.suppress(asyncio.CancelledError, Exception):
                 await session.task
         if session.state is not SessionState.STOPPED:
@@ -389,12 +421,12 @@ class FeedRouter:
         """Finds a running session for a series.
 
         Args:
-            instrument: Instrument.
-            timeframe: Resolution.
-            mode: Optional mode filter.
+            instrument: Instrument of the series.
+            timeframe: Resolution of the series.
+            mode: Optional mode filter; ``None`` matches any mode.
 
         Returns:
-            Session or ``None``.
+            The first matching session, or ``None`` when none runs.
         """
         for session in self._sessions.values():
             if session.instrument == instrument and (
@@ -417,6 +449,8 @@ class FeedRouter:
         """
         tracker = self._rest.get(venue)
         if tracker is None:
+            # REST calls are occasional, so the tracker tolerates 20 times
+            # the silence a streaming session may have.
             tracker = health.FeedHealthTracker(
                 venue, quality.FeedMode.REST_POLL, self._stale_after_ms * 20
             )
@@ -432,7 +466,7 @@ class FeedRouter:
             venue: Venue.
 
         Returns:
-            Feed health.
+            The worst session health, else the REST tracker's health.
         """
         now = self._clock.now_ms()
         order = {
@@ -450,6 +484,7 @@ class FeedRouter:
             return min(snapshots, key=lambda h: order[h.state])
         rest = self.rest_tracker(venue)
         if venue is instruments.Venue.MOCK:
+            # The DEMO venue is always reachable; it never goes stale.
             rest.set_transport(quality.Transport.MOCK, quality.FeedState.DEMO)
             rest.record_message(now)
         return rest.snapshot(now)
@@ -457,10 +492,10 @@ class FeedRouter:
     async def _set_state(
         self, session: FeedSession, state: SessionState
     ) -> None:
-        """Transitions a session and publishes its health.
+        """Transitions a session and publishes its health on a change.
 
         Args:
-            session: Session.
+            session: Session to move.
             state: New state.
         """
         previous = session.state
@@ -475,17 +510,24 @@ class FeedRouter:
 
         Args:
             session: Producing session.
-            candle: Candle.
+            candle: Candle to merge into the store.
         """
         result = self._store.upsert(candle)
         if result.changed and self._on_candle is not None:
             await self._on_candle(session, result.candle, result.action)
 
     async def _run(self, session: FeedSession) -> None:
-        """Runs a session until cancelled.
+        """Runs a session until it is cancelled or its recording ends.
+
+        Only ``REPLAY`` sessions end on their own. A session that fails
+        with an unexpected exception is logged and marked unavailable; its
+        task then ends, and the session stays registered until released.
 
         Args:
-            session: Session.
+            session: Session to run.
+
+        Raises:
+            asyncio.CancelledError: When the session is stopped.
         """
         try:
             if session.mode is quality.FeedMode.REPLAY:
@@ -502,7 +544,7 @@ class FeedRouter:
                 await self._run_auto(session)
         except asyncio.CancelledError:
             raise
-        except Exception as err:
+        except Exception as err:  # noqa: BLE001 - isolation point: a crashed session is logged and marked unavailable; other sessions keep running
             _LOG.exception("feed session crashed: %s", type(err).__name__)
             session.tracker.set_unavailable(
                 self._clock.now_ms(), type(err).__name__
@@ -512,9 +554,10 @@ class FeedRouter:
         """Replays a recording.
 
         Args:
-            session: Session.
+            session: ``REPLAY`` session (``validate`` checked the source).
         """
-        assert self._replay is not None
+        if self._replay is None:
+            raise AssertionError("REPLAY session without a replay source")
         session.state = SessionState.REPLAYING
         session.history.append(SessionState.REPLAYING)
         session.tracker.set_transport(
@@ -531,10 +574,11 @@ class FeedRouter:
         """Consumes the native stream until it gives up.
 
         Args:
-            session: Session.
+            session: Session to feed.
 
         Raises:
-            errors.VenueUnavailableError: When the stream gives up or ends.
+            errors.VenueUnavailableError: When the stream ends. The errors
+                the adapter raises when it gives up propagate as well.
         """
         adapter = self._adapter(session.instrument.venue)
         transport = (
@@ -548,19 +592,19 @@ class FeedRouter:
             else quality.FeedState.LIVE
         )
         await self._set_state(session, SessionState.CONNECTING)
-        updates = (
-            adapter.stream_candle_coverage(
+        updates: AsyncIterator[candle_rules.CandleCoverage]
+        if ports.sparse_bars(adapter):
+            updates = adapter.stream_candle_coverage(
                 session.instrument, session.timeframe, tracker=session.tracker
             )
-            if ports.sparse_bars(adapter)
-            else _uncovered(
+        else:
+            updates = _uncovered(
                 adapter.stream_candles(
                     session.instrument,
                     session.timeframe,
                     tracker=session.tracker,
                 )
             )
-        )
         async for update in updates:
             for candle in update.candles:
                 if session.state is not SessionState.LIVE:
@@ -576,8 +620,11 @@ class FeedRouter:
     async def _run_native_only(self, session: FeedSession) -> None:
         """Runs ``NATIVE_WS``: retry forever, never poll.
 
+        After each venue failure the session is ``STALE`` for
+        ``native_retry_s`` seconds before the stream is opened again.
+
         Args:
-            session: Session.
+            session: Session to run.
         """
         while True:
             try:
@@ -592,8 +639,12 @@ class FeedRouter:
     async def _run_auto(self, session: FeedSession) -> None:
         """Runs ``AUTO``: native first, visible REST fallback.
 
+        When native fails, the session polls for ``native_retry_s`` seconds
+        and then tries native again. A series without a native stream polls
+        forever; one that cannot be polled runs as ``NATIVE_WS``.
+
         Args:
-            session: Session.
+            session: Session to run.
         """
         caps = self._adapter(session.instrument.venue).capabilities()
         native = _native(caps, session.timeframe)
@@ -624,17 +675,23 @@ class FeedRouter:
     async def _poll(self, session: FeedSession, until_ms: int | None) -> None:
         """Polls recent bars over REST.
 
+        Failed polls are recorded on the tracker; after
+        ``max_poll_failures`` in a row the session is ``UNAVAILABLE`` until
+        a poll succeeds again.
+
         Args:
-            session: Session.
-            until_ms: Return once the clock passes this time (``None``
-                polls forever).
+            session: Session to feed.
+            until_ms: Return once the clock passes this time, epoch
+                milliseconds (``None`` polls forever).
         """
         adapter = self._adapter(session.instrument.venue)
         failures = 0
         tf = session.timeframe
         calendar = sessions.for_instrument(session.instrument)
-        # Look back far enough that consecutive polls overlap; window
-        # sizing may use the nominal duration, boundaries the calendar.
+        # Each window reaches back far enough that consecutive polls
+        # overlap: for seconds bars the bars of one poll interval (sized by
+        # the nominal duration, while the calendar sets the boundaries), for
+        # longer bars just the previous bar.
         back = 1 + math.ceil(self._poll_interval_s * 1000 / tf.duration_ms)
         if not tf.is_seconds:
             back = 1
@@ -676,6 +733,8 @@ class FeedRouter:
                     await self._set_state(session, SessionState.POLLING)
                 failures = 0
                 session.tracker.record_message(now)
+                # Polled bars are display-grade: label them POLL (DEMO
+                # data stays DEMO) and mark their source as polled.
                 for candle in fetched.candles:
                     await self._emit(
                         session,
@@ -700,11 +759,13 @@ async def _uncovered(
 ) -> AsyncGenerator[candle_rules.CandleCoverage, None]:
     """Wraps a dense venue's candle stream as updates without coverage.
 
+    Closing the wrapper closes the wrapped stream.
+
     Args:
         candles: Native candle stream.
 
     Yields:
-        One update per candle.
+        One update per candle, with no coverage.
     """
     try:
         async for candle in candles:

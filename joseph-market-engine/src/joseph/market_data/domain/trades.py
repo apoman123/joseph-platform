@@ -151,8 +151,9 @@ class TradeCoverage:
 
     Attributes:
         trades: Every public trade of the interval, ascending.
-        from_ms: Inclusive start of the complete interval.
-        to_ms: Exclusive end of the complete interval.
+        from_ms: Inclusive start of the complete interval, epoch
+            milliseconds.
+        to_ms: Exclusive end of the complete interval, epoch milliseconds.
     """
 
     trades: tuple[market.Trade, ...]
@@ -190,7 +191,8 @@ def coverage_from_suffix(
 
     Returns:
         Coverage ``[start_ms, end_ms)`` when complete, otherwise from the
-        first whole millisecond of the collected trades.
+        first whole millisecond of the collected trades (paging may have
+        cut through the oldest one, so it is excluded).
     """
     inside = [t for t in trades if start_ms <= t.venue_event_ts_ms < end_ms]
     if complete:
@@ -215,7 +217,8 @@ def coverage_from_prefix(
 
     Returns:
         Coverage ``[start_ms, end_ms)`` when complete, otherwise up to the
-        last whole millisecond of the collected trades.
+        last whole millisecond of the collected trades (paging may have cut
+        through the newest one, so it is excluded).
     """
     inside = [t for t in trades if start_ms <= t.venue_event_ts_ms < end_ms]
     if complete:

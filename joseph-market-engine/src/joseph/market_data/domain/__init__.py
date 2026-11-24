@@ -3,5 +3,6 @@
 
 """Market-data domain rules (pure).
 
-Gap detection, candle merge semantics, book sequencing.
+Candle merge and gap detection; bars built from trades, exchange snapshots
+or shorter bars; order-book sequencing; feed health; venue capabilities.
 """

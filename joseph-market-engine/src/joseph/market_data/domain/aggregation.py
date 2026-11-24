@@ -30,6 +30,7 @@ import dataclasses
 import decimal
 from collections.abc import Iterable
 from collections.abc import Sequence
+from typing import TypeAlias
 
 from joseph.domain import decimals
 from joseph.domain import market
@@ -37,7 +38,8 @@ from joseph.domain import sessions
 from joseph.domain import timeframes
 from joseph.market_data.domain import candles as candle_rules
 
-_EmitKey = tuple[object, ...]
+# Fields of a parent bar whose change is worth re-emitting; ``is_final`` last.
+_EmitKey: TypeAlias = tuple[object, ...]
 
 
 def source_timeframe(
@@ -58,8 +60,9 @@ def source_timeframe(
     candidates = [
         tf
         for tf in native
-        if not tf.is_seconds and tf is not target
-        if calendar.contains(target, tf)
+        if not tf.is_seconds
+        and tf is not target
+        and calendar.contains(target, tf)
     ]
     return max(candidates, key=lambda tf: tf.duration_ms, default=None)
 
@@ -132,6 +135,8 @@ def _buy_volume(
     methods = {c.buy_volume_method for c in children}
     if len(methods) != 1:
         return None, None
+    # Keep the children's own label when they agree (``None`` reads as taker),
+    # so folding unlabelled bars yields an unlabelled parent like a native one.
     labels = {c.taker_buy_method for c in children}
     return taker, labels.pop() if len(labels) == 1 else methods.pop()
 
@@ -150,8 +155,8 @@ def fold(
     Args:
         children: Non-empty ascending child bars inside the span.
         timeframe: Parent timeframe.
-        start_ms: Parent start.
-        end_ms: Parent exclusive end.
+        start_ms: Parent start, epoch milliseconds.
+        end_ms: Parent exclusive end, epoch milliseconds.
         is_final: Parent finality.
         source: Provenance label.
 
@@ -201,10 +206,10 @@ def child_slots(
         calendar: Session calendar.
         target: Parent timeframe.
         child: Child timeframe.
-        parent_start: Aligned parent start.
+        parent_start: Aligned parent start, epoch milliseconds.
 
     Returns:
-        Ascending child starts.
+        Ascending child starts, epoch milliseconds.
     """
     parent_end = calendar.end_of(target, parent_start)
     slots: list[int] = []
@@ -231,8 +236,9 @@ def aggregate_one(
         calendar: Session calendar.
         target: Parent timeframe.
         child: Child timeframe.
-        parent_start: Aligned parent start.
-        now_ms: Current time (decides which child slots have closed).
+        parent_start: Aligned parent start, epoch milliseconds.
+        now_ms: Current time, epoch milliseconds (decides which child slots
+            have closed).
 
     Returns:
         Parent candle, or ``None`` when a closed child slot is missing.
@@ -282,13 +288,14 @@ def aggregate(
         calendar: Session calendar.
         target: Parent timeframe.
         child: Child timeframe tiling ``target``.
-        now_ms: Current time.
+        now_ms: Current time, epoch milliseconds.
 
     Returns:
         Ascending parent bars (incomplete parents are omitted).
 
     Raises:
-        ValueError: If ``child`` does not tile ``target`` on the calendar.
+        ValueError: If ``child`` does not tile ``target`` on the calendar, or a
+            bar in ``children`` is not of the ``child`` timeframe.
     """
     if not calendar.contains(target, child):
         raise ValueError(f"{child.value} does not tile {target.value}")
@@ -346,7 +353,8 @@ class LiveAggregator:
         calendar: Session calendar.
         target: Parent timeframe.
         child: Child timeframe.
-        keep_parents: Parents remembered for late child updates.
+        keep_parents: Number of newest parents kept for late child updates;
+            updates for older parents are dropped.
     """
 
     calendar: sessions.BarCalendar
@@ -362,18 +370,18 @@ class LiveAggregator:
         """Returns the parent start of a child bar.
 
         Args:
-            child_start: Child bar start.
+            child_start: Child bar start, epoch milliseconds.
 
         Returns:
-            Parent start.
+            Parent start, epoch milliseconds.
         """
         return self.calendar.floor(self.target, child_start)
 
     def missing_before(self, child_start: int) -> list[int]:
-        """Lists child slots of the same parent before ``child_start`` held.
+        """Lists the earlier child slots of the same parent not yet held.
 
         Args:
-            child_start: Child bar start.
+            child_start: Child bar start, epoch milliseconds.
 
         Returns:
             Starts of earlier child slots of that parent not yet seen.
@@ -394,8 +402,9 @@ class LiveAggregator:
         """Merges child updates and rebuilds the affected parents.
 
         Args:
-            children: Child bar updates (any order).
-            now_ms: Current time.
+            children: Child bar updates (any order); bars of another timeframe
+                are ignored.
+            now_ms: Current time, epoch milliseconds.
 
         Returns:
             Changed parents, ascending (incomplete parents are omitted).
@@ -405,6 +414,7 @@ class LiveAggregator:
             if bar.timeframe is not self.child:
                 continue
             parent = self.parent_start(bar.start_ms)
+            # A parent older than every held one was already evicted.
             if self._children and parent < min(self._children):
                 continue
             held = self._children.setdefault(parent, {})
@@ -412,7 +422,8 @@ class LiveAggregator:
             if result.changed:
                 held[bar.start_ms] = result.candle
                 touched.add(parent)
-        # A newer parent may close older ones (finality depends on time).
+        # Finality depends on time, so parents never emitted and parents whose
+        # span has ended since their last non-final emission are rebuilt too.
         touched.update(p for p in self._children if p not in self._emitted)
         touched.update(
             p

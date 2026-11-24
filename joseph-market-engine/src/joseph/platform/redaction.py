@@ -6,8 +6,9 @@
 A ``logging.Filter`` scrubs bearer tokens, API keys, secrets, signatures and
 long hex/base64 blobs from every record before handlers format it, so a
 mistaken ``logger.info("%s", request.headers)`` cannot leak credentials.
-Secrets read from the environment or secret files (``register_secret``) are
-also replaced wherever they appear, whatever their shape.
+Secrets loaded through ``config.secret_value`` (from the environment or a
+secret file) are registered with ``register_secret`` and also replaced
+wherever they appear, whatever their shape.
 """
 
 from __future__ import annotations
@@ -29,6 +30,8 @@ _PATTERNS: tuple[tuple[re.Pattern[str], str], ...] = (
     (re.compile(r"\b[0-9a-fA-F]{48,}\b"), "***"),
 )
 _MIN_SECRET_LENGTH = 4
+# Process-wide on purpose: secrets are registered while settings load, and
+# the filters installed on the root handlers must see them from then on.
 _SECRETS: set[str] = set()
 
 
@@ -46,6 +49,9 @@ def register_secret(value: str | None) -> None:
 def redact(text: str) -> str:
     """Removes secrets from a string.
 
+    Registered secrets are replaced first, longest first so that a secret
+    containing another is removed whole; the patterns run afterwards.
+
     Args:
         text: Arbitrary text.
 
@@ -60,10 +66,13 @@ def redact(text: str) -> str:
 
 
 class RedactingFilter(logging.Filter):
-    """Filter that redacts the fully formatted message of each record."""
+    """Logging filter that redacts the formatted message of each record."""
 
     def filter(self, record: logging.LogRecord) -> bool:
         """Redacts the record in place.
+
+        The message is formatted here and ``args`` cleared, so later
+        handlers see only the redacted text.
 
         Args:
             record: Log record.
@@ -81,6 +90,10 @@ class RedactingFilter(logging.Filter):
 
 def configure_logging(level: int = logging.INFO) -> None:
     """Configures root logging with redaction on every handler.
+
+    Adds a stderr handler when the root logger has none, and is safe to
+    call repeatedly: a handler gets at most one ``RedactingFilter``.
+    Handlers added later are not covered.
 
     Args:
         level: Root log level.

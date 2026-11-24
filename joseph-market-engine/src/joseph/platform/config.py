@@ -4,10 +4,11 @@
 """Environment-driven configuration for the market engine.
 
 All settings come from ``JOSEPH_*`` environment variables so the same build
-runs in development, CI and production. Secrets (dev tokens, service token,
-broker keys) are never logged; ``Settings.__repr__`` redacts them, and
-broker keys may come from secret files (``NAME_FILE``, see
-``secret_value``), which are registered for log redaction.
+runs in development, CI and production; ``Settings`` lists each variable
+with its default and unit. Secrets never appear in ``Settings.__repr__``,
+which masks the tokens and keys it shows and leaves the others out. The
+SinoPac keys may also come from secret files (``NAME_FILE``, see
+``secret_value``) and are registered for log redaction.
 """
 
 from __future__ import annotations
@@ -68,7 +69,7 @@ def parse_dev_tokens(raw: str) -> tuple[DevToken, ...]:
         raw: Value of ``JOSEPH_DEV_TOKENS``.
 
     Returns:
-        Parsed tokens; malformed entries raise.
+        Parsed tokens in input order; empty entries are skipped.
 
     Raises:
         ValueError: If an entry does not have exactly three parts.
@@ -91,10 +92,11 @@ def _bool(value: str | None, default: bool) -> bool:
 
     Args:
         value: Raw value or ``None``.
-        default: Value used when unset.
+        default: Value used when unset or empty.
 
     Returns:
-        Parsed boolean.
+        True for ``1``, ``true``, ``yes`` or ``on`` (any case, surrounding
+        spaces ignored); False for any other non-empty value.
     """
     if value is None or value == "":
         return default
@@ -104,11 +106,12 @@ def _bool(value: str | None, default: bool) -> bool:
 def secret_value(source: Mapping[str, str], name: str) -> str | None:
     """Reads a secret from ``NAME`` or the file named by ``NAME_FILE``.
 
-    The value is registered for log redaction.
+    ``NAME`` wins when both are set. The value is registered for log
+    redaction.
 
     Args:
-        source: Environment.
-        name: Variable.
+        source: Environment mapping.
+        name: Variable name, for example ``JOSEPH_SINOPAC_API_KEY``.
 
     Returns:
         Value (stripped), or ``None`` when unset.
@@ -158,14 +161,17 @@ def _bounded(
     """Reads an integer setting clamped into ``[low, high]``.
 
     Args:
-        source: Environment.
-        name: Variable.
+        source: Environment mapping.
+        name: Variable name.
         default: Value when unset.
         low: Smallest value.
         high: Largest value.
 
     Returns:
         Clamped value.
+
+    Raises:
+        ValueError: If the value is not an integer.
     """
     return min(high, max(low, int(source.get(name, str(default)))))
 
@@ -216,77 +222,151 @@ def _mexc_ws_format(value: str) -> str:
 class Settings:
     """Market-engine settings.
 
+    ``from_env`` reads each field from the environment variable named in
+    its entry below; an unset variable gives the stated default. Values
+    marked "at least" or "clamped" are adjusted into range by ``from_env``
+    only; constructing ``Settings`` directly applies no bounds. Lists are
+    comma-separated, and booleans are true for ``1``, ``true``, ``yes`` or
+    ``on`` (any case) and false for any other non-empty value.
+
     Attributes:
-        dev_tokens: Development bearer tokens (empty disables user APIs).
-        service_token: Token for service-to-service calls.
-        execution_url: Base URL of the execution engine.
-        cors_origins: Allowed browser origins.
-        database_url: SQLAlchemy URL for durable state.
-        enabled_venues: Venues whose adapters are constructed.
-        demo_only: When True only the mock venue is enabled.
-        replay_dir: Directory of JSONL candle files for the replay adapter.
-        http_timeout_s: Venue HTTP timeout in seconds.
-        poll_interval_s: REST polling interval for feeds.
-        snapshot_stale_after_ms: Age at which snapshots are flagged stale.
-        stream_retention: Envelopes kept per stream for resume.
-        top_n: Binance qualification preselection size.
-        coingecko_enabled: Whether trending heat bonuses are fetched.
-        pipeline_enabled: Whether the live signal pipeline runs.
-        pipeline_interval_s: Seconds between live pipeline passes.
+        dev_tokens: Development bearer tokens, ``JOSEPH_DEV_TOKENS``, as
+            ``token:tenant:user`` entries. Default none, which makes every
+            protected route answer 401.
+        service_token: Bearer token sent to the execution engine when
+            forwarding signals, ``JOSEPH_SERVICE_TOKEN``. Default none,
+            which disables forwarding.
+        execution_url: Base URL of the execution engine,
+            ``JOSEPH_EXECUTION_URL``; a trailing ``/`` is removed. Default
+            ``http://localhost:8100``.
+        cors_origins: Allowed browser origins, ``JOSEPH_CORS_ORIGINS``.
+            Default ``http://localhost:3000`` and
+            ``http://127.0.0.1:3000``.
+        database_url: SQLAlchemy URL for durable state,
+            ``JOSEPH_DATABASE_URL``. Default ``sqlite:///./var/market.db``.
+        enabled_venues: Venues whose adapters are constructed,
+            ``JOSEPH_ENABLED_VENUES`` (contract venue ids, any case).
+            Default every venue.
+        demo_only: When true only the mock venue is enabled,
+            ``JOSEPH_DEMO_ONLY``. Default false.
+        replay_dir: Directory of JSONL candle files for the replay adapter,
+            ``JOSEPH_REPLAY_DIR``. Default none (no replay source).
+        http_timeout_s: Timeout of venue and outbound HTTP requests, in
+            seconds, ``JOSEPH_HTTP_TIMEOUT_S``. Default 10.
+        poll_interval_s: REST polling interval of polled feeds, in
+            seconds, ``JOSEPH_POLL_INTERVAL_S``. Default 5, at least 1.
+        snapshot_stale_after_ms: Age at which snapshots and feeds are
+            flagged stale, in milliseconds,
+            ``JOSEPH_SNAPSHOT_STALE_AFTER_MS``. Default 30000.
+        stream_retention: Envelopes the stream hub keeps, across all
+            channels, for clients resuming with ``last_sequence``,
+            ``JOSEPH_STREAM_RETENTION``. Default 2000.
+        top_n: Qualification candidates per venue, ranked by 24h quote
+            turnover, ``JOSEPH_QUALIFICATION_TOP_N``. Default 50.
+        coingecko_enabled: Whether CoinGecko trending heat bonuses are
+            fetched, ``JOSEPH_COINGECKO_ENABLED``. Default false.
+        pipeline_enabled: Whether the live signal pipeline runs,
+            ``JOSEPH_PIPELINE_ENABLED``. Default true.
+        pipeline_interval_s: Time between live pipeline passes, in seconds,
+            ``JOSEPH_PIPELINE_INTERVAL_S``. Default 10, at least 1.
         pipeline_max_instruments: Instruments per venue for universes
-            without explicit instruments.
+            without explicit instruments,
+            ``JOSEPH_PIPELINE_MAX_INSTRUMENTS``. Default 10.
         forward_signals: Whether entry signals of PAPER/SHADOW/AUTO_LIVE
-            strategies are forwarded to the execution engine.
-        alert_interval_s: Seconds between alert outbox passes.
-        max_anchored_bars: Hard cap of chart bars an anchored study (anchored
-            VWAP, anchored regression) computes from its anchor to now.
-        telegram_bot_token: Telegram bot token (secret).
-        line_channel_token: LINE Messaging API channel token (secret).
-        webhook_secret: HMAC secret for outbound webhooks (secret).
-        smtp_host: SMTP host for e-mail alerts.
-        smtp_port: SMTP port.
-        smtp_from: Sender address.
-        smtp_username: SMTP username.
-        smtp_password: SMTP password (secret).
-        alpaca_key_id: Alpaca API key id for US exchange data (secret).
-        alpaca_secret_key: Alpaca API secret (secret).
-        alpaca_feed: Alpaca stock feed: ``iex``, ``sip`` or
-            ``delayed_sip``.
+            strategies are forwarded to the execution engine (also needs
+            ``service_token``), ``JOSEPH_FORWARD_SIGNALS``. Default true.
+        alert_interval_s: Time between alert outbox passes, in seconds,
+            ``JOSEPH_ALERT_INTERVAL_S``. Default 2, at least 0.5.
+        max_anchored_bars: Hard cap of chart bars an anchored study
+            (anchored VWAP, anchored regression) computes from its anchor
+            to now, ``JOSEPH_MAX_ANCHORED_BARS``. Default 50000, at least
+            2000.
+        telegram_bot_token: Telegram bot token (secret),
+            ``JOSEPH_TELEGRAM_BOT_TOKEN``. Default none (channel off).
+        line_channel_token: LINE Messaging API channel token (secret),
+            ``JOSEPH_LINE_CHANNEL_TOKEN``. Default none (channel off).
+        webhook_secret: HMAC secret for outbound webhooks (secret),
+            ``JOSEPH_WEBHOOK_SECRET``. Default none (channel off).
+        smtp_host: SMTP host for e-mail alerts, ``JOSEPH_SMTP_HOST``.
+            Default none; e-mail is off unless both this and ``smtp_from``
+            are set.
+        smtp_port: SMTP port, ``JOSEPH_SMTP_PORT``. Default 587.
+        smtp_from: Sender address, ``JOSEPH_SMTP_FROM``. Default none.
+        smtp_username: SMTP username, ``JOSEPH_SMTP_USERNAME``. Default
+            none.
+        smtp_password: SMTP password (secret), ``JOSEPH_SMTP_PASSWORD``.
+            Default none.
+        alpaca_key_id: Alpaca API key id for US exchange data (secret),
+            ``JOSEPH_ALPACA_KEY_ID``. Default none.
+        alpaca_secret_key: Alpaca API secret (secret),
+            ``JOSEPH_ALPACA_SECRET_KEY``. Default none.
+        alpaca_feed: Alpaca stock feed, ``iex``, ``sip`` or
+            ``delayed_sip`` (any case), ``JOSEPH_ALPACA_FEED``. Default
+            ``iex``.
         alpaca_seconds_history_ms: Longest seconds-bar history built on
-            demand from Alpaca trades and quotes.
+            demand from Alpaca trades and quotes, in milliseconds,
+            ``JOSEPH_ALPACA_SECONDS_HISTORY_MS``. Default 1800000 (30
+            minutes).
         trade_recording: Whether public trades are recorded (seconds
-            history across restarts, true delta on covered bars).
-        trade_bar_retention_days: Days of recorded trades kept.
-        trade_record_instruments: Instruments recorded permanently.
-        trade_record_max_instruments: Instruments recorded live at once.
-        trade_backfill_max_calls: REST trade-history calls per backfill.
-        trade_archive_url: SQLAlchemy URL of the trade archive (defaults to
-            ``database_url``).
+            history across restarts, true delta on covered bars),
+            ``JOSEPH_TRADE_RECORDING``. Default true.
+        trade_bar_retention_days: Recorded trades kept, in days (fractions
+            allowed), ``JOSEPH_TRADE_BAR_RETENTION_DAYS``. Default 30, at
+            least 1.
+        trade_record_instruments: Canonical ids of instruments recorded
+            permanently, ``JOSEPH_TRADE_RECORD_INSTRUMENTS``. Default none.
+        trade_record_max_instruments: Instruments recorded live at once,
+            ``JOSEPH_TRADE_RECORD_MAX_INSTRUMENTS``. Default 16, at least
+            0.
+        trade_backfill_max_calls: REST trade-history calls per backfill,
+            ``JOSEPH_TRADE_BACKFILL_MAX_CALLS``. Default 20, at least 0.
+        trade_archive_url: SQLAlchemy URL of the trade archive,
+            ``JOSEPH_TRADE_ARCHIVE_URL``. Default none, which stores it in
+            ``database_url``.
         binance_archive: Whether Binance seconds history older than the
-            REST window is imported from data.binance.vision.
-        binance_archive_dir: Cache directory of verified archive files.
+            REST window is imported from data.binance.vision,
+            ``JOSEPH_BINANCE_ARCHIVE``. Default true.
+        binance_archive_dir: Cache directory of verified archive files,
+            ``JOSEPH_BINANCE_ARCHIVE_DIR``. Default
+            ``./var/binance-vision``.
         bitget_archive: Whether Bitget seconds history is imported from
-            its public trade archive (verified against 1D klines).
-        bitget_archive_dir: Cache directory of downloaded Bitget parts.
-        mexc_ws_format: MEXC futures WebSocket push format: ``protobuf``
-            (default) or ``json`` (MEXC's deadline for migrating off JSON
-            market data is 2026-12-01 10:00 UTC).
+            its public trade archive (verified against 1D klines),
+            ``JOSEPH_BITGET_ARCHIVE``. Default true.
+        bitget_archive_dir: Cache directory of downloaded Bitget parts,
+            ``JOSEPH_BITGET_ARCHIVE_DIR``. Default ``./var/bitget-archive``.
+        mexc_ws_format: MEXC futures WebSocket push format, ``protobuf``
+            or ``json`` (any case), ``JOSEPH_MEXC_WS_FORMAT``. Default
+            ``protobuf``; MEXC's deadline for migrating off JSON market
+            data is 2026-12-01 10:00 UTC.
         lighter_archive: Whether Lighter seconds history is imported from
             the AWS Public Blockchain Data trade archive (remote range
-            reads, verified against 1d candles, nothing cached on disk).
-        tw_data_source: Market data of TWSE and TPEx: ``twse`` (the
+            reads, verified against 1d candles, nothing cached on disk),
+            ``JOSEPH_LIGHTER_ARCHIVE``. Default true.
+        tw_data_source: Market data of TWSE and TPEx, ``twse`` (the
             exchanges' official sources) or ``sinopac`` (SinoPac Shioaji
-            bars, ticks and books, falling back to the official sources).
-        sinopac_api_key: Shioaji API key (secret).
-        sinopac_secret_key: Shioaji secret key (secret).
+            bars, ticks and books, falling back to the official sources),
+            any case, ``JOSEPH_TW_DATA_SOURCE``. Default ``twse``.
+        sinopac_api_key: Shioaji API key (secret),
+            ``JOSEPH_SINOPAC_API_KEY`` or the file named by
+            ``JOSEPH_SINOPAC_API_KEY_FILE``. Default none.
+        sinopac_secret_key: Shioaji secret key (secret),
+            ``JOSEPH_SINOPAC_SECRET_KEY`` or the file named by
+            ``JOSEPH_SINOPAC_SECRET_KEY_FILE``. Default none.
         sinopac_max_symbols: Codes streamed from Shioaji at once (each
-            uses a tick and a bid/ask subscription; Shioaji allows 200).
+            uses a tick and a bid/ask subscription; Shioaji allows 200),
+            ``JOSEPH_SINOPAC_MAX_SYMBOLS``. Default 60, clamped to 1..100.
         sinopac_intraday_ticks_calls: Tick-history queries spent per day
-            during trading hours (Shioaji allows 10).
+            during trading hours (Shioaji allows 10),
+            ``JOSEPH_SINOPAC_INTRADAY_TICKS_CALLS``. Default 8, clamped to
+            0..10.
         sinopac_intraday_kbars_calls: Kbar queries spent per day during
-            trading hours (Shioaji allows 270).
-        sinopac_seconds_history_days: Sessions of tick history read for
-            seconds bars and trades, counting back from the newest.
+            trading hours (Shioaji allows 270),
+            ``JOSEPH_SINOPAC_INTRADAY_KBARS_CALLS``. Default 200, clamped
+            to 0..270.
+        sinopac_seconds_history_days: Trading sessions of tick history read
+            for seconds bars and trades, counting back from the newest,
+            ``JOSEPH_SINOPAC_SECONDS_HISTORY_DAYS``. Default 5, clamped to
+            0..30.
     """
 
     dev_tokens: tuple[DevToken, ...] = ()
@@ -359,7 +439,7 @@ class Settings:
 
     @property
     def active_venues(self) -> tuple[instruments.Venue, ...]:
-        """Returns the venues to construct, honoring ``demo_only``."""
+        """The venues to construct: only the mock venue when ``demo_only``."""
         if self.demo_only:
             return (instruments.Venue.MOCK,)
         return self.enabled_venues
@@ -375,7 +455,9 @@ class Settings:
             Parsed settings.
 
         Raises:
-            ValueError: If a value is malformed.
+            ValueError: If a value is malformed: an unknown venue or
+                choice, a number that does not parse, a bad dev token
+                entry or an unreadable secret file.
         """
         source = os.environ if env is None else env
         venues = tuple(

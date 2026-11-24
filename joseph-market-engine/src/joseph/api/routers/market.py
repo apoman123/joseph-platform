@@ -6,10 +6,13 @@
 Routes: ``/v1/venues``, ``/v1/instruments``, ``/v1/candles``,
 ``/v1/calendars/{calendar_id}/sessions`` and ``/v1/market/*``. Query
 parameter names match ``joseph-terminal/packages/contracts/src/client/
-http.ts``; responses are contract objects.
+http.ts``; responses are contract objects. The routes are public (no
+bearer token); domain errors are rendered by ``api.errors``.
 """
 
 from __future__ import annotations
+
+import enum
 
 import fastapi
 
@@ -21,7 +24,9 @@ from joseph.screening.app import service as screening_service
 from joseph.screening.domain import policy as policy_lib
 
 
-def _enum[E](kind: type[E], value: str | None, field: str) -> E | None:
+def _enum[EnumType: enum.Enum](
+    kind: type[EnumType], value: str | None, field: str
+) -> EnumType | None:
     """Parses an optional enum query parameter.
 
     Args:
@@ -30,15 +35,15 @@ def _enum[E](kind: type[E], value: str | None, field: str) -> E | None:
         field: Parameter name for errors.
 
     Returns:
-        Enum member or ``None``.
+        Enum member, or ``None`` when the parameter is absent or empty.
 
     Raises:
-        errors.ValidationFailedError: On an unknown value.
+        errors.ValidationFailedError: On an unknown value (422).
     """
     if value is None or value == "":
         return None
     try:
-        return kind(value)  # type: ignore[call-arg]
+        return kind(value)
     except ValueError as err:
         raise errors.ValidationFailedError(
             f"{field} has an unsupported value {value!r}"
@@ -56,7 +61,7 @@ def build_router(
         qualification: Qualification service.
 
     Returns:
-        Router.
+        Router mounted at ``/v1``.
     """
     router = fastapi.APIRouter(prefix="/v1", tags=["market"])
 
@@ -83,13 +88,17 @@ def build_router(
         """Searches exact-venue instruments.
 
         Args:
-            venue: Optional venue.
-            market_type: Optional market type.
+            venue: Optional contract ``Venue`` filter.
+            market_type: Optional contract ``MarketType`` filter.
             q: Optional search text.
-            limit: Maximum results.
+            limit: Maximum results (1..5000, 422 outside).
 
         Returns:
             Contract ``InstrumentList``.
+
+        Raises:
+            errors.ValidationFailedError: On an unknown ``venue`` or
+                ``market_type`` (422).
         """
         rows = await market_data.registry.search(
             q,
@@ -118,14 +127,22 @@ def build_router(
 
         Args:
             instrument_id: Canonical instrument id.
-            tf: Timeframe.
-            from_ms: Inclusive start.
-            to_ms: Exclusive end.
-            limit: Maximum bars.
-            feed_mode: Optional ``REPLAY`` to read recordings.
+            tf: Timeframe value, such as ``1h``.
+            from_ms: Inclusive start, UTC epoch milliseconds.
+            to_ms: Exclusive end, UTC epoch milliseconds.
+            limit: Maximum bars (default 500, max 5000).
+            feed_mode: Contract ``FeedMode`` (``AUTO`` when absent);
+                ``REPLAY`` reads recordings, the other modes the venue.
 
         Returns:
             Contract ``CandleBatch``.
+
+        Raises:
+            errors.ValidationFailedError: On an invalid id, timeframe,
+                range, limit or ``feed_mode`` (422).
+            errors.NotFoundError: If the venue is not enabled (404).
+            errors.MissingDataError: For ``REPLAY`` without a replay source
+                (422).
         """
         mode = _enum(quality.FeedMode, feed_mode, "feed_mode")
         batch = await market_data.get_batch(
@@ -152,23 +169,33 @@ def build_router(
         Args:
             calendar_id: Contract ``CalendarId`` (``24x7``, ``XTAI``,
                 ``XNYS``, ``USBOND``).
-            from_ms: Inclusive window start.
-            to_ms: Exclusive window end.
+            from_ms: Inclusive window start, UTC epoch milliseconds.
+            to_ms: Exclusive window end, UTC epoch milliseconds.
 
         Returns:
             Contract ``SessionList``.
+
+        Raises:
+            errors.NotFoundError: For an unknown calendar (404).
+            errors.ValidationFailedError: For an empty or too long window
+                (422).
         """
         return market_data.calendar_sessions(calendar_id, from_ms, to_ms)
 
     @router.get("/market/snapshot")
     async def snapshot(instrument_id: str) -> dict[str, object]:
-        """Returns the latest market snapshot.
+        """Returns the latest market snapshot (cached for one second).
 
         Args:
             instrument_id: Canonical instrument id.
 
         Returns:
-            Contract ``MarketSnapshot``.
+            Contract ``MarketSnapshot``, flagged stale when older than the
+            service's ``stale_after_ms``.
+
+        Raises:
+            errors.ValidationFailedError: On a malformed id (422).
+            errors.NotFoundError: If the venue is not enabled (404).
         """
         result = await market_data.get_snapshot(instrument_id)
         return result.to_contract(_now(market_data), market_data.stale_after_ms)
@@ -182,10 +209,14 @@ def build_router(
 
         Args:
             instrument_id: Canonical instrument id.
-            depth: Levels per side.
+            depth: Levels per side (1..1000, 422 outside).
 
         Returns:
             Contract ``OrderBook``.
+
+        Raises:
+            errors.ValidationFailedError: On a malformed id (422).
+            errors.NotFoundError: If the venue is not enabled (404).
         """
         book = await market_data.get_order_book(instrument_id, depth)
         return book.to_contract()
@@ -199,12 +230,17 @@ def build_router(
         """Returns qualification results with every gate's evidence.
 
         Args:
-            venue: Optional venue.
-            status: Optional status filter.
-            refresh: Force a fresh scan.
+            venue: Optional contract ``Venue`` filter.
+            status: Optional qualification status filter.
+            refresh: Whether to scan again instead of using records
+                cached within the service's time to live.
 
         Returns:
             Contract ``QualificationReport``.
+
+        Raises:
+            errors.ValidationFailedError: On an unknown ``venue`` or
+                ``status`` (422).
         """
         report = await qualification.report(
             _enum(instruments.Venue, venue, "venue"),
@@ -220,7 +256,7 @@ def _now(market_data: market_service.MarketDataService) -> int:
     """Returns the service clock time.
 
     Args:
-        market_data: Service.
+        market_data: Service whose clock is read.
 
     Returns:
         UTC epoch milliseconds.

@@ -3,6 +3,7 @@
 
 """Cross-cutting infrastructure.
 
-Configuration, persistence, outbox, in-process event bus, logging redaction
-and metrics.
+Configuration, bearer-token authentication, persistence (outbox and inbox),
+the in-process event bus, the resumable stream hub, logging redaction and
+metrics.
 """

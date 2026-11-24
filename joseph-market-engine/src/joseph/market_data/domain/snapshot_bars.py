@@ -60,6 +60,7 @@ from joseph.market_data.domain import classification
 from joseph.market_data.domain import session_bars
 
 _M1 = timeframes.Timeframe.M1
+# Open end for clipping coverage spans, later than any data time.
 _FOREVER_MS = 2**63
 
 
@@ -69,11 +70,11 @@ class Snapshot:
 
     Attributes:
         day: Exchange-local trading date.
-        data_ms: Time of the data (exchange clock).
+        data_ms: Time of the data, epoch milliseconds (exchange clock).
         cumulative_volume: Day volume so far, in base units (shares).
         last_price: Price of a trade printed exactly at ``data_ms``.
         trade_price: Price of the latest trade the source reports.
-        trade_ms: Time of that trade.
+        trade_ms: Time of that trade, epoch milliseconds.
         day_open: Official day open.
         day_high: Official day high.
         day_low: Official day low.
@@ -99,7 +100,7 @@ class DerivedTrade:
     """Volume traded between two snapshots.
 
     Attributes:
-        data_ms: Data time of the newer snapshot.
+        data_ms: Data time of the newer snapshot, epoch milliseconds.
         quantity: Base volume.
         price: Price when known.
         side: Classified side (``UNKNOWN`` when unpriced or unclassified).
@@ -116,7 +117,7 @@ class _Bar:
     """Running state of one bar.
 
     Attributes:
-        start_ms: Bar start.
+        start_ms: Bar start, epoch milliseconds.
         open: Open (first priced trade).
         high: High.
         low: Low.
@@ -174,8 +175,9 @@ class SnapshotBarBuilder:
             instrument_id: Instrument (its calendar sets the grid).
             source: Provenance label.
             retention_bars: One-minute bars kept (oldest dropped).
-            max_gap_ms: Longer silences between snapshots start a new
-                coverage segment instead of attributing their volume.
+            max_gap_ms: Silences between snapshots longer than this, in
+                milliseconds, start a new coverage segment instead of
+                attributing their volume.
         """
         self.instrument_id = instrument_id
         self.source = source
@@ -193,17 +195,18 @@ class SnapshotBarBuilder:
 
     @property
     def latest(self) -> Snapshot | None:
-        """Returns the newest applied snapshot."""
+        """The newest applied snapshot (``None`` before the first)."""
         return self._previous
 
     def segment_at(self, ts_ms: int) -> tuple[int, int] | None:
         """Returns the coverage segment containing an instant.
 
         Args:
-            ts_ms: Instant (typically a bar start).
+            ts_ms: Instant, epoch milliseconds (typically a bar start).
 
         Returns:
-            ``(from_ms, to_ms)`` data times of the segment, or ``None``.
+            ``(first, last)`` data times of the segment, both inclusive, or
+            ``None`` when no segment contains ``ts_ms``.
         """
         for first, last in reversed(self._segments):
             if first <= ts_ms <= last:
@@ -277,7 +280,9 @@ class SnapshotBarBuilder:
             snapshot: Snapshot.
 
         Returns:
-            The derived trade, if the volume increased.
+            A one-element list with the derived trade when the volume
+            increased inside a session; empty for an ignored or baseline
+            snapshot, or when no volume was added.
         """
         previous = self._previous
         if (
@@ -326,12 +331,10 @@ class SnapshotBarBuilder:
         """
         if new_day:
             self._classifier.reset()
-        self._last_price = (
-            snapshot.last_price
-            if snapshot.last_price is not None
-            and snapshot.cumulative_volume > 0
-            else None
-        )
+        if snapshot.last_price is not None and snapshot.cumulative_volume > 0:
+            self._last_price = snapshot.last_price
+        else:
+            self._last_price = None
         self._previous = snapshot
         self._segments.append([snapshot.data_ms, snapshot.data_ms])
         self.applied += 1
@@ -463,12 +466,12 @@ class SnapshotBarBuilder:
     def bars(
         self, start_ms: int, end_ms: int, now_ms: int
     ) -> list[market.Candle]:
-        """Returns the one-minute bars starting in ``[start, end)``.
+        """Returns the one-minute bars starting in ``[start_ms, end_ms)``.
 
         Args:
-            start_ms: Inclusive start.
-            end_ms: Exclusive end.
-            now_ms: Receipt time stamped on the candles.
+            start_ms: Inclusive start, epoch milliseconds.
+            end_ms: Exclusive end, epoch milliseconds.
+            now_ms: Receipt time stamped on the candles, epoch milliseconds.
 
         Returns:
             Ascending candles (bars without a priced trade, or starting
@@ -483,8 +486,8 @@ class SnapshotBarBuilder:
             segment = self.segment_at(key)
             if segment is None:
                 continue
-            assert bar.high is not None and bar.low is not None
-            assert bar.close is not None
+            if bar.high is None or bar.low is None or bar.close is None:
+                raise AssertionError("a priced bar has a high, low and close")
             out.append(
                 session_bars.candle(
                     instrument_id=self.instrument_id,

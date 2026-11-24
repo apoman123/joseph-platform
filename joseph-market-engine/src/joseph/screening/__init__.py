@@ -1,4 +1,7 @@
 # Copyright 2026 apoman123
 # SPDX-License-Identifier: MIT
 
-"""Perpetual qualification filter bounded context."""
+"""Qualification bounded context: liquidity gates per instrument.
+
+Covers perpetuals and exchange-listed securities (stocks and ETFs).
+"""
