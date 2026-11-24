@@ -67,6 +67,7 @@ from collections.abc import Callable
 from collections.abc import Sequence
 from typing import Any
 from typing import Protocol
+from typing import TypeAlias
 
 from joseph_execution.adapters.brokers import base
 from joseph_execution.adapters.brokers import capabilities as broker_caps
@@ -80,7 +81,7 @@ from joseph_execution.ports import services
 from joseph_execution.ports import trading
 
 _LOG = logging.getLogger(__name__)
-S = enums.OrderState
+_State = enums.OrderState
 BROKER = enums.Broker.SINOPAC.value
 _TIFS = {
     enums.TimeInForce.DAY: "ROD",
@@ -97,7 +98,10 @@ _EXCHANGE_ALIASES = {
     enums.Venue.TPEX.value: frozenset({"OTC"}),
 }
 _EMERGING = "OES"
+# Trade statuses of orders still working at the exchange.
 _WORKING = frozenset({"PendingSubmit", "PreSubmitted", "Submitted"})
+# SDK exception names that mean the order was refused before it left, so
+# the outcome is known (everything else from place_order is unknown).
 _REFUSED = frozenset(
     {
         "ValidationError",
@@ -112,12 +116,14 @@ _REFUSED = frozenset(
     }
 )
 _TAG_ALPHABET = "0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZ"
+# Orders younger than this are still in the session's trade list, so their
+# absence there is conclusive.
 _TODAY_WINDOW_MS = 12 * 3_600_000
 _COMMON = "Common"
 _ODD = "IntradayOdd"
 _SNAPSHOT_TTL_MS = 5_000
 
-Runner = Callable[[Callable[[], Any]], Awaitable[Any]]
+Runner: TypeAlias = Callable[[Callable[[], Any]], Awaitable[Any]]
 """Runs one blocking SDK call (default: a worker thread)."""
 
 
@@ -184,7 +190,7 @@ class SjClient(Protocol):
 
     @property
     def contracts(self) -> Any:
-        """Returns the contract tree (``contracts.stocks[code]``)."""
+        """The contract tree (``contracts.stocks[code]``)."""
         ...
 
     def place_order(self, contract: Any, order: Any, timeout: int = ...) -> Any:
@@ -420,7 +426,8 @@ def tag(client_order_id: str) -> str:
         client_order_id: Joseph client id.
 
     Returns:
-        Six uppercase letters/digits (Shioaji's custom_field limit).
+        Six uppercase letters/digits (Shioaji's custom_field limit): the
+        first 8 bytes of the id's SHA-256 in base 36.
     """
     number = int.from_bytes(
         hashlib.sha256(client_order_id.encode()).digest()[:8], "big"
@@ -460,7 +467,8 @@ def order_fields(
     if request.order_type is enums.OrderType.MARKET:
         price_type, price = "MKT", 0.0
     elif request.order_type is enums.OrderType.LIMIT:
-        assert request.limit_price is not None
+        if request.limit_price is None:
+            raise AssertionError("LIMIT orders carry a limit price")
         price_type, price = "LMT", base.exact_float(request.limit_price)
     else:
         raise errors.AdapterUnavailableError(
@@ -524,12 +532,12 @@ def map_status(trade: Any) -> enums.OrderState | None:
     status = text(trade.status.status)
     deal = int(str(getattr(trade.status, "deal_quantity", 0) or 0))
     if status in _WORKING:
-        return S.PARTIALLY_FILLED if deal > 0 else S.ACKNOWLEDGED
+        return _State.PARTIALLY_FILLED if deal > 0 else _State.ACKNOWLEDGED
     mapping = {
-        "PartFilled": S.PARTIALLY_FILLED,
-        "Filled": S.FILLED,
-        "Cancelled": S.CANCELED,
-        "Failed": S.REJECTED,
+        "PartFilled": _State.PARTIALLY_FILLED,
+        "Filled": _State.FILLED,
+        "Cancelled": _State.CANCELED,
+        "Failed": _State.REJECTED,
     }
     return mapping.get(status)
 
@@ -553,7 +561,7 @@ def venue_state(
         return None
     lot = text(getattr(trade.order, "order_lot", _COMMON)) or _COMMON
     message = getattr(trade.status, "msg", None)
-    final = status in (S.REJECTED, S.CANCELED)
+    final = status in (_State.REJECTED, _State.CANCELED)
     return trading.VenueOrderState(
         client_order_id=client_order_id,
         exchange_order_id=str(trade.order.id) or None,
@@ -740,7 +748,7 @@ class SinopacAdapter:
         calls: Methods invoked (safety tests assert none while gated).
     """
 
-    def __init__(  # noqa: PLR0917
+    def __init__(  # noqa: PLR0917 - catalog.build and the tests construct it positionally
         self,
         config: SinopacConfig | None,
         factory: Callable[[], SjFactory],
@@ -804,7 +812,7 @@ class SinopacAdapter:
 
     @property
     def name(self) -> str:
-        """Returns ``sinopac``."""
+        """The broker code, ``sinopac``."""
         return BROKER
 
     async def _run(self, fn: Callable[[], Any]) -> Any:
@@ -852,6 +860,9 @@ class SinopacAdapter:
     def _require_open(self, method: str) -> None:
         """Records a call and refuses it while gated.
 
+        This is where a gated deployment fails closed: no login and no SDK
+        call happens after a refusal.
+
         Args:
             method: Method name.
 
@@ -865,6 +876,12 @@ class SinopacAdapter:
     async def _login(self) -> SjClient:
         """Logs in (and activates the CA) once.
 
+        The API key and secret go only to the SDK's ``login``; the
+        certificate path, password and person id only to ``activate_ca``,
+        which production order signing needs. Production without a
+        configured certificate fails closed before any order. Error
+        messages name the exception type, never the credentials.
+
         Returns:
             Logged-in client.
 
@@ -875,7 +892,8 @@ class SinopacAdapter:
             if self._api is not None:
                 return self._api
             cfg = self._config
-            assert cfg is not None
+            if cfg is None:
+                raise AssertionError("an ungated adapter has a config")
             if self._factory is None:
                 self._factory = self._factory_fn()
             factory = self._factory
@@ -1017,6 +1035,9 @@ class SinopacAdapter:
     def _order_callback(self, state: Any, event: Any) -> None:
         """Receives SDK order/deal events on an SDK thread.
 
+        Adapter state is only touched on the event loop, so the event is
+        handed over with ``call_soon_threadsafe``.
+
         Args:
             state: ``sj.OrderState``.
             event: Event mapping.
@@ -1036,7 +1057,7 @@ class SinopacAdapter:
             info: Text.
             event: Event name.
         """
-        del resp_code, event
+        del resp_code, event  # Unused.
         loop = self._loop
         if loop is not None:
             loop.call_soon_threadsafe(self._on_session, event_code, info)
@@ -1048,6 +1069,8 @@ class SinopacAdapter:
             event_code: Session event code.
             info: Text.
         """
+        # Shioaji session events: 0 up, 13 reconnected, 12 reconnecting,
+        # 1 down, 2 connect failed.
         if event_code in (0, 13):
             self._health = enums.HealthState.HEALTHY
             if event_code == 13:
@@ -1107,12 +1130,14 @@ class SinopacAdapter:
         message = str(operation.get("op_msg") or "") or None
         filled = self._filled.get(cid, decimals.ZERO)
         if op_type == "New" and ok:
-            status = S.PARTIALLY_FILLED if filled > 0 else S.ACKNOWLEDGED
+            status = (
+                _State.PARTIALLY_FILLED if filled > 0 else _State.ACKNOWLEDGED
+            )
         elif op_type == "Cancel" and ok:
-            status = S.CANCELED
+            status = _State.CANCELED
             self._cancel_requested.pop(cid, None)
         elif op_type in ("New", "Reject"):
-            status = S.REJECTED
+            status = _State.REJECTED
         else:
             self._cancel_requested.pop(cid, None)
             self._failures[cid] = message or f"{op_type} failed"
@@ -1124,7 +1149,7 @@ class SinopacAdapter:
                 exchange_order_id=trade_id or None,
                 status=status,
                 filled_base=filled,
-                reason=message if status is not S.ACKNOWLEDGED else None,
+                reason=message if status is not _State.ACKNOWLEDGED else None,
                 ts_ms=self._clock.now_ms(),
             ),
         )
@@ -1174,7 +1199,9 @@ class SinopacAdapter:
             trading.VenueOrderState(
                 client_order_id=cid,
                 exchange_order_id=trade_id or None,
-                status=S.FILLED if total >= ordered else S.PARTIALLY_FILLED,
+                status=_State.FILLED
+                if total >= ordered
+                else _State.PARTIALLY_FILLED,
                 filled_base=total,
                 reason=None,
                 ts_ms=self._clock.now_ms(),
@@ -1281,6 +1308,11 @@ class SinopacAdapter:
     ) -> accounts.TradingCapabilities:
         """Negotiates capabilities (logs in when allowed).
 
+        Fails closed: a gated deployment, an account without a SinoPac
+        account number or stock account, a failed login and, in production,
+        an account SinoPac reports as not signed (API agreement and
+        simulation test outstanding) all report TRADING_UNAVAILABLE.
+
         Args:
             account_id: Joseph account.
 
@@ -1375,7 +1407,8 @@ class SinopacAdapter:
         Returns:
             ``(position, market value)`` pairs.
         """
-        assert self._factory is not None
+        if self._factory is None:
+            raise AssertionError("the SDK factory exists after login")
         unit = self._factory.share_unit()
         await self._query_pacer.acquire()
         rows = await self._run(lambda: api.list_positions(account, unit=unit))
@@ -1492,8 +1525,8 @@ class SinopacAdapter:
                 else venue_state(cid, trade, tracked.unit, now)
             )
             if state is not None and state.status in (
-                S.ACKNOWLEDGED,
-                S.PARTIALLY_FILLED,
+                _State.ACKNOWLEDGED,
+                _State.PARTIALLY_FILLED,
             ):
                 result.append(state)
         return result
@@ -1509,6 +1542,9 @@ class SinopacAdapter:
 
         Returns:
             Fills (deal reports of the current session).
+
+        Raises:
+            AdapterUnavailableError: ``LIVE_TRADING_DISABLED`` when gated.
         """
         self._require_open("list_recent_fills")
         return [
@@ -1522,7 +1558,9 @@ class SinopacAdapter:
 
         The code is looked up in the venue's Shioaji contract group
         (``TSE`` for ``twse``, ``OTC`` for ``tpex``), so a code listed on
-        the other exchange (or on the emerging board) is refused.
+        the other exchange (or on the emerging board) is refused. A client
+        id this process already placed returns its current state instead
+        of placing a second order.
 
         Args:
             request: Venue request.
@@ -1543,7 +1581,7 @@ class SinopacAdapter:
             if state is None:
                 raise errors.AdapterTimeoutError("SinoPac order is unclear")
             return trading.VenueSubmitResult(
-                state.status is not S.REJECTED, state
+                state.status is not _State.REJECTED, state
             )
         ref = equities.parse_instrument_id(request.instrument_id)
         group = SJ_EXCHANGES.get(ref.venue)
@@ -1570,7 +1608,8 @@ class SinopacAdapter:
         fields = order_fields(request, unit, account)
         # The OMS read this metadata for its risk checks, so it is cached.
         tax_class = await self._tax_class(request.instrument_id)
-        assert self._factory is not None
+        if self._factory is None:
+            raise AssertionError("the SDK factory exists after login")
         order = self._factory.stock_order(fields)
         timeout = (
             4_000 if self._config is None else self._config.call_timeout_ms
@@ -1601,7 +1640,9 @@ class SinopacAdapter:
         state = venue_state(cid, trade, unit, self._clock.now_ms())
         if state is None:
             raise errors.AdapterTimeoutError("SinoPac order status unclear")
-        return trading.VenueSubmitResult(state.status is not S.REJECTED, state)
+        return trading.VenueSubmitResult(
+            state.status is not _State.REJECTED, state
+        )
 
     async def cancel_order(
         self, account_id: str, client_order_id: str
@@ -1632,8 +1673,8 @@ class SinopacAdapter:
         now = self._clock.now_ms()
         state = venue_state(client_order_id, trade, unit, now)
         if state is not None and state.status not in (
-            S.ACKNOWLEDGED,
-            S.PARTIALLY_FILLED,
+            _State.ACKNOWLEDGED,
+            _State.PARTIALLY_FILLED,
         ):
             return state
         self._cancel_requested[client_order_id] = now
@@ -1641,7 +1682,10 @@ class SinopacAdapter:
         await self._order_pacer.acquire()
         updated = await self._run(lambda: api.cancel_order(trade))
         state = venue_state(client_order_id, updated or trade, unit, now)
-        if state is not None and state.status in (S.CANCELED, S.FILLED):
+        if state is not None and state.status in (
+            _State.CANCELED,
+            _State.FILLED,
+        ):
             self._cancel_requested.pop(client_order_id, None)
             return state
         raise errors.AdapterTimeoutError("SinoPac cancel pending")
@@ -1667,7 +1711,8 @@ class SinopacAdapter:
             State after the update.
 
         Raises:
-            ExecutionError: ``NOT_FOUND``, ``UNSUPPORTED`` or ``CONFLICT``.
+            ExecutionError: ``NOT_FOUND``, ``UNSUPPORTED``,
+                ``INVALID_LOT_SIZE`` or ``CONFLICT``.
         """
         api, _ = await self._session("amend_order", account_id)
         tracked = self._tracked.get(client_order_id)
@@ -1781,7 +1826,7 @@ class SinopacAdapter:
         pending_cancel = (
             requested is not None
             and state is not None
-            and state.status in (S.ACKNOWLEDGED, S.PARTIALLY_FILLED)
+            and state.status in (_State.ACKNOWLEDGED, _State.PARTIALLY_FILLED)
             and now - requested < grace
         )
         if state is None or pending_cancel:
@@ -1798,6 +1843,9 @@ class SinopacAdapter:
 
         Yields:
             Events.
+
+        Raises:
+            AdapterUnavailableError: ``LIVE_TRADING_DISABLED`` when gated.
         """
         self._require_open("stream_account_events")
         async for event in self._events.stream(account_id):

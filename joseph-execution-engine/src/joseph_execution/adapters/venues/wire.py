@@ -22,8 +22,10 @@ import re
 from joseph_execution.domain import decimals
 from joseph_execution.domain import errors
 
+# A Joseph client order id: hex body, optional stop-loss or take-profit leg.
 _JOSEPH_CID = re.compile(r"^j([0-9a-f]{30})(?:-(sl|tp(\d{1,3})))?$")
 _CLOID = re.compile(r"^0x([0-9a-f]{2})([0-9a-f]{30})$")
+# First byte of an encoded cloid: which leg the id is, or that it was hashed.
 _TAG_PRIMARY = 0x00
 _TAG_STOP = 0x01
 _TAG_TP_BASE = 0x10
@@ -99,7 +101,8 @@ def opt_dec(value: object) -> decimal.Decimal | None:
         value: Venue value.
 
     Returns:
-        Decimal, or ``None`` for missing/zero-like placeholders.
+        Decimal, or ``None`` when the value is missing (``None`` or an empty
+        string); zero stays zero.
     """
     if value is None or value == "":
         return None
@@ -110,8 +113,9 @@ def cloid_of(client_order_id: str) -> str:
     """Encodes a client order id as a 128-bit hex ``cloid``.
 
     Joseph ids encode reversibly: a tag byte (primary, stop-loss or
-    take-profit leg) followed by the 30 hex digits. Other ids hash (tag
-    ``ff``) and can only be mapped back by the adapter that sent them.
+    take-profit leg ``n`` as ``0x10 + n``, for ``n`` up to 238) followed by
+    the 30 hex digits. Other ids, and larger leg numbers, hash (tag ``ff``)
+    and can only be mapped back by the adapter that sent them.
 
     Args:
         client_order_id: Client order id.
@@ -207,7 +211,8 @@ def client_id_of_compact(venue_id: str) -> str | None:
         venue_id: Venue client id.
 
     Returns:
-        The client order id, or ``None`` for hashed ids.
+        The client order id (primary and pass-through ids come back
+        unchanged), or ``None`` for hashed ids.
     """
     stop = _COMPACT_STOP.match(venue_id)
     if stop is not None:
@@ -225,8 +230,8 @@ def index_of(client_order_id: str, bits: int) -> int:
 
     Used where the venue only accepts a bounded integer (Lighter's
     ``client_order_index``). The mapping is a truncated SHA-256, so the
-    adapter keeps the reverse map; collisions are astronomically unlikely
-    for one account's order history.
+    adapter keeps the reverse map; collisions are negligible for one
+    account's order history (about n**2 / 2**(bits + 1) for n orders).
 
     Args:
         client_order_id: Client order id.

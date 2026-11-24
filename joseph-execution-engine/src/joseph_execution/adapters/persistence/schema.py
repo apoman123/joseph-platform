@@ -13,6 +13,8 @@ import sqlalchemy as sa
 
 METADATA = sa.MetaData()
 
+# Decimals (prices, quantities, money) are stored as exact text, never as
+# floats; times are UTC epoch milliseconds.
 _TEXT = sa.Text
 _MS = sa.BigInteger
 
@@ -39,6 +41,8 @@ credentials = sa.Table(
     sa.Column("credential_id", sa.String(128), primary_key=True),
     sa.Column("tenant_id", sa.String(128), nullable=False),
     sa.Column("account_id", sa.String(128), nullable=False, index=True),
+    # The vault's AES-GCM envelope as JSON; plaintext secrets are never
+    # stored.
     sa.Column("envelope", _TEXT, nullable=False),
     sa.Column("created_at_ms", _MS, nullable=False),
 )
@@ -251,6 +255,8 @@ account_live_arming = sa.Table(
     sa.Column("revoked_by", sa.String(160)),
 )
 
+# SQLite triggers that make the audit chain append-only: any UPDATE or
+# DELETE of an audit row aborts.
 SQLITE_AUDIT_TRIGGERS = (
     """CREATE TRIGGER IF NOT EXISTS audit_no_update BEFORE UPDATE ON
     audit_events BEGIN SELECT RAISE(ABORT, 'audit log is append-only'); END""",

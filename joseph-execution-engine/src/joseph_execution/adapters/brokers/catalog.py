@@ -5,10 +5,10 @@
 
 A broker is open only when the global LIVE flag is on *and* the broker is
 explicitly enabled and configured; otherwise its adapter is gated and
-refuses every call without creating an SDK client (no network). The
-remaining LIVE gates (account LIVE mode, preview tokens, AUTO_LIVE
-consent with step-up, Risk Gateway, kill switch) still apply to every
-order in the OMS.
+refuses every call without creating an SDK client (no network). Cathay is
+always fail-closed (no API yet). The remaining LIVE gates (account LIVE
+mode, preview tokens, AUTO_LIVE consent with step-up, Risk Gateway, kill
+switch) still apply to every order in the OMS (order management system).
 """
 
 from __future__ import annotations
@@ -34,10 +34,14 @@ def gate_reason(
 ) -> str | None:
     """Explains why a broker is gated, if it is.
 
+    The global LIVE flag is checked first, so it is the reason reported
+    when both gates are closed.
+
     Args:
         live_trading_enabled: Global LIVE flag.
-        enabled: The broker is enabled and configured.
-        variable: Environment variable that enables the broker.
+        enabled: The broker's own enable flag (``variable``).
+        variable: Environment variable that enables the broker (named in
+            the reason).
 
     Returns:
         Reason, or ``None`` when the broker may connect.
@@ -67,17 +71,21 @@ def build(
     Args:
         live_trading_enabled: Global LIVE flag.
         ibkr_config: IBKR connection settings.
-        ibkr_enabled: IBKR explicitly enabled.
-        sinopac_config: Shioaji settings, ``None`` when not configured.
-        sinopac_enabled: SinoPac explicitly enabled.
-        market_data: Market gateway.
+        ibkr_enabled: IBKR explicitly enabled (``JOSEPH_IBKR_ENABLED``).
+        sinopac_config: Shioaji settings, ``None`` when not configured (the
+            SinoPac adapter then stays gated).
+        sinopac_enabled: SinoPac explicitly enabled
+            (``JOSEPH_SINOPAC_ENABLED``).
+        market_data: Market gateway (instrument metadata).
         clock: Time source.
         account_lookup: Joseph account id -> broker account number.
-        ib_factory: ``ib_async`` factory (tests inject fakes).
-        sj_factory: Shioaji factory (tests inject fakes).
+        ib_factory: Creates the ``ib_async`` factory on first connect
+            (tests inject fakes).
+        sj_factory: Creates the Shioaji factory on first login (tests
+            inject fakes).
 
     Returns:
-        Adapters keyed by broker code.
+        Adapters keyed by broker code (``ibkr``, ``sinopac``, ``cathay``).
     """
     return {
         enums.Broker.IBKR.value: ibkr.IbkrAdapter(

@@ -17,9 +17,11 @@ Field names per venue (all values are strings):
   account) and ``account_address`` (the master account it trades for).
 * ``lighter``: ``api_private_key``, ``account_index``, ``api_key_index``.
 
-Every venue also accepts ``environment``: ``mainnet`` (default) or
-``testnet`` (aliases ``demo``, ``sandbox``) to use the venue's test
-environment for that account.
+Every venue also accepts ``environment``: ``testnet`` (aliases ``demo``,
+``sandbox``, ``paper``) uses the venue's test environment for that account,
+``mainnet`` (aliases ``live``, ``production``, empty) the real market.
+Without the field the deployment's default for the venue applies
+(``VenueOptions.sandbox``).
 """
 
 from __future__ import annotations
@@ -33,6 +35,7 @@ from joseph_execution.ports import repositories
 from joseph_execution.ports import services
 
 ENVIRONMENT_FIELD = "environment"
+# Accepted spellings of ``environment``, compared lowercased and stripped.
 _SANDBOX_NAMES = ("testnet", "demo", "sandbox", "paper")
 _MAINNET_NAMES = ("mainnet", "live", "production", "")
 
@@ -64,7 +67,8 @@ class VenueCredentials:
             name: Field name.
 
         Returns:
-            Value.
+            Value with surrounding whitespace removed; empty when the field
+            is absent.
         """
         return self.fields.get(name, "").strip()
 
@@ -75,7 +79,8 @@ class VenueCredentials:
             required: Field names.
 
         Returns:
-            Missing names.
+            Missing names in ``required`` order (field names only, never
+            values).
         """
         return [name for name in required if not self.get(name)]
 
@@ -83,7 +88,9 @@ class VenueCredentials:
         """Returns a process-local hash used to rebuild cached sessions.
 
         Returns:
-            Hash of the field values (not reversible, never persisted).
+            Hash of the field names and values; Python salts string hashes
+            per process, so it is never persisted or compared across
+            processes.
         """
         return hash(tuple(sorted(self.fields.items())))
 
@@ -92,10 +99,10 @@ def from_fields(fields: Mapping[str, str]) -> VenueCredentials:
     """Builds credentials, interpreting the ``environment`` field.
 
     Args:
-        fields: Plaintext fields.
+        fields: Plaintext fields, including the optional ``environment``.
 
     Returns:
-        Credentials.
+        Credentials without the ``environment`` field.
 
     Raises:
         ExecutionError: ``VALIDATION_FAILED`` for an unknown environment.
@@ -124,10 +131,10 @@ class CredentialSource(Protocol):
         """Loads credentials.
 
         Args:
-            account_id: Account.
+            account_id: Account whose credentials to load.
 
         Returns:
-            Credentials or ``None``.
+            Credentials, or ``None`` when the account has none.
         """
         ...
 
@@ -139,12 +146,12 @@ class NoCredentials:
         """Returns ``None``.
 
         Args:
-            account_id: Account.
+            account_id: Account whose credentials to load.
 
         Returns:
             Always ``None``.
         """
-        del account_id
+        del account_id  # Unused.
         return None
 
 
@@ -167,10 +174,14 @@ class StaticCredentials:
         """Returns the account's credentials.
 
         Args:
-            account_id: Account.
+            account_id: Account whose credentials to load.
 
         Returns:
-            Credentials or ``None``.
+            Credentials, or ``None`` for an unknown account.
+
+        Raises:
+            ExecutionError: ``VALIDATION_FAILED`` for an unknown
+                ``environment`` value.
         """
         fields = self._by_account.get(account_id)
         return None if fields is None else from_fields(fields)
@@ -204,10 +215,15 @@ class VaultCredentialSource:
         """Loads and decrypts the account's credential envelope.
 
         Args:
-            account_id: Account.
+            account_id: Account whose credentials to load.
 
         Returns:
             Credentials, or ``None`` for unknown, paper or revoked accounts.
+
+        Raises:
+            ExecutionError: ``FORBIDDEN`` when the envelope fails
+                authentication; ``VALIDATION_FAILED`` for an unknown
+                ``environment`` value.
         """
         with self._uow() as uow:
             account = uow.accounts.get(account_id)

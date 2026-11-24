@@ -19,15 +19,21 @@ from joseph_execution.ports import services
 def totp(secret_b32: str, at_ms: int, step_s: int = 30, digits: int = 6) -> str:
     """Computes a TOTP code.
 
+    HMAC-SHA1 over the big-endian 8-byte step counter, with RFC 4226
+    dynamic truncation: the defaults authenticator apps use.
+
     Args:
-        secret_b32: Base32 shared secret.
+        secret_b32: Base32 shared secret, case-insensitive, padding
+            optional.
         at_ms: Time in UTC epoch milliseconds.
-        step_s: Time step.
+        step_s: Time step in seconds.
         digits: Code length.
 
     Returns:
         Zero-padded code.
     """
+    # Authenticator secrets are usually shared without base32 padding, which
+    # b32decode requires.
     key = base64.b32decode(secret_b32.upper() + "=" * (-len(secret_b32) % 8))
     counter = struct.pack(">Q", at_ms // 1000 // step_s)
     digest = hmac.new(key, counter, hashlib.sha1).digest()
@@ -37,13 +43,14 @@ def totp(secret_b32: str, at_ms: int, step_s: int = 30, digits: int = 6) -> str:
 
 
 class TotpStepUpVerifier:
-    """Verifies TOTP codes with a +/- one step window."""
+    """Verifies 30-second TOTP codes with a +/- one step window."""
 
     def __init__(self, secret_b32: str | None, clock: services.Clock) -> None:
         """Initializes the verifier.
 
         Args:
-            secret_b32: Shared secret, ``None`` to disable step-up.
+            secret_b32: Base32 shared secret; ``None`` or empty makes every
+                verification fail.
             clock: Time source.
         """
         self._secret = secret_b32
@@ -52,14 +59,19 @@ class TotpStepUpVerifier:
     def verify(self, user_id: str, code: str) -> bool:
         """Checks a code.
 
+        Fails closed: without a secret, or for a non-numeric code, nothing
+        verifies. Codes are compared in constant time against the previous,
+        current and next step, which tolerates clock drift of up to one
+        step.
+
         Args:
-            user_id: User (single shared secret in this build).
-            code: Code.
+            user_id: User (ignored: this build has one shared secret).
+            code: Code the user typed.
 
         Returns:
-            True when valid.
+            True when the code matches one of the three steps.
         """
-        del user_id
+        del user_id  # Unused.
         if not self._secret or not code.isdigit():
             return False
         now = self._clock.now_ms()

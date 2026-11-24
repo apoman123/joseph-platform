@@ -4,13 +4,15 @@
 """HMAC request signing shared by the centralized venues.
 
 * Binance and MEXC: lowercase hex HMAC-SHA256 of the venue's payload
-  string (``hmac_sha256_hex``).
+  string (``hmac_sha256_hex``); each adapter documents its payload.
 * Bitget: Base64 of the raw HMAC-SHA256 digest (``hmac_sha256_b64``) of
   ``timestamp + METHOD + requestPath[?query] + body``, sent with the API
   passphrase.
 
 Hyperliquid (EIP-712) and Lighter (native SignerClient) sign in their own
 adapter modules because they need optional dependencies.
+
+Secrets and signatures are never logged.
 """
 
 from __future__ import annotations
@@ -55,6 +57,10 @@ def hmac_sha256_b64(secret: str, payload: str) -> str:
 
 def encode_query(params: Sequence[tuple[str, str]]) -> str:
     """Encodes parameters in the given order (signed exactly as sent).
+
+    The venue verifies the signature over the query string it receives, so
+    the same encoded string must be both signed and sent; reordering or
+    re-encoding the parameters would invalidate it.
 
     Args:
         params: ``(name, value)`` pairs.

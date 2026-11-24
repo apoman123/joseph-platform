@@ -5,9 +5,10 @@
 
 Values follow each venue's official API documentation (re-read 2026-11-23;
 sources are cited in each adapter module) and are re-verified per account
-at runtime (V5 §4): an adapter reports ``AVAILABLE`` only with stored
-credentials, a healthy venue and a passing permission probe, and always
-negotiates one-way position mode.
+at runtime by the live adapters: an adapter reports ``AVAILABLE`` only with
+stored credentials, a healthy venue and a passing permission probe, and
+always negotiates one-way position mode. ``build_live_adapters`` turns the
+table into one adapter per venue.
 """
 
 from __future__ import annotations
@@ -38,10 +39,13 @@ from joseph_execution.domain import enums
 from joseph_execution.ports import services
 from joseph_execution.ports import trading
 
+# Short aliases keep the capability table below readable.
 _T = enums.OrderType
 _F = enums.TimeInForce
 _M = enums.MarginMode
 
+# Every entry starts TRADING_UNAVAILABLE: a live adapter upgrades the status
+# per account only after its runtime checks pass.
 DOCUMENTED: dict[str, accounts.TradingCapabilities] = {
     "binance": accounts.TradingCapabilities(
         venue="binance",
@@ -164,7 +168,7 @@ _ADAPTERS: dict[str, type[live.LiveVenueAdapter[Any]]] = {
 }
 
 
-def build_live_adapters(  # noqa: PLR0917
+def build_live_adapters(  # noqa: PLR0917 - callers pass credentials and clock positionally; keyword-only would break them
     credentials: creds_lib.CredentialSource | None = None,
     clock: services.Clock | None = None,
     options: live.VenueOptions | None = None,

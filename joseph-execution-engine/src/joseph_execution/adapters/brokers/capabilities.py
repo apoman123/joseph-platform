@@ -14,8 +14,8 @@ from __future__ import annotations
 from joseph_execution.domain import accounts
 from joseph_execution.domain import enums
 
-_T = enums.OrderType
-_F = enums.TimeInForce
+_OrderType = enums.OrderType
+_Tif = enums.TimeInForce
 
 CATHAY_AWAITING_SDK = (
     "Awaiting the Cathay API SDK/spec (available only through a Cathay "
@@ -40,8 +40,13 @@ def ibkr(
     return accounts.TradingCapabilities(
         venue=enums.Broker.IBKR.value,
         status=enums.TradingStatus.AVAILABLE,
-        order_types=(_T.MARKET, _T.LIMIT, _T.STOP_MARKET, _T.STOP_LIMIT),
-        time_in_force=(_F.DAY, _F.GTC, _F.IOC),
+        order_types=(
+            _OrderType.MARKET,
+            _OrderType.LIMIT,
+            _OrderType.STOP_MARKET,
+            _OrderType.STOP_LIMIT,
+        ),
+        time_in_force=(_Tif.DAY, _Tif.GTC, _Tif.IOC),
         native_reduce_only=False,
         native_stop_loss=True,
         native_take_profit=True,
@@ -86,8 +91,8 @@ def sinopac(*, simulation: bool = True) -> accounts.TradingCapabilities:
     return accounts.TradingCapabilities(
         venue=enums.Broker.SINOPAC.value,
         status=enums.TradingStatus.AVAILABLE,
-        order_types=(_T.MARKET, _T.LIMIT),
-        time_in_force=(_F.DAY, _F.IOC, _F.FOK),
+        order_types=(_OrderType.MARKET, _OrderType.LIMIT),
+        time_in_force=(_Tif.DAY, _Tif.IOC, _Tif.FOK),
         native_reduce_only=False,
         native_stop_loss=False,
         native_take_profit=False,
@@ -125,6 +130,10 @@ def sinopac(*, simulation: bool = True) -> accounts.TradingCapabilities:
 
 def cathay() -> accounts.TradingCapabilities:
     """Returns the Cathay Securities entry (TWSE, TPEx; fail-closed).
+
+    No order types or time-in-force values are declared, so nothing can be
+    routed to Cathay; the fail-closed adapter adds ``CATHAY_AWAITING_SDK``
+    to the notes.
 
     Returns:
         Capabilities with status TRADING_UNAVAILABLE.

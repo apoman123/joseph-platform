@@ -27,9 +27,9 @@ class KnownOrder:
 
     Attributes:
         client_order_id: Client order id.
-        instrument_id: Instrument.
+        instrument_id: Canonical instrument id.
         mode: Order mode.
-        updated_at_ms: Last update.
+        updated_at_ms: Last update, UTC epoch milliseconds.
         terminal: Whether the OMS considers the order finished.
         order_type: Order type.
         exchange_order_id: Venue order id once acknowledged.
@@ -51,23 +51,25 @@ class OrderDirectory(Protocol):
         """Finds one order by client id.
 
         Args:
-            account_id: Account.
-            client_order_id: Client id.
+            account_id: Account that owns the orders.
+            client_order_id: Client order id.
 
         Returns:
-            Order or ``None``.
+            The order, or ``None`` when the OMS has no such order.
         """
         ...
 
     def recent(self, account_id: str, since_ms: int) -> list[KnownOrder]:
         """Lists LIVE orders updated since a time, newest first.
 
+        Orders that are still open are included whatever their age.
+
         Args:
-            account_id: Account.
-            since_ms: Lower bound.
+            account_id: Account that owns the orders.
+            since_ms: Earliest update time, UTC epoch milliseconds.
 
         Returns:
-            Orders.
+            Orders, possibly empty.
         """
         ...
 
@@ -79,26 +81,26 @@ class EmptyDirectory:
         """Returns ``None``.
 
         Args:
-            account_id: Account.
-            client_order_id: Client id.
+            account_id: Account that owns the orders.
+            client_order_id: Client order id.
 
         Returns:
             Always ``None``.
         """
-        del account_id, client_order_id
+        del account_id, client_order_id  # Unused.
         return None
 
     def recent(self, account_id: str, since_ms: int) -> list[KnownOrder]:
         """Returns nothing.
 
         Args:
-            account_id: Account.
-            since_ms: Lower bound.
+            account_id: Account that owns the orders.
+            since_ms: Earliest update time, UTC epoch milliseconds.
 
         Returns:
             Empty list.
         """
-        del account_id, since_ms
+        del account_id, since_ms  # Unused.
         return []
 
 
@@ -112,7 +114,8 @@ class RepositoryOrderDirectory:
 
         Args:
             uow_factory: Unit of work factory.
-            limit: Maximum orders scanned by ``recent``.
+            limit: Maximum orders scanned by ``recent`` (the newest ones);
+                older open orders beyond it are not seen.
         """
         self._uow = uow_factory
         self._limit = limit
@@ -121,11 +124,11 @@ class RepositoryOrderDirectory:
         """Finds one order by client id.
 
         Args:
-            account_id: Account.
-            client_order_id: Client id.
+            account_id: Account that owns the orders.
+            client_order_id: Client order id.
 
         Returns:
-            Order or ``None``.
+            The order, or ``None`` when the OMS has no such order.
         """
         with self._uow() as uow:
             order = uow.orders.get_by_client_id(account_id, client_order_id)
@@ -134,12 +137,14 @@ class RepositoryOrderDirectory:
     def recent(self, account_id: str, since_ms: int) -> list[KnownOrder]:
         """Lists LIVE orders updated since a time, newest first.
 
+        Orders that are still open are included whatever their age.
+
         Args:
-            account_id: Account.
-            since_ms: Lower bound.
+            account_id: Account that owns the orders.
+            since_ms: Earliest update time, UTC epoch milliseconds.
 
         Returns:
-            Orders.
+            Orders, possibly empty.
         """
         with self._uow() as uow:
             rows = uow.orders.list(account_id=account_id, limit=self._limit)
@@ -152,10 +157,10 @@ class RepositoryOrderDirectory:
 
 
 def _known(order: orders.Order) -> KnownOrder:
-    """Projects an OMS order.
+    """Projects an OMS order onto the fields adapters need.
 
     Args:
-        order: Order.
+        order: OMS order.
 
     Returns:
         Known order.

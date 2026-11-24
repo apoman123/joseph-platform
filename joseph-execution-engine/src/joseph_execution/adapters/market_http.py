@@ -23,7 +23,8 @@ from joseph_execution.domain import market
 
 _LOG = logging.getLogger(__name__)
 
-
+# Cache lifetimes in seconds: trading calendars change rarely; the previous
+# close changes once a day but must pick up a new final bar soon after it.
 _SESSION_TTL_S = 3_600.0
 _CLOSE_TTL_S = 300.0
 
@@ -41,8 +42,9 @@ class HttpMarketDataGateway:
 
         Args:
             base_url: Market engine URL, e.g. ``http://localhost:8000``.
-            client: Optional shared HTTP client.
-            metadata_ttl_s: Instrument metadata cache lifetime.
+            client: Optional shared HTTP client; by default the gateway
+                creates one with a 5 s timeout.
+            metadata_ttl_s: Instrument metadata cache lifetime in seconds.
         """
         self._base = base_url.rstrip("/")
         self._client = client or httpx.AsyncClient(timeout=5.0)
@@ -64,11 +66,14 @@ class HttpMarketDataGateway:
         """Performs a GET and parses JSON.
 
         Args:
-            path: Path.
+            path: Path below the base URL.
             params: Query parameters.
 
         Returns:
-            JSON object or ``None`` on any failure.
+            The JSON object, or ``None`` on a transport error, a non-200
+            status or a body that is not a JSON object. A 200 response
+            whose body is not JSON at all raises the decoder's
+            ``ValueError``.
         """
         try:
             response = await self._client.get(
@@ -87,17 +92,20 @@ class HttpMarketDataGateway:
     async def instrument(
         self, instrument_id: str
     ) -> market.InstrumentMeta | None:
-        """Fetches instrument metadata (cached).
+        """Fetches instrument metadata (cached for ``metadata_ttl_s``).
 
         Args:
             instrument_id: Canonical id.
 
         Returns:
-            Metadata or ``None``.
+            Metadata, or ``None`` when the request fails or the engine lists
+            no exact match.
         """
         cached = self._meta.get(instrument_id)
         if cached is not None and time.monotonic() - cached[0] < self._ttl:
             return cached[1]
+        # Canonical ids are ``venue:kind:symbol``; the instrument search takes
+        # the venue and the native symbol, and may return near matches.
         venue, _, symbol = instrument_id.partition(":")
         native = symbol.partition(":")[2]
         body = await self._get("/v1/instruments", {"venue": venue, "q": native})
@@ -120,7 +128,7 @@ class HttpMarketDataGateway:
             instrument_id: Canonical id.
 
         Returns:
-            Quote or ``None``.
+            Quote, or ``None`` when the request fails.
         """
         body = await self._get(
             "/v1/market/snapshot", {"instrument_id": instrument_id}
@@ -137,7 +145,7 @@ class HttpMarketDataGateway:
             depth: Levels per side.
 
         Returns:
-            Book or ``None``.
+            Book, or ``None`` when the request fails.
         """
         body = await self._get(
             "/v1/market/orderbook",
@@ -152,14 +160,15 @@ class HttpMarketDataGateway:
 
         Args:
             calendar: Calendar id.
-            from_ms: Window start.
-            to_ms: Window end.
+            from_ms: Window start, UTC epoch milliseconds.
+            to_ms: Window end, UTC epoch milliseconds.
 
         Returns:
             Sessions, ``()`` for ``24x7`` or ``None`` on failure.
         """
         if calendar == market.CONTINUOUS_CALENDAR:
             return ()
+        # Windows that fall in the same hours share one cache entry.
         hour = 3_600_000
         key = (calendar, from_ms // hour, to_ms // hour)
         cached = self._sessions.get(key)
@@ -190,7 +199,8 @@ class HttpMarketDataGateway:
             instrument_id: Canonical id.
 
         Returns:
-            Close or ``None``.
+            Close, or ``None`` on failure or without a final daily bar
+            (failures are not cached).
         """
         cached = self._closes.get(instrument_id)
         if cached is not None and time.monotonic() - cached[0] < _CLOSE_TTL_S:
@@ -363,28 +373,29 @@ def parse_book(body: Mapping[str, object]) -> market.BookView:
         body: Contract object.
 
     Returns:
-        Book view.
+        Book view; a book without a ``stale`` flag counts as stale.
     """
-
-    def levels(raw: object) -> tuple[tuple[object, object], ...]:
-        """Parses level pairs.
-
-        Args:
-            raw: List of ``[price, qty]``.
-
-        Returns:
-            Parsed levels.
-        """
-        if not isinstance(raw, list):
-            return ()
-        return tuple(
-            (decimals.to_decimal(p), decimals.to_decimal(q)) for p, q in raw
-        )
-
     return market.BookView(
         instrument_id=str(body["instrument_id"]),
-        bids=levels(body.get("bids")),  # type: ignore[arg-type]
-        asks=levels(body.get("asks")),  # type: ignore[arg-type]
+        bids=_levels(body.get("bids")),
+        asks=_levels(body.get("asks")),
         as_of_ms=int(str(body.get("snapshot_ts_ms", 0))),
         stale=bool(body.get("stale", True)),
+    )
+
+
+def _levels(raw: object) -> tuple[tuple[decimal.Decimal, decimal.Decimal], ...]:
+    """Parses book level pairs.
+
+    Args:
+        raw: List of ``[price, qty]`` pairs.
+
+    Returns:
+        ``(price, quantity)`` levels in the order given; empty when ``raw``
+        is not a list.
+    """
+    if not isinstance(raw, list):
+        return ()
+    return tuple(
+        (decimals.to_decimal(p), decimals.to_decimal(q)) for p, q in raw
     )

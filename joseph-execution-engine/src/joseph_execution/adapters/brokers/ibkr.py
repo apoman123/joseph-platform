@@ -23,6 +23,11 @@ extra ``ibkr``). IB Gateway ports: paper 4002 / live 4001 (TWS: 7497 /
 * Pacing: at most ``max_messages_per_s`` order-path requests per second
   (IBKR allows 50 messages/s; ``ib_async`` itself throttles at 45/s).
 
+The adapter holds no credentials: IB Gateway or TWS performs the login.
+``capabilities`` reports TRADING_UNAVAILABLE unless the Joseph account's
+IBKR account number is one of the login's managed accounts and the API
+connection is read-write.
+
 Nothing connects while the deployment gates the adapter (LIVE off or IBKR
 not enabled): every call is refused before the client is even created.
 """
@@ -55,7 +60,7 @@ from joseph_execution.ports import services
 from joseph_execution.ports import trading
 
 _LOG = logging.getLogger(__name__)
-S = enums.OrderState
+_State = enums.OrderState
 BROKER = enums.Broker.IBKR.value
 
 _PRIMARY_BY_LISTING = {
@@ -92,15 +97,27 @@ _TIFS = {
     enums.TimeInForce.GTC: "GTC",
     enums.TimeInForce.IOC: "IOC",
 }
+# IBKR ``OrderStatus.status`` values, grouped by how the adapter reports
+# them; transitional statuses are never reported as an order state.
 _WORKING = frozenset(
     {"PendingSubmit", "ApiPending", "PreSubmitted", "Submitted"}
 )
 _DONE = frozenset({"Filled", "Cancelled", "ApiCancelled", "Inactive"})
 _TRANSITIONAL = frozenset({"PendingCancel", "ValidationError", "ApiUpdate"})
+# TWS API error codes. Cancel refusals: 135 order id not found, 161 not in a
+# cancellable state, 10147/10148 order to cancel not found / not cancellable.
 _CANCEL_ERRORS = frozenset({135, 161, 10147, 10148})
+# Order refusals: 103 duplicate order id, 110 price off the tick grid, 200
+# no security definition, 201 order rejected, 203 security not allowed for
+# the account, 434 zero order size.
 _ORDER_ERRORS = frozenset({103, 110, 200, 201, 203, 434})
+# 202 "order canceled": a cancel, not a rejection.
 _CANCELED_CODE = 202
+# Maximum order age for which IBKR's open and completed-order lists (the
+# completed list covers today) are trusted to prove an order's absence.
 _COMPLETED_WINDOW_MS = 12 * 3_600_000
+# After a cancel request, an order IBKR still shows as working is reported
+# as "cancel pending" (outcome unknown) for this long.
 _CANCEL_GRACE_MS = 30_000
 
 
@@ -116,7 +133,7 @@ class IbEvent(Protocol):
         """Subscribes a handler.
 
         Args:
-            handler: Callback.
+            handler: Callback invoked with the event's arguments.
 
         Returns:
             The event.
@@ -125,23 +142,34 @@ class IbEvent(Protocol):
 
 
 class IbClient(Protocol):
-    """The ``ib_async.IB`` surface used by the adapter."""
+    """The ``ib_async.IB`` surface used by the adapter.
 
-    orderStatusEvent: IbEvent  # noqa: N815
-    execDetailsEvent: IbEvent  # noqa: N815
-    commissionReportEvent: IbEvent  # noqa: N815
-    errorEvent: IbEvent  # noqa: N815
-    disconnectedEvent: IbEvent  # noqa: N815
+    Names mirror ``ib_async`` (camelCase), so a real ``IB`` satisfies it.
+
+    Attributes:
+        orderStatusEvent: Fires with the trade on every order status change.
+        execDetailsEvent: Fires with the trade and fill on each execution.
+        commissionReportEvent: Fires with the trade, fill and commission
+            report once IBKR reports the fee.
+        errorEvent: Fires with request id, error code, message and contract.
+        disconnectedEvent: Fires when the API connection drops.
+    """
+
+    orderStatusEvent: IbEvent  # noqa: N815 - mirrors ib_async's camelCase IB attribute
+    execDetailsEvent: IbEvent  # noqa: N815 - mirrors ib_async's camelCase IB attribute
+    commissionReportEvent: IbEvent  # noqa: N815 - mirrors ib_async's camelCase IB attribute
+    errorEvent: IbEvent  # noqa: N815 - mirrors ib_async's camelCase IB attribute
+    disconnectedEvent: IbEvent  # noqa: N815 - mirrors ib_async's camelCase IB attribute
 
     def isConnected(self) -> bool:  # noqa: N802 - ib_async method name.
-        """Whether the API connection is ready."""
+        """Returns whether the API connection is ready."""
         ...
 
-    async def connectAsync(  # noqa: N802, PLR0917
+    async def connectAsync(  # noqa: N802, PLR0917 - mirrors ib_async's IB.connectAsync signature
         self,
         host: str,
         port: int,
-        clientId: int,  # noqa: N803
+        clientId: int,  # noqa: N803 - ib_async keyword argument name
         timeout: float,  # noqa: ASYNC109 - ib_async signature.
         readonly: bool,
         account: str,
@@ -150,11 +178,12 @@ class IbClient(Protocol):
 
         Args:
             host: Gateway host.
-            port: Gateway port.
-            clientId: API client id.
-            timeout: Seconds.
-            readonly: Read-only API.
-            account: Main account.
+            port: Gateway API port.
+            clientId: API client id (unique per gateway connection).
+            timeout: Connect and sync timeout in seconds.
+            readonly: Connect read-only (the gateway refuses orders).
+            account: Main account to synchronize (empty: the login's
+                default).
 
         Returns:
             The client.
@@ -169,7 +198,7 @@ class IbClient(Protocol):
         """
         ...
 
-    def managedAccounts(self) -> list[str]:  # noqa: N802
+    def managedAccounts(self) -> list[str]:  # noqa: N802 - ib_async method name
         """Lists the accounts of the login.
 
         Returns:
@@ -177,36 +206,37 @@ class IbClient(Protocol):
         """
         ...
 
-    async def qualifyContractsAsync(  # noqa: N802
+    async def qualifyContractsAsync(  # noqa: N802 - ib_async method name
         self, *contracts: Any
     ) -> list[Any]:
         """Fills in contract details.
 
         Args:
-            *contracts: Contracts.
+            *contracts: Contracts to qualify.
 
         Returns:
             Qualified contracts (``None`` when ambiguous or unknown).
         """
         ...
 
-    def placeOrder(self, contract: Any, order: Any) -> Any:  # noqa: N802
+    def placeOrder(self, contract: Any, order: Any) -> Any:  # noqa: N802 - ib_async method name
         """Places or modifies an order.
 
         Args:
-            contract: Contract.
-            order: Order.
+            contract: Qualified contract.
+            order: Order to place, or a placed order to modify (same
+                ``orderId``).
 
         Returns:
             Live-updated trade.
         """
         ...
 
-    def cancelOrder(self, order: Any) -> Any:  # noqa: N802
+    def cancelOrder(self, order: Any) -> Any:  # noqa: N802 - ib_async method name
         """Requests cancellation.
 
         Args:
-            order: Order.
+            order: Placed order to cancel.
 
         Returns:
             Trade or ``None``.
@@ -233,27 +263,27 @@ class IbClient(Protocol):
         """Lists positions.
 
         Args:
-            account: Account filter.
+            account: Account number filter (empty: all accounts).
 
         Returns:
             Positions.
         """
         ...
 
-    async def accountSummaryAsync(  # noqa: N802
+    async def accountSummaryAsync(  # noqa: N802 - ib_async method name
         self, account: str = ""
     ) -> list[Any]:
         """Reads the account summary.
 
         Args:
-            account: Account.
+            account: Account number (empty: all accounts).
 
         Returns:
             Account values.
         """
         ...
 
-    def reqAllOpenOrdersAsync(self) -> Awaitable[list[Any]]:  # noqa: N802
+    def reqAllOpenOrdersAsync(self) -> Awaitable[list[Any]]:  # noqa: N802 - ib_async method name
         """Requests open orders of every client.
 
         Returns:
@@ -261,28 +291,29 @@ class IbClient(Protocol):
         """
         ...
 
-    def reqCompletedOrdersAsync(  # noqa: N802
+    def reqCompletedOrdersAsync(  # noqa: N802 - ib_async method name
         self,
-        apiOnly: bool,  # noqa: N803
+        apiOnly: bool,  # noqa: N803 - ib_async argument name
     ) -> Awaitable[list[Any]]:
         """Requests today's completed orders.
 
         Args:
-            apiOnly: Only API orders.
+            apiOnly: Only orders placed through the API.
 
         Returns:
             Awaitable trades.
         """
         ...
 
-    def reqExecutionsAsync(  # noqa: N802
+    def reqExecutionsAsync(  # noqa: N802 - ib_async method name
         self,
-        execFilter: Any = None,  # noqa: N803
+        execFilter: Any = None,  # noqa: N803 - ib_async argument name
     ) -> Awaitable[list[Any]]:
         """Requests executions.
 
         Args:
-            execFilter: Filter.
+            execFilter: ``ExecutionFilter``, or ``None`` for all of today's
+                executions.
 
         Returns:
             Awaitable fills.
@@ -318,7 +349,7 @@ class IbFactory(Protocol):
         """Creates an ``Order``.
 
         Args:
-            fields: Order fields.
+            fields: ``Order`` constructor fields (see ``order_fields``).
 
         Returns:
             Order.
@@ -366,8 +397,8 @@ class IbAsyncFactory:
         """Creates ``ib_async.Stock``.
 
         Args:
-            symbol: Symbol.
-            primary_exchange: Primary exchange.
+            symbol: IBKR symbol.
+            primary_exchange: Listing exchange code.
 
         Returns:
             Contract.
@@ -380,7 +411,7 @@ class IbAsyncFactory:
         """Creates ``ib_async.Order``.
 
         Args:
-            fields: Fields.
+            fields: ``Order`` constructor fields.
 
         Returns:
             Order.
@@ -391,7 +422,7 @@ class IbAsyncFactory:
         """Creates ``ib_async.ExecutionFilter``.
 
         Args:
-            account: Account.
+            account: IBKR account number.
 
         Returns:
             Filter.
@@ -432,7 +463,7 @@ def primary_exchange(listing_exchange: str | None, venue: str) -> str:
 
 
 def ib_symbol(symbol: str) -> str:
-    """Converts a Joseph symbol to IBKR form (share classes use a space).
+    """Converts a Joseph symbol to IBKR form (``.`` or ``/`` become a space).
 
     Args:
         symbol: Native symbol such as ``BRK.B``.
@@ -563,22 +594,23 @@ def map_status(trade: Any, error_code: int = 0) -> enums.OrderState | None:
         error_code: Error recorded by the adapter for the order, if any.
 
     Returns:
-        State, or ``None`` for transitional statuses (PendingCancel,
-        ValidationError) that must not be reported.
+        State, or ``None`` for transitional or unknown statuses
+        (PendingCancel, ValidationError, ApiUpdate) that must not be
+        reported.
     """
     status = str(trade.orderStatus.status)
     filled = exact_filled(trade)
     if status in _WORKING:
-        return S.PARTIALLY_FILLED if filled > 0 else S.ACKNOWLEDGED
+        return _State.PARTIALLY_FILLED if filled > 0 else _State.ACKNOWLEDGED
     if status == "Filled":
-        return S.FILLED
+        return _State.FILLED
     if status in ("Cancelled", "ApiCancelled"):
         code = _last_error(trade) or error_code
         if filled == 0 and code and code != _CANCELED_CODE:
-            return S.REJECTED
-        return S.CANCELED
+            return _State.REJECTED
+        return _State.CANCELED
     if status == "Inactive":
-        return S.REJECTED
+        return _State.REJECTED
     return None
 
 
@@ -601,11 +633,12 @@ def venue_state(
 
     Args:
         trade: ``ib_async.Trade``.
-        now_ms: Report time.
-        error_code: Recorded error, if any.
+        now_ms: Report time in epoch milliseconds.
+        error_code: Error recorded by the adapter for the order, if any.
 
     Returns:
-        State, or ``None`` for transitional statuses.
+        State (the reason is the latest log message for rejected and
+        canceled orders), or ``None`` for transitional statuses.
     """
     status = map_status(trade, error_code)
     if status is None:
@@ -618,7 +651,7 @@ def venue_state(
         status=status,
         filled_base=exact_filled(trade),
         reason=_last_message(trade)
-        if status in (S.REJECTED, S.CANCELED)
+        if status in (_State.REJECTED, _State.CANCELED)
         else None,
         ts_ms=now_ms,
     )
@@ -662,6 +695,7 @@ def venue_fill(fill: Any) -> trading.VenueFill:
         quantity_base=base.exact_decimal(float(execution.shares)),
         fee=base.exact_decimal(commission) if has_report else decimals.ZERO,
         fee_asset=str(getattr(report, "currency", "") or "USD"),
+        # IBKR lastLiquidity: 1 added liquidity, 2 removed, 3 routed out.
         liquidity="maker"
         if int(execution.lastLiquidity or 0) == 1
         else "taker",
@@ -685,13 +719,15 @@ class IbkrConfig:
         simulation: The login is the IBKR paper account.
         short_selling: The account may short (margin accounts only).
         readonly: Connect read-only (orders refused by the gateway).
-        connect_timeout_s: Connection and sync timeout.
-        ack_timeout_s: Wait for an order acknowledgement before
+        connect_timeout_s: Connection and sync timeout in seconds.
+        ack_timeout_s: Seconds to wait for an order acknowledgement before
             reporting the outcome as unknown.
         max_messages_per_s: Order-path pacing (IBKR limit 50/s).
-        reconnect_base_s: First reconnect delay (doubles, jittered).
-        reconnect_max_s: Maximum reconnect delay.
-        commission_wait_s: Wait for a fill's commission report.
+        reconnect_base_s: First reconnect delay in seconds (doubles,
+            jittered).
+        reconnect_max_s: Maximum reconnect delay in seconds.
+        commission_wait_s: Seconds a fill waits for its commission report
+            before it is emitted without a fee.
     """
 
     host: str = "127.0.0.1"
@@ -727,10 +763,11 @@ class IbkrAdapter:
     """``TradingAdapter`` for Interactive Brokers.
 
     Attributes:
-        calls: Methods invoked (safety tests assert none while gated).
+        calls: Names of the methods invoked, recorded before the gate
+            check (safety tests inspect it).
     """
 
-    def __init__(  # noqa: PLR0917
+    def __init__(  # noqa: PLR0917 - catalog.build passes these positionally
         self,
         config: IbkrConfig,
         factory: Callable[[], IbFactory],
@@ -742,7 +779,7 @@ class IbkrAdapter:
         """Initializes the adapter.
 
         Args:
-            config: Settings.
+            config: Connection and behaviour settings.
             factory: Creates the ``ib_async`` factory (called on first
                 connect only).
             market_data: Market gateway (listing exchange of instruments).
@@ -781,7 +818,7 @@ class IbkrAdapter:
 
     @property
     def name(self) -> str:
-        """Returns ``ibkr``."""
+        """The broker code, ``ibkr``."""
         return BROKER
 
     # -- connection ------------------------------------------------------
@@ -789,8 +826,11 @@ class IbkrAdapter:
     def _require_open(self, method: str) -> None:
         """Records a call and refuses it while gated.
 
+        This is the fail-closed check: it runs before any account lookup,
+        connection or request.
+
         Args:
-            method: Method name.
+            method: Name of the calling method.
 
         Raises:
             AdapterUnavailableError: ``LIVE_TRADING_DISABLED`` when gated.
@@ -809,7 +849,8 @@ class IbkrAdapter:
             IBKR account number.
 
         Raises:
-            AdapterUnavailableError: When none is bound.
+            AdapterUnavailableError: When no IBKR account number is
+                connected to the Joseph account.
         """
         number = self._accounts.get(account_id)
         if number is None:
@@ -828,7 +869,8 @@ class IbkrAdapter:
             account_id: Joseph account.
 
         Returns:
-            True when an IBKR account number is known.
+            True when an IBKR account number is known; always False while
+            gated.
         """
         if self._gate is not None:
             return False
@@ -840,6 +882,8 @@ class IbkrAdapter:
 
     async def _connected(self) -> IbClient:
         """Returns a connected client, connecting when needed.
+
+        A new connection is followed by a resync of orders and executions.
 
         Returns:
             Client.
@@ -891,6 +935,10 @@ class IbkrAdapter:
 
         Returns:
             ``(client, IBKR account)``.
+
+        Raises:
+            AdapterUnavailableError: When gated, when no IBKR account is
+                bound, or when the gateway cannot be reached.
         """
         self._require_open(method)
         number = self._broker_account(account_id)
@@ -900,7 +948,7 @@ class IbkrAdapter:
         """Subscribes the adapter to a client's events.
 
         Args:
-            ib: Client.
+            ib: Client to subscribe to.
         """
         ib.orderStatusEvent.connect(self._on_status)
         ib.execDetailsEvent.connect(self._on_exec)
@@ -912,14 +960,14 @@ class IbkrAdapter:
         """Runs a background task, keeping a reference until it ends.
 
         Args:
-            coro: Coroutine.
+            coro: Coroutine to run.
         """
         task = asyncio.ensure_future(coro)
         self._tasks.add(task)
         task.add_done_callback(self._tasks.discard)
 
     def _on_disconnected(self) -> None:
-        """Marks the adapter down and schedules a reconnect."""
+        """Marks the adapter down and, unless closed or gated, reconnects."""
         self._health = enums.HealthState.UNAVAILABLE
         if self._closed or self._gate is not None:
             return
@@ -959,7 +1007,9 @@ class IbkrAdapter:
             ib_account: IBKR account number.
 
         Returns:
-            Joseph account, or ``None`` for foreign or unbound orders.
+            Joseph account (for an untracked order, the first bound Joseph
+            account with that IBKR account number), or ``None`` for foreign
+            or unbound orders.
         """
         if not base.is_joseph_client_id(client_order_id):
             return None
@@ -1049,14 +1099,20 @@ class IbkrAdapter:
             contract: Related contract, if any.
         """
         del contract
+        # 1100: connectivity between IBKR and the gateway lost.
         if code == 1100:
             self._health = enums.HealthState.UNAVAILABLE
+        # 1101/1102: connectivity restored (data lost / kept); events may
+        # have been missed, so resync.
         elif code in (1101, 1102):
             self._health = enums.HealthState.HEALTHY
             if self._ib is not None:
                 self._spawn(self._resync(self._ib))
+        # 100: message rate exceeded; 2110: gateway-server link broken,
+        # restored automatically.
         elif code in (100, 2110):
             self._health = enums.HealthState.DEGRADED
+        # 502: cannot connect, 504: not connected, 1300: socket port reset.
         elif code in (502, 504, 1300):
             self._health = enums.HealthState.UNAVAILABLE
         elif code in _CANCEL_ERRORS:
@@ -1072,10 +1128,10 @@ class IbkrAdapter:
         """Finds a tracked trade by IBKR order id.
 
         Args:
-            order_id: Order id.
+            order_id: IBKR order id.
 
         Returns:
-            Trade or ``None``.
+            Trade, or ``None`` when the adapter does not track the order.
         """
         for tracked in self._tracked.values():
             if int(tracked.trade.order.orderId) == order_id:
@@ -1085,14 +1141,15 @@ class IbkrAdapter:
     # -- sync ----------------------------------------------------------------
 
     def _find(self, ib: IbClient, client_order_id: str) -> Any | None:
-        """Finds a trade by ``orderRef``.
+        """Finds a trade by ``orderRef``, tracked trades first.
 
         Args:
             ib: Client.
-            client_order_id: Client id.
+            client_order_id: Client order id.
 
         Returns:
-            Trade or ``None``.
+            Trade, or ``None`` when neither the adapter nor the session
+            knows it.
         """
         tracked = self._tracked.get(client_order_id)
         if tracked is not None:
@@ -1109,7 +1166,7 @@ class IbkrAdapter:
             ib: Client.
 
         Returns:
-            Events buffered.
+            Number of events buffered; 0 when the requests fail (logged).
         """
         try:
             await self._pacer.acquire()
@@ -1146,7 +1203,7 @@ class IbkrAdapter:
         """Resynchronizes when connected (periodic safety net).
 
         Returns:
-            Events buffered.
+            Number of events buffered; 0 while gated or disconnected.
         """
         if self._gate is not None or self._ib is None:
             return 0
@@ -1180,6 +1237,11 @@ class IbkrAdapter:
     ) -> accounts.TradingCapabilities:
         """Negotiates capabilities (connects when allowed).
 
+        Fails closed: the result is TRADING_UNAVAILABLE while gated, when
+        no IBKR account is bound or the gateway is unreachable, when the
+        login does not manage the bound account, and when the API is
+        connected read-only.
+
         Args:
             account_id: Joseph account.
 
@@ -1204,7 +1266,7 @@ class IbkrAdapter:
         return self._documented
 
     async def health(self) -> enums.HealthState:
-        """Returns connection health."""
+        """Returns connection health (UNAVAILABLE while gated)."""
         if self._gate is not None:
             return enums.HealthState.UNAVAILABLE
         return self._health
@@ -1218,7 +1280,10 @@ class IbkrAdapter:
             account_id: Joseph account.
 
         Returns:
-            Snapshot in the account's base currency.
+            Snapshot: equity is NetLiquidation, available margin is
+            AvailableFunds, settled cash is SettledCash and unsettled cash
+            is TotalCashValue minus SettledCash, in the currency of
+            NetLiquidation (USD when blank).
 
         Raises:
             AdapterUnavailableError: When the summary is incomplete.
@@ -1243,14 +1308,17 @@ class IbkrAdapter:
                 tag: Summary tag.
 
             Returns:
-                Decimal or ``None``.
+                Decimal, or ``None`` when the tag is missing or blank.
             """
             row = rows.get(tag)
             return None if row is None else decimals.to_optional(row[0])
 
         equity = amount("NetLiquidation")
         available = amount("AvailableFunds")
-        assert equity is not None and available is not None
+        if equity is None or available is None:
+            raise AssertionError(
+                "NetLiquidation and AvailableFunds have values"
+            )
         settled = amount("SettledCash")
         total = amount("TotalCashValue")
         unsettled = (
@@ -1274,7 +1342,8 @@ class IbkrAdapter:
             account_id: Joseph account.
 
         Returns:
-            States.
+            States of the account's working orders; orders Joseph did not
+            place are skipped.
         """
         ib, number = await self._session("list_open_orders", account_id)
         now = self._clock.now_ms()
@@ -1298,7 +1367,9 @@ class IbkrAdapter:
             contract: ``ib_async.Contract``.
 
         Returns:
-            Instrument id, or ``None`` outside Nasdaq/NYSE/Cboe BZX.
+            Instrument id (a known contract keeps the id it was qualified
+            for), or ``None`` for non-stock contracts and listings outside
+            Nasdaq/NYSE/Cboe BZX.
         """
         known = self._instruments.get(int(contract.conId or 0))
         if known is not None:
@@ -1342,10 +1413,11 @@ class IbkrAdapter:
 
         Args:
             account_id: Joseph account.
-            since_ms: Lower bound.
+            since_ms: Earliest fill time in epoch milliseconds.
 
         Returns:
-            Fills.
+            Fills of the account's Joseph orders at or after ``since_ms``,
+            from the session's fill list.
         """
         ib, number = await self._session("list_recent_fills", account_id)
         result = []
@@ -1388,7 +1460,8 @@ class IbkrAdapter:
         primary = primary_exchange(
             None if meta is None else meta.listing_exchange, ref.venue
         )
-        assert self._factory is not None and self._ib is not None
+        if self._factory is None or self._ib is None:
+            raise AssertionError("connected before contracts are qualified")
         contract = self._factory.stock(ib_symbol(ref.symbol), primary)
         await self._pacer.acquire()
         qualified = await self._ib.qualifyContractsAsync(contract)
@@ -1411,9 +1484,10 @@ class IbkrAdapter:
         """Waits for a trade condition until the acknowledgement timeout.
 
         Args:
-            trade: Trade.
+            trade: ``ib_async.Trade``.
             done: Condition on the trade.
-            failed: Returns an error text that stops the wait.
+            failed: Returns an error text that stops the wait, or ``None``
+                to keep waiting.
 
         Returns:
             True when the condition held; False on timeout.
@@ -1445,8 +1519,12 @@ class IbkrAdapter:
             Result once IBKR acknowledges or rejects it.
 
         Raises:
-            AdapterUnavailableError: Refused before sending.
-            AdapterTimeoutError: Sent, but the outcome is unknown.
+            AdapterUnavailableError: Refused before sending (gated, unbound
+                account, unreachable gateway, unsupported order or
+                instrument).
+            AdapterTimeoutError: Sent, but the outcome is unknown; also
+                when an existing order with this ``orderRef`` is
+                transitional.
         """
         ib, number = await self._session("submit_order", request.account_id)
         cid = request.client_order_id
@@ -1457,11 +1535,12 @@ class IbkrAdapter:
             if state is None:
                 raise errors.AdapterTimeoutError("IBKR order is transitional")
             return trading.VenueSubmitResult(
-                state.status is not S.REJECTED, state
+                state.status is not _State.REJECTED, state
             )
         fields = order_fields(request, number)
         contract = await self._contract(request.instrument_id)
-        assert self._factory is not None
+        if self._factory is None:
+            raise AssertionError("connected before orders are built")
         order = self._factory.order(fields)
         await self._pacer.acquire()
         try:
@@ -1482,7 +1561,9 @@ class IbkrAdapter:
                 "IBKR did not acknowledge the order in time"
             )
         self._events.order(request.account_id, state)
-        return trading.VenueSubmitResult(state.status is not S.REJECTED, state)
+        return trading.VenueSubmitResult(
+            state.status is not _State.REJECTED, state
+        )
 
     async def cancel_order(
         self, account_id: str, client_order_id: str
@@ -1491,10 +1572,11 @@ class IbkrAdapter:
 
         Args:
             account_id: Joseph account.
-            client_order_id: Client id.
+            client_order_id: Client order id.
 
         Returns:
-            State after the cancel (FILLED on a race).
+            State after the cancel (FILLED on a race); the current state
+            when the order was already done.
 
         Raises:
             ExecutionError: ``NOT_FOUND`` or ``CONFLICT`` (IBKR refused).
@@ -1518,7 +1600,8 @@ class IbkrAdapter:
             if not settled:
                 raise errors.AdapterTimeoutError("IBKR cancel outcome unknown")
         state = venue_state(trade, self._clock.now_ms())
-        assert state is not None
+        if state is None:
+            raise AssertionError("a done IBKR order has a reportable state")
         return state
 
     async def amend_order(
@@ -1531,18 +1614,23 @@ class IbkrAdapter:
     ) -> trading.VenueOrderState:
         """Modifies a working order (re-place with the same order id).
 
+        The tracked ``Order`` is changed in place before it is re-placed.
+
         Args:
             account_id: Joseph account.
-            client_order_id: Client id.
-            limit_price: New limit price.
-            trigger_price: New stop price.
-            quantity_base: New total quantity.
+            client_order_id: Client order id.
+            limit_price: New limit price, or ``None`` to keep it.
+            trigger_price: New stop price, or ``None`` to keep it.
+            quantity_base: New total quantity in shares, or ``None`` to
+                keep it.
 
         Returns:
-            State after the modification.
+            State after the modification, or the current state when IBKR
+            has not answered within the acknowledgement timeout.
 
         Raises:
-            ExecutionError: ``NOT_FOUND`` or ``CONFLICT``.
+            ExecutionError: ``NOT_FOUND`` or ``CONFLICT`` (not working,
+                refused by IBKR, or transitional).
         """
         ib, _ = await self._session("amend_order", account_id)
         trade = self._find(ib, client_order_id)
@@ -1589,7 +1677,7 @@ class IbkrAdapter:
 
         Args:
             account_id: Joseph account.
-            client_order_id: Client id.
+            client_order_id: Client order id.
 
         Returns:
             State, or ``None`` when IBKR confirms it never had the order.
@@ -1636,7 +1724,10 @@ class IbkrAdapter:
             account_id: Joseph account.
 
         Yields:
-            Events.
+            Events in arrival order.
+
+        Raises:
+            AdapterUnavailableError: On the first iteration while gated.
         """
         self._require_open("stream_account_events")
         async for event in self._events.stream(account_id):
