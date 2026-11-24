@@ -5,7 +5,9 @@
  */
 
 /**
- * @fileoverview Data hooks and lazy stores shared by the F6 features.
+ * @fileoverview Data hooks and a derived store shared by the feature panels
+ * (trading, portfolio, alerts, screener, strategy, watchlist): error
+ * messages, polling, a clock and subscription-scoped derived stores.
  */
 
 'use client';
@@ -18,13 +20,13 @@ import {useCallback, useEffect, useRef, useState} from 'react';
 
 /** State of an async resource. */
 export interface AsyncState<T> {
-  /** Last successful value. */
+  /** Last successful value, kept when a later load fails; null before. */
   data: T | null;
-  /** Last error message. */
+  /** Message of the last failed load, cleared by the next success. */
   error: string | null;
   /** True until the first load settles. */
   loading: boolean;
-  /** Forces a reload. */
+  /** Reloads now and restarts the interval. */
   refresh: () => void;
 }
 
@@ -34,6 +36,8 @@ export interface AsyncState<T> {
  * @return Message.
  */
 export function errorMessage(err: unknown): string {
+  // Prefer the server's message from an `ApiError`-like body, read without
+  // trusting its shape.
   if (err && typeof err === 'object' && 'body' in err) {
     const body = (err as {body?: {message?: unknown}}).body;
     if (body && typeof body.message === 'string') return body.message;
@@ -43,10 +47,11 @@ export function errorMessage(err: unknown): string {
 }
 
 /**
- * Loads a value and optionally refreshes it on an interval.
- * @param load Loader; re-run when `key` changes.
- * @param key Cache key describing the loader's inputs.
- * @param intervalMs Refresh interval, or 0 to load once.
+ * Loads a value and optionally refreshes it on an interval. Results that
+ * arrive after the key changed or the component unmounted are dropped.
+ * @param load Loader; the latest one is called on every run.
+ * @param key Describes the loader's inputs; a new key reloads at once.
+ * @param intervalMs Refresh interval in milliseconds, or 0 to load once.
  * @return Async state.
  */
 export function usePolling<T>(
@@ -57,6 +62,8 @@ export function usePolling<T>(
   const [data, setData] = useState<T | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
+  // `load` is usually a new closure every render; a ref lets each run call
+  // the latest one without restarting the effect.
   const loader = useRef(load);
   loader.current = load;
   const [tick, setTick] = useState(0);
@@ -131,7 +138,7 @@ export function derived<T>(
 
 /**
  * Re-renders every `intervalMs` (for countdowns and data ages).
- * @param intervalMs Interval.
+ * @param intervalMs Interval in milliseconds.
  * @return Current time (UTC ms).
  */
 export function useNow(intervalMs = 1000): number {

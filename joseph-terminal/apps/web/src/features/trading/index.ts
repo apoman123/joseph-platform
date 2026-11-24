@@ -37,7 +37,7 @@ import {derived} from './ui/hooks';
  */
 function ticketView(runtime: TradingRuntime): WebView {
   /**
-   * Slot view rendering the order ticket.
+   * Renders the order ticket with the slot's context.
    * @param props Slot props.
    * @return Element.
    */
@@ -54,7 +54,7 @@ function ticketView(runtime: TradingRuntime): WebView {
  */
 function menuView(runtime: TradingRuntime): WebView {
   /**
-   * Slot view rendering chart trading menu items.
+   * Renders the chart's trading menu items with the slot's context.
    * @param props Slot props.
    * @return Element.
    */
@@ -65,10 +65,10 @@ function menuView(runtime: TradingRuntime): WebView {
 }
 
 /**
- * Tick and lot sizes for labels, falling back to generic precision.
+ * Returns the tick and lot sizes for chart labels.
  * @param runtime Trading runtime.
  * @param instrumentId Instrument id.
- * @return Precision for labels.
+ * @return Cached precision, or `0.01`/`0.001` until it has loaded.
  */
 function labelPrecision(
   runtime: TradingRuntime,
@@ -126,7 +126,7 @@ export const TRADING_FEATURE: WebFeature = {
             runtime.orders.get(),
             chart.instrumentId,
             labelPrecision(runtime, chart.instrumentId),
-            true
+            /* amendable= */ true
           )
         )
       ),
@@ -148,6 +148,7 @@ export const TRADING_FEATURE: WebFeature = {
         })
       )
     );
+    // Bar replay shows history, so trading from the chart is off there.
     disposers.push(
       ctx.events.on('chart.contextMenu', event => {
         if (ctx.selection.get().replay) return;
@@ -178,6 +179,8 @@ export const TRADING_FEATURE: WebFeature = {
       }),
       ctx.events.on('chart.overlayDragEnd', event => {
         if (ctx.selection.get().replay) return;
+        // Snap to the dragged order's tick; a ticket draft line uses the
+        // ticket instrument's tick.
         const precision = runtime.precisionFor(
           runtime.controller.get().inputs.instrumentId
         );
@@ -222,6 +225,8 @@ export const TRADING_FEATURE: WebFeature = {
       ctx.hotkeys.bind('alt+b', 'trading.buy'),
       ctx.hotkeys.bind('alt+s', 'trading.sell')
     );
+    // Undo in reverse order of setup; `splice` empties the list so a second
+    // call does nothing.
     return () => {
       for (const dispose of disposers.splice(0).reverse()) {
         dispose();

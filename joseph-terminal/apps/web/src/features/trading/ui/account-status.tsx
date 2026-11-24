@@ -19,14 +19,14 @@ import styles from '../trading.module.css';
 
 /** Props of `AccountStatusBadge`. */
 export interface AccountStatusBadgeProps {
-  /** Account. */
+  /** Account as reported by the execution engine. */
   account: AccountSummary;
 }
 
 /**
- * Connection badge of an account (`Connected`, `Disconnected`, `Awaiting
- * API SDK`, ...).
- * @param props Props.
+ * Renders the connection badge of an account (`Connected`, `Disconnected`,
+ * `Awaiting API SDK`, ...).
+ * @param props Account.
  * @return Badge.
  */
 export function AccountStatusBadge({
@@ -45,9 +45,9 @@ export function AccountStatusBadge({
 }
 
 /**
- * One-line status under the ticket's account picker: broker, connection
- * and credentials.
- * @param props Props.
+ * Renders the status under the ticket's account picker: broker, connection
+ * and credentials, plus settled cash for a cash account.
+ * @param props Account.
  * @return Status line.
  */
 export function AccountStatusLine({

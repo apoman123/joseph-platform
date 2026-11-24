@@ -9,7 +9,7 @@
  */
 
 import type {OverlayLayer} from '@joseph/chart-core';
-import {act, screen, waitFor, within} from '@testing-library/react';
+import {act, render, screen, waitFor, within} from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import {afterEach, describe, expect, it} from 'vitest';
 import {TRADING_FEATURE} from './index';
@@ -27,7 +27,8 @@ afterEach(() => {
 });
 
 /**
- * Renders the ticket and waits for account and instrument metadata.
+ * Renders the ticket and waits until the instrument's precision (the
+ * lot-size hint) and the routed DEMO paper account have loaded.
  * @return Rendered feature.
  */
 async function renderTicket(): Promise<RenderedFeature> {
@@ -46,7 +47,7 @@ async function renderTicket(): Promise<RenderedFeature> {
 }
 
 /**
- * Fills a valid limit buy.
+ * Types a valid 0.01 BTC limit buy (limit is the default order type).
  * @param price Limit price.
  */
 async function fillLimitBuy(price = '95100'): Promise<void> {
@@ -151,9 +152,7 @@ describe('order ticket', () => {
     const menuContribution = ctx.contributions('chart-context-menu')[0];
     if (!menuContribution) throw new Error('no menu');
     const Menu = menuContribution.view;
-    const {unmount} = await import('@testing-library/react').then(m =>
-      m.render(<Menu ctx={ctx} />)
-    );
+    const {unmount} = render(<Menu ctx={ctx} />);
     const item = await screen.findByRole('menuitem', {
       name: /Sell limit at 94,980.0/,
     });
@@ -171,6 +170,7 @@ describe('order ticket', () => {
   it('publishes order lines for the chart instrument', async () => {
     const {ctx} = await renderTicket();
     expect(ctx.layerProviders).toHaveLength(3);
+    // Registration order: orders, positions, ticket draft.
     const ordersLayer = ctx.layerProviders[0]?.({
       chartId: 'c',
       instrumentId: 'mock:perp:BTCUSD',
@@ -227,12 +227,15 @@ describe('order ticket', () => {
         )
     );
     await waitFor(() => void expect(ctx.layerProviders.length).toBe(3));
-    // Let the runtime see the acknowledged order.
+    // The acknowledgement reaches the runtime as a user-stream event that
+    // starts an asynchronous refresh; give it time to land.
     await act(async () => {
       await new Promise(resolve => setTimeout(resolve, 20));
     });
     const runtimeOrders = await ctx.broker.listOrders();
     expect(runtimeOrders.orders).toHaveLength(1);
+    // A drag on an order the runtime does not know yet is ignored, so the
+    // drag is retried until the amend panel appears.
     await waitFor(() => {
       act(
         () =>

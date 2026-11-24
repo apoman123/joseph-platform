@@ -10,17 +10,31 @@
  * orders. Submitting shows the venue-reported state, never an assumed fill.
  *
  * Perpetuals keep leverage, reduce-only and attached stop/target. Stocks
- * and ETFs route to a broker account (IBKR for Nasdaq/NYSE/Cboe, SinoPac or
- * Cathay for TWSE and TPEx) with cash-equity rules: whole shares or
+ * and ETFs route to a broker account (IBKR, Interactive Brokers, for
+ * Nasdaq/NYSE/Cboe; SinoPac or Cathay for TWSE, the Taiwan Stock Exchange,
+ * and TPEx, the Taipei Exchange) with cash-equity rules: whole shares or
  * Taiwan board/odd lots, tick-ladder prices inside the daily price limit,
- * DAY/GTC, IBKR's outside-RTH flag and market-hours notices from the
- * session calendar.
- * LIVE needs the server's permission, a server-side arming of the account
- * (step-up code verified by the execution engine; the ticket shows the
- * armed-until time from `live_armed_until_ms` and can disarm) and a
- * dedicated confirmation. When the engine answers `LIVE_NOT_ARMED` (the
- * arming expired or was revoked elsewhere) the ticket returns to paper and
- * asks to arm again. Published rates have no ticket.
+ * DAY/GTC, IBKR's outside-RTH (regular trading hours) flag and market-hours
+ * notices from the session calendar. Published rates have no ticket.
+ *
+ * Decimals: prices and quantities stay the strings the user typed.
+ * `buildIntentRequest` strips thousands separators, parses them into
+ * `Decimal`s, floors the quantity to the lot size, rounds prices to the
+ * tick (with a warning) and sends decimal strings; hints and the preview
+ * format decimal strings with
+ * `formatStep`/`formatFixed`. No price or quantity that is shown or sent
+ * passes through a binary float; only the reward-to-risk ratio is a
+ * `number`, for display.
+ *
+ * LIVE needs three things: the server's permission for the account
+ * (`modeAvailability`), a server-side arming of the account, and a dedicated
+ * confirmation. Choosing Live on an unarmed account opens `ArmLivePanel`,
+ * which sends a step-up code that the execution engine verifies; the ticket
+ * then shows the armed-until time from `live_armed_until_ms` and can disarm.
+ * Confirming a LIVE preview opens `LiveConfirmDialog` before anything is
+ * sent. When the engine answers `LIVE_NOT_ARMED` (the arming expired or was
+ * revoked elsewhere), the ticket forgets its local answer, returns to paper
+ * and asks to arm again.
  */
 
 'use client';
@@ -91,7 +105,7 @@ export interface OrderTicketProps {
   runtime: TradingRuntime;
 }
 
-/** Order type buttons. */
+/** Order type buttons; securities show only the types their account offers. */
 const TYPE_OPTIONS: ReadonlyArray<{type: OrderType; label: string}> = [
   {type: 'market', label: 'Market'},
   {type: 'limit', label: 'Limit'},
@@ -99,9 +113,10 @@ const TYPE_OPTIONS: ReadonlyArray<{type: OrderType; label: string}> = [
 ];
 
 /**
- * Outcome badge class for a risk check.
+ * Returns the badge classes for a risk check outcome.
  * @param outcome Check outcome.
- * @return Badge modifier class.
+ * @return `j-badge` plus its modifier: live for a pass, stale for a failure,
+ *     sodium for a warning or unknown, muted for a skip.
  */
 function outcomeClass(outcome: RiskCheckResult['outcome']): string {
   return {
@@ -114,9 +129,10 @@ function outcomeClass(outcome: RiskCheckResult['outcome']): string {
 }
 
 /**
- * Re-renders when the session calendars load new sessions.
+ * Re-renders the caller when the session calendars load new sessions.
  * @param ctx Feature context.
- * @return Revision counter.
+ * @return Counter that grows on every calendar update, for use as a memo
+ *     dependency.
  */
 function useCalendarRevision(ctx: WebFeatureContext): number {
   const [revision, setRevision] = useState(0);
@@ -128,9 +144,9 @@ function useCalendarRevision(ctx: WebFeatureContext): number {
 }
 
 /**
- * Renders the order ticket.
- * @param props Props.
- * @return Ticket element.
+ * Renders the order ticket for the selected instrument and account.
+ * @param props Feature context and trading runtime.
+ * @return Ticket element; a notice only for a published rate.
  */
 export function OrderTicket({ctx, runtime}: OrderTicketProps): ReactNode {
   const state = useStore(runtime.controller);
@@ -374,6 +390,10 @@ export function OrderTicket({ctx, runtime}: OrderTicketProps): ReactNode {
     [inputs, precision, meta.mark, account, reference, calendar, now]
   );
   const [attempted, setAttempted] = useState(false);
+  // A field's errors show once the user tried to preview or typed into it,
+  // so an empty draft is not covered in red. Order-level issues and choices
+  // (selects, toggles), which always hold a value, show at once; warnings
+  // show regardless (see `errorsFor`).
   const touched = (name: string): boolean => {
     if (attempted || name === 'notional' || name === 'instrumentId') {
       return true;
@@ -387,6 +407,7 @@ export function OrderTicket({ctx, runtime}: OrderTicketProps): ReactNode {
     ) {
       return true;
     }
+    // `TicketInputs` has no index signature; `name` is one of its keys.
     const value = (inputs as unknown as Record<string, unknown>)[name];
     return typeof value === 'string' ? value.trim() !== '' : true;
   };
@@ -401,6 +422,10 @@ export function OrderTicket({ctx, runtime}: OrderTicketProps): ReactNode {
   const base = precision?.key.canonical_base ?? '';
   const currency = precision?.key.quote ?? account?.currency ?? '';
 
+  // "Size from risk" (perpetuals): the quantity that loses `riskPct` percent
+  // of account equity between the entry (limit, trigger, else mark) and the
+  // stop-loss, floored to the lot size. Typed prices may carry thousands
+  // separators, which `Decimal` does not accept, so they are removed first.
   const [riskPct, setRiskPct] = useState('0.5');
   const riskQty = useMemo(() => {
     if (equity || !account?.equity || !precision || !Decimal.isValid(riskPct)) {
@@ -427,6 +452,8 @@ export function OrderTicket({ctx, runtime}: OrderTicketProps): ReactNode {
     inputs.stopLoss,
   ]);
 
+  // Reward to risk (R multiple) of the attached target and stop, perpetuals
+  // only.
   const rr = useMemo(() => {
     if (equity) return null;
     const entry = built.limitPrice ?? built.triggerPrice ?? meta.mark;
@@ -559,6 +586,7 @@ export function OrderTicket({ctx, runtime}: OrderTicketProps): ReactNode {
     if (built.quantity && !built.quantity.isZero()) {
       return `= ${formatShares(precision, built.quantity)}`;
     }
+    // 張 is a Taiwan board lot; an odd lot is anything below one.
     if (lot && lotMode === 'board') {
       return `1 張 = ${groupedShares(lot)} shares`;
     }
@@ -567,6 +595,8 @@ export function OrderTicket({ctx, runtime}: OrderTicketProps): ReactNode {
     }
     return 'Whole shares';
   })();
+  // Securities have price-dependent ticks (a tick ladder) and a daily limit
+  // band around the previous close; the hint shows both for the typed price.
   const priceHint = (() => {
     if (!equity || !precision) return undefined;
     const at = built.limitPrice ?? built.triggerPrice ?? meta.mark;
@@ -665,6 +695,8 @@ export function OrderTicket({ctx, runtime}: OrderTicketProps): ReactNode {
                 disabled={!m.available || busy}
                 title={m.reason ?? undefined}
                 onClick={() => {
+                  // Live on an unarmed account opens the arming step; the
+                  // mode switches only once the engine has armed it.
                   if (m.mode === 'LIVE' && !liveArmed) {
                     setArmReason(null);
                     setArming(true);
@@ -1236,6 +1268,8 @@ export function OrderTicket({ctx, runtime}: OrderTicketProps): ReactNode {
               type="button"
               className={`j-btn ${inputs.side === 'buy' ? 'j-btn--bid' : 'j-btn--ask'}`}
               data-testid="confirm-order"
+              // A failed submit that kept its idempotency key may be sent
+              // again: the engine answers the same order, never a second one.
               disabled={
                 replay ||
                 (liveOrder && !liveArmed) ||
@@ -1244,6 +1278,7 @@ export function OrderTicket({ctx, runtime}: OrderTicketProps): ReactNode {
               }
               aria-busy={state.phase === 'SUBMITTING'}
               onClick={() => {
+                // A LIVE preview goes through the dedicated confirmation.
                 if (liveOrder && state.phase === 'PREVIEWED') {
                   setLiveConfirm(true);
                   return;
@@ -1278,8 +1313,8 @@ export function OrderTicket({ctx, runtime}: OrderTicketProps): ReactNode {
 }
 
 /**
- * Groups a share count with thousands separators.
- * @param shares Shares.
+ * Formats a whole share count with thousands separators.
+ * @param shares Share count.
  * @return Text such as `1,000`.
  */
 function groupedShares(shares: Decimal): string {
@@ -1287,9 +1322,10 @@ function groupedShares(shares: Decimal): string {
 }
 
 /**
- * Confirmation panel for an order line dragged on the chart.
- * @param props Props.
- * @return Panel element.
+ * Renders the confirmation for an order line dragged on the chart. Nothing
+ * is amended until the user confirms here.
+ * @param props Feature context and trading runtime.
+ * @return Panel element, or null when no amendment is pending.
  */
 function AmendPanel({ctx, runtime}: OrderTicketProps): ReactNode {
   const draft = useStore(runtime.amend);
@@ -1303,6 +1339,8 @@ function AmendPanel({ctx, runtime}: OrderTicketProps): ReactNode {
     setBusy(true);
     setError(null);
     try {
+      // `expected_version` makes the engine refuse the amendment if the
+      // order changed since it was drawn.
       await ctx.clients.execution.amendOrder(draft.order.order_id, {
         [draft.field]: draft.price,
         expected_version: draft.order.version,
