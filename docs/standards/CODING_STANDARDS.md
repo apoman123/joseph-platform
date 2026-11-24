@@ -1,6 +1,6 @@
 # Coding standards
 
-The rules every contribution follows: the [Google Python Style Guide](https://google.github.io/styleguide/pyguide.html) and the [Google TypeScript Style Guide](https://google.github.io/styleguide/tsguide.html), plus the project rules below. "Enforced by" names the check that fails CI; run `make lint typecheck` before opening a pull request.
+The rules every contribution follows: the [Google Python Style Guide](https://google.github.io/styleguide/pyguide.html), the [Google TypeScript Style Guide](https://google.github.io/styleguide/tsguide.html), the [JavaScript guide](https://google.github.io/styleguide/jsguide.html) for `.mjs`/`.cjs` scripts and the [HTML/CSS guide](https://google.github.io/styleguide/htmlcssguide.html) for stylesheets, plus the project rules below. "Enforced by" names the check that fails CI; run `make lint typecheck` before opening a pull request.
 
 ## Python (both engines and the system tests)
 
@@ -30,19 +30,52 @@ The rules every contribution follows: the [Google Python Style Guide](https://go
 | Domain imports only the stdlib; adapters wire only in `bootstrap.py`; plugins never import each other | import-linter (`tests/architecture/test_layering.py`) |
 | Secrets redacted, never logged | security tests |
 
-## TypeScript (joseph-terminal)
+## TypeScript and JavaScript (joseph-terminal)
+
+`.ts`/`.tsx` follow the TypeScript guide; `.mjs`/`.cjs` scripts and tool configs follow the JavaScript guide with the same project choices. Generated code (`packages/contracts/src/generated/`, `apps/web/next-env.d.ts`) is exempt.
 
 | Rule | Enforced by |
 |---|---|
-| Named exports only (framework entry files such as `page.tsx` excepted) | ESLint `no-restricted-syntax` |
-| JSDoc with a description on every class, interface, type alias, enum, function, method and module-level arrow function; `@param name description`, `@return description`; no types in JSDoc; files start with `@fileoverview` | `eslint-plugin-jsdoc` |
-| No `any` (use `unknown`), no non-null `!`, no `namespace`, `const enum` or `#private` | ESLint |
-| `interface` for object shapes, `type` for unions; `import type` for type-only imports | ESLint |
-| `UpperCamelCase` types and components, `lowerCamelCase` functions and variables, `CONSTANT_CASE` module constants, kebab-case files; contract fields keep wire `snake_case` | ESLint `naming-convention` |
-| Prettier (gts): single quotes, no bracket spacing, ES5 trailing commas, 80 columns | `prettier --check` |
+| Licence header first in every file: `/**` ` * @license` ` * Copyright 2026 Joseph Terminal contributors` ` * SPDX-License-Identifier: MIT` ` */`, then a blank line | ESLint `local/license-header` |
+| File order: licence, `@fileoverview` JSDoc, `'use client'` (Next.js only), imports, implementation, one blank line between sections; every file has an `@fileoverview` | `local/file-structure`, `jsdoc/require-file-overview` |
+| Prettier (gts): single quotes, no bracket spacing, ES5 trailing commas, 80 columns, consistent quoting of object keys | `prettier --check` (`.ts`, `.tsx`, `.mjs`, `.cjs`, `.css`) |
+| Named exports only (framework entry files such as `page.tsx` and `*.config.*` excepted); no `export let`; no static-only container classes; no `namespace`, `require` (outside `.cjs`) or `/// <reference>` | ESLint `no-restricted-exports`, `no-restricted-syntax`, `no-extraneous-class`, `no-namespace`, `no-require-imports`, `triple-slash-reference` |
+| `import type` for type-only imports, `export type` for type re-exports, one import statement per module | ESLint `consistent-type-imports`, `consistent-type-exports`, `no-duplicate-imports` |
+| JSDoc on every class, method, function (nested too), top-level arrow function, interface, type alias, enum and exported constant; a description (constructors excepted); `@param name description` for each parameter, `@return description`, `@throws` when the function throws; no types in TS JSDoc, `{Type}` required in JS JSDoc; no tags the TS keywords express (`@private`, `@override`, ...); wrapped tag lines indented 4 spaces | `eslint-plugin-jsdoc`, `local/jsdoc-tag-indent` |
+| `//` for implementation comments, multi-line ones as consecutive `//` lines; `/** */` only before the declaration or member it documents; `/* */` only inline (`/* name= */`) and for JSX children | `local/comment-style` |
+| TODOs as `TODO: <link or owner> - <what>`; no `FIXME`/`XXX` | `local/todo-format` |
+| Inline exceptions name the rule and give a reason: `// eslint-disable-next-line <rule> -- <reason>` (`/* stylelint-disable-next-line <rule> -- <reason> */` in CSS); unused exceptions fail | `eslint-comments/require-description`, `no-unlimited-disable`, `reportUnusedDisableDirectives`; stylelint `reportDescriptionlessDisables`, `reportNeedlessDisables` |
+| `const`/`let` only, one variable per declaration, no use before declaration | ESLint `no-var`, `prefer-const`, `one-var`, `no-use-before-define` |
+| Named top-level functions are `function` declarations (arrows only when a type annotation is needed); no function expressions; a concise arrow body only when its value is used (`() => void f()` or a block otherwise) | `no-restricted-syntax`, `no-confusing-void-expression` |
+| Braces on every loop and on every `if` that does not fit on one line | ESLint `curly`, `local/loop-braces` |
+| Every `switch` has a last `default` group; no fall-through | ESLint `default-case`, `default-case-last`, `no-fallthrough`, `tsc` |
+| `===`/`!==` only (`== null` allowed) | ESLint `eqeqeq` |
+| Throw and reject only `Error` objects, created with `new`; empty `catch` blocks carry a comment | ESLint `only-throw-error`, `prefer-promise-reject-errors`, `no-throw-literal`, `no-restricted-syntax`, `no-empty` |
+| `for...in` only on dict objects, with an own-property filter, never on arrays | ESLint `guard-for-in`, `no-for-in-array` |
+| No `Array()`/`Object()` constructors, wrapper objects, unary `+`/`'' +` coercion, `parseFloat`, decimal `parseInt`, `eval`, `new Function`, prototype changes, HTML strings into the DOM, decorators | ESLint core rules, `no-restricted-syntax` |
+| Classes: no `public` (except non-readonly parameter properties), no `#private`, `readonly` for private members never reassigned, parameter properties instead of plumbing, no useless constructors, no `this` in static code, methods set off by blank lines | ESLint `explicit-member-accessibility`, `no-restricted-syntax`, `prefer-readonly`, `parameter-properties`, `no-useless-constructor`, `lines-between-class-members` |
+| Types: no `any` (use `unknown`), no `{}`, no wrapper types; `interface` for object shapes; `T[]` for simple element types and `Array<T>` otherwise; type aliases never include `\| null`/`\| undefined`; no annotations on literal-initialised variables | ESLint `no-explicit-any`, `no-empty-object-type`, `no-wrapper-object-types`, `consistent-type-definitions`, `array-type`, `no-restricted-syntax`, `no-inferrable-types` |
+| Assertions: `as` syntax, never on object literals (annotate instead), none that are unnecessary, no non-null `!`; each remaining `as` is obvious or has a comment saying why it is safe | ESLint `consistent-type-assertions`, `no-unnecessary-type-assertion`, `no-non-null-assertion`; review |
+| No `@ts-ignore`, `@ts-nocheck` or `@ts-expect-error` (unit tests may use `@ts-expect-error: <reason>`) | ESLint `ban-ts-comment` |
+| Naming: `UpperCamelCase` types and components, `lowerCamelCase` functions, variables and members, `CONSTANT_CASE` module constants, enum members and `static readonly` constants (never locals); acronyms as words (`loadHttpUrl`, `customerId`); no `_` prefix or suffix except `_` on an unused required binding; trailing unused parameters omitted; kebab-case files; contract fields keep wire `snake_case` | ESLint `naming-convention` (strict camel case), `no-unused-vars`, `local/filename-case` |
+| Third-person JSDoc summaries ("Returns ..."), Markdown lists in JSDoc, minimal exported surface, descriptive names, focused `try` blocks, no named callbacks with optional parameters | review |
 | Contract types are generated from JSON Schema, never hand-written | `pnpm contracts:check` |
 | Order-path prices and quantities use `Decimal` from `@joseph/contracts`; `number` only for display and chart coordinates | review, unit tests |
 | Package boundaries ([architecture](../architecture/INDEX.md#dependency-rules-enforced-in-ci)) | `dependency-cruiser` (`pnpm arch:check`) |
+
+## CSS (joseph-terminal)
+
+| Rule | Enforced by |
+|---|---|
+| Licence header first: `/*` ` * Copyright 2026 Joseph Terminal contributors` ` * SPDX-License-Identifier: MIT` ` */`, then a blank line | stylelint `local/license-header` |
+| 2-space indent, lowercase, one selector and one declaration per line, `prop: value;`, single quotes, leading zeros (`0.5em`) | `prettier --check` |
+| Valid CSS only; no duplicate or ineffective declarations; a shorthand never overrides a longhand declared before it | stylelint `*-no-unknown`, `*-no-invalid`, `declaration-block-no-duplicate-properties`, `declaration-block-no-shorthand-property-overrides` |
+| Declarations in alphabetical order (vendor prefixes ignored for sorting) | `stylelint-order` `properties-alphabetical-order` |
+| A blank line between rules | stylelint `rule-empty-line-before`, `at-rule-empty-line-before` |
+| Global class names: lowercase words joined by `-`, BEM `__element`/`--modifier` allowed; CSS Module class names `lowerCamelCase` (read as `styles.name`); kebab-case custom properties and keyframes | stylelint `selector-class-pattern`, `custom-property-pattern`, `keyframes-name-pattern` |
+| No ID selectors, no type-qualified classes (`div.error`), no `!important` (inline exception with a reason if unavoidable) | stylelint `selector-max-id`, `selector-no-qualifying-type`, `declaration-no-important` |
+| Shorthand where it sets every sub-property; no redundant shorthand values; no unit after `0` (custom properties excepted); 3-digit hex; no quotes in `url()`; HTTPS URLs; no `@charset` | stylelint `declaration-block-no-redundant-longhand-properties`, `shorthand-property-no-redundant-values`, `length-zero-no-unit`, `color-hex-length`, `function-url-quotes`, `function-url-scheme-allowed-list`, `at-rule-disallowed-list` |
+| Meaningful, short class names; no browser hacks; comments explain why | review |
 
 ## Contracts
 
