@@ -7,6 +7,8 @@ from __future__ import annotations
 
 import decimal
 import itertools
+from collections.abc import Callable
+from typing import TypeAlias
 
 import pytest
 
@@ -16,19 +18,20 @@ from joseph_execution.domain import orders
 
 S = enums.OrderState
 D = decimal.Decimal
+_Validate: TypeAlias = Callable[[str, str, object], None]
 
 
 def _order(
     state: enums.OrderState = S.ACKNOWLEDGED, qty: str = "1"
 ) -> orders.Order:
-    """Builds an order in a given state.
+    """Builds a paper limit buy of the mock BTC perp at 100.
 
     Args:
         state: Initial state.
-        qty: Quantity.
+        qty: Base quantity, as a decimal string.
 
     Returns:
-        Order.
+        Order ``o1`` (client id ``c1``) in ``state``, version 0.
     """
     return orders.Order(
         order_id="o1",
@@ -52,15 +55,15 @@ def _order(
 
 
 def _fill(fid: str, qty: str, price: str = "100") -> orders.Fill:
-    """Builds a fill.
+    """Builds a maker buy fill of order ``o1`` without fees.
 
     Args:
-        fid: Venue fill id.
-        qty: Quantity.
-        price: Price.
+        fid: Venue fill id; the fill id is ``f-<fid>``.
+        qty: Base quantity, as a decimal string.
+        price: Fill price, as a decimal string.
 
     Returns:
-        Fill.
+        The fill.
     """
     return orders.Fill(
         fill_id=f"f-{fid}",
@@ -87,7 +90,7 @@ def _fill(fid: str, qty: str, price: str = "100") -> orders.Fill:
 def test_transition_table_is_exhaustive(
     current: enums.OrderState, target: enums.OrderState
 ) -> None:
-    """Every state pair is either allowed by the table or rejected."""
+    """Table transitions succeed; any other raises and keeps the state."""
     order = _order(current)
     allowed = target in orders.TRANSITIONS[current]
     if allowed:
@@ -112,7 +115,7 @@ def test_every_state_has_a_row() -> None:
 
 
 def test_version_increments_on_each_mutation() -> None:
-    """Versions increase monotonically."""
+    """Each transition increments the order version by one."""
     order = _order()
     order.transition(S.PARTIALLY_FILLED, 2)
     order.transition(S.CANCEL_PENDING, 3)
@@ -138,7 +141,7 @@ def test_fills_complete_order_with_weighted_average() -> None:
 
 
 def test_overfill_is_rejected() -> None:
-    """Filled quantity can never exceed the order quantity."""
+    """An overfill raises CONFLICT and leaves the filled quantity at zero."""
     order = _order(qty="1")
     with pytest.raises(errors.ExecutionError) as info:
         order.apply_fill(_fill("a", "1.5"), 3)
@@ -147,7 +150,7 @@ def test_overfill_is_rejected() -> None:
 
 
 def test_fill_during_cancel_pending_stays_pending() -> None:
-    """A partial fill racing a cancel keeps CANCEL_PENDING."""
+    """A partial fill keeps CANCEL_PENDING; the completing fill sets FILLED."""
     order = _order(S.CANCEL_PENDING, qty="2")
     order.apply_fill(_fill("a", "1"), 3)
     assert order.state is S.CANCEL_PENDING
@@ -178,24 +181,24 @@ def test_amend_requires_working_order_and_quantity_above_filled() -> None:
 
 
 def test_acknowledge_sets_exchange_id() -> None:
-    """Acknowledgement moves SUBMITTING to ACKNOWLEDGED."""
+    """Acknowledgement moves SUBMITTING to ACKNOWLEDGED with the venue id."""
     order = _order(S.SUBMITTING)
     order.acknowledge("x-1", 3)
     assert order.state is S.ACKNOWLEDGED
     assert order.exchange_order_id == "x-1"
 
 
-def test_contract_shape(contract_validate: object) -> None:
+def test_contract_shape(contract_validate: _Validate) -> None:
     """Orders and fills serialize to valid contract objects."""
     order = _order()
     order.apply_fill(_fill("a", "0.5"), 3)
     contract_validate(
         "execution.schema.json",
-        "Order",  # type: ignore[operator]
+        "Order",
         order.to_contract(),
     )
     contract_validate(
         "execution.schema.json",
-        "Fill",  # type: ignore[operator]
+        "Fill",
         _fill("a", "0.5").to_contract(),
     )

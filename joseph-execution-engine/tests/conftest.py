@@ -69,6 +69,9 @@ def contract_validate() -> Callable[[str, str, object], None]:
             schema_file: File name such as ``market.schema.json``.
             definition: ``$defs`` entry such as ``Candle``.
             instance: JSON-compatible value to validate.
+
+        Raises:
+            jsonschema.ValidationError: ``instance`` does not conform.
         """
         schema = {"$ref": f"{_BASE_URI}{schema_file}#/$defs/{definition}"}
         validator = jsonschema.Draft202012Validator(

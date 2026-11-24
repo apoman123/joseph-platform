@@ -111,11 +111,11 @@ def _order_wire(
     """Builds the SDK test order (ETH, asset 1, buy 100 @ 100).
 
     Args:
-        order_type: ``t`` field.
-        cloid: Optional cloid.
+        order_type: Order type object, the wire ``t`` field.
+        cloid: Client order id, the wire ``c`` field; omitted when ``None``.
 
     Returns:
-        Order action.
+        An ``order`` action holding that one order, without grouping.
     """
     order: dict[str, object] = {
         "a": 1,
@@ -334,4 +334,4 @@ async def test_lighter_native_signer_signs_offline() -> None:
     )
     assert token_err is None and token is not None
     assert token.split(":")[1:3] == ["7", "4"]
-    await signer.close()  # type: ignore[attr-defined]
+    await signer.close()  # type: ignore[attr-defined]  # the Signer protocol omits the SDK client's close()

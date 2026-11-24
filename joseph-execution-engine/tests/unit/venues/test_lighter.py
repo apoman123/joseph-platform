@@ -61,7 +61,8 @@ class FakeSigner:
         """Initializes the signer.
 
         Args:
-            check: ``check_client`` result.
+            check: What ``check_client`` returns: ``None`` for a usable key,
+                else the error text.
         """
         self.calls: list[tuple[str, tuple[Any, ...], dict[str, Any]]] = []
         self.check = check
@@ -73,14 +74,14 @@ class FakeSigner:
     def create_auth_token_with_expiry(
         self, deadline: int = 600, *, api_key_index: int = 255
     ) -> tuple[str | None, str | None]:
-        """Returns a deterministic token.
+        """Returns a deterministic auth token.
 
         Args:
-            deadline: Lifetime.
-            api_key_index: Key index.
+            deadline: Token lifetime in seconds.
+            api_key_index: API key index.
 
         Returns:
-            ``(token, None)``.
+            ``("<deadline>:21:<api_key_index>:cafe", None)``.
         """
         return f"{deadline}:21:{api_key_index}:cafe", None
 
@@ -114,11 +115,11 @@ class FakeSigner:
         """Records a create.
 
         Args:
-            *args: Fields.
-            **kwargs: Nonce and key index.
+            *args: Transaction fields, recorded as given.
+            **kwargs: Keyword arguments; ``nonce`` is required.
 
         Returns:
-            Signed tuple.
+            ``(14, tx_info, tx_hash, None)``, as from ``_tx``.
         """
         return self._tx("create", 14, args, kwargs)
 
@@ -126,11 +127,11 @@ class FakeSigner:
         """Records a cancel.
 
         Args:
-            *args: Fields.
-            **kwargs: Nonce and key index.
+            *args: Transaction fields, recorded as given.
+            **kwargs: Keyword arguments; ``nonce`` is required.
 
         Returns:
-            Signed tuple.
+            ``(15, tx_info, tx_hash, None)``, as from ``_tx``.
         """
         return self._tx("cancel", 15, args, kwargs)
 
@@ -138,37 +139,37 @@ class FakeSigner:
         """Records a modify.
 
         Args:
-            *args: Fields.
-            **kwargs: Nonce and key index.
+            *args: Transaction fields, recorded as given.
+            **kwargs: Keyword arguments; ``nonce`` is required.
 
         Returns:
-            Signed tuple.
+            ``(17, tx_info, tx_hash, None)``, as from ``_tx``.
         """
         return self._tx("modify", 17, args, kwargs)
 
 
 class _Directory:
-    """In-memory order directory."""
+    """In-memory order directory keyed by client order id."""
 
     def __init__(self, known: list[directory.KnownOrder]) -> None:
         """Initializes the directory.
 
         Args:
-            known: Orders.
+            known: Orders the directory knows.
         """
         self._known = {k.client_order_id: k for k in known}
 
     def find(
         self, account_id: str, client_order_id: str
     ) -> directory.KnownOrder | None:
-        """Finds an order.
+        """Finds a known order by client id.
 
         Args:
-            account_id: Account.
-            client_order_id: Client id.
+            account_id: Ignored; the tests use one account.
+            client_order_id: Client order id.
 
         Returns:
-            Order or ``None``.
+            The order, or ``None`` when it is not known.
         """
         del account_id
         return self._known.get(client_order_id)
@@ -176,14 +177,14 @@ class _Directory:
     def recent(
         self, account_id: str, since_ms: int
     ) -> list[directory.KnownOrder]:
-        """Lists orders.
+        """Lists every known order, whatever the account and time.
 
         Args:
-            account_id: Account.
-            since_ms: Lower bound.
+            account_id: Ignored; the tests use one account.
+            since_ms: Ignored lower bound, epoch milliseconds.
 
         Returns:
-            Orders.
+            The known orders.
         """
         del account_id, since_ms
         return list(self._known.values())
@@ -199,14 +200,15 @@ def _adapter(
     """Builds an adapter with a fake signer.
 
     Args:
-        signer: Signer.
-        fields: Credentials.
-        known: Directory orders.
-        connector: Fake WebSocket connector.
-        mono: Manual monotonic clock.
+        signer: Fake signer to use; a new one by default.
+        fields: Credential fields of ``acct``; ``KEYS`` when empty.
+        known: OMS orders visible through the directory.
+        connector: Fake WebSocket connector; one without scripts by default.
+        mono: Manual monotonic clock; a new one by default.
 
     Returns:
-        Adapter and signer.
+        The LIVE-enabled adapter (100 bps market slippage band), on a manual
+        wall clock at 1_795_000_000_000 ms, and its fake signer.
     """
     fake = signer or FakeSigner()
     clock = mono or venue_fakes.ManualMonotonic()
@@ -215,17 +217,17 @@ def _adapter(
     def factory(
         url: str, account: int, key_index: int, key: str, chain: int
     ) -> lighter.Signer:
-        """Returns the fake signer.
+        """Records the signer's settings and returns the fake signer.
 
         Args:
-            url: URL.
+            url: REST base URL.
             account: Account index.
-            key_index: Key index.
-            key: Private key.
+            key_index: API key index.
+            key: Ignored API private key.
             chain: Chain id.
 
         Returns:
-            Signer.
+            The fake signer.
         """
         del key
         built.append((url, account, key_index, chain))
@@ -249,10 +251,10 @@ def _known(cid: str = CID) -> directory.KnownOrder:
     """Builds a directory entry.
 
     Args:
-        cid: Client id.
+        cid: Client order id.
 
     Returns:
-        Entry.
+        A LIVE, non-reduce-only BTC entry.
     """
     return directory.KnownOrder(
         cid, "lighter:perp:BTC", enums.OrderMode.LIVE, 1, False
@@ -260,13 +262,13 @@ def _known(cid: str = CID) -> directory.KnownOrder:
 
 
 def _request(**overrides: object) -> trading.VenueOrderRequest:
-    """Builds an order request.
+    """Builds an order request for account ``acct``.
 
     Args:
-        **overrides: Overrides.
+        **overrides: Request fields that replace the defaults.
 
     Returns:
-        Request.
+        By default a GTC limit sell of 0.001 BTC at 150000.5.
     """
     fields: dict[str, object] = {
         "account_id": "acct",
@@ -280,19 +282,19 @@ def _request(**overrides: object) -> trading.VenueOrderRequest:
         "limit_price": D("150000.5"),
     }
     fields.update(overrides)
-    return trading.VenueOrderRequest(**fields)  # type: ignore[arg-type]
+    return trading.VenueOrderRequest(**fields)  # type: ignore[arg-type]  # dict[str, object] holds each field's own type
 
 
 def _get(path: str, body: object, status: int = 200) -> respx.Route:
-    """Mocks a GET.
+    """Mocks a GET on the mainnet REST API.
 
     Args:
-        path: Path.
-        body: JSON body.
-        status: Status.
+        path: Request path.
+        body: JSON answer body.
+        status: HTTP status of the answer.
 
     Returns:
-        Route.
+        The mocked route.
     """
     return respx.get(f"{API}{path}").mock(
         return_value=httpx.Response(status, json=body)
@@ -781,7 +783,9 @@ async def test_account_stream_subscribes_with_auth() -> None:
         [venue_fakes.Script(['{"type":"connected"}', frame])], mono
     )
     adapter, _ = _adapter(connector=connector, mono=mono)
-    events = await venue_fakes.collect(adapter.stream_account_events("acct"), 2)
+    events: list[Any] = await venue_fakes.collect(
+        adapter.stream_account_events("acct"), 2
+    )
     assert connector.urls == ["wss://mainnet.zklighter.elliot.ai/stream"]
     sent = [json.loads(m) for m in connector.connections[0].sent]
     assert [m["channel"] for m in sent] == [
@@ -790,5 +794,5 @@ async def test_account_stream_subscribes_with_auth() -> None:
         "account_all_positions/21",
     ]
     assert all(m["auth"] == "25200:21:4:cafe" for m in sent)
-    assert events[-1].order is not None  # type: ignore[attr-defined]
+    assert events[-1].order is not None
     await adapter.aclose()

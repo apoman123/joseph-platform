@@ -73,10 +73,11 @@ def _request(**overrides: object) -> intents.OrderIntentRequest:
     """Builds a LIVE TWSE board-lot limit buy.
 
     Args:
-        **overrides: Field overrides.
+        **overrides: Request fields that replace the defaults.
 
     Returns:
-        Request.
+        By default a manual DAY buy of 1000 TSMC (2330) shares at 600 TWD on
+        the SinoPac account.
     """
     fields: dict[str, object] = {
         "account_id": SINOPAC.account_id,
@@ -92,17 +93,18 @@ def _request(**overrides: object) -> intents.OrderIntentRequest:
         "source": enums.IntentSource.MANUAL_TICKET,
     }
     fields.update(overrides)
-    return intents.OrderIntentRequest(**fields)  # type: ignore[arg-type]
+    return intents.OrderIntentRequest(**fields)  # type: ignore[arg-type]  # dict[str, object] holds each field's own type
 
 
 def _ctx(**overrides: object) -> context.RiskContext:
     """Builds a securities context in which every check passes.
 
     Args:
-        **overrides: Field overrides.
+        **overrides: Context fields that replace the defaults.
 
     Returns:
-        Context.
+        The context; unless ``live_arming`` is overridden, the effective
+        account is armed for an hour from one second before ``now_ms``.
     """
     fields: dict[str, object] = {
         "request": _request(),
@@ -149,17 +151,17 @@ def _ctx(**overrides: object) -> context.RiskContext:
         fields["live_arming"] = accounts.LiveArming.grant(
             armed, "user:u", int(str(fields["now_ms"])) - 1_000, 3_600_000
         )
-    return context.RiskContext(**fields)  # type: ignore[arg-type]
+    return context.RiskContext(**fields)  # type: ignore[arg-type]  # dict[str, object] holds each field's own type
 
 
 def _held(qty: str) -> positions.Position:
     """Builds a long TWSE position.
 
     Args:
-        qty: Shares.
+        qty: Shares held, as a decimal string.
 
     Returns:
-        Position.
+        A LIVE TSMC position on the SinoPac account, bought at 590.
     """
     pos = positions.Position(
         "p", "t", SINOPAC.account_id, fixtures.TSMC, enums.OrderMode.LIVE
@@ -202,13 +204,13 @@ def test_tpex_orders_follow_taiwan_rules() -> None:
     )
 
     def run(**overrides: object) -> dict[str, risk.RiskCheckResult]:
-        """Evaluates a TPEx limit buy.
+        """Evaluates a TPEx limit buy of GlobalWafers at 460 TWD.
 
         Args:
-            **overrides: Request overrides.
+            **overrides: Request fields that replace the defaults.
 
         Returns:
-            Results by check name.
+            Check results by check name.
         """
         fields: dict[str, object] = {
             "instrument_id": fixtures.GLOBALWAFERS,

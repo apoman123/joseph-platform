@@ -7,6 +7,8 @@ from __future__ import annotations
 
 import dataclasses
 import decimal
+from collections.abc import Callable
+from typing import TypeAlias
 
 import pytest
 
@@ -24,13 +26,14 @@ from joseph_execution.domain import risk
 D = decimal.Decimal
 BUY = enums.OrderSide.BUY
 SELL = enums.OrderSide.SELL
+_Validate: TypeAlias = Callable[[str, str, object], None]
 
 
 def _position() -> positions.Position:
     """Builds an empty position.
 
     Returns:
-        Position.
+        A flat paper position on the mock BTC perp.
     """
     return positions.Position(
         position_id="p",
@@ -92,14 +95,32 @@ def test_unrealized_and_margin() -> None:
     assert pos.margin() == D(50)
 
 
-def _request(**overrides: object) -> intents.OrderIntentRequest:
-    """Builds a request.
+def _switch(
+    scope: enums.KillSwitchScope, target: str | None, engaged: bool = True
+) -> kill_switch.KillSwitch:
+    """Builds a kill switch of tenant ``t`` that neither cancels nor flattens.
 
     Args:
-        **overrides: Field overrides.
+        scope: Scope.
+        target: Account id or strategy id; ``None`` for the GLOBAL scope.
+        engaged: Whether the switch is engaged.
 
     Returns:
-        Request.
+        The switch.
+    """
+    return kill_switch.KillSwitch(
+        "t", scope, target, engaged, False, False, "r", "u", 1
+    )
+
+
+def _request(**overrides: object) -> intents.OrderIntentRequest:
+    """Builds a paper intent request.
+
+    Args:
+        **overrides: Request fields that replace the defaults.
+
+    Returns:
+        By default a manual GTC limit buy of 1 BTC at 100.
     """
     fields: dict[str, object] = {
         "account_id": "a",
@@ -115,7 +136,7 @@ def _request(**overrides: object) -> intents.OrderIntentRequest:
         "limit_price": D(100),
     }
     fields.update(overrides)
-    return intents.OrderIntentRequest(**fields)  # type: ignore[arg-type]
+    return intents.OrderIntentRequest(**fields)  # type: ignore[arg-type]  # dict[str, object] holds each field's own type
 
 
 @pytest.mark.parametrize(
@@ -145,7 +166,9 @@ def test_request_validation(overrides: dict[str, object]) -> None:
     assert info.value.code == "VALIDATION_FAILED"
 
 
-def test_request_round_trip_and_body_hash(contract_validate: object) -> None:
+def test_request_round_trip_and_body_hash(
+    contract_validate: _Validate,
+) -> None:
     """Contract round trip is lossless; body hash ignores preview tokens."""
     req = _request(
         bracket=intents.Bracket(
@@ -155,7 +178,7 @@ def test_request_round_trip_and_body_hash(contract_validate: object) -> None:
     )
     body = req.to_contract()
     contract_validate(
-        "execution.schema.json",  # type: ignore[operator]
+        "execution.schema.json",
         "OrderIntentRequest",
         body,
     )
@@ -202,32 +225,14 @@ def test_audit_chain_detects_tampering() -> None:
 
 def test_kill_switch_scopes() -> None:
     """Switches apply by scope; released switches never apply."""
-
-    def switch(
-        scope: enums.KillSwitchScope, target: str | None, engaged: bool = True
-    ) -> kill_switch.KillSwitch:
-        """Builds a switch.
-
-        Args:
-            scope: Scope.
-            target: Target.
-            engaged: Engaged flag.
-
-        Returns:
-            Switch.
-        """
-        return kill_switch.KillSwitch(
-            "t", scope, target, engaged, False, False, "r", "u", 1
-        )
-
-    assert switch(enums.KillSwitchScope.GLOBAL, None).applies_to("a", None)
-    assert switch(enums.KillSwitchScope.ACCOUNT, "a").applies_to("a", None)
-    assert not switch(enums.KillSwitchScope.ACCOUNT, "b").applies_to("a", None)
-    strat = switch(enums.KillSwitchScope.STRATEGY, "my-strat")
-    assert strat.applies_to("a", "my-strat:v3")
-    assert not strat.applies_to("a", "other:v1")
-    assert not strat.applies_to("a", None)
-    assert not switch(
+    assert _switch(enums.KillSwitchScope.GLOBAL, None).applies_to("a", None)
+    assert _switch(enums.KillSwitchScope.ACCOUNT, "a").applies_to("a", None)
+    assert not _switch(enums.KillSwitchScope.ACCOUNT, "b").applies_to("a", None)
+    strategy_switch = _switch(enums.KillSwitchScope.STRATEGY, "my-strat")
+    assert strategy_switch.applies_to("a", "my-strat:v3")
+    assert not strategy_switch.applies_to("a", "other:v1")
+    assert not strategy_switch.applies_to("a", None)
+    assert not _switch(
         enums.KillSwitchScope.GLOBAL, None, engaged=False
     ).applies_to("a", None)
 
@@ -246,7 +251,7 @@ def test_live_consent_binds_scope_and_expiry() -> None:
         ),
         "user:u",
     )
-    dep = deployments.Deployment(
+    deployment = deployments.Deployment(
         "d",
         "t",
         "s:v1",
@@ -259,17 +264,17 @@ def test_live_consent_binds_scope_and_expiry() -> None:
         1,
         consent,
     )
-    assert dep.consent_valid("binance", 5_000)
-    assert not dep.consent_valid("binance", expires)
-    assert not dep.consent_valid("bitget", 5_000)
+    assert deployment.consent_valid("binance", 5_000)
+    assert not deployment.consent_valid("binance", expires)
+    assert not deployment.consent_valid("bitget", 5_000)
     bigger = deployments.DeploymentLimits(
         D(2000), 2, D(100), ("binance:perp:BTCUSDT",), D(2)
     )
-    assert not dataclasses.replace(dep, limits=bigger).consent_valid(
+    assert not dataclasses.replace(deployment, limits=bigger).consent_valid(
         "binance", 5_000
     )
     assert not dataclasses.replace(
-        dep, strategy_version_id="s:v2"
+        deployment, strategy_version_id="s:v2"
     ).consent_valid("binance", 5_000)
 
 
@@ -283,9 +288,9 @@ def test_live_consent_binds_scope_and_expiry() -> None:
     ],
 )
 def test_sizing_validation(kwargs: dict[str, object]) -> None:
-    """Sizing models validate their parameters."""
+    """Sizing models refuse missing, out-of-range or unknown parameters."""
     with pytest.raises(errors.ExecutionError):
-        deployments.SizingModel(**kwargs)  # type: ignore[arg-type]
+        deployments.SizingModel(**kwargs)  # type: ignore[arg-type]  # parametrized kwargs are typed object
 
 
 def test_risk_decision_round_trip() -> None:

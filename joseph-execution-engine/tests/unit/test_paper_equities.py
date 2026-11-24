@@ -21,7 +21,6 @@ S = enums.OrderState
 MONDAY = datetime.date(2026, 11, 23)
 TWD = accounts.paper_account_id("t", "TWD")
 USD = accounts.paper_account_id("t")
-_HOUR = 3_600_000
 
 
 def _setup(
@@ -34,10 +33,11 @@ def _setup(
     """Builds a paper adapter with TWSE and US instruments.
 
     Args:
-        now_ms: Start time.
+        now_ms: Start time of the manual clock, epoch milliseconds.
 
     Returns:
-        Adapter, gateway and clock.
+        The adapter, with 3,000,000 TWD of paper cash; its gateway, holding
+        the securities fixtures from the week before ``MONDAY``; the clock.
     """
     clock = clock_lib.ManualClock(now_ms)
     gateway = market_static.StaticMarketDataGateway(clock)
@@ -52,11 +52,12 @@ def _req(cid: str, **overrides: object) -> trading.VenueOrderRequest:
     """Builds a TWSE limit buy of one board lot.
 
     Args:
-        cid: Client id.
-        **overrides: Overrides.
+        cid: Client order id.
+        **overrides: Request fields that replace the defaults.
 
     Returns:
-        Request.
+        By default a DAY buy of 1000 TSMC (2330) shares at 601 TWD on the
+        TWD paper account.
     """
     fields: dict[str, object] = {
         "account_id": TWD,
@@ -70,7 +71,7 @@ def _req(cid: str, **overrides: object) -> trading.VenueOrderRequest:
         "limit_price": D(601),
     }
     fields.update(overrides)
-    return trading.VenueOrderRequest(**fields)  # type: ignore[arg-type]
+    return trading.VenueOrderRequest(**fields)  # type: ignore[arg-type]  # dict[str, object] holds each field's own type
 
 
 async def test_orders_wait_for_the_open_and_fill_in_session() -> None:
@@ -88,7 +89,7 @@ async def test_orders_wait_for_the_open_and_fill_in_session() -> None:
 
 
 async def test_ioc_is_canceled_while_closed() -> None:
-    """IOC/FOK orders cannot wait for the open."""
+    """IOC orders are canceled while the market is closed."""
     adapter, _, _ = _setup(fixtures.taipei(MONDAY, 14))
     result = await adapter.submit_order(
         _req("ioc", time_in_force=enums.TimeInForce.IOC)
@@ -109,7 +110,7 @@ async def test_day_orders_expire_at_the_close() -> None:
 
 
 async def test_market_fills_clamp_to_daily_limits() -> None:
-    """Market fills stay on the tick ladder inside the +-10% band."""
+    """Market fills clamp to the +-10% band; without a close there is none."""
     adapter, gateway, _ = _setup(fixtures.taipei(MONDAY, 10))
     gateway.set_mark(fixtures.TSMC, D(700))
     result = await adapter.submit_order(

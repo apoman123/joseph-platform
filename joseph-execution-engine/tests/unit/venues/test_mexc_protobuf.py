@@ -28,7 +28,8 @@ def _official_blocks() -> dict[str, str]:
     """Extracts message bodies from the vendored ``.proto`` files.
 
     Returns:
-        Body text per message name.
+        The text between the braces of each ``message``, keyed by message
+        name, with ``//`` comments removed; enums are skipped.
     """
     blocks: dict[str, str] = {}
     for path in sorted(mexc_protobuf.PROTO_DIR.glob("*.proto")):
@@ -50,7 +51,8 @@ def _official_fields(body: str) -> set[tuple[str, int, str, str]]:
         body: Message body text.
 
     Returns:
-        ``(name, number, type, label)`` per field.
+        ``(name, number, type, label)`` per field; ``label`` is
+        ``optional``, ``repeated`` or empty.
     """
     return {
         (name, int(number), kind, label)
@@ -61,10 +63,12 @@ def _official_fields(body: str) -> set[tuple[str, int, str, str]]:
 def _wrap(member: str, channel: str, **fields: object) -> bytes:
     """Encodes a private push like the Protobuf endpoint.
 
+    The wrapper carries symbol ``BTC_USDT`` and ``ts`` 7.
+
     Args:
-        member: ``ContractWrapper`` oneof member (``orderChange`` …).
-        channel: Wrapper channel.
-        **fields: Payload fields.
+        member: ``ContractWrapper`` oneof member, such as ``orderChange``.
+        channel: Wrapper ``channel`` text.
+        **fields: Payload message fields.
 
     Returns:
         Serialized ``ContractWrapper``.
@@ -82,12 +86,12 @@ def test_transcribed_messages_match_the_vendored_proto_files() -> None:
     """Every transcribed field has the official name, number, type, label."""
     blocks = _official_blocks()
     for name, fields in mexc_protobuf.MESSAGES.items():
-        mine = {(f.name, f.number, f.kind, f.label) for f in fields}
+        transcribed = {(f.name, f.number, f.kind, f.label) for f in fields}
         official = _official_fields(blocks[name])
         if name == "ContractWrapper":
-            assert mine <= official
+            assert transcribed <= official
         else:
-            assert mine == official
+            assert transcribed == official
 
 
 def test_every_decoded_member_has_a_json_channel() -> None:

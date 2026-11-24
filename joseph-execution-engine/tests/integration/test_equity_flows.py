@@ -10,6 +10,7 @@ import datetime
 import decimal
 from collections.abc import Callable
 from collections.abc import Iterator
+from typing import TypeAlias
 
 import pytest
 from fastapi import testclient
@@ -31,23 +32,28 @@ S = enums.OrderState
 EXEC = "execution.schema.json"
 MONDAY = datetime.date(2026, 11, 23)
 TWD_A = accounts.paper_account_id("tenant-a", "TWD")
-Validate = Callable[[str, str, object], None]
+_Validate: TypeAlias = Callable[[str, str, object], None]
 
 
 def _build(**securities: object) -> harness.Harness:
     """Builds a harness with the TWD paper account and securities data.
 
+    The TWD paper account starts with 3,000,000 TWD; the securities fixtures
+    cover the week before ``MONDAY`` onwards.
+
     Args:
-        **securities: ``SecuritiesSettings`` overrides.
+        **securities: ``SecuritiesSettings`` fields that replace the
+            defaults.
 
     Returns:
-        Harness with the clock inside Monday's TWSE session.
+        Harness with the clock at 10:00 Taipei on ``MONDAY``, inside the TWSE
+        session.
     """
-    sec = config.SecuritiesSettings(
+    settings = config.SecuritiesSettings(
         paper_twd_starting_cash=D(3_000_000),
-        **securities,  # type: ignore[arg-type]
+        **securities,  # type: ignore[arg-type]  # overrides are typed object; each matches its field
     )
-    h = harness.build(securities=sec)
+    h = harness.build(securities=settings)
     h.clock.current_ms = fixtures.taipei(MONDAY, 10)
     fixtures.install(h.market, MONDAY - datetime.timedelta(days=7))
     return h
@@ -57,10 +63,11 @@ def _twse(**overrides: object) -> intents.OrderIntentRequest:
     """Builds a PAPER board-lot limit buy of 2330.
 
     Args:
-        **overrides: Field overrides.
+        **overrides: Request fields that replace the defaults.
 
     Returns:
-        Request.
+        A manual DAY buy of 1000 TSMC (2330) shares at 601 TWD on tenant A's
+        TWD paper account.
     """
     fields: dict[str, object] = {
         "account_id": TWD_A,
@@ -76,7 +83,7 @@ def _twse(**overrides: object) -> intents.OrderIntentRequest:
         "source": enums.IntentSource.MANUAL_TICKET,
     }
     fields.update(overrides)
-    return intents.OrderIntentRequest(**fields)  # type: ignore[arg-type]
+    return intents.OrderIntentRequest(**fields)  # type: ignore[arg-type]  # dict[str, object] holds each field's own type
 
 
 async def test_twse_paper_order_fills_in_shares() -> None:
@@ -99,7 +106,7 @@ async def test_twse_paper_order_fills_in_shares() -> None:
 
 
 async def test_cboe_paper_order_fills_in_the_usd_account() -> None:
-    """A Cboe BZX ETF fills in the USD paper account during XNYS hours."""
+    """A Cboe BZX ETF fills in the USD account; the TWD account refuses it."""
     h = _build()
     h.clock.current_ms = fixtures.new_york(MONDAY, 10)
     oms = h.container.services.oms
@@ -122,7 +129,7 @@ async def test_cboe_paper_order_fills_in_the_usd_account() -> None:
 
 
 async def test_tpex_paper_orders_follow_taiwan_rules() -> None:
-    """TPEx orders fill in the TWD paper account with Taiwan fees and lots."""
+    """TPEx orders follow Taiwan fees, price limits and TWD-only routing."""
     h = _build()
     oms = h.container.services.oms
     stock = _twse(instrument_id=fixtures.GLOBALWAFERS, limit_price=D(462))
@@ -240,7 +247,7 @@ async def test_odd_lots_and_long_only_selling() -> None:
 
 
 async def test_closed_market_rejects_market_orders_and_rests_limits() -> None:
-    """While closed market orders are rejected and limits wait for the open."""
+    """While closed, market orders are rejected and limits fill at the open."""
     h = _build()
     oms = h.container.services.oms
     h.clock.current_ms = fixtures.taipei(MONDAY, 15)
@@ -332,10 +339,10 @@ async def test_amend_uses_the_ladder_tick() -> None:
 
 @pytest.fixture
 def api() -> Iterator[tuple[harness.Harness, testclient.TestClient]]:
-    """Provides a harness and an API client.
+    """Provides a securities harness (see ``_build``) and an API client.
 
     Yields:
-        Harness and client.
+        ``(harness, client)``; the app's lifespan runs until teardown.
     """
     h = _build()
     with testclient.TestClient(bootstrap.build_app(h.container)) as client:
@@ -344,7 +351,7 @@ def api() -> Iterator[tuple[harness.Harness, testclient.TestClient]]:
 
 def test_api_accepts_securities_orders(
     api: tuple[harness.Harness, testclient.TestClient],
-    contract_validate: Validate,
+    contract_validate: _Validate,
 ) -> None:
     """DAY, outside_rth and TWSE ids pass the API and contracts."""
     _, client = api
@@ -379,7 +386,7 @@ def test_api_accepts_securities_orders(
 
 def test_broker_connections_take_only_the_account_number(
     api: tuple[harness.Harness, testclient.TestClient],
-    contract_validate: Validate,
+    contract_validate: _Validate,
 ) -> None:
     """Broker connections store the account number; logins stay secret."""
     _, client = api
@@ -436,7 +443,7 @@ def test_broker_connections_take_only_the_account_number(
 
 
 async def test_live_ibkr_order_end_to_end() -> None:
-    """With every gate satisfied an IBKR order fills through the OMS."""
+    """With every gate satisfied, an IBKR order fills through the OMS."""
     h = harness.build(
         live_trading_enabled=True,
         securities=config.SecuritiesSettings(ibkr_enabled=True),
@@ -462,16 +469,16 @@ async def test_live_ibkr_order_end_to_end() -> None:
     )
     h.container.brokers["ibkr"] = adapter
     h.container.registry.live["ibkr"] = adapter
-    svc = h.container.services
-    connected = await svc.accounts.connect_start(
+    services = h.container.services
+    connected = await services.accounts.connect_start(
         harness.TENANT_A, "ibkr", "IBKR", {"account": "DU1234567"}, True
     )
     account_id = str(connected["account_id"])
-    verified = await svc.accounts.verify(harness.TENANT_A, account_id)
+    verified = await services.accounts.verify(harness.TENANT_A, account_id)
     assert verified["status"] == "CONNECTED" and verified["modes"] == ["LIVE"]
     assert verified["equity"] == "50000"
     assert verified["live_armed_until_ms"] is None
-    armed = await svc.accounts.grant_live_consent(
+    armed = await services.accounts.grant_live_consent(
         harness.TENANT_A, account_id, h.totp(), True, 3_600_000
     )
     assert armed["live_armed_until_ms"] == h.clock.now_ms() + 3_600_000
@@ -489,28 +496,34 @@ async def test_live_ibkr_order_end_to_end() -> None:
         source=enums.IntentSource.MANUAL_TICKET,
     )
     with pytest.raises(errors.ExecutionError) as info:
-        await svc.oms.submit_intent(harness.TENANT_A, request, "no-preview")
+        await services.oms.submit_intent(
+            harness.TENANT_A, request, "no-preview"
+        )
     assert info.value.code == "PREVIEW_REQUIRED"
-    preview = await svc.oms.preview(harness.TENANT_A, request)
+    preview = await services.oms.preview(harness.TENANT_A, request)
     assert preview.allowed, [
         c.to_contract() for c in preview.decision.failures()
     ]
     tokened = dataclasses.replace(
         preview.normalized, preview_token=preview.token
     )
-    result = await svc.oms.submit_intent(harness.TENANT_A, tokened, "live-1")
+    result = await services.oms.submit_intent(
+        harness.TENANT_A, tokened, "live-1"
+    )
     order = result.orders[0]
     assert order.state is S.ACKNOWLEDGED
     assert ib.placed[0].orderRef == order.client_order_id
     ib.execute(ib.trades()[0], 10, 190.01, commission=1.0)
     applied = await bootstrap.pump_brokers(h.container)
     assert applied >= 1
-    filled = svc.oms.get_order(harness.TENANT_A, order.order_id)
+    filled = services.oms.get_order(harness.TENANT_A, order.order_id)
     assert filled.state is S.FILLED
-    position = (await svc.oms.list_positions(harness.TENANT_A, account_id))[0]
+    position = (
+        await services.oms.list_positions(harness.TENANT_A, account_id)
+    )[0]
     assert position["quantity_base"] == "10" and position["mode"] == "LIVE"
     twse = dataclasses.replace(
         request, instrument_id=fixtures.TSMC, limit_price=D(601)
     )
-    refused = await svc.oms.preview(harness.TENANT_A, twse)
+    refused = await services.oms.preview(harness.TENANT_A, twse)
     assert refused.decision.primary_code() == "UNSUPPORTED"

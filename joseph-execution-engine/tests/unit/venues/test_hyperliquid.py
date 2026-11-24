@@ -42,27 +42,27 @@ META = {
 
 
 class _Directory:
-    """In-memory order directory."""
+    """In-memory order directory keyed by client order id."""
 
     def __init__(self, known: list[directory.KnownOrder]) -> None:
         """Initializes the directory.
 
         Args:
-            known: Orders.
+            known: Orders the directory knows.
         """
         self._known = {k.client_order_id: k for k in known}
 
     def find(
         self, account_id: str, client_order_id: str
     ) -> directory.KnownOrder | None:
-        """Finds an order.
+        """Finds a known order by client id.
 
         Args:
-            account_id: Account.
-            client_order_id: Client id.
+            account_id: Ignored; the tests use one account.
+            client_order_id: Client order id.
 
         Returns:
-            Order or ``None``.
+            The order, or ``None`` when it is not known.
         """
         del account_id
         return self._known.get(client_order_id)
@@ -70,14 +70,14 @@ class _Directory:
     def recent(
         self, account_id: str, since_ms: int
     ) -> list[directory.KnownOrder]:
-        """Lists orders.
+        """Lists every known order, whatever the account and time.
 
         Args:
-            account_id: Account.
-            since_ms: Lower bound.
+            account_id: Ignored; the tests use one account.
+            since_ms: Ignored lower bound, epoch milliseconds.
 
         Returns:
-            Orders.
+            The known orders.
         """
         del account_id, since_ms
         return list(self._known.values())
@@ -87,10 +87,10 @@ def _known(cid: str = CID) -> directory.KnownOrder:
     """Builds a directory entry.
 
     Args:
-        cid: Client id.
+        cid: Client order id.
 
     Returns:
-        Entry.
+        A LIVE, non-reduce-only BTC entry.
     """
     return directory.KnownOrder(
         cid, "hyperliquid:perp:BTC", enums.OrderMode.LIVE, 1, False
@@ -106,13 +106,14 @@ def _adapter(
     """Builds an adapter for account ``acct``.
 
     Args:
-        fields: Credentials.
-        known: Directory orders.
-        connector: Fake WebSocket connector.
-        mono: Manual monotonic clock.
+        fields: Credential fields of ``acct``; ``KEYS`` when empty.
+        known: OMS orders visible through the directory.
+        connector: Fake WebSocket connector; one without scripts by default.
+        mono: Manual monotonic clock; a new one by default.
 
     Returns:
-        Adapter.
+        The LIVE-enabled adapter (100 bps market slippage band), on a manual
+        wall clock at 1_795_000_000_000 ms.
     """
     clock = mono or venue_fakes.ManualMonotonic()
     return hyperliquid.HyperliquidAdapter(
@@ -131,20 +132,20 @@ def _info(responses: dict[str, Any]) -> respx.Route:
     """Mocks ``/info`` by request type.
 
     Args:
-        responses: Body by ``type``.
+        responses: Answer body for each request ``type``.
 
     Returns:
-        Route.
+        The mocked route.
     """
 
     def answer(request: httpx.Request) -> httpx.Response:
         """Answers one info request.
 
         Args:
-            request: Request.
+            request: Captured ``/info`` request.
 
         Returns:
-            Response.
+            A 200 response with the body for the request's ``type``.
         """
         kind = json.loads(request.content)["type"]
         return httpx.Response(200, json=responses[kind])
@@ -184,10 +185,11 @@ def _exchange(*statuses: Any) -> respx.Route:
     """Mocks ``/exchange`` answers in order.
 
     Args:
-        *statuses: ``response.data`` objects or full bodies.
+        *statuses: ``response.data`` objects, or full bodies (dicts with a
+            ``status`` key) that are sent as they are.
 
     Returns:
-        Route.
+        The mocked route.
     """
     replies = [
         httpx.Response(
@@ -202,13 +204,13 @@ def _exchange(*statuses: Any) -> respx.Route:
 
 
 def _request(**overrides: object) -> trading.VenueOrderRequest:
-    """Builds an order request.
+    """Builds an order request for account ``acct``.
 
     Args:
-        **overrides: Overrides.
+        **overrides: Request fields that replace the defaults.
 
     Returns:
-        Request.
+        By default a GTC limit buy of 0.001 BTC at 50000, 5x cross.
     """
     fields: dict[str, object] = {
         "account_id": "acct",
@@ -224,7 +226,7 @@ def _request(**overrides: object) -> trading.VenueOrderRequest:
         "margin_mode": enums.MarginMode.CROSS,
     }
     fields.update(overrides)
-    return trading.VenueOrderRequest(**fields)  # type: ignore[arg-type]
+    return trading.VenueOrderRequest(**fields)  # type: ignore[arg-type]  # dict[str, object] holds each field's own type
 
 
 async def test_credential_checks_refuse_master_keys_and_bad_addresses() -> None:
@@ -401,7 +403,7 @@ async def test_precision_and_unsupported_orders_are_refused_locally() -> None:
 
 
 def test_price_rule_matches_the_documented_examples() -> None:
-    """Five significant figures and 6 - szDecimals decimals."""
+    """Prices keep five significant figures and 6 - szDecimals decimals."""
     assert hyperliquid.valid_price(D("1670.1"), 4)
     assert not hyperliquid.valid_price(D("1670.12"), 4)
     assert hyperliquid.valid_price(D("123456"), 5)
@@ -698,7 +700,9 @@ async def test_user_stream_subscribes_master_account_channels() -> None:
     adapter = _adapter(connector=connector, mono=mono)
     adapter_session = adapter._session("acct", credentials.from_fields(KEYS))
     adapter_session.oids["1"] = CID
-    events = await venue_fakes.collect(adapter.stream_account_events("acct"), 2)
+    events: list[Any] = await venue_fakes.collect(
+        adapter.stream_account_events("acct"), 2
+    )
     assert connector.urls == ["wss://api.hyperliquid.xyz/ws"]
     subscriptions = [
         json.loads(m)["subscription"] for m in connector.connections[0].sent
@@ -708,4 +712,4 @@ async def test_user_stream_subscribes_master_account_channels() -> None:
         {"type": "userFills", "user": MASTER},
         {"type": "clearinghouseState", "user": MASTER, "dex": ""},
     ]
-    assert events[-1].fill is not None  # type: ignore[attr-defined]
+    assert events[-1].fill is not None

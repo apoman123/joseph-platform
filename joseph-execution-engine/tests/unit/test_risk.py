@@ -7,6 +7,7 @@ from __future__ import annotations
 
 import dataclasses
 import decimal
+from typing import NoReturn
 
 import pytest
 
@@ -84,10 +85,10 @@ def _request(**overrides: object) -> intents.OrderIntentRequest:
     """Builds a market buy request.
 
     Args:
-        **overrides: Field overrides.
+        **overrides: Request fields that replace the defaults.
 
     Returns:
-        Request.
+        By default a manual paper IOC market buy of 0.01 BTC.
     """
     fields: dict[str, object] = {
         "account_id": "acct",
@@ -102,17 +103,17 @@ def _request(**overrides: object) -> intents.OrderIntentRequest:
         "source": enums.IntentSource.MANUAL_TICKET,
     }
     fields.update(overrides)
-    return intents.OrderIntentRequest(**fields)  # type: ignore[arg-type]
+    return intents.OrderIntentRequest(**fields)  # type: ignore[arg-type]  # dict[str, object] holds each field's own type
 
 
 def _ctx(**overrides: object) -> context.RiskContext:
     """Builds a context in which every check passes.
 
     Args:
-        **overrides: Field overrides.
+        **overrides: Context fields that replace the defaults.
 
     Returns:
-        Context.
+        A paper context for ``_request()`` on the ``PAPER`` account.
     """
     fields: dict[str, object] = {
         "request": _request(),
@@ -145,17 +146,17 @@ def _ctx(**overrides: object) -> context.RiskContext:
         "slippage_pct": D("0.0001"),
     }
     fields.update(overrides)
-    return context.RiskContext(**fields)  # type: ignore[arg-type]
+    return context.RiskContext(**fields)  # type: ignore[arg-type]  # dict[str, object] holds each field's own type
 
 
 def _long(qty: str = "0.02") -> positions.Position:
     """Builds a long position.
 
     Args:
-        qty: Quantity.
+        qty: Base quantity, as a decimal string.
 
     Returns:
-        Position.
+        A paper long position bought at 95000.
     """
     pos = positions.Position("p", "t", "acct", BTC, enums.OrderMode.PAPER)
     pos.apply_fill(enums.OrderSide.BUY, D(qty), D(95000), D(0), 1)
@@ -166,10 +167,10 @@ def _close(qty: str = "0.02") -> intents.OrderIntentRequest:
     """Builds a reduce-only close of the long position.
 
     Args:
-        qty: Quantity.
+        qty: Base quantity, as a decimal string.
 
     Returns:
-        Request.
+        A reduce-only market sell of ``qty``.
     """
     return _request(
         side=enums.OrderSide.SELL,
@@ -494,11 +495,11 @@ def _armed(
     """Builds a one-hour LIVE arming of an account.
 
     Args:
-        account: Account.
-        granted_ms: Grant time.
+        account: Account to arm.
+        granted_ms: Grant time, epoch milliseconds.
 
     Returns:
-        Arming.
+        An arming granted by ``user:u``.
     """
     return accounts.LiveArming.grant(account, "user:u", granted_ms, 3_600_000)
 
@@ -515,10 +516,10 @@ def _live_ctx(**overrides: object) -> context.RiskContext:
     """Builds a LIVE context on a LIVE account with the gate open.
 
     Args:
-        **overrides: Field overrides.
+        **overrides: Context fields that replace the LIVE defaults.
 
     Returns:
-        Context (not armed unless ``live_arming`` is given).
+        The context; it is not armed unless ``live_arming`` is given.
     """
     fields: dict[str, object] = {
         "request": _request(mode=enums.OrderMode.LIVE),
@@ -586,7 +587,7 @@ def test_every_manual_source_passes_once_armed(
 
 
 def test_risk_reducing_live_orders_pass_while_disarmed() -> None:
-    """A reduce-only close is allowed with a WARN when not armed."""
+    """Disarmed, a reduce-only close passes with WARN; a flipping one fails."""
     live_long = _long()
     live_long.mode = enums.OrderMode.LIVE
     ctx = _live_ctx(
@@ -606,16 +607,18 @@ def test_risk_reducing_live_orders_pass_while_disarmed() -> None:
 
 def test_strategy_and_emergency_live_orders_do_not_use_arming() -> None:
     """AUTO_LIVE keeps deployment consent; emergency flattening is exempt."""
-    lim = deployments.DeploymentLimits(D(10000), 3, D(500), (BTC,), D(5))
+    deployment_limits = deployments.DeploymentLimits(
+        D(10000), 3, D(500), (BTC,), D(5)
+    )
     expires = NOW + 3_600_000
-    dep = deployments.Deployment(
+    deployment = deployments.Deployment(
         "d",
         "t",
         "s:v1",
         "acct",
         enums.DeploymentMode.AUTO_LIVE,
         enums.DeploymentState.ENABLED,
-        lim,
+        deployment_limits,
         deployments.SizingModel("FIXED_QTY", fixed_qty=D("0.01")),
         1,
         1,
@@ -623,7 +626,7 @@ def test_strategy_and_emergency_live_orders_do_not_use_arming() -> None:
             NOW,
             expires,
             deployments.consent_scope_hash(
-                "acct", "mock", "s:v1", lim, expires
+                "acct", "mock", "s:v1", deployment_limits, expires
             ),
             "user:u",
         ),
@@ -634,7 +637,7 @@ def test_strategy_and_emergency_live_orders_do_not_use_arming() -> None:
         strategy_version_id="s:v1",
         signal_id="sig",
     )
-    consented = _live_ctx(request=strategy, deployment=dep)
+    consented = _live_ctx(request=strategy, deployment=deployment)
     assert checks.mode_allowed(consented).outcome is OUT.PASS
     armed_only = _live_ctx(request=strategy, live_arming=_armed(LIVE_ACCOUNT))
     assert checks.mode_allowed(armed_only).code == "TRADE_MODE_DISABLED"
@@ -647,7 +650,7 @@ def test_strategy_and_emergency_live_orders_do_not_use_arming() -> None:
 
 
 def test_live_arming_domain_lifecycle() -> None:
-    """Grant, state, revoke (idempotent) and serialization of an arming."""
+    """An arming expires, revokes once, then stays revoked and serializes."""
     arming = _armed(LIVE_ACCOUNT)
     assert arming.expires_at_ms == NOW - 1_000 + 3_600_000
     assert arming.acknowledgement == accounts.LIVE_ARM_ACKNOWLEDGEMENT
@@ -723,25 +726,27 @@ def test_strategy_decision_quality() -> None:
         strategy_version_id="s:v1",
         signal_id="sig",
     )
-    lim = deployments.DeploymentLimits(D(10000), 3, D(500), (), D(5))
-    dep = deployments.Deployment(
+    deployment_limits = deployments.DeploymentLimits(
+        D(10000), 3, D(500), (), D(5)
+    )
+    deployment = deployments.Deployment(
         "d",
         "t",
         "s:v1",
         "acct",
         enums.DeploymentMode.PAPER,
         enums.DeploymentState.ENABLED,
-        lim,
+        deployment_limits,
         deployments.SizingModel("FIXED_QTY", fixed_qty=D("0.01")),
         1,
         1,
     )
     assert checks.decision_quality(_ctx(request=strategy)).outcome is OUT.FAIL
-    fresh = _ctx(request=strategy, deployment=dep, signal_age_ms=1000)
+    fresh = _ctx(request=strategy, deployment=deployment, signal_age_ms=1000)
     assert checks.decision_quality(fresh).outcome is OUT.PASS
-    stale = _ctx(request=strategy, deployment=dep, signal_age_ms=999_999)
+    stale = _ctx(request=strategy, deployment=deployment, signal_age_ms=999_999)
     assert checks.decision_quality(stale).outcome is OUT.FAIL
-    other = dataclasses.replace(dep, strategy_version_id="s:v2")
+    other = dataclasses.replace(deployment, strategy_version_id="s:v2")
     assert (
         checks.decision_quality(
             _ctx(request=strategy, deployment=other, signal_age_ms=1)
@@ -749,9 +754,9 @@ def test_strategy_decision_quality() -> None:
         is OUT.FAIL
     )
     allow_list = dataclasses.replace(
-        dep,
+        deployment,
         limits=dataclasses.replace(
-            lim, allowed_instruments=("mock:perp:ETHUSD",)
+            deployment_limits, allowed_instruments=("mock:perp:ETHUSD",)
         ),
     )
     assert (
@@ -762,35 +767,35 @@ def test_strategy_decision_quality() -> None:
     )
     busy = _ctx(
         request=strategy,
-        deployment=dep,
+        deployment=deployment,
         signal_age_ms=1,
         strategy_open_orders=1,
     )
     assert checks.duplicate_guard(busy).code == "DUPLICATE_INTENT"
 
 
+def _explode(ctx: context.RiskContext) -> NoReturn:
+    """Raises to simulate a buggy check.
+
+    Args:
+        ctx: Ignored context.
+
+    Raises:
+        RuntimeError: Always.
+    """
+    raise RuntimeError("bug")
+
+
 def test_aggregation_reject_pause_block_and_fail_closed() -> None:
     """Size failures reject, daily loss pauses, unknowns block."""
-    gw = gateway.RiskGateway()
-    reject = gw.evaluate(_ctx(notional=D(1)))
+    risk_gateway = gateway.RiskGateway()
+    reject = risk_gateway.evaluate(_ctx(notional=D(1)))
     assert reject.decision is enums.Decision.REJECT
-    pause = gw.evaluate(_ctx(daily_realized_pnl=D(-6000)))
+    pause = risk_gateway.evaluate(_ctx(daily_realized_pnl=D(-6000)))
     assert pause.decision is enums.Decision.PAUSE
-    block = gw.evaluate(_ctx(quote=None))
+    block = risk_gateway.evaluate(_ctx(quote=None))
     assert block.decision is enums.Decision.BLOCK
-
-    def explode(ctx: context.RiskContext) -> object:
-        """Raises to simulate a buggy check.
-
-        Args:
-            ctx: Context.
-
-        Raises:
-            RuntimeError: Always.
-        """
-        raise RuntimeError("bug")
-
-    broken = gateway.RiskGateway((checks.CheckSpec(explode),))  # type: ignore[arg-type]
+    broken = gateway.RiskGateway((checks.CheckSpec(_explode),))
     decision = broken.evaluate(_ctx())
     assert decision.decision is enums.Decision.BLOCK
     assert decision.checks[0].outcome is OUT.UNKNOWN

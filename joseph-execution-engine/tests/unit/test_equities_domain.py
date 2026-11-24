@@ -113,7 +113,7 @@ def test_instrument_helpers() -> None:
     ],
 )
 def test_twse_tick_ladder(price: str, tick: str) -> None:
-    """The tick at each price comes from the TWSE ladder."""
+    """TWSE and TPEx stocks share the tick ladder at each price."""
     assert fixtures.twse().tick_for(D(price)) == D(tick)
     assert fixtures.tpex().tick_for(D(price)) == D(tick)
 
@@ -417,8 +417,9 @@ def test_capabilities_serialize_new_fields() -> None:
 
 
 def test_client_id_helpers() -> None:
-    """Joseph client ids are recognized and carry their creation time."""
-    cid = "j" + "0193f0a0b1c2" + "7" * 18
+    """Joseph client ids carry their creation time; masks keep four digits."""
+    # ``j`` + 30 hex digits of a UUIDv7; the first 12 are the creation ms.
+    cid = "j0193f0a0b1c2" + "7" * 18
     assert base.is_joseph_client_id(cid)
     assert base.is_joseph_client_id(cid + "-sl")
     assert not base.is_joseph_client_id("manual-order")

@@ -7,6 +7,7 @@ from __future__ import annotations
 
 import decimal
 import json
+from typing import Any
 
 import httpx
 import pytest
@@ -41,27 +42,27 @@ DETAIL = {
 
 
 class _Directory:
-    """In-memory order directory."""
+    """In-memory order directory keyed by client order id."""
 
     def __init__(self, known: list[directory.KnownOrder]) -> None:
         """Initializes the directory.
 
         Args:
-            known: Orders.
+            known: Orders the directory knows.
         """
         self._known = {k.client_order_id: k for k in known}
 
     def find(
         self, account_id: str, client_order_id: str
     ) -> directory.KnownOrder | None:
-        """Finds an order.
+        """Finds a known order by client id.
 
         Args:
-            account_id: Account.
-            client_order_id: Client id.
+            account_id: Ignored; the tests use one account.
+            client_order_id: Client order id.
 
         Returns:
-            Order or ``None``.
+            The order, or ``None`` when it is not known.
         """
         del account_id
         return self._known.get(client_order_id)
@@ -69,14 +70,14 @@ class _Directory:
     def recent(
         self, account_id: str, since_ms: int
     ) -> list[directory.KnownOrder]:
-        """Lists orders.
+        """Lists every known order, whatever the account and time.
 
         Args:
-            account_id: Account.
-            since_ms: Lower bound.
+            account_id: Ignored; the tests use one account.
+            since_ms: Ignored lower bound, epoch milliseconds.
 
         Returns:
-            Orders.
+            The known orders.
         """
         del account_id, since_ms
         return list(self._known.values())
@@ -90,12 +91,12 @@ def _known(
     """Builds a directory entry.
 
     Args:
-        cid: Client id.
+        cid: Client order id.
         kind: Order type.
-        oid: Venue id.
+        oid: Venue order id, if known.
 
     Returns:
-        Entry.
+        A LIVE, non-reduce-only BTC_USDT entry.
     """
     return directory.KnownOrder(
         cid, "mexc:perp:BTC_USDT", enums.OrderMode.LIVE, 1, False, kind, oid
@@ -112,14 +113,15 @@ def _adapter(
     """Builds an adapter for account ``acct``.
 
     Args:
-        fields: Credentials.
-        known: Directory orders.
-        connector: Fake WebSocket connector.
-        mono: Manual monotonic clock.
-        urls: Endpoint overrides.
+        fields: Credential fields of ``acct``; ``KEYS`` when empty.
+        known: OMS orders visible through the directory.
+        connector: Fake WebSocket connector; one without scripts by default.
+        mono: Manual monotonic clock; a new one by default.
+        urls: Endpoint URL overrides, such as ``ws_url``.
 
     Returns:
-        Adapter.
+        The LIVE-enabled adapter, on a manual wall clock at
+        1_795_000_000_000 ms.
     """
     clock = mono or venue_fakes.ManualMonotonic()
     return mexc.MexcFuturesAdapter(
@@ -139,8 +141,8 @@ def _pb(member: str, channel: str, **fields: object) -> bytes:
     """Encodes a private push as the Protobuf endpoint would.
 
     Args:
-        member: ``ContractWrapper`` payload member (``orderChange`` …).
-        channel: Wrapper channel.
+        member: ``ContractWrapper`` payload member, such as ``orderChange``.
+        channel: Wrapper ``channel`` text.
         **fields: Payload fields (decimals as strings, like MEXC).
 
     Returns:
@@ -156,26 +158,26 @@ def _pb(member: str, channel: str, **fields: object) -> bytes:
 
 
 def _ok(data: object) -> httpx.Response:
-    """Builds a success answer.
+    """Builds a MEXC success answer.
 
     Args:
-        data: ``data``.
+        data: Value of the ``data`` field.
 
     Returns:
-        Response.
+        A 200 response with MEXC's success envelope.
     """
     return httpx.Response(200, json={"success": True, "code": 0, "data": data})
 
 
 def _fail(code: int, message: str) -> httpx.Response:
-    """Builds an error answer.
+    """Builds a MEXC error answer: HTTP 200 with ``success`` false.
 
     Args:
-        code: Venue code.
-        message: Message.
+        code: Venue error code.
+        message: Venue message.
 
     Returns:
-        Response.
+        The error response.
     """
     return httpx.Response(
         200, json={"success": False, "code": code, "message": message}
@@ -183,7 +185,7 @@ def _fail(code: int, message: str) -> httpx.Response:
 
 
 def _check(request: httpx.Request) -> None:
-    """Recomputes the signature of a private request.
+    """Recomputes the signature of a private request and asserts headers.
 
     Args:
         request: Captured request.
@@ -202,10 +204,10 @@ def _check(request: httpx.Request) -> None:
 
 
 def _detail() -> respx.Route:
-    """Mocks contract detail.
+    """Mocks the contract detail of BTC_USDT (``DETAIL``).
 
     Returns:
-        Route.
+        The mocked route.
     """
     return respx.get(f"{API}/api/v1/contract/detail").mock(
         return_value=_ok(DETAIL)
@@ -213,13 +215,14 @@ def _detail() -> respx.Route:
 
 
 def _request(**overrides: object) -> trading.VenueOrderRequest:
-    """Builds an order request.
+    """Builds an order request for account ``acct``.
 
     Args:
-        **overrides: Overrides.
+        **overrides: Request fields that replace the defaults.
 
     Returns:
-        Request.
+        By default a post-only limit sell of 0.0005 BTC at 150000, 2x
+        isolated.
     """
     fields: dict[str, object] = {
         "account_id": "acct",
@@ -235,7 +238,7 @@ def _request(**overrides: object) -> trading.VenueOrderRequest:
         "margin_mode": enums.MarginMode.ISOLATED,
     }
     fields.update(overrides)
-    return trading.VenueOrderRequest(**fields)  # type: ignore[arg-type]
+    return trading.VenueOrderRequest(**fields)  # type: ignore[arg-type]  # dict[str, object] holds each field's own type
 
 
 @respx.mock
@@ -358,7 +361,7 @@ async def test_market_and_plan_orders() -> None:
 async def test_rejections_are_rejected_results(
     code: int, expected: str
 ) -> None:
-    """Margin, KYC/permission and parameter errors reject non-retryably."""
+    """Margin, KYC/permission and parameter errors become REJECTED."""
     _detail()
     respx.post(f"{API}/api/v1/private/order/create").mock(
         return_value=_fail(code, "refused")
@@ -600,7 +603,7 @@ async def test_stream_parser_on_documented_pushes() -> None:
 
 @respx.mock
 async def test_stream_logs_in_and_relies_on_default_pushes() -> None:
-    """The stream signs ``apiKey + reqTime`` and pings every 15 s."""
+    """The stream signs ``apiKey + reqTime``; a refused login raises."""
     _detail()
     respx.get(f"{API}/api/v1/private/order/list/open_orders").mock(
         return_value=_ok([])
@@ -633,13 +636,15 @@ async def test_stream_logs_in_and_relies_on_default_pushes() -> None:
         mono,
     )
     adapter = _adapter(connector=connector, mono=mono)
-    events = await venue_fakes.collect(adapter.stream_account_events("acct"), 2)
+    events: list[Any] = await venue_fakes.collect(
+        adapter.stream_account_events("acct"), 2
+    )
     login = json.loads(connector.connections[0].sent[0])
     param = login["param"]
     assert param["signature"] == signing.hmac_sha256_hex(
         KEYS["api_secret"], f"{KEYS['api_key']}{param['reqTime']}"
     )
-    assert events[-1].fill is not None  # type: ignore[attr-defined]
+    assert events[-1].fill is not None
     refused = venue_fakes.FakeConnector(
         [venue_fakes.Script(['{"channel":"rs.error","data":"bad"}'])], mono
     )
@@ -767,8 +772,10 @@ async def test_stream_logs_in_on_the_protobuf_endpoint() -> None:
     adapter = _adapter(
         connector=connector, mono=mono, urls={"ws_url": mexc.WS_PROTOBUF_URL}
     )
-    events = await venue_fakes.collect(adapter.stream_account_events("acct"), 2)
+    events: list[Any] = await venue_fakes.collect(
+        adapter.stream_account_events("acct"), 2
+    )
     assert connector.urls == [mexc.WS_PROTOBUF_URL]
-    fill = events[-1].fill  # type: ignore[attr-defined]
+    fill = events[-1].fill
     assert fill is not None and fill.client_order_id == CID
     assert fill.liquidity == "taker"

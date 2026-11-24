@@ -10,6 +10,7 @@ import dataclasses
 import datetime
 import decimal
 from typing import Any
+from typing import NoReturn
 
 import pytest
 
@@ -40,14 +41,15 @@ class _FailingGateway(market_static.StaticMarketDataGateway):
     """Static gateway whose securities calls raise ``ExecutionError``.
 
     Attributes:
-        fail: Methods that raise.
+        fail: Names of the methods that raise (``instrument``,
+            ``sessions``, ``previous_close``); the others delegate.
     """
 
     def __init__(self, clock: clock_lib.ManualClock) -> None:
         """Initializes the gateway.
 
         Args:
-            clock: Clock.
+            clock: Manual clock shared with the code under test.
         """
         super().__init__(clock)
         self.fail: set[str] = set()
@@ -59,45 +61,54 @@ class _FailingGateway(market_static.StaticMarketDataGateway):
             name: Method name.
 
         Raises:
-            MarketDataUnavailableError: When configured.
+            MarketDataUnavailableError: ``name`` is in ``fail``.
         """
         if name in self.fail:
             raise errors.MarketDataUnavailableError(name)
 
     async def instrument(self, instrument_id: str) -> Any:
-        """Fails or delegates.
+        """Raises when ``instrument`` is set to fail, else delegates.
 
         Args:
             instrument_id: Instrument.
 
         Returns:
-            Metadata.
+            The base gateway's metadata.
+
+        Raises:
+            MarketDataUnavailableError: ``instrument`` is in ``fail``.
         """
         self._check("instrument")
         return await super().instrument(instrument_id)
 
     async def sessions(self, calendar: str, from_ms: int, to_ms: int) -> Any:
-        """Fails or delegates.
+        """Raises when ``sessions`` is set to fail, else delegates.
 
         Args:
-            calendar: Calendar.
-            from_ms: Start.
-            to_ms: End.
+            calendar: Calendar id.
+            from_ms: Window start, epoch milliseconds.
+            to_ms: Window end, epoch milliseconds.
 
         Returns:
-            Sessions.
+            The base gateway's sessions.
+
+        Raises:
+            MarketDataUnavailableError: ``sessions`` is in ``fail``.
         """
         self._check("sessions")
         return await super().sessions(calendar, from_ms, to_ms)
 
     async def previous_close(self, instrument_id: str) -> Any:
-        """Fails or delegates.
+        """Raises when ``previous_close`` is set to fail, else delegates.
 
         Args:
             instrument_id: Instrument.
 
         Returns:
-            Close.
+            The base gateway's previous close.
+
+        Raises:
+            MarketDataUnavailableError: ``previous_close`` is in ``fail``.
         """
         self._check("previous_close")
         return await super().previous_close(instrument_id)
@@ -107,10 +118,11 @@ def _gateway(now_ms: int) -> tuple[_FailingGateway, clock_lib.ManualClock]:
     """Builds a failing gateway with securities fixtures.
 
     Args:
-        now_ms: Clock time.
+        now_ms: Start time of the manual clock, epoch milliseconds.
 
     Returns:
-        Gateway and clock.
+        The gateway, holding the securities fixtures from the week before
+        ``MONDAY``, and its clock; nothing fails until ``fail`` is set.
     """
     clock = clock_lib.ManualClock(now_ms)
     gateway = _FailingGateway(clock)
@@ -118,15 +130,37 @@ def _gateway(now_ms: int) -> tuple[_FailingGateway, clock_lib.ManualClock]:
     return gateway, clock
 
 
+def _closed_socket_place_order(contract: Any, order: Any) -> NoReturn:
+    """Fails like ``placeOrder`` on a socket that closed after sending.
+
+    Args:
+        contract: Ignored IB contract.
+        order: Ignored IB order.
+
+    Raises:
+        OSError: Always.
+    """
+    raise OSError("socket closed")
+
+
+async def _lost_open_orders() -> NoReturn:
+    """Fails like ``reqAllOpenOrdersAsync`` on a lost connection.
+
+    Raises:
+        ConnectionError: Always.
+    """
+    raise ConnectionError("lost")
+
+
 def _order(cid: str, **overrides: object) -> trading.VenueOrderRequest:
     """Builds a TWSE market buy for the TWD paper account.
 
     Args:
-        cid: Client id.
-        **overrides: Overrides.
+        cid: Client order id.
+        **overrides: Request fields that replace the defaults.
 
     Returns:
-        Request.
+        By default an IOC market buy of 1000 TSMC (2330) shares.
     """
     fields: dict[str, object] = {
         "account_id": accounts.paper_account_id("t", "TWD"),
@@ -139,7 +173,7 @@ def _order(cid: str, **overrides: object) -> trading.VenueOrderRequest:
         "reduce_only": False,
     }
     fields.update(overrides)
-    return trading.VenueOrderRequest(**fields)  # type: ignore[arg-type]
+    return trading.VenueOrderRequest(**fields)  # type: ignore[arg-type]  # dict[str, object] holds each field's own type
 
 
 async def test_paper_maps_market_data_errors_to_unknowns() -> None:
@@ -206,7 +240,9 @@ async def test_equity_inputs_fail_closed() -> None:
         "p", "tenant-a", "acct-ib", fixtures.AAPL, enums.OrderMode.LIVE
     )
     position.apply_fill(enums.OrderSide.BUY, D(1), D(190), D(0), 1)
-    val = valuation.Valuation(None, None, None, (position,), {}, True)
+    account_valuation = valuation.Valuation(
+        None, None, None, (position,), {}, True
+    )
     refused = h.container.brokers["ibkr"]
     inputs = await equity_inputs.gather(
         gateway,
@@ -215,7 +251,7 @@ async def test_equity_inputs_fail_closed() -> None:
         account,
         enums.OrderMode.LIVE,
         fixtures.twse(),
-        val,
+        account_valuation,
         clock.now_ms(),
     )
     assert inputs.sessions is None and inputs.previous_close is None
@@ -227,7 +263,7 @@ async def test_equity_inputs_fail_closed() -> None:
         account,
         enums.OrderMode.PAPER,
         None,
-        dataclasses.replace(val, positions=()),
+        dataclasses.replace(account_valuation, positions=()),
         clock.now_ms(),
     )
     assert paper_inputs.cash is None and paper_inputs.sessions is None
@@ -236,14 +272,14 @@ async def test_equity_inputs_fail_closed() -> None:
 async def test_broker_account_lookup_returns_none_when_unknown() -> None:
     """The lookup ignores unknown, paper, revoked and foreign-key accounts."""
     h = harness.build()
-    svc = h.container.services
+    services = h.container.services
     key = h.container.settings.vault_master_key
     lookup = bootstrap.broker_account_lookup(
         h.container.uow_factory, vault.AesGcmVault(key)
     )
     assert lookup("missing") is None
     assert lookup(harness.PAPER_A) is None
-    ib = await svc.accounts.connect_start(
+    ib = await services.accounts.connect_start(
         harness.TENANT_A, "ibkr", "IB", {"account": "DU7654321"}, True
     )
     ib_id = str(ib["account_id"])
@@ -252,7 +288,7 @@ async def test_broker_account_lookup_returns_none_when_unknown() -> None:
         h.container.uow_factory, vault.AesGcmVault(b"z" * 32)
     )
     assert other_key(ib_id) is None
-    crypto = await svc.accounts.connect_start(
+    crypto = await services.accounts.connect_start(
         harness.TENANT_A,
         "binance",
         "B",
@@ -260,7 +296,7 @@ async def test_broker_account_lookup_returns_none_when_unknown() -> None:
         True,
     )
     assert lookup(str(crypto["account_id"])) is None
-    await svc.accounts.revoke(harness.TENANT_A, ib_id)
+    await services.accounts.revoke(harness.TENANT_A, ib_id)
     assert lookup(ib_id) is None
 
 
@@ -272,11 +308,8 @@ async def test_broker_event_job_resyncs_and_survives_errors() -> None:
     )
     calls: list[str] = []
 
-    async def failing_resync() -> int:
+    async def failing_resync() -> NoReturn:
         """Records the call and fails.
-
-        Returns:
-            Never.
 
         Raises:
             RuntimeError: Always.
@@ -285,7 +318,7 @@ async def test_broker_event_job_resyncs_and_survives_errors() -> None:
         raise RuntimeError("broker down")
 
     adapter = h.container.brokers["cathay"]
-    adapter.resync = failing_resync  # type: ignore[method-assign]
+    adapter.resync = failing_resync  # type: ignore[method-assign]  # injects a failure into this instance
     job = bootstrap.background_jobs(h.container)[-1]
     task = asyncio.ensure_future(job())
     for _ in range(20):
@@ -299,7 +332,7 @@ async def test_broker_event_job_resyncs_and_survives_errors() -> None:
 
 
 async def test_ibkr_edge_paths() -> None:
-    """IBKR adapter edge paths: foreign orders, transitional states."""
+    """IBKR ignores foreign fills; odd states and dead sockets fail closed."""
     clock = clock_lib.ManualClock(fixtures.new_york(MONDAY, 10))
     gateway, _ = _gateway(clock.now_ms())
     gateway.fail = {"instrument"}
@@ -351,32 +384,10 @@ async def test_ibkr_edge_paths() -> None:
     ib._fills.append(other)
     assert await adapter.list_recent_fills("acct") == []
     ib.errorEvent.emit(12345, 201, "unknown order", None)
-
-    def raising(contract: Any, order: Any) -> Any:
-        """Fails like a broken socket after sending.
-
-        Args:
-            contract: Contract.
-            order: Order.
-
-        Raises:
-            OSError: Always.
-        """
-        raise OSError("socket closed")
-
-    ib.placeOrder = raising  # type: ignore[method-assign]
+    ib.placeOrder = _closed_socket_place_order  # type: ignore[method-assign]  # injects a failure into this fake
     with pytest.raises(errors.AdapterTimeoutError):
         await adapter.submit_order(
             dataclasses.replace(request, client_order_id=cid[:-1] + "2")
         )
-
-    async def broken() -> list[Any]:
-        """Fails a resync request.
-
-        Raises:
-            ConnectionError: Always.
-        """
-        raise ConnectionError("lost")
-
-    ib.reqAllOpenOrdersAsync = broken  # type: ignore[method-assign]
+    ib.reqAllOpenOrdersAsync = _lost_open_orders  # type: ignore[method-assign]  # injects a failure into this fake
     assert await adapter.resync() == 0

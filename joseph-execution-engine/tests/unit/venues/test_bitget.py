@@ -7,6 +7,7 @@ from __future__ import annotations
 
 import decimal
 import json
+from typing import Any
 
 import httpx
 import pytest
@@ -35,27 +36,27 @@ KEYS = {
 
 
 class _Directory:
-    """In-memory order directory."""
+    """In-memory order directory keyed by client order id."""
 
     def __init__(self, known: list[directory.KnownOrder]) -> None:
         """Initializes the directory.
 
         Args:
-            known: Orders.
+            known: Orders the directory knows.
         """
         self._known = {k.client_order_id: k for k in known}
 
     def find(
         self, account_id: str, client_order_id: str
     ) -> directory.KnownOrder | None:
-        """Finds an order.
+        """Finds a known order by client id.
 
         Args:
-            account_id: Account.
-            client_order_id: Client id.
+            account_id: Ignored; the tests use one account.
+            client_order_id: Client order id.
 
         Returns:
-            Order or ``None``.
+            The order, or ``None`` when it is not known.
         """
         del account_id
         return self._known.get(client_order_id)
@@ -63,14 +64,14 @@ class _Directory:
     def recent(
         self, account_id: str, since_ms: int
     ) -> list[directory.KnownOrder]:
-        """Lists orders.
+        """Lists every known order, whatever the account and time.
 
         Args:
-            account_id: Account.
-            since_ms: Lower bound.
+            account_id: Ignored; the tests use one account.
+            since_ms: Ignored lower bound, epoch milliseconds.
 
         Returns:
-            Orders.
+            The known orders.
         """
         del account_id, since_ms
         return list(self._known.values())
@@ -86,13 +87,14 @@ def _adapter(
     """Builds an adapter for account ``acct``.
 
     Args:
-        fields: Credential fields.
-        known: Directory orders.
-        connector: Fake WebSocket connector.
-        mono: Manual monotonic clock.
+        fields: Credential fields of ``acct``; ``KEYS`` when empty.
+        known: OMS orders visible through the directory.
+        connector: Fake WebSocket connector; one without scripts by default.
+        mono: Manual monotonic clock; a new one by default.
 
     Returns:
-        Adapter.
+        The LIVE-enabled adapter, on a manual wall clock at
+        1_795_000_000_000 ms.
     """
     clock = mono or venue_fakes.ManualMonotonic()
     return bitget.BitgetFuturesAdapter(
@@ -108,13 +110,13 @@ def _adapter(
 
 
 def _ok(data: object) -> httpx.Response:
-    """Builds a ``00000`` answer.
+    """Builds a Bitget success (``00000``) answer.
 
     Args:
-        data: ``data`` field.
+        data: Value of the ``data`` field.
 
     Returns:
-        Response.
+        A 200 response wrapping ``data``.
     """
     return httpx.Response(
         200,
@@ -131,12 +133,12 @@ def _fail(code: str, msg: str, status: int = 400) -> httpx.Response:
     """Builds an error answer.
 
     Args:
-        code: Venue code.
-        msg: Message.
+        code: Venue error code.
+        msg: Venue message.
         status: HTTP status.
 
     Returns:
-        Response.
+        The error response, with a null ``data`` field.
     """
     return httpx.Response(
         status, json={"code": code, "msg": msg, "requestTime": 1, "data": None}
@@ -144,11 +146,11 @@ def _fail(code: str, msg: str, status: int = 400) -> httpx.Response:
 
 
 def _check_signature(request: httpx.Request, demo: bool = False) -> None:
-    """Recomputes ``ACCESS-SIGN`` and checks the auth headers.
+    """Recomputes ``ACCESS-SIGN`` and asserts the auth headers.
 
     Args:
         request: Captured request.
-        demo: Expect the ``paptrading`` header.
+        demo: Whether the demo-trading ``paptrading`` header must be set.
     """
     path = request.url.raw_path.decode()
     body = request.content.decode()
@@ -165,11 +167,11 @@ def _check_signature(request: httpx.Request, demo: bool = False) -> None:
 
 
 def _settings(hold: str = "one_way_mode", mode: str = "unified") -> None:
-    """Mocks health and account settings.
+    """Mocks the server time and the account settings (BTCUSDT 3x cross).
 
     Args:
-        hold: ``holdMode``.
-        mode: ``accountMode``.
+        hold: Account ``holdMode``.
+        mode: Account ``accountMode``.
     """
     respx.get(f"{API}/api/v3/market/time").mock(
         return_value=_ok({"serverTime": "1"})
@@ -193,13 +195,13 @@ def _settings(hold: str = "one_way_mode", mode: str = "unified") -> None:
 
 
 def _request(**overrides: object) -> trading.VenueOrderRequest:
-    """Builds an order request.
+    """Builds an order request for account ``acct``.
 
     Args:
-        **overrides: Overrides.
+        **overrides: Request fields that replace the defaults.
 
     Returns:
-        Request.
+        By default a GTC limit buy of 0.01 BTCUSDT at 45000, 3x cross.
     """
     fields: dict[str, object] = {
         "account_id": "acct",
@@ -215,7 +217,7 @@ def _request(**overrides: object) -> trading.VenueOrderRequest:
         "margin_mode": enums.MarginMode.CROSS,
     }
     fields.update(overrides)
-    return trading.VenueOrderRequest(**fields)  # type: ignore[arg-type]
+    return trading.VenueOrderRequest(**fields)  # type: ignore[arg-type]  # dict[str, object] holds each field's own type
 
 
 @respx.mock
@@ -638,7 +640,9 @@ async def test_private_stream_logs_in_and_subscribes() -> None:
         mono,
     )
     adapter = _adapter(connector=connector, mono=mono)
-    events = await venue_fakes.collect(adapter.stream_account_events("acct"), 2)
+    events: list[Any] = await venue_fakes.collect(
+        adapter.stream_account_events("acct"), 2
+    )
     assert connector.urls[0] == "wss://ws.bitget.com/v3/ws/private"
     login = json.loads(connector.connections[0].sent[0])
     args = login["args"][0]
@@ -653,4 +657,4 @@ async def test_private_stream_logs_in_and_subscribes() -> None:
         "position",
         "account",
     ]
-    assert events[-1].order is not None  # type: ignore[attr-defined]
+    assert events[-1].order is not None

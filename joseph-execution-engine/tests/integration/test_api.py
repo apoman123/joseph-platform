@@ -6,6 +6,7 @@
 from __future__ import annotations
 
 import collections.abc
+from typing import TypeAlias
 
 import pytest
 from fastapi import testclient
@@ -13,7 +14,7 @@ from fastapi import testclient
 from joseph_execution import bootstrap
 from joseph_execution.testing import harness
 
-Validate = collections.abc.Callable[[str, str, object], None]
+_Validate: TypeAlias = collections.abc.Callable[[str, str, object], None]
 EXEC = "execution.schema.json"
 
 
@@ -24,7 +25,7 @@ def ctx() -> collections.abc.Iterator[
     """Provides a harness and a running test client.
 
     Yields:
-        ``(harness, client)``.
+        ``(harness, client)``; the app's lifespan runs until teardown.
     """
     h = harness.build()
     with testclient.TestClient(bootstrap.build_app(h.container)) as client:
@@ -33,7 +34,7 @@ def ctx() -> collections.abc.Iterator[
 
 def test_preview_submit_and_read_models(
     ctx: tuple[harness.Harness, testclient.TestClient],
-    contract_validate: Validate,
+    contract_validate: _Validate,
 ) -> None:
     """Preview, submit and every read model conform to the contracts."""
     _, client = ctx
@@ -75,9 +76,9 @@ def test_preview_submit_and_read_models(
 
 def test_idempotency_replay_and_conflict(
     ctx: tuple[harness.Harness, testclient.TestClient],
-    contract_validate: Validate,
+    contract_validate: _Validate,
 ) -> None:
-    """Replays return the original intent; altered bodies conflict."""
+    """Replays return the original intent, changes conflict, no key is 422."""
     _, client = ctx
     first = client.post(
         "/v1/orders/intents",
@@ -114,7 +115,7 @@ def test_idempotency_replay_and_conflict(
 
 def test_validation_errors_are_contract_shaped(
     ctx: tuple[harness.Harness, testclient.TestClient],
-    contract_validate: Validate,
+    contract_validate: _Validate,
 ) -> None:
     """Bad bodies yield VALIDATION_FAILED with field errors."""
     _, client = ctx
@@ -179,19 +180,23 @@ def test_tenant_isolation_over_http(
         headers=harness.headers(idempotency_key="a1"),
     ).json()
     order_id = created["orders"][0]["order_id"]
-    b = harness.headers(harness.TOKEN_B)
-    assert client.get("/v1/orders", headers=b).json()["orders"] == []
+    headers_b = harness.headers(harness.TOKEN_B)
+    assert client.get("/v1/orders", headers=headers_b).json()["orders"] == []
     assert (
-        client.post(f"/v1/orders/{order_id}/cancel", headers=b).status_code
+        client.post(
+            f"/v1/orders/{order_id}/cancel", headers=headers_b
+        ).status_code
         == 404
     )
     assert (
         client.post(
-            f"/v1/orders/{order_id}/amend", json={}, headers=b
+            f"/v1/orders/{order_id}/amend", json={}, headers=headers_b
         ).status_code
         == 404
     )
-    summary = client.get(f"/v1/accounts/{harness.PAPER_A}/summary", headers=b)
+    summary = client.get(
+        f"/v1/accounts/{harness.PAPER_A}/summary", headers=headers_b
+    )
     assert summary.status_code == 404
     steal = client.post(
         "/v1/orders/intents",
@@ -199,15 +204,15 @@ def test_tenant_isolation_over_http(
         headers=harness.headers(harness.TOKEN_B, "b1"),
     )
     assert steal.status_code == 404
-    accounts = client.get("/v1/accounts", headers=b).json()["accounts"]
+    accounts = client.get("/v1/accounts", headers=headers_b).json()["accounts"]
     assert [a["account_id"] for a in accounts] == [harness.PAPER_B]
 
 
 def test_cancel_amend_close_endpoints(
     ctx: tuple[harness.Harness, testclient.TestClient],
-    contract_validate: Validate,
+    contract_validate: _Validate,
 ) -> None:
-    """Cancel, amend and close endpoints return contract objects."""
+    """The cancel, amend and close endpoints return contract objects."""
     _, client = ctx
     hdr = harness.headers()
     resting = client.post(
@@ -262,9 +267,9 @@ def test_cancel_amend_close_endpoints(
 
 def test_kill_switch_limits_and_deployments(
     ctx: tuple[harness.Harness, testclient.TestClient],
-    contract_validate: Validate,
+    contract_validate: _Validate,
 ) -> None:
-    """Kill switch, limits and deployment endpoints behave safely."""
+    """The kill switch blocks, limits clamp and AUTO_LIVE consent is refused."""
     h, client = ctx
     hdr = harness.headers()
     switch = client.post(
@@ -374,7 +379,7 @@ def test_kill_switch_limits_and_deployments(
 
 def test_account_connection_never_echoes_secrets(
     ctx: tuple[harness.Harness, testclient.TestClient],
-    contract_validate: Validate,
+    contract_validate: _Validate,
 ) -> None:
     """Credentials are sealed, never echoed and can be revoked."""
     _, client = ctx
@@ -434,7 +439,7 @@ def test_account_connection_never_echoes_secrets(
 
 def test_user_stream_auth_isolation_and_replay(
     ctx: tuple[harness.Harness, testclient.TestClient],
-    contract_validate: Validate,
+    contract_validate: _Validate,
 ) -> None:
     """The user stream is authenticated, tenant scoped and resumable."""
     _, client = ctx

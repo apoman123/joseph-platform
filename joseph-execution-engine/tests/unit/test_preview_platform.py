@@ -10,6 +10,8 @@ import base64
 import dataclasses
 import decimal
 import logging
+from collections.abc import Callable
+from typing import TypeAlias
 
 import pytest
 
@@ -36,16 +38,17 @@ META = market.InstrumentMeta(
     D("0.001"),
     enums.InstrumentStatus.TRADING,
 )
+_Validate: TypeAlias = Callable[[str, str, object], None]
 
 
 def _req(**overrides: object) -> intents.OrderIntentRequest:
-    """Builds a limit request.
+    """Builds a limit request off the ``META`` lot and tick grid.
 
     Args:
-        **overrides: Overrides.
+        **overrides: Request fields that replace the defaults.
 
     Returns:
-        Request.
+        By default a paper GTC limit buy of 0.0109 BTC at 100.26, 2x.
     """
     fields: dict[str, object] = {
         "account_id": "a",
@@ -62,7 +65,7 @@ def _req(**overrides: object) -> intents.OrderIntentRequest:
         "leverage": D(2),
     }
     fields.update(overrides)
-    return intents.OrderIntentRequest(**fields)  # type: ignore[arg-type]
+    return intents.OrderIntentRequest(**fields)  # type: ignore[arg-type]  # dict[str, object] holds each field's own type
 
 
 def test_normalize_floors_quantity_and_rounds_prices() -> None:
@@ -90,12 +93,12 @@ def test_normalize_rejects_zero_quantity() -> None:
 
 
 def test_estimates() -> None:
-    """Estimates walk the book for market orders and price fees."""
+    """Estimates walk the book, price fees and skip margin for reduce-only."""
     book = market.BookView(
         BTC, ((D(99), D(1)),), ((D(100), D("0.5")), (D(102), D(10))), 1
     )
     fees = preview.FeeSchedule()
-    est = preview.estimate(
+    market_estimate = preview.estimate(
         _req(
             order_type=enums.OrderType.MARKET,
             limit_price=None,
@@ -108,9 +111,9 @@ def test_estimates() -> None:
         fees,
         now_ms=0,
     )
-    assert est.reference_price == D(101)
-    assert est.slippage_pct == D(1)
-    assert est.fee == D(101) * D(5) / D(10000)
+    assert market_estimate.reference_price == D(101)
+    assert market_estimate.slippage_pct == D(1)
+    assert market_estimate.fee == D(101) * D(5) / D(10000)
     maker = preview.estimate(
         _req(
             time_in_force=enums.TimeInForce.POST_ONLY,
@@ -269,7 +272,7 @@ def test_metrics_render() -> None:
 
 
 async def test_stream_hub_tenant_isolation_and_replay(
-    contract_validate: object,
+    contract_validate: _Validate,
 ) -> None:
     """Hub sequences per tenant, isolates tenants and bounds replay."""
     hub = streams.UserStreamHub(clock_lib.ManualClock(), retention=3)
@@ -283,7 +286,7 @@ async def test_stream_hub_tenant_isolation_and_replay(
     envelope = await asyncio.wait_for(sub_a.queue.get(), 1)
     contract_validate(
         "stream.schema.json",
-        "StreamEnvelope",  # type: ignore[operator]
+        "StreamEnvelope",
         envelope,
     )
     assert hub.current_sequence("a") == 5
