@@ -17,10 +17,10 @@ A newer `ci-cd` run cancels an older one on the same branch or pull request, exc
 
 | Job | Does |
 |---|---|
-| `terminal` | Contract generation check, format, lint, types, Vitest with coverage, boundaries, secret scan, licences, `pnpm audit`, build |
+| `terminal` | Contract generation check, format, lint (ESLint and stylelint), types, Vitest with coverage, boundaries, secret scan, licences, `pnpm audit`, build |
 | `terminal-e2e` | DEMO browser tests and accessibility |
-| `engines` (×2) | ruff, `mypy --strict`, pytest with coverage, OpenAPI drift, licences, `pip-audit` |
-| `system` | Both engines as real processes over HTTP and WebSocket |
+| `engines` (×2) | ruff format, ruff, pydoclint and the Google-style checks ([standards](standards/CODING_STANDARDS.md)), `mypy --strict`, pytest with coverage, OpenAPI drift, licences, `pip-audit` |
+| `system` | Python style checks of `system-tests`, then both engines as real processes over HTTP and WebSocket |
 | `fullstack` | Browser tests against the terminal and both engines |
 | `images` (×3) | After all test jobs, for pushes to `main` and `v*` tags |
 | `deploy-staging` | `main` → `staging` |

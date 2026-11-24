@@ -1,19 +1,19 @@
-# Test report — 2026-11-23
+# Test report — 2026-11-24
 
-Results of every test tier on the final code, for contributors and reviewers. Environment: Linux, Python 3.13 (uv), Node 24, pnpm 10.34, Chromium 1243 via Playwright 1.63. Every number is from an actual run.
+Results of every test tier on the final code, for contributors and reviewers. Environment: Linux, Python 3.12 (uv), Node 24, pnpm 10.34, Chromium 1243 via Playwright 1.63. Every number is from an actual run.
 
 ## Summary
 
 | Tier | Project | Result |
 |---|---|---|
-| Unit, integration, contract, architecture, property, replay, in-process system | Market engine | **1,879 passed**, 47 skipped (45 opt-in network, 1 SinoPac data test that needs keys, 1 Pine parity test awaiting TradingView exports) · 96% line coverage |
+| Unit, integration, contract, architecture, property, replay, in-process system | Market engine | **1,643 passed** (1,331 behaviour tests and 312 Google-style checks: one per file plus the checker's own tests), 47 skipped (45 opt-in network, 1 SinoPac data test that needs keys, 1 Pine parity test awaiting TradingView exports) · 96% line coverage |
 | Live venue (opt-in, public APIs) | Market engine | **44 passed**, 1 skipped (no Alpaca key), 1 deselected (SinoPac data, needs keys): five crypto venues including MEXC Protobuf and the Lighter archive, TWSE, TPEx, Nasdaq Trader, Treasury. One Binance assertion failed once at a minute boundary; the test now allows 10 s of venue lag and passed 8/8 on reruns |
-| Unit, integration, contract, architecture, security, chaos, property, in-process system | Execution engine | **1,028 passed**, 9 skipped (7 need real credentials: 5 venue testnets, IBKR paper, SinoPac simulation; 2 opt-in network) · 97% line coverage. Venues run against mocks and official signature vectors; IBKR and Shioaji against fake clients |
+| Unit, integration, contract, architecture, security, chaos, property, in-process system | Execution engine | **917 passed** (738 behaviour tests and 179 style checks), 9 skipped (7 need real credentials: 5 venue testnets, IBKR paper, SinoPac simulation; 2 opt-in network) · 96% line coverage. Venues run against mocks and official signature vectors; IBKR and Shioaji against fake clients |
 | Live venue (opt-in) | Execution engine | **2 passed**: MEXC private-stream Protobuf decoding against the live public stream |
-| Unit, component, contract, architecture (Vitest) | Terminal | **904 passed** (106 files) · 83% line coverage (the browser tiers cover the canvas adapter) |
+| Unit, component, contract, architecture (Vitest) | Terminal | **904 passed** (106 files) · 82.5% line coverage (the browser tiers cover the canvas adapter) |
 | Browser system, DEMO (Playwright + axe) | Terminal | **47 passed** |
 | Full-stack browser: production build + both engines | All three | **12 passed** |
-| Cross-service system (real processes, HTTP + WebSocket) | Both engines | **70 passed** |
+| Cross-service system (real processes, HTTP + WebSocket) | Both engines | **116 passed** (70 cross-service tests and 46 style checks) |
 
 ## GitHub CI
 
@@ -23,17 +23,18 @@ Results of every test tier on the final code, for contributors and reviewers. En
 | `security.yml` (on `main`, pull requests and weekly) | **Green.** Full-history secret scan; CodeQL for Python, JavaScript/TypeScript and Actions; npm and Python audits |
 | CodeQL alerts | **0 open:** 15 fixed, 2 dismissed as false positives (venue-mandated HMAC request signing; a redaction test that logs a fake secret) |
 
+The 2026-11-24 style pass was checked before it was pushed by rehearsing both workflows' jobs on a clean clone (lint, types, every test tier, OpenAPI drift, licences, audits, build, browser tests, secret scan, actionlint): all passed. The numbers above come from that run.
+
 ## Static checks
 
 | Check | Result |
 |---|---|
-| ruff format + ruff (Google docstrings) | Clean in both engines and system-tests |
+| Google Python style: ruff format, ruff, pydoclint and the GPY checks ([standards](../standards/CODING_STANDARDS.md)) | Clean in both engines and system-tests |
 | `mypy --strict` | 169 files (market), 105 (execution): no issues |
-| Google style tests | Pass |
 | import-linter | Market 8/8 contracts; execution 7/7 |
-| ESLint (Google TS, JSDoc), Prettier, `tsc` | 0 problems |
+| Google TypeScript, JavaScript and CSS style: ESLint (with JSDoc and local rules), stylelint, Prettier, `tsc` | 0 problems |
 | Contracts and OpenAPI drift | Up to date |
-| dependency-cruiser | 368 modules, 0 violations |
+| dependency-cruiser | 369 modules, 0 violations |
 | Secret scan | Pass |
 | Licences | 65 production npm packages allowed (1 reviewed exception: `@img/sharp-libvips`, LGPL, server-only via Next.js); no GPL/AGPL Python dependencies |
 | Production build | `next build` succeeds; 103 kB shared first-load JS |

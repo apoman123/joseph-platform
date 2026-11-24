@@ -79,7 +79,8 @@ All routes except `/health` need `Authorization: Bearer <token>`; errors use the
 
 ```bash
 uv run pytest     # unit, integration, chaos, security, property, contract, architecture, system
-uv run ruff check src tests && uv run mypy src && uv run lint-imports
+uv run ruff format --check src tests scripts && uv run ruff check src tests scripts
+uv run pydoclint -q src tests scripts && uv run mypy && uv run lint-imports
 ```
 
 System tests start a real uvicorn process. Opt-in broker checks (IBKR paper, SinoPac simulation): [brokers](../docs/BROKERS.md).

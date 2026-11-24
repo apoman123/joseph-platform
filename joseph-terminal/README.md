@@ -56,7 +56,7 @@ The `Dockerfile` builds a standalone image on port 3000; pass the same variables
 
 `pnpm lint` · `pnpm typecheck` · `pnpm test` · `pnpm test:e2e` (Playwright + axe, DEMO) · `pnpm contracts:gen|check` · `pnpm arch:check` · `pnpm secrets:scan` · `pnpm licenses:check` · `pnpm build` · `pnpm ci` (everything but the browser tests). `pnpm test:e2e:fullstack` starts both engines from sibling directories `../joseph-market-engine` and `../joseph-execution-engine`.
 
-Code follows the Google TypeScript Style Guide (ESLint, Prettier, JSDoc). Extensions: [plugin authoring](docs/PLUGIN_AUTHORING.md). Architecture decisions: [docs/adr](docs/adr/).
+Code follows Google's TypeScript, JavaScript and HTML/CSS style guides (ESLint, stylelint, Prettier, JSDoc). Extensions: [plugin authoring](docs/PLUGIN_AUTHORING.md). Architecture decisions: [docs/adr](docs/adr/).
 
 ## License
 
