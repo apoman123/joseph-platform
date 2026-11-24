@@ -1,3 +1,6 @@
+# Copyright 2026 apoman123
+# SPDX-License-Identifier: MIT
+
 """Cross-service system tests.
 
 Signal → deployment → paper order, streams, security boundaries and a
@@ -54,7 +57,7 @@ def _signal(
         {
             "signal_id": str(uuid.uuid4()),
             "tenant_id": "tenant-a",
-            "strategy_id": strategy_version_id.split(":")[0],
+            "strategy_id": strategy_version_id.split(":", maxsplit=1)[0],
             "strategy_version_id": strategy_version_id,
             "instrument_id": MOCK_BTC,
             "entry_price": entry,
@@ -240,7 +243,7 @@ async def test_user_stream_requires_token_and_streams_orders(
 ) -> None:
     """The user stream rejects anonymous clients and streams order events."""
     base = services["execution"].replace("http", "ws") + "/v1/stream/user"
-    with pytest.raises(Exception):  # noqa: B017, PT011 - any rejection.
+    with pytest.raises(Exception):  # noqa: B017 - any rejection.
         async with websockets.connect(base) as ws:
             await ws.send(
                 json.dumps(

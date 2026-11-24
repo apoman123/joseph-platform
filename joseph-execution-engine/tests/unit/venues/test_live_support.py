@@ -1,3 +1,6 @@
+# Copyright 2026 apoman123
+# SPDX-License-Identifier: MIT
+
 """Supervisor, venue valuation, fail-closed refusals and plan orders."""
 
 from __future__ import annotations

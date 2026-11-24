@@ -1,3 +1,6 @@
+# Copyright 2026 apoman123
+# SPDX-License-Identifier: MIT
+
 """Strategy authoring: immutable versions, validation and activation.
 
 Every saved change creates a new immutable version; activation never

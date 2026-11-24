@@ -1,3 +1,6 @@
+# Copyright 2026 apoman123
+# SPDX-License-Identifier: MIT
+
 """Signature test vectors for every live venue.
 
 * Binance: the official HMAC example of the USDⓈ-M "General Info" page

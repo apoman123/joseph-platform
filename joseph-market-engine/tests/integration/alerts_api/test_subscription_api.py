@@ -1,3 +1,6 @@
+# Copyright 2026 apoman123
+# SPDX-License-Identifier: MIT
+
 """Integration tests for the alert subscription API."""
 
 from __future__ import annotations

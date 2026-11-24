@@ -1,3 +1,6 @@
+# Copyright 2026 apoman123
+# SPDX-License-Identifier: MIT
+
 """Data provenance, feed modes and health states.
 
 Every value shown to a user or consumed by a strategy carries its provenance

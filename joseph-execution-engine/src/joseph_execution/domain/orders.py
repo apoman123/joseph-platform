@@ -1,3 +1,6 @@
+# Copyright 2026 apoman123
+# SPDX-License-Identifier: MIT
+
 """Order aggregate with an explicit state machine.
 
 Transitions not listed in ``TRANSITIONS`` raise ``InvalidTransitionError``.

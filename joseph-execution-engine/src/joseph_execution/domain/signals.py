@@ -1,3 +1,6 @@
+# Copyright 2026 apoman123
+# SPDX-License-Identifier: MIT
+
 """Minimal view of a market-engine ``Signal`` needed for execution."""
 
 from __future__ import annotations

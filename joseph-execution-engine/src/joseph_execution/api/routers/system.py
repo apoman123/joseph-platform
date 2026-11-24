@@ -1,3 +1,6 @@
+# Copyright 2026 apoman123
+# SPDX-License-Identifier: MIT
+
 """Health, metrics and the authenticated user stream."""
 
 from __future__ import annotations

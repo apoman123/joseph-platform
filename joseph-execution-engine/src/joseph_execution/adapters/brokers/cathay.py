@@ -1,3 +1,6 @@
+# Copyright 2026 apoman123
+# SPDX-License-Identifier: MIT
+
 """Cathay Securities (TWSE, TPEx): fail-closed until its SDK arrives.
 
 Cathay Securities publishes no developer API; an SDK/spec is available

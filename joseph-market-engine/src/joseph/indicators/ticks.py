@@ -1,3 +1,6 @@
+# Copyright 2026 apoman123
+# SPDX-License-Identifier: MIT
+
 """Instrument tick sizes for indicator settings (Pine ``syminfo.mintick``).
 
 The ported Pine indicators compare and round prices in ticks. Plugins only

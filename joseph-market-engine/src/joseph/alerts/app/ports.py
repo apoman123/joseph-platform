@@ -1,3 +1,6 @@
+# Copyright 2026 apoman123
+# SPDX-License-Identifier: MIT
+
 """Ports of the alerts application layer."""
 
 from __future__ import annotations

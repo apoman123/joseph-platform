@@ -1,3 +1,6 @@
+# Copyright 2026 apoman123
+# SPDX-License-Identifier: MIT
+
 """System tests for the market engine running as a real process."""
 
 from __future__ import annotations

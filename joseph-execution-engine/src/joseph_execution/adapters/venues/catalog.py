@@ -1,3 +1,6 @@
+# Copyright 2026 apoman123
+# SPDX-License-Identifier: MIT
+
 """Documented trading capabilities of the five crypto venues.
 
 Values follow each venue's official API documentation (re-read 2026-11-23;

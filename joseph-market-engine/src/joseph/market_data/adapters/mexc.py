@@ -1,3 +1,6 @@
+# Copyright 2026 apoman123
+# SPDX-License-Identifier: MIT
+
 """MEXC Futures (contract API) market-data adapter.
 
 REST base: ``https://contract.mexc.com/api/v1/contract`` — ``detail``,

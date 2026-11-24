@@ -1,3 +1,6 @@
+# Copyright 2026 apoman123
+# SPDX-License-Identifier: MIT
+
 """Fail-closed venue adapter.
 
 Used wherever no trading adapter can serve an account: venues without

@@ -1,3 +1,6 @@
+# Copyright 2026 apoman123
+# SPDX-License-Identifier: MIT
+
 """Node-by-node semantics of the tri-state evaluator."""
 
 from __future__ import annotations

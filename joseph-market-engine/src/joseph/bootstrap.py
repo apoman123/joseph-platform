@@ -1,3 +1,6 @@
+# Copyright 2026 apoman123
+# SPDX-License-Identifier: MIT
+
 """Dependency-injection composition root for the market engine.
 
 Wires adapters to ports. This is the only module allowed to import the API

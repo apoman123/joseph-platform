@@ -1,3 +1,6 @@
+# Copyright 2026 apoman123
+# SPDX-License-Identifier: MIT
+
 """Market-data application service (read side used by the API and engines).
 
 Implements ``ports.CandleSource`` (``get_candles`` returns final candles

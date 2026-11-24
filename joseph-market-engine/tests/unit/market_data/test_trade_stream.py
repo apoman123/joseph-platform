@@ -1,3 +1,6 @@
+# Copyright 2026 apoman123
+# SPDX-License-Identifier: MIT
+
 """Unit tests for reconnecting trade streams and trade-built candles."""
 
 from __future__ import annotations

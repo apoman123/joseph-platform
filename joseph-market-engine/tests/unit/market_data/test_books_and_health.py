@@ -1,3 +1,6 @@
+# Copyright 2026 apoman123
+# SPDX-License-Identifier: MIT
+
 """Unit tests for order-book reconciliation, slippage and feed health."""
 
 from __future__ import annotations

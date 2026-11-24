@@ -1,3 +1,6 @@
+# Copyright 2026 apoman123
+# SPDX-License-Identifier: MIT
+
 """Interactive Brokers adapter (US stocks and ETFs: Nasdaq, NYSE, Cboe).
 
 Talks to IB Gateway or TWS through ``ib_async`` (BSD-2-Clause, optional

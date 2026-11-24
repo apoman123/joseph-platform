@@ -120,10 +120,13 @@ jobs:
         with:
           token: ${{ secrets.PINESCRIPTS_TOKEN }}
       - run: uv sync --frozen
-      - name: Google Python style (ruff format + ruff + docstrings)
+      # Rules and their checks: docs/standards/CODING_STANDARDS.md.
+      - name: Google Python style (ruff format, ruff, pydoclint, GPY checks)
         run: |
           uv run ruff format --check src tests scripts
           uv run ruff check src tests scripts
+          uv run pydoclint -q src tests scripts
+          uv run pytest -q -p no:cacheprovider tests/architecture/test_code_standards.py
       - name: mypy --strict
         run: uv run mypy
       - name: Unit, integration, contract, architecture, property, security, chaos
@@ -163,6 +166,13 @@ jobs:
           (cd joseph-market-engine && uv sync --frozen)
           (cd joseph-execution-engine && uv sync --frozen)
           (cd system-tests && uv sync --frozen)
+      - name: Google Python style (ruff format, ruff, pydoclint, GPY checks)
+        working-directory: system-tests
+        run: |
+          uv run ruff format --check tests launchers
+          uv run ruff check tests launchers
+          uv run pydoclint -q tests launchers
+          uv run pytest -q -p no:cacheprovider tests/test_code_standards.py
       - name: Both engines as real processes over HTTP and WebSocket
         working-directory: system-tests
         run: uv run pytest -s

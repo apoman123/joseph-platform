@@ -1,3 +1,6 @@
+# Copyright 2026 apoman123
+# SPDX-License-Identifier: MIT
+
 """Shared pytest fixtures for the execution engine test suite."""
 
 from __future__ import annotations

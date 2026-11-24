@@ -1,3 +1,6 @@
+# Copyright 2026 apoman123
+# SPDX-License-Identifier: MIT
+
 """Indicator engine, plugins and queries on exchange session calendars."""
 
 from __future__ import annotations

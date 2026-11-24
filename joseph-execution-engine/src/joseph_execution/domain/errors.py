@@ -1,3 +1,6 @@
+# Copyright 2026 apoman123
+# SPDX-License-Identifier: MIT
+
 """Execution error hierarchy carrying contract ``ErrorCode`` values."""
 
 from __future__ import annotations

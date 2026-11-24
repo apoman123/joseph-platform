@@ -1,3 +1,6 @@
+# Copyright 2026 apoman123
+# SPDX-License-Identifier: MIT
+
 """Small infrastructure ports: clock, ids, events, metrics, security."""
 
 from __future__ import annotations

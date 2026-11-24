@@ -1,3 +1,6 @@
+# Copyright 2026 apoman123
+# SPDX-License-Identifier: MIT
+
 """Taipei Exchange (TPEx, 櫃買中心) market-data adapter (official, free).
 
 Serves the TPEx mainboard (上櫃): common stocks and ETFs, including the

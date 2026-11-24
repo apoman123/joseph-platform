@@ -1,3 +1,6 @@
+# Copyright 2026 apoman123
+# SPDX-License-Identifier: MIT
+
 """Hyperliquid adapter: agent checks, signed actions, precision, stream."""
 
 from __future__ import annotations

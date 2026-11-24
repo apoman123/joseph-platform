@@ -1,3 +1,6 @@
+# Copyright 2026 apoman123
+# SPDX-License-Identifier: MIT
+
 """Bitget public trade archive (``www.bitget.com/data-download``), USDT-M.
 
 Bitget publishes every USDT-M futures trade as free downloads that need no

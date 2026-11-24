@@ -1,3 +1,6 @@
+# Copyright 2026 apoman123
+# SPDX-License-Identifier: MIT
+
 """Alert routing, quiet hours, delivery records and message formatting.
 
 Pure domain logic: deciding *who* receives a signal on *which* channel and

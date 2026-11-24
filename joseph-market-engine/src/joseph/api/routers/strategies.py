@@ -1,3 +1,6 @@
+# Copyright 2026 apoman123
+# SPDX-License-Identifier: MIT
+
 """Strategy authoring routes (``/v1/strategies``).
 
 This module deliberately does not use postponed annotations: FastAPI must

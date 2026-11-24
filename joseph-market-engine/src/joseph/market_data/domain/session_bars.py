@@ -1,3 +1,6 @@
+# Copyright 2026 apoman123
+# SPDX-License-Identifier: MIT
+
 """Session-aligned candles for exchange and rate venues (pure).
 
 Bars of exchange-listed instruments follow the instrument's session calendar

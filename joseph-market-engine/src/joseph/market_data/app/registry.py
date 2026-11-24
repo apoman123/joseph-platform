@@ -1,3 +1,6 @@
+# Copyright 2026 apoman123
+# SPDX-License-Identifier: MIT
+
 """Instrument registry aggregated across venues.
 
 Results are always exact-venue instruments: searching ``BTC`` returns

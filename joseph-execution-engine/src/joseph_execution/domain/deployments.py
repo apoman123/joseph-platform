@@ -1,3 +1,6 @@
+# Copyright 2026 apoman123
+# SPDX-License-Identifier: MIT
+
 """Strategy deployments and scoped AUTO_LIVE consent.
 
 A deployment binds one immutable strategy version to one account. AUTO_LIVE

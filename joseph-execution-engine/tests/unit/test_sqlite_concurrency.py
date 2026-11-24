@@ -1,3 +1,6 @@
+# Copyright 2026 apoman123
+# SPDX-License-Identifier: MIT
+
 """Regression test: a reader must never block a writer's commit (WAL)."""
 
 from __future__ import annotations

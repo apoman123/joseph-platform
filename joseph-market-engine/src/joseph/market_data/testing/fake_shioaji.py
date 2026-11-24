@@ -1,3 +1,6 @@
+# Copyright 2026 apoman123
+# SPDX-License-Identifier: MIT
+
 """In-memory stand-in for ``shioaji.Shioaji`` market data (no network).
 
 Mirrors the Shioaji 1.7.11 shapes the market-data source depends on

@@ -1,3 +1,6 @@
+# Copyright 2026 apoman123
+# SPDX-License-Identifier: MIT
+
 """Adapters running the external ``smc_indicators`` package as plugins.
 
 The indicator algorithms live in the ``apoman123/PineScripts`` repository

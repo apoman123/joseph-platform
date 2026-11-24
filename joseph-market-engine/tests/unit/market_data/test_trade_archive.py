@@ -1,3 +1,6 @@
+# Copyright 2026 apoman123
+# SPDX-License-Identifier: MIT
+
 """Unit tests for the recorded-trade archive (memory and SQL) and reader."""
 
 from __future__ import annotations

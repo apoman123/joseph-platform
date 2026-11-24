@@ -1,3 +1,6 @@
+# Copyright 2026 apoman123
+# SPDX-License-Identifier: MIT
+
 """Static mapping from rule vocabulary to indicator plugins.
 
 The strategy engine only reads published indicator outputs. This catalog

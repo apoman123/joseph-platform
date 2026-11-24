@@ -1,3 +1,6 @@
+# Copyright 2026 apoman123
+# SPDX-License-Identifier: MIT
+
 """Candle timeframes and UTC-aligned bar boundaries.
 
 All bars are half-open intervals ``[start_ms, end_ms)`` aligned to the UTC

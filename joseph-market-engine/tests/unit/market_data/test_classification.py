@@ -1,3 +1,6 @@
+# Copyright 2026 apoman123
+# SPDX-License-Identifier: MIT
+
 """Unit tests for quote-rule, tick-test and Lee-Ready classification."""
 
 from __future__ import annotations

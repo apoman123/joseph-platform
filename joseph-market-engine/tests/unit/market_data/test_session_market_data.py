@@ -1,3 +1,6 @@
+# Copyright 2026 apoman123
+# SPDX-License-Identifier: MIT
+
 """Session-aware market data on exchange calendars (XNYS, XTAI)."""
 
 from __future__ import annotations

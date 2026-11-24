@@ -1,3 +1,6 @@
+# Copyright 2026 apoman123
+# SPDX-License-Identifier: MIT
+
 """Contract tests: captured venue payloads → canonical, schema-valid objects.
 
 Each adapter parses real responses captured from the public APIs

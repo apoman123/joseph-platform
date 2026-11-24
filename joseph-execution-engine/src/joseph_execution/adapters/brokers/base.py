@@ -1,3 +1,6 @@
+# Copyright 2026 apoman123
+# SPDX-License-Identifier: MIT
+
 """Shared machinery of the securities broker adapters.
 
 * ``EventBuffer`` turns broker callbacks into ordered ``VenueEvent``s per

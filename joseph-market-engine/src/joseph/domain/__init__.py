@@ -1,3 +1,6 @@
+# Copyright 2026 apoman123
+# SPDX-License-Identifier: MIT
+
 """Shared domain kernel for the Joseph market engine.
 
 This package holds immutable value objects, enums and errors that every

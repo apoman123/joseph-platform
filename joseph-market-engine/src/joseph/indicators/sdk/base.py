@@ -1,3 +1,6 @@
+# Copyright 2026 apoman123
+# SPDX-License-Identifier: MIT
+
 """Reusable base class implementing the plugin contract boilerplate.
 
 Concrete plugins declare class-level metadata and implement three hooks:

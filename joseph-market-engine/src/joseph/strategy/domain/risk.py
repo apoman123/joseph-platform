@@ -1,3 +1,6 @@
+# Copyright 2026 apoman123
+# SPDX-License-Identifier: MIT
+
 """Projected entry, stop, target and net reward/risk for a setup.
 
 Entry is the close of the evaluated signal bar. When any input is missing

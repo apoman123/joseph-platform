@@ -1,3 +1,6 @@
+# Copyright 2026 apoman123
+# SPDX-License-Identifier: MIT
+
 """Validates the shared contract fixtures with the Python JSON Schema stack.
 
 The same fixtures are validated by the TypeScript suite with ajv, so both

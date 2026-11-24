@@ -1,3 +1,6 @@
+# Copyright 2026 apoman123
+# SPDX-License-Identifier: MIT
+
 """Qualification service: scans venues and applies the policy.
 
 Per venue: list instruments, fetch bulk snapshots, preselect the top

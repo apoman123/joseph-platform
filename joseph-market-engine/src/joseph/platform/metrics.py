@@ -1,3 +1,6 @@
+# Copyright 2026 apoman123
+# SPDX-License-Identifier: MIT
+
 """Minimal Prometheus text-format metrics registry (no third-party deps).
 
 Supports counters, gauges and histograms with string labels. Rendering

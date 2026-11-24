@@ -1,3 +1,6 @@
+# Copyright 2026 apoman123
+# SPDX-License-Identifier: MIT
+
 """Rule AST v2 models mirroring ``strategy.schema.json``.
 
 The visual builder emits this typed tree; nothing is ever evaluated as code.

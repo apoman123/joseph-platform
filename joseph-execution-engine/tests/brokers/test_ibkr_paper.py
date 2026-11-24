@@ -1,3 +1,6 @@
+# Copyright 2026 apoman123
+# SPDX-License-Identifier: MIT
+
 """Opt-in: round trip against a running IB Gateway paper account.
 
 Run with ``JOSEPH_IBKR_PAPER_TESTS=1 JOSEPH_IBKR_PAPER_ACCOUNT=DU...``

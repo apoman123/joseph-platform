@@ -1,3 +1,6 @@
+# Copyright 2026 apoman123
+# SPDX-License-Identifier: MIT
+
 """Contract tests: recording captured trade frames through real adapters.
 
 Each venue's captured trade stream (``fixtures/venues/*/ws_*``) is replayed

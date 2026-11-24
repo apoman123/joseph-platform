@@ -1,3 +1,6 @@
+# Copyright 2026 apoman123
+# SPDX-License-Identifier: MIT
+
 """Unit tests for the SinoPac Shioaji adapter against a fake SDK."""
 
 from __future__ import annotations

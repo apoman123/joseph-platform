@@ -1,3 +1,6 @@
+# Copyright 2026 apoman123
+# SPDX-License-Identifier: MIT
+
 """Minimal error mapping for router tests.
 
 Production mapping to the contract ``ErrorResponse`` is owned by the API

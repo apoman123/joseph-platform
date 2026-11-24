@@ -1,3 +1,6 @@
+# Copyright 2026 apoman123
+# SPDX-License-Identifier: MIT
+
 """In-memory stand-in for ``ib_async.IB`` used by tests (no network).
 
 It mirrors the ``ib_async`` behaviours the adapter depends on: trades are

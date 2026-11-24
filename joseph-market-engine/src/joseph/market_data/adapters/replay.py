@@ -1,3 +1,6 @@
+# Copyright 2026 apoman123
+# SPDX-License-Identifier: MIT
+
 """Replay source reading recorded candles from JSONL files.
 
 Layout: ``<root>/<venue>/<market_type>/<venue_market_id>/<timeframe>.jsonl``

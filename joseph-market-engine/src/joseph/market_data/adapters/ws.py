@@ -1,3 +1,6 @@
+# Copyright 2026 apoman123
+# SPDX-License-Identifier: MIT
+
 """Reconnecting native WebSocket candle and trade streams with recovery.
 
 One implementation serves every venue:

@@ -1,3 +1,6 @@
+# Copyright 2026 apoman123
+# SPDX-License-Identifier: MIT
+
 """Exhaustive truth tables for Kleene three-valued logic."""
 
 from __future__ import annotations

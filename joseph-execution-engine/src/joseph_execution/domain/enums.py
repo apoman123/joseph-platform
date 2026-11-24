@@ -1,3 +1,6 @@
+# Copyright 2026 apoman123
+# SPDX-License-Identifier: MIT
+
 """Enumerations mirroring ``execution.schema.json`` and ``common``."""
 
 from __future__ import annotations

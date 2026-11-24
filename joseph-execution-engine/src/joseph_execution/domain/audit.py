@@ -1,3 +1,6 @@
+# Copyright 2026 apoman123
+# SPDX-License-Identifier: MIT
+
 """Append-only, hash-chained audit records."""
 
 from __future__ import annotations

@@ -1,3 +1,6 @@
+# Copyright 2026 apoman123
+# SPDX-License-Identifier: MIT
+
 """Unit tests: exchange and rate venues bypass crypto bar derivation."""
 
 from __future__ import annotations

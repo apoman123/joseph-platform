@@ -1,3 +1,6 @@
+# Copyright 2026 apoman123
+# SPDX-License-Identifier: MIT
+
 """Kill switches: engaging blocks new opening orders.
 
 Cancelling open orders and flattening positions are separate, explicit

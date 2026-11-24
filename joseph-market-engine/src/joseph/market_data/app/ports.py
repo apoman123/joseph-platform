@@ -1,3 +1,6 @@
+# Copyright 2026 apoman123
+# SPDX-License-Identifier: MIT
+
 """Ports of the market-data bounded context.
 
 ``MarketDataPort`` is implemented once per venue (plus mock and replay).

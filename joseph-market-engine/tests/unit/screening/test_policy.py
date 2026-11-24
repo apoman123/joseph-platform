@@ -1,3 +1,6 @@
+# Copyright 2026 apoman123
+# SPDX-License-Identifier: MIT
+
 """Unit and property tests for the qualification policy."""
 
 from __future__ import annotations

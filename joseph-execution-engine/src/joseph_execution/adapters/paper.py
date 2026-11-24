@@ -1,3 +1,6 @@
+# Copyright 2026 apoman123
+# SPDX-License-Identifier: MIT
+
 """Paper trading venue simulator (PAPER mode).
 
 Simulates a venue with resting orders, triggers, reduce-only enforcement,

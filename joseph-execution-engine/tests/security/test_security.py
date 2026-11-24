@@ -1,3 +1,6 @@
+# Copyright 2026 apoman123
+# SPDX-License-Identifier: MIT
+
 """Security tests: authentication, secrets, CORS and the LIVE gate."""
 
 from __future__ import annotations

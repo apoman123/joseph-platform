@@ -1,3 +1,6 @@
+# Copyright 2026 apoman123
+# SPDX-License-Identifier: MIT
+
 """Normalization, cost estimates and preview tokens."""
 
 from __future__ import annotations

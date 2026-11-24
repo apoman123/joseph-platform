@@ -1,3 +1,6 @@
+# Copyright 2026 apoman123
+# SPDX-License-Identifier: MIT
+
 """Periodic reconciliation against venue truth.
 
 Each pass (1) resolves due outbox items, including UNKNOWN_RECONCILING

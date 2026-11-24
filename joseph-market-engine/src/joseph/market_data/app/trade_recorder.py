@@ -1,3 +1,6 @@
+# Copyright 2026 apoman123
+# SPDX-License-Identifier: MIT
+
 """Trade recorder: archives venues' public trades with explicit coverage.
 
 Seconds history and true delta on minute-and-above bars both need the

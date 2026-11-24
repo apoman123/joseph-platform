@@ -1,3 +1,6 @@
+# Copyright 2026 apoman123
+# SPDX-License-Identifier: MIT
+
 """Venue market-data capability declarations.
 
 Capabilities describe only what an adapter implements and has verified

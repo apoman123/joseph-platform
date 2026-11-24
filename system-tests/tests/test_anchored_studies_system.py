@@ -1,3 +1,6 @@
+# Copyright 2026 apoman123
+# SPDX-License-Identifier: MIT
+
 """System tests for the anchored-study cap of the market engine.
 
 The system-test market engine runs with ``JOSEPH_MAX_ANCHORED_BARS`` at

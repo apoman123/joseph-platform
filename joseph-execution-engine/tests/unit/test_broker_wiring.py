@@ -1,3 +1,6 @@
+# Copyright 2026 apoman123
+# SPDX-License-Identifier: MIT
+
 """Unit tests for broker wiring: catalog, Cathay, config and market data."""
 
 from __future__ import annotations

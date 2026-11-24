@@ -1,3 +1,6 @@
+# Copyright 2026 apoman123
+# SPDX-License-Identifier: MIT
+
 """Three-valued (Kleene) logic used by the strategy evaluator.
 
 ``UNKNOWN`` represents missing, stale or not-yet-warm data. It never

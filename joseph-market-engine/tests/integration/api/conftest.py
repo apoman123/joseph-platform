@@ -1,3 +1,6 @@
+# Copyright 2026 apoman123
+# SPDX-License-Identifier: MIT
+
 """Fixtures: DEMO app, fixture-backed venue app and test tokens."""
 
 from __future__ import annotations

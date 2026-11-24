@@ -1,3 +1,6 @@
+# Copyright 2026 apoman123
+# SPDX-License-Identifier: MIT
+
 """Deterministic tri-state evaluator of compiled Rule AST plans.
 
 The evaluator is a pure function of ``(plan, frames, market context,

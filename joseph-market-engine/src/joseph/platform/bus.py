@@ -1,3 +1,6 @@
+# Copyright 2026 apoman123
+# SPDX-License-Identifier: MIT
+
 """In-process asynchronous event bus for versioned domain events.
 
 Handlers subscribe by event type (or ``"*"``). Publishing awaits every

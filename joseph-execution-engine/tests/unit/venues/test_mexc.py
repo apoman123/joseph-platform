@@ -1,3 +1,6 @@
+# Copyright 2026 apoman123
+# SPDX-License-Identifier: MIT
+
 """MEXC futures adapter: permission probe, contracts, errors, stream."""
 
 from __future__ import annotations

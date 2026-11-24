@@ -1,3 +1,6 @@
+# Copyright 2026 apoman123
+# SPDX-License-Identifier: MIT
+
 """Exact decimal helpers for money, prices and quantities."""
 
 from __future__ import annotations

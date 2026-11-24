@@ -1,3 +1,6 @@
+# Copyright 2026 apoman123
+# SPDX-License-Identifier: MIT
+
 """Account service: paper provisioning, venue connections, summaries.
 
 Credentials are sealed by the vault before persistence and are never

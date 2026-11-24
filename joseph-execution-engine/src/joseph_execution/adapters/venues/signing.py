@@ -1,3 +1,6 @@
+# Copyright 2026 apoman123
+# SPDX-License-Identifier: MIT
+
 """HMAC request signing shared by the centralized venues.
 
 * Binance and MEXC: lowercase hex HMAC-SHA256 of the venue's payload

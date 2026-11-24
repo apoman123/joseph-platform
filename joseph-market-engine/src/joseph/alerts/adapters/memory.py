@@ -1,3 +1,6 @@
+# Copyright 2026 apoman123
+# SPDX-License-Identifier: MIT
+
 """In-memory alert repositories."""
 
 from __future__ import annotations

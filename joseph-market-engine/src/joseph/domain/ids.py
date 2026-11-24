@@ -1,3 +1,6 @@
+# Copyright 2026 apoman123
+# SPDX-License-Identifier: MIT
+
 """Identifier generation.
 
 Provides RFC 9562 UUIDv7 (time ordered) identifiers for server-generated

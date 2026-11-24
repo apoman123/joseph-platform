@@ -1,3 +1,6 @@
+# Copyright 2026 apoman123
+# SPDX-License-Identifier: MIT
+
 """Unit tests for every Risk Gateway check and the aggregation policy."""
 
 from __future__ import annotations

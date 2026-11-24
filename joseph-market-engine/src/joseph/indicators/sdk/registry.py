@@ -1,3 +1,6 @@
+# Copyright 2026 apoman123
+# SPDX-License-Identifier: MIT
+
 """Compile-time plugin registry with lifecycle (V5 §10).
 
 Plugins are vetted modules registered at build time, never fetched

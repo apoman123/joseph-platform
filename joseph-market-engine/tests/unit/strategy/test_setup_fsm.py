@@ -1,3 +1,6 @@
+# Copyright 2026 apoman123
+# SPDX-License-Identifier: MIT
+
 """Setup state machine: transition table, checkpoints and lifecycle."""
 
 from __future__ import annotations

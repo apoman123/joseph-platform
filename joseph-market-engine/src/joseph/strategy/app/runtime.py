@@ -1,3 +1,6 @@
+# Copyright 2026 apoman123
+# SPDX-License-Identifier: MIT
+
 """Live strategy runtime: frames in, recorded and published signals out.
 
 The integrator feeds every closed signal-timeframe ``BarFrame`` produced by

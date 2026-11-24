@@ -1,3 +1,6 @@
+# Copyright 2026 apoman123
+# SPDX-License-Identifier: MIT
+
 """Shadow adapter: records hypothetical orders, never submits them.
 
 Shadow mode runs the real signal and risk pipeline but only records the

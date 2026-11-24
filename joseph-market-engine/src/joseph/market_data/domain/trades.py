@@ -1,3 +1,6 @@
+# Copyright 2026 apoman123
+# SPDX-License-Identifier: MIT
+
 """Public-trade helpers (pure): contract encoding, de-duplication, coverage.
 
 A ``TradeCoverage`` states which venue-time interval a set of trades

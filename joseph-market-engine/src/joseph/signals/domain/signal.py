@@ -1,3 +1,6 @@
+# Copyright 2026 apoman123
+# SPDX-License-Identifier: MIT
+
 """Signal records: immutable lifecycle notifications of strategy setups.
 
 A fired signal is never rewritten. Its ``dedupe_key`` is unique per tenant,

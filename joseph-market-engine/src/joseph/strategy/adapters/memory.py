@@ -1,3 +1,6 @@
+# Copyright 2026 apoman123
+# SPDX-License-Identifier: MIT
+
 """In-memory strategy repositories for tests and DEMO deployments."""
 
 from __future__ import annotations

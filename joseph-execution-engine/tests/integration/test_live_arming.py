@@ -1,3 +1,6 @@
+# Copyright 2026 apoman123
+# SPDX-License-Identifier: MIT
+
 """Account LIVE arming: API, persistence, audit and the Risk Gateway.
 
 Manual LIVE orders need a server-side, expiring arming granted with the

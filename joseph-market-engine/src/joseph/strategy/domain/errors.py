@@ -1,3 +1,6 @@
+# Copyright 2026 apoman123
+# SPDX-License-Identifier: MIT
+
 """Strategy-specific errors carrying contract error codes."""
 
 from __future__ import annotations

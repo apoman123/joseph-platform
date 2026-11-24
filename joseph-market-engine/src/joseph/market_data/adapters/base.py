@@ -1,3 +1,6 @@
+# Copyright 2026 apoman123
+# SPDX-License-Identifier: MIT
+
 """Shared building blocks for REST/WebSocket venue adapters.
 
 Besides parsing helpers, ``BaseVenueAdapter`` implements the venue-neutral

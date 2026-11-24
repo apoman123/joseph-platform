@@ -1,3 +1,6 @@
+# Copyright 2026 apoman123
+# SPDX-License-Identifier: MIT
+
 """Opt-in testnet round trips: place and cancel a far-from-market order.
 
 Run with ``JOSEPH_SANDBOX_TESTS=1`` and the venue's test-environment keys

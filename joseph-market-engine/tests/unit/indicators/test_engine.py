@@ -1,3 +1,6 @@
+# Copyright 2026 apoman123
+# SPDX-License-Identifier: MIT
+
 """Unit tests for the multi-timeframe indicator engine."""
 
 from __future__ import annotations

@@ -1,3 +1,6 @@
+# Copyright 2026 apoman123
+# SPDX-License-Identifier: MIT
+
 """Unit tests for securities rules: routing, ticks, limits, lots, sessions."""
 
 from __future__ import annotations

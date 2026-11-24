@@ -1,3 +1,6 @@
+# Copyright 2026 apoman123
+# SPDX-License-Identifier: MIT
+
 """Binance public data archive (``data.binance.vision``): USDⓈ-M aggTrades.
 
 Binance publishes every USDⓈ-M futures aggregate trade as free, keyless

@@ -1,3 +1,6 @@
+# Copyright 2026 apoman123
+# SPDX-License-Identifier: MIT
+
 """Unit tests for the optional CoinGecko trending adapter."""
 
 from __future__ import annotations

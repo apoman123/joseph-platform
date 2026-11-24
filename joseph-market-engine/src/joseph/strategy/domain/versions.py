@@ -1,3 +1,6 @@
+# Copyright 2026 apoman123
+# SPDX-License-Identifier: MIT
+
 """Immutable strategy versions and their lifecycle metadata."""
 
 from __future__ import annotations

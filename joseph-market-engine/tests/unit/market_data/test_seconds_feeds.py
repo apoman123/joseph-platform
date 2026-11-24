@@ -1,3 +1,6 @@
+# Copyright 2026 apoman123
+# SPDX-License-Identifier: MIT
+
 """Unit tests for seconds (trade-built) feed sessions, batches and storage."""
 
 from __future__ import annotations

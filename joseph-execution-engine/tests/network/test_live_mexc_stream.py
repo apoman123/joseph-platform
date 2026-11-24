@@ -1,3 +1,6 @@
+# Copyright 2026 apoman123
+# SPDX-License-Identifier: MIT
+
 """Opt-in live checks of the MEXC private stream endpoints.
 
 Run with ``JOSEPH_NETWORK_TESTS=1 uv run pytest tests/network -m network``.

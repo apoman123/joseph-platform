@@ -1,3 +1,6 @@
+# Copyright 2026 apoman123
+# SPDX-License-Identifier: MIT
+
 """``TickSizeSource`` backed by the market-data instrument registry."""
 
 from __future__ import annotations

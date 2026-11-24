@@ -1,3 +1,6 @@
+# Copyright 2026 apoman123
+# SPDX-License-Identifier: MIT
+
 """System tests for the session calendars of the market engine.
 
 ``GET /v1/calendars/{XTAI|XNYS|USBOND|24x7}/sessions`` answers from the

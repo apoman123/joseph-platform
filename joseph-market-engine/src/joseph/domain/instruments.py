@@ -1,3 +1,6 @@
+# Copyright 2026 apoman123
+# SPDX-License-Identifier: MIT
+
 """Venue-scoped instrument identity and contract metadata.
 
 ``BTCUSDT`` on Binance and ``BTC`` on Hyperliquid are different instruments:

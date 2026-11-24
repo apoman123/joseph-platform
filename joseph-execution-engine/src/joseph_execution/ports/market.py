@@ -1,3 +1,6 @@
+# Copyright 2026 apoman123
+# SPDX-License-Identifier: MIT
+
 """Market-data gateway port (read-only views from the market engine)."""
 
 from __future__ import annotations

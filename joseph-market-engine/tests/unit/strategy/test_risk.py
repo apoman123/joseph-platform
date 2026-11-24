@@ -1,3 +1,6 @@
+# Copyright 2026 apoman123
+# SPDX-License-Identifier: MIT
+
 """Unit tests for the projected stop/target/reward-to-risk model."""
 
 from __future__ import annotations

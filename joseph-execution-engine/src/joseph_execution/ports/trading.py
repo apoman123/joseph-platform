@@ -1,3 +1,6 @@
+# Copyright 2026 apoman123
+# SPDX-License-Identifier: MIT
+
 """Venue trading port.
 
 Only the OMS holds a reference to adapters (through ``AdapterResolver``);

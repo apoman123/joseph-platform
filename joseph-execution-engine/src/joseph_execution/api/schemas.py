@@ -1,3 +1,6 @@
+# Copyright 2026 apoman123
+# SPDX-License-Identifier: MIT
+
 """Pydantic request bodies mirroring ``execution.schema.json``."""
 
 from __future__ import annotations

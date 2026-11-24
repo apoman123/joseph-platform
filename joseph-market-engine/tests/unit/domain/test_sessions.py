@@ -1,3 +1,6 @@
+# Copyright 2026 apoman123
+# SPDX-License-Identifier: MIT
+
 """Unit tests for session calendars and session-aware bar boundaries."""
 
 from __future__ import annotations

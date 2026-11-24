@@ -1,3 +1,6 @@
+# Copyright 2026 apoman123
+# SPDX-License-Identifier: MIT
+
 """Notification channel adapters.
 
 Every sender raises ``DeliveryError`` with a redacted message: bot tokens,

@@ -1,3 +1,6 @@
+# Copyright 2026 apoman123
+# SPDX-License-Identifier: MIT
+
 """Feed health tracking (pure).
 
 Health is derived, never asserted: a feed is ``STALE`` once no message has

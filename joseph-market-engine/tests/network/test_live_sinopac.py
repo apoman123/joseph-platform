@@ -1,3 +1,6 @@
+# Copyright 2026 apoman123
+# SPDX-License-Identifier: MIT
+
 """Opt-in live test of SinoPac Shioaji market data (needs a SinoPac account).
 
 Run with ``JOSEPH_SINOPAC_DATA_TESTS=1 uv run --extra sinopac pytest

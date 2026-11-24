@@ -1,3 +1,6 @@
+# Copyright 2026 apoman123
+# SPDX-License-Identifier: MIT
+
 """Template for credentialed live venue adapters (the ``TradingAdapter`` port).
 
 Every venue adapter inherits the same guards, so a venue module only

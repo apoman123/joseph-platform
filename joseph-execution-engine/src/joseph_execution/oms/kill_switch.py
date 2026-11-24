@@ -1,3 +1,6 @@
+# Copyright 2026 apoman123
+# SPDX-License-Identifier: MIT
+
 """Kill switch service.
 
 Engaging blocks new opening orders immediately (the Risk Gateway reads the

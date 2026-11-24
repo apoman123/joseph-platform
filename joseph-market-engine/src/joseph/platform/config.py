@@ -1,3 +1,6 @@
+# Copyright 2026 apoman123
+# SPDX-License-Identifier: MIT
+
 """Environment-driven configuration for the market engine.
 
 All settings come from ``JOSEPH_*`` environment variables so the same build

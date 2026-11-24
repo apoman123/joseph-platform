@@ -1,3 +1,6 @@
+# Copyright 2026 apoman123
+# SPDX-License-Identifier: MIT
+
 """Per-instance processing shared by the live runtime and backtests.
 
 ``InstanceProcessor`` owns the frame window and the setup state of one

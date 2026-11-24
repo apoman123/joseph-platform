@@ -1,3 +1,6 @@
+# Copyright 2026 apoman123
+# SPDX-License-Identifier: MIT
+
 """Bitget USDT-M futures trading adapter (Unified Trading Account, API v3).
 
 Sources (Bitget docs, read 2026-11-23):

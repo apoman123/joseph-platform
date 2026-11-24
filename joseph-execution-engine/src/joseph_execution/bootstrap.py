@@ -1,3 +1,6 @@
+# Copyright 2026 apoman123
+# SPDX-License-Identifier: MIT
+
 """Composition root: wires adapters to ports and builds the application.
 
 This is the only module that imports adapters and the API together.

@@ -1,3 +1,6 @@
+# Copyright 2026 apoman123
+# SPDX-License-Identifier: MIT
+
 """SQLAlchemy Core signal repository with a unique dedupe key."""
 
 from __future__ import annotations

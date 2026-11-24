@@ -1,3 +1,6 @@
+# Copyright 2026 apoman123
+# SPDX-License-Identifier: MIT
+
 """System tests: Treasury rate series are never tradable.
 
 Rejection is static validation, so it works offline although the Treasury

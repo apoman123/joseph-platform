@@ -1,3 +1,6 @@
+# Copyright 2026 apoman123
+# SPDX-License-Identifier: MIT
+
 """Trade-side classification for markets without an aggressor flag (pure).
 
 Stock exchanges publish trades and quotes but not which side initiated a

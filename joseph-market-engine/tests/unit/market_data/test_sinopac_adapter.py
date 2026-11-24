@@ -1,3 +1,6 @@
+# Copyright 2026 apoman123
+# SPDX-License-Identifier: MIT
+
 """Unit tests: TWSE and TPEx adapters on the Shioaji source (fake SDK)."""
 
 from __future__ import annotations

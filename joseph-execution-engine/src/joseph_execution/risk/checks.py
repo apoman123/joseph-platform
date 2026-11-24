@@ -1,3 +1,6 @@
+# Copyright 2026 apoman123
+# SPDX-License-Identifier: MIT
+
 """Individual pre-trade checks (V5 §8 risk table).
 
 Each check is a pure function of a ``RiskContext`` returning one

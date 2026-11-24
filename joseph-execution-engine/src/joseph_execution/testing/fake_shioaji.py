@@ -1,3 +1,6 @@
+# Copyright 2026 apoman123
+# SPDX-License-Identifier: MIT
+
 """In-memory stand-in for ``shioaji.Shioaji`` used by tests (no network).
 
 Mirrors the Shioaji 1.7 behaviours the adapter depends on: ``place_order``

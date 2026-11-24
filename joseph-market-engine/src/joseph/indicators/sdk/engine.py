@@ -1,3 +1,6 @@
+# Copyright 2026 apoman123
+# SPDX-License-Identifier: MIT
+
 """Multi-timeframe indicator engine producing no-look-ahead ``BarFrame``s.
 
 The engine runs configured plugins on each requested timeframe and builds

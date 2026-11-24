@@ -1,3 +1,6 @@
+# Copyright 2026 apoman123
+# SPDX-License-Identifier: MIT
+
 """Domain error hierarchy with contract error codes.
 
 Every error carries a machine-readable ``code`` from the ``ErrorCode`` enum in

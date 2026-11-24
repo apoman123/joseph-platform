@@ -1,3 +1,6 @@
+# Copyright 2026 apoman123
+# SPDX-License-Identifier: MIT
+
 """Bitget v2 mix (``USDT-FUTURES``) market-data adapter.
 
 REST base: ``https://api.bitget.com/api/v2/mix/market`` — ``contracts``,

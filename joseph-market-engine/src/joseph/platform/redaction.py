@@ -1,3 +1,6 @@
+# Copyright 2026 apoman123
+# SPDX-License-Identifier: MIT
+
 """Logging setup with secret redaction.
 
 A ``logging.Filter`` scrubs bearer tokens, API keys, secrets, signatures and

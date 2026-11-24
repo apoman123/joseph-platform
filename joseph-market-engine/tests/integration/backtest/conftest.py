@@ -1,3 +1,6 @@
+# Copyright 2026 apoman123
+# SPDX-License-Identifier: MIT
+
 """Fixtures for integration tests: in-memory SQLite and a manual clock."""
 
 from __future__ import annotations

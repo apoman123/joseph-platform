@@ -1,3 +1,6 @@
+# Copyright 2026 apoman123
+# SPDX-License-Identifier: MIT
+
 """Tests for the adapters around the external ``smc_indicators`` library."""
 
 from __future__ import annotations

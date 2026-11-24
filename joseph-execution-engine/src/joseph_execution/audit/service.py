@@ -1,3 +1,6 @@
+# Copyright 2026 apoman123
+# SPDX-License-Identifier: MIT
+
 """Audit log service: appends hash-chained records inside transactions."""
 
 from __future__ import annotations

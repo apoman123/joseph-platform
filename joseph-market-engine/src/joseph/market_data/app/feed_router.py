@@ -1,3 +1,6 @@
+# Copyright 2026 apoman123
+# SPDX-License-Identifier: MIT
+
 """Feed router: the ``FeedMode`` policy as an explicit state machine.
 
 ``AUTO``

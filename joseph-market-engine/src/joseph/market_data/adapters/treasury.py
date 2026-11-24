@@ -1,3 +1,6 @@
+# Copyright 2026 apoman123
+# SPDX-License-Identifier: MIT
+
 """US Treasury par and par real yield curves (official, free, no key).
 
 Source: the Daily Treasury Par Yield Curve Rates and Daily Treasury Par Real

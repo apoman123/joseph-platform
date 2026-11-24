@@ -1,3 +1,6 @@
+# Copyright 2026 apoman123
+# SPDX-License-Identifier: MIT
+
 """Binance USDⓈ-M futures trading adapter.
 
 Sources (Binance developer docs, read 2026-11-23):

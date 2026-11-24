@@ -1,3 +1,6 @@
+# Copyright 2026 apoman123
+# SPDX-License-Identifier: MIT
+
 """Unit tests for candle merge semantics and gap detection."""
 
 from __future__ import annotations

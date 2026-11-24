@@ -1,3 +1,6 @@
+# Copyright 2026 apoman123
+# SPDX-License-Identifier: MIT
+
 """Qualification of exchange-listed equities and bond ETFs; rates excluded."""
 
 from __future__ import annotations

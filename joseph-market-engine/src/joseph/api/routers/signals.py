@@ -1,3 +1,6 @@
+# Copyright 2026 apoman123
+# SPDX-License-Identifier: MIT
+
 """Signal history route (``/v1/signals``).
 
 No postponed annotations: FastAPI resolves the injected dependency.

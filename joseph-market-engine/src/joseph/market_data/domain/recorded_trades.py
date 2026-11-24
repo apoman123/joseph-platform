@@ -1,3 +1,6 @@
+# Copyright 2026 apoman123
+# SPDX-License-Identifier: MIT
+
 """Recorded public trades: coverage, archived seconds and true delta (pure).
 
 The engine records the venue's public trades as 1s aggregates (the

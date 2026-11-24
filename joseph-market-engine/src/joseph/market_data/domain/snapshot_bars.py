@@ -1,3 +1,6 @@
+# Copyright 2026 apoman123
+# SPDX-License-Identifier: MIT
+
 """One-minute bars built from periodic exchange snapshots (pure).
 
 Some exchanges (TWSE's MIS, which also serves TPEx) publish no trade feed,

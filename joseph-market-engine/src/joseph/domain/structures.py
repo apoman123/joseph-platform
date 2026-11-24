@@ -1,3 +1,6 @@
+# Copyright 2026 apoman123
+# SPDX-License-Identifier: MIT
+
 """Market-structure outputs shared by indicators and the strategy engine.
 
 Indicator plugins publish ``Aoi`` records, ``StructureEvent`` occurrences and

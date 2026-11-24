@@ -1,3 +1,6 @@
+# Copyright 2026 apoman123
+# SPDX-License-Identifier: MIT
+
 """Request-scoped dependencies: trace ids and authenticated principals."""
 
 from __future__ import annotations

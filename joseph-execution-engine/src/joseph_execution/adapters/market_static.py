@@ -1,3 +1,6 @@
+# Copyright 2026 apoman123
+# SPDX-License-Identifier: MIT
+
 """Static in-memory market gateway for tests and standalone DEMO runs.
 
 Quotes are labeled DEMO so the Risk Gateway never treats them as live.

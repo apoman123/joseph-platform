@@ -50,9 +50,16 @@ dev: ## Run all three services (Ctrl-C stops them)
 	$(MAKE) --no-print-directory dev-execution & \
 	$(MAKE) --no-print-directory dev-web & wait
 
+# Google Python style per project: formatter, ruff, pydoclint and the GPY
+# checks of test_code_standards.py (docs/standards/CODING_STANDARDS.md).
+PY_STYLE = uv run ruff format --check $(1) && uv run ruff check $(1) && \
+	uv run pydoclint -q $(1) && \
+	uv run pytest -q -p no:cacheprovider $(2)
+
 lint: ## Format checks and Google-style linters on every project
-	cd $(ME) && uv run ruff format --check src tests scripts && uv run ruff check src tests scripts
-	cd $(EE) && uv run ruff format --check src tests scripts && uv run ruff check src tests scripts
+	cd $(ME) && $(call PY_STYLE,src tests scripts,tests/architecture/test_code_standards.py)
+	cd $(EE) && $(call PY_STYLE,src tests scripts,tests/architecture/test_code_standards.py)
+	cd system-tests && $(call PY_STYLE,tests launchers,tests/test_code_standards.py)
 	cd $(TERM_DIR) && pnpm format:check && pnpm lint
 
 typecheck: ## mypy --strict and tsc

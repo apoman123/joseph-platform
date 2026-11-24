@@ -1,3 +1,6 @@
+# Copyright 2026 apoman123
+# SPDX-License-Identifier: MIT
+
 """Session calendars over HTTP and contract validity of the DEMO stock."""
 
 from __future__ import annotations

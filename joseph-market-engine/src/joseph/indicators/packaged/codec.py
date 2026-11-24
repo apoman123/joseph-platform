@@ -1,3 +1,6 @@
+# Copyright 2026 apoman123
+# SPDX-License-Identifier: MIT
+
 """Checkpoint codec for external indicator objects.
 
 The ported indicators are ordinary mutable Python objects. Checkpoints use

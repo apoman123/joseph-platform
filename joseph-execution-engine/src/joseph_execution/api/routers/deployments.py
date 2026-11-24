@@ -1,3 +1,6 @@
+# Copyright 2026 apoman123
+# SPDX-License-Identifier: MIT
+
 """Deployment and internal signal endpoints."""
 
 from __future__ import annotations

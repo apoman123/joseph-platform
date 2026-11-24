@@ -1,3 +1,6 @@
+# Copyright 2026 apoman123
+# SPDX-License-Identifier: MIT
+
 """Alert subscription routes (``/v1/alerts/subscriptions``).
 
 No postponed annotations: FastAPI resolves the injected dependency.

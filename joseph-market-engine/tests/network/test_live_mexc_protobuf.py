@@ -1,3 +1,6 @@
+# Copyright 2026 apoman123
+# SPDX-License-Identifier: MIT
+
 """Opt-in live tests of MEXC's futures WebSocket in Protobuf and JSON.
 
 Run with ``JOSEPH_NETWORK_TESTS=1 uv run pytest tests/network -m network``.

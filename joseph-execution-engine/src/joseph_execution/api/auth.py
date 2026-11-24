@@ -1,3 +1,6 @@
+# Copyright 2026 apoman123
+# SPDX-License-Identifier: MIT
+
 """Bearer-token and service-token authentication."""
 
 from __future__ import annotations

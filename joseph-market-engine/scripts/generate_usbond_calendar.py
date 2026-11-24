@@ -1,3 +1,6 @@
+# Copyright 2026 apoman123
+# SPDX-License-Identifier: MIT
+
 """Generates the US Treasury market (USBOND) calendar from Treasury data.
 
 A USBOND session is a day on which the US Department of the Treasury

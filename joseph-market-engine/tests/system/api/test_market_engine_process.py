@@ -1,3 +1,6 @@
+# Copyright 2026 apoman123
+# SPDX-License-Identifier: MIT
+
 """System test: the market engine as a real process on a real socket.
 
 Starts ``uvicorn joseph.bootstrap:create_application --factory`` in DEMO

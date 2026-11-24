@@ -1,3 +1,6 @@
+# Copyright 2026 apoman123
+# SPDX-License-Identifier: MIT
+
 """HTTP and WebSocket integration tests with contract validation."""
 
 from __future__ import annotations

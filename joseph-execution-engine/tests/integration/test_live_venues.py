@@ -1,3 +1,6 @@
+# Copyright 2026 apoman123
+# SPDX-License-Identifier: MIT
+
 """End-to-end LIVE trading through the real engine wiring (Binance mocked).
 
 The venue is simulated with respx (REST) and a scripted WebSocket; every

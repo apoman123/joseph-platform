@@ -1,3 +1,6 @@
+# Copyright 2026 apoman123
+# SPDX-License-Identifier: MIT
+
 """Signal pipeline: closed candles → indicator engine → strategy runtime.
 
 Application-level orchestration that connects the market-data, indicator,

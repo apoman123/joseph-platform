@@ -1,3 +1,6 @@
+# Copyright 2026 apoman123
+# SPDX-License-Identifier: MIT
+
 """SQL signal repository: unique dedupe keys, filters and isolation."""
 
 from __future__ import annotations

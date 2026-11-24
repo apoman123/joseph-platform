@@ -1,3 +1,6 @@
+# Copyright 2026 apoman123
+# SPDX-License-Identifier: MIT
+
 """Unit tests for the Rule AST v2 models and canonical hashing."""
 
 from __future__ import annotations

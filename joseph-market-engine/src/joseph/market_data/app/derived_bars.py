@@ -1,3 +1,6 @@
+# Copyright 2026 apoman123
+# SPDX-License-Identifier: MIT
+
 """Engine-derived bars layered over a venue adapter (never fabricated).
 
 ``DerivedBarsAdapter`` wraps a venue ``MarketDataPort`` and adds two things

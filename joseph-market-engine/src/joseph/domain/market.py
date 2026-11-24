@@ -1,3 +1,6 @@
+# Copyright 2026 apoman123
+# SPDX-License-Identifier: MIT
+
 """Canonical market-data value objects.
 
 Candles, trades, order books, funding and open interest normalized from any

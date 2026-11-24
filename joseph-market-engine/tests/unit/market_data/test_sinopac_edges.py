@@ -1,3 +1,6 @@
+# Copyright 2026 apoman123
+# SPDX-License-Identifier: MIT
+
 """Unit tests: edge paths of the Shioaji-backed TWSE adapter (fake SDK)."""
 
 from __future__ import annotations
