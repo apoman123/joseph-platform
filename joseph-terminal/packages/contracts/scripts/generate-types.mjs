@@ -5,11 +5,15 @@
  */
 
 /**
- * @fileoverview Generates TypeScript types from the canonical JSON Schemas.
+ * @fileoverview Generates `src/generated/contracts.ts` from the canonical
+ * JSON Schemas in `schemas/`.
  *
  * All schema files are bundled into one document whose `$defs` hold every
  * definition (names must be unique across files), so each contract type is
- * emitted exactly once. Run with `--check` in CI to fail on drift.
+ * emitted exactly once. The output starts with the project licence header.
+ * `pnpm contracts:gen` writes the file; `pnpm contracts:check` (the `--check`
+ * flag, run in CI) exits with status 1 when the committed file differs from
+ * what the schemas produce.
  */
 
 import {readFileSync, readdirSync, writeFileSync, mkdirSync} from 'node:fs';
@@ -17,10 +21,16 @@ import {dirname, join} from 'node:path';
 import {fileURLToPath} from 'node:url';
 import {compile} from 'json-schema-to-typescript';
 
+import {SCRIPT_HEADER} from '../../../scripts/lint/license-header.mjs';
+
 const PACKAGE_DIR = join(dirname(fileURLToPath(import.meta.url)), '..');
 const SCHEMA_DIR = join(PACKAGE_DIR, 'schemas');
 const OUTPUT = join(PACKAGE_DIR, 'src', 'generated', 'contracts.ts');
-const BANNER = `/**
+// The same licence header every hand-written file carries. The generated
+// file is exempt from lint, hence the blanket `eslint-disable`.
+const BANNER = `${SCRIPT_HEADER}
+
+/**
  * @fileoverview GENERATED FILE - DO NOT EDIT.
  * Source: packages/contracts/schemas/*.schema.json
  * Regenerate with \`pnpm contracts:gen\`.
@@ -28,10 +38,16 @@ const BANNER = `/**
 /* eslint-disable */`;
 
 /**
- * Rewrites cross-file `$ref`s to local `#/$defs/...` references and drops
- * keywords that sit next to a `$ref`.
- * @param {unknown} node Schema node to rewrite in place.
- * @return {unknown} The rewritten node.
+ * Returns a copy of a schema node whose cross-file `$ref`s point into the
+ * bundle's local `$defs`.
+ *
+ * A `$ref` has the form `<file>.schema.json#/$defs/<Name>` or
+ * `#/$defs/<Name>`. Definition names are unique across files (`bundle` checks
+ * this), so the file part can be dropped. An object that holds a `$ref` keeps
+ * only the `$ref`.
+ * @param {unknown} node Schema node: any JSON value.
+ * @return {unknown} A new array or object with the references rewritten, or
+ *     `node` itself when it is a primitive.
  */
 function localizeRefs(node) {
   if (Array.isArray(node)) return node.map(localizeRefs);
@@ -55,8 +71,10 @@ function localizeRefs(node) {
 }
 
 /**
- * Bundles every schema file into a single document.
- * @return {object} Bundled JSON Schema.
+ * Bundles every `*.schema.json` file into a single JSON Schema document.
+ * @return {object} A 2020-12 schema whose `$defs` hold the definitions of
+ *     every file, with references localized.
+ * @throws {Error} When two schema files define the same `$defs` name.
  */
 function bundle() {
   const defs = {};
@@ -82,8 +100,11 @@ function bundle() {
 }
 
 /**
- * Generates the TypeScript source and writes or checks it.
- * @return {Promise<void>} Resolves when done.
+ * Generates the TypeScript source, then writes it to `OUTPUT` or, with
+ * `--check`, compares it with the committed file and exits with status 1 on
+ * any difference.
+ * @return {Promise<void>} Resolves once the file is written or found current;
+ *     rejects when the schemas cannot be bundled or compiled.
  */
 async function main() {
   const raw = await compile(bundle(), 'JosephContracts', {
@@ -99,6 +120,8 @@ async function main() {
       printWidth: 80,
     },
   });
+  // The bundle's root object type is empty and unused; drop it and its
+  // generated comment.
   const source = raw
     .replace(
       /\/\*\*\n \* This interface was referenced by `JosephContracts`'s JSON-Schema\n \* via the `definition` "JosephContracts"\.\n \*\/\nexport interface JosephContracts \{\}\n/,
