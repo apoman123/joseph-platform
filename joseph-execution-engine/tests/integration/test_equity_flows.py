@@ -1,3 +1,6 @@
+# Copyright 2026 apoman123
+# SPDX-License-Identifier: MIT
+
 """Integration tests: securities through the Risk Gateway, OMS and API."""
 
 from __future__ import annotations

@@ -1,3 +1,6 @@
+# Copyright 2026 apoman123
+# SPDX-License-Identifier: MIT
+
 """Tests for the shared live-venue helpers (limits, HTTP, WS, codecs)."""
 
 from __future__ import annotations

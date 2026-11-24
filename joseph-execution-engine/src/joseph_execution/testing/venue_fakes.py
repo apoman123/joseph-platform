@@ -1,3 +1,6 @@
+# Copyright 2026 apoman123
+# SPDX-License-Identifier: MIT
+
 """Fakes for live venue adapter tests: WebSockets, clocks and sleep.
 
 ``FakeConnector`` plays scripted connections: each connection is a list of

@@ -1,3 +1,6 @@
+# Copyright 2026 apoman123
+# SPDX-License-Identifier: MIT
+
 """Unit tests for the TPEx adapter helpers, listings and schedule."""
 
 from __future__ import annotations

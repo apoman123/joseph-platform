@@ -1,3 +1,6 @@
+# Copyright 2026 apoman123
+# SPDX-License-Identifier: MIT
+
 """Property-based tests of OMS, position and rounding invariants."""
 
 from __future__ import annotations

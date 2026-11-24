@@ -1,3 +1,6 @@
+# Copyright 2026 apoman123
+# SPDX-License-Identifier: MIT
+
 """Unit tests for the Bitget public trade archive client.
 
 The fixtures are a real archive part (XTZUSDT, 2026-11-21 UTC+8, one part)

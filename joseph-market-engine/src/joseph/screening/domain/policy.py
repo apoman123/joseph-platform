@@ -1,3 +1,6 @@
+# Copyright 2026 apoman123
+# SPDX-License-Identifier: MIT
+
 """Qualification policy (V5 §5), pure and deterministic.
 
 Hard gates use **strict** comparators: a value equal to its threshold fails.

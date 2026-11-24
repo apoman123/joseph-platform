@@ -1,3 +1,6 @@
+# Copyright 2026 apoman123
+# SPDX-License-Identifier: MIT
+
 """Unit tests for paper trading of exchange-listed securities."""
 
 from __future__ import annotations

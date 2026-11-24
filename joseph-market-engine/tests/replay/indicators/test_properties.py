@@ -1,3 +1,6 @@
+# Copyright 2026 apoman123
+# SPDX-License-Identifier: MIT
+
 """Property tests: batch == streaming == replay, and no look-ahead.
 
 Random multi-timeframe series are generated from a seeded 1m walk and

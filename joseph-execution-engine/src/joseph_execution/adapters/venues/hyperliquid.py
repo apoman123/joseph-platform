@@ -1,3 +1,6 @@
+# Copyright 2026 apoman123
+# SPDX-License-Identifier: MIT
+
 """Hyperliquid perpetuals trading adapter (API wallet / agent signing).
 
 Sources (read 2026-11-23):

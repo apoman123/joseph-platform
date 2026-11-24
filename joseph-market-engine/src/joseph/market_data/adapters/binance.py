@@ -1,3 +1,6 @@
+# Copyright 2026 apoman123
+# SPDX-License-Identifier: MIT
+
 """Binance USDⓈ-M futures market-data adapter.
 
 REST: ``https://fapi.binance.com/fapi/v1`` (exchangeInfo, fundingInfo,

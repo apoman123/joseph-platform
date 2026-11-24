@@ -1,3 +1,6 @@
+# Copyright 2026 apoman123
+# SPDX-License-Identifier: MIT
+
 """Read-only market views consumed by risk and the OMS.
 
 These are snapshots fetched from the market engine (or a static DEMO

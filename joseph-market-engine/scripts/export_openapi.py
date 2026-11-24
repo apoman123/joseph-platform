@@ -1,3 +1,6 @@
+# Copyright 2026 apoman123
+# SPDX-License-Identifier: MIT
+
 """Exports the market engine's OpenAPI document into the contracts package.
 
 Usage: ``uv run python scripts/export_openapi.py [--check]``. With

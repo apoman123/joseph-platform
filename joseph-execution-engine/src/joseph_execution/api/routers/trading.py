@@ -1,3 +1,6 @@
+# Copyright 2026 apoman123
+# SPDX-License-Identifier: MIT
+
 """Order, position and fill endpoints."""
 
 from __future__ import annotations

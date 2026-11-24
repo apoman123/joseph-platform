@@ -1,3 +1,6 @@
+# Copyright 2026 apoman123
+# SPDX-License-Identifier: MIT
+
 """Documented trading capabilities of the securities brokers.
 
 Values follow each broker's official API documentation (verified for

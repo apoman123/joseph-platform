@@ -1,3 +1,6 @@
+# Copyright 2026 apoman123
+# SPDX-License-Identifier: MIT
+
 """HTTP tests of the strategy, signal and backtest routers."""
 
 from __future__ import annotations

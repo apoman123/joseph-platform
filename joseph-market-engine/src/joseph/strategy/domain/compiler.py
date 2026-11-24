@@ -1,3 +1,6 @@
+# Copyright 2026 apoman123
+# SPDX-License-Identifier: MIT
+
 """Semantic validation and compilation of Rule AST v2 definitions.
 
 JSON Schema (enforced by the Pydantic models) guarantees structure. This

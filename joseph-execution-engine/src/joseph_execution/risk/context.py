@@ -1,3 +1,6 @@
+# Copyright 2026 apoman123
+# SPDX-License-Identifier: MIT
+
 """Inputs of a risk evaluation, gathered by the OMS before checks run."""
 
 from __future__ import annotations

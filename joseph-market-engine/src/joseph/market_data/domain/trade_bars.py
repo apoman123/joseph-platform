@@ -1,3 +1,6 @@
+# Copyright 2026 apoman123
+# SPDX-License-Identifier: MIT
+
 """Seconds candles folded from public trades (pure).
 
 No perpetual venue publishes sub-minute klines, so seconds bars are built

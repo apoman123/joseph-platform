@@ -1,3 +1,6 @@
+# Copyright 2026 apoman123
+# SPDX-License-Identifier: MIT
+
 """HTTP market gateway reading the market engine's public read models.
 
 Failures return ``None`` so the Risk Gateway reports UNKNOWN and fails

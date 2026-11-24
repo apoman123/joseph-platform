@@ -1,3 +1,6 @@
+# Copyright 2026 apoman123
+# SPDX-License-Identifier: MIT
+
 """Bitget UTA adapter: negotiation, signed requests, errors, stream."""
 
 from __future__ import annotations

@@ -1,3 +1,6 @@
+# Copyright 2026 apoman123
+# SPDX-License-Identifier: MIT
+
 """Setup lifecycle state machine with de-duplication.
 
 One ``InstanceState`` exists per ``(tenant, strategy_version, account scope,

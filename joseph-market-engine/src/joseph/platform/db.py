@@ -1,3 +1,6 @@
+# Copyright 2026 apoman123
+# SPDX-License-Identifier: MIT
+
 """SQLAlchemy Core persistence primitives: engine, outbox and inbox.
 
 The transactional outbox stores events in the same transaction as the state

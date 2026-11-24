@@ -1,3 +1,6 @@
+# Copyright 2026 apoman123
+# SPDX-License-Identifier: MIT
+
 """Deployment and AUTO_LIVE consent service."""
 
 from __future__ import annotations

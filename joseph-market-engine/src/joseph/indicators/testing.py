@@ -1,3 +1,6 @@
+# Copyright 2026 apoman123
+# SPDX-License-Identifier: MIT
+
 """Deterministic candle builders for indicator and strategy tests.
 
 Shipped with the package (no runtime cost) so every bounded context can

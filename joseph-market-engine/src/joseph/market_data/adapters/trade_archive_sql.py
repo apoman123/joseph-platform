@@ -1,3 +1,6 @@
+# Copyright 2026 apoman123
+# SPDX-License-Identifier: MIT
+
 """SQLAlchemy Core ``TradeArchive``: recorded trades survive restarts.
 
 Three tables hold what the engine records from public trades:

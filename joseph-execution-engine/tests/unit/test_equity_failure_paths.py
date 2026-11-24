@@ -1,3 +1,6 @@
+# Copyright 2026 apoman123
+# SPDX-License-Identifier: MIT
+
 """Failure paths of the securities support: every unknown fails closed."""
 
 from __future__ import annotations

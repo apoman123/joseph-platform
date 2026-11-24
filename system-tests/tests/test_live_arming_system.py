@@ -1,3 +1,6 @@
+# Copyright 2026 apoman123
+# SPDX-License-Identifier: MIT
+
 """System tests: server-side LIVE arming with the global gate open.
 
 The ``live`` execution engine runs the stock entry point with

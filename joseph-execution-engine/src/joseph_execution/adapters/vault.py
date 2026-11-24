@@ -1,3 +1,6 @@
+# Copyright 2026 apoman123
+# SPDX-License-Identifier: MIT
+
 """AES-256-GCM envelope encryption for venue credentials.
 
 Each secret gets a fresh data key; the data key is wrapped by the master

@@ -1,3 +1,6 @@
+# Copyright 2026 apoman123
+# SPDX-License-Identifier: MIT
+
 """Execution engine with a settable clock for deterministic system tests.
 
 ``create_application`` builds the real engine like

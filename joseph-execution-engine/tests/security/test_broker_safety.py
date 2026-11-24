@@ -1,3 +1,6 @@
+# Copyright 2026 apoman123
+# SPDX-License-Identifier: MIT
+
 """Safety tests: broker adapters stay behind every LIVE gate."""
 
 from __future__ import annotations

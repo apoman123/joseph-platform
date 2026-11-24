@@ -1,3 +1,6 @@
+# Copyright 2026 apoman123
+# SPDX-License-Identifier: MIT
+
 """Typed plugin settings with JSON Schema generation and validation.
 
 Plugins declare their settings as ``SettingSpec`` tuples. The same

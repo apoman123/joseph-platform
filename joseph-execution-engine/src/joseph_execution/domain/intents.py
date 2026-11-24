@@ -1,3 +1,6 @@
+# Copyright 2026 apoman123
+# SPDX-License-Identifier: MIT
+
 """Order intents: the single entry point of every order path.
 
 Manual tickets, chart trades, strategy signals and emergency closes all

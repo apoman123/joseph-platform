@@ -1,3 +1,6 @@
+# Copyright 2026 apoman123
+# SPDX-License-Identifier: MIT
+
 """Plugin adapters for each ported Pine indicator and Python-native study.
 
 Each adapter declares the plugin metadata, exposes the Pine inputs as

@@ -1,3 +1,6 @@
+# Copyright 2026 apoman123
+# SPDX-License-Identifier: MIT
+
 """Risk endpoints: kill switch, limits and audit."""
 
 from __future__ import annotations

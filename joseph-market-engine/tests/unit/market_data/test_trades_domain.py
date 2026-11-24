@@ -1,3 +1,6 @@
+# Copyright 2026 apoman123
+# SPDX-License-Identifier: MIT
+
 """Unit tests for trade de-duplication, truncation and coverage helpers."""
 
 from __future__ import annotations

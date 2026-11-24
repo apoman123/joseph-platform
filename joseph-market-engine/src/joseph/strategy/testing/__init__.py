@@ -1,3 +1,6 @@
+# Copyright 2026 apoman123
+# SPDX-License-Identifier: MIT
+
 """Test-support builders for strategy frames and scenarios.
 
 These helpers construct ``BarFrame`` sequences without running indicator

@@ -1,3 +1,6 @@
+# Copyright 2026 apoman123
+# SPDX-License-Identifier: MIT
+
 """Tenant-scoped user stream hub with sequence numbers and replay.
 
 Each tenant has its own monotonic sequence and bounded replay ring. A

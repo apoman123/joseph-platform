@@ -1,3 +1,6 @@
+# Copyright 2026 apoman123
+# SPDX-License-Identifier: MIT
+
 """MEXC futures (contract) trading adapter.
 
 Sources (MEXC docs, read 2026-11-23):

@@ -1,3 +1,6 @@
+# Copyright 2026 apoman123
+# SPDX-License-Identifier: MIT
+
 """Versioned domain-event envelope for cross-context integration.
 
 Every published event carries a schema version and an idempotency key so

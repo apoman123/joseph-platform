@@ -1,3 +1,6 @@
+# Copyright 2026 apoman123
+# SPDX-License-Identifier: MIT
+
 """Resumable publish/subscribe hub behind the market WebSocket.
 
 Every published envelope receives a hub-wide monotonic ``sequence`` and is

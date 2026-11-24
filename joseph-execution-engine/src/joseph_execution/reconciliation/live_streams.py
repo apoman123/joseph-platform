@@ -1,3 +1,6 @@
+# Copyright 2026 apoman123
+# SPDX-License-Identifier: MIT
+
 """Private venue streams for live accounts, applied through the OMS.
 
 The supervisor keeps one ``stream_account_events`` task per live account

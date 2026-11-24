@@ -1,3 +1,6 @@
+# Copyright 2026 apoman123
+# SPDX-License-Identifier: MIT
+
 """Archive of recorded sparse bars and their coverage (port).
 
 Venues with sparse bars (``ports.sparse_bars``) prove which spans they

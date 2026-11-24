@@ -185,6 +185,15 @@ wheels = [
 ]
 
 [[package]]
+name = "docstring-parser-fork"
+version = "0.0.16"
+source = { registry = "https://pypi.org/simple" }
+sdist = { url = "https://files.pythonhosted.org/packages/04/ce/48b17c6c24d0af112f73721a90fac245450e548b82b53169260720f60d07/docstring_parser_fork-0.0.16.tar.gz", hash = "sha256:9ecf861ceab8b87d1297a71001c15a1956ad02e87434ee6473643a5988094f7c", size = 36360, upload-time = "2026-07-03T07:27:46.668Z" }
+wheels = [
+    { url = "https://files.pythonhosted.org/packages/c1/69/427c34e61827818942b48ececd7c892b8f58ba4ce4cfc89ba9fd8dbe8a8d/docstring_parser_fork-0.0.16-py3-none-any.whl", hash = "sha256:c024c97af582d6acf85a14f0b332b3a2ab08626648d251c25e47191f33064386", size = 25253, upload-time = "2026-07-03T07:27:45.591Z" },
+]
+
+[[package]]
 name = "fastapi"
 version = "0.165.0"
 source = { registry = "https://pypi.org/simple" }
@@ -551,6 +560,7 @@ dev = [
     { name = "jsonschema" },
     { name = "mypy" },
     { name = "pip-licenses" },
+    { name = "pydoclint" },
     { name = "pytest" },
     { name = "pytest-asyncio" },
     { name = "pytest-cov" },
@@ -582,6 +592,7 @@ dev = [
     { name = "jsonschema", specifier = ">=4.23,<5" },
     { name = "mypy", specifier = ">=1.13,<2" },
     { name = "pip-licenses", specifier = ">=5,<6" },
+    { name = "pydoclint", specifier = ">=0.12,<0.13" },
     { name = "pytest", specifier = ">=8,<10" },
     { name = "pytest-asyncio", specifier = ">=0.24,<2" },
     { name = "pytest-cov", specifier = ">=5,<8" },
@@ -1052,6 +1063,19 @@ wheels = [
     { url = "https://files.pythonhosted.org/packages/ed/1d/0e2d5bb47dc729ddf21fb846cb1ac85baf6290eca5ef1ee3d871712496f4/pydantic_core-2.50.5-graalpy313-graalpy253_313_native-macosx_11_0_arm64.whl", hash = "sha256:d7826407ed74ff8e6cc6e6df7ffbf180e9b449ab1516f28eb5f6e2a489bc5129", size = 2054207, upload-time = "2026-11-19T12:56:17.916Z" },
     { url = "https://files.pythonhosted.org/packages/59/61/f1b75d2dffa662c4326adc6b16881f98158717cfd461936c2f0c36d9d1c8/pydantic_core-2.50.5-graalpy313-graalpy253_313_native-manylinux2014_aarch64.manylinux_2_17_aarch64.whl", hash = "sha256:c415a8da7c89a3dd32d988a9117bf0a52371769b77b0943bcfd50b281ecefb8d", size = 2125491, upload-time = "2026-11-19T12:56:19.202Z" },
     { url = "https://files.pythonhosted.org/packages/e5/78/104a8c414f58132acaa6b2ce4cc3441b8cc556df0f7fcc9ca8c07473f17a/pydantic_core-2.50.5-graalpy313-graalpy253_313_native-manylinux2014_x86_64.manylinux_2_17_x86_64.whl", hash = "sha256:ea7429e3adb2f2fd81e2d6e8942e5c1cd760a6e6be5b7574d2ee5499b5e19e67", size = 2284742, upload-time = "2026-11-19T12:56:20.825Z" },
+]
+
+[[package]]
+name = "pydoclint"
+version = "0.12.0"
+source = { registry = "https://pypi.org/simple" }
+dependencies = [
+    { name = "click" },
+    { name = "docstring-parser-fork" },
+]
+sdist = { url = "https://files.pythonhosted.org/packages/9b/f7/ae03ad83f47dfee8a468544e4b77b254940299b15f9710e00450a5034729/pydoclint-0.12.0.tar.gz", hash = "sha256:ac061ae24381547e41d5a45044a1f88c87a54541b67ec959bd5160c69256482c", size = 255216, upload-time = "2026-10-28T06:48:34.428Z" }
+wheels = [
+    { url = "https://files.pythonhosted.org/packages/6e/45/9aea4898fcfbb3ed973eb23f6b83c677bb8bcecb59e9681fae6da82bb3be/pydoclint-0.12.0-py3-none-any.whl", hash = "sha256:28f5763a865cb19b54883dfe68b05b01d2c2fc2e8d59dcf424cc345bc976a689", size = 99545, upload-time = "2026-10-28T06:48:33.34Z" },
 ]
 
 [[package]]

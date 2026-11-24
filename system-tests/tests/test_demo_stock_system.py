@@ -1,3 +1,6 @@
+# Copyright 2026 apoman123
+# SPDX-License-Identifier: MIT
+
 """System tests for the DEMO stock ``mock:stock:ACME`` (XNYS calendar).
 
 Every query uses a fixed, past window or ``at_ms`` so the synthetic data

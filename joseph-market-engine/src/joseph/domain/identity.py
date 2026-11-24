@@ -1,3 +1,6 @@
+# Copyright 2026 apoman123
+# SPDX-License-Identifier: MIT
+
 """Authenticated caller identity shared by every bounded context."""
 
 from __future__ import annotations

@@ -1,3 +1,6 @@
+# Copyright 2026 apoman123
+# SPDX-License-Identifier: MIT
+
 """Taiwan Stock Exchange (TWSE) market-data adapter (official, free, no key).
 
 Sources (all public, verified live 2026-11-23):

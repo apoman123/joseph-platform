@@ -1,3 +1,6 @@
+# Copyright 2026 apoman123
+# SPDX-License-Identifier: MIT
+
 """Unit tests for positions, intents and related value objects."""
 
 from __future__ import annotations

@@ -1,3 +1,6 @@
+# Copyright 2026 apoman123
+# SPDX-License-Identifier: MIT
+
 """Live connectivity probe for every venue adapter (evidence, not tests).
 
 Usage::

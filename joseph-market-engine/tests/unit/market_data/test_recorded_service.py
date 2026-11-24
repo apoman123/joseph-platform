@@ -1,3 +1,6 @@
+# Copyright 2026 apoman123
+# SPDX-License-Identifier: MIT
+
 """Unit tests: the market-data service serves recorded trades."""
 
 from __future__ import annotations

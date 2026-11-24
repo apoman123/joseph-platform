@@ -1,3 +1,6 @@
+# Copyright 2026 apoman123
+# SPDX-License-Identifier: MIT
+
 """Value conversions between ``smc_indicators`` and the platform domain.
 
 The library computes with IEEE-754 floats (as Pine does); the platform

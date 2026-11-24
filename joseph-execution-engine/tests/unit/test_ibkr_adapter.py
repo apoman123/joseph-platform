@@ -1,3 +1,6 @@
+# Copyright 2026 apoman123
+# SPDX-License-Identifier: MIT
+
 """Unit tests for the Interactive Brokers adapter against a fake IB."""
 
 from __future__ import annotations

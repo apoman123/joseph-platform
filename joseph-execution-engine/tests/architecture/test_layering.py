@@ -1,3 +1,6 @@
+# Copyright 2026 apoman123
+# SPDX-License-Identifier: MIT
+
 """Runs import-linter layer and independence contracts as a test."""
 
 from __future__ import annotations

@@ -1,3 +1,6 @@
+# Copyright 2026 apoman123
+# SPDX-License-Identifier: MIT
+
 """Lighter public trade archive (AWS Public Blockchain Data, Parquet).
 
 Lighter's REST trade history reaches back only about 53 minutes. The AWS

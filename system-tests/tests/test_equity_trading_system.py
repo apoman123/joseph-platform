@@ -1,3 +1,6 @@
+# Copyright 2026 apoman123
+# SPDX-License-Identifier: MIT
+
 """System tests: securities paper trading against the real market engine.
 
 The DEMO stock ``mock:stock:ACME`` follows XNYS. Session rules are tested

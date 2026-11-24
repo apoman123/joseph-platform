@@ -1,3 +1,6 @@
+# Copyright 2026 apoman123
+# SPDX-License-Identifier: MIT
+
 """Builds ``BarFrame``s with the production indicator engine.
 
 Used by backtests (``FrameProvider``) and by the live pipeline for warm-up,

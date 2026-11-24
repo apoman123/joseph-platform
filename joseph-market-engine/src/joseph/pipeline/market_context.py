@@ -1,3 +1,6 @@
+# Copyright 2026 apoman123
+# SPDX-License-Identifier: MIT
+
 """Records market snapshots as evaluator ``MarketContext`` observations.
 
 ``oi_change_pct`` is the percent change of open-interest notional against

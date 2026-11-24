@@ -1,3 +1,6 @@
+# Copyright 2026 apoman123
+# SPDX-License-Identifier: MIT
+
 """Backtests run the production evaluator over provided frames."""
 
 from __future__ import annotations

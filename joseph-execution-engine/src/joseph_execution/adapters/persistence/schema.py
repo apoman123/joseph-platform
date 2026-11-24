@@ -1,3 +1,6 @@
+# Copyright 2026 apoman123
+# SPDX-License-Identifier: MIT
+
 """SQLAlchemy Core schema (portable SQLite / PostgreSQL).
 
 Uniqueness that protects against duplicate orders is enforced by the

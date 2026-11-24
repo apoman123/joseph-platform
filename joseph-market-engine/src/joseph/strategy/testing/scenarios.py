@@ -1,3 +1,6 @@
+# Copyright 2026 apoman123
+# SPDX-License-Identifier: MIT
+
 """Canonical market worlds for the proposal's Long A and Short B rules.
 
 Each builder returns frames in which every condition of the rule holds on

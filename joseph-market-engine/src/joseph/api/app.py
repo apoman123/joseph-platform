@@ -1,3 +1,6 @@
+# Copyright 2026 apoman123
+# SPDX-License-Identifier: MIT
+
 """FastAPI application factory for the market engine."""
 
 from __future__ import annotations

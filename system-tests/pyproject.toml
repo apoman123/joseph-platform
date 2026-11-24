@@ -13,6 +13,7 @@ dev = [
   "websockets>=13,<17",
   "jsonschema>=4.23,<5",
   "ruff>=0.8,<1",
+  "pydoclint>=0.12,<0.13",
 ]
 
 [tool.uv]
@@ -31,11 +32,57 @@ line-length = 80
 target-version = "py312"
 
 [tool.ruff.lint]
-select = ["E", "F", "W", "I", "D", "B", "UP"]
-ignore = ["D107"]
+# Google Python Style Guide ("pyguide") rules, as in the engines; see
+# docs/standards/CODING_STANDARDS.md.
+select = [
+  "E", "F", "W", "I", "D", "B", "UP",
+  "N",       # pyguide 3.16: naming.
+  "C417",    # pyguide 2.10: generator expressions over map/filter + lambda.
+  "PLC0415", # pyguide 3.13: imports at the top of the file.
+  "PLC1802", # pyguide 2.14: `if seq:` rather than `if len(seq):`.
+  "PLW0602", # pyguide 2.5: no global state.
+  "PLW0603", # pyguide 2.5: no global state.
+  "RUF100",  # pyguide 2.1: no stale suppressions.
+  "S101",    # pyguide 2.4: no assert outside tests (launchers).
+  "SIM115",  # pyguide 3.11: open files with `with`.
+  "SIM118",  # pyguide 2.8: `for key in mapping`.
+  "ARG",     # pyguide 2.1: unused arguments (`del name  # Unused.`).
+  "BLE",     # pyguide 2.4: catch Exception only at isolation points.
+  "ERA",     # pyguide 3.8.5: comments explain code, never hold old code.
+  "FURB129", # pyguide 2.8: iterate files directly, not `.readlines()`.
+  "G",       # pyguide 3.10.1: logging takes a %-pattern literal.
+  "PGH",     # pyguide 2.1, 3.19.7: noqa/type: ignore name their codes.
+  "TD",      # pyguide 3.12: `# TODO(link): explanation`.
+]
+ignore = [
+  "D107",    # GPY011 (tests/test_code_standards.py) already requires it.
+  "TD003",   # pyguide 3.12 puts the link inside TODO(...), not below it.
+  "UP040",   # pyguide 3.19.6: `X: TypeAlias = ...`; `type X` changes runtime.
+]
+# Codes checked outside ruff, kept in `# noqa` comments: pydoclint (DOC) and
+# tests/test_code_standards.py (GPY).
+external = ["DOC", "GPY"]
 
 [tool.ruff.lint.pydocstyle]
 convention = "google"
 
+[tool.ruff.lint.per-file-ignores]
+# Tests assert (S101) and use fixtures, fakes and signatures they ignore.
+"tests/**" = ["S", "PLR", "D104", "ARG"]
+
 [tool.ruff.lint.isort]
 force-single-line = true
+
+[tool.pydoclint]
+# Google docstrings without types (annotations carry them). Section-less
+# docstrings, Raises and class Attributes are checked by
+# tests/test_code_standards.py (GPY012-GPY015) instead.
+style = "google"
+arg-type-hints-in-docstring = false
+check-return-types = false
+check-yield-types = false
+skip-checking-short-docstrings = true
+skip-checking-raises = true
+check-class-attributes = false
+allow-init-docstring = true
+native-mode-noqa-location = "definition"

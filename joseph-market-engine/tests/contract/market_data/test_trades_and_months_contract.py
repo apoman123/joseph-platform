@@ -1,3 +1,6 @@
+# Copyright 2026 apoman123
+# SPDX-License-Identifier: MIT
+
 """Contract tests: captured trade frames, trade history and monthly klines.
 
 Fixtures under ``fixtures/venues`` were captured from the live public APIs

@@ -1,3 +1,6 @@
+# Copyright 2026 apoman123
+# SPDX-License-Identifier: MIT
+
 """US stocks and ETFs listed on Nasdaq, NYSE and Cboe BZX, via Alpaca.
 
 Instruments come from the official Nasdaq Trader symbol directory (free, no

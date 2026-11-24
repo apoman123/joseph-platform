@@ -1,3 +1,6 @@
+# Copyright 2026 apoman123
+# SPDX-License-Identifier: MIT
+
 """Opt-in: login and place_order in Shioaji simulation mode.
 
 Run with ``JOSEPH_SINOPAC_SIM_TESTS=1``, ``JOSEPH_SINOPAC_API_KEY``,

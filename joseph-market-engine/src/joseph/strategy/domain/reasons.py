@@ -1,3 +1,6 @@
+# Copyright 2026 apoman123
+# SPDX-License-Identifier: MIT
+
 """Explanation trace produced for every evaluated rule node."""
 
 from __future__ import annotations

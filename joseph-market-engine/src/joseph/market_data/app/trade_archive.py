@@ -1,3 +1,6 @@
+# Copyright 2026 apoman123
+# SPDX-License-Identifier: MIT
+
 """Archive of recorded trades: port, in-memory store and read side.
 
 The archive holds what the engine records from venues' public trades (see

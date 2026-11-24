@@ -1,3 +1,6 @@
+# Copyright 2026 apoman123
+# SPDX-License-Identifier: MIT
+
 """Unit tests for the data.binance.vision aggTrades archive client."""
 
 from __future__ import annotations

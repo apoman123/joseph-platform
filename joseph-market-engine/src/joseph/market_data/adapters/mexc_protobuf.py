@@ -1,3 +1,6 @@
+# Copyright 2026 apoman123
+# SPDX-License-Identifier: MIT
+
 """MEXC futures WebSocket frames in Protocol Buffers and JSON.
 
 MEXC is moving its futures WebSocket market data from JSON to Protocol

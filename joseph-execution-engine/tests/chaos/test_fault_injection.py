@@ -1,3 +1,6 @@
+# Copyright 2026 apoman123
+# SPDX-License-Identifier: MIT
+
 """Chaos tests: lost ACKs, timeouts, duplicate/out-of-order events, crashes.
 
 The invariant under test (V5 §12.2 #3): an uncertain submit is never sent a

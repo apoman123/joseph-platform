@@ -1,3 +1,6 @@
+# Copyright 2026 apoman123
+# SPDX-License-Identifier: MIT
+
 """Indicator read endpoints (backend-authoritative outputs for the terminal).
 
 Routes raise domain errors; the application's exception handlers map them

@@ -1,3 +1,6 @@
+# Copyright 2026 apoman123
+# SPDX-License-Identifier: MIT
+
 """Decoding of contract JSON into domain market objects (pure)."""
 
 from __future__ import annotations

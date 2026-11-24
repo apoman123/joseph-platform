@@ -1,3 +1,6 @@
+# Copyright 2026 apoman123
+# SPDX-License-Identifier: MIT
+
 """Signal routing into the outbox and the outbox delivery worker."""
 
 from __future__ import annotations

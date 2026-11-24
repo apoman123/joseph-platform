@@ -1,3 +1,6 @@
+# Copyright 2026 apoman123
+# SPDX-License-Identifier: MIT
+
 """Services exposed to the API layer (assembled by the composition root)."""
 
 from __future__ import annotations

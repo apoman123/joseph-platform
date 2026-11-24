@@ -1,3 +1,6 @@
+# Copyright 2026 apoman123
+# SPDX-License-Identifier: MIT
+
 """Generic adapter from a ``smc_indicators`` object to the plugin SDK.
 
 A ``PackagedPlugin`` owns one or more mutable library objects per series.

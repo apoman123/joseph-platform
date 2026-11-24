@@ -1,3 +1,6 @@
+# Copyright 2026 apoman123
+# SPDX-License-Identifier: MIT
+
 """Unit tests for the Lighter trade archive (remote Parquet range reads).
 
 Every Parquet file here is a tiny synthetic one written by the test itself,

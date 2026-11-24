@@ -1,3 +1,6 @@
+# Copyright 2026 apoman123
+# SPDX-License-Identifier: MIT
+
 """Environment-driven settings.
 
 Safety defaults: live trading off, emergency halt off, dev tokens only in

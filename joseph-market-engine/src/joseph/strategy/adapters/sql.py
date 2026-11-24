@@ -1,3 +1,6 @@
+# Copyright 2026 apoman123
+# SPDX-License-Identifier: MIT
+
 """SQLAlchemy Core persistence for strategy versions and checkpoints.
 
 Definitions are stored as canonical JSON and are immutable: the repository

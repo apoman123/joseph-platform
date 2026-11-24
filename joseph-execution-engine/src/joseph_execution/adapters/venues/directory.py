@@ -1,3 +1,6 @@
+# Copyright 2026 apoman123
+# SPDX-License-Identifier: MIT
+
 """Read-only view of the OMS order book for live venue adapters.
 
 Several venues need context the trading port does not carry: Binance,

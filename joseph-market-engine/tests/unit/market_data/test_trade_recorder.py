@@ -1,3 +1,6 @@
+# Copyright 2026 apoman123
+# SPDX-License-Identifier: MIT
+
 """Unit tests for the public-trade recorder (live, backfill, retention)."""
 
 from __future__ import annotations

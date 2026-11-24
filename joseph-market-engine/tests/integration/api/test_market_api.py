@@ -1,3 +1,6 @@
+# Copyright 2026 apoman123
+# SPDX-License-Identifier: MIT
+
 """Integration tests of the market-engine HTTP and WebSocket API."""
 
 from __future__ import annotations

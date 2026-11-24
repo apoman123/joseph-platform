@@ -1,3 +1,6 @@
+# Copyright 2026 apoman123
+# SPDX-License-Identifier: MIT
+
 """Backtest runner using the production compiler, evaluator and FSM.
 
 Bars are counted on the instrument's session calendar: an exchange backtest

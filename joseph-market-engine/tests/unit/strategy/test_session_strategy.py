@@ -1,3 +1,6 @@
+# Copyright 2026 apoman123
+# SPDX-License-Identifier: MIT
+
 """Strategy rules on exchange session calendars and rate instruments."""
 
 from __future__ import annotations

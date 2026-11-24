@@ -1,3 +1,6 @@
+# Copyright 2026 apoman123
+# SPDX-License-Identifier: MIT
+
 """Generates the TWSE (XTAI) trading-day table from official TWSE data.
 
 Past trading days come from the monthly market summary (``FMTQIK``), which

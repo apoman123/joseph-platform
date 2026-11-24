@@ -1,3 +1,6 @@
+# Copyright 2026 apoman123
+# SPDX-License-Identifier: MIT
+
 """Builds venue adapters from settings (used by the composition root)."""
 
 from __future__ import annotations

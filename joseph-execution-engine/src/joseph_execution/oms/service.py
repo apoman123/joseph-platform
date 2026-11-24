@@ -1,3 +1,6 @@
+# Copyright 2026 apoman123
+# SPDX-License-Identifier: MIT
+
 """Order management service: the only owner of venue order side effects.
 
 Pathway: ``OrderIntent -> RiskGateway -> OMS (outbox) -> TradingAdapter``.

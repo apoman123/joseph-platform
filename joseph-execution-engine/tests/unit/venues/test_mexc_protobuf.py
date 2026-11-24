@@ -1,3 +1,6 @@
+# Copyright 2026 apoman123
+# SPDX-License-Identifier: MIT
+
 """MEXC futures private Protobuf frames: transcription and decoding.
 
 The transcribed schema is checked against the vendored official ``.proto``

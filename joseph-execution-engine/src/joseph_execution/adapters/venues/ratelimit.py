@@ -1,3 +1,6 @@
+# Copyright 2026 apoman123
+# SPDX-License-Identifier: MIT
+
 """Weighted sliding-window rate limiting for venue requests.
 
 Each venue documents its limits as "weight W per window T" budgets (for

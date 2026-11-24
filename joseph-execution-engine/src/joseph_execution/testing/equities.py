@@ -1,3 +1,6 @@
+# Copyright 2026 apoman123
+# SPDX-License-Identifier: MIT
+
 """Securities fixtures for tests and demos: instruments and sessions.
 
 Sessions are built with fixed UTC offsets (Taipei UTC+8; New York in

@@ -1,3 +1,6 @@
+# Copyright 2026 apoman123
+# SPDX-License-Identifier: MIT
+
 """Backtests of an exchange-listed DEMO stock count session bars."""
 
 from __future__ import annotations

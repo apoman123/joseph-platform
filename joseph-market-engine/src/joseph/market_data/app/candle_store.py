@@ -1,3 +1,6 @@
+# Copyright 2026 apoman123
+# SPDX-License-Identifier: MIT
+
 """Bounded in-memory candle store with merge semantics and fetch coverage.
 
 Besides bars, each series keeps its *coverage*: spans in which a fetch or a

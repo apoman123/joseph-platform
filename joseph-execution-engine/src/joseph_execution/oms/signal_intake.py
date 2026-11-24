@@ -1,3 +1,6 @@
+# Copyright 2026 apoman123
+# SPDX-License-Identifier: MIT
+
 """Converts market-engine signals into strategy intents.
 
 Only ENTRY_CONFIRMED signals create intents, one per enabled deployment of

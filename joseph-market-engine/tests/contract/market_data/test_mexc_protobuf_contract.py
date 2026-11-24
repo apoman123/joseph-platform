@@ -1,3 +1,6 @@
+# Copyright 2026 apoman123
+# SPDX-License-Identifier: MIT
+
 """Contract tests: MEXC streams in Protobuf and JSON through the adapter.
 
 ``ws_deal_protobuf`` and ``ws_kline_1m_protobuf`` were captured live from

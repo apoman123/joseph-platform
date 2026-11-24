@@ -1,3 +1,6 @@
+# Copyright 2026 apoman123
+# SPDX-License-Identifier: MIT
+
 """Seconds bars from US consolidated-tape trades (pure).
 
 US trades carry sale conditions that decide which parts of a bar a trade

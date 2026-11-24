@@ -1,3 +1,6 @@
+# Copyright 2026 apoman123
+# SPDX-License-Identifier: MIT
+
 """Long A and Short B end-to-end: each condition is necessary."""
 
 from __future__ import annotations

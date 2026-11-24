@@ -1,3 +1,6 @@
+# Copyright 2026 apoman123
+# SPDX-License-Identifier: MIT
+
 """Builds a deterministic in-memory execution engine for tests and demos.
 
 Uses SQLite in memory, a manual clock, the static DEMO market gateway and

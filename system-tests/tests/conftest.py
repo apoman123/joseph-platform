@@ -1,3 +1,6 @@
+# Copyright 2026 apoman123
+# SPDX-License-Identifier: MIT
+
 """Boots the Joseph engines as real processes for system tests.
 
 The market engine runs with only the deterministic ``mock`` venue so the
@@ -55,7 +58,7 @@ TENANT_A = "tenant-a"
 TENANT_B = "tenant-b"
 MAX_ANCHORED_BARS = 2_000
 """Anchored-study cap of the system-test market engine (engine minimum)."""
-STEP_UP_SECRET = "NJXXGZLQNAWXG6LTORSW2LLUMVZXILJR"  # noqa: S105 - test only.
+STEP_UP_SECRET = "NJXXGZLQNAWXG6LTORSW2LLUMVZXILJR"
 """Base32 TOTP secret of the ``live`` execution engine."""
 ENGINE_VENVS = "JOSEPH_SYSTEM_ENGINE_VENVS"
 """Optional checkout holding pre-synced ``<engine>/.venv`` environments."""
@@ -147,7 +150,7 @@ def _command(
     return [str(python), "-m", "uvicorn", *uvicorn_args], run_env
 
 
-def _start(  # noqa: PLR0913 - one call site per engine flavour.
+def _start(
     name: str,
     project: str,
     app: str,
@@ -185,7 +188,7 @@ def _start(  # noqa: PLR0913 - one call site per engine flavour.
     if app_dir is not None:
         uvicorn_args += ["--app-dir", str(app_dir)]
     command, run_env = _command(project, uvicorn_args, env)
-    process = subprocess.Popen(  # noqa: S603 - fixed local command.
+    process = subprocess.Popen(
         command,
         cwd=ROOT / project,
         env=run_env,
@@ -196,7 +199,7 @@ def _start(  # noqa: PLR0913 - one call site per engine flavour.
 
 
 @contextlib.contextmanager
-def _serving(  # noqa: PLR0913 - mirrors ``_start``.
+def _serving(
     name: str,
     project: str,
     app: str,

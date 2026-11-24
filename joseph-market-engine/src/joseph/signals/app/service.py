@@ -1,3 +1,6 @@
+# Copyright 2026 apoman123
+# SPDX-License-Identifier: MIT
+
 """Signal recording and query service (tenant scoped)."""
 
 from __future__ import annotations

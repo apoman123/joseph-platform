@@ -1,3 +1,6 @@
+# Copyright 2026 apoman123
+# SPDX-License-Identifier: MIT
+
 """SinoPac Shioaji adapter (TWSE and TPEx stocks and ETFs).
 
 Uses the ``shioaji`` SDK (optional extra ``sinopac``; SinoPac's

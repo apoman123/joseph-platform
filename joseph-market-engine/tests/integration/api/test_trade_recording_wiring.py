@@ -1,3 +1,6 @@
+# Copyright 2026 apoman123
+# SPDX-License-Identifier: MIT
+
 """Integration tests: the composition root wires trade recording."""
 
 from __future__ import annotations

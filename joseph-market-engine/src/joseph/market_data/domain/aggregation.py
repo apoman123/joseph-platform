@@ -1,3 +1,6 @@
+# Copyright 2026 apoman123
+# SPDX-License-Identifier: MIT
+
 """Bars aggregated from a shorter native timeframe that tiles them (pure).
 
 Some venues lack a timeframe natively although a shorter native timeframe

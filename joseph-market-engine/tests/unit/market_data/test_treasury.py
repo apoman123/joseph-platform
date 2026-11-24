@@ -1,3 +1,6 @@
+# Copyright 2026 apoman123
+# SPDX-License-Identifier: MIT
+
 """Unit tests for Treasury CSV parsing, publication timing and caching."""
 
 from __future__ import annotations

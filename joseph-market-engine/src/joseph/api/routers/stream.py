@@ -1,3 +1,6 @@
+# Copyright 2026 apoman123
+# SPDX-License-Identifier: MIT
+
 """Market WebSocket ``/v1/stream/market`` (contract ``stream.schema.json``).
 
 Protocol:

@@ -1,3 +1,6 @@
+# Copyright 2026 apoman123
+# SPDX-License-Identifier: MIT
+
 """JSON-compatible checkpoint encoding for immutable plugin state.
 
 Plugin states are frozen dataclasses built from tuples, decimals, enums and

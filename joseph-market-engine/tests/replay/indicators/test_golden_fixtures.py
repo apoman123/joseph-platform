@@ -1,3 +1,6 @@
+# Copyright 2026 apoman123
+# SPDX-License-Identifier: MIT
+
 """Runs the hand-constructed golden scenarios and the Pine parity harness."""
 
 from __future__ import annotations

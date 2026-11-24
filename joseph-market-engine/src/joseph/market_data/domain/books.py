@@ -1,3 +1,6 @@
+# Copyright 2026 apoman123
+# SPDX-License-Identifier: MIT
+
 """Order-book reconciliation and book-walk slippage (pure).
 
 ``OrderBookBuilder`` maintains a book from a REST snapshot plus validated

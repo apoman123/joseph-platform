@@ -1,3 +1,6 @@
+# Copyright 2026 apoman123
+# SPDX-License-Identifier: MIT
+
 """Hyperliquid perpetuals market-data adapter.
 
 REST: ``POST https://api.hyperliquid.xyz/info`` with ``metaAndAssetCtxs``,

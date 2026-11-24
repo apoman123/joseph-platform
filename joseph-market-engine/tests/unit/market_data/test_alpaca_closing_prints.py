@@ -1,3 +1,6 @@
+# Copyright 2026 apoman123
+# SPDX-License-Identifier: MIT
+
 """Unit tests: the official closing print in Alpaca minute and hour bars.
 
 Alpaca stamps the closing cross after the close, in its minute after the

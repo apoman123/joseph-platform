@@ -1,3 +1,6 @@
+# Copyright 2026 apoman123
+# SPDX-License-Identifier: MIT
+
 """Unit tests for alert routing, quiet hours, backoff and formatting."""
 
 from __future__ import annotations

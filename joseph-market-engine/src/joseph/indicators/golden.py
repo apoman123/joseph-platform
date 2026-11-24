@@ -1,3 +1,6 @@
+# Copyright 2026 apoman123
+# SPDX-License-Identifier: MIT
+
 """Golden fixtures: hand-built scenarios and future Pine parity exports.
 
 Two fixture families live under ``fixtures/indicators/``:

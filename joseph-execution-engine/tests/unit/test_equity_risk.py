@@ -1,3 +1,6 @@
+# Copyright 2026 apoman123
+# SPDX-License-Identifier: MIT
+
 """Unit tests for broker routing and securities risk checks."""
 
 from __future__ import annotations

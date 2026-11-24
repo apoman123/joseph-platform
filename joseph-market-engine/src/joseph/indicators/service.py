@@ -1,3 +1,6 @@
+# Copyright 2026 apoman123
+# SPDX-License-Identifier: MIT
+
 """Point-in-time indicator queries for the API layer.
 
 ``IndicatorQueryService`` fetches closed candles through the

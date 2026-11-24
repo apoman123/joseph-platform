@@ -1,3 +1,6 @@
+# Copyright 2026 apoman123
+# SPDX-License-Identifier: MIT
+
 """Lighter (zkLighter mainnet) perpetuals market-data adapter.
 
 REST base: ``https://mainnet.zklighter.elliot.ai/api/v1`` — ``orderBooks``,

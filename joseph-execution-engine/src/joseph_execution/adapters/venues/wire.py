@@ -1,3 +1,6 @@
+# Copyright 2026 apoman123
+# SPDX-License-Identifier: MIT
+
 """Wire helpers shared by the live venue adapters.
 
 * Canonical instrument ids are ``{venue}:perp:{venue_market_id}`` (the

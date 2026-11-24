@@ -1,3 +1,6 @@
+# Copyright 2026 apoman123
+# SPDX-License-Identifier: MIT
+
 """Unit tests for DEMO taker volume, synthetic trades, seconds and months."""
 
 from __future__ import annotations

@@ -1,3 +1,6 @@
+# Copyright 2026 apoman123
+# SPDX-License-Identifier: MIT
+
 """Persistence ports. One ``UnitOfWork`` is one ACID transaction."""
 
 from __future__ import annotations

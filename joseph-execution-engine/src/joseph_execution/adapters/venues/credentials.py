@@ -1,3 +1,6 @@
+# Copyright 2026 apoman123
+# SPDX-License-Identifier: MIT
+
 """Venue credentials for live adapters, loaded from the credential vault.
 
 Accounts store credentials as an AES-GCM envelope (``adapters/vault.py``)

@@ -1,3 +1,6 @@
+# Copyright 2026 apoman123
+# SPDX-License-Identifier: MIT
+
 """The indicator plugin contract (V5 §3.3 / §6.3).
 
 A plugin is a deterministic, pure state machine over closed bars of one

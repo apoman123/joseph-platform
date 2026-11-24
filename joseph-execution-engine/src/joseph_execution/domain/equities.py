@@ -1,3 +1,6 @@
+# Copyright 2026 apoman123
+# SPDX-License-Identifier: MIT
+
 """Rules for exchange-listed securities and broker routing.
 
 Pure functions shared by the Risk Gateway, the OMS and the paper

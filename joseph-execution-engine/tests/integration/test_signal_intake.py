@@ -1,3 +1,6 @@
+# Copyright 2026 apoman123
+# SPDX-License-Identifier: MIT
+
 """Integration tests for strategy signal intake (market -> execution)."""
 
 from __future__ import annotations

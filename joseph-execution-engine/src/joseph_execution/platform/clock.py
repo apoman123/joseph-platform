@@ -1,3 +1,6 @@
+# Copyright 2026 apoman123
+# SPDX-License-Identifier: MIT
+
 """Clock and id generator implementations."""
 
 from __future__ import annotations

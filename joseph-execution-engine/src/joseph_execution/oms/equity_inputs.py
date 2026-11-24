@@ -1,3 +1,6 @@
+# Copyright 2026 apoman123
+# SPDX-License-Identifier: MIT
+
 """Risk inputs specific to exchange-listed securities.
 
 Gathers what the securities checks consult: the exchange sessions around

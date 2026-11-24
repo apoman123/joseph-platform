@@ -1,3 +1,6 @@
+# Copyright 2026 apoman123
+# SPDX-License-Identifier: MIT
+
 """Binance USDⓈ-M adapter: negotiation, request shapes, errors, stream."""
 
 from __future__ import annotations

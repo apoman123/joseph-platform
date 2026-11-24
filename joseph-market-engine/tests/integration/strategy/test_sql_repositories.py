@@ -1,3 +1,6 @@
+# Copyright 2026 apoman123
+# SPDX-License-Identifier: MIT
+
 """SQL persistence: immutability, uniqueness and checkpoints."""
 
 from __future__ import annotations

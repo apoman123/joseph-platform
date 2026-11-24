@@ -1,3 +1,6 @@
+# Copyright 2026 apoman123
+# SPDX-License-Identifier: MIT
+
 """Mapping of domain errors to the contract ``ErrorResponse``.
 
 Unexpected exceptions return ``INTERNAL`` with a trace id and no internal

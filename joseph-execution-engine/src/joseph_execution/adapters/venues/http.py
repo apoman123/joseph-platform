@@ -1,3 +1,6 @@
+# Copyright 2026 apoman123
+# SPDX-License-Identifier: MIT
+
 """HTTP transport shared by the live venue adapters.
 
 Maps transport failures onto the OMS's safety semantics:

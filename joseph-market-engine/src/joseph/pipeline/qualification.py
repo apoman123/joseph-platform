@@ -1,3 +1,6 @@
+# Copyright 2026 apoman123
+# SPDX-License-Identifier: MIT
+
 """Synchronous qualification gate over cached screening reports."""
 
 from __future__ import annotations

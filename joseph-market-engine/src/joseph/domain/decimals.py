@@ -1,3 +1,6 @@
+# Copyright 2026 apoman123
+# SPDX-License-Identifier: MIT
+
 """Exact decimal helpers for prices, quantities and money.
 
 Contracts transport decimals as strings. These helpers parse venue values

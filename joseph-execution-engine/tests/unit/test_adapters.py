@@ -1,3 +1,6 @@
+# Copyright 2026 apoman123
+# SPDX-License-Identifier: MIT
+
 """Unit tests for the paper, shadow, live, resolver and market adapters."""
 
 from __future__ import annotations

@@ -1,3 +1,6 @@
+# Copyright 2026 apoman123
+# SPDX-License-Identifier: MIT
+
 """Captures small, sanitized public-API samples used by offline tests.
 
 Run manually (network required); never run in CI::

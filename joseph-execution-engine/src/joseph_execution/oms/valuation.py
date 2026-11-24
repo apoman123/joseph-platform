@@ -1,3 +1,6 @@
+# Copyright 2026 apoman123
+# SPDX-License-Identifier: MIT
+
 """Account valuation used by risk checks and account summaries."""
 
 from __future__ import annotations

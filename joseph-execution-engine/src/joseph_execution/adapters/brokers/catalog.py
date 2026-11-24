@@ -1,3 +1,6 @@
+# Copyright 2026 apoman123
+# SPDX-License-Identifier: MIT
+
 """Builds the broker adapters with the deployment's gates applied.
 
 A broker is open only when the global LIVE flag is on *and* the broker is

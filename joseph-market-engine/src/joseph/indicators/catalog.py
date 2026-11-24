@@ -1,3 +1,6 @@
+# Copyright 2026 apoman123
+# SPDX-License-Identifier: MIT
+
 """Build-time composition of the indicator plugins.
 
 Every indicator algorithm lives in the external ``smc_indicators`` library

@@ -1,3 +1,6 @@
+# Copyright 2026 apoman123
+# SPDX-License-Identifier: MIT
+
 """SQLAlchemy Core ``BarArchive``: recorded sparse bars survive restarts.
 
 Two tables, in the trade recorder's database (``JOSEPH_TRADE_ARCHIVE_URL``,

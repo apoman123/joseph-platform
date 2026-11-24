@@ -1,3 +1,6 @@
+# Copyright 2026 apoman123
+# SPDX-License-Identifier: MIT
+
 """Deterministic builders for candles, AOIs, events, snapshots and frames.
 
 Bar ``index`` counts bars of the instrument's session calendar: for an

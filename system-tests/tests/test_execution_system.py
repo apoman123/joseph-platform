@@ -1,3 +1,6 @@
+# Copyright 2026 apoman123
+# SPDX-License-Identifier: MIT
+
 """System tests for the execution engine running as a real process.
 
 Covers the manual paper flow, idempotency, kill switch, tenant isolation,

@@ -1,3 +1,6 @@
+# Copyright 2026 apoman123
+# SPDX-License-Identifier: MIT
+
 """Full chain: live pipeline → signal → execution forwarder → paper order.
 
 An always-true 1m PAPER strategy is activated on the DEMO venue and bound to

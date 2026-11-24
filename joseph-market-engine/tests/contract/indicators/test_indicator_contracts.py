@@ -1,3 +1,6 @@
+# Copyright 2026 apoman123
+# SPDX-License-Identifier: MIT
+
 """Every indicator output conforms to indicators.schema.json."""
 
 from __future__ import annotations

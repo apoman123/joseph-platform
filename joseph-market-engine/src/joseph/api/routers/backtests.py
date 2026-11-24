@@ -1,3 +1,6 @@
+# Copyright 2026 apoman123
+# SPDX-License-Identifier: MIT
+
 """Backtest route (``POST /v1/strategies/{id}/backtests``).
 
 No postponed annotations: FastAPI resolves the injected dependency.

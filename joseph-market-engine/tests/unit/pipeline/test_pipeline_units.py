@@ -1,3 +1,6 @@
+# Copyright 2026 apoman123
+# SPDX-License-Identifier: MIT
+
 """Unit tests for pipeline helpers: requirement merging, gate, context."""
 
 from __future__ import annotations

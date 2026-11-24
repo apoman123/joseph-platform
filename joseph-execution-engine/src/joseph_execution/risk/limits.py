@@ -1,3 +1,6 @@
+# Copyright 2026 apoman123
+# SPDX-License-Identifier: MIT
+
 """Risk limits: user values clamped by platform hard caps."""
 
 from __future__ import annotations

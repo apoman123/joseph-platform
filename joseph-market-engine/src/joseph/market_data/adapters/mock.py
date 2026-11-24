@@ -1,3 +1,6 @@
+# Copyright 2026 apoman123
+# SPDX-License-Identifier: MIT
+
 """Deterministic synthetic DEMO venue (``mock``).
 
 Prices are a pure function of ``(instrument, time)``: layered value noise

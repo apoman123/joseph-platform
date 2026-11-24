@@ -1,3 +1,6 @@
+# Copyright 2026 apoman123
+# SPDX-License-Identifier: MIT
+
 """Live signal pipeline.
 
 Every ``interval_s`` the pipeline reloads ACTIVE strategy versions, selects

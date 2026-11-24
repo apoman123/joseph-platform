@@ -1,3 +1,6 @@
+# Copyright 2026 apoman123
+# SPDX-License-Identifier: MIT
+
 """Performance smoke tests: every plugin over 5k bars; 50k anchored bars."""
 
 from __future__ import annotations

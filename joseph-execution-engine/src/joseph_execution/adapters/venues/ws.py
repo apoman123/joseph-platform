@@ -1,3 +1,6 @@
+# Copyright 2026 apoman123
+# SPDX-License-Identifier: MIT
+
 """Reconnecting private (account) WebSocket streams for live venues.
 
 One loop serves every venue:

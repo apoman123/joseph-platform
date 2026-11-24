@@ -1,3 +1,6 @@
+# Copyright 2026 apoman123
+# SPDX-License-Identifier: MIT
+
 """Unit tests for the DEMO venue, registry and market-data service."""
 
 from __future__ import annotations

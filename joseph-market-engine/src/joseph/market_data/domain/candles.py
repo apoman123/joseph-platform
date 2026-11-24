@@ -1,3 +1,6 @@
+# Copyright 2026 apoman123
+# SPDX-License-Identifier: MIT
+
 """Candle merge semantics and gap detection (pure).
 
 Merge rules for two observations of the same bar:

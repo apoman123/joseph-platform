@@ -1,3 +1,6 @@
+# Copyright 2026 apoman123
+# SPDX-License-Identifier: MIT
+
 """SinoPac Shioaji market data for TWSE and TPEx (optional, credential-gated).
 
 ``JOSEPH_TW_DATA_SOURCE=sinopac`` with a SinoPac Shioaji API key

@@ -1,3 +1,6 @@
+# Copyright 2026 apoman123
+# SPDX-License-Identifier: MIT
+
 """Contract tests: TWSE, TPEx, Nasdaq/NYSE (Alpaca) and Treasury adapters.
 
 TWSE (OpenAPI, STOCK_DAY, holiday schedules, MIS), TPEx (OpenAPI,

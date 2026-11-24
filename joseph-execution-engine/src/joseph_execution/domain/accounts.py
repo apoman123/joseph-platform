@@ -1,3 +1,6 @@
+# Copyright 2026 apoman123
+# SPDX-License-Identifier: MIT
+
 """Accounts, negotiated trading capabilities and LIVE arming."""
 
 from __future__ import annotations

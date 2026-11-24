@@ -1,3 +1,6 @@
+# Copyright 2026 apoman123
+# SPDX-License-Identifier: MIT
+
 """Optional CoinGecko trending source (heat-score bonus only).
 
 Disabled by default. Its output can only reorder results; it never changes

@@ -1,3 +1,6 @@
+# Copyright 2026 apoman123
+# SPDX-License-Identifier: MIT
+
 """Trading-session calendars and session-aware bar boundaries.
 
 Crypto venues trade around the clock, so their bars are aligned to the UTC

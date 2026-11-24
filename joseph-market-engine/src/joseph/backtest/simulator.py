@@ -1,3 +1,6 @@
+# Copyright 2026 apoman123
+# SPDX-License-Identifier: MIT
+
 """Conservative fill simulation and performance metrics for backtests.
 
 Assumptions (also reported in every ``BacktestReport``):

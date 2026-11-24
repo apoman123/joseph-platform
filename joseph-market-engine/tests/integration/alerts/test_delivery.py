@@ -1,3 +1,6 @@
+# Copyright 2026 apoman123
+# SPDX-License-Identifier: MIT
+
 """Alert delivery over mocked HTTP/SMTP with the durable outbox."""
 
 from __future__ import annotations

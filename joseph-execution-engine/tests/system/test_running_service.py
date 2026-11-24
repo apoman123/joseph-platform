@@ -1,3 +1,6 @@
+# Copyright 2026 apoman123
+# SPDX-License-Identifier: MIT
+
 """System test: the real uvicorn process with background loops.
 
 Starts the execution engine as a separate process (file SQLite, static

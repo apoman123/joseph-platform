@@ -1,3 +1,6 @@
+# Copyright 2026 apoman123
+# SPDX-License-Identifier: MIT
+
 """Clock port so time-dependent logic stays deterministic under test."""
 
 from __future__ import annotations

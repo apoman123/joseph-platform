@@ -1,3 +1,6 @@
+# Copyright 2026 apoman123
+# SPDX-License-Identifier: MIT
+
 """Public market-data REST endpoints.
 
 Routes: ``/v1/venues``, ``/v1/instruments``, ``/v1/candles``,

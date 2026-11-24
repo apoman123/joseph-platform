@@ -1,3 +1,6 @@
+# Copyright 2026 apoman123
+# SPDX-License-Identifier: MIT
+
 """Lighter adapter: key checks, nonces, integer orders, errors, stream."""
 
 from __future__ import annotations
