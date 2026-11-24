@@ -14,6 +14,10 @@
  * Binance is never confused with `BTC` on Hyperliquid. Rows carry the venue
  * and listing-exchange badges and say when a venue's data is delayed or
  * its data source has no API key configured.
+ *
+ * The search box takes focus when the picker opens. Groups are a
+ * `role="tablist"`; results are a `role="listbox"` of option buttons,
+ * sectioned by group.
  */
 
 'use client';
@@ -42,7 +46,7 @@ import {Popover} from './popover';
 import {useRuntime} from './runtime-context';
 import {loadVenueCapabilities} from './venue-capabilities';
 
-/** Results shown at most. */
+/** Maximum number of results shown. */
 const MAX_RESULTS = 60;
 
 /** Venues whose listings are searched by name in the browser. */
@@ -56,7 +60,7 @@ const NAMED_VENUES: ReadonlySet<Venue> = new Set<Venue>([
   'mock',
 ]);
 
-/** Short venue badges. */
+/** Short venue badges on result rows. */
 const VENUE_BADGES: Readonly<Record<Venue, string>> = {
   binance: 'BIN',
   hyperliquid: 'HL',
@@ -79,11 +83,11 @@ const directories = new WeakMap<
 >();
 
 /**
- * Full listing of a venue (cached; retried after a failure). The engine
- * matches symbols only, so names are matched against this list.
- * @param runtime Runtime.
- * @param venue Venue.
- * @return Instruments of the venue.
+ * Returns the full listing of a venue (cached; retried after a failure).
+ * The engine matches symbols only, so names are matched against this list.
+ * @param runtime Runtime whose market client is asked.
+ * @param venue Venue to list.
+ * @return Instruments of the venue (at most 5,000).
  */
 export function venueDirectory(
   runtime: TerminalRuntime,
@@ -99,6 +103,8 @@ export function venueDirectory(
     promise = runtime.clients.market
       .listInstruments({venue, limit: 5000})
       .then(list => list.instruments);
+    // Forget a failed load (unless a newer one replaced it) so the next
+    // search retries.
     const own = promise;
     promise.catch(() => {
       if (cache.get(venue) === own) cache.delete(venue);
@@ -110,12 +116,12 @@ export function venueDirectory(
 
 /**
  * Merges symbol matches from the engine with name matches from venue
- * listings, ranked and limited.
+ * listings, ranked and limited. Ties sort by group order, then symbol.
  * @param symbolHits Engine search results.
- * @param listings Venue listings for name search.
+ * @param listings Venue listings for name search (used only with a query).
  * @param query Search text.
  * @param group Selected group (`all` for every group).
- * @return Ranked instruments.
+ * @return At most `MAX_RESULTS` instruments, best first.
  */
 export function rankInstruments(
   symbolHits: readonly Instrument[],
@@ -157,7 +163,8 @@ export function rankInstruments(
 }
 
 /**
- * Instrument selector for the active chart.
+ * Renders the instrument selector: a trigger showing the current symbol and
+ * venue that opens the picker in a popover.
  * @param props Current instrument and change handler.
  * @return Selector.
  */
@@ -203,9 +210,11 @@ export function InstrumentSelector({
 }
 
 /**
- * One result row.
- * @param props Instrument, venue capabilities and pick handler.
- * @return Option.
+ * Renders one result row. Its tooltip explains a delay or a missing API
+ * key, else shows the canonical id.
+ * @param props Instrument, venue capabilities (null while unknown) and pick
+ *     handler.
+ * @return Option button.
  */
 function InstrumentOption({
   item,
@@ -286,8 +295,9 @@ function InstrumentOption({
 }
 
 /**
- * Search body.
- * @param props Initial venue, mode and pick handler.
+ * Renders the picker body: group tabs, venue filter, search box and
+ * results.
+ * @param props Initial venue, DEMO mode and pick handler.
  * @return Search UI.
  */
 function InstrumentSearch({
@@ -335,7 +345,7 @@ function InstrumentSearch({
     const own = venues.filter(v => wanted.has(v));
     return own.length > 0 ? own : [undefined];
   }, [venue, group, venues]);
-  // Symbol search on the engine (debounced).
+  // Symbol search on the engine, 150 ms after typing pauses.
   useEffect(() => {
     let alive = true;
     const timer = setTimeout(() => {
@@ -414,6 +424,7 @@ function InstrumentSearch({
     if (group !== 'all' || query.trim()) return [{group: null, items: list}];
     return MARKET_GROUPS.filter(g => g.id !== 'all')
       .map(g => ({
+        // `filter` above dropped `all`, which it cannot narrow by type.
         group: g.id as MarketGroup,
         items: list.filter(item => marketGroupOf(item) === g.id),
       }))
@@ -453,6 +464,7 @@ function InstrumentSearch({
           id="venue-filter"
           className="j-select"
           value={venue}
+          // The options are `all` and the venues listed below.
           onChange={e => void setVenue(e.target.value as Venue | 'all')}
         >
           {!demo && <option value="all">All venues</option>}

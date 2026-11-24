@@ -28,8 +28,9 @@ afterEach(() => {
 });
 
 /**
- * Whether the bundle's execution client lists a LIVE-capable account.
- * @param config Configuration.
+ * Returns whether the bundle's execution client lists a LIVE-capable
+ * account.
+ * @param config Configuration to build the clients from.
  * @return True when an account offers LIVE.
  */
 async function offersLive(config: TerminalConfig): Promise<boolean> {

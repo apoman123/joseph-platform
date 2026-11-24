@@ -17,6 +17,9 @@
  * `BroadcastChannel`; closing the window docks the pane again. The window
  * keeps running while the main window reloads and reconnects to the new
  * main window by itself; changes made here meanwhile are sent to it then.
+ *
+ * The window handles hotkeys like the main window. Its link state is shown
+ * as a dot with the full text in a tooltip and as visually hidden text.
  */
 
 'use client';
@@ -58,7 +61,7 @@ import {RuntimeProvider, useRuntime} from './runtime-context';
 import {SlotPanelView, SlotTabs} from './slot-host';
 import {TimeframeControl} from './timeframe-menu';
 
-/** Titles of detachable panels. */
+/** Titles of detachable panels by contribution id. */
 const PANEL_TITLES: Readonly<Record<string, string>> = {
   'market-info': 'Market',
   'watchlist': 'Watchlist',
@@ -66,7 +69,7 @@ const PANEL_TITLES: Readonly<Record<string, string>> = {
   'alerts': 'Alerts',
 };
 
-/** Link status wording. */
+/** Link state wording (tooltip and screen-reader text). */
 const LINK_TEXT: Readonly<Record<MainLinkState, string>> = {
   connecting: 'Connecting to the main window…',
   linked: 'Linked to the main window',
@@ -76,7 +79,7 @@ const LINK_TEXT: Readonly<Record<MainLinkState, string>> = {
 };
 
 /**
- * Title of the pane a pop-out shows.
+ * Returns the title of the pane a pop-out shows.
  * @param runtime Pop-out runtime.
  * @param target Pop-out target.
  * @return Title such as `BTCUSD 5m` or `Alerts`.
@@ -91,8 +94,8 @@ function paneTitle(runtime: TerminalRuntime, target: PopoutTarget): string {
 }
 
 /**
- * Pop-out route entry: validates the link, then opens the window.
- * @return Window content.
+ * Renders the pop-out route: validates the link, then the window.
+ * @return Window content, or a help page for an incomplete link.
  */
 export function PopoutApp(): ReactElement {
   const [target] = useState(() => parsePopoutQuery(window.location.search));
@@ -114,7 +117,7 @@ export function PopoutApp(): ReactElement {
 }
 
 /**
- * Pop-out window bound to one pane.
+ * Renders the pop-out window bound to one pane.
  * @param props Target pane.
  * @return Window frame.
  */
@@ -174,7 +177,9 @@ function PopoutWindow({target}: {target: PopoutTarget}): ReactElement {
     );
     linkRef.current = next;
     setLink(next);
-    // `pagehide` (not `beforeunload`) also fires on mobile and bfcache.
+    // `pagehide` (not `beforeunload`) also fires on mobile. A page that
+    // enters the back/forward cache (`persisted`) may come back, so it
+    // does not say goodbye.
     const onHide = (event: PageTransitionEvent) => {
       if (!event.persisted) next.goodbye();
     };
@@ -253,7 +258,8 @@ function PopoutWindow({target}: {target: PopoutTarget}): ReactElement {
 }
 
 /**
- * Shown when the chart of a pop-out link is no longer in the workspace.
+ * Renders the notice shown when the chart of a pop-out link is no longer
+ * in the workspace.
  * @param props Close callback.
  * @return Notice.
  */
@@ -270,9 +276,10 @@ function MissingPane({onClose}: {onClose: () => void}): ReactElement {
 }
 
 /**
- * The pop-out's chart pane with its context menu.
+ * Renders the pop-out's chart pane with its context menu; Escape or any
+ * press outside closes the menu.
  * @param props Chart id.
- * @return Pane.
+ * @return Pane, or null while the chart is missing.
  */
 function PopoutChart({chartId}: {chartId: string}): ReactElement | null {
   const runtime = useRuntime();
@@ -312,10 +319,10 @@ function PopoutChart({chartId}: {chartId: string}): ReactElement | null {
 }
 
 /**
- * Compact window bar: link state, the pane's instrument and timeframe
- * (charts), provenance, order mode, theme and "Bring back".
- * @param props Target, link and title.
- * @return Header.
+ * Renders the compact window bar: link state, the pane's instrument and
+ * timeframe (charts), provenance, order mode, theme and "Bring back".
+ * @param props Target, link (null until started) and title.
+ * @return Header element.
  */
 function PopoutBar({
   target,
@@ -433,7 +440,7 @@ function PopoutBar({
   );
 }
 
-/** Link store used before the link starts. */
+/** Link-state store used before the link starts. */
 const IDLE_LINK = {
   get: (): MainLinkState => 'connecting',
   subscribe: () => () => undefined,

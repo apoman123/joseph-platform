@@ -77,7 +77,7 @@ afterEach(() => {
 
 /**
  * Advances fake time and the injected clock together.
- * @param ms Milliseconds.
+ * @param ms Time to advance, in milliseconds.
  */
 function advance(ms: number): void {
   clock += ms;
@@ -119,6 +119,7 @@ function mainWindow(hub: MemoryChannelHub, options: MainOptions = {}) {
         close: vi.fn(),
       };
       opened.push({url, name, features, handle});
+      // Deliberate partial mock: the controller uses only these members.
       return handle as unknown as Window;
     },
     now: () => clock,
@@ -337,7 +338,7 @@ const ALERTS: DetachedPaneRef = {
 };
 
 /**
- * Statuses of every detached pane of a main window.
+ * Returns the status of every detached pane of a main window.
  * @param runtime Main runtime.
  * @return Status per pane, in detach order.
  */

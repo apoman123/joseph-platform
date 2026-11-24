@@ -12,12 +12,12 @@
 
 import {Decimal} from '@joseph/contracts';
 
-/** Supported field kinds. */
+/** Supported field kinds; decimals are strings to keep exact values. */
 export type InputKind = 'integer' | 'decimal' | 'boolean' | 'enum';
 
 /** One form field derived from the schema. */
 export interface InputField {
-  /** Setting key. */
+  /** Setting key, e.g. `min_delta_share`. */
   name: string;
   /** Field kind. */
   kind: InputKind;
@@ -27,7 +27,7 @@ export interface InputField {
   defaultValue: string | number | boolean;
   /** Inclusive minimum (numbers as strings for decimals). */
   minimum?: number | string;
-  /** Inclusive maximum. */
+  /** Inclusive maximum (numbers as strings for decimals). */
   maximum?: number | string;
   /** Allowed values of enum fields. */
   choices?: readonly string[];
@@ -43,6 +43,8 @@ const PLATFORM_FIELDS: ReadonlySet<string> = new Set(['tick_size']);
  * @return Fields in schema order.
  */
 export function fieldsFromSchema(schema: unknown): InputField[] {
+  // Optional chaining tolerates any value; only an object whose
+  // `properties` is an object yields fields.
   const properties = (schema as {properties?: unknown} | null)?.properties;
   if (!properties || typeof properties !== 'object') return [];
   const fields: InputField[] = [];
@@ -53,6 +55,8 @@ export function fieldsFromSchema(schema: unknown): InputField[] {
     const prop = raw as Record<string, unknown>;
     const description =
       typeof prop.description === 'string' ? prop.description : name;
+    // The engine publishes bounds as numbers, or as decimal strings for
+    // decimal settings.
     const bounds = {
       ...(prop.minimum !== undefined
         ? {minimum: prop.minimum as number | string}
@@ -112,20 +116,20 @@ export function fieldLabel(name: string): string {
 }
 
 /**
- * Compares two decimal strings.
- * @param a First.
- * @param b Second.
- * @return -1, 0 or 1.
+ * Compares two decimal strings exactly.
+ * @param a First decimal.
+ * @param b Second decimal.
+ * @return -1, 0 or 1 as `a` is less than, equal to or greater than `b`.
  */
 function cmp(a: string, b: string): number {
   return Decimal.parse(a).cmp(Decimal.parse(b));
 }
 
 /**
- * Validates one raw form value.
- * @param field Field.
+ * Validates one raw form value against its field's kind and bounds.
+ * @param field Field definition.
  * @param raw Value from the form (strings for text inputs).
- * @return Parsed value or an error message.
+ * @return Parsed value (decimals stay strings) or an error message.
  */
 export function parseFieldValue(
   field: InputField,
@@ -151,6 +155,8 @@ export function parseFieldValue(
     }
     return {ok: true, value};
   }
+  // Plain notation only: no exponent, leading zeros or `+` sign, even where
+  // `Decimal` would accept them.
   if (!Decimal.isValid(text) || !/^-?(0|[1-9][0-9]*)(\.[0-9]+)?$/.test(text)) {
     return {ok: false, error: 'Enter a decimal number such as 0.25'};
   }
@@ -164,10 +170,11 @@ export function parseFieldValue(
 }
 
 /**
- * Validates every field and keeps only values that differ from defaults.
- * @param fields Fields.
- * @param raw Raw form values by name.
- * @return Overrides (empty = plugin defaults) or errors by field.
+ * Validates every field and keeps only values that differ from defaults
+ * (decimals compared by value, so `0.50` equals `0.5`).
+ * @param fields Field definitions.
+ * @param raw Raw form values by setting key; missing keys are skipped.
+ * @return Overrides (empty = plugin defaults) or errors by setting key.
  */
 export function collectOverrides(
   fields: readonly InputField[],
@@ -197,10 +204,10 @@ export function collectOverrides(
 }
 
 /**
- * Initial form values: saved overrides over defaults.
- * @param fields Fields.
- * @param saved Saved overrides (may be null).
- * @return Raw values by name.
+ * Returns the initial form values: saved overrides over defaults.
+ * @param fields Field definitions.
+ * @param saved Saved overrides, or null when none are saved.
+ * @return Raw form values by setting key.
  */
 export function initialValues(
   fields: readonly InputField[],

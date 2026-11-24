@@ -7,6 +7,12 @@
 /**
  * @fileoverview Accessible drag handle (`role="separator"`) for resizing
  * docks and chart-grid tracks with the pointer or the arrow keys.
+ *
+ * The handle is focusable and reports its value through `aria-valuenow`,
+ * `aria-valuemin` and `aria-valuemax`. Left/Right (vertical handles) or
+ * Up/Down (horizontal handles) move it by `keyStepPx` and commit at once;
+ * a pointer drag commits on release. Pointer capture keeps a drag going
+ * when the pointer leaves the thin handle.
  */
 
 'use client';
@@ -20,9 +26,9 @@ export interface SplitterProps {
   label: string;
   /** Current value for assistive tech (percent or pixels). */
   value: number;
-  /** Minimum value. */
+  /** Minimum value, in the unit of `value`. */
   min: number;
-  /** Maximum value. */
+  /** Maximum value, in the unit of `value`. */
   max: number;
   /** Called with the pointer delta in pixels while dragging. */
   onDrag: (deltaPx: number) => void;
@@ -32,14 +38,14 @@ export interface SplitterProps {
   keyStepPx?: number;
   /** Extra class. */
   className?: string;
-  /** Inline position. */
+  /** Inline position (the handle is absolutely positioned). */
   style?: CSSProperties;
   /** Test id. */
   testId?: string;
 }
 
 /**
- * Drag handle.
+ * Renders a drag handle.
  * @param props Props.
  * @return Separator element.
  */

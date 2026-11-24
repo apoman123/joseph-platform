@@ -24,14 +24,15 @@ import {useEffect, useState, type ReactElement} from 'react';
 import type {TerminalRuntime} from '../composition/runtime';
 import {formatCountdown} from '@joseph/terminal-shell';
 
-/** Days of sessions kept loaded around "now" for status and countdowns. */
+/** Sessions kept loaded on each side of now (21 days) for status lines. */
 const NOW_WINDOW_MS = 21 * 86_400_000;
 
 /**
- * Current calendar of an id; re-renders when the engine's (or DEMO's)
- * sessions for it arrive, and loads the weeks around now.
- * @param runtime Runtime.
- * @param calendarId Calendar id.
+ * Returns the current calendar of an id. The component re-renders when the
+ * engine's (or DEMO's) sessions for it arrive; the weeks around now are
+ * loaded on mount.
+ * @param runtime Runtime whose session cache is used.
+ * @param calendarId Calendar id such as `XNYS` or `24x7`.
  * @return Calendar.
  */
 export function useBarCalendar(
@@ -51,7 +52,7 @@ export function useBarCalendar(
       calendarId,
       now - NOW_WINDOW_MS,
       now + NOW_WINDOW_MS,
-      0
+      /* marginMs= */ 0
     );
     return off;
   }, [runtime, calendarId]);
@@ -63,10 +64,10 @@ const WEEKDAYS = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'];
 
 /**
  * Formats a session time such as `Mon 09:30 ET`.
- * @param ms UTC ms.
- * @param calendar Calendar (its time zone).
- * @param withDay Prefix the exchange-local weekday.
- * @return Text.
+ * @param ms Instant, UTC ms.
+ * @param calendar Calendar whose time zone is used.
+ * @param withDay Whether to prefix the exchange-local weekday.
+ * @return Text in exchange time.
  */
 function sessionTime(
   ms: number,
@@ -94,12 +95,13 @@ export interface MarketStatusView {
 }
 
 /**
- * Builds the badge text of a status.
+ * Builds the badge text of a status. Within 12 hours of the next open the
+ * detail adds a countdown.
  * @param status Market status.
- * @param calendar Calendar.
- * @param nowMs Clock.
+ * @param calendar Calendar of the market (exchange time zone).
+ * @param nowMs Current time, UTC ms.
  * @param market Market name for notices, e.g. `NYSE / Nasdaq`.
- * @return View.
+ * @return Label, detail and notice of the badge.
  */
 export function describeMarketStatus(
   status: MarketStatus,
@@ -144,14 +146,15 @@ interface MarketStatusBadgeProps {
   calendar: BarCalendar;
   /** Market name for notices. */
   market: string;
-  /** Clock (re-render driven by the parent). */
+  /** Current time, UTC ms; the parent re-renders the badge as it ticks. */
   nowMs: number;
 }
 
 /**
- * Market status badge of a session market (nothing for `24x7`).
+ * Renders the market status badge of a session market. The full status is
+ * in the tooltip; narrow panes hide the detail and notice.
  * @param props Calendar, market and clock.
- * @return Badge, or null for markets that never close.
+ * @return Badge, or null for markets that never close (`24x7`).
  */
 export function MarketStatusBadge({
   calendar,

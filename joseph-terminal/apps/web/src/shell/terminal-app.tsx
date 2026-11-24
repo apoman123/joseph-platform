@@ -5,7 +5,12 @@
  */
 
 /**
- * @fileoverview Terminal application shell (client only).
+ * @fileoverview Terminal application shell (client only): creates the
+ * runtime, activates the features and lays out the top bar, drawing
+ * toolbar, chart grid, docks and status bar.
+ *
+ * Keyboard: one window-level `keydown` listener hands every key to the
+ * hotkey registry; keys it handles do not reach the browser's defaults.
  */
 
 'use client';
@@ -30,8 +35,10 @@ import {SlotTabs} from './slot-host';
 import {TopBar} from './top-bar';
 
 /**
- * Applies a shared workspace from `#ws=` in the URL, if present.
- * @param runtime Runtime.
+ * Applies a shared workspace from `#ws=` in the URL, if present. The hash
+ * is removed first, so a reload does not import it again. Drawings live
+ * outside the workspace document and stay unchanged.
+ * @param runtime Main runtime.
  */
 function importShareLink(runtime: TerminalRuntime): void {
   const match = /^#ws=([A-Za-z0-9_-]+)$/.exec(window.location.hash);
@@ -59,7 +66,7 @@ function importShareLink(runtime: TerminalRuntime): void {
 }
 
 /**
- * Root terminal component.
+ * Renders the root terminal component.
  * @return Application shell.
  */
 export function TerminalApp(): ReactElement {
@@ -87,6 +94,7 @@ export function TerminalApp(): ReactElement {
     const onKey = (event: KeyboardEvent) => {
       if (runtime.hotkeys.handle(event)) event.preventDefault();
     };
+    // Save pending (debounced) workspace changes before the page goes away.
     const onUnload = () => void runtime.flush();
     window.addEventListener('keydown', onKey);
     window.addEventListener('beforeunload', onUnload);

@@ -6,6 +6,12 @@
 
 /**
  * @fileoverview Left vertical drawing toolbar built from the tool registry.
+ *
+ * Every control is a labelled button; armed tools and toggles report their
+ * state through `aria-pressed`. A group with several tools has a chevron
+ * (`aria-haspopup="menu"`, `aria-expanded`) that opens a `role="menu"` of
+ * `menuitemradio` entries; Escape or a press outside closes it. Tooltips
+ * name a tool's hotkey when it has one.
  */
 
 'use client';
@@ -27,8 +33,8 @@ import {useStore} from './react-bindings';
 import {useRuntime} from './runtime-context';
 
 /**
- * Subscribes to the tool registry.
- * @return Registered tools.
+ * Subscribes the component to the tool registry.
+ * @return Registered tools in registration order.
  */
 function useTools(): ToolPlugin[] {
   const runtime = useRuntime();
@@ -53,11 +59,11 @@ const GROUP_NAMES: Readonly<Record<ToolGroup, string>> = {
   annotation: 'Annotations',
 };
 
-/** Storage key of the last tool used per group. */
+/** Storage key of the last tool picked per group (JSON object). */
 const GROUP_STORAGE_KEY = 'joseph.drawbar.groups';
 
 /**
- * Groups tools in toolbar order.
+ * Groups consecutive tools of the same group, keeping registration order.
  * @param tools Registered tools.
  * @return Groups with their tools.
  */
@@ -88,14 +94,15 @@ interface FlyoutProps {
   group: ToolGroup;
   /** Tools of the group. */
   tools: readonly ToolPlugin[];
-  /** Armed tool. */
+  /** Armed tool id, or null for the pointer. */
   activeTool: string | null;
   /** Arms a tool. */
   onPick: (tool: ToolPlugin) => void;
 }
 
 /**
- * Chevron button that opens a group's tool list beside the toolbar.
+ * Renders the chevron button that opens a group's tool list beside the
+ * toolbar.
  * @param props Props.
  * @return Flyout trigger and panel.
  */
@@ -114,6 +121,7 @@ function GroupFlyout({
     if (!position) return;
     const close = (event: Event) => {
       if (event instanceof KeyboardEvent && event.key !== 'Escape') return;
+      // Presses on the panel or its trigger (which toggles) keep it open.
       if (
         event instanceof PointerEvent &&
         (panel.current?.contains(event.target as Node) ||
@@ -141,6 +149,8 @@ function GroupFlyout({
         aria-expanded={position !== null}
         data-testid={`tool-group-${group}`}
         onClick={() => {
+          // The flyout is fixed-positioned beside the trigger, so the
+          // scrolling toolbar cannot clip it.
           const rect = trigger.current?.getBoundingClientRect();
           setPosition(
             position || !rect ? null : {left: rect.right + 6, top: rect.top - 4}
@@ -184,8 +194,8 @@ function GroupFlyout({
 }
 
 /**
- * Drawing toolbar.
- * @return Toolbar.
+ * Renders the drawing toolbar for the active chart.
+ * @return Navigation element.
  */
 export function DrawingToolbar(): ReactElement {
   const runtime = useRuntime();
@@ -215,10 +225,13 @@ export function DrawingToolbar(): ReactElement {
     try {
       const raw = runtime.storage.getItem(GROUP_STORAGE_KEY);
       const parsed: unknown = raw ? JSON.parse(raw) : {};
+      // Values are only compared with tool ids, so a wrong saved value
+      // matches nothing.
       return parsed && typeof parsed === 'object'
         ? (parsed as Record<string, string>)
         : {};
     } catch {
+      // Unreadable saved state: start with each group's first tool.
       return {};
     }
   });

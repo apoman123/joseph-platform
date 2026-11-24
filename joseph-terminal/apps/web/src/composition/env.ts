@@ -12,29 +12,31 @@
  * synthetic data: failures surface as STALE or UNAVAILABLE.
  */
 
-/** Resolved configuration. */
+/** Resolved configuration; null means not configured. */
 export interface TerminalConfig {
-  /** Market engine REST base URL. */
+  /** Market engine REST base URL, without a trailing slash. */
   marketApiUrl: string | null;
-  /** Market engine WebSocket base URL. */
+  /** Market engine WebSocket base URL (else derived from the REST URL). */
   marketWsUrl: string | null;
-  /** Execution engine REST base URL. */
+  /** Execution engine REST base URL, without a trailing slash. */
   executionApiUrl: string | null;
-  /** Execution engine WebSocket base URL. */
+  /** Execution engine WebSocket base URL (else derived from the REST URL). */
   executionWsUrl: string | null;
   /**
    * Development bearer token. Production must replace this with a
-   * server-side session (BFF); never ship real credentials to the browser.
+   * server-side session (a backend for frontend, BFF); never ship real
+   * credentials to the browser.
    */
   devToken: string | null;
-  /** Whether the terminal serves DEMO data. */
+  /** Whether the terminal serves DEMO data (no market engine URL). */
   demo: boolean;
 }
 
 /**
- * Normalizes an optional URL.
- * @param value Raw value.
- * @return URL without trailing slash, or null.
+ * Normalizes an optional setting (a URL or the token).
+ * @param value Raw environment value; may be unset or blank.
+ * @return Value without surrounding blanks and one trailing slash, or null
+ *     when empty.
  */
 function clean(value: string | undefined): string | null {
   const trimmed = (value ?? '').trim().replace(/\/$/, '');
@@ -43,9 +45,13 @@ function clean(value: string | undefined): string | null {
 
 /**
  * Reads the configuration (values are inlined by Next.js at build time).
+ * A WebSocket URL left unset is derived from its REST URL (`http` becomes
+ * `ws`, `https` becomes `wss`).
  * @return Configuration.
  */
 export function readConfig(): TerminalConfig {
+  // Each variable is named in full: Next.js inlines only literal
+  // `process.env.NEXT_PUBLIC_*` reads into the browser bundle.
   const marketApiUrl = clean(process.env.NEXT_PUBLIC_MARKET_API_URL);
   const marketWsUrl =
     clean(process.env.NEXT_PUBLIC_MARKET_WS_URL) ??

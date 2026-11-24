@@ -6,6 +6,11 @@
 
 /**
  * @fileoverview Status bar, toasts and command palette.
+ *
+ * The palette is a modal `role="dialog"`. Its search input takes focus on
+ * open and keeps it: Up/Down move the highlighted option (`aria-selected`,
+ * wrapping at the ends), Enter runs it, Escape or a press outside closes
+ * the palette. Toasts are announced politely through `role="status"`.
  */
 
 'use client';
@@ -17,8 +22,8 @@ import {useRuntime} from './runtime-context';
 import {SlotInline} from './slot-host';
 
 /**
- * UTC clock updated every second.
- * @return Clock text.
+ * Renders a UTC clock that updates every second.
+ * @return Clock element.
  */
 function UtcClock() {
   const [now, setNow] = useState(() => Date.now());
@@ -34,8 +39,9 @@ function UtcClock() {
 }
 
 /**
- * Status bar with venue health, mode, clock and attribution.
- * @return Footer.
+ * Renders the status bar: status-bar slot items (venue health), the DEMO
+ * notice, the clock and the attribution links.
+ * @return Footer element.
  */
 export function StatusBar(): ReactElement {
   const runtime = useRuntime();
@@ -65,8 +71,8 @@ export function StatusBar(): ReactElement {
 }
 
 /**
- * Toast stack.
- * @return Toasts.
+ * Renders the toast stack.
+ * @return Live region holding the current toasts.
  */
 export function Toasts(): ReactElement {
   const runtime = useRuntime();
@@ -83,20 +89,23 @@ export function Toasts(): ReactElement {
 }
 
 /**
- * Command palette dialog.
- * @return Palette or null.
+ * Renders the command palette dialog while it is open.
+ * @return Palette, or null while closed.
  */
 export function CommandPalette(): ReactElement | null {
   const runtime = useRuntime();
   const state = useStore(runtime.palette);
   const input = useRef<HTMLInputElement>(null);
+  // The registries are mutable, not observable: `state.open` makes the
+  // palette re-read bindings and commands each time it opens.
   const hotkeyHints = useMemo(() => {
     const hints = new Map<string, string>();
     for (const [combo, id] of runtime.hotkeys.bindings()) {
       hints.set(id, combo);
     }
     return hints;
-  }, [runtime, state.open]); // eslint-disable-line react-hooks/exhaustive-deps
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- `state.open` re-reads the mutable registries each time the palette opens
+  }, [runtime, state.open]);
   const entries = useMemo(
     () =>
       filterPalette(
@@ -107,7 +116,8 @@ export function CommandPalette(): ReactElement | null {
         })),
         state.query
       ),
-    [runtime, state.query, state.open, hotkeyHints] // eslint-disable-line react-hooks/exhaustive-deps
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- `state.open` re-reads the mutable registries each time the palette opens
+    [runtime, state.query, state.open, hotkeyHints]
   );
   useEffect(() => {
     if (state.open) input.current?.focus();

@@ -24,8 +24,8 @@ const cache = new WeakMap<
 
 /**
  * Loads venue capabilities once per runtime (retried after a failure).
- * @param runtime Runtime.
- * @return Capabilities by venue.
+ * @param runtime Runtime whose market client is asked.
+ * @return Capabilities by venue; rejects when the venue list fails to load.
  */
 export function loadVenueCapabilities(
   runtime: TerminalRuntime
@@ -43,6 +43,7 @@ export function loadVenueCapabilities(
             ])
           )
       );
+    // Forget a failed load so the next caller retries.
     promise.catch(() => cache.delete(runtime));
     cache.set(runtime, promise);
   }
@@ -50,9 +51,9 @@ export function loadVenueCapabilities(
 }
 
 /**
- * Capabilities of one venue.
- * @param runtime Runtime.
- * @param venue Venue.
+ * Returns the capabilities of one venue, loading them on first use.
+ * @param runtime Runtime whose market client is asked.
+ * @param venue Venue to look up.
  * @return Capabilities, or null while loading or unavailable.
  */
 export function useVenueCapabilities(
@@ -69,6 +70,8 @@ export function useVenueCapabilities(
       .then(map => {
         if (alive) setCapabilities(map.get(venue) ?? null);
       })
+      // Unknown capabilities grey out nothing; the engine stays the
+      // authority.
       .catch(() => undefined);
     return () => {
       alive = false;

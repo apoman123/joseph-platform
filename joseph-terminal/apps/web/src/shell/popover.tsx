@@ -6,6 +6,11 @@
 
 /**
  * @fileoverview Accessible popover anchored to a trigger button.
+ *
+ * The trigger is a button with `aria-haspopup="dialog"`, `aria-expanded`
+ * and `aria-controls`; the panel is a labelled `role="dialog"`. Escape or a
+ * press outside closes it. Focus stays where it is: the panel's controls
+ * follow the trigger in the tab order.
  */
 
 'use client';
@@ -33,16 +38,16 @@ interface PopoverProps {
   className?: string;
   /** Popover body; receives a close callback. */
   children: (close: () => void) => ReactNode;
-  /** Align the panel to the right edge of the trigger. */
+  /** Whether to align the panel to the right edge of the trigger. */
   alignRight?: boolean;
   /** Test id for the trigger. */
   testId?: string;
 }
 
 /**
- * Popover that closes on outside click and Escape.
+ * Renders a trigger button and, while open, its popover panel.
  * @param props Props.
- * @return Popover.
+ * @return Popover element.
  */
 export function Popover({
   label,
@@ -59,6 +64,7 @@ export function Popover({
   useEffect(() => {
     if (!open) return;
     const onPointer = (event: PointerEvent) => {
+      // Pointer events on the document always target a DOM node.
       if (!root.current?.contains(event.target as Node)) setOpen(false);
     };
     const onKey = (event: KeyboardEvent) => {

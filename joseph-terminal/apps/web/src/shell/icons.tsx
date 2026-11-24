@@ -60,7 +60,7 @@ import {
   type LucideIcon,
 } from 'lucide-react';
 
-/** Known icons. */
+/** Icons by the ids that tool manifests use. */
 const ICONS: Readonly<Record<string, LucideIcon>> = {
   'activity': Activity,
   'align-justify': AlignJustify,
@@ -112,8 +112,10 @@ const ICONS: Readonly<Record<string, LucideIcon>> = {
 };
 
 /**
- * Renders a named icon.
- * @param props Icon name and size.
+ * Renders a named icon. An unknown or missing name renders a square, so a
+ * manifest typo never breaks the toolbar. Icons are decorative
+ * (`aria-hidden`); their buttons carry the accessible name.
+ * @param props Icon name and size in pixels.
  * @return Icon element.
  */
 export function Icon({

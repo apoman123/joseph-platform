@@ -9,6 +9,11 @@
  * windows: favorites, a grouped menu (seconds, minutes, hours, days) and a
  * typed resolution box. Timeframes the chart's venue does not publish are
  * disabled with the reason; the engine stays the authority.
+ *
+ * Favorites and menu entries are toggle buttons (`aria-pressed` marks the
+ * chart's timeframe); the reason a timeframe is disabled is its tooltip.
+ * The typed box describes itself through `aria-describedby` and announces
+ * an invalid entry with `role="alert"`.
  */
 
 'use client';
@@ -33,9 +38,10 @@ import {useRuntime} from './runtime-context';
 import {useVenueCapabilities} from './venue-capabilities';
 
 /**
- * Custom resolution input ("15", "4h", "1D", "5S", "1M").
- * @param props Offered timeframes and the apply callback.
- * @return Form.
+ * Renders the custom resolution input ("15", "4h", "1D", "5S", "1M").
+ * @param props Offered timeframes (null while unknown) and the apply
+ *     callback.
+ * @return Form element.
  */
 function CustomTimeframe({
   offered,
@@ -96,7 +102,8 @@ export interface TimeframeControlProps {
 }
 
 /**
- * Favorites plus the full timeframe menu for one chart.
+ * Renders the favorite timeframes plus the full timeframe menu for one
+ * chart.
  * @param props Chart.
  * @return Navigation element.
  */

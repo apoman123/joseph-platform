@@ -9,6 +9,10 @@
  * width, dash, fill, extension, text, tool inputs (for example anchored
  * VWAP bands), lock, visibility, z-order and delete. Every change is an
  * undoable drawing-store command.
+ *
+ * The editor is a labelled `role="toolbar"` of native controls; swatches
+ * and toggles report their state through `aria-pressed`. Text edits apply
+ * on blur or Enter. A locked drawing disables its style controls.
  */
 
 'use client';
@@ -52,9 +56,9 @@ export const SWATCHES: readonly string[] = [
 const TEXT_TOOLS: ReadonlySet<string> = new Set(['text', 'zone-box']);
 
 /**
- * Converts `#rrggbb` + alpha byte to a fill color.
- * @param color Base color.
- * @return Translucent fill.
+ * Returns the translucent fill for a stroke color (alpha 0x26, about 15%).
+ * @param color Stroke color as `#rrggbb`; an alpha suffix is dropped.
+ * @return Fill color as `#rrggbbaa`.
  */
 export function fillFor(color: string): string {
   return `${color.slice(0, 7)}26`;
@@ -67,9 +71,9 @@ interface StyleBarProps {
 }
 
 /**
- * Floating style editor; renders nothing without a selection on this chart.
+ * Renders the floating style editor of the drawing selected on this chart.
  * @param props Props.
- * @return Toolbar or null.
+ * @return Toolbar, or null without a selection on this chart.
  */
 export function DrawingStyleBar({chartId}: StyleBarProps): ReactElement | null {
   const runtime = useRuntime();
@@ -179,6 +183,7 @@ export function DrawingStyleBar({chartId}: StyleBarProps): ReactElement | null {
           aria-label="Line style"
           value={style.line_style}
           disabled={locked}
+          // The options below are exactly the line styles.
           onChange={event =>
             void restyle({
               line_style: event.target.value as DrawingStyle['line_style'],
@@ -286,7 +291,8 @@ export function DrawingStyleBar({chartId}: StyleBarProps): ReactElement | null {
           }}
           onKeyDown={event => {
             if (event.key === 'Enter') {
-              (event.target as HTMLInputElement).blur();
+              // Blurring commits the text (see `onBlur`).
+              event.currentTarget.blur();
             }
           }}
         />

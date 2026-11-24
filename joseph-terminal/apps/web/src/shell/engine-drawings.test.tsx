@@ -53,9 +53,9 @@ const PALETTE = {
 };
 
 /**
- * Start of the bar `n` bars before the latest closed 5m bar.
- * @param n Bars back.
- * @return Bar start.
+ * Returns the start of the bar `n` bars before the latest closed 5m bar.
+ * @param n Number of bars back.
+ * @return Bar start, UTC ms.
  */
 function barsBack(n: number): number {
   return floorToTimeframe('5m', Date.now()) - (n + 1) * BAR;

@@ -34,14 +34,18 @@ import type {TerminalConfig} from './env';
 export interface ClientBundle {
   /** Backend clients. */
   clients: BackendClients;
-  /** Capability names (`demo`, `market`, `strategy`, `execution`, ...). */
+  /**
+   * Capability names (`demo`, `market`, `strategy`, `execution`,
+   * `user-stream`, `venue:mock`) that feature manifests may require.
+   */
   capabilities: string[];
 }
 
 /**
- * Throws a contract error for every call; used when no execution engine is
- * configured so trading UI fails closed with an actionable message.
- * @return Execution client that always rejects.
+ * Returns an execution client for deployments without an execution engine,
+ * so trading UI fails closed with an actionable message.
+ * @return Execution client whose every method rejects with `ApiError` 503
+ *     (`VENUE_UNAVAILABLE`).
  */
 export function unavailableExecutionClient(): ExecutionClient {
   const fail = async (): Promise<never> => {
@@ -54,10 +58,13 @@ export function unavailableExecutionClient(): ExecutionClient {
       field_errors: [],
     });
   };
-  return new Proxy({} as ExecutionClient, {get: () => fail});
+  // Every property read goes through the `get` trap and returns `fail`, so
+  // the empty target never needs the client's members.
+  const target: Partial<ExecutionClient> = {};
+  return new Proxy(target, {get: () => fail}) as ExecutionClient;
 }
 
-/** Stream that never emits (no user stream configured). */
+/** Stream that never emits and reports itself closed (no user stream). */
 const NULL_STREAM: StreamClient = {
   subscribe: () => () => undefined,
   onStatus: handler => {
@@ -68,11 +75,11 @@ const NULL_STREAM: StreamClient = {
 };
 
 /**
- * Current DEMO mark for broker simulation (same path as DEMO candles; for
- * session markets the last session's close while closed, on the tick
- * ladder).
- * @param instrumentId Instrument.
- * @return Mark price or null for non-DEMO instruments.
+ * Returns the current DEMO mark for broker simulation. It follows the same
+ * price path as the DEMO candles: for session markets, the last session's
+ * close while the market is closed, on the tick ladder.
+ * @param instrumentId Canonical instrument id.
+ * @return Mark price as a decimal string, or null for non-DEMO instruments.
  */
 export function demoMark(instrumentId: string): string | null {
   const spec = DEMO_INSTRUMENT_SPECS.find(s => s.instrumentId === instrumentId);
@@ -84,10 +91,11 @@ export function demoMark(instrumentId: string): string | null {
 export const DEMO_LIVE_REHEARSAL_PARAM = 'demo-live-rehearsal';
 
 /**
- * Whether the page asked for the DEMO LIVE rehearsal account
+ * Returns whether the page asked for the DEMO LIVE rehearsal account
  * (`?demo-live-rehearsal=1`). Only DEMO clients read it; a configured
  * execution engine ignores it.
- * @param search Query string; defaults to the current page's.
+ * @param search Query string; defaults to the current page's (empty during
+ *     server rendering).
  * @return True when the rehearsal is requested.
  */
 export function demoLiveRehearsalRequested(search?: string): boolean {
@@ -97,9 +105,11 @@ export function demoLiveRehearsalRequested(search?: string): boolean {
 }
 
 /**
- * Builds DEMO or HTTP clients from configuration.
+ * Builds DEMO or HTTP clients from configuration. Without an execution
+ * engine URL, trading calls reject (`unavailableExecutionClient`); without
+ * its WebSocket URL, the user stream stays closed.
  * @param config Terminal configuration.
- * @return Clients and capabilities.
+ * @return Clients and the capabilities they provide.
  */
 export function buildClients(config: TerminalConfig): ClientBundle {
   if (config.demo) {
@@ -142,6 +152,8 @@ export function buildClients(config: TerminalConfig): ClientBundle {
   if (config.executionApiUrl) capabilities.push('execution');
   const userStream = config.executionWsUrl
     ? new WebSocketStreamClient({
+        // Browsers cannot set headers on a WebSocket handshake, so the
+        // development token travels in the query string.
         url: () =>
           `${config.executionWsUrl}/v1/stream/user${config.devToken ? `?token=${encodeURIComponent(config.devToken)}` : ''}`,
       })

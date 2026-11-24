@@ -83,9 +83,10 @@ const INSTRUMENTS = DEMO_INSTRUMENT_SPECS.map(spec =>
 );
 
 /**
- * DEMO instrument by id.
+ * Returns the DEMO instrument with an id.
  * @param id Instrument id.
  * @return Instrument.
+ * @throws `Error` when no DEMO instrument has the id.
  */
 function demo(id: string): Instrument {
   const found = INSTRUMENTS.find(i => i.instrument_id === id);
@@ -94,10 +95,10 @@ function demo(id: string): Instrument {
 }
 
 /**
- * New York wall time.
- * @param date `YYYY-MM-DD`.
- * @param hour Hour.
- * @param minute Minute.
+ * Converts a New York wall time to an instant.
+ * @param date Day as `YYYY-MM-DD`.
+ * @param hour Hour of the day.
+ * @param minute Minute of the hour.
  * @return Epoch ms.
  */
 function ny(date: string, hour = 0, minute = 0): number {
@@ -181,13 +182,14 @@ describe('market groups and search', () => {
   });
 
   it('flags delayed data and a missing Alpaca key', () => {
+    // Deliberate partial mock: `venueAccess` reads only these fields.
     const nasdaq = {
       venue: 'nasdaq',
       display_name: 'Nasdaq',
       data_delay_ms: 900_000,
       requires_credentials: true,
       credentials_configured: false,
-    } as VenueCapabilities;
+    } as unknown as VenueCapabilities;
     const access = venueAccess(nasdaq);
     expect(access.delay).toBe('Delayed 15 min');
     expect(access.missingCredentials).toMatch(/^Alpaca API key missing/);
@@ -487,6 +489,7 @@ describe('market panel helpers', () => {
     const View = view.view;
     render(
       <RuntimeProvider runtime={runtime}>
+        {/* The market panel uses the context it was activated with. */}
         <View ctx={undefined as never} />
       </RuntimeProvider>
     );

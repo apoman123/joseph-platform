@@ -54,10 +54,10 @@ import {
 import {createStore, type ReadableStore} from '@joseph/feature-registry';
 import type {SyncedPoint, TerminalRuntime, WindowActions} from './runtime';
 
-/** Crosshair messages per second at most. */
+/** Minimum gap between crosshair messages (at most 25 per second). */
 const CROSSHAIR_INTERVAL_MS = 40;
 
-/** Liveness check interval. */
+/** Interval of the main window's liveness check of its pop-outs. */
 const CHECK_MS = 1_000;
 
 /** Time a just-docked pane ignores late heartbeats from its window. */
@@ -89,14 +89,14 @@ export interface DetachEnvironment {
   open: (url: string, name: string, features: string) => Window | null;
   /**
    * Clock.
-   * @return UTC ms.
+   * @return Current time, UTC ms.
    */
   now: () => number;
-  /** This window's id. */
+  /** This window's id, unique per page load. */
   windowId: string;
 }
 
-/** Running controller. */
+/** Running main-window controller. */
 export interface DetachController {
   /** Window actions exposed to the UI. */
   actions: WindowActions;
@@ -107,18 +107,20 @@ export interface DetachController {
 }
 
 /**
- * Window name of a pane's pop-out (so re-opening reuses the window).
+ * Returns the window name of a pane's pop-out, so re-opening reuses the
+ * window.
  * @param key Pane key.
- * @return Name.
+ * @return Name made of letters, digits, `_` and `-` only.
  */
 export function popoutWindowName(key: string): string {
   return `joseph-popout-${key.replace(/[^A-Za-z0-9_-]/g, '_')}`;
 }
 
 /**
- * Window features for a pane, at its remembered position when known.
- * @param ref Pane reference.
- * @param geometry Remembered window position and size.
+ * Returns the window features for a pane, at its remembered position when
+ * known.
+ * @param ref Pane reference; charts get a larger default window than panels.
+ * @param geometry Remembered window position and size, in screen pixels.
  * @return `window.open` features string.
  */
 export function popoutFeatures(
@@ -136,8 +138,8 @@ export function popoutFeatures(
 
 /**
  * Explains how many remembered windows a restore click opened.
- * @param opened Windows opened.
- * @param wanted Windows to restore.
+ * @param opened Number of windows the browser opened.
+ * @param wanted Number of windows to restore.
  * @return Message, or null when every window opened.
  */
 export function restoreMessage(opened: number, wanted: number): string | null {
@@ -149,19 +151,21 @@ export function restoreMessage(opened: number, wanted: number): string | null {
 }
 
 /**
- * Starts the main window's detach controller.
+ * Starts the main window's detach controller. Without a channel port
+ * (`env.port` null) panes cannot be detached and `actions.supported` is
+ * false.
  * @param runtime Main runtime.
  * @param env Browser services.
- * @return Controller.
+ * @return Controller; call `dispose` to stop it.
  */
 export function startMainDetach(
   runtime: TerminalRuntime,
   env: DetachEnvironment
 ): DetachController {
   const handles = new Map<string, Window>();
-  /** When each pane was docked here (late heartbeats must not re-detach). */
+  // When each pane was docked here (late heartbeats must not re-detach).
   const docked = new Map<string, number>();
-  /** Last pop-out action applied, per pop-out window id. */
+  // Sequence number of the last pop-out action applied, per pop-out window.
   const applied = new Map<string, number>();
   const bus = env.port
     ? new PopoutBus(
@@ -192,8 +196,8 @@ export function startMainDetach(
 
   /**
    * Opens (or re-opens) a pane's window.
-   * @param pane Pane.
-   * @return Whether the browser opened a window.
+   * @param pane Pane to show in the window.
+   * @return Whether the browser opened a window (false when blocked).
    */
   const openWindow = (pane: DetachedPane): boolean => {
     const url = popoutUrl(pane.ref, runtime.workspace.get().workspace_id);
@@ -205,6 +209,7 @@ export function startMainDetach(
         popoutFeatures(pane.ref, pane.geometry)
       );
     } catch {
+      // `open` may throw instead of returning null; treat it as blocked.
       handle = null;
     }
     if (!handle) return false;
@@ -449,6 +454,8 @@ export function startMainDetach(
       try {
         closed = handle.closed;
       } catch {
+        // Cross-window access can fail while the window is unloading; the
+        // heartbeat timeout catches a window that really went away.
         closed = false;
       }
       if (closed) redockLocally(key, `${titleOf(key)} is back in this window.`);
@@ -490,9 +497,9 @@ export type MainLinkState = 'connecting' | 'linked' | 'reconnecting' | 'lost';
 
 /** Running pop-out link. */
 export interface PopoutLink {
-  /** Whether the main window is reachable. */
+  /** Connection state to the main window. */
   main: ReadableStore<MainLinkState>;
-  /** Actions the main window has not acknowledged yet. */
+  /** Number of actions the main window has not acknowledged yet. */
   pending: ReadableStore<number>;
   /**
    * Forwards a workspace action to the main window (kept until the main
@@ -512,9 +519,12 @@ export interface PopoutLink {
 export interface PopoutLinkOptions {
   /** Pane this window shows. */
   ref: DetachedPaneRef;
-  /** Human title. */
+  /** Returns the pane's current title (it follows symbol changes). */
   title: () => string;
-  /** Whether the document is hidden. */
+  /**
+   * Returns whether the document is hidden. Browsers throttle hidden
+   * windows' timers, so the main window allows them a longer silence.
+   */
   hidden: () => boolean;
   /** Closes this window. */
   close: () => void;
@@ -529,11 +539,13 @@ export interface PopoutLinkOptions {
 }
 
 /**
- * Starts a pop-out window's link to the main window.
+ * Starts a pop-out window's link to the main window. Without a channel port
+ * the link never connects and ends up `lost`; the window keeps working on
+ * its own.
  * @param runtime Pop-out runtime.
  * @param env Browser services.
  * @param options Pane and window callbacks.
- * @return Link.
+ * @return Link; call `dispose` to stop it.
  */
 export function startPopoutLink(
   runtime: TerminalRuntime,

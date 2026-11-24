@@ -33,9 +33,9 @@ import {useStore} from './react-bindings';
 
 /** One drawing value row. */
 export interface DrawingRow {
-  /** Unique key. */
+  /** Unique key: drawing id and row index. */
   key: string;
-  /** Label. */
+  /** Row label, e.g. `VWAP`. */
   label: string;
   /** Formatted value. */
   value: string;
@@ -51,9 +51,9 @@ export interface DataWindowProps {
   calendar?: BarCalendar | null;
   /** Instrument (ladder precision, yields in %, share and lot volumes). */
   instrument?: Instrument | null;
-  /** Previous bar's close (for the change). */
+  /** Previous bar's close (for the change), or null for the first bar. */
   previousClose: number | null;
-  /** Tick size for price precision. */
+  /** Tick size for price precision while the instrument is unknown. */
   tickSize: string | null;
   /** Engine delta bars by bar start, when the pane is shown. */
   delta: DeltaByTime | null;
@@ -66,7 +66,8 @@ export interface DataWindowProps {
 }
 
 /**
- * Data window.
+ * Renders the data window: a labelled `aside` with the values as a
+ * description list. It is display only and never takes the pointer.
  * @param props Props.
  * @return Panel.
  */
@@ -98,6 +99,7 @@ export function DataWindow({
       : null;
   const deltaBar = bar ? delta?.get(bar.timeMs) : undefined;
   const deltaValue = deltaBar?.value;
+  // Rows are [label, value, tone class, React key, tooltip].
   const rows: Array<[string, string, string?, string?, string?]> = bar
     ? [
         ['Open', price(bar.open)],
@@ -149,7 +151,7 @@ export function DataWindow({
       }
     }
   }
-  // Yields have no volume.
+  // Yields have no volume: their volume row has an empty label.
   const visible = rows.filter(([name]) => name !== '');
   rows.splice(0, rows.length, ...visible);
   for (const entry of compare) {
@@ -189,12 +191,12 @@ export function DataWindow({
 
 /**
  * Collects data-window rows from the chart's engine-backed drawings.
- * @param runtime Runtime.
+ * @param runtime Runtime holding the chart's drawing controller and series.
  * @param chartId Chart id.
- * @param barTimeMs Bar under the crosshair.
- * @param tickSize Tick size.
+ * @param barTimeMs Start of the bar under the crosshair, UTC ms.
+ * @param tickSize Tick size for price precision.
  * @param atMs Replay as-of time, or null when live.
- * @return Rows in z order.
+ * @return Rows in z order; empty when no visible drawing has data rows.
  */
 export function drawingDataRows(
   runtime: TerminalRuntime,
@@ -228,8 +230,8 @@ export interface ChartDataWindowProps extends DataWindowProps {
 }
 
 /**
- * Data window of one chart, re-rendered when drawings or their engine
- * values change.
+ * Renders the data window of one chart, re-rendered when drawings or their
+ * engine values change.
  * @param props Props.
  * @return Panel.
  */

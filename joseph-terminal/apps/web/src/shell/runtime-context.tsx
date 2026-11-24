@@ -17,13 +17,13 @@ import {
 } from 'react';
 import type {TerminalRuntime} from '../composition/runtime';
 
-/** Runtime context. */
+/** Runtime context; null outside a `RuntimeProvider`. */
 const RuntimeContext = createContext<TerminalRuntime | null>(null);
 
 /**
- * Provides the runtime.
+ * Provides the runtime to the shell views below it.
  * @param props Runtime and children.
- * @return Provider.
+ * @return Provider element.
  */
 export function RuntimeProvider({
   runtime,
@@ -40,9 +40,9 @@ export function RuntimeProvider({
 }
 
 /**
- * Reads the runtime.
+ * Returns the runtime of the nearest `RuntimeProvider`.
  * @return Runtime.
- * @throws {Error} Outside a provider.
+ * @throws `Error` when called outside a `RuntimeProvider`.
  */
 export function useRuntime(): TerminalRuntime {
   const runtime = useContext(RuntimeContext);

@@ -17,7 +17,7 @@ import type {ReactElement} from 'react';
 import type {FeedState} from '@joseph/contracts';
 import {formatAge} from './format';
 
-/** Human labels. */
+/** Badge labels per feed state. */
 const LABELS: Readonly<Record<FeedState, string>> = {
   LIVE: 'Live',
   POLL: 'Polled',
@@ -40,10 +40,10 @@ const DESCRIPTIONS: Readonly<Record<FeedState, string>> = {
 };
 
 /**
- * Label for a feed state.
+ * Returns the badge label of a feed state.
  * @param state Feed state.
- * @param ageMs Data age, shown when stale.
- * @return Label.
+ * @param ageMs Data age in ms, shown when stale.
+ * @return Label such as `Live` or `Stale for 3 min`.
  */
 export function provenanceLabel(state: FeedState, ageMs?: number): string {
   return state === 'STALE' && ageMs !== undefined
@@ -52,9 +52,10 @@ export function provenanceLabel(state: FeedState, ageMs?: number): string {
 }
 
 /**
- * Ribbon along a pane's top edge.
+ * Renders the ribbon along a pane's top edge. It is decorative
+ * (`aria-hidden`): the badge carries the same state as text.
  * @param props Feed state.
- * @return Ribbon.
+ * @return Ribbon element.
  */
 export function ProvenanceRibbon({state}: {state: FeedState}): ReactElement {
   return (
@@ -67,9 +68,10 @@ export function ProvenanceRibbon({state}: {state: FeedState}): ReactElement {
 }
 
 /**
- * Badge with label and explanation.
- * @param props Feed state and optional age.
- * @return Badge.
+ * Renders the provenance badge: the label, with the explanation as a
+ * tooltip and as visually hidden text for screen readers.
+ * @param props Feed state and optional age in ms.
+ * @return Badge element.
  */
 export function ProvenanceBadge({
   state,

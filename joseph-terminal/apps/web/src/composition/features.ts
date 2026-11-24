@@ -34,9 +34,11 @@ import type {WebFeature} from '../shell/react-bindings';
 import type {TerminalRuntime} from './runtime';
 
 /**
- * Shell-owned features (chart stack workstream).
- * @param runtime Runtime.
- * @return Features.
+ * Returns the shell-owned features: workspace, theme, palette, chart tools,
+ * drawings, indicators, market info and data health. They receive the whole
+ * runtime.
+ * @param runtime Runtime the features are composed into.
+ * @return Features in registration order.
  */
 export function shellFeatures(runtime: TerminalRuntime): WebFeature[] {
   return [
@@ -53,12 +55,12 @@ export function shellFeatures(runtime: TerminalRuntime): WebFeature[] {
 }
 
 /**
- * Market, strategy and trading features. Each is removable by deleting its
- * line; its saved settings stay readable.
- * @param _runtime Runtime (these features use only their FeatureContext).
- * @return Features.
+ * Returns the market, strategy and trading features. Each is removable by
+ * deleting its line; its saved settings stay readable. They take no runtime:
+ * they reach the terminal only through their scoped `FeatureContext`.
+ * @return Features in registration order.
  */
-export function extensionFeatures(_runtime: TerminalRuntime): WebFeature[] {
+export function extensionFeatures(): WebFeature[] {
   return [
     WATCHLIST_FEATURE,
     SCREENER_FEATURE,
@@ -70,10 +72,10 @@ export function extensionFeatures(_runtime: TerminalRuntime): WebFeature[] {
 }
 
 /**
- * All features in composition order.
- * @param runtime Runtime.
+ * Returns every feature in composition order: shell features first.
+ * @param runtime Runtime the features are composed into.
  * @return Features.
  */
 export function composeFeatures(runtime: TerminalRuntime): WebFeature[] {
-  return [...shellFeatures(runtime), ...extensionFeatures(runtime)];
+  return [...shellFeatures(runtime), ...extensionFeatures()];
 }

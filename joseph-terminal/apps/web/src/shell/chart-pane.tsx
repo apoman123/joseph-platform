@@ -8,11 +8,20 @@
  * @fileoverview One chart pane: mounts the chart port, loads candles,
  * follows the stream, hosts drawings and feature overlay layers, and keeps
  * provenance visible at all times.
+ *
+ * The pane is a labelled region (`Chart <symbol> <timeframe>`); pressing
+ * anywhere in it makes it the active chart. Header controls are native
+ * buttons and a labelled select. Load errors are announced with
+ * `role="alert"`, a stale feed with `role="status"`.
  */
 
 'use client';
-import type {ChartBar, ChartPort, OverlayLayer} from '@joseph/chart-core';
-import {themeFromCss} from '@joseph/chart-core';
+import {
+  themeFromCss,
+  type ChartBar,
+  type ChartPort,
+  type OverlayLayer,
+} from '@joseph/chart-core';
 import {
   EXCHANGE_HOURS,
   TIMEFRAME_MS,
@@ -84,7 +93,7 @@ import {ReplayBar} from './replay-bar';
 const HISTORY_BARS = 500;
 /** Bars shown when a chart opens without a saved viewport. */
 const INITIAL_VISIBLE_BARS = 140;
-/** Age after which a live feed counts as stale. */
+/** Age after which a live feed counts as stale (60 s). */
 const STALE_AFTER_MS = 60_000;
 /** Feed modes offered per chart (REPLAY is entered with bar replay). */
 const FEED_MODES: ReadonlyArray<[FeedMode, string]> = [
@@ -105,30 +114,30 @@ const LINK_GROUPS: ReadonlyArray<ChartState['link_group']> = [
 interface PaneStatus {
   /** Loading phase. */
   phase: 'loading' | 'ready' | 'error' | 'empty';
-  /** Provenance of what is displayed. */
+  /** Provenance of what is displayed, as the engine reported it. */
   feedState: FeedState;
-  /** Actionable error. */
+  /** Actionable error, or null. */
   error: string | null;
-  /** When the latest data arrived. */
+  /** When the latest data arrived (UTC ms), or null before any. */
   lastUpdateMs: number | null;
 }
 
 /** Context-menu request. */
 export interface PaneMenu {
-  /** X within the pane. */
+  /** X in CSS pixels, relative to the plot area of the chart canvas. */
   x: number;
-  /** Y within the pane. */
+  /** Y in CSS pixels, relative to the chart canvas. */
   y: number;
-  /** Price under the pointer. */
+  /** Price under the pointer, or null when the chart cannot map it. */
   price: number | null;
-  /** Time under the pointer. */
+  /** Time under the pointer (UTC ms), or null when the chart cannot map it. */
   timeMs: number | null;
 }
 
 /**
  * Converts a contract candle to a render bar.
- * @param candle Candle.
- * @return Bar (display numbers only).
+ * @param candle Contract candle.
+ * @return Bar with display numbers only.
  */
 export function toChartBar(candle: Candle): ChartBar {
   return candleToBar(candle);
@@ -136,8 +145,8 @@ export function toChartBar(candle: Candle): ChartBar {
 
 /**
  * Reads a CSS custom property from the document root.
- * @param name Property name.
- * @return Value.
+ * @param name Property name, e.g. `--chart-bg`.
+ * @return Computed value; empty when the property is not set.
  */
 function cssVar(name: string): string {
   return getComputedStyle(document.documentElement).getPropertyValue(name);
@@ -151,16 +160,16 @@ interface ChartPaneProps {
   active: boolean;
   /** Runtime. */
   runtime: TerminalRuntime;
-  /** Opens the context menu. */
+  /** Opens the context menu (null closes it). */
   onMenu: (chartId: string, menu: PaneMenu | null) => void;
   /** Extra header buttons (e.g. open in another window). */
   headerActions?: ReactNode;
 }
 
 /**
- * Chart pane component.
+ * Renders one chart pane.
  * @param props Props.
- * @return Pane.
+ * @return Pane element.
  */
 export function ChartPane({
   chart,
@@ -181,8 +190,10 @@ export function ChartPane({
   const [hover, setHover] = useState<ChartBar | null>(null);
   const [lastBar, setLastBar] = useState<ChartBar | null>(null);
   const [now, setNow] = useState(() => Date.now());
+  // Refs carry the latest values into chart and stream callbacks without
+  // re-subscribing them on every render.
   const barsRef = useRef<ChartBar[]>([]);
-  /** Bars actually displayed (truncated during replay). */
+  // Bars actually displayed (truncated during replay).
   const shownRef = useRef<readonly ChartBar[]>([]);
   const [barCount, setBarCount] = useState(0);
   const chartRef = useRef(chart);
@@ -389,6 +400,8 @@ export function ChartPane({
           return;
         }
         if (envelope.type !== 'candle.updated') return;
+        // The stream contract types payloads loosely; a `candle.updated`
+        // payload is a candle, and it is checked against this chart below.
         const candle = envelope.payload as unknown as Candle;
         if (
           candle.instrument_id !== instrumentId ||
@@ -438,7 +451,7 @@ export function ChartPane({
     };
   }, [port, instrumentId, timeframe, runtime, chartId]);
 
-  // Staleness clock.
+  // Staleness clock (also drives the bar countdown and market status).
   useEffect(() => {
     const timer = setInterval(() => void setNow(Date.now()), 1000);
     return () => void clearInterval(timer);
@@ -460,7 +473,10 @@ export function ChartPane({
   }, [runtime, chartId, effectiveState]);
   useEffect(
     () => () =>
-      void runtime.feedStates.update(({[chartId]: _removed, ...rest}) => rest),
+      void runtime.feedStates.update(states => {
+        const {[chartId]: _removed, ...rest} = states;
+        return rest;
+      }),
     [runtime, chartId]
   );
 
@@ -551,10 +567,11 @@ export function ChartPane({
         runtime.drawing.stores.delete(chartId);
       }
     };
-    // tickSize is read lazily through the accessor.
-  }, [port, instrumentId, timeframe, workspace.workspace_id, chartId, runtime]); // eslint-disable-line react-hooks/exhaustive-deps
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- a new tick size must not rebuild the drawing controller; the `tickSize` accessor returns the value captured when this effect last ran
+  }, [port, instrumentId, timeframe, workspace.workspace_id, chartId, runtime]);
 
-  // Feature overlay layers.
+  // Feature overlay layers. A layer is shown when its provider marks it
+  // visible and the chart has not hidden its indicator.
   const layerVisibility = useMemo(
     () =>
       new Map(
@@ -680,6 +697,8 @@ export function ChartPane({
         [chartId]: chooseReplayStart(state, times, event.timeMs),
       }));
     });
+    // Scrolling and zooming are saved 600 ms after they stop, unless the
+    // range is still the saved one (within 1 s at both ends).
     let rangeTimer: ReturnType<typeof setTimeout> | null = null;
     const offRange = port.on('visibleRangeChange', range => {
       if (rangeTimer) clearTimeout(rangeTimer);
@@ -769,7 +788,10 @@ export function ChartPane({
   // Leaving the instrument or timeframe ends replay on this chart.
   useEffect(
     () => () =>
-      void runtime.replay.update(({[chartId]: _ended, ...rest}) => rest),
+      void runtime.replay.update(all => {
+        const {[chartId]: _ended, ...rest} = all;
+        return rest;
+      }),
     [runtime, chartId, instrumentId, timeframe]
   );
 
@@ -906,6 +928,7 @@ export function ChartPane({
             className="pane__feed"
             value={chart.feed_mode === 'REPLAY' ? 'AUTO' : chart.feed_mode}
             title="Requested market-data transport"
+            // The options are exactly `FEED_MODES`.
             onChange={event =>
               void runtime.dispatch({
                 type: 'setFeedMode',
@@ -1031,7 +1054,10 @@ export function ChartPane({
             )
           }
           onExit={() =>
-            void runtime.replay.update(({[chartId]: _ended, ...rest}) => rest)
+            void runtime.replay.update(all => {
+              const {[chartId]: _ended, ...rest} = all;
+              return rest;
+            })
           }
         />
       )}

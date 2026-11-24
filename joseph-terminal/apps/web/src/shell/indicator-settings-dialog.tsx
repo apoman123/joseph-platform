@@ -10,6 +10,12 @@
  * engine with every query), per-kind visibility and colors, event markers
  * and the sub-pane toggle. Settings are saved in the workspace, so they
  * travel with templates, exports and share links.
+ *
+ * The dialog is modal (`aria-modal`, labelled by its title). The first
+ * control takes focus on open; Escape, Cancel, the close button or a press
+ * on the backdrop close it without saving. Text inputs point at their help
+ * or error text with `aria-describedby` and set `aria-invalid` when
+ * invalid.
  */
 
 'use client';
@@ -43,9 +49,9 @@ const pluginCache = new WeakMap<
 >();
 
 /**
- * Loads plugin descriptors once per runtime.
- * @param runtime Runtime.
- * @return Descriptors.
+ * Loads plugin descriptors once per runtime (retried after a failure).
+ * @param runtime Runtime whose market client is asked.
+ * @return Descriptors of the plugins the engine publishes.
  */
 function loadPlugins(runtime: TerminalRuntime): Promise<IndicatorPluginInfo[]> {
   let promise = pluginCache.get(runtime);
@@ -53,18 +59,19 @@ function loadPlugins(runtime: TerminalRuntime): Promise<IndicatorPluginInfo[]> {
     promise = runtime.clients.market
       .listIndicatorPlugins()
       .then(list => list.plugins);
+    // Forget a failed load so the next dialog retries.
     promise.catch(() => pluginCache.delete(runtime));
     pluginCache.set(runtime, promise);
   }
   return promise;
 }
 
-/** Fallback color per kind when the user has not picked one. */
+/** Color the pickers show for kinds and events without a chosen color. */
 const DEFAULT_SWATCH = '#8fa5b3';
 
 /**
- * Indicator settings dialog (renders when a request is open).
- * @return Dialog or null.
+ * Renders the indicator settings dialog while a request is open.
+ * @return Dialog, or null without a request.
  */
 export function IndicatorSettingsDialog(): ReactElement | null {
   const runtime = useRuntime();
@@ -80,9 +87,9 @@ export function IndicatorSettingsDialog(): ReactElement | null {
 }
 
 /**
- * The form for one chart layer.
+ * Renders the settings form of one chart layer.
  * @param props Chart and plugin ids.
- * @return Dialog.
+ * @return Dialog, or an empty fragment when the chart no longer exists.
  */
 function SettingsForm({
   chartId,
@@ -137,8 +144,8 @@ function SettingsForm({
   const [pane, setPane] = useState(style.pane !== false);
   useEffect(() => {
     setValues(initialValues(fields, saved));
-    // Only when the schema arrives; later edits are local until saved.
-  }, [fields]); // eslint-disable-line react-hooks/exhaustive-deps
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- runs only when the schema arrives; later edits stay local until saved
+  }, [fields]);
   const close = () => void runtime.indicatorSettings.set(null);
   useEffect(() => {
     dialog.current
@@ -149,7 +156,8 @@ function SettingsForm({
     };
     window.addEventListener('keydown', onKey);
     return () => void window.removeEventListener('keydown', onKey);
-  }, []); // eslint-disable-line react-hooks/exhaustive-deps
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- focus and the Escape listener are set up once per dialog; `close` only clears a store
+  }, []);
   if (!chart) return <></>;
   const outputKinds = plugin?.output_kinds ?? [];
   const markedEvents = (plugin?.output_events ?? []).filter(
