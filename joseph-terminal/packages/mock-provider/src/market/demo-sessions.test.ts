@@ -36,10 +36,10 @@ import {
 import {DEMO_INSTRUMENT_SPECS, demoTickAt} from './prices';
 
 /**
- * New York wall time.
- * @param date `YYYY-MM-DD`.
- * @param hour Hour.
- * @param minute Minute.
+ * Converts a New York wall time to epoch ms.
+ * @param date Local date, `YYYY-MM-DD`.
+ * @param hour Hour 0-23 (default 0).
+ * @param minute Minute 0-59 (default 0).
  * @return Epoch ms.
  */
 function ny(date: string, hour = 0, minute = 0): number {
@@ -233,9 +233,8 @@ describe('DEMO session instruments', () => {
     const snapshot = await client.getSnapshot('mock:stock:9901');
     expect(snapshot.funding).toBeNull();
     expect(Number(snapshot.last) % 1).toBe(0);
-    expect(demoSpecMatches(DEMO_INSTRUMENT_SPECS[0] ?? ({} as never), '')).toBe(
-      true
-    );
+    const first = DEMO_INSTRUMENT_SPECS[0];
+    expect(first && demoSpecMatches(first, '')).toBe(true);
     const tw = DEMO_INSTRUMENT_SPECS.find(
       s => s.instrumentId === 'mock:stock:9901'
     );

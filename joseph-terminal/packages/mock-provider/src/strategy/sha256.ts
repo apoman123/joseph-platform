@@ -7,8 +7,14 @@
 /**
  * @fileoverview Small synchronous SHA-256 for DEMO hashes (definition
  * hashes and the demo audit chain). Not used for any security purpose.
+ *
+ * It follows FIPS 180-4 and is synchronous, so DEMO records can be hashed
+ * where they are built (Web Crypto's `crypto.subtle.digest` is
+ * asynchronous).
  */
 
+// Round constants: the first 32 bits of the fractional parts of the cube
+// roots of the first 64 primes (FIPS 180-4, section 4.2.2).
 const K = new Uint32Array([
   0x428a2f98, 0x71374491, 0xb5c0fbcf, 0xe9b5dba5, 0x3956c25b, 0x59f111f1,
   0x923f82a4, 0xab1c5ed5, 0xd807aa98, 0x12835b01, 0x243185be, 0x550c7dc3,
@@ -26,8 +32,9 @@ const K = new Uint32Array([
 /**
  * Rotates a 32-bit word right.
  * @param x Word.
- * @param n Bits.
- * @return Rotated word.
+ * @param n Bits to rotate by, 1-31.
+ * @return Rotated word (may be negative as a signed 32-bit value; callers
+ *     only combine it bitwise).
  */
 function rotr(x: number, n: number): number {
   return (x >>> n) | (x << (32 - n));
@@ -41,17 +48,25 @@ function rotr(x: number, n: number): number {
 export function sha256Hex(text: string): string {
   const bytes = new TextEncoder().encode(text);
   const bitLength = bytes.length * 8;
+  // Padding: a 0x80 byte, zeros up to a multiple of 64 bytes, then the
+  // message length in bits as a 64-bit big-endian integer (section 5.1.1).
   const padded = new Uint8Array(((bytes.length + 9 + 63) >> 6) << 6);
   padded.set(bytes);
   padded[bytes.length] = 0x80;
   const view = new DataView(padded.buffer);
   view.setUint32(padded.length - 8, Math.floor(bitLength / 2 ** 32));
   view.setUint32(padded.length - 4, bitLength >>> 0);
+  // Initial hash value: the first 32 bits of the fractional parts of the
+  // square roots of the first 8 primes (section 5.3.3).
   const h = new Uint32Array([
     0x6a09e667, 0xbb67ae85, 0x3c6ef372, 0xa54ff53a, 0x510e527f, 0x9b05688c,
     0x1f83d9ab, 0x5be0cd19,
   ]);
   const w = new Uint32Array(64);
+  // Each 64-byte block: expand it into the 64-word message schedule `w`,
+  // run 64 compression rounds and add the result into `h` (section 6.2.2).
+  // `>>> 0` keeps every sum an unsigned 32-bit word; the `?? 0` fallbacks
+  // only satisfy `noUncheckedIndexedAccess`, as every index is in range.
   for (let offset = 0; offset < padded.length; offset += 64) {
     for (let i = 0; i < 16; i += 1) {
       w[i] = view.getUint32(offset + i * 4);
@@ -63,6 +78,8 @@ export function sha256Hex(text: string): string {
       const s1 = rotr(w2, 17) ^ rotr(w2, 19) ^ (w2 >>> 10);
       w[i] = ((w[i - 16] ?? 0) + s0 + (w[i - 7] ?? 0) + s1) >>> 0;
     }
+    // Working variables a..h of the standard; `hh` because `h` holds the
+    // hash state.
     let [a, b, c, d, e, f, g, hh] = [
       h[0] ?? 0,
       h[1] ?? 0,
@@ -104,11 +121,14 @@ export function sha256Hex(text: string): string {
 /**
  * Serializes JSON with sorted object keys (canonical form for hashing).
  * @param value JSON value.
- * @return Canonical JSON text.
+ * @return Canonical JSON text: keys sorted by UTF-16 code units, properties
+ *     whose value is `undefined` dropped, no whitespace; `null` for a value
+ *     JSON cannot represent.
  */
 export function canonicalJson(value: unknown): string {
   if (Array.isArray(value)) return `[${value.map(canonicalJson).join(',')}]`;
   if (value && typeof value === 'object') {
+    // Typed as unknown values rather than the `any` of `Object.entries`.
     const entries = Object.entries(value as Record<string, unknown>)
       .filter(([, v]) => v !== undefined)
       .sort(([a], [b]) => (a < b ? -1 : a > b ? 1 : 0));

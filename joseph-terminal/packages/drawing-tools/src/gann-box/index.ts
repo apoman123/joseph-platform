@@ -47,20 +47,20 @@ export const GANN_BOX_LEVELS = [
   '1',
 ];
 
-/** Grid of a Gann box in pixels. */
+/** Grid of a Gann box in CSS pixels. */
 export interface GannBoxGrid {
-  /** Time divisions (vertical lines). */
+  /** Time divisions (vertical lines): ratio and x. */
   vertical: Array<{level: string; x: number}>;
-  /** Price divisions (horizontal lines). */
+  /** Price divisions (horizontal lines): ratio and y. */
   horizontal: Array<{level: string; y: number}>;
 }
 
 /**
  * Computes the division lines measured from the origin corner.
- * @param origin Origin corner (anchor A).
- * @param corner Opposite corner (anchor B).
- * @param levels Ratios.
- * @return Line positions.
+ * @param origin Origin corner (anchor A), in CSS pixels.
+ * @param corner Opposite corner (anchor B), in CSS pixels.
+ * @param levels Ratios as decimal strings (`GANN_BOX_LEVELS` by default).
+ * @return Line positions in `levels` order.
  */
 export function gannBoxGrid(
   origin: Point,
@@ -80,10 +80,10 @@ export function gannBoxGrid(
 }
 
 /**
- * Every line segment of the box: grid lines then the two diagonals.
- * @param a Origin corner.
- * @param b Opposite corner.
- * @return Segments.
+ * Returns every line segment of the box: grid lines, then the two diagonals.
+ * @param a Origin corner, in CSS pixels.
+ * @param b Opposite corner, in CSS pixels.
+ * @return Segments in CSS pixels.
  */
 function segments(a: Point, b: Point): Array<[Point, Point]> {
   const grid = gannBoxGrid(a, b);
@@ -122,6 +122,7 @@ export const gannBoxTool: ToolPlugin = {
     color: palette.user,
     line_width: 1,
     line_style: 'solid',
+    // A hex alpha byte on the `#rrggbb` user color: 0x14, about 8 % opacity.
     fill_color: `${palette.user}14`,
     show_labels: true,
   }),

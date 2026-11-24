@@ -20,7 +20,11 @@ import {
   type StructureEventName,
 } from '@joseph/contracts';
 
-/** Compact setting declaration: name, type, default, description, bounds. */
+/**
+ * Compact setting declaration: name, type, default, description, then the
+ * optional minimum and maximum (`int`, `decimal`) or the allowed values
+ * (`enum`).
+ */
 type DemoSetting =
   | [string, 'int', number, string, number?, number?]
   | [string, 'decimal', string, string, string?, string?]
@@ -38,9 +42,9 @@ const TICK: DemoSetting = [
 ];
 
 /**
- * Builds the swing length setting.
- * @param defaultValue Pine default.
- * @param maximum Pine maximum.
+ * Builds the swing length setting (pivot bars on each side, at least 2).
+ * @param defaultValue Default, as in the Pine script.
+ * @param maximum Maximum, as in the Pine script (default 20).
  * @return Setting.
  */
 function swing(defaultValue: number, maximum = 20): DemoSetting {
@@ -72,9 +76,9 @@ interface DemoPlugin {
   name: string;
   /** Description. */
   description: string;
-  /** Settings. */
+  /** Input settings, in form order. */
   settings: readonly DemoSetting[];
-  /** AOI kinds produced. */
+  /** AOI (area of interest) kinds produced. */
   kinds: readonly AoiKind[];
   /** Events produced. */
   events: readonly StructureEventName[];
@@ -295,7 +299,8 @@ function settingSchema(setting: DemoSetting): Record<string, unknown> {
 
 /**
  * Builds the DEMO plugin descriptors.
- * @return Plugin descriptors.
+ * @return One descriptor per plugin, in catalog order: inputs as a JSON
+ *     Schema object, every timeframe supported, 50 warm-up bars.
  */
 export function demoPluginInfos(): IndicatorPluginInfo[] {
   return DEMO_PLUGINS.map(plugin => ({

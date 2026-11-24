@@ -6,7 +6,13 @@
 
 /**
  * @fileoverview Drawing document helpers over the contract
- * `DrawingDocument`. Anchors are time/price (decimal strings), never pixels.
+ * `DrawingDocument`: creation, conversion between anchors and pixels, and
+ * exact translation.
+ *
+ * Anchors are data-space positions: `time_ms` in epoch ms UTC and `price`
+ * as an exact decimal string, never pixels, so drawings stay put across
+ * zoom, scroll and resize. Pixel points are CSS pixels relative to the plot
+ * (see `surface.ts`).
  */
 
 import {
@@ -25,33 +31,34 @@ export const DRAWING_SCHEMA_VERSION = 1;
 
 /** Inputs for a new drawing. */
 export interface NewDrawingInput {
-  /** Tool id. */
+  /** Tool id (`ToolManifest.id`). */
   toolId: string;
-  /** Tool version. */
+  /** Tool document version (`ToolManifest.version`). */
   toolVersion: number;
   /** Exact instrument the drawing belongs to. */
   instrumentId: InstrumentId;
-  /** Timeframe, or null for all timeframes. */
+  /** Timeframe the drawing is shown on, or null for all timeframes. */
   timeframe: Timeframe | null;
-  /** Anchors. */
+  /** Anchors in data space; copied, not shared. */
   anchors: DrawingAnchor[];
-  /** Style. */
+  /** Style; copied, not shared. */
   style: DrawingStyle;
-  /** Tool-specific props. */
+  /** Tool-specific props; deep-copied. Defaults to `{}`. */
   props?: Record<string, unknown>;
-  /** Optional text. */
+  /** Text of text-bearing tools; defaults to null. */
   text?: string | null;
-  /** Z order. */
+  /** Z index; higher draws on top. */
   zIndex: number;
-  /** Creation time. */
+  /** Creation time in epoch ms (also the first `updated_at_ms`). */
   nowMs: number;
-  /** Id generator. */
+  /** Returns a fresh drawing id. */
   newId: () => string;
 }
 
 /**
- * Creates a drawing document.
- * @param input Inputs.
+ * Creates a visible, unlocked drawing document at the current schema
+ * version.
+ * @param input Tool, instrument, anchors, style and clock of the drawing.
  * @return New document.
  */
 export function createDrawing(input: NewDrawingInput): DrawingDocument {
@@ -76,9 +83,12 @@ export function createDrawing(input: NewDrawingInput): DrawingDocument {
 
 /**
  * Formats a chart price as an anchor price, rounded to the tick.
- * @param price Display price.
- * @param tickSize Tick size string; no rounding when null.
- * @return Decimal string.
+ * @param price Price in quote units, as read from the chart (a float).
+ * @param tickSize Tick size as a decimal string; no rounding when null.
+ * @return Exact decimal string (at most 10 fractional digits before
+ *     rounding to the tick).
+ * @throws `RangeError` when `price` is not finite or `tickSize` is not a
+ *     positive decimal string.
  */
 export function anchorPrice(price: number, tickSize: string | null): string {
   const value = Decimal.fromNumber(price, 10);
@@ -88,10 +98,13 @@ export function anchorPrice(price: number, tickSize: string | null): string {
 
 /**
  * Converts a pixel point to an anchor.
- * @param transform Transform.
- * @param point Pixel point.
- * @param tickSize Tick size for rounding.
- * @return Anchor or null when outside the data space.
+ * @param transform Transforms of the current frame.
+ * @param point Point in CSS pixels, plot-relative.
+ * @param tickSize Tick size the price is rounded to, or null for none.
+ * @return Anchor with the time rounded to a whole millisecond (never before
+ *     the epoch) and a tick-rounded price, or null when the point has no
+ *     time or finite price (no bars yet, or outside the price plot).
+ * @throws `RangeError` when `tickSize` is not a positive decimal string.
  */
 export function anchorFromPoint(
   transform: PixelTransform,
@@ -109,9 +122,10 @@ export function anchorFromPoint(
 
 /**
  * Converts an anchor to pixels for the current frame.
- * @param transform Transform.
- * @param anchor Anchor.
- * @return Pixel point or null.
+ * @param transform Transforms of the current frame.
+ * @param anchor Anchor in data space.
+ * @return Point in CSS pixels (possibly off-screen), or null when the
+ *     transform cannot place the time or price.
  */
 export function anchorToPoint(
   transform: PixelTransform,
@@ -123,10 +137,11 @@ export function anchorToPoint(
 }
 
 /**
- * Converts all anchors to pixels; null if any cannot be placed.
- * @param transform Transform.
- * @param doc Document.
- * @return Pixel points or null.
+ * Converts all anchors of a drawing to pixels.
+ * @param transform Transforms of the current frame.
+ * @param doc Drawing whose anchors are converted.
+ * @return Points in CSS pixels in anchor order, or null if any anchor
+ *     cannot be placed.
  */
 export function anchorPoints(
   transform: PixelTransform,
@@ -142,10 +157,11 @@ export function anchorPoints(
 }
 
 /**
- * Whether a drawing is shown on a timeframe.
- * @param doc Document.
- * @param timeframe Active timeframe.
- * @return True when visible there.
+ * Returns whether a drawing is shown on a timeframe.
+ * @param doc Drawing to check.
+ * @param timeframe Active chart timeframe.
+ * @return True when the drawing is scoped to all timeframes or to this one
+ *     (its `visible` flag is not considered).
  */
 export function appliesToTimeframe(
   doc: DrawingDocument,
@@ -156,11 +172,14 @@ export function appliesToTimeframe(
 
 /**
  * Returns a document with anchors shifted by a time/price delta.
- * @param doc Document.
- * @param deltaMs Time delta.
- * @param deltaPrice Price delta (decimal string).
- * @param nowMs Update time.
- * @return Moved document.
+ * @param doc Drawing to move; not modified.
+ * @param deltaMs Time shift in milliseconds; shifted times are clamped to
+ *     the epoch.
+ * @param deltaPrice Price shift as a decimal string, added exactly.
+ * @param nowMs Update time in epoch ms (`updated_at_ms`).
+ * @return Moved copy.
+ * @throws `RangeError` when `deltaPrice` or an anchor price is not a
+ *     decimal string.
  */
 export function translateDrawing(
   doc: DrawingDocument,

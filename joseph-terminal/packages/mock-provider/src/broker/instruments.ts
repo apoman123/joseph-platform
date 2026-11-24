@@ -10,11 +10,11 @@
  *
  * The accounts mirror the execution engine: a USD paper account (crypto,
  * Nasdaq, NYSE, Cboe BZX) and a TWD paper account (TWSE, TPEx), an
- * Interactive Brokers paper account (Nasdaq/NYSE/Cboe BZX, outside RTH,
- * queued market orders), a SinoPac Shioaji simulation account (TWSE and
- * TPEx board and intraday
- * odd lots, no stop orders), a SinoPac live account whose credentials are missing on
- * the server and Cathay awaiting its API SDK. Capabilities carry the
+ * Interactive Brokers paper account (Nasdaq/NYSE/Cboe BZX, outside regular
+ * trading hours (RTH), queued market orders), a SinoPac Shioaji simulation
+ * account (TWSE and TPEx board and intraday odd lots, no stop orders), a
+ * SinoPac live account whose credentials are missing on the server and
+ * Cathay awaiting its API SDK. Capabilities carry the
  * contract's `tradable_venues`, `cash_account`, `short_selling`,
  * `outside_rth`, `odd_lot`, `queue_market_when_closed`, `simulation` and
  * `currencies`. None of the default accounts offers LIVE; the opt-in live
@@ -35,11 +35,11 @@ import {demoInstrument} from '../market/demo-market-client';
 import {DEMO_INSTRUMENT_SPECS} from '../market/prices';
 
 /**
- * Builds a DEMO perpetual instrument.
- * @param base Base asset.
- * @param tick Tick size.
- * @param lot Lot size.
- * @return Contract instrument on the `mock` venue.
+ * Builds a DEMO USD-margined perpetual instrument.
+ * @param base Base asset symbol, such as `BTC`.
+ * @param tick Tick size in USD, a decimal string.
+ * @param lot Lot size and minimum quantity in base units, a decimal string.
+ * @return Contract instrument `mock:perp:<base>USD` on the `mock` venue.
  */
 function demoPerp(base: string, tick: string, lot: string): Instrument {
   return {
@@ -83,7 +83,10 @@ export const DEMO_BROKER_INSTRUMENTS: readonly Instrument[] = [
   ...DEMO_SECURITIES,
 ];
 
-/** Static DEMO reference marks. */
+/**
+ * Static DEMO reference marks per instrument id, decimal strings in the
+ * quote currency.
+ */
 export const DEMO_MARKS: Readonly<Record<string, string>> = {
   'mock:perp:BTCUSD': '95000',
   'mock:perp:ETHUSD': '3400',
@@ -123,12 +126,15 @@ export const DEMO_LIVE_REHEARSAL_ACCOUNT_ID = 'acct-ibkr-live-rehearsal-demo';
 
 /**
  * Step-up code the DEMO broker accepts when arming LIVE (the execution
- * engine verifies a TOTP code instead). Any other code is refused with
- * `STEP_UP_REQUIRED`.
+ * engine verifies a time-based one-time password (TOTP) instead). Any other
+ * code is refused with `STEP_UP_REQUIRED`.
  */
 export const DEMO_STEP_UP_CODE = '123456';
 
-/** Longest DEMO arming (the engine's default `JOSEPH_LIVE_ARM_MAX_MS`). */
+/**
+ * Longest DEMO arming in ms, 8 hours (the engine's default
+ * `JOSEPH_LIVE_ARM_MAX_MS`).
+ */
 export const DEMO_LIVE_ARM_MAX_MS = 8 * 60 * 60_000;
 
 /** Tenant id used by DEMO services. */
@@ -141,19 +147,22 @@ export const DEMO_USER_ID = 'demo-user';
 export interface DemoAccountSpec {
   /** Account id. */
   accountId: string;
-  /** Venue or broker. */
+  /** Venue or broker; `mock` for the paper accounts. */
   venue: TradingVenue;
-  /** Label. */
+  /** Display label, also used in risk-check messages. */
   label: string;
-  /** Connection status. */
+  /** Connection status; balances are reported only while `CONNECTED`. */
   status: AccountStatus;
   /** Permitted modes (LIVE only on the opt-in rehearsal account). */
   modes: readonly OrderMode[];
-  /** Account currency. */
+  /** Account currency, an ISO 4217 code such as `USD` or `TWD`. */
   currency: string;
-  /** Starting paper cash in the account currency. */
+  /**
+   * Starting paper cash in the account currency, a decimal string. The
+   * broker's `startingEquity` option overrides it for `DEMO_ACCOUNT_ID`.
+   */
   startingEquity: string;
-  /** Largest order value in the account currency. */
+  /** Largest order value in the account currency, a decimal string. */
   maxNotional: string;
   /** Trading capabilities. */
   capabilities: TradingCapabilities;
@@ -162,11 +171,11 @@ export interface DemoAccountSpec {
 }
 
 /**
- * Capabilities of a DEMO paper account (engine paper adapter): every order
- * type, crypto on the USD account and long-only cash securities of the
- * account currency's exchanges.
+ * Builds the capabilities of a DEMO paper account (engine paper adapter):
+ * every order type and long-only cash securities of the given exchanges.
+ * Crypto routing to the USD account is decided by `demoRoutingProblem`.
  * @param currency Account currency.
- * @param tradable Exchanges of that currency.
+ * @param tradable Exchanges that list securities in that currency.
  * @return Capabilities.
  */
 function paperCapabilities(
@@ -240,9 +249,10 @@ const IBKR_CAPABILITIES: TradingCapabilities = {
 };
 
 /**
- * SinoPac Shioaji (engine `capabilities.sinopac`).
- * @param status Trading status.
- * @param notes Notes.
+ * Builds SinoPac Shioaji capabilities (engine `capabilities.sinopac`).
+ * @param status Trading status; `AVAILABLE` also marks the account as a
+ *     simulation.
+ * @param notes Notes shown to the user.
  * @return Capabilities.
  */
 function sinopacCapabilities(
@@ -413,9 +423,10 @@ export const DEMO_LIVE_REHEARSAL_ACCOUNT: DemoAccountSpec = {
 };
 
 /**
- * Finds a DEMO account.
+ * Finds a default DEMO account.
  * @param accountId Account id.
- * @return Spec or null.
+ * @return Spec, or null when unknown; the opt-in rehearsal account is not
+ *     in `DEMO_ACCOUNTS`, so it is never found here.
  */
 export function demoAccount(accountId: string): DemoAccountSpec | null {
   return DEMO_ACCOUNTS.find(a => a.accountId === accountId) ?? null;
@@ -425,10 +436,10 @@ export function demoAccount(accountId: string): DemoAccountSpec | null {
 const EXCHANGES: readonly Venue[] = ['twse', 'tpex', 'nasdaq', 'nyse', 'cboe'];
 
 /**
- * Exchanges a security trades on: its venue, or for DEMO securities the
- * exchanges of its session calendar.
+ * Returns the exchanges a security trades on: its venue, or for DEMO
+ * securities the exchanges of its session calendar.
  * @param instrument Instrument.
- * @return Exchange venues.
+ * @return Exchange venues; empty when neither tells.
  */
 function listingExchanges(instrument: Instrument): readonly Venue[] {
   const venue = instrument.key.venue;
@@ -439,13 +450,17 @@ function listingExchanges(instrument: Instrument): readonly Venue[] {
 }
 
 /**
- * Why a DEMO account cannot trade an instrument (engine `equities.route`
- * and the `tradable_venues` check): securities go to accounts listing their
- * exchange; brokers trade securities only; the TWD paper account trades
- * TWSE and TPEx only.
+ * Explains why a DEMO account cannot trade an instrument.
+ *
+ * Mirrors the engine's `equities.route` and `tradable_venues` checks:
+ *
+ * - securities go to accounts that list one of their exchanges;
+ * - broker accounts trade securities only;
+ * - other instruments (crypto) trade on the USD paper account only.
+ *
  * @param account Account.
  * @param instrument Instrument.
- * @return Reason, or null when routable.
+ * @return User-facing reason, or null when the account can trade it.
  */
 export function demoRoutingProblem(
   account: DemoAccountSpec,

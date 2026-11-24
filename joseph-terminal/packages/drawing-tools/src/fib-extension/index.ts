@@ -7,7 +7,12 @@
 /**
  * @fileoverview Trend-based Fibonacci extension from three anchors A, B, C.
  *
- * Level `r` sits at `C + (B - A) * r`, using exact decimals.
+ * Level `r` sits at `C + (B - A) * r`, using exact decimals rounded to the
+ * instrument tick: the A-B swing projected from the retracement point C.
+ * The A-B-C path is dashed; each level is a line from C's x, up to 160 px.
+ * Rendering always uses `FIB_EXTENSION_LEVELS`: `props.levels` is stored
+ * with new drawings but not read. Hit-testing covers the handles and the
+ * A-B-C path, not the level lines.
  */
 
 import {Decimal} from '@joseph/contracts';
@@ -36,12 +41,14 @@ export const FIB_EXTENSION_LEVELS = [
 
 /**
  * Computes extension prices.
- * @param a Swing start.
- * @param b Swing end.
- * @param c Retracement point.
- * @param levels Ratios.
- * @param tickSize Tick size.
- * @return Level/price pairs.
+ * @param a Swing start price (decimal string).
+ * @param b Swing end price (decimal string).
+ * @param c Retracement point price (decimal string).
+ * @param levels Ratios as decimal strings.
+ * @param tickSize Tick size, or null to leave prices unrounded.
+ * @return Level/price pairs in `levels` order; prices are decimal strings.
+ * @throws `RangeError` when a price, level or the tick size is not a
+ *     decimal string.
  */
 export function extensionPrices(
   a: string,

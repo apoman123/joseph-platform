@@ -5,7 +5,7 @@
  */
 
 /**
- * @fileoverview Curve.
+ * @fileoverview Curve: a quadratic Bézier bent by a control point.
  *
  * - Anchors: 3, the start, a control point and the end.
  * - Geometry: quadratic Bézier from start to end bent toward the control
@@ -32,9 +32,12 @@ import {
 } from '@joseph/drawing-core';
 
 /**
- * Sampled path of the curve for the anchor pixels placed so far.
- * @param points Anchor pixels (2 while creating, 3 when complete).
- * @return Path vertices from start to end.
+ * Returns the sampled curve path for the anchor pixels placed so far.
+ * @param points Anchor pixels: start, control and end (2 while creating, 3
+ *     when complete).
+ * @return Path vertices in CSS pixels from start to end; the segment
+ *     start-control while the end is pending; empty with fewer than two
+ *     points.
  */
 export function curvePath(points: readonly Point[]): Point[] {
   const [a, control, b] = points;

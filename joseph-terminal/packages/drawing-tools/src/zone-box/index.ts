@@ -7,8 +7,8 @@
 /**
  * @fileoverview Zone box: a user-marked zone (for example a fair value gap
  * the trader wants to watch) with a 50% midline, an optional name and an
- * optional extension to the right edge. It is an annotation only; engine
- * AOIs are drawn by the indicator layers.
+ * optional extension to the right edge. It is an annotation only; the
+ * engine's areas of interest (AOIs) are drawn by the indicator layers.
  */
 
 import {
@@ -29,11 +29,11 @@ import {Decimal} from '@joseph/contracts';
 
 /**
  * Lays out the zone, extended to the right edge when asked.
- * @param a First corner.
- * @param b Second corner.
- * @param width Plot width.
+ * @param a First corner, in CSS pixels.
+ * @param b Second corner, in CSS pixels.
+ * @param width Plot width in CSS pixels.
  * @param extendRight Whether the zone runs to the right edge.
- * @return Rectangle.
+ * @return Rectangle in CSS pixels; never narrower than the two corners.
  */
 export function zoneRect(
   a: Point,
@@ -48,10 +48,11 @@ export function zoneRect(
 }
 
 /**
- * Midpoint price of two decimal prices.
- * @param upper First price.
- * @param lower Second price.
+ * Returns the midpoint of two decimal prices.
+ * @param upper One price (decimal string), in either order.
+ * @param lower The other price (decimal string).
  * @return Exact midpoint as a decimal string.
+ * @throws `RangeError` when a price is not a decimal string.
  */
 export function midPrice(upper: string, lower: string): string {
   return Decimal.parse(upper)
@@ -74,6 +75,7 @@ export const zoneBoxTool: ToolPlugin = {
     color: palette.user,
     line_width: 1,
     line_style: 'solid',
+    // A hex alpha byte on the `#rrggbb` user color: 0x1f, about 12 % opacity.
     fill_color: `${palette.user}1f`,
     extend_right: true,
     show_labels: true,
@@ -115,6 +117,8 @@ export const zoneBoxTool: ToolPlugin = {
         state
       );
     }
+    // All four corners are marked; only the two anchor corners (handle
+    // indices 0 and 1) can be dragged.
     drawHandles(ctx, [a, b, {x: a.x, y: b.y}, {x: b.x, y: a.y}], state);
   },
   hitTest(doc, transform, point, tolerance) {

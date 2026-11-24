@@ -5,8 +5,8 @@
  */
 
 /**
- * @fileoverview DEMO paper broker and user stream. Synthetic only; label
- * everything they produce as DEMO.
+ * @fileoverview DEMO paper broker, its instruments and accounts, and the
+ * user stream. Synthetic only; label everything they produce as DEMO.
  */
 
 export * from './instruments';

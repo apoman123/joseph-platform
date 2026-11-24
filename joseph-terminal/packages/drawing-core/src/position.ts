@@ -35,11 +35,17 @@ export type PositionSide = 'long' | 'short';
 
 /** Derived position metrics. */
 export interface PositionMetrics {
-  /** Reward-to-risk ratio as a decimal string, null when risk is zero. */
+  /**
+   * Reward-to-risk ratio as a decimal string with 2 decimals, null when risk
+   * is zero.
+   */
   riskReward: string | null;
-  /** Target distance in percent of entry. */
+  /**
+   * Target distance in percent of entry, 2 decimals (negative when the
+   * target is on the wrong side; `0` when entry is zero).
+   */
   targetPct: string;
-  /** Stop distance in percent of entry. */
+  /** Stop distance in percent of entry, 2 decimals (as `targetPct`). */
   stopPct: string;
   /** Whether target and stop sit on the correct sides of entry. */
   valid: boolean;
@@ -48,10 +54,11 @@ export interface PositionMetrics {
 /**
  * Computes reward/risk metrics with exact decimals.
  * @param side Direction.
- * @param entry Entry price.
- * @param target Target price.
- * @param stop Stop price.
+ * @param entry Entry price, decimal string.
+ * @param target Target price, decimal string.
+ * @param stop Stop price, decimal string.
  * @return Metrics.
+ * @throws `RangeError` when a price is not a decimal string.
  */
 export function positionMetrics(
   side: PositionSide,
@@ -77,14 +84,20 @@ export function positionMetrics(
 }
 
 /**
- * Expands a single entry anchor into entry, target (+2%) and stop (-1%),
- * 24 bars wide (session bars when a calendar is given).
+ * Expands a single entry anchor into entry, target and stop, 24 bars wide
+ * (session bars when a calendar is given). The target is 2% and the stop 1%
+ * away from entry: above and below for a long, below and above for a
+ * short.
  * @param side Direction.
  * @param anchors User anchors (first is entry).
- * @param durationMs Bar duration.
- * @param tickSize Tick size.
+ * @param durationMs Bar duration in milliseconds (used without a session
+ *     calendar).
+ * @param tickSize Tick size the levels round to, or null for none.
  * @param sessions Timeframe and session calendar of the chart, if any.
- * @return `[entry, target, stop]`.
+ * @return `[entry, target, stop]`; the first three anchors when three or
+ *     more are given; `anchors` unchanged when empty.
+ * @throws `RangeError` when the entry price or `tickSize` is not a valid
+ *     decimal string.
  */
 export function expandPositionAnchors(
   side: PositionSide,
@@ -128,10 +141,12 @@ export function createPositionTool(
   manifest: ToolManifest
 ): ToolPlugin {
   /**
-   * Computes pixel geometry.
-   * @param doc Document.
-   * @param transform Transform.
-   * @return Geometry or null.
+   * Computes the pixel geometry: anchor points, the left and right edges
+   * (entry and target x, in either order) and the three handles.
+   * @param doc Drawing to measure.
+   * @param transform Transforms of the current frame.
+   * @return Geometry in CSS pixels, or null until all three anchors can be
+   *     placed.
    */
   const geometry = (
     doc: Parameters<ToolPlugin['render']>[1],
@@ -165,6 +180,7 @@ export function createPositionTool(
       if (!g || !entry || !target || !stop) return;
       const width = Math.max(1, g.right - g.left);
       ctx.globalAlpha = state.preview ? 0.6 : 1;
+      // A `33` hex alpha suffix makes the profit and loss zones 20% opaque.
       ctx.fillStyle = `${state.palette.bid}33`;
       ctx.fillRect(
         g.left,
@@ -193,6 +209,7 @@ export function createPositionTool(
         stop.price
       );
       if (doc.style.show_labels !== false) {
+        // Level labels sit 10 px inside their zone, towards the entry line.
         drawLabel(
           ctx,
           `Target ${formatPrice(target.price, state.tickSize)} (${metrics.targetPct}%)`,

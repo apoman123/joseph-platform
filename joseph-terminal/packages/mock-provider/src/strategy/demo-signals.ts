@@ -16,12 +16,13 @@ import {DEMO_INSTRUMENT_SPECS, demoCandle} from '../market/prices';
 
 /**
  * Builds a reason node.
- * @param path Node path.
- * @param op Operator.
+ * @param path JSON Pointer of the node in the definition, e.g.
+ *     `/when/children/0`.
+ * @param op Condition operator, e.g. `ALL` or `BIAS`.
  * @param result Tri-state result.
- * @param detail Explanation.
- * @param children Child reasons.
- * @return Reason node.
+ * @param detail Human-readable explanation.
+ * @param children Child reasons (default none).
+ * @return Reason node without evidence.
  */
 function reason(
   path: string,
@@ -42,10 +43,10 @@ function reason(
 }
 
 /**
- * Volume fields of a signal bar, read from the DEMO venue candle.
- * @param instrumentId DEMO instrument.
- * @param barStartMs Signal bar start (5m).
- * @param nowMs Clock.
+ * Reads the volume fields of a signal bar from the DEMO venue candle.
+ * @param instrumentId DEMO instrument id.
+ * @param barStartMs Start of the 5m signal bar, epoch ms.
+ * @param nowMs Current time in epoch ms.
  * @return Base volume and quote turnover (null for unknown instruments).
  */
 function barVolumes(
@@ -64,12 +65,15 @@ function barVolumes(
 
 /**
  * Creates DEMO signals relative to a reference time.
- * @param nowMs Reference time (UTC ms); bars are aligned to 5 minutes.
- * @return Signals, newest first.
+ * @param nowMs Reference time in epoch ms (UTC); the signals sit on the 5m
+ *     bars that closed 0, 3 and 6 bars before the 5-minute boundary at or
+ *     before it.
+ * @return Three signals (fired, blocked, confirming), newest first.
  */
 export function createDemoSignals(nowMs: number): Signal[] {
-  const bar = 300_000;
-  const close = Math.floor(nowMs / bar) * bar;
+  const barMs = 300_000;
+  const close = Math.floor(nowMs / barMs) * barMs;
+  // Placeholder digest: one hex digit repeated, clearly not a real hash.
   const hash = (digit: string) => `sha256:${digit.repeat(64)}`;
   const base = {
     tenant_id: 'demo-tenant',
@@ -99,7 +103,7 @@ export function createDemoSignals(nowMs: number): Signal[] {
       kind: 'ENTRY_CONFIRMED',
       setup_state: 'FIRED',
       severity: 'ENTRY',
-      bar_start_ms: close - bar,
+      bar_start_ms: close - barMs,
       bar_close_ms: close,
       evaluated_at_ms: close + 120,
       inputs_snapshot_hash: hash('a'),
@@ -139,7 +143,7 @@ export function createDemoSignals(nowMs: number): Signal[] {
       ]),
       aoi_ids: ['demo-fvg-1'],
       range_ids: ['demo-r1'],
-      ...barVolumes('mock:perp:BTCUSD', close - bar, nowMs),
+      ...barVolumes('mock:perp:BTCUSD', close - barMs, nowMs),
       entry_price: '94790',
       stop_price: '94650',
       target_price: '95100',
@@ -162,9 +166,9 @@ export function createDemoSignals(nowMs: number): Signal[] {
       kind: 'ENTRY_BLOCKED',
       setup_state: 'BLOCKED',
       severity: 'WARNING',
-      bar_start_ms: close - 4 * bar,
-      bar_close_ms: close - 3 * bar,
-      evaluated_at_ms: close - 3 * bar + 90,
+      bar_start_ms: close - 4 * barMs,
+      bar_close_ms: close - 3 * barMs,
+      evaluated_at_ms: close - 3 * barMs + 90,
       inputs_snapshot_hash: hash('c'),
       rule_version: hash('d'),
       reason_tree: reason(
@@ -203,7 +207,7 @@ export function createDemoSignals(nowMs: number): Signal[] {
       ),
       aoi_ids: ['demo-brk-4'],
       range_ids: ['demo-r2'],
-      ...barVolumes('mock:perp:ETHUSD', close - 4 * bar, nowMs),
+      ...barVolumes('mock:perp:ETHUSD', close - 4 * barMs, nowMs),
       entry_price: null,
       stop_price: null,
       target_price: null,
@@ -229,9 +233,9 @@ export function createDemoSignals(nowMs: number): Signal[] {
       kind: 'PRE_SIGNAL',
       setup_state: 'CONFIRMING',
       severity: 'INFO',
-      bar_start_ms: close - 7 * bar,
-      bar_close_ms: close - 6 * bar,
-      evaluated_at_ms: close - 6 * bar + 75,
+      bar_start_ms: close - 7 * barMs,
+      bar_close_ms: close - 6 * barMs,
+      evaluated_at_ms: close - 6 * barMs + 75,
       inputs_snapshot_hash: hash('e'),
       rule_version: hash('b'),
       reason_tree: reason('/when', 'ALL', 'FALSE', '5 of 6 conditions true', [
@@ -250,7 +254,7 @@ export function createDemoSignals(nowMs: number): Signal[] {
       ]),
       aoi_ids: ['demo-ob-2'],
       range_ids: [],
-      ...barVolumes('mock:perp:SOLUSD', close - 7 * bar, nowMs),
+      ...barVolumes('mock:perp:SOLUSD', close - 7 * barMs, nowMs),
       entry_price: null,
       stop_price: null,
       target_price: null,

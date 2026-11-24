@@ -36,7 +36,7 @@ export const SERIES_LOADING_MESSAGE = 'Loading engine values…';
 export interface DrawingSeriesRequest {
   /** Engine plugin id, e.g. `anchored_vwap`. */
   pluginId: string;
-  /** Inclusive first bar start (UTC ms). */
+  /** Inclusive first bar start, epoch ms UTC. */
   fromMs: number;
   /**
    * Plugin inputs. Decimals are strings and integers are numbers, like the
@@ -57,7 +57,7 @@ export interface DrawingSeriesState {
   calendar?: BarCalendar;
   /** Points of the latest response, oldest first. */
   points: readonly IndicatorSeriesPoint[];
-  /** Response `as_of_ms`, or null before the first response. */
+  /** Response `as_of_ms` (epoch ms), or null before the first response. */
   asOfMs: number | null;
   /** Error message when `status` is `error`. */
   error: string | null;
@@ -69,14 +69,16 @@ export interface DrawingSeriesState {
 }
 
 /**
- * Start of the bar an anchor time belongs to. Anchors are placed at the
- * pointer, which may sit in either half of a bar, so the time is rounded to
- * the nearest bar centre first; on session calendars the second half of a
- * session's last bar rounds to the next session's first bar.
- * @param timeMs Anchor time.
+ * Returns the start of the bar an anchor time belongs to. Anchors are
+ * placed at the pointer, which may sit in either half of a bar, so the time
+ * is rounded to the nearest bar boundary: the first half of a bar maps to
+ * its start, the second half to the next bar's start. On session calendars
+ * the second half of a session's last bar maps to the next session's first
+ * bar.
+ * @param timeMs Anchor time in epoch ms UTC; negative times count as 0.
  * @param timeframe Chart timeframe.
  * @param calendar Session calendar of the instrument (default UTC bars).
- * @return Bar start (UTC ms).
+ * @return Bar start in epoch ms UTC.
  */
 export function barStartAt(
   timeMs: number,
@@ -90,10 +92,11 @@ export function barStartAt(
 }
 
 /**
- * Stable identity of a request (re-fetch when it changes).
- * @param request Request.
- * @param timeframe Timeframe.
- * @return Key.
+ * Returns a stable identity of a request; the series is re-fetched when it
+ * changes.
+ * @param request Series request.
+ * @param timeframe Chart timeframe the request is sent with.
+ * @return JSON key, independent of the order of the settings' keys.
  */
 export function seriesRequestKey(
   request: DrawingSeriesRequest,
@@ -111,10 +114,10 @@ export function seriesRequestKey(
 }
 
 /**
- * Finds the point of one bar.
- * @param points Points sorted by bar start.
- * @param barStartMs Bar start.
- * @return Point or undefined.
+ * Finds the point of one bar by binary search.
+ * @param points Points sorted by bar start, ascending.
+ * @param barStartMs Exact bar start in epoch ms UTC.
+ * @return Point, or undefined when no point starts at that time.
  */
 export function seriesPointAt(
   points: readonly IndicatorSeriesPoint[],
@@ -133,9 +136,9 @@ export function seriesPointAt(
 }
 
 /**
- * Reads a decimal-string value.
- * @param point Series point.
- * @param key Value key.
+ * Reads a decimal-string value of a series point.
+ * @param point Series point, or undefined for none.
+ * @param key Value key, e.g. `vwap`.
  * @return Decimal string, or null when missing, null or malformed.
  */
 export function decimalValue(
@@ -147,9 +150,9 @@ export function decimalValue(
 }
 
 /**
- * Reads an integer value.
- * @param point Series point.
- * @param key Value key.
+ * Reads an integer value of a series point.
+ * @param point Series point, or undefined for none.
+ * @param key Value key, e.g. `bars`.
  * @return Integer, or null when missing or not an integer.
  */
 export function integerValue(
@@ -161,11 +164,13 @@ export function integerValue(
 }
 
 /**
- * Point-in-time view of a series for bar replay: only bars that closed
- * before `atMs` are known.
- * @param state Series state.
- * @param atMs Replay as-of time, or null when live.
- * @return Filtered state (the same object when live).
+ * Returns the point-in-time view of a series for bar replay: only points of
+ * bars that start before `atMs` are kept (with `atMs` on a bar boundary,
+ * the bars closed by then).
+ * @param state Series state, or null without one.
+ * @param atMs Replay as-of time in epoch ms UTC, or null when live.
+ * @return Filtered copy with `asOfMs` capped at `atMs`; `state` itself
+ *     when live or null.
  */
 export function seriesAsOf(
   state: DrawingSeriesState | null,
@@ -180,9 +185,10 @@ export function seriesAsOf(
 }
 
 /**
- * Message for a series that is not ready.
- * @param state Series state (null before any request).
- * @return Loading or error text, or null when ready.
+ * Returns the message for a series that is not ready.
+ * @param state Series state (null or undefined before any request).
+ * @return Loading text, the engine's refusal (capitalized) or a generic
+ *     error text, or null when ready.
  */
 export function seriesStatusMessage(
   state: DrawingSeriesState | null | undefined

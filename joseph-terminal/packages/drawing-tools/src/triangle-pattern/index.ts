@@ -28,14 +28,18 @@ import {
   type Point,
 } from '@joseph/drawing-core';
 
-/** Apex limit in pattern widths beyond the last anchor. */
+/**
+ * Furthest the apex may lie beyond the right-most anchor, in pattern widths.
+ * A pattern width is the anchors' x span; past the limit the boundaries stop
+ * at the right-most anchor's x.
+ */
 const APEX_LIMIT_WIDTHS = 3;
 
 /**
- * Boundary lines of the triangle.
+ * Returns the boundary lines of the triangle.
  * @param points Anchor pixels A, B, C, D.
- * @return Upper-or-lower boundaries `[A..end, B..end]`, or null when an
- *     anchor is missing.
+ * @return Boundaries through A-C and B-D in CSS pixels, each from its first
+ *     anchor to the end x, or null when an anchor is missing.
  */
 export function triangleBoundaries(
   points: readonly Point[]
@@ -45,6 +49,7 @@ export function triangleBoundaries(
   const xs = [a.x, b.x, c.x, d.x];
   const first = Math.min(...xs);
   const last = Math.max(...xs);
+  // At least 1 px, so anchors stacked on one x still allow an apex.
   const width = Math.max(1, last - first);
   const apex = lineIntersection(a, c, b, d);
   const endX =
@@ -53,9 +58,10 @@ export function triangleBoundaries(
       : last;
   /**
    * Extends a line from `from` through `through` to `endX`.
-   * @param from Start anchor.
-   * @param through Second anchor.
-   * @return Segment.
+   * @param from Start anchor, in CSS pixels.
+   * @param through Second anchor, in CSS pixels.
+   * @return Segment from `from` to `endX`; `[from, through]` when the line
+   *     is vertical.
    */
   const extend = (from: Point, through: Point): [Point, Point] => {
     const dx = through.x - from.x;

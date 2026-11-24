@@ -6,7 +6,9 @@
 
 /**
  * @fileoverview Extended line: a line through two anchors that spans the
- * whole chart in both directions.
+ * whole chart in both directions, whatever the `extend_left` and
+ * `extend_right` style flags say. A vertical line (both anchors at one x) is
+ * drawn between the anchors only.
  */
 
 import {

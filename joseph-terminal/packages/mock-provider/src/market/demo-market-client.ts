@@ -6,25 +6,29 @@
 
 /**
  * @fileoverview DEMO implementation of `MarketDataClient` and a simulated
- * market stream. Every record carries `feed_state: 'DEMO'`.
+ * market stream for the synthetic instruments of the `mock` venue.
+ *
+ * Candles, snapshots, AOIs (areas of interest), indicator series and feed
+ * health carry `feed_state: 'DEMO'`. Requests for any other venue's
+ * instruments fail instead of inventing data.
  */
 
 import {
-  type IndicatorSeries,
-  type IndicatorSeriesQuery,
   Decimal,
   TIMEFRAMES,
   floorToTimeframe,
   isSecondsTimeframe,
   type AoiList,
-  type BarCalendar,
   type AoiRecord,
+  type BarCalendar,
   type Candle,
   type CandleBatch,
   type CandleQuery,
   type ChannelSpec,
   type IndicatorPluginList,
+  type IndicatorSeries,
   type IndicatorSeriesPoint,
+  type IndicatorSeriesQuery,
   type IndicatorSnapshotList,
   type Instrument,
   type InstrumentList,
@@ -59,14 +63,14 @@ import {
   type DemoInstrumentSpec,
 } from './prices';
 
-/** Default history length. */
+/** Bars returned by `getCandles` without `fromMs` or `limit`. */
 const DEFAULT_LIMIT = 400;
 
 /**
  * Looks up a DEMO instrument.
- * @param instrumentId Canonical id.
- * @return Spec.
- * @throws {Error} For non-DEMO instruments (DEMO never fakes real venues).
+ * @param instrumentId Canonical instrument id, e.g. `mock:perp:BTCUSD`.
+ * @return The DEMO spec.
+ * @throws `Error` for non-DEMO instruments (DEMO never fakes real venues).
  */
 export function demoSpec(instrumentId: string): DemoInstrumentSpec {
   const spec = DEMO_INSTRUMENT_SPECS.find(s => s.instrumentId === instrumentId);
@@ -79,18 +83,20 @@ export function demoSpec(instrumentId: string): DemoInstrumentSpec {
 }
 
 /**
- * Session calendar of a DEMO instrument.
- * @param spec Spec.
- * @return Calendar (`24x7` for perpetuals).
+ * Returns the session calendar of a DEMO instrument.
+ * @param spec Instrument.
+ * @return Calendar; continuous `24x7` when the spec names none (perpetuals).
  */
 export function demoSpecCalendar(spec: DemoInstrumentSpec): BarCalendar {
   return demoCalendar(spec.calendar ?? '24x7');
 }
 
 /**
- * Builds the contract instrument for a DEMO spec.
- * @param spec Spec.
- * @param nowMs Clock.
+ * Builds the contract instrument for a DEMO spec. Perpetuals get a 5 USD
+ * minimum notional, 8-hour funding and 20x maximum leverage; other market
+ * types have none of these.
+ * @param spec Instrument.
+ * @param nowMs Current time in epoch ms (the record's `as_of_ms`).
  * @return Instrument.
  */
 export function demoInstrument(
@@ -136,12 +142,13 @@ export function demoInstrument(
 }
 
 /**
- * Last traded DEMO price: the synthetic path now for 24x7 markets; for
- * session markets the price at the last session's close while closed. Rounded
- * to the tick (the ladder rung at that price).
- * @param spec Spec.
- * @param nowMs Clock.
- * @return Price and the time it traded at.
+ * Returns the last traded DEMO price: the synthetic path now for 24x7
+ * markets; for session markets, while closed, the price 1 ms before the
+ * latest session's close. Rounded to the tick (the ladder rung at that
+ * price).
+ * @param spec Instrument.
+ * @param nowMs Current time in epoch ms.
+ * @return Price and the epoch ms it traded at.
  */
 export function demoLastPrice(
   spec: DemoInstrumentSpec,
@@ -157,10 +164,12 @@ export function demoLastPrice(
 }
 
 /**
- * Whether a DEMO spec matches search text (symbol, base or name).
- * @param spec Spec.
- * @param text Search text (any case; Chinese names match as typed).
- * @return True on a match.
+ * Returns whether a DEMO spec matches search text (symbol, base, English or
+ * local name).
+ * @param spec Instrument.
+ * @param text Search text, a substring in any case (Chinese names match as
+ *     typed).
+ * @return True on a match; blank text matches every spec.
  */
 export function demoSpecMatches(
   spec: DemoInstrumentSpec,
@@ -175,17 +184,20 @@ export function demoSpecMatches(
 
 /** Options for the DEMO client. */
 export interface DemoMarketOptions {
-  /** Clock (injectable for tests). */
+  /** Clock in epoch ms (injectable for tests; defaults to `Date.now`). */
   now?: () => number;
 }
 
-/** DEMO market-data client. */
+/**
+ * DEMO `MarketDataClient`: serves synthetic data for `mock` instruments
+ * only; calls for any other instrument reject.
+ */
 export class DemoMarketDataClient implements MarketDataClient {
   private readonly now: () => number;
 
   /**
    * Creates the client.
-   * @param options Options.
+   * @param options Injectable clock.
    */
   constructor(options: DemoMarketOptions = {}) {
     this.now = options.now ?? (() => Date.now());
@@ -193,7 +205,8 @@ export class DemoMarketDataClient implements MarketDataClient {
 
   /**
    * Lists the DEMO venue.
-   * @return Venue status.
+   * @return Status of the single `mock` venue: its capabilities and a
+   *     healthy DEMO feed.
    */
   async listVenues(): Promise<VenueStatusList> {
     const now = this.now();
@@ -251,8 +264,9 @@ export class DemoMarketDataClient implements MarketDataClient {
 
   /**
    * Searches DEMO instruments.
-   * @param query Filters.
-   * @return Instruments.
+   * @param query Venue, market type and search-text filters; `limit`
+   *     defaults to 500.
+   * @return Matching instruments; none for any venue other than `mock`.
    */
   async listInstruments(query: InstrumentQuery): Promise<InstrumentList> {
     const now = this.now();
@@ -272,8 +286,12 @@ export class DemoMarketDataClient implements MarketDataClient {
 
   /**
    * Builds DEMO candles.
-   * @param query Series and range.
-   * @return Candle batch.
+   * @param query Series and range. With `fromMs`: the bars from the one
+   *     containing it through `toMs` (1 to 2000 bars). Without: the last
+   *     `limit` bars (default 400, at most 2000) through `toMs` (default
+   *     now).
+   * @return Candle batch, oldest first; always complete, without gaps.
+   * @throws `Error` when the instrument is not a DEMO instrument.
    */
   async getCandles(query: CandleQuery): Promise<CandleBatch> {
     const spec = demoSpec(query.instrumentId);
@@ -309,15 +327,20 @@ export class DemoMarketDataClient implements MarketDataClient {
 
   /**
    * Builds a DEMO snapshot.
-   * @param instrumentId Instrument.
-   * @return Snapshot.
+   * @param instrumentId DEMO instrument id.
+   * @return Snapshot: last, mark and index equal; bid and ask one tick
+   *     either side; the 24-hour change measured from the path 24 hours ago
+   *     (24x7) or just before the latest session opened; funding (a fixed
+   *     0.01% per 8 hours) and open interest for perpetuals only.
+   * @throws `Error` when the instrument is not a DEMO instrument.
    */
   async getSnapshot(instrumentId: string): Promise<MarketSnapshot> {
     const spec = demoSpec(instrumentId);
     const now = this.now();
     const calendar = demoSpecCalendar(spec);
     // Session markets keep the last price of the latest session while
-    // closed; the change is measured from the previous session's close.
+    // closed. Their change is measured from the path 1 ms before that
+    // session's daily bar opened, standing in for the previous close.
     const {price: last, tradeMs} = demoLastPrice(spec, now);
     const tick = Decimal.parse(demoTickAt(spec, last.toNumber()));
     const reference = calendar.continuous
@@ -325,6 +348,8 @@ export class DemoMarketDataClient implements MarketDataClient {
       : priceAt(spec, calendar.floor('1d', tradeMs) - 1);
     const change = ((last.toNumber() - reference) / reference) * 100;
     const perp = (spec.marketType ?? 'perp') === 'perp';
+    // A day is 1440 minutes on 24x7 markets and a 390-minute (6.5-hour)
+    // session elsewhere.
     const volumeDay = spec.volumePerMinute * (calendar.continuous ? 1440 : 390);
     return {
       instrument_id: instrumentId,
@@ -379,9 +404,12 @@ export class DemoMarketDataClient implements MarketDataClient {
 
   /**
    * Builds a DEMO order book.
-   * @param instrumentId Instrument.
-   * @param depth Levels.
-   * @return Book.
+   * @param instrumentId DEMO instrument id.
+   * @param depth Price levels per side (default 20).
+   * @return Book with levels one tick apart from the snapshot's best bid and
+   *     ask; sizes start at 5% of the per-minute volume and grow 40% of that
+   *     per level.
+   * @throws `Error` when the instrument is not a DEMO instrument.
    */
   async getOrderBook(instrumentId: string, depth = 20): Promise<OrderBook> {
     const snapshot = await this.getSnapshot(instrumentId);
@@ -418,9 +446,9 @@ export class DemoMarketDataClient implements MarketDataClient {
 
   /**
    * Returns the DEMO qualification report.
-   * @param venue Venue filter.
-   * @param status Status filter.
-   * @return Report.
+   * @param venue When set, only records of this venue.
+   * @param status When set, only records with this status.
+   * @return Report of the static DEMO records that pass the filters.
    */
   async getQualification(
     venue?: Venue,
@@ -442,16 +470,18 @@ export class DemoMarketDataClient implements MarketDataClient {
 
   /**
    * Lists indicator plugin descriptors.
-   * @return Plugins.
+   * @return The DEMO plugin descriptors, in catalog order.
    */
   async listIndicatorPlugins(): Promise<IndicatorPluginList> {
     return {plugins: demoPluginInfos()};
   }
 
   /**
-   * Returns DEMO snapshots (AOIs grouped by plugin).
+   * Returns DEMO indicator snapshots: the `getAois` records grouped by
+   * plugin.
    * @param query Series query.
-   * @return Snapshots.
+   * @return One snapshot per plugin that has AOIs or events.
+   * @throws `Error` when the instrument is not a DEMO instrument.
    */
   async getIndicatorSnapshots(
     query: SeriesQuery
@@ -491,7 +521,12 @@ export class DemoMarketDataClient implements MarketDataClient {
    * `regression_channel` come from `demo-drawing-series`. Values are
    * synthetic and labelled DEMO.
    * @param query Series query.
-   * @return DEMO indicator series.
+   * @return DEMO indicator series: for order flow the 200 bars through the
+   *     last closed one; for other non-drawing plugins no points.
+   * @throws `Error` when the instrument is not a DEMO instrument.
+   * @throws `Error` for invalid drawing-plugin settings, or `ApiError` (422
+   *     `VALIDATION_FAILED`) for a drawing anchor beyond the bar cap (see
+   *     `demoDrawingSeries`).
    */
   async getIndicatorSeries(
     query: IndicatorSeriesQuery
@@ -533,17 +568,23 @@ export class DemoMarketDataClient implements MarketDataClient {
   /**
    * Lists DEMO sessions of an exchange calendar (the engine's
    * `/v1/calendars/{calendar_id}/sessions`).
-   * @param query Calendar and window.
-   * @return Session list.
+   * @param query Calendar and the half-open window `[fromMs, toMs)` in epoch
+   *     ms.
+   * @return Sessions overlapping the window, oldest first.
    */
   async getSessions(query: SessionQuery): Promise<SessionList> {
     return demoSessionList(query);
   }
 
   /**
-   * Materializes the relative DEMO AOI fixture for a series.
-   * @param query Series query.
-   * @return AOI list.
+   * Materializes the relative DEMO AOI fixture for a series: bar offsets
+   * count back from the last closed bar and prices are ratios of its close,
+   * rounded to the tick.
+   * @param query Series, optional plugin filter and optional `atMs` (epoch
+   *     ms) for a point-in-time view.
+   * @return AOIs and structure events. With an `atMs` before the latest
+   *     data, only those confirmed by then, with later invalidations undone.
+   * @throws `Error` when the instrument is not a DEMO instrument.
    */
   async getAois(query: SeriesQuery): Promise<AoiList> {
     const spec = demoSpec(query.instrumentId);
@@ -648,14 +689,17 @@ export class DemoMarketDataClient implements MarketDataClient {
 }
 
 /**
- * One DEMO order-flow point for a candle. True delta uses the candle's
- * taker-buy volume (buy − sell over the bar volume); on stock bars that
- * volume is classified against quotes, so the method is
+ * Builds one DEMO order-flow point for a candle. True delta uses the
+ * candle's taker-buy volume (buy − sell over the bar volume); on stock and
+ * ETF bars that volume is classified against quotes, so the method is
  * `trade_classification`; the estimate signs the bar volume by candle
  * direction, as the engine's fallback does.
- * @param candle DEMO candle (with `taker_buy_base_volume`).
- * @param estimate Force the candle-direction estimate.
- * @return Series point.
+ * @param candle DEMO candle; true delta needs `taker_buy_base_volume` and a
+ *     non-zero volume, otherwise the estimate is used.
+ * @param estimate Whether to use the candle-direction estimate even when
+ *     taker volume is present.
+ * @return Series point; `delta_pct` is the delta share of volume in percent
+ *     (the estimate's body-over-range share is scaled to at most ±60%).
  */
 export function demoDeltaPoint(
   candle: Candle,
@@ -700,13 +744,14 @@ export function demoDeltaPoint(
 }
 
 /**
- * Static DEMO qualification records with strict gates.
- * @param now Clock.
- * @return Records.
+ * Builds the static DEMO qualification records with strict gates.
+ * @param now Current time in epoch ms.
+ * @return Records for the three DEMO perpetuals.
  */
 function demoQualification(now: number): QualificationRecord[] {
+  // A gate without an observed value is never treated as passing.
   const gate = (
-    gate: QualificationRecord['gates'][number]['gate'],
+    id: QualificationRecord['gates'][number]['gate'],
     observed: string | null,
     threshold: string,
     comparator: 'gt' | 'lt',
@@ -719,7 +764,7 @@ function demoQualification(now: number): QualificationRecord[] {
           ? Decimal.parse(observed).cmp(Decimal.parse(threshold)) > 0
           : Decimal.parse(observed).cmp(Decimal.parse(threshold)) < 0;
     return {
-      gate,
+      gate: id,
       observed,
       threshold,
       comparator,
@@ -800,13 +845,17 @@ function demoQualification(now: number): QualificationRecord[] {
 
 /** Options for the DEMO stream. */
 export interface DemoStreamOptions {
-  /** Clock. */
+  /** Clock in epoch ms (defaults to `Date.now`). */
   now?: () => number;
-  /** Tick interval. */
+  /** Milliseconds between simulated updates (default 1000). */
   intervalMs?: number;
 }
 
-/** Simulated market stream emitting DEMO candle updates. */
+/**
+ * Simulated market stream emitting DEMO candle updates. Every interval it
+ * re-sends each subscribed series' forming bar; when a new bar starts, it
+ * first sends the previous bar once more, now final.
+ */
 export class DemoMarketStream implements StreamClient {
   private sequence = 0;
   private readonly timers = new Set<ReturnType<typeof setInterval>>();
@@ -822,9 +871,11 @@ export class DemoMarketStream implements StreamClient {
 
   /**
    * Subscribes to channels; candles and feed health are simulated.
-   * @param channels Specs.
-   * @param handler Handler.
-   * @return Unsubscribe.
+   * @param channels Channel specs. `candles` (with instrument and timeframe)
+   *     and `feed_health` are served; candles of non-DEMO instruments and
+   *     other channels are ignored.
+   * @param handler Receives each envelope.
+   * @return Unsubscribe function that stops this subscription's timer.
    */
   subscribe(
     channels: readonly ChannelSpec[],
@@ -844,6 +895,7 @@ export class DemoMarketStream implements StreamClient {
           try {
             instrument = demoSpec(spec.instrument_id);
           } catch {
+            // Only DEMO instruments have synthetic bars: skip the rest.
             continue;
           }
           const key = `${spec.instrument_id}:${spec.timeframe}`;
@@ -899,10 +951,10 @@ export class DemoMarketStream implements StreamClient {
   }
 
   /**
-   * Builds an envelope.
+   * Builds an envelope with the next sequence number.
    * @param type Event type.
-   * @param channel Channel key.
-   * @param payload Payload.
+   * @param channel Channel key, e.g. `candles:<instrument>:<timeframe>`.
+   * @param payload Candle or feed-health record.
    * @return Envelope.
    */
   private envelope(
@@ -919,21 +971,21 @@ export class DemoMarketStream implements StreamClient {
       event_ts_ms: this.now(),
       correlation_id: null,
       channel,
-      payload: payload,
+      payload,
     };
   }
 
   /**
-   * Reports a permanently open status.
+   * Reports `OPEN` once, synchronously: the DEMO stream never disconnects.
    * @param handler Status handler.
-   * @return Unsubscribe.
+   * @return No-op unsubscribe function.
    */
   onStatus(handler: (status: StreamStatus) => void): () => void {
     handler('OPEN');
     return () => undefined;
   }
 
-  /** Stops every timer. */
+  /** Stops the timers of every subscription. */
   close(): void {
     for (const timer of this.timers) {
       clearInterval(timer);

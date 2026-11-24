@@ -5,7 +5,7 @@
  */
 
 /**
- * @fileoverview Ellipse.
+ * @fileoverview Ellipse: an axis-aligned ellipse inscribed in a two-corner box.
  *
  * - Anchors: 2, opposite corners of the ellipse's bounding box (any order).
  * - Geometry: axis-aligned ellipse in pixel space centred on the box
@@ -28,20 +28,20 @@ import {
   type ToolPlugin,
 } from '@joseph/drawing-core';
 
-/** Ellipse in pixel space. */
+/** Axis-aligned ellipse in CSS pixels. */
 export interface EllipseGeometry {
   /** Centre. */
   center: Point;
-  /** Horizontal radius. */
+  /** Horizontal radius in CSS pixels. */
   rx: number;
-  /** Vertical radius. */
+  /** Vertical radius in CSS pixels. */
   ry: number;
 }
 
 /**
- * Ellipse inscribed in the box spanned by two corners.
- * @param a Corner.
- * @param b Opposite corner.
+ * Returns the ellipse inscribed in the box spanned by two corners.
+ * @param a Corner, in CSS pixels.
+ * @param b Opposite corner, in CSS pixels.
  * @return Centre and radii.
  */
 export function ellipseGeometry(a: Point, b: Point): EllipseGeometry {
@@ -53,10 +53,11 @@ export function ellipseGeometry(a: Point, b: Point): EllipseGeometry {
 }
 
 /**
- * Whether a point lies inside (or on) an ellipse.
- * @param p Point.
+ * Returns whether a point lies inside (or on) an ellipse.
+ * @param p Point, in CSS pixels.
  * @param e Ellipse.
- * @return True when inside.
+ * @return True when inside or on the outline; false for a flat ellipse
+ *     (a zero radius).
  */
 export function pointInEllipse(p: Point, e: EllipseGeometry): boolean {
   if (e.rx <= 0 || e.ry <= 0) return false;
@@ -66,12 +67,14 @@ export function pointInEllipse(p: Point, e: EllipseGeometry): boolean {
 }
 
 /**
- * Approximate distance from a point to an ellipse outline.
- * @param p Point.
+ * Returns the approximate distance from a point to an ellipse outline.
+ * @param p Point, in CSS pixels.
  * @param e Ellipse.
- * @return Distance in pixels.
+ * @return Distance in CSS pixels.
  */
 export function distanceToEllipse(p: Point, e: EllipseGeometry): number {
+  // On a circle, 96 vertices stay within about 0.05 % of the radius of the
+  // true outline (0.5 px at 1000 px), well inside the hit tolerance.
   return distanceToPolyline(p, sampleEllipse(e.center, e.rx, e.ry, 96), true);
 }
 
@@ -89,6 +92,7 @@ export const ellipseTool: ToolPlugin = {
     color: palette.user,
     line_width: 1,
     line_style: 'solid',
+    // A hex alpha byte on the `#rrggbb` user color: 0x26, about 15 % opacity.
     fill_color: `${palette.user}26`,
   }),
   render(ctx, doc, transform, state) {

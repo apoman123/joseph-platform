@@ -5,7 +5,10 @@
  */
 
 /**
- * @fileoverview Price/time measurement between two anchors.
+ * @fileoverview Measure (price range) tool: the price change, percent
+ * change, bar count and duration between two anchors, drawn as a box
+ * tinted with the bid color when price rises and the ask color when it
+ * falls.
  */
 
 import {Decimal, type BarCalendar, type Timeframe} from '@joseph/contracts';
@@ -23,24 +26,26 @@ import {
 
 /** Measurement result. */
 export interface Measurement {
-  /** Signed price change. */
+  /** Signed price change `to - from` (decimal string). */
   delta: string;
-  /** Signed percent change (2 decimals). */
+  /** Signed percent change from `from`, 2 decimals (`'0.00'` from price 0). */
   pct: string;
   /** Number of bars spanned. */
   bars: number;
-  /** Human-readable duration. */
+  /** Wall-clock span: `<d>d <h>h` from one day, else `<h>h <m>m`. */
   duration: string;
 }
 
 /**
  * Measures the span between two anchors. With a session calendar the bar
  * count only counts session bars (no overnight or weekend bars).
- * @param from Start anchor.
- * @param to End anchor.
- * @param durationMs Bar duration.
+ * @param from Start anchor (epoch milliseconds, decimal price).
+ * @param to End anchor (epoch milliseconds, decimal price).
+ * @param durationMs Bar duration in milliseconds, for the bar count without
+ *     a session calendar.
  * @param sessions Chart timeframe and session calendar, if any.
  * @return Measurement.
+ * @throws `RangeError` when an anchor price is not a decimal string.
  */
 export function measure(
   from: {time_ms: number; price: string},
@@ -100,6 +105,7 @@ export const priceRangeTool: ToolPlugin = {
     const m = measure(from, to, state.durationMs, state);
     const up = !m.delta.startsWith('-');
     const tone = up ? state.palette.bid : state.palette.ask;
+    // A hex alpha byte on the `#rrggbb` tone: 0x22, about 13 % opacity.
     ctx.fillStyle = `${tone}22`;
     ctx.fillRect(rect.x, rect.y, rect.width, rect.height);
     applyStroke(ctx, doc.style, state);

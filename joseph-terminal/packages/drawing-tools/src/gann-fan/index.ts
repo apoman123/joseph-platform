@@ -50,19 +50,20 @@ export const GANN_FAN_RATIOS: ReadonlyArray<readonly [number, number]> = [
 export interface GannRay {
   /** Ratio label such as `2×1`. */
   label: string;
-  /** Direction from the origin in pixels. */
+  /** Direction vector from the origin in CSS pixels: `(t * dx, p * dy)`. */
   direction: Point;
-  /** Where the ray leaves the plot. */
+  /** Where the ray leaves the plot, in CSS pixels. */
   end: Point;
 }
 
 /**
  * Computes the fan rays.
- * @param origin Fan origin (anchor A).
- * @param scale Point fixing the 1×1 angle (anchor B).
- * @param width Plot width.
- * @param height Plot height.
- * @return Rays, or an empty list when A and B coincide.
+ * @param origin Fan origin (anchor A), in CSS pixels.
+ * @param scale Point fixing the 1×1 angle (anchor B), in CSS pixels.
+ * @param width Plot width in CSS pixels (rays are clipped to it).
+ * @param height Plot height in CSS pixels (rays are clipped to it).
+ * @return Rays in `GANN_FAN_RATIOS` order, or an empty list when A and B
+ *     coincide.
  */
 export function gannFanRays(
   origin: Point,

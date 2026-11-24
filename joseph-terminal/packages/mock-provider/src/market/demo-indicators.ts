@@ -7,11 +7,11 @@
 /**
  * @fileoverview Static DEMO indicator fixture.
  *
- * Records are precomputed shapes (not computed from candles in the
- * browser): each AOI is stored relative to the latest closed bar
- * (`barsAgo`) and the latest close (`lowerRatio`/`upperRatio`) and is
- * materialized at request time. TODO(integration): replace with records
- * exported by the Python engine for the `mock` venue.
+ * Records are hand-written shapes, not computed from candles in the browser
+ * and not exported by the Python engine: each AOI (area of interest) is
+ * stored relative to the latest closed bar (`barsAgo`) and the latest close
+ * (`lowerRatio`/`upperRatio`) and is materialized at request time by
+ * `DemoMarketDataClient.getAois`, so it fits any instrument and timeframe.
  */
 
 import type {
@@ -23,9 +23,9 @@ import type {
 
 /** Relative AOI fixture entry. */
 export interface RelativeAoi {
-  /** Stable id suffix. */
+  /** Stable id part; the record id is `demo-<key>-<timeframe>`. */
   key: string;
-  /** Producing plugin. */
+  /** Producing plugin id. */
   source: string;
   /** AOI kind. */
   kind: AoiKind;
@@ -35,35 +35,41 @@ export interface RelativeAoi {
   state: AoiState;
   /** Bars before the latest closed bar where it originates. */
   barsAgo: number;
-  /** Bars after origin when it was confirmed. */
+  /** Bars after the origin bar until confirmation, at that bar's close. */
   confirmBars: number;
   /** Lower bound as a ratio of the latest close. */
   lowerRatio: number;
   /** Upper bound as a ratio of the latest close. */
   upperRatio: number;
-  /** Quality score. */
+  /** Quality score 0-100, or null for kinds without one. */
   score: number | null;
-  /** Dealing range id for premium/discount/OTE. */
+  /**
+   * Dealing range shared by the premium, discount and OTE (optimal trade
+   * entry) zones of one range.
+   */
   rangeId?: string;
 }
 
 /** Relative event fixture entry. */
 export interface RelativeEvent {
-  /** Stable id suffix. */
+  /** Stable id part; the event id is `demo-<key>-<timeframe>`. */
   key: string;
-  /** Producing plugin. */
+  /** Producing plugin id. */
   source: string;
   /** Event name. */
   name: StructureEventName;
-  /** Bars before the latest closed bar. */
+  /** Bars before the latest closed bar; it is confirmed at that bar's close. */
   barsAgo: number;
-  /** Reference price ratio. */
+  /** Event price as a ratio of the latest close. */
   priceRatio: number;
-  /** Bars before the latest closed bar of the pivot the event refers to. */
+  /**
+   * Bars before the latest closed bar of the pivot the event refers to
+   * (published as `meta.pivot_time_ms`).
+   */
   pivotBarsAgo?: number;
 }
 
-/** DEMO AOIs. */
+/** DEMO AOIs: at least one for every AOI-producing plugin. */
 export const DEMO_AOIS: readonly RelativeAoi[] = [
   {
     key: 'fvg-a',
@@ -286,7 +292,10 @@ export const DEMO_AOIS: readonly RelativeAoi[] = [
   },
 ];
 
-/** DEMO structure events. */
+/**
+ * DEMO structure events: breaks of structure, changes of character,
+ * sweeps, order-flow events and swing labels.
+ */
 export const DEMO_EVENTS: readonly RelativeEvent[] = [
   {
     key: 'bos-1',

@@ -5,7 +5,7 @@
  */
 
 /**
- * @fileoverview Triangle.
+ * @fileoverview Triangle: a closed polygon through three vertices.
  *
  * - Anchors: 3, the vertices in placement order.
  * - Geometry: the closed polygon through the three anchors (a segment
@@ -40,6 +40,7 @@ export const triangleTool: ToolPlugin = {
     color: palette.user,
     line_width: 1,
     line_style: 'solid',
+    // A hex alpha byte on the `#rrggbb` user color: 0x26, about 15 % opacity.
     fill_color: `${palette.user}26`,
   }),
   render(ctx, doc, transform, state) {

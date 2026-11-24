@@ -27,9 +27,11 @@ import {
 } from '@joseph/drawing-core';
 
 /**
- * Neckline through neck 1 and neck 2 spanning the start-to-end x range.
- * @param points Anchor pixels (start, LS, N1, head, N2, RS, end).
- * @return Neckline endpoints, or null when a point is missing.
+ * Returns the neckline through both necks, across the start-to-end x range.
+ * @param points Anchor pixels: start, left shoulder, neck 1, head, neck 2,
+ *     right shoulder, end.
+ * @return Neckline endpoints in CSS pixels (just neck 1 and neck 2 when they
+ *     share an x), or null when a point is missing.
  */
 export function necklineSegment(
   points: readonly Point[]

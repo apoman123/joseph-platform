@@ -42,8 +42,9 @@ function validator(file: string, def: string): (value: unknown) => string {
 }
 
 /**
- * Loads Long A from the shared fixtures.
- * @return Definition.
+ * Loads Long A, the first valid strategy in the shared fixtures.
+ * @return Strategy definition.
+ * @throws Error when the fixture has no valid strategy.
  */
 function longA(): StrategyDefinition {
   const fixture = JSON.parse(
@@ -116,6 +117,7 @@ describe('DemoStrategyClient', () => {
     await expect(
       client.activate('discount-ote-reversal', {
         version: 1,
+        // Deliberately outside the contract type, as an untyped caller sends.
         mode: 'AUTO_LIVE' as 'PAPER',
       })
     ).rejects.toMatchObject({body: {code: 'TRADE_MODE_DISABLED'}});

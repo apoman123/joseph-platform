@@ -10,11 +10,11 @@
  *
  * - XNYS (NYSE/Nasdaq, 09:30-16:00 America/New_York): a port of the engine's
  *   rules — New Year's Day (a Saturday is not moved to Friday), Martin
- *   Luther King Jr. Day, Washington's Birthday, Good Friday, Memorial Day,
- *   Juneteenth (from 2022), Independence Day, Labor Day, Thanksgiving and
- *   Christmas with weekend observance, the ad hoc closures the engine lists,
- *   and 13:00 early closes on July 3, Christmas Eve (Monday-Thursday) and
- *   the day after Thanksgiving.
+ *   Luther King Jr. Day (from 1998), Washington's Birthday, Good Friday,
+ *   Memorial Day, Juneteenth (from 2022), Independence Day, Labor Day,
+ *   Thanksgiving and Christmas with weekend observance, the ad hoc closures
+ *   the engine lists, and 13:00 New York early closes on July 3 and
+ *   Christmas Eve (Monday-Thursday) and on the day after Thanksgiving.
  * - USBOND (08:00-17:00 America/New_York): like the engine, the observed
  *   Treasury publication days through 2026-11-20 (the rule below plus the
  *   observed extra closures: most Good Fridays, MLK Day before 1998, NYSE
@@ -25,6 +25,9 @@
  *   closures of the engine's TWSE table for 2024-2027 (observed through
  *   2026-11-22 and published through 2027; TPEx keeps the same days);
  *   later dates follow the weekday rule.
+ *
+ * Days are day numbers: whole days since 1970-01-01 of the local calendar
+ * date, not UTC instants. Session open and close times are epoch ms.
  */
 
 import {
@@ -131,7 +134,7 @@ export const DEMO_XTAI_CLOSURES: readonly string[] = [
   '2027-12-31',
 ];
 
-/** TWSE closures as day numbers. */
+/** `DEMO_XTAI_CLOSURES` as day numbers. */
 const XTAI_CLOSED: ReadonlySet<number> = new Set(
   DEMO_XTAI_CLOSURES.map(dayNumberOf)
 );
@@ -224,10 +227,11 @@ const NYSE_SPECIAL_CLOSURES: ReadonlySet<number> = new Set(
 );
 
 /**
- * Day number of a calendar date.
- * @param year Year.
- * @param month Month 1-12.
- * @param day Day of month.
+ * Returns the day number of a calendar date.
+ * @param year Full year, e.g. 2026.
+ * @param month Month 1-12; 13 is January of the next year (`Date.UTC`
+ *     rolls over), which `nthWeekday` uses to find a month's last day.
+ * @param day Day of the month, 1-31.
  * @return Days since 1970-01-01.
  */
 function dayOf(year: number, month: number, day: number): number {
@@ -235,20 +239,21 @@ function dayOf(year: number, month: number, day: number): number {
 }
 
 /**
- * Monday-based weekday (Python `date.weekday()`: 0 = Monday).
+ * Returns the Monday-based weekday of a day, as Python's `date.weekday()`
+ * (the convention of the engine rules ported here).
  * @param day Day number.
- * @return Weekday 0-6.
+ * @return Weekday, 0 = Monday … 6 = Sunday.
  */
-function isoWeekday(day: number): number {
+function mondayBasedWeekday(day: number): number {
   return (weekdayOf(day) + 6) % 7;
 }
 
 /**
- * The n-th weekday of a month (`n = -1` for the last).
- * @param year Year.
+ * Returns the day number of the n-th weekday of a month.
+ * @param year Full year.
  * @param month Month 1-12.
- * @param weekday 0 = Monday.
- * @param n Occurrence (1-based) or -1.
+ * @param weekday Weekday, 0 = Monday … 6 = Sunday.
+ * @param n Occurrence, 1-based; -1 (any value of 0 or less) selects the last.
  * @return Day number.
  */
 export function nthWeekday(
@@ -259,19 +264,21 @@ export function nthWeekday(
 ): number {
   if (n > 0) {
     const first = dayOf(year, month, 1);
-    const offset = (weekday - isoWeekday(first) + 7) % 7;
+    const offset = (weekday - mondayBasedWeekday(first) + 7) % 7;
     return first + offset + 7 * (n - 1);
   }
   const last = dayOf(year, month + 1, 1) - 1;
-  return last - ((isoWeekday(last) - weekday + 7) % 7);
+  return last - ((mondayBasedWeekday(last) - weekday + 7) % 7);
 }
 
 /**
- * Western Easter Sunday (anonymous Gregorian algorithm).
- * @param year Year.
+ * Returns the day number of Western Easter Sunday (the anonymous Gregorian
+ * algorithm, also known as Meeus/Jones/Butcher).
+ * @param year Full Gregorian year.
  * @return Day number.
  */
 export function easterSunday(year: number): number {
+  // The single-letter names are those of the published algorithm.
   const a = year % 19;
   const b = Math.floor(year / 100);
   const c = year % 100;
@@ -290,39 +297,43 @@ export function easterSunday(year: number): number {
 }
 
 /**
- * Weekend observance of a fixed-date holiday.
- * @param day Holiday date.
- * @param saturdayToFriday Whether a Saturday holiday closes the Friday.
- * @return Closed weekday, or null.
+ * Returns the weekday on which a fixed-date holiday is observed.
+ * @param day Day number of the holiday.
+ * @param saturdayToFriday Whether a Saturday holiday closes the Friday
+ *     before; when false it closes no day.
+ * @return Observed day number (a Sunday holiday moves to Monday), or null
+ *     when a Saturday holiday is not observed.
  */
 function observed(day: number, saturdayToFriday = true): number | null {
-  const weekday = isoWeekday(day);
+  const weekday = mondayBasedWeekday(day);
   if (weekday === 5) return saturdayToFriday ? day - 1 : null;
   if (weekday === 6) return day + 1;
   return day;
 }
 
-/** NYSE holidays per year (cached). */
+/** Cache of `nyseHolidays` results by year. */
 const NYSE_HOLIDAYS = new Map<number, ReadonlySet<number>>();
 
 /**
- * NYSE full-day closures of a year (engine `_nyse_holidays`).
- * @param year Year.
- * @return Closed weekdays.
+ * Returns the NYSE full-day holiday closures of a year (a port of the
+ * engine's `_nyse_holidays`; ad hoc closures are not included).
+ * @param year Full year.
+ * @return Day numbers of the closed weekdays (cached per year).
  */
 export function nyseHolidays(year: number): ReadonlySet<number> {
   const cached = NYSE_HOLIDAYS.get(year);
   if (cached) return cached;
   const days: Array<number | null> = [
-    observed(dayOf(year, 1, 1), false),
-    nthWeekday(year, 2, 0, 3),
-    easterSunday(year) - 2,
-    nthWeekday(year, 5, 0, -1),
-    observed(dayOf(year, 7, 4)),
-    nthWeekday(year, 9, 0, 1),
-    nthWeekday(year, 11, 3, 4),
-    observed(dayOf(year, 12, 25)),
+    observed(dayOf(year, 1, 1), false), // New Year's Day
+    nthWeekday(year, 2, 0, 3), // Washington's Birthday: 3rd Monday of Feb
+    easterSunday(year) - 2, // Good Friday
+    nthWeekday(year, 5, 0, -1), // Memorial Day: last Monday of May
+    observed(dayOf(year, 7, 4)), // Independence Day
+    nthWeekday(year, 9, 0, 1), // Labor Day: 1st Monday of September
+    nthWeekday(year, 11, 3, 4), // Thanksgiving: 4th Thursday of November
+    observed(dayOf(year, 12, 25)), // Christmas
   ];
+  // Martin Luther King Jr. Day (3rd Monday of January) and Juneteenth.
   if (year >= 1998) days.push(nthWeekday(year, 1, 0, 3));
   if (year >= 2022) days.push(observed(dayOf(year, 6, 19)));
   const result = new Set(days.filter((d): d is number => d !== null));
@@ -331,27 +342,32 @@ export function nyseHolidays(year: number): ReadonlySet<number> {
 }
 
 /**
- * NYSE 13:00 early close (engine `_nyse_early_close`).
- * @param day Session date.
- * @return Whether the session closes at 13:00.
+ * Returns whether an NYSE session closes early, at 13:00 New York time (a
+ * port of the engine's `_nyse_early_close`).
+ * @param day Day number of the session.
+ * @return True on July 3 and Christmas Eve (Monday-Thursday) and on the day
+ *     after Thanksgiving.
  */
 export function nyseEarlyClose(day: number): boolean {
   const date = new Date(day * DAY_MS);
   const year = date.getUTCFullYear();
   const month = date.getUTCMonth() + 1;
-  const dom = date.getUTCDate();
+  const dayOfMonth = date.getUTCDate();
   if (day === nthWeekday(year, 11, 3, 4) + 1) return true;
   return (
-    ((month === 7 && dom === 3) || (month === 12 && dom === 24)) &&
-    isoWeekday(day) <= 3
+    ((month === 7 && dayOfMonth === 3) ||
+      (month === 12 && dayOfMonth === 24)) &&
+    mondayBasedWeekday(day) <= 3
   );
 }
 
 /**
- * Rule-based US Treasury market closures of a year (engine
- * `_bond_holidays`, used after the observed table).
- * @param year Year.
- * @return Closed weekdays.
+ * Returns the rule-based US Treasury market closures of a year (a port of
+ * the engine's `_bond_holidays`, used after the observed table): the NYSE
+ * holidays without Good Friday, plus Columbus Day (2nd Monday of October)
+ * and Veterans Day (November 11; a Saturday is not moved to Friday).
+ * @param year Full year.
+ * @return Day numbers of the closed weekdays.
  */
 export function bondHolidays(year: number): ReadonlySet<number> {
   const days = new Set(nyseHolidays(year));
@@ -363,9 +379,9 @@ export function bondHolidays(year: number): ReadonlySet<number> {
 }
 
 /**
- * Whether a weekday is closed on a calendar.
+ * Returns whether a weekday is a full-day closure on an exchange calendar.
  * @param calendar Exchange calendar.
- * @param day Day number.
+ * @param day Local day number.
  * @return True when closed.
  */
 function closedOn(calendar: ExchangeCalendarId, day: number): boolean {
@@ -381,16 +397,17 @@ function closedOn(calendar: ExchangeCalendarId, day: number): boolean {
 }
 
 /**
- * DEMO session of one local day.
+ * Returns the DEMO session of one local day.
  * @param calendar Exchange calendar.
- * @param day Local day number.
- * @return Session, or null when closed.
+ * @param day Local day number in the calendar's time zone.
+ * @return Session with its open and close in epoch ms, or null on weekends
+ *     and closures.
  */
 export function demoSessionOn(
   calendar: ExchangeCalendarId,
   day: number
 ): TradingSession | null {
-  const weekday = isoWeekday(day);
+  const weekday = mondayBasedWeekday(day);
   if (weekday >= 5 || closedOn(calendar, day)) return null;
   const hours = EXCHANGE_HOURS[calendar];
   const close =
@@ -403,15 +420,19 @@ export function demoSessionOn(
 }
 
 /**
- * DEMO sessions overlapping a window (engine `sessions(from, to)`).
- * @param query Calendar and window.
- * @return Session list.
+ * Lists the DEMO sessions overlapping a window (the engine's
+ * `sessions(from, to)`).
+ * @param query Calendar and the half-open window `[fromMs, toMs)` in epoch
+ *     ms.
+ * @return Sessions oldest first; none when `toMs <= fromMs`.
  */
 export function demoSessionList(query: SessionQuery): SessionList {
   const {calendar, fromMs, toMs} = query;
   const timeZone = EXCHANGE_HOURS[calendar].timeZone;
   const sessions: TradingSession[] = [];
   if (toMs > fromMs) {
+    // One extra local day on each side: the overlap test below decides, so
+    // no session touching the window's edges is missed.
     const first = localDayNumber(fromMs, timeZone) - 1;
     const last = localDayNumber(toMs, timeZone) + 1;
     for (let day = first; day <= last; day += 1) {
@@ -428,9 +449,10 @@ export function demoSessionList(query: SessionQuery): SessionList {
 const DEMO_CALENDARS = new Map<ExchangeCalendarId, SessionCalendar>();
 
 /**
- * DEMO calendar of an id: the exchange rules above for every day.
+ * Returns the DEMO bar calendar of an id: the exchange rules above for every
+ * day.
  * @param id Calendar id.
- * @return Calendar (`CONTINUOUS_CALENDAR` for `24x7`).
+ * @return Calendar, built once per id; `CONTINUOUS_CALENDAR` for `24x7`.
  */
 export function demoCalendar(id: CalendarId): BarCalendar {
   if (!isExchangeCalendar(id)) return CONTINUOUS_CALENDAR;

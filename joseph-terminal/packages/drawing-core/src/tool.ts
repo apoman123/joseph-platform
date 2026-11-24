@@ -6,16 +6,20 @@
 
 /**
  * @fileoverview Drawing tool plugin interface, registry and paint helpers.
+ *
+ * Tools paint and hit-test in CSS pixels relative to the plot (see
+ * `surface.ts`), converting their time/price anchors through the frame's
+ * `PixelTransform`. Label prices are formatted from exact decimals.
  */
 
-import type {
-  BarCalendar,
-  DrawingAnchor,
-  DrawingDocument,
-  DrawingStyle,
-  Timeframe,
+import {
+  type BarCalendar,
+  Decimal,
+  type DrawingAnchor,
+  type DrawingDocument,
+  type DrawingStyle,
+  type Timeframe,
 } from '@joseph/contracts';
-import {Decimal} from '@joseph/contracts';
 import {handleAt, type Point, type Rect} from './geometry';
 import type {DrawingSeriesRequest, DrawingSeriesState} from './series';
 import type {PixelTransform} from './surface';
@@ -69,17 +73,20 @@ export const MAX_ANCHORS = 64;
 
 /** Colors resolved from the theme for painting. */
 export interface ToolPalette {
-  /** User-authored mark color (course magenta). */
+  /**
+   * Color of user-authored marks (the theme's magenta `--course` token),
+   * expected as `#rrggbb`: tools append a two-digit hex alpha for fills.
+   */
   user: string;
-  /** Neutral text. */
+  /** Neutral text color. */
   text: string;
-  /** Profit / long color. */
+  /** Profit / long color, as `#rrggbb` (alpha may be appended). */
   bid: string;
-  /** Loss / short color. */
+  /** Loss / short color, as `#rrggbb` (alpha may be appended). */
   ask: string;
   /** Plot background (for label plates). */
   background: string;
-  /** Font family. */
+  /** CSS font family for labels. */
   fontFamily: string;
   /** Warning accent for inline status messages (additive, optional). */
   warning?: string;
@@ -93,9 +100,9 @@ export interface RenderState {
   preview: boolean;
   /** Theme palette. */
   palette: ToolPalette;
-  /** Tick size string for labels. */
+  /** Tick size as a decimal string for label precision, or null. */
   tickSize: string | null;
-  /** Bar duration (for measuring tools). */
+  /** Bar duration in milliseconds (for measuring tools). */
   durationMs: number;
   /** Chart timeframe (with `calendar`, for counting session bars). */
   timeframe?: Timeframe;
@@ -147,7 +154,7 @@ export type ToolInput = ToolBooleanInput | ToolChoiceInput;
 export interface DescribeContext {
   /** Engine series of the drawing, when the tool uses one. */
   series: DrawingSeriesState | null;
-  /** Tick size of the instrument, when known. */
+  /** Tick size of the instrument as a decimal string, or null if unknown. */
   tickSize: string | null;
 }
 
@@ -169,25 +176,25 @@ export interface HitResult {
 
 /** A drawing tool plugin. Tools must not import each other. */
 export interface ToolPlugin {
-  /** Manifest. */
+  /** Static description: id, version, toolbar entry and anchor count. */
   readonly manifest: ToolManifest;
   /**
-   * Default style for new drawings.
+   * Returns the default style for new drawings.
    * @param palette Theme palette.
    * @return Style.
    */
   defaultStyle(palette: ToolPalette): DrawingStyle;
   /**
-   * Default tool props for new drawings.
-   * @return Props.
+   * Returns the default tool props for new drawings.
+   * @return Props stored in `DrawingDocument.props`.
    */
   defaultProps?(): Record<string, unknown>;
   /**
-   * Paints a drawing.
-   * @param ctx 2D context (CSS pixels).
-   * @param doc Document.
-   * @param transform Transform.
-   * @param state Render state.
+   * Paints a drawing; called on every frame.
+   * @param ctx 2D context in CSS-pixel space.
+   * @param doc Drawing to paint.
+   * @param transform Transforms of the frame being painted.
+   * @param state Selection, preview flag, palette and series.
    */
   render(
     ctx: CanvasRenderingContext2D,
@@ -197,12 +204,12 @@ export interface ToolPlugin {
   ): void;
   /**
    * Tests whether a point hits the drawing.
-   * @param doc Document.
-   * @param transform Transform.
-   * @param point Pointer position.
-   * @param tolerance Hit tolerance in pixels.
+   * @param doc Drawing to test.
+   * @param transform Transforms of the current frame.
+   * @param point Pointer position in CSS pixels.
+   * @param tolerance Hit tolerance in CSS pixels.
    * @param series Engine series of the drawing (engine-backed tools only).
-   * @return Hit or null.
+   * @return The part hit (handles take precedence), or null for a miss.
    */
   hitTest(
     doc: DrawingDocument,
@@ -217,10 +224,10 @@ export interface ToolPlugin {
    */
   readonly inputs?: readonly ToolInput[];
   /**
-   * Engine series this drawing displays (engine-backed tools only). Must be
-   * a pure function of the anchors, props and timeframe; the host fetches
-   * it and re-fetches when the request changes or a bar closes.
-   * @param doc Document.
+   * Returns the engine series this drawing displays (engine-backed tools
+   * only). Must be a pure function of the anchors, props and timeframe; the
+   * host fetches it and re-fetches when the request changes or a bar closes.
+   * @param doc Drawing whose anchors and props define the request.
    * @param env Chart timeframe and the instrument's session calendar
    *     (bar boundaries; UTC bars when absent).
    * @return Request, or null when the drawing needs no series.
@@ -230,9 +237,10 @@ export interface ToolPlugin {
     env: {timeframe: Timeframe; calendar?: BarCalendar}
   ): DrawingSeriesRequest | null;
   /**
-   * Values the host's data window shows for this drawing at a bar.
-   * @param doc Document.
-   * @param barStartMs Bar under the crosshair.
+   * Returns the values the host's data window shows for this drawing at a
+   * bar.
+   * @param doc Drawing to describe.
+   * @param barStartMs Start of the bar under the crosshair, epoch ms UTC.
    * @param context Series and tick size.
    * @return Rows (empty when nothing applies).
    */
@@ -245,8 +253,8 @@ export interface ToolPlugin {
    * Expands anchors placed by the user into the tool's full anchor set
    * (e.g. one click for a long position yields entry, target and stop).
    * @param anchors Anchors placed by the user.
-   * @param env Bar duration, tick size and (optionally) the timeframe and
-   *     session calendar for widths measured in bars.
+   * @param env Bar duration in milliseconds, tick size and (optionally) the
+   *     timeframe and session calendar for widths measured in bars.
    * @return Complete anchors.
    */
   expandAnchors?(
@@ -265,8 +273,8 @@ export interface ToolPlugin {
    */
   migrate?(doc: DrawingDocument): DrawingDocument;
   /**
-   * Accessible one-line description (shown in the object list).
-   * @param doc Document.
+   * Returns an accessible one-line description (shown in the object list).
+   * @param doc Drawing to describe.
    * @param context Engine series and tick size, when the host has them.
    * @return Description.
    */
@@ -276,14 +284,17 @@ export interface ToolPlugin {
 /**
  * Reads a tool input from a drawing's props, falling back to the default
  * when the prop is missing or invalid.
- * @param doc Document.
+ * @param doc Drawing (only `props` is read).
  * @param input Input declaration.
- * @return Current value.
+ * @return Current value: a boolean for boolean inputs, one of the choice
+ *     values for choice inputs.
  */
 export function readInput(
   doc: Pick<DrawingDocument, 'props'>,
   input: ToolInput
 ): string | boolean {
+  // The generated contract types `props` as `{}`; it is a JSON object whose
+  // values are checked below.
   const props = doc.props as Readonly<Record<string, unknown>> | undefined;
   const value = props?.[input.key];
   if (input.kind === 'boolean') {
@@ -296,7 +307,7 @@ export function readInput(
 }
 
 /**
- * Default props for a list of inputs.
+ * Returns the default props for a list of inputs.
  * @param inputs Input declarations.
  * @return Props with every input at its default.
  */
@@ -316,8 +327,9 @@ export class ToolRegistry {
   /**
    * Registers a tool.
    * @param tool Tool plugin.
-   * @return Disposer that unregisters it.
-   * @throws {Error} On duplicate ids.
+   * @return Disposer that unregisters it (a no-op once another tool took
+   *     the id).
+   * @throws `Error` when a tool with the same id is already registered.
    */
   register(tool: ToolPlugin): () => void {
     if (this.tools.has(tool.manifest.id)) {
@@ -336,7 +348,7 @@ export class ToolRegistry {
   /**
    * Looks up a tool.
    * @param id Tool id.
-   * @return Tool or undefined when unknown/removed.
+   * @return Tool, or undefined when unknown or removed.
    */
   get(id: string): ToolPlugin | undefined {
     return this.tools.get(id);
@@ -352,8 +364,8 @@ export class ToolRegistry {
 
   /**
    * Subscribes to registry changes.
-   * @param listener Listener.
-   * @return Disposer.
+   * @param listener Called after each registration or removal.
+   * @return Disposer that unsubscribes.
    */
   subscribe(listener: () => void): () => void {
     this.listeners.add(listener);
@@ -370,7 +382,7 @@ export class ToolRegistry {
   }
 }
 
-/** Dash patterns per style. */
+/** Canvas dash patterns per line style, in CSS pixels (dash, gap). */
 const DASHES: Readonly<Record<DrawingStyle['line_style'], number[]>> = {
   solid: [],
   dashed: [6, 4],
@@ -379,9 +391,10 @@ const DASHES: Readonly<Record<DrawingStyle['line_style'], number[]>> = {
 
 /**
  * Applies a drawing's stroke style to the context.
- * @param ctx Context.
+ * @param ctx Context to configure.
  * @param style Drawing style.
- * @param state Render state (previews are dashed and lighter).
+ * @param state Render state: selected drawings stroke 0.5 px wider,
+ *     previews are dashed and lighter.
  */
 export function applyStroke(
   ctx: CanvasRenderingContext2D,
@@ -395,9 +408,9 @@ export function applyStroke(
 }
 
 /**
- * Draws square anchor handles for a selected drawing.
- * @param ctx Context.
- * @param points Handle positions.
+ * Draws 8 px square anchor handles, only for a selected or preview drawing.
+ * @param ctx Context to paint on.
+ * @param points Handle centres in CSS pixels.
  * @param state Render state.
  */
 export function drawHandles(
@@ -420,13 +433,13 @@ export function drawHandles(
 }
 
 /**
- * Draws a text label on a background plate.
- * @param ctx Context.
+ * Draws an 11 px text label on a background plate.
+ * @param ctx Context to paint on.
  * @param text Label text.
- * @param x Left x.
- * @param y Baseline-middle y.
+ * @param x Left x of the text in CSS pixels.
+ * @param y Vertical centre of the text in CSS pixels.
  * @param color Text color.
- * @param state Render state.
+ * @param state Render state (palette background and font).
  */
 export function drawLabel(
   ctx: CanvasRenderingContext2D,
@@ -453,13 +466,14 @@ export function drawLabel(
 export const LABEL_CHAR_WIDTH_PX = 6;
 
 /**
- * Plate of an inline status message, kept inside the plot horizontally.
- * @param textWidth Text width in pixels (measured, or estimated with
+ * Returns the plate of an inline status message, kept inside the plot
+ * horizontally.
+ * @param textWidth Text width in CSS pixels (measured, or estimated with
  *     `LABEL_CHAR_WIDTH_PX` when no context is at hand).
- * @param x Preferred left x of the text.
- * @param y Vertical centre.
- * @param plotWidth Plot width.
- * @return Plate rectangle (the text starts 5 px inside it).
+ * @param x Preferred left x of the text in CSS pixels.
+ * @param y Vertical centre in CSS pixels.
+ * @param plotWidth Plot width in CSS pixels.
+ * @return Plate rectangle, 20 px tall (the text starts 5 px inside it).
  */
 export function noticeBounds(
   textWidth: number,
@@ -467,6 +481,8 @@ export function noticeBounds(
   y: number,
   plotWidth: number
 ): Rect {
+  // Keeps the text at least 4 px from the left edge and the plate's right
+  // side 7 px inside the plot (12 px minus the 5 px padding).
   const left = Math.max(4, Math.min(x, plotWidth - textWidth - 12));
   return {x: left - 5, y: y - 10, width: textWidth + 10, height: 20};
 }
@@ -476,12 +492,13 @@ export function noticeBounds(
  * bars back") on a bordered plate in the warning accent. Tools hit-test
  * the same plate (`noticeBounds`) so a drawing whose anchor is off-screen
  * can still be selected.
- * @param ctx Context.
+ * @param ctx Context to paint on.
  * @param text Message.
- * @param x Preferred left x.
- * @param y Baseline-middle y.
- * @param state Render state.
- * @param plotWidth Plot width (the plate is shifted left to fit).
+ * @param x Preferred left x of the text in CSS pixels.
+ * @param y Vertical centre of the text in CSS pixels.
+ * @param state Render state (palette and font).
+ * @param plotWidth Plot width in CSS pixels (the plate is shifted left to
+ *     fit).
  */
 export function drawNotice(
   ctx: CanvasRenderingContext2D,
@@ -510,9 +527,12 @@ export function drawNotice(
 
 /**
  * Formats a price for labels using the tick's precision.
- * @param price Price (decimal string or number).
- * @param tickSize Tick size or null.
- * @return Grouped, fixed-precision text.
+ * @param price Price as a decimal string or a chart number.
+ * @param tickSize Tick size as a decimal string; null shows 2 decimals.
+ * @return Text with comma thousands separators, at most 8 fractional digits
+ *     (rounded half-even) and a Unicode minus sign for negatives.
+ * @throws `RangeError` when `price` or `tickSize` is not a valid decimal
+ *     (or `price` is a non-finite number).
  */
 export function formatPrice(
   price: string | number,
@@ -535,9 +555,10 @@ export function formatPrice(
 
 /**
  * Rounds a price to the tick (exact decimal arithmetic).
- * @param price Price as Decimal.
- * @param tickSize Tick size or null.
+ * @param price Price to round.
+ * @param tickSize Tick size as a decimal string; null leaves it unrounded.
  * @return Decimal string.
+ * @throws `RangeError` when `tickSize` is not a positive decimal string.
  */
 export function roundToTick(price: Decimal, tickSize: string | null): string {
   return tickSize
@@ -547,10 +568,10 @@ export function roundToTick(price: Decimal, tickSize: string | null): string {
 
 /**
  * Hit-tests anchor handles.
- * @param handles Handle positions.
- * @param point Pointer position.
- * @param tolerance Hit radius.
- * @return Handle hit or null.
+ * @param handles Handle centres in CSS pixels, in anchor order.
+ * @param point Pointer position in CSS pixels.
+ * @param tolerance Hit radius in CSS pixels.
+ * @return Hit of the nearest handle within the radius, or null.
  */
 export function hitHandles(
   handles: readonly Point[],
@@ -562,9 +583,9 @@ export function hitHandles(
 }
 
 /**
- * Strokes a polyline.
- * @param ctx Context.
- * @param points Points.
+ * Strokes an open polyline with the context's current stroke style.
+ * @param ctx Context to paint on.
+ * @param points Vertices in CSS pixels.
  */
 export function strokePath(
   ctx: CanvasRenderingContext2D,

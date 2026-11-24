@@ -17,7 +17,8 @@
  * defensively: each document goes through the schema migrations, must
  * belong to its collection's instrument and stay within the contract limits
  * (64 anchors, 2000 characters of text, a valid style); documents saved by
- * a newer drawing schema are kept as opaque payloads (ADR 0007), anything
+ * a newer drawing schema are kept as opaque payloads (ADR 0007, the
+ * architecture decision record on feature manifests and migration), anything
  * else that cannot be read is dropped and counted. Documents of tools this
  * build does not know are ordinary documents and are kept.
  */
@@ -38,20 +39,20 @@ import {MAX_ANCHORS, type ToolRegistry} from './tool';
 export interface DrawingStorage {
   /**
    * Reads a value.
-   * @param key Key.
-   * @return Value or null.
+   * @param key Storage key.
+   * @return Stored text, or null when absent.
    */
   getItem(key: string): string | null;
   /**
    * Writes a value.
-   * @param key Key.
-   * @param value Value.
+   * @param key Storage key.
+   * @param value Text to store.
    */
   setItem(key: string, value: string): void;
   /**
    * Lists keys with a prefix (needed to export every instrument).
    * @param prefix Key prefix.
-   * @return Matching keys.
+   * @return Matching keys in any order.
    */
   keys?(prefix: string): string[];
 }
@@ -68,10 +69,10 @@ export const MAX_EXPORT_OPAQUE = 500;
 /** Longest drawing text (contract `DrawingDocument.text`). */
 const MAX_TEXT = 2000;
 
-/** Longest accepted drawing id. */
+/** Longest accepted drawing id and tool id, in characters. */
 const MAX_ID = 128;
 
-/** Drawing colors (contract `DrawingStyle.color`). */
+/** Drawing colors: `#rrggbb` or `#rrggbbaa` (contract `DrawingStyle.color`). */
 const COLOR_PATTERN = /^#[0-9a-fA-F]{6}([0-9a-fA-F]{2})?$/;
 
 /** Line styles (contract `DrawingStyle.line_style`). */
@@ -120,9 +121,10 @@ export interface DrawingImportOptions {
 
 /**
  * Applies tool-level migrations when the installed tool is newer.
- * @param doc Document.
+ * @param doc Document read at the current schema version.
  * @param tools Tool registry, if any.
- * @return Possibly upgraded document.
+ * @return Upgraded document, or `doc` itself when the tool is unknown, not
+ *     newer, has no `migrate` or its migration throws.
  */
 export function upgradeToolVersion(
   doc: DrawingDocument,
@@ -135,12 +137,13 @@ export function upgradeToolVersion(
   try {
     return tool.migrate(doc);
   } catch {
+    // A faulty tool migration must not lose the drawing: keep it as stored.
     return doc;
   }
 }
 
 /**
- * Whether a value is a plain JSON object.
+ * Returns whether a value is a plain JSON object.
  * @param value Candidate.
  * @return True for non-null, non-array objects.
  */
@@ -149,15 +152,17 @@ function isPlainObject(value: unknown): value is Record<string, unknown> {
 }
 
 /**
- * Contract limits a readable document must meet to be imported.
- * @param doc Migrated document.
- * @param instrumentId Instrument of its collection.
+ * Checks the contract limits a readable document must meet to be imported.
+ * @param doc Migrated document (structurally valid, values unchecked).
+ * @param instrumentId Instrument of its collection; the document must
+ *     belong to it.
  * @return True when the document is safe to store and render.
  */
 export function isImportableDrawing(
   doc: DrawingDocument,
   instrumentId: InstrumentId
 ): boolean {
+  // Untrusted input: the style is read field by field as unknown values.
   const style = doc.style as unknown as Record<string, unknown>;
   const timeframe = doc.timeframe;
   return (
@@ -194,7 +199,8 @@ export function isImportableDrawing(
 }
 
 /**
- * Whether a raw payload was saved by a newer drawing schema (kept opaque).
+ * Returns whether a raw payload was saved by a newer drawing schema (kept
+ * opaque).
  * @param raw Raw payload.
  * @return True for an object with a schema version above the current one.
  */
@@ -209,7 +215,7 @@ function isNewerSchema(raw: unknown): raw is Record<string, unknown> {
 /**
  * Reads the drawings of an import file (untrusted). One collection per
  * instrument is kept (later duplicates are dropped); every entry that can't
- * be read safely is dropped and counted.
+ * be read safely is dropped and counted. Never throws on malformed input.
  * @param raw The file's `drawings` array.
  * @param options Migrations and installed tools.
  * @return Collections to restore and counts.
@@ -236,6 +242,8 @@ export function readImportedDrawings(
       !isInstrumentId(instrumentId) ||
       seen.has(instrumentId)
     ) {
+      // A rejected collection counts each of its entries as dropped (at
+      // least one, for an empty or non-object entry).
       const size = isPlainObject(entry)
         ? countOf(entry.drawings) + countOf(entry.opaque)
         : 1;
@@ -289,7 +297,8 @@ export class DrawingRepository {
   /**
    * Creates the repository.
    * @param storage Storage port.
-   * @param workspaceId Workspace scope.
+   * @param workspaceId Workspace whose drawings this repository reads and
+   *     writes (part of every key).
    * @param tools Tool registry (for tool-version migrations).
    * @param migrations Schema migrations.
    */
@@ -301,7 +310,7 @@ export class DrawingRepository {
   ) {}
 
   /**
-   * Key prefix of this workspace's collections.
+   * Returns the key prefix of this workspace's collections.
    * @return Prefix ending with a dot.
    */
   prefix(): string {
@@ -309,8 +318,8 @@ export class DrawingRepository {
   }
 
   /**
-   * Storage key for an instrument.
-   * @param instrumentId Instrument.
+   * Returns the storage key of an instrument's collection.
+   * @param instrumentId Canonical instrument id.
    * @return Key.
    */
   key(instrumentId: InstrumentId): string {
@@ -318,8 +327,9 @@ export class DrawingRepository {
   }
 
   /**
-   * Instruments of this workspace that have a stored collection.
-   * @return Canonical instrument ids, sorted (empty without key listing).
+   * Lists the instruments of this workspace that have a stored collection.
+   * @return Canonical instrument ids, sorted (empty when the storage cannot
+   *     list keys).
    */
   instruments(): InstrumentId[] {
     const prefix = this.prefix();
@@ -333,8 +343,10 @@ export class DrawingRepository {
 
   /**
    * Loads drawings for an instrument, migrating as needed.
-   * @param instrumentId Instrument.
-   * @return State with readable drawings and preserved opaque payloads.
+   * @param instrumentId Canonical instrument id.
+   * @return State with readable drawings and preserved opaque payloads
+   *     (unparseable stored text is kept as one opaque string); empty when
+   *     nothing is stored.
    */
   load(instrumentId: InstrumentId): DrawingState {
     const raw = this.storage.getItem(this.key(instrumentId));
@@ -365,8 +377,9 @@ export class DrawingRepository {
   }
 
   /**
-   * Saves drawings (and opaque payloads) for an instrument.
-   * @param instrumentId Instrument.
+   * Saves drawings (and opaque payloads) for an instrument, replacing the
+   * stored collection.
+   * @param instrumentId Canonical instrument id.
    * @param state Store state.
    */
   save(instrumentId: InstrumentId, state: DrawingState): void {
@@ -427,10 +440,10 @@ export class DrawingRepository {
 /**
  * Saves the store after changes, debounced; flushes on dispose.
  * @param store Drawing store.
- * @param repository Repository.
+ * @param repository Repository the collection is saved to.
  * @param instrumentId Instrument whose drawings the store holds.
- * @param delayMs Debounce delay.
- * @return Disposer that flushes pending saves.
+ * @param delayMs Debounce delay in milliseconds after the latest change.
+ * @return Disposer that unsubscribes and writes a pending save at once.
  */
 export function bindAutosave(
   store: DrawingStore,

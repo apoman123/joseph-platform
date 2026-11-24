@@ -39,11 +39,13 @@ export const FIB_RETRACEMENT_LEVELS = [
 
 /**
  * Computes level prices.
- * @param start Start price.
- * @param end End price.
- * @param levels Level ratios.
- * @param tickSize Tick size.
- * @return Level/price pairs.
+ * @param start Swing start price (decimal string), level 1.
+ * @param end Swing end price (decimal string), level 0.
+ * @param levels Level ratios as decimal strings.
+ * @param tickSize Tick size, or null to leave prices unrounded.
+ * @return Level/price pairs in `levels` order; prices are decimal strings.
+ * @throws `RangeError` when a price, level or the tick size is not a
+ *     decimal string.
  */
 export function retracementPrices(
   start: string,
@@ -62,10 +64,12 @@ export function retracementPrices(
 /**
  * Reads levels from props.
  * @param props Drawing props.
- * @return Level ratios.
+ * @return `props.levels` when it is a list of decimal strings (an empty list
+ *     draws no levels), else `FIB_RETRACEMENT_LEVELS`.
  */
 function levelsOf(props: Record<string, unknown> | undefined): string[] {
   const levels = props?.levels;
+  // The cast is safe: `every` checks that each level is a decimal string.
   return Array.isArray(levels) &&
     levels.every(l => typeof l === 'string' && Decimal.isValid(l))
     ? (levels as string[])

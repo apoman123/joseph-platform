@@ -27,6 +27,7 @@ const client = new DemoMarketDataClient({now: () => NOW});
  * Builds a validator for one contract definition.
  * @param def Definition name in `indicators.schema.json`.
  * @return Validation function.
+ * @throws Error when the schema does not define `def`.
  */
 function validator(def: string) {
   const ajv = new Ajv2020({strict: false, allErrors: true});

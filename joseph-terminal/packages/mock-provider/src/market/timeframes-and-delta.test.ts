@@ -27,9 +27,10 @@ const DAY = 86_400_000;
 
 /**
  * Builds a validator for one contract definition.
- * @param file Schema file.
- * @param def Definition name.
+ * @param file Schema file name, e.g. `market.schema.json`.
+ * @param def Definition name under `$defs`.
  * @return Validation function.
+ * @throws Error when the schema does not define `def`.
  */
 function validator(file: string, def: string) {
   const ajv = new Ajv2020({strict: false, allErrors: true});

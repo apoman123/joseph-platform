@@ -14,12 +14,14 @@ import type {PixelTransform, SnapBar} from './surface';
 /**
  * Snaps a point to the nearest open/high/low/close of the bar under it when
  * within `radiusPx`; otherwise returns the point unchanged.
- * @param point Pointer position.
- * @param bars Bars sorted by time.
- * @param transform Transform.
- * @param durationMs Bar duration.
- * @param radiusPx Snap radius in pixels.
- * @return Snapped point.
+ * @param point Pointer position in CSS pixels.
+ * @param bars Bars sorted by start time, ascending.
+ * @param transform Transforms of the current frame.
+ * @param durationMs Bar duration in milliseconds; a time at or after
+ *     `bar.timeMs + durationMs` is not under that bar.
+ * @param radiusPx Vertical snap radius in CSS pixels.
+ * @return Point moved to the bar's start x and the nearest OHLC price's y,
+ *     or `point` itself when no bar or price is close enough.
  */
 export function magnetSnap(
   point: Point,
@@ -30,6 +32,7 @@ export function magnetSnap(
 ): Point {
   const timeMs = transform.xToTime(point.x);
   if (timeMs === null || bars.length === 0) return point;
+  // Binary search for the last bar starting at or before the pointer time.
   let lo = 0;
   let hi = bars.length - 1;
   let index = -1;

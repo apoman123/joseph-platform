@@ -26,7 +26,6 @@ import {DrawingStore, createCommand} from './store';
 import type {
   DrawingSurface,
   PixelTransform,
-  SurfaceCanvasLayer,
   SurfaceEventMap,
   SurfacePointerEvent,
 } from './surface';
@@ -39,6 +38,7 @@ import {
   type ToolPlugin,
 } from './tool';
 
+/** Linear transform: 10 px per minute; price 200 at y=0, 100 at y=500. */
 const TRANSFORM: PixelTransform = {
   width: 1000,
   height: 500,
@@ -53,10 +53,10 @@ class Surface implements DrawingSurface {
   private readonly handlers = new Map<string, Array<(e: never) => void>>();
 
   /**
-   * Subscribes to an event.
-   * @param event Event.
-   * @param handler Handler.
-   * @return Disposer.
+   * Subscribes to a pointer event.
+   * @param event Event name.
+   * @param handler Called by `fire`.
+   * @return No-op disposer.
    */
   on<E extends keyof SurfaceEventMap>(
     event: E,
@@ -69,36 +69,32 @@ class Surface implements DrawingSurface {
   }
 
   /**
-   * Accepts a layer.
-   * @param _layer Layer.
-   * @return Disposer.
+   * Accepts any layer and ignores it.
+   * @return No-op disposer.
    */
-  addCanvasLayer(_layer: SurfaceCanvasLayer): () => void {
+  addCanvasLayer(): () => void {
     return () => undefined;
   }
 
   /** No-op repaint. */
   invalidate(): void {}
 
-  /**
-   * No-op interactivity.
-   * @param _enabled Ignored.
-   */
-  setInteractive(_enabled: boolean): void {}
+  /** Ignores interactivity changes. */
+  setInteractive(): void {}
 
   /**
-   * Returns the fixed transform.
-   * @return Transform.
+   * Returns the fixed test transform.
+   * @return `TRANSFORM`.
    */
   transform(): PixelTransform {
     return TRANSFORM;
   }
 
   /**
-   * Fires a pointer event.
-   * @param kind Event.
-   * @param x X.
-   * @param y Y.
+   * Fires a primary-button pointer event at a pixel position.
+   * @param kind Event kind.
+   * @param x X in CSS pixels.
+   * @param y Y in CSS pixels.
    */
   fire(
     kind: 'pointerDown' | 'pointerMove' | 'pointerUp',
@@ -115,6 +111,7 @@ class Surface implements DrawingSurface {
       modKey: false,
       preventDefault: () => undefined,
     };
+    // Handlers of every event share one map; all of them take a pointer event.
     for (const handler of this.handlers.get(kind) ?? []) {
       (handler as (e: SurfacePointerEvent) => void)(event);
     }
@@ -122,8 +119,8 @@ class Surface implements DrawingSurface {
 
   /**
    * Clicks (down + up) at a point.
-   * @param x X.
-   * @param y Y.
+   * @param x X in CSS pixels.
+   * @param y Y in CSS pixels.
    */
   click(x: number, y: number): void {
     this.fire('pointerDown', x, y);
@@ -132,10 +129,11 @@ class Surface implements DrawingSurface {
 }
 
 /**
- * Builds a tool with a creation mode.
+ * Builds a two-anchor-minimum tool with a creation mode that paints and hits
+ * nothing.
  * @param id Tool id.
  * @param creation Creation mode.
- * @param maxAnchors Anchor cap.
+ * @param maxAnchors Anchor cap, or undefined for the schema maximum.
  * @return Tool.
  */
 function tool(

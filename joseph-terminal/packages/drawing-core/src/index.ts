@@ -5,7 +5,10 @@
  */
 
 /**
- * @fileoverview Public entry point of `@joseph/drawing-core`.
+ * @fileoverview Public entry point of `@joseph/drawing-core`: the drawing
+ * document model, pixel geometry, the tool plugin interface, the
+ * interaction controller, undoable editing, engine series sync and
+ * persistence.
  */
 
 export * from './controller';

@@ -21,7 +21,7 @@
 
 import {createPatternTool, type PatternSpec} from '@joseph/drawing-core';
 
-/** Pattern geometry: labels and ratio connectors. */
+/** Pattern geometry: labels, BC/AB on A-C and CD/BC on B-D. */
 export const ABCD_SPEC: PatternSpec = {
   labels: ['A', 'B', 'C', 'D'],
   ratios: [

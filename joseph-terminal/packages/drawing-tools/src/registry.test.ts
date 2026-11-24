@@ -28,7 +28,7 @@ import {describe, expect, it} from 'vitest';
 import {FIRST_PARTY_TOOLS} from '.';
 import {TRANSFORM, makeDoc} from './testing/harness';
 
-/** Tools added in the extended (P3) tier and the engine-backed tools. */
+/** Tools whose handles map one-to-one to anchor indices (tested below). */
 const EXTENDED_TOOLS = [
   'ellipse',
   'circle',
@@ -53,7 +53,8 @@ const EXTENDED_TOOLS = [
 
 /**
  * Builds the contract validator for `DrawingDocument`.
- * @return Validation function.
+ * @return Validation function; true when the value matches the schema.
+ * @throws Error when the schemas do not define `DrawingDocument`.
  */
 function drawingValidator(): (value: unknown) => boolean {
   const dir = join(__dirname, '..', '..', 'contracts', 'schemas');
@@ -68,13 +69,15 @@ function drawingValidator(): (value: unknown) => boolean {
     'https://schemas.joseph.local/v1/workspace.schema.json#/$defs/DrawingDocument'
   );
   if (!validate) throw new Error('missing DrawingDocument');
+  // The schemas are synchronous, so Ajv returns a boolean, not a promise.
   return value => validate(value) as boolean;
 }
 
 /**
- * Zig-zag anchors a user could place for a tool.
- * @param tool Tool.
- * @return Anchors (5 minutes apart, alternating prices).
+ * Builds zig-zag anchors a user could place for a tool.
+ * @param tool Tool under test.
+ * @return Anchors 5 minutes apart with alternating prices: the manifest's
+ *     anchor count, at least two for freehand and multi-click tools.
  */
 function anchorsFor(tool: ToolPlugin): DrawingAnchor[] {
   const mode = tool.manifest.creation ?? 'anchors';

@@ -28,11 +28,11 @@ import {ToolRegistry, type ToolPlugin} from './tool';
 const XNYS = createBarCalendar('XNYS');
 
 /**
- * New York wall time.
- * @param date `YYYY-MM-DD`.
- * @param hour Hour.
- * @param minute Minute.
- * @return Epoch ms.
+ * Converts a New York wall-clock time to epoch ms.
+ * @param date Local date, `YYYY-MM-DD`.
+ * @param hour Local hour, 0-23.
+ * @param minute Local minute.
+ * @return Epoch ms UTC.
  */
 function ny(date: string, hour = 0, minute = 0): number {
   return zonedTimeToUtc(

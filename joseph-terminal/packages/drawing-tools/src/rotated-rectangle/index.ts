@@ -5,7 +5,8 @@
  */
 
 /**
- * @fileoverview Rotated rectangle.
+ * @fileoverview Rotated rectangle: a rectangle at any angle, from one side
+ * and a width.
  *
  * - Anchors: 3. A and B are the ends of one side at any angle; C sets the
  *   width as its signed perpendicular distance from line AB (C may sit
@@ -31,11 +32,13 @@ import {
 } from '@joseph/drawing-core';
 
 /**
- * Corners of the rectangle with side AB and width set by C.
- * @param a First corner of the base side.
- * @param b Second corner of the base side.
- * @param c Point setting the width (perpendicular distance from AB).
- * @return Corners in order A, B, B + n·h, A + n·h (degenerate when A = B).
+ * Returns the corners of the rectangle with side AB and width set by C.
+ * @param a First corner of the base side, in CSS pixels.
+ * @param b Second corner of the base side, in CSS pixels.
+ * @param c Point setting the width (perpendicular distance from AB), in CSS
+ *     pixels.
+ * @return Corners in CSS pixels in order A, B, B + n·h, A + n·h; `[A, B, B,
+ *     A]` when A = B.
  */
 export function rotatedRectCorners(
   a: Point,
@@ -46,6 +49,7 @@ export function rotatedRectCorners(
   const dy = b.y - a.y;
   const length = Math.hypot(dx, dy);
   if (length === 0) return [a, b, b, a];
+  // Unit normal of AB, and C's signed distance along it.
   const n = {x: -dy / length, y: dx / length};
   const h = (c.x - a.x) * n.x + (c.y - a.y) * n.y;
   return [
@@ -70,6 +74,7 @@ export const rotatedRectangleTool: ToolPlugin = {
     color: palette.user,
     line_width: 1,
     line_style: 'solid',
+    // A hex alpha byte on the `#rrggbb` user color: 0x26, about 15 % opacity.
     fill_color: `${palette.user}26`,
   }),
   render(ctx, doc, transform, state) {

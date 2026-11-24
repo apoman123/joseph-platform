@@ -69,13 +69,13 @@ import {
   type ToolPlugin,
 } from '@joseph/drawing-core';
 
-/** Engine plugin id. */
+/** Engine indicator plugin id of the series request. */
 export const ANCHORED_VWAP_PLUGIN = 'anchored_vwap';
 
-/** Price source sent to the engine. */
+/** Price source sent to the engine: typical price (high + low + close) / 3. */
 export const ANCHORED_VWAP_SOURCE = 'hlc3';
 
-/** Band multiplier choices (`'0'` = off). */
+/** Band multiplier choices in standard deviations (`'0'` = off). */
 const BAND_CHOICES: ToolChoiceInput['choices'] = [
   {value: '0', label: 'Off'},
   {value: '0.5', label: '0.5σ'},
@@ -86,7 +86,10 @@ const BAND_CHOICES: ToolChoiceInput['choices'] = [
   {value: '3', label: '3σ'},
 ];
 
-/** Band inputs (props `band_1` .. `band_3`). */
+/**
+ * Band inputs (props `band_1` .. `band_3`), in standard deviations.
+ * Band 1 defaults to 1σ, bands 2 and 3 to off.
+ */
 export const ANCHORED_VWAP_INPUTS: readonly ToolChoiceInput[] = [1, 2, 3].map(
   (k): ToolChoiceInput => ({
     key: `band_${k}`,
@@ -99,9 +102,9 @@ export const ANCHORED_VWAP_INPUTS: readonly ToolChoiceInput[] = [1, 2, 3].map(
 
 /** One plotted value. */
 export interface PlotPoint {
-  /** Bar start (UTC ms). */
+  /** Bar start, epoch milliseconds (UTC). */
   timeMs: number;
-  /** Value as a display number. */
+  /** Value in price units, as a float for plotting only. */
   value: number;
 }
 
@@ -109,11 +112,11 @@ export interface PlotPoint {
 export interface VwapBand {
   /** Band number (1-3). */
   k: number;
-  /** Multiplier (decimal string). */
+  /** Standard-deviation multiplier (decimal string). */
   multiplier: string;
-  /** Upper line. */
+  /** Upper band line (engine `upper_<k>` values). */
   upper: PlotPoint[];
-  /** Lower line. */
+  /** Lower band line (engine `lower_<k>` values). */
   lower: PlotPoint[];
 }
 
@@ -122,7 +125,7 @@ export type VwapView =
   | {
       /** Lines are drawn. */
       kind: 'ready';
-      /** Anchor bar start. */
+      /** Anchor bar start, epoch milliseconds. */
       anchorBarMs: number;
       /** VWAP line. */
       line: PlotPoint[];
@@ -134,7 +137,7 @@ export type VwapView =
   | {
       /** A notice replaces the lines. */
       kind: 'notice';
-      /** Anchor bar start, or null before any request. */
+      /** Anchor bar start (epoch milliseconds), or null before any request. */
       anchorBarMs: number | null;
       /** Notice text. */
       text: string;
@@ -142,10 +145,12 @@ export type VwapView =
 
 /**
  * Builds the engine request for a drawing.
- * @param doc Drawing.
- * @param timeframe Chart timeframe.
+ * @param doc Drawing; only its first anchor's time and the band props are
+ *     read.
+ * @param timeframe Chart timeframe; the anchor time is rounded to the nearest
+ *     bar start on it.
  * @param calendar Session calendar of the instrument (default UTC bars).
- * @return Request, or null without an anchor.
+ * @return Request from the anchor bar on, or null without an anchor.
  */
 export function anchoredVwapRequest(
   doc: Pick<DrawingDocument, 'anchors' | 'props'>,
@@ -174,10 +179,10 @@ export function anchoredVwapRequest(
 }
 
 /**
- * Collects a value line from series points.
- * @param points Points.
- * @param key Value key.
- * @return Plot points (nulls skipped).
+ * Collects one engine value as plot points.
+ * @param points Series points, sorted by bar start.
+ * @param key Value key, e.g. `vwap` or `upper_1`.
+ * @return Plot points; bars whose value is null or malformed are skipped.
  */
 function lineOf(
   points: DrawingSeriesState['points'],
@@ -194,9 +199,10 @@ function lineOf(
 }
 
 /**
- * Interprets a series state.
+ * Interprets a series state as lines to draw or a notice.
  * @param series Series state (null before any request).
- * @return View: lines to draw, or a notice.
+ * @return View: the VWAP line and enabled bands from the anchor bar on, or a
+ *     notice (loading, error, refusal or no values yet).
  */
 export function vwapView(series: DrawingSeriesState | null): VwapView {
   const message = seriesStatusMessage(series);
@@ -215,6 +221,8 @@ export function vwapView(series: DrawingSeriesState | null): VwapView {
     .find(p => decimalValue(p, 'vwap') !== null);
   const latest = decimalValue(lastPoint, 'vwap');
   if (line.length === 0 || latest === null) {
+    // With no points and a response no newer than the anchor bar's close,
+    // the engine has had no closed bar to compute from yet.
     const pending =
       points.length === 0 &&
       (series.asOfMs === null ||
@@ -231,6 +239,8 @@ export function vwapView(series: DrawingSeriesState | null): VwapView {
         : 'No engine values for this anchor yet',
     };
   }
+  // Bands follow the request this series answered, not the current props,
+  // so new multipliers are never paired with values computed for old ones.
   const bands: VwapBand[] = [];
   for (let k = 1; k <= 3; k += 1) {
     const multiplier = series.request.settings[`band_${k}`];
@@ -246,10 +256,10 @@ export function vwapView(series: DrawingSeriesState | null): VwapView {
 }
 
 /**
- * Projects a value line to pixels, skipping points off the time scale.
- * @param transform Transform.
+ * Projects plot points to CSS pixels, skipping points off either scale.
+ * @param transform Current chart transform.
  * @param line Plot points.
- * @return Pixels.
+ * @return Pixel points.
  */
 function pixels(
   transform: PixelTransform,
@@ -265,11 +275,11 @@ function pixels(
 }
 
 /**
- * Handle position: the VWAP at the anchor bar when drawn, else the anchor.
+ * Returns the handle position: the VWAP at the anchor bar, else the anchor.
  * @param doc Drawing.
- * @param transform Transform.
- * @param view View.
- * @return Handle or null.
+ * @param transform Current chart transform.
+ * @param view View of the series.
+ * @return Handle in CSS pixels, or null when neither can be placed.
  */
 function handleOf(
   doc: DrawingDocument,
@@ -285,11 +295,12 @@ function handleOf(
 }
 
 /**
- * X of the anchor marker.
+ * Returns the x of the dashed anchor-bar marker.
  * @param doc Drawing.
- * @param transform Transform.
- * @param view View.
- * @return X or null.
+ * @param transform Current chart transform.
+ * @param view View of the series; its anchor bar wins over the raw anchor
+ *     time.
+ * @return X in CSS pixels, or null without an anchor or off the time scale.
  */
 function markerX(
   doc: DrawingDocument,
@@ -301,10 +312,11 @@ function markerX(
 }
 
 /**
- * Vertical centre of the notice: beside the handle, kept inside the plot.
- * @param transform Transform.
- * @param handle Handle position.
- * @return Y.
+ * Returns the notice's vertical centre, level with the handle.
+ * It is kept 16 px inside the plot.
+ * @param transform Current chart transform (plot height).
+ * @param handle Handle position in CSS pixels.
+ * @return Y in CSS pixels.
  */
 function noticeY(transform: PixelTransform, handle: Point): number {
   return Math.max(16, Math.min(transform.height - 16, handle.y));
@@ -383,6 +395,7 @@ export const anchoredVwapTool: ToolPlugin = {
     strokePath(ctx, line);
     const last = line.at(-1);
     if (last && doc.style.show_labels !== false) {
+      // Keeps the label (about 90 px wide) inside the plot's right edge.
       drawLabel(
         ctx,
         `VWAP ${formatPrice(view.latest, state.tickSize)}`,
@@ -400,6 +413,8 @@ export const anchoredVwapTool: ToolPlugin = {
     if (!handle) return null;
     const hit = hitHandles([handle], point, tolerance);
     if (hit) return hit;
+    // Without lines, the marker and the notice plate are the body, so a
+    // drawing whose anchor is scrolled off-screen can still be selected.
     if (view.kind === 'notice') {
       const x = markerX(doc, transform, view) ?? handle.x;
       const plate = noticeBounds(

@@ -52,19 +52,19 @@ export interface DrawingSeriesSyncOptions {
   calendar?: () => BarCalendar;
   /** Called after any state change (repaint, re-render lists). */
   onChange: () => void;
-  /** Delay before a changed request is sent (default 200 ms). */
+  /** Delay in milliseconds before a changed request is sent (default 200). */
   debounceMs?: number;
 }
 
 /** Tracked request of one drawing. */
 interface Entry {
-  /** Request identity. */
+  /** Request identity (`seriesRequestKey`). */
   key: string;
   /** Latest state. */
   state: DrawingSeriesState;
-  /** Increments per fetch; older responses are dropped. */
+  /** Increments per fetch; responses of older fetches are dropped. */
   seq: number;
-  /** Pending (debounced) fetch. */
+  /** Pending (debounced) fetch, or null. */
   timer: ReturnType<typeof setTimeout> | null;
 }
 
@@ -78,7 +78,7 @@ export class DrawingSeriesSync {
    * Creates the sync and requests series for existing drawings.
    * @param store Drawing store of the chart.
    * @param tools Tool registry.
-   * @param options Environment.
+   * @param options Fetch client, chart accessors and change callback.
    */
   constructor(
     private readonly store: DrawingStore,
@@ -93,9 +93,10 @@ export class DrawingSeriesSync {
   }
 
   /**
-   * Series state of a drawing.
+   * Returns the series state of a drawing.
    * @param drawingId Drawing id.
-   * @return State, or null when the drawing has no series request.
+   * @return State, or null when the drawing has no series request (or is
+   *     hidden, or on another instrument or timeframe).
    */
   get(drawingId: string): DrawingSeriesState | null {
     return this.entries.get(drawingId)?.state ?? null;
@@ -108,7 +109,11 @@ export class DrawingSeriesSync {
     }
   }
 
-  /** Aligns tracked requests with the store (also called on changes). */
+  /**
+   * Aligns tracked requests with the store: drops entries of drawings that
+   * no longer need a series and schedules a debounced fetch for new or
+   * changed requests. Called on every store or registry change.
+   */
   reconcile(): void {
     if (this.disposed) return;
     const timeframe = this.options.timeframe();
@@ -146,6 +151,8 @@ export class DrawingSeriesSync {
     }
     for (const [id, {request, key}] of wanted) {
       const current = this.entries.get(id);
+      // An unchanged request keeps its state and pending fetch, so store
+      // changes that do not move the anchors cost nothing.
       if (current?.key === key) continue;
       if (current?.timer) clearTimeout(current.timer);
       const entry: Entry = {
@@ -171,10 +178,10 @@ export class DrawingSeriesSync {
   }
 
   /**
-   * Schedules a fetch for an entry.
+   * Schedules a fetch for an entry, replacing any pending one (debounce).
    * @param id Drawing id.
-   * @param entry Entry.
-   * @param delayMs Delay.
+   * @param entry Entry to fetch.
+   * @param delayMs Delay in milliseconds.
    */
   private schedule(id: string, entry: Entry, delayMs: number): void {
     if (entry.timer) clearTimeout(entry.timer);
@@ -187,12 +194,15 @@ export class DrawingSeriesSync {
   /**
    * Fetches an entry's series and applies the response if still current.
    * @param id Drawing id.
-   * @param entry Entry.
+   * @param entry Entry to fetch.
    */
   private load(id: string, entry: Entry): void {
     entry.seq += 1;
     const seq = entry.seq;
     const {request, timeframe} = entry.state;
+    // A response applies only while the sync is alive, the drawing still
+    // has this entry (a changed request replaces it) and no later fetch of
+    // the entry was started; out-of-order responses are dropped.
     const current = () =>
       !this.disposed && this.entries.get(id) === entry && entry.seq === seq;
     this.options
@@ -218,6 +228,8 @@ export class DrawingSeriesSync {
         this.options.onChange();
       })
       .catch((failure: unknown) => {
+        // A failed refresh keeps the last good values: they stay correct as
+        // of their `as_of_ms`.
         if (!current() || entry.state.status === 'ready') return;
         const refused =
           failure instanceof ApiError &&

@@ -57,10 +57,11 @@ const CHANNEL: IndicatorSeriesPoint = {
 };
 
 /**
- * Builds a ready series state.
- * @param points Points.
- * @param asOfMs As-of time.
- * @return State.
+ * Builds a ready 1m series state for the fixture drawing.
+ * @param points Series points.
+ * @param asOfMs Response as-of time, epoch milliseconds.
+ * @return Ready series state.
+ * @throws Error when the fixture drawing yields no series request.
  */
 function ready(
   points: IndicatorSeriesPoint[],
@@ -79,12 +80,13 @@ function ready(
 }
 
 /**
- * Collects drawn texts with a series.
- * @param series Series state.
- * @return Texts.
+ * Renders the fixture drawing with a series and collects the drawn text.
+ * @param series Series state, or null before any request.
+ * @return Texts passed to `fillText`, in draw order.
  */
 function drawnTexts(series: DrawingSeriesState | null): string[] {
   const ops: Op[] = [];
+  // Deliberate partial mock: the proxy stands in for every context member.
   const ctx = new Proxy(
     {},
     {
@@ -155,6 +157,7 @@ describe('regression-channel', () => {
     const hidden = {...DOC, props: {show_pearson: false}};
     const ops: string[] = [];
     tool.render(
+      // Deliberate partial mock that records only `fillText`.
       new Proxy(
         {},
         {

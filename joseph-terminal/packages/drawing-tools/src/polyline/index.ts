@@ -22,10 +22,10 @@ import {
 } from '@joseph/drawing-core';
 
 /**
- * Distance from a point to the nearest segment of a path.
- * @param point Point.
- * @param points Path vertices.
- * @return Distance in pixels (Infinity for fewer than two vertices).
+ * Returns the distance from a point to the nearest segment of a path.
+ * @param point Point, in CSS pixels.
+ * @param points Path vertices, in CSS pixels.
+ * @return Distance in CSS pixels (Infinity for fewer than two vertices).
  */
 export function distanceToPath(point: Point, points: readonly Point[]): number {
   let best = Infinity;

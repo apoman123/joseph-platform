@@ -5,7 +5,8 @@
  */
 
 /**
- * @fileoverview Rectangle zone between two corners.
+ * @fileoverview Rectangle: an axis-aligned box between two corner anchors,
+ * filled by default.
  */
 
 import {
@@ -34,6 +35,7 @@ export const rectangleTool: ToolPlugin = {
     color: palette.user,
     line_width: 1,
     line_style: 'solid',
+    // A hex alpha byte on the `#rrggbb` user color: 0x26, about 15 % opacity.
     fill_color: `${palette.user}26`,
   }),
   render(ctx, doc, transform, state) {
@@ -46,6 +48,8 @@ export const rectangleTool: ToolPlugin = {
     }
     applyStroke(ctx, doc.style, state);
     ctx.strokeRect(rect.x, rect.y, rect.width, rect.height);
+    // All four corners are marked; only the two anchor corners (handle
+    // indices 0 and 1) can be dragged.
     drawHandles(ctx, [a, b, {x: a.x, y: b.y}, {x: b.x, y: a.y}], state);
   },
   hitTest(doc, transform, point, tolerance) {

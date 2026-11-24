@@ -12,10 +12,10 @@
 
 import {
   ApiError,
-  type AlertSubscription,
-  type AlertSubscriptionList,
   TIMEFRAME_MS,
   type ActivateRequest,
+  type AlertSubscription,
+  type AlertSubscriptionList,
   type BacktestReport,
   type BacktestRequest,
   type ErrorCode,
@@ -40,24 +40,24 @@ export type DefinitionValidator = (
 
 /** Options of the DEMO strategy client. */
 export interface DemoStrategyOptions {
-  /** Clock (UTC ms). */
+  /** Clock in epoch ms (UTC; defaults to `Date.now`). */
   now?: () => number;
   /**
    * Structural validator; inject `toValidationResult` from
    * `@joseph/strategy-builder`. A minimal check is used otherwise.
    */
   validate?: DefinitionValidator;
-  /** Signal fixtures; defaults to `createDemoSignals(now())`. */
+  /** Signal fixtures, copied; defaults to `createDemoSignals(now())`. */
   signals?: Signal[];
 }
 
 /**
- * Builds an ApiError.
- * @param status HTTP-like status.
- * @param code Error code.
- * @param message Message.
- * @param fieldErrors Field errors.
- * @return Error.
+ * Builds an `ApiError` with a contract error body.
+ * @param status HTTP status code.
+ * @param code Contract error code.
+ * @param message User-facing message.
+ * @param fieldErrors Per-field errors (default none).
+ * @return Error for the caller to throw.
  */
 function apiError(
   status: number,
@@ -75,9 +75,11 @@ function apiError(
 }
 
 /**
- * Minimal validator used when none is injected.
+ * Minimal validator used when none is injected: checks only the rule schema
+ * version and that a `when` tree is present.
  * @param definition Definition.
- * @return Validation result.
+ * @return Result with a `schema_version` error unless the definition uses
+ *     rule schema 2 with a `when` object; never a hash.
  */
 function minimalValidate(definition: StrategyDefinition): ValidationResult {
   const errors =
@@ -102,7 +104,10 @@ function minimalValidate(definition: StrategyDefinition): ValidationResult {
   };
 }
 
-/** DEMO strategy service. */
+/**
+ * DEMO strategy service: in-memory immutable versions, activation rules, a
+ * canned backtest and fixture signals. Nothing is persisted.
+ */
 export class DemoStrategyClient implements StrategyClient {
   private readonly now: () => number;
   private readonly validator: DefinitionValidator;
@@ -114,7 +119,7 @@ export class DemoStrategyClient implements StrategyClient {
 
   /**
    * Creates the client.
-   * @param options Options.
+   * @param options Clock, validator and signal fixtures.
    */
   constructor(options: DemoStrategyOptions = {}) {
     this.now = options.now ?? Date.now;
@@ -124,7 +129,7 @@ export class DemoStrategyClient implements StrategyClient {
 
   /**
    * Subscribes to emitted signals (used by `DemoUserStream`).
-   * @param listener Listener.
+   * @param listener Called with each signal `emitSignal` adds.
    * @return Unsubscribe function.
    */
   onSignal(listener: (signal: Signal) => void): () => void {
@@ -136,7 +141,7 @@ export class DemoStrategyClient implements StrategyClient {
 
   /**
    * Adds a DEMO signal and notifies stream listeners.
-   * @param signal Signal.
+   * @param signal Signal, put first in the list.
    */
   emitSignal(signal: Signal): void {
     this.signals.unshift(signal);
@@ -146,7 +151,7 @@ export class DemoStrategyClient implements StrategyClient {
   }
 
   /**
-   * Computes the definition hash.
+   * Computes the definition hash: SHA-256 of its canonical JSON.
    * @param definition Definition.
    * @return `sha256:<hex>`.
    */
@@ -156,7 +161,7 @@ export class DemoStrategyClient implements StrategyClient {
 
   /**
    * Lists the latest version of each strategy.
-   * @return Versions.
+   * @return Versions, most recently created first.
    */
   async listStrategies(): Promise<StrategyVersionList> {
     const latest = [...this.versions.values()]
@@ -170,6 +175,7 @@ export class DemoStrategyClient implements StrategyClient {
    * Lists all versions of a strategy.
    * @param strategyId Strategy id.
    * @return Versions, newest first.
+   * @throws `ApiError` (404 `NOT_FOUND`) when the strategy is unknown.
    */
   async getStrategy(strategyId: string): Promise<StrategyVersionList> {
     const list = this.versions.get(strategyId);
@@ -178,9 +184,9 @@ export class DemoStrategyClient implements StrategyClient {
   }
 
   /**
-   * Validates a definition.
+   * Validates a definition with the injected (or minimal) validator.
    * @param definition Definition.
-   * @return Result with hash when valid.
+   * @return Result with the definition hash when valid, null otherwise.
    */
   async validate(definition: StrategyDefinition): Promise<ValidationResult> {
     const result = this.validator(definition);
@@ -191,9 +197,11 @@ export class DemoStrategyClient implements StrategyClient {
   }
 
   /**
-   * Validates or throws.
+   * Validates a definition and returns its hash.
    * @param definition Definition.
-   * @return Hash.
+   * @return Definition hash.
+   * @throws `ApiError` (422 `VALIDATION_FAILED`) with one field error per
+   *     validation error when the definition is invalid.
    */
   private async requireValid(definition: StrategyDefinition): Promise<string> {
     const result = await this.validate(definition);
@@ -211,9 +219,10 @@ export class DemoStrategyClient implements StrategyClient {
   /**
    * Builds an immutable version record.
    * @param definition Definition.
-   * @param version Version number.
+   * @param version Version number, from 1.
    * @param hash Definition hash.
-   * @return Version.
+   * @return Version in the `VALIDATED` state holding a deep copy of the
+   *     definition.
    */
   private makeVersion(
     definition: StrategyDefinition,
@@ -227,6 +236,8 @@ export class DemoStrategyClient implements StrategyClient {
       tenant_id: 'demo-tenant',
       author_user_id: 'demo-user',
       created_at_ms: this.now(),
+      // A JSON round trip deep-copies the definition without changing its
+      // shape.
       definition: JSON.parse(JSON.stringify(definition)) as StrategyDefinition,
       definition_hash: hash,
       compiler_version: 'demo-1.0.0',
@@ -240,6 +251,8 @@ export class DemoStrategyClient implements StrategyClient {
    * Creates a strategy as version 1.
    * @param definition Definition.
    * @return Version 1.
+   * @throws `ApiError` (422 `VALIDATION_FAILED`) when the definition is
+   *     invalid, or (409 `CONFLICT`) when the strategy id exists.
    */
   async createStrategy(
     definition: StrategyDefinition
@@ -260,8 +273,11 @@ export class DemoStrategyClient implements StrategyClient {
   /**
    * Stores a new immutable version.
    * @param strategyId Strategy id.
-   * @param definition Definition.
+   * @param definition Definition; its `strategy_id` must be `strategyId`.
    * @return New version.
+   * @throws `ApiError` (404 `NOT_FOUND`) when the strategy is unknown, or
+   *     (422 `VALIDATION_FAILED`) when the id differs or the definition is
+   *     invalid.
    */
   async createVersion(
     strategyId: string,
@@ -284,15 +300,20 @@ export class DemoStrategyClient implements StrategyClient {
   }
 
   /**
-   * Activates one version; AUTO_LIVE is never accepted here.
+   * Activates one version; AUTO_LIVE is never accepted here. Any other
+   * active or paused version of the strategy returns to `VALIDATED`.
    * @param strategyId Strategy id.
-   * @param request Version and mode.
+   * @param request Version number, mode and optional instruments.
    * @return Activated version.
+   * @throws `ApiError` (403 `TRADE_MODE_DISABLED`) for AUTO_LIVE, or (404
+   *     `NOT_FOUND`) when the strategy or version is unknown.
    */
   async activate(
     strategyId: string,
     request: ActivateRequest
   ): Promise<StrategyVersion> {
+    // The contract type has no AUTO_LIVE; widen it so untyped callers that
+    // send one are refused.
     if ((request.mode as string) === 'AUTO_LIVE') {
       throw apiError(
         403,
@@ -334,6 +355,7 @@ export class DemoStrategyClient implements StrategyClient {
    * Pauses the active version.
    * @param strategyId Strategy id.
    * @return Paused version.
+   * @throws `ApiError` (409 `CONFLICT`) when no version is active.
    */
   async pause(strategyId: string): Promise<StrategyVersion> {
     const list = this.versions.get(strategyId);
@@ -348,10 +370,14 @@ export class DemoStrategyClient implements StrategyClient {
   }
 
   /**
-   * Returns a canned DEMO backtest report.
+   * Returns a canned DEMO backtest report: five fixed trades spread evenly
+   * over the window, whatever the definition says.
    * @param strategyId Strategy id.
-   * @param request Request.
+   * @param request Version, instrument and window `[from_ms, to_ms)` in
+   *     epoch ms.
    * @return Report explicitly marked DEMO.
+   * @throws `ApiError` (404 `NOT_FOUND`) when the version is unknown, or (422
+   *     `VALIDATION_FAILED`) when the window is empty.
    */
   async backtest(
     strategyId: string,
@@ -375,7 +401,7 @@ export class DemoStrategyClient implements StrategyClient {
     }
     this.backtests += 1;
     const timeframe = version.definition.signal_timeframe;
-    const bar = TIMEFRAME_MS[timeframe];
+    const barMs = TIMEFRAME_MS[timeframe];
     // Session instruments (DEMO stocks) align entries and exits to their
     // exchange calendar; perpetuals keep UTC bars.
     const spec = DEMO_INSTRUMENT_SPECS.find(
@@ -384,11 +410,14 @@ export class DemoStrategyClient implements StrategyClient {
     const calendar = demoCalendar(spec?.calendar ?? '24x7');
     const direction = version.definition.direction;
     const span = request.to_ms - request.from_ms;
-    const rs = ['2.1', '-1', '1.4', '-1', '2.6'];
-    const trades = rs.map((r, i) => {
+    // Trade i enters at the bar containing from + span * (i + 1) / 6 at 100,
+    // exits 6 bars later at 100 ± its R multiple, stop and target 1 and 2
+    // away.
+    const rMultiples = ['2.1', '-1', '1.4', '-1', '2.6'];
+    const trades = rMultiples.map((r, i) => {
       const at = request.from_ms + (span * (i + 1)) / 6;
       const entry = calendar.continuous
-        ? Math.floor(at / bar) * bar
+        ? Math.floor(at / barMs) * barMs
         : calendar.floor(timeframe, at);
       return {
         signal_id: `demo-bt-${this.backtests}-${i}`,
@@ -398,7 +427,7 @@ export class DemoStrategyClient implements StrategyClient {
         stop_price: direction === 'LONG' ? '99' : '101',
         target_price: direction === 'LONG' ? '102' : '98',
         exit_ms: calendar.continuous
-          ? entry + 6 * bar
+          ? entry + 6 * barMs
           : calendar.shift(timeframe, entry, 6),
         exit_price:
           direction === 'LONG'
@@ -419,7 +448,7 @@ export class DemoStrategyClient implements StrategyClient {
       from_ms: request.from_ms,
       to_ms: request.to_ms,
       bars_evaluated: calendar.continuous
-        ? Math.floor(span / bar)
+        ? Math.floor(span / barMs)
         : calendar.barsBetween(timeframe, request.from_ms, request.to_ms),
       signals: [],
       trades,
@@ -447,7 +476,7 @@ export class DemoStrategyClient implements StrategyClient {
   /**
    * Lists DEMO notification subscriptions. Only the in-app channel is
    * configured, so external channels are stored but never delivered.
-   * @return Subscriptions.
+   * @return Stored subscriptions and the configured channels (`UI` only).
    */
   async listAlertSubscriptions(): Promise<AlertSubscriptionList> {
     return {
@@ -458,8 +487,10 @@ export class DemoStrategyClient implements StrategyClient {
 
   /**
    * Stores a DEMO notification subscription.
-   * @param subscription Subscription.
-   * @return Stored subscription.
+   * @param subscription Subscription; replaces one with the same id.
+   * @return Stored deep copy.
+   * @throws `ApiError` (422 `VALIDATION_FAILED`) when the id is not 1-63
+   *     lowercase letters, digits or dashes starting with a letter or digit.
    */
   async putAlertSubscription(
     subscription: AlertSubscription
@@ -480,8 +511,10 @@ export class DemoStrategyClient implements StrategyClient {
 
   /**
    * Lists signals, newest first.
-   * @param query Filters.
-   * @return Signals.
+   * @param query Strategy, kind and instrument filters, a bar-close window
+   *     `[fromMs, toMs)` in epoch ms, and `limit` (default 100).
+   * @return Matching signals by bar close, newest first, in one page (no
+   *     cursor).
    */
   async listSignals(query: SignalQuery): Promise<SignalList> {
     const signals = this.signals
