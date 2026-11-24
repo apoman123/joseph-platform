@@ -22,7 +22,6 @@ import {
   VENUE_NAMES,
 } from '@joseph/contracts';
 import {useEffect, useState} from 'react';
-import type {TerminalRuntime} from '../../composition/runtime';
 import {useStore, type WebFeature} from '../../shell/react-bindings';
 import {
   formatAge,
@@ -124,13 +123,9 @@ export function tickDescription(instrument: Instrument): string {
 
 /**
  * Creates the market info feature.
- * @param _runtime Runtime; unused, the feature reads only its context.
  * @return Feature contributing the side-panel market view.
  */
-export function marketInfoFeature(
-  // eslint-disable-next-line @typescript-eslint/no-unused-vars -- composition/features.ts calls every shell feature factory with the runtime; dropping it breaks that call.
-  _runtime: TerminalRuntime
-): WebFeature {
+export function marketInfoFeature(): WebFeature {
   return {
     manifest: shellManifest(
       'market-info',

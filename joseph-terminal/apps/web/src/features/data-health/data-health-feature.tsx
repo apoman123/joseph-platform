@@ -11,7 +11,6 @@
 
 import {type VenueStatus, VENUE_NAMES} from '@joseph/contracts';
 import type {ReadableStore} from '@joseph/feature-registry';
-import type {TerminalRuntime} from '../../composition/runtime';
 import {useStore, type WebFeature} from '../../shell/react-bindings';
 import {formatAge, formatUtcTime} from '../../shell/format';
 import {createLazyStore} from '../shell/lazy-store';
@@ -49,13 +48,9 @@ function badgeFor(status: VenueStatus): string {
 /**
  * Creates the data health feature. It polls the venue list every
  * `POLL_MS` while a view is mounted.
- * @param _runtime Runtime; unused, the feature reads only its context.
  * @return Feature contributing the bottom-panel table and status-bar dots.
  */
-export function dataHealthFeature(
-  // eslint-disable-next-line @typescript-eslint/no-unused-vars -- composition/features.ts calls every shell feature factory with the runtime; dropping it breaks that call.
-  _runtime: TerminalRuntime
-): WebFeature {
+export function dataHealthFeature(): WebFeature {
   return {
     manifest: shellManifest(
       'data-health',

@@ -49,8 +49,8 @@ export function shellFeatures(runtime: TerminalRuntime): WebFeature[] {
     drawingFeature(runtime),
     ...toolFeatures(runtime),
     indicatorsFeature(runtime),
-    marketInfoFeature(runtime),
-    dataHealthFeature(runtime),
+    marketInfoFeature(),
+    dataHealthFeature(),
   ];
 }
 
