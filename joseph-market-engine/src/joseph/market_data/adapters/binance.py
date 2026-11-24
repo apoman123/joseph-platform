@@ -52,9 +52,13 @@ REST_URL = "https://fapi.binance.com"
 WS_URL = "wss://fstream.binance.com/market/ws"
 _TF = (*timeframes.SECONDS, *timeframes.MINUTE_AND_ABOVE)
 _DEPTH_LIMITS = (5, 10, 20, 50, 100, 500, 1000)
+"""Depth sizes ``/fapi/v1/depth`` accepts."""
 _MAX_KLINES = 1500
+"""Klines per request (the endpoint's maximum ``limit``)."""
 _MAX_AGG_TRADES = 1000
+"""aggTrades per request (the endpoint's maximum ``limit``)."""
 _AGG_WINDOW_MS = 3_600_000 - 1
+"""Longest aggTrades window (``startTime`` to ``endTime`` must be < 1 h)."""
 _AGG_HISTORY_MS = 48 * 3_600_000 - 60_000
 """``aggTrades`` serves the last 48 hours; keep a minute of margin."""
 _PERPETUAL_TYPES = frozenset({"PERPETUAL", "TRADIFI_PERPETUAL"})
@@ -95,8 +99,9 @@ def parse_instrument(
 
     Args:
         symbol: exchangeInfo symbol entry.
-        funding_hours: Per-symbol funding interval overrides.
-        now_ms: Fetch time.
+        funding_hours: Funding interval in hours per symbol, from
+            fundingInfo (which lists only adjusted symbols; others get 8 h).
+        now_ms: Fetch time, epoch milliseconds.
 
     Returns:
         Instrument, or ``None`` for non-perpetual contracts.
@@ -148,7 +153,7 @@ def parse_kline_row(
             takerBuyBaseVol, takerBuyQuoteVol, ignore]``.
         instrument_id: Instrument.
         timeframe: Resolution.
-        now_ms: Receipt time.
+        now_ms: Receipt time, epoch milliseconds.
 
     Returns:
         Candle.
@@ -182,10 +187,10 @@ def parse_ws_kline(
         raw: Frame payload.
         instrument_id: Instrument.
         timeframe: Resolution.
-        now_ms: Receipt time.
+        now_ms: Receipt time, epoch milliseconds.
 
     Returns:
-        Zero or one candle.
+        Zero or one candle (none for acks and other intervals).
     """
     message = json.loads(raw)
     kline = message.get("k") if isinstance(message, dict) else None
@@ -218,9 +223,10 @@ def _agg_trade(
     """Converts an aggregate trade (REST row or stream payload).
 
     Args:
-        row: ``{a, p, q, T, m, ...}``.
+        row: ``{a, p, q, T, m, ...}`` (``T`` is the trade time in epoch
+            milliseconds).
         instrument_id: Instrument.
-        now_ms: Receipt time.
+        now_ms: Receipt time, epoch milliseconds.
 
     Returns:
         Trade; ``m`` (buyer is maker) means the aggressor sold.
@@ -249,7 +255,7 @@ def parse_agg_trade_rows(
     Args:
         rows: Ascending aggregate trades.
         instrument_id: Instrument.
-        now_ms: Receipt time.
+        now_ms: Receipt time, epoch milliseconds.
 
     Returns:
         Trades.
@@ -265,10 +271,10 @@ def parse_ws_agg_trade(
     Args:
         raw: Frame payload.
         instrument_id: Instrument.
-        now_ms: Receipt time.
+        now_ms: Receipt time, epoch milliseconds.
 
     Returns:
-        Zero or one trade.
+        Zero or one trade (none for other events and symbols).
     """
     message = json.loads(raw)
     if not isinstance(message, dict) or message.get("e") != "aggTrade":
@@ -279,7 +285,11 @@ def parse_ws_agg_trade(
 
 
 class BinanceAdapter(base.BaseVenueAdapter):
-    """``MarketDataPort`` for Binance USDⓈ-M perpetuals."""
+    """``MarketDataPort`` for Binance USDⓈ-M perpetuals.
+
+    Attributes:
+        VENUE: ``binance``.
+    """
 
     VENUE = instruments.Venue.BINANCE
 
@@ -376,15 +386,22 @@ class BinanceAdapter(base.BaseVenueAdapter):
     ) -> list[market.Candle]:
         """Fetches klines with pagination (1500 per request).
 
+        Without ``limit`` paging stops once 10,000 bars are fetched, so a
+        longer range returns its oldest bars.
+
         Args:
             instrument: Instrument.
             timeframe: Resolution.
-            start_ms: Inclusive start.
-            end_ms: Exclusive end.
-            limit: Optional maximum bars.
+            start_ms: Inclusive start, epoch milliseconds.
+            end_ms: Exclusive end, epoch milliseconds.
+            limit: Optional maximum bars (newest kept).
 
         Returns:
             Ascending candles.
+
+        Raises:
+            errors.UnsupportedError: For a resolution Binance does not
+                serve.
         """
         self._require_timeframe(timeframe)
         if timeframe.is_seconds:
@@ -400,6 +417,7 @@ class BinanceAdapter(base.BaseVenueAdapter):
                 timeframe, start_ms, end_ms, limit
             )
         while cursor < end_ms and len(rows) < wanted:
+            # ``endTime`` is inclusive.
             batch = await self._http.get(
                 "/fapi/v1/klines",
                 params={
@@ -477,13 +495,15 @@ class BinanceAdapter(base.BaseVenueAdapter):
         Args:
             instrument: Instrument.
             listed: Instrument metadata.
-            premium: premiumIndex payload.
-            ticker: ticker/24hr payload.
-            book: bookTicker payload.
-            now_ms: Receipt time.
+            premium: premiumIndex payload (``lastFundingRate`` is the
+                current period's predicted rate).
+            ticker: ticker/24hr payload, or ``None`` to omit its fields.
+            book: bookTicker payload, or ``None`` to omit best bid/ask.
+            now_ms: Receipt time, epoch milliseconds.
 
         Returns:
-            Snapshot without open interest.
+            Snapshot without open interest; ``priceChangePercent`` is
+            already in percent.
         """
         funding = market.Funding(
             instrument_id=instrument,
@@ -526,13 +546,13 @@ class BinanceAdapter(base.BaseVenueAdapter):
             Snapshots for listed perpetuals.
         """
         await self.list_instruments()
-        tickers, premiums, books_ = await asyncio.gather(
+        tickers, premiums, book_tickers = await asyncio.gather(
             self._http.get("/fapi/v1/ticker/24hr"),
             self._http.get("/fapi/v1/premiumIndex"),
             self._http.get("/fapi/v1/ticker/bookTicker"),
         )
         by_ticker = {str(t["symbol"]): t for t in tickers}
-        by_book = {str(b["symbol"]): b for b in books_}
+        by_book = {str(b["symbol"]): b for b in book_tickers}
         now = self._clock.now_ms()
         snapshots = []
         for premium in premiums:
@@ -559,7 +579,8 @@ class BinanceAdapter(base.BaseVenueAdapter):
 
         Args:
             instrument: Instrument.
-            depth: Levels per side (rounded up to a Binance limit).
+            depth: Levels per side (rounded up to a size Binance accepts,
+                at most 1000).
 
         Returns:
             Order book.
@@ -622,6 +643,10 @@ class BinanceAdapter(base.BaseVenueAdapter):
 
         Returns:
             Funding.
+
+        Raises:
+            errors.MissingDataError: If the snapshot carries no funding
+                (a guard: ``_snapshot`` always sets it).
         """
         listed = await self._require(instrument)
         premium = await self._http.get(
@@ -657,7 +682,7 @@ class BinanceAdapter(base.BaseVenueAdapter):
 
             Args:
                 raw: Frame payload.
-                now_ms: Receipt time.
+                now_ms: Receipt time, epoch milliseconds.
 
             Returns:
                 Trades.
@@ -689,12 +714,13 @@ class BinanceAdapter(base.BaseVenueAdapter):
 
         Args:
             instrument: Instrument.
-            start_ms: Inclusive start.
-            end_ms: Exclusive end.
+            start_ms: Inclusive start, epoch milliseconds.
+            end_ms: Exclusive end, epoch milliseconds.
             max_pages: Request budget.
 
         Returns:
-            Complete suffix of the range (empty beyond the 48h history).
+            Complete suffix of the range, never older than the 48 h the
+            endpoint serves (empty when the range ends before that).
         """
         oldest = self._clock.now_ms() - _AGG_HISTORY_MS
         if end_ms <= oldest:
@@ -705,14 +731,16 @@ class BinanceAdapter(base.BaseVenueAdapter):
             """Fetches one oldest-first page.
 
             Args:
-                start: Inclusive start.
-                end: Exclusive end.
+                start: Inclusive start, epoch milliseconds.
+                end: Exclusive end, epoch milliseconds.
 
             Returns:
-                Prefix coverage of the page.
+                Prefix coverage of the page (complete when fewer than
+                ``_MAX_AGG_TRADES`` rows came back).
             """
             rows = await self._http.get(
                 "/fapi/v1/aggTrades",
+                # ``endTime`` is inclusive.
                 params={
                     "symbol": symbol,
                     "startTime": start,
@@ -766,7 +794,7 @@ class BinanceAdapter(base.BaseVenueAdapter):
 
             Args:
                 raw: Frame payload.
-                now_ms: Receipt time.
+                now_ms: Receipt time, epoch milliseconds.
 
             Returns:
                 Candles.
@@ -777,14 +805,17 @@ class BinanceAdapter(base.BaseVenueAdapter):
             """Fetches missed bars over REST.
 
             Args:
-                start: Inclusive start.
-                end: Exclusive end.
+                start: Inclusive start, epoch milliseconds.
+                end: Exclusive end, epoch milliseconds.
 
             Returns:
                 Candles.
             """
             return await self.fetch_candles(instrument, timeframe, start, end)
 
+        # The stream is named in the URL path, so nothing is subscribed, and
+        # Binance sends protocol pings (answered by ``websockets``) instead
+        # of expecting application pings.
         spec = ws.WsCandleSpec(
             url=f"{WS_URL}/{symbol}@kline_{timeframe.value}",
             subscribe=(),

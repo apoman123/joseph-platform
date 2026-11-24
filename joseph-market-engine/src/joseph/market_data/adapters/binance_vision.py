@@ -25,7 +25,7 @@ downloads (verified live 2026-11-23):
 
 Downloads stream to disk (no whole file in memory) while hashing, are
 verified against the checksum, and are cached per day; concurrency is
-bounded and a missing day is not re-requested for a while.
+bounded and a missing day is not re-requested for 30 minutes.
 """
 
 from __future__ import annotations
@@ -43,6 +43,7 @@ import zipfile
 from collections.abc import Callable
 from collections.abc import Iterable
 from collections.abc import Iterator
+from typing import TypeAlias
 
 import httpx
 
@@ -73,8 +74,11 @@ _COLUMNS = (
     "is_buyer_maker",
 )
 _MICROS_ABOVE = 10**14
+"""Times above this are microseconds (milliseconds have 13 digits)."""
 _CHUNK_BYTES = 1 << 16
+"""Download chunk size (64 KiB)."""
 _MISSING_RETRY_S = 1_800.0
+"""Seconds before a day found unpublished is requested again."""
 _BOOLS = {"true": True, "false": False}
 
 
@@ -159,7 +163,8 @@ def parse_rows(
     Args:
         lines: CSV text lines.
         instrument: Instrument of every row.
-        received_ms: Receipt time stamped on the trades.
+        received_ms: Receipt time stamped on the trades, epoch
+            milliseconds.
 
     Yields:
         Trades in file order.
@@ -172,6 +177,7 @@ def parse_rows(
         if not row:
             continue
         if columns is None:
+            # Only files from late 2022 on start with a header line.
             if not row[0].strip().isdigit():
                 columns = {name.strip(): i for i, name in enumerate(row)}
                 if set(_COLUMNS) - set(columns):
@@ -216,8 +222,9 @@ def day_seconds(
         lines: CSV lines of the day's file.
         instrument: Instrument.
         day: UTC date of the file.
-        received_ms: Receipt time stamped on the bars.
-        batch: Bars per yielded chunk.
+        received_ms: Receipt time stamped on the bars, epoch milliseconds.
+        batch: Bars at which a chunk is yielded (a chunk may hold more;
+            the last may hold fewer).
 
     Yields:
         Chunks of final 1s aggregates with traded volume, ascending.
@@ -262,7 +269,7 @@ def day_seconds(
         yield out
 
 
-ArchiveSink = Callable[
+ArchiveSink: TypeAlias = Callable[
     [list[market.Candle], list[recorded_trades.Interval]], None
 ]
 """Receives archived 1s aggregates and coverage (``TradeArchive.put``)."""
@@ -299,10 +306,12 @@ class BinanceVision:
 
         Args:
             cache_dir: Cache directory (created on demand).
-            client: Optional HTTP client (tests inject respx-backed ones).
+            client: Optional HTTP client (tests inject respx-backed ones);
+                ``close`` leaves an injected client open.
             base_url: Archive host.
-            max_concurrency: Concurrent downloads.
-            timeout_s: Per-request timeout.
+            max_concurrency: Concurrent downloads (at least 1).
+            timeout_s: Per-request timeout in seconds of the client created
+                here (unused with ``client``).
             monotonic: Monotonic clock (seconds) for the missing-day cache.
         """
         self.cache_dir = pathlib.Path(cache_dir)
@@ -320,7 +329,7 @@ class BinanceVision:
         """Returns the monotonic clock in seconds."""
         return self._monotonic()
 
-    @staticmethod
+    @staticmethod  # noqa: GPY035 - implements DayArchive.day_of; trade_recorder calls it on the instance
     def day_of(ts_ms: int) -> datetime.date:
         """Returns the archive (UTC) day containing a time.
 
@@ -332,7 +341,7 @@ class BinanceVision:
         """
         return utc_day(ts_ms)
 
-    @staticmethod
+    @staticmethod  # noqa: GPY035 - implements DayArchive.day_bounds; trade_recorder calls it on the instance
     def day_bounds(day: datetime.date) -> recorded_trades.Interval:
         """Returns the ``[start, end)`` of an archive (UTC) day.
 
@@ -377,10 +386,11 @@ class BinanceVision:
             url: URL.
 
         Returns:
-            Body, or ``None`` when the file does not exist.
+            Body, or ``None`` when the file does not exist (HTTP 403 or
+            404).
 
         Raises:
-            errors.VenueUnavailableError: On transport or HTTP errors.
+            errors.VenueUnavailableError: On transport or other HTTP errors.
         """
         try:
             response = await self._client.get(url)
@@ -404,10 +414,13 @@ class BinanceVision:
             target: Destination (``.part`` file).
 
         Returns:
-            Hex digest, or ``None`` when the file does not exist.
+            Hex digest, or ``None`` when the file does not exist (HTTP 403
+            or 404).
 
         Raises:
-            errors.VenueUnavailableError: On transport or HTTP errors.
+            errors.VenueUnavailableError: On transport or other HTTP errors
+                (a partly written ``target`` is removed after a transport
+                error).
         """
         digest = hashlib.sha256()
         try:
@@ -434,6 +447,9 @@ class BinanceVision:
     ) -> pathlib.Path | None:
         """Returns the verified daily archive, downloading it once.
 
+        A day found unpublished is not requested again for
+        ``_MISSING_RETRY_S`` (30 minutes); ``None`` is returned meanwhile.
+
         Args:
             symbol: Binance symbol.
             day: UTC date.
@@ -443,8 +459,9 @@ class BinanceVision:
             published it (yet).
 
         Raises:
-            ChecksumMismatchError: If the download does not match.
-            errors.VenueUnavailableError: On transport errors.
+            ChecksumMismatchError: If the checksum file is unreadable or the
+                download does not match it.
+            errors.VenueUnavailableError: On transport or HTTP errors.
         """
         key = (symbol, day)
         lock = self._locks.setdefault(key, asyncio.Lock())
@@ -483,7 +500,7 @@ class BinanceVision:
                 _LOG.info("cached binance archive %s", final.name)
                 return final
 
-    @staticmethod
+    @staticmethod  # noqa: GPY035 - tests/network call open_lines on an instance
     @contextlib.contextmanager
     def open_lines(path: pathlib.Path) -> Iterator[Iterator[str]]:
         """Opens the CSV inside a cached zip as a line stream.
@@ -522,7 +539,8 @@ class BinanceVision:
             instrument: Instrument.
             day: UTC date.
             sink: Archive writer.
-            received_ms: Receipt time stamped on the aggregates.
+            received_ms: Receipt time stamped on the aggregates, epoch
+                milliseconds.
         """
         with self.open_lines(path) as lines:
             for chunk in day_seconds(
@@ -541,13 +559,16 @@ class BinanceVision:
     ) -> bool:
         """Archives one day of an instrument's trades from the archive.
 
-        Parsing runs in a worker thread so the event loop stays free.
+        Parsing runs in a worker thread so the event loop stays free;
+        ``sink`` is therefore called from that thread.
 
         Args:
             instrument: Binance instrument.
             day: UTC date (a complete past day).
-            sink: Archive writer (``TradeArchive.put`` of the instrument).
-            received_ms: Receipt time stamped on the aggregates.
+            sink: Archive writer (``TradeArchive.put`` of the instrument),
+                called from the worker thread.
+            received_ms: Receipt time stamped on the aggregates, epoch
+                milliseconds.
 
         Returns:
             True when imported, False when the day is not published.
@@ -584,7 +605,7 @@ class BinanceVision:
         """Deletes cached files of days entirely before a cut-off.
 
         Args:
-            before_ms: Retention cut-off.
+            before_ms: Retention cut-off, epoch milliseconds.
 
         Returns:
             Number of files deleted.
