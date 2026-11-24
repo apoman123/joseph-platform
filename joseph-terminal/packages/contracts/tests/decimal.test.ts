@@ -1,7 +1,14 @@
 /**
+ * @license
+ * Copyright 2026 Joseph Terminal contributors
+ * SPDX-License-Identifier: MIT
+ */
+
+/**
  * @fileoverview Unit and property tests for exact decimal arithmetic and the
  * instrument identity helpers.
  */
+
 import {describe, expect, it} from 'vitest';
 import {Decimal, stepDecimals} from '../src/decimal';
 import {

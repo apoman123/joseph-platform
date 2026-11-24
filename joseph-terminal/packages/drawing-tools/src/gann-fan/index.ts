@@ -1,4 +1,10 @@
 /**
+ * @license
+ * Copyright 2026 Joseph Terminal contributors
+ * SPDX-License-Identifier: MIT
+ */
+
+/**
  * @fileoverview Gann fan.
  *
  * - Anchors: `[A, B]`. A is the fan origin; B fixes the 1×1 angle, i.e.
@@ -13,6 +19,7 @@
  * - Style options: color, width, dash, `show_labels` (ratio near the end
  *   of each ray).
  */
+
 import {
   anchorPoints,
   applyStroke,
@@ -27,7 +34,7 @@ import {
 } from '@joseph/drawing-core';
 
 /** Price×time ratios of the fan, steepest last. */
-export const GANN_FAN_RATIOS: readonly (readonly [number, number])[] = [
+export const GANN_FAN_RATIOS: ReadonlyArray<readonly [number, number]> = [
   [1, 8],
   [1, 4],
   [1, 3],
@@ -102,7 +109,9 @@ export const gannFanTool: ToolPlugin = {
     if (!a || !b) return;
     applyStroke(ctx, doc.style, state);
     const rays = gannFanRays(a, b, transform.width, transform.height);
-    for (const ray of rays) strokePath(ctx, [a, ray.end]);
+    for (const ray of rays) {
+      strokePath(ctx, [a, ray.end]);
+    }
     if (doc.style.show_labels !== false) {
       ctx.font = `11px ${state.palette.fontFamily}`;
       for (const ray of rays) {

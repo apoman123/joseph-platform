@@ -1,7 +1,14 @@
 /**
+ * @license
+ * Copyright 2026 Joseph Terminal contributors
+ * SPDX-License-Identifier: MIT
+ */
+
+/**
  * @fileoverview End-to-end: strategy template → validate → save version,
  * with automatic live trading visibly locked (DEMO mode).
  */
+
 import {expect, test} from '@playwright/test';
 import {loadTerminal, openPanel} from './trading-helpers';
 

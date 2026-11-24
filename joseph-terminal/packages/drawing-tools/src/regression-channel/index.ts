@@ -1,4 +1,10 @@
 /**
+ * @license
+ * Copyright 2026 Joseph Terminal contributors
+ * SPDX-License-Identifier: MIT
+ */
+
+/**
  * @fileoverview Regression channel: the market engine's least-squares line
  * over the bars between two anchors with ±k·σ channel lines. The browser
  * computes nothing; it requests the series and draws the returned values.
@@ -33,6 +39,7 @@
  *   the channel (on by default). Inputs: deviations (1-3σ) and the
  *   Pearson's R label.
  */
+
 import {
   Decimal,
   CONTINUOUS_CALENDAR,
@@ -215,8 +222,9 @@ export function channelView(
 ): ChannelView {
   if (series) {
     const bars = channelBars(doc, series.timeframe, series.calendar);
-    if (bars && bars[0] === bars[1])
+    if (bars && bars[0] === bars[1]) {
       return {kind: 'notice', text: SAME_BAR_MESSAGE};
+    }
   }
   const message = seriesStatusMessage(series);
   if (!series || message) return {kind: 'notice', text: message ?? ''};
@@ -227,8 +235,9 @@ export function channelView(
       series.asOfMs === null ||
       series.asOfMs <=
         (series.calendar ?? CONTINUOUS_CALENDAR).endOf(series.timeframe, endMs)
-    )
+    ) {
       return {kind: 'notice', text: 'Waiting for the end bar to close'};
+    }
     return {kind: 'notice', text: 'No engine values for these anchors yet'};
   }
   const startMs = integerValue(point, 'start_ms');

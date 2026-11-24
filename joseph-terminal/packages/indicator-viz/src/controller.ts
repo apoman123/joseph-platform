@@ -1,8 +1,15 @@
 /**
+ * @license
+ * Copyright 2026 Joseph Terminal contributors
+ * SPDX-License-Identifier: MIT
+ */
+
+/**
  * @fileoverview Keeps a chart's indicator layers in sync with backend
  * records, removing layers that disappear and clearing on instrument
  * switches.
  */
+
 import type {OverlayLayer} from '@joseph/chart-core';
 import {buildIndicatorLayers, type IndicatorLayerInput} from './mapping';
 
@@ -45,14 +52,18 @@ export class IndicatorLayerController {
     for (const id of this.shown) {
       if (!next.has(id)) this.sink.removeOverlayLayer(id);
     }
-    for (const layer of layers) this.sink.setOverlayLayer(layer);
+    for (const layer of layers) {
+      this.sink.setOverlayLayer(layer);
+    }
     this.shown = next;
     return layers;
   }
 
   /** Removes every indicator layer. */
   clear(): void {
-    for (const id of this.shown) this.sink.removeOverlayLayer(id);
+    for (const id of this.shown) {
+      this.sink.removeOverlayLayer(id);
+    }
     this.shown = new Set();
   }
 

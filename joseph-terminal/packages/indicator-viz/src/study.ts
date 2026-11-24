@@ -1,4 +1,10 @@
 /**
+ * @license
+ * Copyright 2026 Joseph Terminal contributors
+ * SPDX-License-Identifier: MIT
+ */
+
+/**
  * @fileoverview Maps backend per-bar indicator values to study panes.
  *
  * Render-only: the order-flow Delta % comes from the engine's
@@ -11,6 +17,7 @@
  * else is the candle-direction estimate. A bar is only called "true" or
  * "classified" when the engine says so.
  */
+
 import type {StudyLevel, StudyPaneSpec, StudyPoint} from '@joseph/chart-core';
 import type {IndicatorSeries} from '@joseph/contracts';
 import {feedStateLabel} from './mapping';
@@ -168,7 +175,7 @@ export function deltaBarsFromSeries(
  *     or a mixed legend.
  */
 export function deltaStudyTitle(
-  bars: readonly Pick<DeltaBar, 'method'>[]
+  bars: ReadonlyArray<Pick<DeltaBar, 'method'>>
 ): string {
   const methods = new Set(bars.map(bar => bar.method));
   if (methods.size === 0) return 'Delta %';

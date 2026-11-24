@@ -1,8 +1,15 @@
 /**
+ * @license
+ * Copyright 2026 Joseph Terminal contributors
+ * SPDX-License-Identifier: MIT
+ */
+
+/**
  * @fileoverview Shared helpers for the F6 trading end-to-end specs (DEMO
  * mode). Panels are opened by their slot contribution titles, which the
  * shell renders as tabs (falling back to buttons with the same name).
  */
+
 import {expect, type Locator, type Page} from '@playwright/test';
 
 /**
@@ -76,10 +83,11 @@ export async function previewOrder(
     .getByRole('button', {name: options.type})
     .click();
   await t.getByRole('textbox', {name: /Quantity/}).fill(options.quantity);
-  if (options.limitPrice)
+  if (options.limitPrice) {
     await t
       .getByRole('textbox', {name: 'Limit price'})
       .fill(options.limitPrice);
+  }
   await t.getByRole('button', {name: /Preview order|Preview again/}).click();
   await expect(t.getByTestId('ticket-preview')).toBeVisible();
 }

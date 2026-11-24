@@ -1,4 +1,10 @@
 /**
+ * @license
+ * Copyright 2026 Joseph Terminal contributors
+ * SPDX-License-Identifier: MIT
+ */
+
+/**
  * @fileoverview Builds contract `OrderIntentRequest`s from ticket inputs.
  *
  * Quantities are floored to the lot size (rounding never increases
@@ -10,6 +16,7 @@
  * `equity.ts` (whole shares or TWSE board/odd lots, tick ladders, daily
  * price limits, DAY/GTC, no leverage); published rates cannot be traded.
  */
+
 import {
   Decimal,
   parseInstrumentId,

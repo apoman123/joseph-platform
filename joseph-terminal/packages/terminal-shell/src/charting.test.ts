@@ -1,8 +1,15 @@
 /**
+ * @license
+ * Copyright 2026 Joseph Terminal contributors
+ * SPDX-License-Identifier: MIT
+ */
+
+/**
  * @fileoverview Unit tests for the charting additions of the terminal shell:
  * indicator layer configuration, comparisons, session separators, chart
  * templates, bar replay, custom timeframes and resizable layout geometry.
  */
+
 import {describe, expect, it} from 'vitest';
 import {
   LAYOUT_TRACKS,

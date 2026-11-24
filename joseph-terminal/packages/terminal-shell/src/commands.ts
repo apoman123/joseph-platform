@@ -1,4 +1,10 @@
 /**
+ * @license
+ * Copyright 2026 Joseph Terminal contributors
+ * SPDX-License-Identifier: MIT
+ */
+
+/**
  * @fileoverview Default hotkeys and the command-palette model.
  */
 
@@ -8,9 +14,9 @@ export const DEFAULT_HOTKEYS: Readonly<Record<string, string>> = {
   'mod+z': 'drawing.undo',
   'shift+mod+z': 'drawing.redo',
   'mod+y': 'drawing.redo',
-  escape: 'drawing.cancel',
-  delete: 'drawing.delete',
-  backspace: 'drawing.delete',
+  'escape': 'drawing.cancel',
+  'delete': 'drawing.delete',
+  'backspace': 'drawing.delete',
   'alt+t': 'drawing.tool.trendline',
   'alt+h': 'drawing.tool.horizontal-line',
   'alt+r': 'drawing.tool.rectangle',

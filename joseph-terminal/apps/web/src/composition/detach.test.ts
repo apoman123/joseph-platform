@@ -1,4 +1,10 @@
 /**
+ * @license
+ * Copyright 2026 Joseph Terminal contributors
+ * SPDX-License-Identifier: MIT
+ */
+
+/**
  * @fileoverview Main window and pop-out windows over an in-memory channel:
  * detaching, workspace/link-group/theme/crosshair sync, action forwarding,
  * re-docking on goodbye, closed handles and crashed windows, pop-outs that
@@ -6,6 +12,7 @@
  * changes made meanwhile), "Restore pop-outs" after a browser restart with
  * remembered window geometry, and trading guards that never cross windows.
  */
+
 import {
   DETACHED_PANEL_KEY,
   LIVE_TIMEOUT_MS,
@@ -53,7 +60,7 @@ interface FakeWindow {
 }
 
 let clock = 1_800_000_000_000;
-const cleanups: (() => void)[] = [];
+const cleanups: Array<() => void> = [];
 
 beforeEach(() => {
   vi.useFakeTimers();
@@ -62,7 +69,9 @@ beforeEach(() => {
 });
 
 afterEach(() => {
-  for (const cleanup of cleanups.splice(0).reverse()) cleanup();
+  for (const cleanup of cleanups.splice(0).reverse()) {
+    cleanup();
+  }
   vi.useRealTimers();
 });
 
@@ -93,12 +102,12 @@ interface MainOptions {
  */
 function mainWindow(hub: MemoryChannelHub, options: MainOptions = {}) {
   const runtime = options.runtime ?? createRuntime(() => [], DEMO);
-  const opened: {
+  const opened: Array<{
     url: string;
     name: string;
     features: string;
     handle: FakeWindow;
-  }[] = [];
+  }> = [];
   const blocked = options.blocked ?? false;
   const controller: DetachController = startMainDetach(runtime, {
     port: options.port ?? hub.port(),
@@ -116,7 +125,7 @@ function mainWindow(hub: MemoryChannelHub, options: MainOptions = {}) {
     windowId: `main-${Math.random()}`,
   });
   runtime.windows.set(controller.actions);
-  cleanups.push(() => controller.dispose());
+  cleanups.push(() => void controller.dispose());
   return {runtime, controller, opened, actions: controller.actions};
 }
 
@@ -158,7 +167,7 @@ function popoutWindow(
     }
   );
   const started = link;
-  cleanups.push(() => started.dispose());
+  cleanups.push(() => void started.dispose());
   return {runtime, link: started, close, focus};
 }
 
@@ -208,11 +217,11 @@ describe('detaching a chart pane', () => {
     pop.runtime.flush();
     const saved = JSON.parse(
       localStorage.getItem('joseph.workspace.v1.default') ?? '{}'
-    ) as {charts?: {timeframe: string}[]};
+    ) as {charts?: Array<{timeframe: string}>};
     main.runtime.flush();
     const after = JSON.parse(
       localStorage.getItem('joseph.workspace.v1.default') ?? '{}'
-    ) as {charts?: {timeframe: string}[]};
+    ) as {charts?: Array<{timeframe: string}>};
     expect(saved.charts?.[0]?.timeframe).not.toBe('1M');
     expect(after.charts?.[0]?.timeframe).toBe('1M');
   });
@@ -222,8 +231,9 @@ describe('detaching a chart pane', () => {
     const main = mainWindow(hub);
     main.runtime.dispatch({type: 'setLayout', layout: '2h'});
     main.runtime.dispatch({type: 'setSync', key: 'instrument', value: true});
-    for (const chartId of ['chart-1', 'chart-2'])
+    for (const chartId of ['chart-1', 'chart-2']) {
       main.runtime.dispatch({type: 'setLinkGroup', chartId, group: 'A'});
+    }
     const ref: DetachedPaneRef = {kind: 'chart', chartId: 'chart-2'};
     main.actions.detach(ref, 'BTCUSD 5m');
     const pop = popoutWindow(hub, ref);
@@ -498,7 +508,7 @@ describe('main window reload', () => {
     reloaded.runtime.flush();
     const saved = JSON.parse(
       localStorage.getItem('joseph.workspace.v1.default') ?? '{}'
-    ) as {charts?: {timeframe: string}[]};
+    ) as {charts?: Array<{timeframe: string}>};
     expect(saved.charts?.[0]?.timeframe).toBe('1h');
   });
 
@@ -523,7 +533,7 @@ describe('main window reload', () => {
         port.postMessage(data);
       },
       onMessage: handler => port.onMessage(handler),
-      close: () => port.close(),
+      close: () => void port.close(),
     };
     const reloaded = mainWindow(hub, {port: lossy});
     reloaded.runtime.dispatch({type: 'rename', name: 'Desk'});

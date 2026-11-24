@@ -1,12 +1,20 @@
 /**
+ * @license
+ * Copyright 2026 Joseph Terminal contributors
+ * SPDX-License-Identifier: MIT
+ */
+
+/**
  * @fileoverview Tests for the parallel channel tool.
  */
+
 import {describe, expect, it} from 'vitest';
 import {TRANSFORM, makeDoc, manifestProblems} from '../testing/harness';
 import {parallelChannelTool as tool, parallelThrough} from '.';
 
 describe('parallel-channel', () => {
-  it('has a valid manifest', () => expect(manifestProblems(tool)).toEqual([]));
+  it('has a valid manifest', () =>
+    void expect(manifestProblems(tool)).toEqual([]));
   it('offsets the base line through the third anchor', () => {
     expect(
       parallelThrough({x: 0, y: 100}, {x: 100, y: 0}, {x: 50, y: 100})

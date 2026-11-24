@@ -1,4 +1,10 @@
 /**
+ * @license
+ * Copyright 2026 Joseph Terminal contributors
+ * SPDX-License-Identifier: MIT
+ */
+
+/**
  * @fileoverview Arc.
  *
  * - Anchors: 3, the start, a point the arc passes through, and the end.
@@ -10,6 +16,7 @@
  * - Handles: start, through point and end (indices 0-2).
  * - Style options: color, line width and dash. No fill.
  */
+
 import {
   anchorPoints,
   applyStroke,

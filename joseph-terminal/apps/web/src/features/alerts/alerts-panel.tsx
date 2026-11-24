@@ -1,9 +1,16 @@
-'use client';
+/**
+ * @license
+ * Copyright 2026 Joseph Terminal contributors
+ * SPDX-License-Identifier: MIT
+ */
+
 /**
  * @fileoverview Alerts: strategy signals newest first with filters, local
  * acknowledgment, the explanation trace (reason tree) and a jump to the
  * exact venue, instrument, bar and AOI on the chart.
  */
+
+'use client';
 import {formatUtcDateTime} from '@joseph/chart-trading';
 import type {
   AoiRecord,
@@ -91,11 +98,12 @@ export function useAoiDistances(
         {instrumentId: string; timeframe: Signal['timeframe']}
       >();
       for (const signal of subset) {
-        if (signal.aoi_ids.length > 0)
+        if (signal.aoi_ids.length > 0) {
           series.set(`${signal.instrument_id}|${signal.timeframe}`, {
             instrumentId: signal.instrument_id,
             timeframe: signal.timeframe,
           });
+        }
       }
       const instruments = [
         ...new Set([...series.values()].map(s => s.instrumentId)),
@@ -110,8 +118,11 @@ export function useAoiDistances(
       ]);
       const aois = new Map<string, AoiRecord>();
       for (const result of aoiResults) {
-        if (result.status === 'fulfilled')
-          for (const aoi of result.value.aois) aois.set(aoi.aoi_id, aoi);
+        if (result.status === 'fulfilled') {
+          for (const aoi of result.value.aois) {
+            aois.set(aoi.aoi_id, aoi);
+          }
+        }
       }
       const prices = new Map<string, number>();
       snapshotResults.forEach((result, i) => {
@@ -144,11 +155,11 @@ export function useAoiDistances(
 }
 
 /** Kind filter groups. */
-const FILTERS: readonly {
+const FILTERS: ReadonlyArray<{
   id: string;
   label: string;
   kinds: readonly SignalKind[] | null;
-}[] = [
+}> = [
   {id: 'all', label: 'All', kinds: null},
   {id: 'entries', label: 'Entries', kinds: ['ENTRY_CONFIRMED']},
   {id: 'blocked', label: 'Blocked', kinds: ['ENTRY_BLOCKED']},
@@ -236,8 +247,8 @@ export function AlertsPanel({
   const [open, setOpen] = useState<string | null>(null);
   const [now, setNow] = useState(() => Date.now());
   useEffect(() => {
-    const timer = setInterval(() => setNow(Date.now()), 30_000);
-    return () => clearInterval(timer);
+    const timer = setInterval(() => void setNow(Date.now()), 30_000);
+    return () => void clearInterval(timer);
   }, []);
   const distances = useAoiDistances(ctx, signals);
   const hiddenCount = signals.filter(
@@ -286,7 +297,7 @@ export function AlertsPanel({
     });
   };
   const acknowledge = (id: string) =>
-    acked.set([id, ...ackedIds.filter(x => x !== id)].slice(0, 500));
+    void acked.set([id, ...ackedIds.filter(x => x !== id)].slice(0, 500));
 
   return (
     <section className={styles.panel} aria-label="Alerts">
@@ -297,7 +308,7 @@ export function AlertsPanel({
               key={f.id}
               type="button"
               aria-pressed={filter === f.id}
-              onClick={() => setFilter(f.id)}
+              onClick={() => void setFilter(f.id)}
             >
               {f.label}
             </button>
@@ -308,7 +319,7 @@ export function AlertsPanel({
           <select
             className="j-select"
             value={severity}
-            onChange={e => setSeverity(e.target.value as Severity | '')}
+            onChange={e => void setSeverity(e.target.value as Severity | '')}
           >
             <option value="">Any</option>
             <option value="ENTRY">Entry</option>
@@ -323,7 +334,7 @@ export function AlertsPanel({
             className="j-select"
             value={sort}
             data-testid="alerts-sort"
-            onChange={e => setSort(e.target.value as SignalSort)}
+            onChange={e => void setSort(e.target.value as SignalSort)}
           >
             {SIGNAL_SORTS.map(option => (
               <option
@@ -340,7 +351,7 @@ export function AlertsPanel({
           <input
             type="checkbox"
             checked={showAcked}
-            onChange={e => setShowAcked(e.target.checked)}
+            onChange={e => void setShowAcked(e.target.checked)}
           />
           Show acknowledged
         </label>
@@ -349,7 +360,7 @@ export function AlertsPanel({
             type="checkbox"
             checked={showHidden}
             data-testid="alerts-show-hidden"
-            onChange={e => setShowHidden(e.target.checked)}
+            onChange={e => void setShowHidden(e.target.checked)}
           />
           Show snoozed and dismissed{hiddenCount > 0 ? ` (${hiddenCount})` : ''}
         </label>
@@ -423,7 +434,7 @@ export function AlertsPanel({
                           className={styles.expand}
                           aria-expanded={expanded}
                           onClick={() =>
-                            setOpen(expanded ? null : signal.signal_id)
+                            void setOpen(expanded ? null : signal.signal_id)
                           }
                         >
                           <span
@@ -477,7 +488,7 @@ export function AlertsPanel({
                         <button
                           type="button"
                           className="j-btn j-btn--sm"
-                          onClick={() => focus(signal)}
+                          onClick={() => void focus(signal)}
                         >
                           Show on chart
                         </button>
@@ -485,7 +496,7 @@ export function AlertsPanel({
                           <button
                             type="button"
                             className="j-btn j-btn--sm j-btn--ghost"
-                            onClick={() => acknowledge(signal.signal_id)}
+                            onClick={() => void acknowledge(signal.signal_id)}
                           >
                             Acknowledge
                           </button>
@@ -496,7 +507,7 @@ export function AlertsPanel({
                             className="j-btn j-btn--sm j-btn--ghost"
                             title={`Snoozed ${snoozeLabel(snoozedUntil, now)}`}
                             onClick={() =>
-                              triage.update(t => {
+                              void triage.update(t => {
                                 const {[signal.signal_id]: _gone, ...rest} =
                                   t.snoozed;
                                 return {...t, snoozed: rest};
@@ -515,7 +526,7 @@ export function AlertsPanel({
                               data-testid="signal-snooze"
                               onChange={e => {
                                 const minutes = Number(e.target.value);
-                                if (minutes > 0)
+                                if (minutes > 0) {
                                   triage.update(t =>
                                     snooze(
                                       t,
@@ -524,6 +535,7 @@ export function AlertsPanel({
                                       Date.now()
                                     )
                                   );
+                                }
                               }}
                             >
                               <option value="">Snooze</option>
@@ -542,7 +554,7 @@ export function AlertsPanel({
                           className="j-btn j-btn--sm j-btn--ghost"
                           data-testid="signal-dismiss"
                           onClick={() =>
-                            triage.update(t =>
+                            void triage.update(t =>
                               setDismissed(t, signal.signal_id, !isDismissed)
                             )
                           }

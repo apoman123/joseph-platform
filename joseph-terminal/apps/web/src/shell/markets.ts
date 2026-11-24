@@ -1,4 +1,10 @@
 /**
+ * @license
+ * Copyright 2026 Joseph Terminal contributors
+ * SPDX-License-Identifier: MIT
+ */
+
+/**
  * @fileoverview Market groups, search ranking and data-access flags for the
  * instrument picker and chart headers.
  *
@@ -8,6 +14,7 @@
  * (XTAI → Taiwan stocks: TWSE and TPEx; XNYS → US stocks); everything else
  * is crypto.
  */
+
 import {
   instrumentCalendarId,
   parseInstrumentId,
@@ -21,10 +28,10 @@ import {
 export type MarketGroup = 'crypto' | 'tw' | 'us' | 'bonds';
 
 /** Picker tabs in display order (`all` first). */
-export const MARKET_GROUPS: readonly {
+export const MARKET_GROUPS: ReadonlyArray<{
   id: MarketGroup | 'all';
   label: string;
-}[] = [
+}> = [
   {id: 'all', label: 'All'},
   {id: 'crypto', label: 'Crypto'},
   {id: 'tw', label: 'Taiwan stocks'},
@@ -135,8 +142,9 @@ export function searchRank(
   const native = instrument.key.venue_market_id.toUpperCase();
   const base = instrument.key.canonical_base.toUpperCase();
   if (symbol === q || native === q || base === q) return 0;
-  if (symbol.startsWith(q) || native.startsWith(q) || base.startsWith(q))
+  if (symbol.startsWith(q) || native.startsWith(q) || base.startsWith(q)) {
     return 1;
+  }
   if (symbol.includes(q) || native.includes(q) || base.includes(q)) return 2;
   const names = [instrument.name ?? '', instrument.local_name ?? ''].map(n =>
     n.toUpperCase()

@@ -1,6 +1,13 @@
 /**
+ * @license
+ * Copyright 2026 Joseph Terminal contributors
+ * SPDX-License-Identifier: MIT
+ */
+
+/**
  * @fileoverview Tests for indicator record to overlay mapping.
  */
+
 import {readFileSync} from 'node:fs';
 import {join} from 'node:path';
 import type {AoiRecord, StructureEvent} from '@joseph/contracts';

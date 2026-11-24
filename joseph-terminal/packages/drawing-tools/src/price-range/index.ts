@@ -1,6 +1,13 @@
 /**
+ * @license
+ * Copyright 2026 Joseph Terminal contributors
+ * SPDX-License-Identifier: MIT
+ */
+
+/**
  * @fileoverview Price/time measurement between two anchors.
  */
+
 import {Decimal, type BarCalendar, type Timeframe} from '@joseph/contracts';
 import {
   anchorPoints,

@@ -1,10 +1,17 @@
 /**
+ * @license
+ * Copyright 2026 Joseph Terminal contributors
+ * SPDX-License-Identifier: MIT
+ */
+
+/**
  * @fileoverview Canvas painting of overlay boxes, rays and captions.
  *
  * Renderer-agnostic: the LWC adapter calls it from a series primitive and
  * tests call it with a recording context. Positions are recomputed from
  * time/price on every frame, so zoom and resize keep overlays anchored.
  */
+
 import type {ChartTheme, CoordinateTransform} from './chart-port';
 import type {
   BoxOverlay,

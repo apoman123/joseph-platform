@@ -1,4 +1,10 @@
 /**
+ * @license
+ * Copyright 2026 Joseph Terminal contributors
+ * SPDX-License-Identifier: MIT
+ */
+
+/**
  * @fileoverview Drawing document migrations.
  *
  * Saved workspaces must stay loadable after upgrades. Documents from older
@@ -6,6 +12,7 @@
  * versions are preserved verbatim as opaque payloads and saved back
  * unchanged, never deleted.
  */
+
 import type {DrawingDocument} from '@joseph/contracts';
 import {DRAWING_SCHEMA_VERSION} from './document';
 
@@ -28,7 +35,7 @@ interface LegacyV0 {
   /** Instrument. */
   instrument?: unknown;
   /** Points with numeric price. */
-  points?: {t: number; p: number}[];
+  points?: Array<{t: number; p: number}>;
   /** Hex color. */
   color?: unknown;
 }

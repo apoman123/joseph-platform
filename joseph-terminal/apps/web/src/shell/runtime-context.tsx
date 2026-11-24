@@ -1,6 +1,13 @@
 /**
+ * @license
+ * Copyright 2026 Joseph Terminal contributors
+ * SPDX-License-Identifier: MIT
+ */
+
+/**
  * @fileoverview React context exposing the terminal runtime to shell views.
  */
+
 'use client';
 import {
   createContext,
@@ -39,7 +46,8 @@ export function RuntimeProvider({
  */
 export function useRuntime(): TerminalRuntime {
   const runtime = useContext(RuntimeContext);
-  if (!runtime)
+  if (!runtime) {
     throw new Error('useRuntime must be used inside RuntimeProvider');
+  }
   return runtime;
 }

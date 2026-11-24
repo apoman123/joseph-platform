@@ -1,6 +1,13 @@
 /**
+ * @license
+ * Copyright 2026 Joseph Terminal contributors
+ * SPDX-License-Identifier: MIT
+ */
+
+/**
  * @fileoverview Tests for the DEMO strategy client and fixtures.
  */
+
 import {readFileSync, readdirSync} from 'node:fs';
 import {join} from 'node:path';
 import type {StrategyDefinition} from '@joseph/contracts';
@@ -24,8 +31,9 @@ function validator(file: string, def: string): (value: unknown) => string {
   const ajv = new Ajv2020({strict: false, allErrors: true});
   addFormats(ajv);
   for (const name of readdirSync(SCHEMAS)) {
-    if (name.endsWith('.schema.json'))
+    if (name.endsWith('.schema.json')) {
       ajv.addSchema(JSON.parse(readFileSync(join(SCHEMAS, name), 'utf8')));
+    }
   }
   const validate = ajv.getSchema(
     `https://schemas.joseph.local/v1/${file}#/$defs/${def}`
@@ -132,8 +140,9 @@ describe('DemoStrategyClient', () => {
 
   it('serves schema-valid fixture signals newest first', async () => {
     const check = validator('signal.schema.json', 'Signal');
-    for (const signal of createDemoSignals(1_800_000_000_000))
+    for (const signal of createDemoSignals(1_800_000_000_000)) {
       expect(check(signal)).toBe('');
+    }
     const client = new DemoStrategyClient({now: () => 1_800_000_000_000});
     const {signals} = await client.listSignals({});
     expect(signals.map(s => s.signal_id)).toEqual([

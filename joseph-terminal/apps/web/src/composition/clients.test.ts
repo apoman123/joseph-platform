@@ -1,7 +1,14 @@
 /**
+ * @license
+ * Copyright 2026 Joseph Terminal contributors
+ * SPDX-License-Identifier: MIT
+ */
+
+/**
  * @fileoverview Tests for the client bundle: the DEMO LIVE rehearsal is
  * opt-in through the page URL and DEMO-only.
  */
+
 import {afterEach, describe, expect, it} from 'vitest';
 import {buildClients, demoLiveRehearsalRequested} from './clients';
 import type {TerminalConfig} from './env';

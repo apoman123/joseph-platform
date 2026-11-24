@@ -1,6 +1,13 @@
 /**
+ * @license
+ * Copyright 2026 Joseph Terminal contributors
+ * SPDX-License-Identifier: MIT
+ */
+
+/**
  * @fileoverview Tests for the trendline tool.
  */
+
 import {describe, expect, it} from 'vitest';
 import {
   TRANSFORM,
@@ -15,7 +22,8 @@ describe('trendline', () => {
     {time_ms: 600_000, price: '150'},
     {time_ms: 1_200_000, price: '160'},
   ]);
-  it('has a valid manifest', () => expect(manifestProblems(tool)).toEqual([]));
+  it('has a valid manifest', () =>
+    void expect(manifestProblems(tool)).toEqual([]));
   it('draws between anchors and extends when asked', () => {
     expect(renderOps(tool, doc).find(o => o.op === 'moveTo')?.args).toEqual([
       100, 250,

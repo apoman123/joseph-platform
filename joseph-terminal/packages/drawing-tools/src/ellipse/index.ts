@@ -1,4 +1,10 @@
 /**
+ * @license
+ * Copyright 2026 Joseph Terminal contributors
+ * SPDX-License-Identifier: MIT
+ */
+
+/**
  * @fileoverview Ellipse.
  *
  * - Anchors: 2, opposite corners of the ellipse's bounding box (any order).
@@ -10,6 +16,7 @@
  * - Handles: the two anchors (indices 0 and 1).
  * - Style options: color, line width and dash, fill (on by default).
  */
+
 import {
   anchorPoints,
   applyStroke,

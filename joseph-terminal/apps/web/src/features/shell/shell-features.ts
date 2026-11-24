@@ -1,7 +1,14 @@
 /**
+ * @license
+ * Copyright 2026 Joseph Terminal contributors
+ * SPDX-License-Identifier: MIT
+ */
+
+/**
  * @fileoverview Shell features: workspace layouts and sync, theme and the
  * command palette.
  */
+
 import type {LayoutId} from '@joseph/contracts';
 import {DrawingRepository} from '@joseph/drawing-core';
 import {
@@ -76,7 +83,7 @@ export function workspaceFeature(runtime: TerminalRuntime): WebFeature {
         ctx.commands.register({
           id,
           title: `Show ${LAYOUT_LABELS[layout].toLowerCase()}`,
-          run: () => runtime.dispatch({type: 'setLayout', layout}),
+          run: () => void runtime.dispatch({type: 'setLayout', layout}),
         });
       }
       for (const key of [
@@ -89,7 +96,7 @@ export function workspaceFeature(runtime: TerminalRuntime): WebFeature {
           id: `sync.${key}`,
           title: `Toggle ${key} sync across charts`,
           run: () =>
-            runtime.dispatch({
+            void runtime.dispatch({
               type: 'setSync',
               key,
               value: !runtime.workspace.get().sync[key],
@@ -171,7 +178,9 @@ export function themeFeature(runtime: TerminalRuntime): WebFeature {
         id: 'theme.toggle',
         title: 'Switch between night and daylight theme',
         run: () =>
-          runtime.theme.update(theme => (theme === 'dark' ? 'light' : 'dark')),
+          void runtime.theme.update(theme =>
+            theme === 'dark' ? 'light' : 'dark'
+          ),
       });
       return () => undefined;
     },
@@ -194,7 +203,7 @@ export function paletteFeature(runtime: TerminalRuntime): WebFeature {
       ctx.commands.register({
         id: 'palette.open',
         title: 'Open command palette',
-        run: () => runtime.palette.set({open: true, query: '', index: 0}),
+        run: () => void runtime.palette.set({open: true, query: '', index: 0}),
       });
       bindDefaultHotkeys(
         (combo, id) => ctx.hotkeys.bind(combo, id),

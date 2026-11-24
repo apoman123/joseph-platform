@@ -1,7 +1,14 @@
 /**
+ * @license
+ * Copyright 2026 Joseph Terminal contributors
+ * SPDX-License-Identifier: MIT
+ */
+
+/**
  * @fileoverview Tests for the DEMO anchored VWAP and regression channel
  * series (the engine stand-in for the engine-backed drawing tools).
  */
+
 import {readFileSync, readdirSync} from 'node:fs';
 import {join} from 'node:path';
 import Ajv2020 from 'ajv/dist/2020';
@@ -36,8 +43,9 @@ function validSeries(value: unknown): boolean {
   const ajv = new Ajv2020({strict: false, allErrors: true});
   addFormats(ajv);
   for (const file of readdirSync(SCHEMA_DIR)) {
-    if (file.endsWith('.schema.json'))
+    if (file.endsWith('.schema.json')) {
       ajv.addSchema(JSON.parse(readFileSync(join(SCHEMA_DIR, file), 'utf8')));
+    }
   }
   const validate = ajv.getSchema(
     'https://schemas.joseph.local/v1/indicators.schema.json#/$defs/IndicatorSeries'

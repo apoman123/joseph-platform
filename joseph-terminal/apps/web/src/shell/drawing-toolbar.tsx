@@ -1,6 +1,13 @@
 /**
+ * @license
+ * Copyright 2026 Joseph Terminal contributors
+ * SPDX-License-Identifier: MIT
+ */
+
+/**
  * @fileoverview Left vertical drawing toolbar built from the tool registry.
  */
+
 'use client';
 import type {ToolGroup, ToolPlugin} from '@joseph/drawing-core';
 import {
@@ -28,7 +35,7 @@ function useTools(): ToolPlugin[] {
   const [tools, setTools] = useState(() => runtime.tools.list());
   useEffect(() => {
     setTools(runtime.tools.list());
-    return runtime.tools.subscribe(() => setTools(runtime.tools.list()));
+    return runtime.tools.subscribe(() => void setTools(runtime.tools.list()));
   }, [runtime]);
   return tools;
 }
@@ -56,8 +63,8 @@ const GROUP_STORAGE_KEY = 'joseph.drawbar.groups';
  */
 export function groupTools(
   tools: readonly ToolPlugin[]
-): {group: ToolGroup; tools: ToolPlugin[]}[] {
-  const groups: {group: ToolGroup; tools: ToolPlugin[]}[] = [];
+): Array<{group: ToolGroup; tools: ToolPlugin[]}> {
+  const groups: Array<{group: ToolGroup; tools: ToolPlugin[]}> = [];
   for (const tool of tools) {
     const last = groups.at(-1);
     if (last && last.group === tool.manifest.group) last.tools.push(tool);
@@ -111,8 +118,9 @@ function GroupFlyout({
         event instanceof PointerEvent &&
         (panel.current?.contains(event.target as Node) ||
           trigger.current?.contains(event.target as Node))
-      )
+      ) {
         return;
+      }
       setPosition(null);
     };
     document.addEventListener('pointerdown', close);
@@ -228,7 +236,7 @@ export function DrawingToolbar(): ReactElement {
         aria-label="Pointer"
         title="Pointer (Esc)"
         aria-pressed={activeTool === null}
-        onClick={() => run('drawing.pointer')}
+        onClick={() => void run('drawing.pointer')}
       >
         <MousePointer2 size={18} aria-hidden="true" />
       </button>
@@ -254,7 +262,7 @@ export function DrawingToolbar(): ReactElement {
                 }
                 aria-pressed={activeTool === tool.manifest.id}
                 data-testid={`tool-${tool.manifest.id}`}
-                onClick={() => pick(tool)}
+                onClick={() => void pick(tool)}
               >
                 <Icon name={tool.manifest.icon} />
               </button>
@@ -278,7 +286,7 @@ export function DrawingToolbar(): ReactElement {
         title="Undo (Ctrl + Z)"
         disabled={!store?.canUndo()}
         data-testid="undo"
-        onClick={() => run('drawing.undo')}
+        onClick={() => void run('drawing.undo')}
       >
         <Undo2 size={18} aria-hidden="true" />
       </button>
@@ -289,7 +297,7 @@ export function DrawingToolbar(): ReactElement {
         title="Redo (Ctrl + Shift + Z)"
         disabled={!store?.canRedo()}
         data-testid="redo"
-        onClick={() => run('drawing.redo')}
+        onClick={() => void run('drawing.redo')}
       >
         <Redo2 size={18} aria-hidden="true" />
       </button>
@@ -299,7 +307,7 @@ export function DrawingToolbar(): ReactElement {
         aria-label="Magnet snapping to candles"
         title="Magnet: snap to open, high, low or close (hold Ctrl to invert)"
         aria-pressed={magnet}
-        onClick={() => run('drawing.magnet')}
+        onClick={() => void run('drawing.magnet')}
       >
         <Magnet size={18} aria-hidden="true" />
       </button>
@@ -309,7 +317,7 @@ export function DrawingToolbar(): ReactElement {
         aria-label={allLocked ? 'Unlock all drawings' : 'Lock all drawings'}
         aria-pressed={allLocked}
         disabled={drawings.length === 0}
-        onClick={() => setAll({locked: !allLocked})}
+        onClick={() => void setAll({locked: !allLocked})}
       >
         {allLocked ? (
           <Lock size={18} aria-hidden="true" />
@@ -323,7 +331,7 @@ export function DrawingToolbar(): ReactElement {
         aria-label={allHidden ? 'Show all drawings' : 'Hide all drawings'}
         aria-pressed={allHidden}
         disabled={drawings.length === 0}
-        onClick={() => setAll({visible: allHidden})}
+        onClick={() => void setAll({visible: allHidden})}
       >
         {allHidden ? (
           <EyeOff size={18} aria-hidden="true" />

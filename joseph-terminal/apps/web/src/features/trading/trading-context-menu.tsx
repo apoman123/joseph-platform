@@ -1,9 +1,16 @@
-'use client';
+/**
+ * @license
+ * Copyright 2026 Joseph Terminal contributors
+ * SPDX-License-Identifier: MIT
+ */
+
 /**
  * @fileoverview Chart context-menu contribution ("Buy limit at X", ...).
  * Choosing an item only prefills the order ticket; nothing is sent until
  * the user previews and confirms.
  */
+
+'use client';
 import {ticketFromMenuItem, type ContextMenuItem} from '@joseph/chart-trading';
 import type {ReactNode} from 'react';
 import {useStore, type WebFeatureContext} from '../../shell/react-bindings';
@@ -34,8 +41,9 @@ export function applyMenuItem(
   instrumentId: string,
   item: ContextMenuItem
 ): void {
-  if (ctx.selection.get().instrumentId !== instrumentId)
+  if (ctx.selection.get().instrumentId !== instrumentId) {
     ctx.select({instrumentId});
+  }
   const current = runtime.controller.get().inputs;
   runtime.controller.dispatch({
     type: 'replaceInputs',
@@ -81,7 +89,9 @@ export function TradingContextMenu({
           type="button"
           role="menuitem"
           className={`j-menu__item ${styles.menuItem}`}
-          onClick={() => applyMenuItem(ctx, runtime, menu.instrumentId, item)}
+          onClick={() =>
+            void applyMenuItem(ctx, runtime, menu.instrumentId, item)
+          }
         >
           <span className={item.side === 'buy' ? 'j-pos' : 'j-neg'}>
             {item.label}

@@ -1,4 +1,10 @@
 /**
+ * @license
+ * Copyright 2026 Joseph Terminal contributors
+ * SPDX-License-Identifier: MIT
+ */
+
+/**
  * @fileoverview Gann box (Gann square).
  *
  * - Anchors: `[A, B]`, opposite corners of the box. A is the origin corner
@@ -15,6 +21,7 @@
  *   `show_labels` (time ratios along the top edge, price ratios along the
  *   left edge).
  */
+
 import {
   anchorPoints,
   applyStroke,
@@ -43,9 +50,9 @@ export const GANN_BOX_LEVELS = [
 /** Grid of a Gann box in pixels. */
 export interface GannBoxGrid {
   /** Time divisions (vertical lines). */
-  vertical: {level: string; x: number}[];
+  vertical: Array<{level: string; x: number}>;
   /** Price divisions (horizontal lines). */
-  horizontal: {level: string; y: number}[];
+  horizontal: Array<{level: string; y: number}>;
 }
 
 /**
@@ -78,7 +85,7 @@ export function gannBoxGrid(
  * @param b Opposite corner.
  * @return Segments.
  */
-function segments(a: Point, b: Point): [Point, Point][] {
+function segments(a: Point, b: Point): Array<[Point, Point]> {
   const grid = gannBoxGrid(a, b);
   const top = Math.min(a.y, b.y);
   const bottom = Math.max(a.y, b.y);
@@ -127,7 +134,9 @@ export const gannBoxTool: ToolPlugin = {
       ctx.fillRect(rect.x, rect.y, rect.width, rect.height);
     }
     applyStroke(ctx, doc.style, state);
-    for (const segment of segments(a, b)) strokePath(ctx, segment);
+    for (const segment of segments(a, b)) {
+      strokePath(ctx, segment);
+    }
     if (doc.style.show_labels !== false) {
       const grid = gannBoxGrid(a, b);
       ctx.font = `11px ${state.palette.fontFamily}`;
@@ -158,8 +167,9 @@ export const gannBoxTool: ToolPlugin = {
       segments(a, b).some(
         ([p, q]) => distanceToSegment(point, p, q) <= tolerance
       )
-    )
+    ) {
       return {part: 'body'};
+    }
     return doc.style.fill_color && pointInRect(point, rectFromPoints(a, b))
       ? {part: 'body'}
       : null;

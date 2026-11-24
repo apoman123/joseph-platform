@@ -1,8 +1,15 @@
 /**
+ * @license
+ * Copyright 2026 Joseph Terminal contributors
+ * SPDX-License-Identifier: MIT
+ */
+
+/**
  * @fileoverview Portfolio feature: positions, open orders, executions,
  * order history, audit log and risk controls as bottom-panel tabs, all
  * backed by one shared read model.
  */
+
 import type {Disposer} from '@joseph/feature-registry';
 import {createElement, type ComponentType} from 'react';
 import type {
@@ -70,7 +77,7 @@ export const PORTFOLIO_FEATURE: WebFeature = {
   },
   activate(ctx) {
     const runtime = createPortfolioRuntime(ctx);
-    const disposers: Disposer[] = [() => runtime.dispose()];
+    const disposers: Disposer[] = [() => void runtime.dispose()];
     disposers.push(
       ctx.slots.contribute('bottom-panel', {
         id: 'portfolio.positions',
@@ -123,7 +130,9 @@ export const PORTFOLIO_FEATURE: WebFeature = {
       })
     );
     return () => {
-      for (const dispose of disposers.splice(0).reverse()) dispose();
+      for (const dispose of disposers.splice(0).reverse()) {
+        dispose();
+      }
     };
   },
 };

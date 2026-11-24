@@ -1,6 +1,13 @@
 /**
+ * @license
+ * Copyright 2026 Joseph Terminal contributors
+ * SPDX-License-Identifier: MIT
+ */
+
+/**
  * @fileoverview Renders feature contributions for UI slots.
  */
+
 'use client';
 import type {SlotContribution, UiSlot} from '@joseph/feature-registry';
 import {
@@ -233,7 +240,11 @@ export function SlotTabs({
         );
   const currentSize = size ?? limits.fallback;
   useEffect(
-    () => runtime.storage.setItem(`${key}.collapsed`, collapsed ? 'yes' : 'no'),
+    () =>
+      void runtime.storage.setItem(
+        `${key}.collapsed`,
+        collapsed ? 'yes' : 'no'
+      ),
     [collapsed, key, runtime]
   );
   const request = useStore(runtime.panelRequest);
@@ -284,8 +295,9 @@ export function SlotTabs({
             setSize(next);
           }}
           onCommit={() => {
-            if (sizeRef.current !== null)
+            if (sizeRef.current !== null) {
               runtime.storage.setItem(`${key}.size`, String(sizeRef.current));
+            }
           }}
         />
       )}
@@ -335,7 +347,7 @@ export function SlotTabs({
               : `Hide ${label.toLowerCase()}`
           }
           aria-expanded={!collapsed}
-          onClick={() => setCollapsed(value => !value)}
+          onClick={() => void setCollapsed(value => !value)}
         >
           <CollapseIcon size={15} aria-hidden="true" />
         </button>

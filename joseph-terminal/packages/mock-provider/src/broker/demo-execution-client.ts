@@ -1,4 +1,10 @@
 /**
+ * @license
+ * Copyright 2026 Joseph Terminal contributors
+ * SPDX-License-Identifier: MIT
+ */
+
+/**
  * @fileoverview DEMO paper broker implementing `ExecutionClient` in the
  * browser for offline development and tests.
  *
@@ -23,6 +29,7 @@
  * offers LIVE; the opt-in `liveRehearsal` option adds a simulated IBKR live
  * account to rehearse arming. Nothing ever reaches a venue.
  */
+
 import {
   ApiError,
   Decimal,
@@ -236,8 +243,9 @@ export class DemoExecutionClient implements ExecutionClient {
       Decimal.parse(a.min_price).cmp(Decimal.parse(b.min_price))
     );
     for (const step of ladder) {
-      if (price.cmp(Decimal.parse(step.min_price)) >= 0)
+      if (price.cmp(Decimal.parse(step.min_price)) >= 0) {
         tick = Decimal.parse(step.tick_size);
+      }
     }
     return tick;
   }
@@ -277,22 +285,24 @@ export class DemoExecutionClient implements ExecutionClient {
         limit: null,
       });
     const caps = account.capabilities;
-    if (!caps.order_types.includes(request.order_type))
+    if (!caps.order_types.includes(request.order_type)) {
       fail(
         'size.order_type',
         'SIZE',
         `${account.label} does not offer ${request.order_type.replace('_', '-')} orders.`,
         'UNSUPPORTED_ORDER_TYPE'
       );
+    }
     const calendar = demoCalendar(instrument.calendar ?? '24x7');
     if (calendar.continuous) {
-      if (request.time_in_force === 'DAY')
+      if (request.time_in_force === 'DAY') {
         fail(
           'market.time_in_force',
           'MARKET_STATUS',
           'DAY applies to exchange sessions; 24x7 markets use GTC, IOC or FOK.',
           'UNSUPPORTED_ORDER_TYPE'
         );
+      }
       return results;
     }
     if (!this.isSecurity(instrument)) return results;
@@ -304,64 +314,67 @@ export class DemoExecutionClient implements ExecutionClient {
       ? Decimal.parse(request.quantity_base)
       : Decimal.zero();
     if (lot && !qty.isZero() && qty.cmp(lot) < 0) {
-      if (!caps.odd_lot)
+      if (!caps.odd_lot) {
         fail(
           'size.board_lot',
           'SIZE',
           'This account cannot send intraday odd-lot orders.',
           'INVALID_LOT_SIZE'
         );
-      else if (request.order_type !== 'limit')
+      } else if (request.order_type !== 'limit') {
         fail(
           'size.board_lot',
           'SIZE',
           'Intraday odd-lot orders must be limit orders.',
           'UNSUPPORTED_ORDER_TYPE'
         );
-      else if (request.time_in_force !== 'DAY')
+      } else if (request.time_in_force !== 'DAY') {
         fail(
           'size.board_lot',
           'SIZE',
           'Intraday odd-lot orders are ROD (DAY) only.',
           'UNSUPPORTED_ORDER_TYPE'
         );
+      }
     }
-    if (request.outside_rth && !caps.outside_rth)
+    if (request.outside_rth && !caps.outside_rth) {
       fail(
         'market.outside_rth',
         'MARKET_STATUS',
         'This account does not accept outside-RTH orders.',
         'UNSUPPORTED_ORDER_TYPE'
       );
+    }
     if (request.side === 'sell' && caps.short_selling === false) {
       const held =
         this.positions.get(request.instrument_id)?.qty ?? Decimal.zero();
-      if (qty.cmp(held) > 0)
+      if (qty.cmp(held) > 0) {
         fail(
           'exposure.short_selling',
           'EXPOSURE',
           `Long-only cash account: sells are limited to the ${held.toString()} shares held.`,
           'RISK_LIMIT'
         );
+      }
     }
     const now = this.now();
     if (!calendar.isOpen(now)) {
       if (request.order_type === 'market') {
-        if (!caps.queue_market_when_closed)
+        if (!caps.queue_market_when_closed) {
           fail(
             'market.session',
             'MARKET_STATUS',
             'Market closed; market orders are rejected until the next open.',
             'VENUE_UNAVAILABLE'
           );
-        else if (request.time_in_force !== 'DAY')
+        } else if (request.time_in_force !== 'DAY') {
           fail(
             'market.session',
             'MARKET_STATUS',
             'Market closed; submit the market order as DAY to queue it for the next open.',
             'UNSUPPORTED_ORDER_TYPE'
           );
-        else
+        } else {
           fail(
             'market.session',
             'MARKET_STATUS',
@@ -369,6 +382,7 @@ export class DemoExecutionClient implements ExecutionClient {
             'UNSUPPORTED_ORDER_TYPE',
             'WARN'
           );
+        }
       } else if (
         request.time_in_force === 'IOC' ||
         request.time_in_force === 'FOK'
@@ -467,37 +481,43 @@ export class DemoExecutionClient implements ExecutionClient {
       observed: null,
       limit: null,
     });
-    if (!account || !account.modes.includes('LIVE'))
+    if (!account || !account.modes.includes('LIVE')) {
       return result(
         'FAIL',
         'Live trading is not available in DEMO mode.',
         'LIVE_TRADING_DISABLED'
       );
-    if (account.capabilities.status !== 'AVAILABLE')
+    }
+    if (account.capabilities.status !== 'AVAILABLE') {
       return result(
         'FAIL',
         'The venue adapter cannot trade for this account.',
         'TRADE_MODE_DISABLED'
       );
-    if (request.source === 'STRATEGY')
+    }
+    if (request.source === 'STRATEGY') {
       return result(
         'FAIL',
         'AUTO_LIVE needs an enabled deployment with valid consent.',
         'TRADE_MODE_DISABLED'
       );
-    if (!MANUAL_SOURCES.has(request.source))
+    }
+    if (!MANUAL_SOURCES.has(request.source)) {
       return result('PASS', 'Live trading is permitted for this scope.');
+    }
     const until = this.armedUntil(account.accountId);
-    if (until !== null)
+    if (until !== null) {
       return result(
         'PASS',
         `Live is armed until ${new Date(until).toISOString().slice(11, 16)} UTC (DEMO rehearsal: simulated, nothing reaches a broker).`
       );
-    if (this.riskReducing(request))
+    }
+    if (this.riskReducing(request)) {
       return result(
         'WARN',
         'Live trading is not armed; risk-reducing order allowed.'
       );
+    }
     return result(
       'FAIL',
       'Live trading is not armed for this account. Arm it with your step-up code first.',
@@ -522,7 +542,9 @@ export class DemoExecutionClient implements ExecutionClient {
    * @param event Event.
    */
   private emit(event: DemoBrokerEvent): void {
-    for (const listener of [...this.listeners]) listener(event);
+    for (const listener of [...this.listeners]) {
+      listener(event);
+    }
   }
 
   /**
@@ -612,14 +634,16 @@ export class DemoExecutionClient implements ExecutionClient {
     for (const state of this.killSwitches.values()) {
       if (!state.engaged) continue;
       if (state.scope === 'GLOBAL') return state;
-      if (state.scope === 'ACCOUNT' && state.target_id === request.account_id)
+      if (state.scope === 'ACCOUNT' && state.target_id === request.account_id) {
         return state;
+      }
       if (
         state.scope === 'STRATEGY' &&
         request.strategy_version_id &&
         state.target_id === request.strategy_version_id
-      )
+      ) {
         return state;
+      }
     }
     return null;
   }
@@ -658,9 +682,9 @@ export class DemoExecutionClient implements ExecutionClient {
         `${request.mode.toLowerCase()} mode is enabled for this account.`
       );
     }
-    if (account)
+    if (account) {
       add('identity.account', 'IDENTITY', 'PASS', 'Account belongs to you.');
-    else
+    } else {
       add(
         'identity.account',
         'IDENTITY',
@@ -668,11 +692,12 @@ export class DemoExecutionClient implements ExecutionClient {
         'Unknown account.',
         'FORBIDDEN'
       );
+    }
     if (account && account.accountId !== DEMO_ACCOUNT_ID) {
       const connected =
         account.status === 'CONNECTED' &&
         account.capabilities.status === 'AVAILABLE';
-      if (!connected)
+      if (!connected) {
         add(
           'account.connected',
           'CONNECTIVITY',
@@ -681,7 +706,10 @@ export class DemoExecutionClient implements ExecutionClient {
             'The broker account is not connected.',
           'TRADE_MODE_DISABLED'
         );
-      else if (request.mode !== 'LIVE' && !account.modes.includes(request.mode))
+      } else if (
+        request.mode !== 'LIVE' &&
+        !account.modes.includes(request.mode)
+      ) {
         add(
           'account.mode',
           'MODE',
@@ -689,19 +717,21 @@ export class DemoExecutionClient implements ExecutionClient {
           `${request.mode.toLowerCase()} orders are not enabled for this account.`,
           'TRADE_MODE_DISABLED'
         );
-      else
+      } else {
         add(
           'account.connected',
           'CONNECTIVITY',
           'PASS',
           `${account.label} is connected (simulated).`
         );
+      }
     }
     if (account && instrument) {
       const problem = demoRoutingProblem(account, instrument);
-      if (problem)
+      if (problem) {
         add('account.routing', 'ACCOUNT', 'FAIL', problem, 'UNSUPPORTED');
-      for (const check of this.securityChecks(request, account, instrument))
+      }
+      for (const check of this.securityChecks(request, account, instrument)) {
         add(
           check.check,
           check.domain,
@@ -711,15 +741,16 @@ export class DemoExecutionClient implements ExecutionClient {
           check.observed,
           check.limit
         );
+      }
     }
-    if (instrument && instrument.status === 'TRADING')
+    if (instrument && instrument.status === 'TRADING') {
       add(
         'market.instrument_trading',
         'MARKET_STATUS',
         'PASS',
         'Instrument is trading.'
       );
-    else
+    } else {
       add(
         'market.instrument_trading',
         'MARKET_STATUS',
@@ -727,8 +758,9 @@ export class DemoExecutionClient implements ExecutionClient {
         'This instrument is not available in the DEMO broker.',
         'UNSUPPORTED'
       );
+    }
     const markText = this.mark(request.instrument_id);
-    if (markText)
+    if (markText) {
       add(
         'data.mark_fresh',
         'DATA_QUALITY',
@@ -737,7 +769,7 @@ export class DemoExecutionClient implements ExecutionClient {
         null,
         markText
       );
-    else
+    } else {
       add(
         'data.mark_fresh',
         'DATA_QUALITY',
@@ -745,6 +777,7 @@ export class DemoExecutionClient implements ExecutionClient {
         'No mark price is available.',
         'MARKET_STALE'
       );
+    }
     const mark = markText ? Decimal.parse(markText) : null;
     const reference = request.limit_price
       ? Decimal.parse(request.limit_price)
@@ -861,7 +894,7 @@ export class DemoExecutionClient implements ExecutionClient {
       request.leverage && Decimal.isValid(request.leverage)
         ? Decimal.parse(request.leverage)
         : Decimal.parse('1');
-    if (leverage.cmp(Decimal.parse('20')) > 0)
+    if (leverage.cmp(Decimal.parse('20')) > 0) {
       add(
         'size.leverage',
         'SIZE',
@@ -871,7 +904,7 @@ export class DemoExecutionClient implements ExecutionClient {
         leverage.toString(),
         '20'
       );
-    else
+    } else {
       add(
         'size.leverage',
         'SIZE',
@@ -881,6 +914,7 @@ export class DemoExecutionClient implements ExecutionClient {
         leverage.toString(),
         '20'
       );
+    }
     const cash = this.isSecurity(instrument);
     const margin =
       cash || leverage.isZero() ? notional : notional.div(leverage);
@@ -888,7 +922,7 @@ export class DemoExecutionClient implements ExecutionClient {
       account && account.accountId !== DEMO_ACCOUNT_ID
         ? Decimal.parse(account.maxNotional)
         : MAX_NOTIONAL;
-    if (notional.cmp(maxNotional) > 0)
+    if (notional.cmp(maxNotional) > 0) {
       add(
         'exposure.max_notional',
         'EXPOSURE',
@@ -898,7 +932,7 @@ export class DemoExecutionClient implements ExecutionClient {
         notional.toFixed(2),
         maxNotional.toString()
       );
-    else
+    } else {
       add(
         'exposure.max_notional',
         'EXPOSURE',
@@ -908,8 +942,9 @@ export class DemoExecutionClient implements ExecutionClient {
         notional.toFixed(2),
         maxNotional.toString()
       );
+    }
     const available = this.availableMargin(request.account_id);
-    if (!request.reduce_only && margin.cmp(available) > 0)
+    if (!request.reduce_only && margin.cmp(available) > 0) {
       add(
         'account.margin',
         'ACCOUNT',
@@ -921,7 +956,7 @@ export class DemoExecutionClient implements ExecutionClient {
         margin.toFixed(2),
         available.toFixed(2)
       );
-    else
+    } else {
       add(
         'account.margin',
         'ACCOUNT',
@@ -931,6 +966,7 @@ export class DemoExecutionClient implements ExecutionClient {
         margin.toFixed(2),
         available.toFixed(2)
       );
+    }
     const engaged = this.blockingSwitch(request);
     if (engaged && !request.reduce_only) {
       add(
@@ -963,7 +999,7 @@ export class DemoExecutionClient implements ExecutionClient {
         (request.side === 'sell'
           ? !book.qty.isNegative()
           : book.qty.isNegative());
-      if (!reduces)
+      if (!reduces) {
         add(
           'duplicate.reduce_only',
           'DUPLICATE',
@@ -971,13 +1007,14 @@ export class DemoExecutionClient implements ExecutionClient {
           'Reduce-only order has no position to reduce.',
           'POSITION_UNKNOWN'
         );
-      else
+      } else {
         add(
           'duplicate.reduce_only',
           'DUPLICATE',
           'PASS',
           'Reduces an existing position.'
         );
+      }
     }
     if (
       request.bracket &&
@@ -1049,12 +1086,14 @@ export class DemoExecutionClient implements ExecutionClient {
       if (book.accountId !== accountId) continue;
       equity = equity.add(book.realized);
       const mark = this.mark(id);
-      if (mark && !book.qty.isZero())
+      if (mark && !book.qty.isZero()) {
         equity = equity.add(Decimal.parse(mark).sub(book.entry).mul(book.qty));
+      }
     }
     for (const fill of this.fills) {
-      if (fill.account_id === accountId)
+      if (fill.account_id === accountId) {
         equity = equity.sub(Decimal.parse(fill.fee));
+      }
     }
     return equity;
   }
@@ -1075,8 +1114,9 @@ export class DemoExecutionClient implements ExecutionClient {
    * @return Summary.
    */
   async getAccountSummary(accountId: string): Promise<AccountSummary> {
-    if (!this.spec(accountId))
+    if (!this.spec(accountId)) {
       throw apiError(404, 'NOT_FOUND', 'Unknown account.');
+    }
     return this.summary(accountId);
   }
 
@@ -1099,46 +1139,47 @@ export class DemoExecutionClient implements ExecutionClient {
     const duration = request.duration_ms ?? DEMO_LIVE_ARM_MAX_MS;
     const ack: unknown = request.acknowledge_risk;
     let problem: ApiError | null = null;
-    if (spec.venue === 'mock')
+    if (spec.venue === 'mock') {
       problem = apiError(
         403,
         'TRADE_MODE_DISABLED',
         'Paper accounts never trade LIVE; arm a verified venue or broker account.'
       );
-    else if (!spec.modes.includes('LIVE'))
+    } else if (!spec.modes.includes('LIVE')) {
       problem = apiError(
         403,
         'TRADE_MODE_DISABLED',
         'This account is not enabled for LIVE; verify the account first.'
       );
-    else if (ack !== true)
+    } else if (ack !== true) {
       problem = apiError(
         422,
         'VALIDATION_FAILED',
         'Risk acknowledgement is required.'
       );
-    else if (
+    } else if (
       !Number.isInteger(duration) ||
       duration <= 0 ||
       duration > DEMO_LIVE_ARM_MAX_MS
-    )
+    ) {
       problem = apiError(
         422,
         'VALIDATION_FAILED',
         `Live arming lasts at most ${DEMO_LIVE_ARM_MAX_MS / 3_600_000} hours.`
       );
-    else if (request.step_up_code.trim() !== DEMO_STEP_UP_CODE)
+    } else if (request.step_up_code.trim() !== DEMO_STEP_UP_CODE) {
       problem = apiError(
         403,
         'STEP_UP_REQUIRED',
         'Step-up verification failed.'
       );
-    else if (spec.capabilities.status !== 'AVAILABLE')
+    } else if (spec.capabilities.status !== 'AVAILABLE') {
       problem = apiError(
         403,
         'LIVE_TRADING_DISABLED',
         `${spec.label} trading is ${spec.capabilities.status}.`
       );
+    }
     if (problem) {
       this.record(
         'live_arming.denied',
@@ -1176,8 +1217,9 @@ export class DemoExecutionClient implements ExecutionClient {
    * @return Summary with `live_armed_until_ms` null.
    */
   async revokeAccountLiveConsent(accountId: string): Promise<AccountSummary> {
-    if (!this.spec(accountId))
+    if (!this.spec(accountId)) {
       throw apiError(404, 'NOT_FOUND', 'Unknown account.');
+    }
     const until = this.armedUntil(accountId);
     this.liveArming.delete(accountId);
     this.record(
@@ -1244,8 +1286,9 @@ export class DemoExecutionClient implements ExecutionClient {
     this.previews.set(token, {canonical: canonicalJson(normalized), expiresAt});
     const mark = this.mark(request.instrument_id);
     const warnings = ['DEMO simulation: no order reaches a venue.'];
-    if (normalized.quantity_base !== request.quantity_base)
+    if (normalized.quantity_base !== request.quantity_base) {
       warnings.push(`Quantity rounded down to ${normalized.quantity_base}.`);
+    }
     return {
       allowed: risk.decision === 'ALLOW',
       normalized,
@@ -1392,7 +1435,10 @@ export class DemoExecutionClient implements ExecutionClient {
     this.emit({type: 'order.updated', payload: order});
     if (role === 'PRIMARY') {
       this.pendingBrackets.set(order.order_id, request);
-      this.schedule(() => this.acknowledge(order.order_id), this.ackDelayMs);
+      this.schedule(
+        () => void this.acknowledge(order.order_id),
+        this.ackDelayMs
+      );
     }
     return order;
   }
@@ -1440,8 +1486,9 @@ export class DemoExecutionClient implements ExecutionClient {
     if (
       !order ||
       (order.state !== 'ACKNOWLEDGED' && order.state !== 'PARTIALLY_FILLED')
-    )
+    ) {
       return;
+    }
     const markText = this.mark(order.instrument_id);
     if (!markText) return;
     const mark = Decimal.parse(markText);
@@ -1455,7 +1502,7 @@ export class DemoExecutionClient implements ExecutionClient {
       const limit = Decimal.parse(order.limit_price);
       const marketable = buy ? limit.cmp(mark) >= 0 : limit.cmp(mark) <= 0;
       // A marketable limit fills at the better of its limit and the mark.
-      if (marketable)
+      if (marketable) {
         price = buy
           ? mark.cmp(limit) < 0
             ? mark
@@ -1463,6 +1510,7 @@ export class DemoExecutionClient implements ExecutionClient {
           : mark.cmp(limit) > 0
             ? mark
             : limit;
+      }
     } else if (order.trigger_price) {
       const trigger = Decimal.parse(order.trigger_price);
       if (buy ? mark.cmp(trigger) >= 0 : mark.cmp(trigger) <= 0) price = mark;
@@ -1505,7 +1553,7 @@ export class DemoExecutionClient implements ExecutionClient {
         : remaining;
     if (first.isZero() || first.eq(remaining)) {
       this.schedule(
-        () => this.applyFill(orderId, remaining, fillPrice, liquidity),
+        () => void this.applyFill(orderId, remaining, fillPrice, liquidity),
         this.fillDelayMs
       );
       return;
@@ -1544,8 +1592,9 @@ export class DemoExecutionClient implements ExecutionClient {
     if (
       !order ||
       (order.state !== 'ACKNOWLEDGED' && order.state !== 'PARTIALLY_FILLED')
-    )
+    ) {
       return;
+    }
     let qty = quantity;
     const book = this.positions.get(order.instrument_id) ?? {
       accountId: order.account_id,
@@ -1652,8 +1701,9 @@ export class DemoExecutionClient implements ExecutionClient {
       next.realized = book.realized.add(pnlPerUnit.mul(closing));
       next.qty = book.qty.add(signed);
       if (next.qty.isZero()) next.entry = Decimal.zero();
-      else if (next.qty.isNegative() !== book.qty.isNegative())
+      else if (next.qty.isNegative() !== book.qty.isNegative()) {
         next.entry = price;
+      }
     }
     this.positions.set(order.instrument_id, next);
     const position = this.toPosition(order.instrument_id, next);
@@ -1834,27 +1884,30 @@ export class DemoExecutionClient implements ExecutionClient {
   async cancelOrder(orderId: string): Promise<Order> {
     const order = this.orders.get(orderId);
     if (!order) throw apiError(404, 'NOT_FOUND', 'Order not found.');
-    if (TERMINAL.has(order.state))
+    if (TERMINAL.has(order.state)) {
       throw apiError(
         409,
         'CONFLICT',
         `The order is already ${order.state.toLowerCase()}.`
       );
-    if (order.state === 'UNKNOWN_RECONCILING')
+    }
+    if (order.state === 'UNKNOWN_RECONCILING') {
       throw apiError(
         409,
         'ORDER_UNKNOWN',
         'The order state is being reconciled.'
       );
+    }
     const pending = this.update(orderId, {state: 'CANCEL_PENDING'});
     this.record('order.cancel', 'order', orderId, {});
     this.schedule(() => {
       const latest = this.orders.get(orderId);
-      if (latest?.state === 'CANCEL_PENDING')
+      if (latest?.state === 'CANCEL_PENDING') {
         this.update(orderId, {
           state: 'CANCELED',
           state_reason: 'Canceled by you.',
         });
+      }
     }, this.ackDelayMs);
     return pending ?? order;
   }
@@ -1885,32 +1938,36 @@ export class DemoExecutionClient implements ExecutionClient {
       order.mode === 'LIVE' &&
       !order.reduce_only &&
       this.armedUntil(order.account_id) === null
-    )
+    ) {
       throw apiError(
         403,
         'LIVE_NOT_ARMED',
         'Live trading is not armed for this account. Arm it with your step-up code first.'
       );
+    }
     const instrument = this.instrument(order.instrument_id);
     const tick = Decimal.parse(instrument?.tick_size ?? '0.01');
     const lot = Decimal.parse(instrument?.lot_size ?? '0.001');
     const patch: Partial<Order> = {};
-    if (request.limit_price)
+    if (request.limit_price) {
       patch.limit_price = Decimal.parse(request.limit_price)
         .roundToStep(tick)
         .toString();
-    if (request.trigger_price)
+    }
+    if (request.trigger_price) {
       patch.trigger_price = Decimal.parse(request.trigger_price)
         .roundToStep(tick)
         .toString();
+    }
     if (request.quantity_base) {
       const qty = Decimal.parse(request.quantity_base).floorToStep(lot);
-      if (qty.cmp(Decimal.parse(order.filled_base)) <= 0)
+      if (qty.cmp(Decimal.parse(order.filled_base)) <= 0) {
         throw apiError(
           422,
           'INVALID_LOT_SIZE',
           'New quantity must exceed the filled quantity.'
         );
+      }
       patch.quantity_base = qty.toString();
     }
     const updated = this.update(orderId, patch) ?? order;
@@ -1956,17 +2013,19 @@ export class DemoExecutionClient implements ExecutionClient {
     const position = this.positionList().find(
       p => p.position_id === positionId
     );
-    if (!position)
+    if (!position) {
       throw apiError(404, 'NOT_FOUND', 'Position not found or already flat.');
+    }
     const instrument = this.instrument(position.instrument_id);
     const lot = Decimal.parse(instrument?.lot_size ?? '0.001');
     const fraction = Decimal.parse(request.fraction);
-    if (fraction.isZero() || fraction.cmp(Decimal.parse('1')) > 0)
+    if (fraction.isZero() || fraction.cmp(Decimal.parse('1')) > 0) {
       throw apiError(
         422,
         'VALIDATION_FAILED',
         'Fraction must be between 0 and 1.'
       );
+    }
     return {
       account_id: position.account_id,
       instrument_id: position.instrument_id,
@@ -2040,8 +2099,9 @@ export class DemoExecutionClient implements ExecutionClient {
    * @return New state.
    */
   async setKillSwitch(request: KillSwitchRequest): Promise<KillSwitchState> {
-    if (!request.reason.trim())
+    if (!request.reason.trim()) {
       throw apiError(422, 'VALIDATION_FAILED', 'A reason is required.');
+    }
     const state: KillSwitchState = {
       scope: request.scope,
       target_id: request.target_id ?? null,
@@ -2129,8 +2189,9 @@ export class DemoExecutionClient implements ExecutionClient {
       if (
         event.prev_hash !== prev ||
         sha256Hex(prev + canonicalJson(rest)) !== hash
-      )
+      ) {
         valid = false;
+      }
       prev = hash;
     }
     const events = this.audit
@@ -2154,8 +2215,9 @@ export class DemoExecutionClient implements ExecutionClient {
    * @return Deployment.
    */
   async createDeployment(request: DeploymentRequest): Promise<Deployment> {
-    if (!this.spec(request.account_id))
+    if (!this.spec(request.account_id)) {
       throw apiError(404, 'NOT_FOUND', 'Unknown account.');
+    }
     const now = this.now();
     const deployment: Deployment = {
       deployment_id: this.nextId('demo-dep'),

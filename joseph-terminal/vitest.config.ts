@@ -1,6 +1,13 @@
 /**
+ * @license
+ * Copyright 2026 Joseph Terminal contributors
+ * SPDX-License-Identifier: MIT
+ */
+
+/**
  * @fileoverview Root Vitest configuration with one project per test tier.
  */
+
 import react from '@vitejs/plugin-react';
 import {defineConfig} from 'vitest/config';
 

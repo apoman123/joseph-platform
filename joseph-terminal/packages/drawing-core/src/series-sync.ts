@@ -1,4 +1,10 @@
 /**
+ * @license
+ * Copyright 2026 Joseph Terminal contributors
+ * SPDX-License-Identifier: MIT
+ */
+
+/**
  * @fileoverview `DrawingSeriesSync`: keeps the engine series of every
  * engine-backed drawing on one chart up to date.
  *
@@ -13,6 +19,7 @@
  * 4xx answer, e.g. an anchor beyond the bars it computes from) its own
  * message is kept so the drawing shows exactly what the engine said.
  */
+
 import {
   ApiError,
   type BarCalendar,
@@ -64,7 +71,7 @@ interface Entry {
 /** Engine series of the engine-backed drawings on one chart. */
 export class DrawingSeriesSync {
   private readonly entries = new Map<string, Entry>();
-  private readonly disposers: (() => void)[] = [];
+  private readonly disposers: Array<() => void> = [];
   private disposed = false;
 
   /**
@@ -79,8 +86,8 @@ export class DrawingSeriesSync {
     private readonly options: DrawingSeriesSyncOptions
   ) {
     this.disposers.push(
-      store.subscribe(() => this.reconcile()),
-      tools.subscribe(() => this.reconcile())
+      store.subscribe(() => void this.reconcile()),
+      tools.subscribe(() => void this.reconcile())
     );
     this.reconcile();
   }
@@ -96,7 +103,9 @@ export class DrawingSeriesSync {
 
   /** Re-requests every series now (call when a bar closes). */
   refresh(): void {
-    for (const [id, entry] of this.entries) this.schedule(id, entry, 0);
+    for (const [id, entry] of this.entries) {
+      this.schedule(id, entry, 0);
+    }
   }
 
   /** Aligns tracked requests with the store (also called on changes). */
@@ -113,8 +122,9 @@ export class DrawingSeriesSync {
         !doc.visible ||
         doc.instrument_id !== instrumentId ||
         !appliesToTimeframe(doc, timeframe)
-      )
+      ) {
         continue;
+      }
       const request =
         this.tools.get(doc.tool_id)?.seriesRequest?.(doc, {
           timeframe,
@@ -229,7 +239,9 @@ export class DrawingSeriesSync {
   /** Stops watching and drops pending requests. */
   dispose(): void {
     this.disposed = true;
-    for (const dispose of this.disposers.splice(0)) dispose();
+    for (const dispose of this.disposers.splice(0)) {
+      dispose();
+    }
     for (const entry of this.entries.values()) {
       if (entry.timer) clearTimeout(entry.timer);
     }

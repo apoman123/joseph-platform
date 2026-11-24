@@ -1,6 +1,13 @@
 /**
+ * @license
+ * Copyright 2026 Joseph Terminal contributors
+ * SPDX-License-Identifier: MIT
+ */
+
+/**
  * @fileoverview Tests for the Fibonacci time zones tool.
  */
+
 import {describe, expect, it} from 'vitest';
 import {
   TRANSFORM,
@@ -18,7 +25,8 @@ describe('fib-time-zones', () => {
     {time_ms: 300_000, price: '150'},
   ]);
 
-  it('has a valid manifest', () => expect(manifestProblems(tool)).toEqual([]));
+  it('has a valid manifest', () =>
+    void expect(manifestProblems(tool)).toEqual([]));
 
   it('places zones at Fibonacci multiples of the unit (exact ms)', () => {
     expect(

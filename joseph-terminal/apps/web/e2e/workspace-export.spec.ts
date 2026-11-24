@@ -1,9 +1,16 @@
 /**
+ * @license
+ * Copyright 2026 Joseph Terminal contributors
+ * SPDX-License-Identifier: MIT
+ */
+
+/**
  * @fileoverview System test in DEMO mode: *Export workspace* writes the
  * layout and the drawings of every instrument (including drawings of tools
  * this build doesn't know), and *Import a workspace* restores them into a
  * browser that has none, showing them on the open chart without a reload.
  */
+
 import {readFileSync} from 'node:fs';
 import {expect, test, type Page} from '@playwright/test';
 import {
@@ -35,7 +42,7 @@ interface ExportFile {
   format: string;
   schema_version: number;
   workspace: {workspace_id: string};
-  drawings: {instrument_id: string; drawings: {tool_id: string}[]}[];
+  drawings: Array<{instrument_id: string; drawings: Array<{tool_id: string}>}>;
 }
 
 test('exports drawings with the workspace and imports them back', async ({
@@ -53,7 +60,7 @@ test('exports drawings with the workspace and imports them back', async ({
   await page.evaluate(
     ({btcKey, ethKey}) => {
       const btc = JSON.parse(localStorage.getItem(btcKey) ?? '{}') as {
-        drawings: Record<string, unknown>[];
+        drawings: Array<Record<string, unknown>>;
       };
       const [first] = btc.drawings;
       const eth = (id: string, tool: string) => ({
@@ -97,7 +104,7 @@ test('exports drawings with the workspace and imports them back', async ({
   await expect(page.getByText(/exported with 4 drawings on 2/)).toBeVisible();
 
   // A browser without any saved drawings.
-  await page.evaluate(() => localStorage.clear());
+  await page.evaluate(() => void localStorage.clear());
   await page.reload();
   await expect(page.locator('.terminal[data-ready="true"]')).toBeVisible();
   await expect.poll(() => savedTools(page)).toEqual([]);

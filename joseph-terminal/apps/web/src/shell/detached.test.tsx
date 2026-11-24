@@ -1,8 +1,15 @@
 /**
+ * @license
+ * Copyright 2026 Joseph Terminal contributors
+ * SPDX-License-Identifier: MIT
+ */
+
+/**
  * @fileoverview Main-window UI of detached panes after a reload: the
  * placeholder while pop-outs reconnect, the "Restore pop-outs" banner that
  * waits for the probe, and the per-click browser hint.
  */
+
 import {act, fireEvent, render, screen, within} from '@testing-library/react';
 import {describe, expect, it, vi} from 'vitest';
 import {createRuntime, type WindowActions} from '../composition/runtime';
@@ -80,7 +87,9 @@ describe('detached panes after a reload', () => {
       </RuntimeProvider>
     );
     expect(screen.queryByTestId('detached-banner')).toBeNull();
-    act(() => runtime.detached.update(state => ({...state, probing: false})));
+    act(
+      () => void runtime.detached.update(state => ({...state, probing: false}))
+    );
     const banner = screen.getByTestId('detached-banner');
     expect(banner).toHaveTextContent(
       '2 panes were open in other windows: BTCUSD 5m, Alerts.'

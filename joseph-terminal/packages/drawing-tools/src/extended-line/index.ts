@@ -1,7 +1,14 @@
 /**
+ * @license
+ * Copyright 2026 Joseph Terminal contributors
+ * SPDX-License-Identifier: MIT
+ */
+
+/**
  * @fileoverview Extended line: a line through two anchors that spans the
  * whole chart in both directions.
  */
+
 import {
   anchorPoints,
   applyStroke,

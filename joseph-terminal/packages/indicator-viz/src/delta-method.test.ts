@@ -1,8 +1,15 @@
 /**
+ * @license
+ * Copyright 2026 Joseph Terminal contributors
+ * SPDX-License-Identifier: MIT
+ */
+
+/**
  * @fileoverview True versus estimated order-flow delta: per-bar methods
  * from `values.method`, buy/sell volumes, faint estimate columns and the
  * pane title.
  */
+
 import type {IndicatorSeries} from '@joseph/contracts';
 import {describe, expect, it} from 'vitest';
 import {
@@ -25,7 +32,7 @@ const BAR = 300_000;
  * @param values Values per bar.
  * @return Series.
  */
-function seriesOf(values: IndicatorSeries['points'][number]['values'][]) {
+function seriesOf(values: Array<IndicatorSeries['points'][number]['values']>) {
   return {
     instrument_id: 'binance:perp:BTCUSDT',
     timeframe: '5m',

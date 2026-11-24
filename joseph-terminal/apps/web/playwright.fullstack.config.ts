@@ -1,8 +1,15 @@
 /**
+ * @license
+ * Copyright 2026 Joseph Terminal contributors
+ * SPDX-License-Identifier: MIT
+ */
+
+/**
  * @fileoverview Full-stack browser system tests: the production web build
  * talks to the real market and execution engines (DEMO venue only, LIVE
  * trading off). Run with `pnpm test:e2e:fullstack`.
  */
+
 import {defineConfig, devices} from '@playwright/test';
 
 const WEB = Number(process.env.E2E_WEB_PORT ?? 3158);

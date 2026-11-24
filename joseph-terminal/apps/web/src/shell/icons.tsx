@@ -1,6 +1,13 @@
 /**
+ * @license
+ * Copyright 2026 Joseph Terminal contributors
+ * SPDX-License-Identifier: MIT
+ */
+
+/**
  * @fileoverview Icon lookup by name (tool manifests reference icons by id).
  */
+
 import type {ReactElement} from 'react';
 import {
   Activity,
@@ -55,53 +62,53 @@ import {
 
 /** Known icons. */
 const ICONS: Readonly<Record<string, LucideIcon>> = {
-  activity: Activity,
+  'activity': Activity,
   'align-justify': AlignJustify,
-  anchor: Anchor,
+  'anchor': Anchor,
   'arrow-down-right': ArrowDownRight,
   'arrow-right': ArrowRight,
   'arrow-right-from-line': ArrowRightFromLine,
   'arrow-up-right': ArrowUpRight,
   'audio-waveform': AudioWaveform,
-  bell: Bell,
-  book: BookOpen,
-  brush: Brush,
+  'bell': Bell,
+  'book': BookOpen,
+  'brush': Brush,
   'chart-network': ChartNetwork,
   'chart-scatter': ChartScatter,
-  circle: Circle,
+  'circle': Circle,
   'columns-2': Columns2,
-  ellipse: Ellipse,
-  filter: Filter,
+  'ellipse': Ellipse,
+  'filter': Filter,
   'git-branch': GitBranch,
   'git-fork': GitFork,
   'grid-3x3': Grid3x3,
-  info: Info,
-  chart: LineChart,
-  list: List,
-  minus: Minus,
+  'info': Info,
+  'chart': LineChart,
+  'list': List,
+  'minus': Minus,
   'mountain-snow': MountainSnow,
   'move-diagonal': MoveDiagonal,
   'move-up-right': MoveUpRight,
-  rainbow: Rainbow,
+  'rainbow': Rainbow,
   'rectangle-horizontal': RectangleHorizontal,
-  route: Route,
-  ruler: Ruler,
+  'route': Route,
+  'ruler': Ruler,
   'separator-vertical': SeparatorVertical,
-  shapes: Shapes,
-  spline: Spline,
+  'shapes': Shapes,
+  'spline': Spline,
   'spline-pointer': SplinePointer,
-  square: Square,
+  'square': Square,
   'tally-5': Tally5,
-  target: Target,
+  'target': Target,
   'trending-up': TrendingUp,
   'trending-up-down': TrendingUpDown,
-  triangle: Triangle,
+  'triangle': Triangle,
   'triangle-right': TriangleRight,
-  type: Type,
+  'type': Type,
   'vector-square': VectorSquare,
-  wallet: Wallet,
-  waves: Waves,
-  workflow: Workflow,
+  'wallet': Wallet,
+  'waves': Waves,
+  'workflow': Workflow,
 };
 
 /**

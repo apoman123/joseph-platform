@@ -1,6 +1,13 @@
 /**
+ * @license
+ * Copyright 2026 Joseph Terminal contributors
+ * SPDX-License-Identifier: MIT
+ */
+
+/**
  * @fileoverview Component tests for the alerts feature.
  */
+
 import type {Signal} from '@joseph/contracts';
 import {act, screen, waitFor, within} from '@testing-library/react';
 import userEvent from '@testing-library/user-event';

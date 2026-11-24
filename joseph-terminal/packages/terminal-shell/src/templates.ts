@@ -1,9 +1,16 @@
 /**
+ * @license
+ * Copyright 2026 Joseph Terminal contributors
+ * SPDX-License-Identifier: MIT
+ */
+
+/**
  * @fileoverview Chart templates: named chart presentations (style, scale,
  * volume, indicator layers with their inputs and colors, separators) that
  * can be applied to any chart. Templates never carry an instrument, so
  * applying one cannot move a chart to another venue.
  */
+
 import type {ChartState} from '@joseph/contracts';
 import type {WorkspaceStorage} from './persistence';
 import type {ChartPresentation} from './workspace';

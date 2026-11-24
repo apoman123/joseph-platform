@@ -1,6 +1,13 @@
 /**
+ * @license
+ * Copyright 2026 Joseph Terminal contributors
+ * SPDX-License-Identifier: MIT
+ */
+
+/**
  * @fileoverview Tests for the zone box tool.
  */
+
 import {describe, expect, it} from 'vitest';
 import {
   TRANSFORM,
@@ -16,7 +23,8 @@ describe('zone box', () => {
     {time_ms: 600_000, price: '160'},
     {time_ms: 1_200_000, price: '150.5'},
   ]);
-  it('has a valid manifest', () => expect(manifestProblems(tool)).toEqual([]));
+  it('has a valid manifest', () =>
+    void expect(manifestProblems(tool)).toEqual([]));
   it('extends right by default and labels the exact midpoint', () => {
     expect(midPrice('160', '150.5')).toBe('155.25');
     expect(texts(renderOps(tool, doc))).toEqual(['Zone · 50% 155.2']);

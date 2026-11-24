@@ -1,4 +1,10 @@
 /**
+ * @license
+ * Copyright 2026 Joseph Terminal contributors
+ * SPDX-License-Identifier: MIT
+ */
+
+/**
  * @fileoverview Bar replay model (pure).
  *
  * Replay hides every bar after a cursor and steps forward one closed bar at
@@ -6,6 +12,7 @@
  * the cursor bar), so nothing from the future is shown. While a chart is in
  * replay its provenance is REPLAY and trading from it is disabled.
  */
+
 import {
   timeframeEnd,
   type BarCalendar,

@@ -1,7 +1,14 @@
 /**
+ * @license
+ * Copyright 2026 Joseph Terminal contributors
+ * SPDX-License-Identifier: MIT
+ */
+
+/**
  * @fileoverview Consumer-driven contract tests: validates the shared
  * fixtures with ajv (the Python suite validates the same files).
  */
+
 import {readFileSync, readdirSync} from 'node:fs';
 import {join} from 'node:path';
 import Ajv2020 from 'ajv/dist/2020';

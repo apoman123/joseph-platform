@@ -1,7 +1,14 @@
 /**
+ * @license
+ * Copyright 2026 Joseph Terminal contributors
+ * SPDX-License-Identifier: MIT
+ */
+
+/**
  * @fileoverview Editor state for the strategy feature: the working
  * definition, server validation, saved versions and activation actions.
  */
+
 import {
   ApiError,
   type ActivateRequest,
@@ -126,7 +133,7 @@ export function createStrategyEditor(ctx: WebFeatureContext): StrategyEditor {
     message: null,
   });
   const patch = (update: Partial<StrategyEditorState>) =>
-    state.update(current => ({...current, ...update}));
+    void state.update(current => ({...current, ...update}));
   const isDirty = (def: StrategyDefinition, versions: StrategyVersion[]) => {
     const latest = versions[0];
     return !latest || canonical(latest.definition) !== canonical(def);

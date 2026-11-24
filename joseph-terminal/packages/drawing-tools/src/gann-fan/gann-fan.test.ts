@@ -1,6 +1,13 @@
 /**
+ * @license
+ * Copyright 2026 Joseph Terminal contributors
+ * SPDX-License-Identifier: MIT
+ */
+
+/**
  * @fileoverview Tests for the Gann fan tool.
  */
+
 import {describe, expect, it} from 'vitest';
 import {
   TRANSFORM,
@@ -18,7 +25,8 @@ describe('gann-fan', () => {
     {time_ms: 600_000, price: '120'},
   ]);
 
-  it('has a valid manifest', () => expect(manifestProblems(tool)).toEqual([]));
+  it('has a valid manifest', () =>
+    void expect(manifestProblems(tool)).toEqual([]));
 
   it('builds nine rays with 1×1 through B, clipped to the plot', () => {
     const rays = gannFanRays({x: 0, y: 500}, {x: 100, y: 400}, 1000, 500);

@@ -1,7 +1,14 @@
 /**
+ * @license
+ * Copyright 2026 Joseph Terminal contributors
+ * SPDX-License-Identifier: MIT
+ */
+
+/**
  * @fileoverview Drawing document helpers over the contract
  * `DrawingDocument`. Anchors are time/price (decimal strings), never pixels.
  */
+
 import {
   Decimal,
   type DrawingAnchor,

@@ -1,4 +1,10 @@
 /**
+ * @license
+ * Copyright 2026 Joseph Terminal contributors
+ * SPDX-License-Identifier: MIT
+ */
+
+/**
  * @fileoverview Engine series of engine-backed drawings (anchored VWAP,
  * regression channel).
  *
@@ -7,6 +13,7 @@
  * host fetches it (`DrawingSeriesSync`) and the tool renders the returned
  * values. Mapping an anchor time to its bar is pure geometry.
  */
+
 import {
   CONTINUOUS_CALENDAR,
   Decimal,

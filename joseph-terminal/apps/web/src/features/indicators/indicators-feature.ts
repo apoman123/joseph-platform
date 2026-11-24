@@ -1,7 +1,14 @@
 /**
+ * @license
+ * Copyright 2026 Joseph Terminal contributors
+ * SPDX-License-Identifier: MIT
+ */
+
+/**
  * @fileoverview Indicator layers feature: fetches backend AOIs/events per
  * chart and publishes one overlay layer per indicator plugin.
  */
+
 import type {OverlayLayer} from '@joseph/chart-core';
 import type {AoiList, ChartState, SeriesQuery} from '@joseph/contracts';
 import type {ReadableStore} from '@joseph/feature-registry';
@@ -87,7 +94,7 @@ export function indicatorsFeature(runtime: TerminalRuntime): WebFeature {
       const settings = createStore<VizSettings>(
         ctx.settings.read(DEFAULT_VIZ_SETTINGS)
       );
-      settings.subscribe(value => ctx.settings.write(value));
+      settings.subscribe(value => void ctx.settings.write(value));
       const cache = new Map<string, ReadableStore<AoiList | null>>();
       /**
        * Shared AOI source per series, point-in-time and input overrides.
@@ -147,8 +154,9 @@ export function indicatorsFeature(runtime: TerminalRuntime): WebFeature {
               if (
                 envelope.type === 'aoi.updated' ||
                 envelope.type === 'snapshot_required'
-              )
+              ) {
                 load();
+              }
             }
           );
           return () => {
@@ -224,7 +232,7 @@ export function indicatorsFeature(runtime: TerminalRuntime): WebFeature {
       ctx.commands.register({
         id: 'indicators.toggle-ended',
         title: 'Show or hide ended zones (invalidated, swept, expired)',
-        run: () => settings.update(s => ({...s, showEnded: !s.showEnded})),
+        run: () => void settings.update(s => ({...s, showEnded: !s.showEnded})),
       });
       for (const [pluginId, name] of Object.entries(PLUGIN_NAMES)) {
         ctx.commands.register({
@@ -246,7 +254,7 @@ export function indicatorsFeature(runtime: TerminalRuntime): WebFeature {
           },
         });
       }
-      return () => cache.clear();
+      return () => void cache.clear();
     },
   };
 }

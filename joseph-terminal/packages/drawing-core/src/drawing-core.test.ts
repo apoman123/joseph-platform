@@ -1,7 +1,14 @@
 /**
+ * @license
+ * Copyright 2026 Joseph Terminal contributors
+ * SPDX-License-Identifier: MIT
+ */
+
+/**
  * @fileoverview Tests for drawing documents, history, geometry, snapping,
  * migrations, persistence and the interaction controller.
  */
+
 import type {DrawingDocument} from '@joseph/contracts';
 import {describe, expect, it, vi} from 'vitest';
 import {DrawingController} from './controller';
@@ -41,7 +48,7 @@ class TestSurface implements DrawingSurface {
   interactive = true;
   layers: SurfaceCanvasLayer[] = [];
   handlers: {
-    [K in keyof SurfaceEventMap]?: ((e: SurfaceEventMap[K]) => void)[];
+    [K in keyof SurfaceEventMap]?: Array<(e: SurfaceEventMap[K]) => void>;
   } = {};
 
   /**
@@ -54,9 +61,9 @@ class TestSurface implements DrawingSurface {
     event: E,
     handler: (payload: SurfaceEventMap[E]) => void
   ): () => void {
-    const list = (this.handlers[event] ??= []) as ((
-      e: SurfaceEventMap[E]
-    ) => void)[];
+    const list = (this.handlers[event] ??= []) as Array<
+      (e: SurfaceEventMap[E]) => void
+    >;
     list.push(handler);
     return () => {
       list.splice(list.indexOf(handler), 1);
@@ -120,7 +127,7 @@ class TestSurface implements DrawingSurface {
       },
     };
     for (const handler of [...(this.handlers[kind] ?? [])]) {
-      (handler as (e: SurfacePointerEvent) => void)(event);
+      handler(event);
     }
     return event;
   }
@@ -143,11 +150,12 @@ const SEGMENT_TOOL: ToolPlugin = {
   }),
   render: (ctx, doc, transform) => {
     ctx.beginPath();
-    for (const a of doc.anchors)
+    for (const a of doc.anchors) {
       ctx.lineTo(
         transform.timeToX(a.time_ms) ?? 0,
         transform.priceToY(Number(a.price)) ?? 0
       );
+    }
     ctx.stroke();
   },
   hitTest: (doc, transform, point, tolerance) => {
@@ -478,13 +486,16 @@ describe('DrawingController', () => {
     const store = new DrawingStore({drawings: [orphan], opaque: []});
     const {surface} = setup(store);
     const texts: string[] = [];
-    const ctx = new Proxy({} as Record<string, unknown>, {
-      get: (_t, prop: string) =>
-        prop === 'fillText'
-          ? (text: string) => texts.push(text)
-          : () => undefined,
-      set: () => true,
-    }) as unknown as CanvasRenderingContext2D;
+    const ctx = new Proxy(
+      {},
+      {
+        get: (_t, prop: string) =>
+          prop === 'fillText'
+            ? (text: string) => texts.push(text)
+            : () => undefined,
+        set: () => true,
+      }
+    ) as unknown as CanvasRenderingContext2D;
     surface.layers[0]?.draw(ctx, TRANSFORM);
     expect(texts).toEqual(['Unsupported drawing (removed-tool)']);
     surface.fire('pointerDown', 0, 250);

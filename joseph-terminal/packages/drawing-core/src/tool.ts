@@ -1,6 +1,13 @@
 /**
+ * @license
+ * Copyright 2026 Joseph Terminal contributors
+ * SPDX-License-Identifier: MIT
+ */
+
+/**
  * @fileoverview Drawing tool plugin interface, registry and paint helpers.
  */
+
 import type {
   BarCalendar,
   DrawingAnchor,
@@ -127,7 +134,7 @@ export interface ToolChoiceInput {
   /** Value when the prop is missing or not one of the choices. */
   defaultValue: string;
   /** Allowed values with their labels. */
-  choices: readonly {value: string; label: string}[];
+  choices: ReadonlyArray<{value: string; label: string}>;
 }
 
 /**
@@ -357,7 +364,9 @@ export class ToolRegistry {
 
   /** Notifies listeners. */
   private notify(): void {
-    for (const listener of [...this.listeners]) listener();
+    for (const listener of [...this.listeners]) {
+      listener();
+    }
   }
 }
 
@@ -563,7 +572,9 @@ export function strokePath(
 ): void {
   ctx.beginPath();
   points.forEach((point, i) =>
-    i === 0 ? ctx.moveTo(point.x, point.y) : ctx.lineTo(point.x, point.y)
+    i === 0
+      ? void ctx.moveTo(point.x, point.y)
+      : void ctx.lineTo(point.x, point.y)
   );
   ctx.stroke();
 }

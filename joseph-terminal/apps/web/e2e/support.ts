@@ -1,6 +1,13 @@
 /**
+ * @license
+ * Copyright 2026 Joseph Terminal contributors
+ * SPDX-License-Identifier: MIT
+ */
+
+/**
  * @fileoverview Shared helpers for terminal system tests.
  */
+
 import {expect, type Locator, type Page} from '@playwright/test';
 
 /** Storage key of BTC drawings in the default workspace. */
@@ -82,9 +89,9 @@ export async function savedTools(
   return page.evaluate(storageKey => {
     const raw = localStorage.getItem(storageKey);
     if (!raw) return [];
-    return (JSON.parse(raw) as {drawings: {tool_id: string}[]}).drawings.map(
-      d => d.tool_id
-    );
+    return (
+      JSON.parse(raw) as {drawings: Array<{tool_id: string}>}
+    ).drawings.map(d => d.tool_id);
   }, key);
 }
 

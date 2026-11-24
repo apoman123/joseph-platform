@@ -1,10 +1,17 @@
 /**
+ * @license
+ * Copyright 2026 Joseph Terminal contributors
+ * SPDX-License-Identifier: MIT
+ */
+
+/**
  * @fileoverview Component tests for the equity order ticket (routing by
  * `tradable_venues`, TWSE board and intraday odd lots, tick ladder, price
  * limits, time in force and order types from the account's capabilities,
  * IBKR outside-RTH), the rate no-ticket rule, arming LIVE and the LIVE
  * confirmation, and the Accounts tab.
  */
+
 import {
   DEMO_IBKR_ACCOUNT_ID,
   DEMO_LIVE_REHEARSAL_ACCOUNT_ID,
@@ -89,7 +96,7 @@ async function renderOn(
  * Texts of the time-in-force options.
  * @return Option texts.
  */
-function tifOptions(): (string | null)[] {
+function tifOptions(): Array<string | null> {
   const tif = screen.getByRole('combobox', {name: 'Time in force'});
   return within(tif)
     .getAllByRole('option')
@@ -313,18 +320,20 @@ describe('live trading', () => {
       })
     );
     await user.click(send);
-    await waitFor(async () =>
-      expect(
-        (await broker.listOrders(DEMO_LIVE_REHEARSAL_ACCOUNT_ID)).orders
-      ).toHaveLength(1)
+    await waitFor(
+      async () =>
+        void expect(
+          (await broker.listOrders(DEMO_LIVE_REHEARSAL_ACCOUNT_ID)).orders
+        ).toHaveLength(1)
     );
     const {orders} = await broker.listOrders(DEMO_LIVE_REHEARSAL_ACCOUNT_ID);
     expect(orders[0]).toMatchObject({mode: 'LIVE', time_in_force: 'DAY'});
     await user.click(screen.getByRole('button', {name: 'New order'}));
     await user.click(screen.getByRole('button', {name: 'Disarm'}));
     expect(screen.getByTestId('mode-badge')).toHaveTextContent('Paper');
-    await waitFor(() =>
-      expect(revoke).toHaveBeenCalledWith(DEMO_LIVE_REHEARSAL_ACCOUNT_ID)
+    await waitFor(
+      () =>
+        void expect(revoke).toHaveBeenCalledWith(DEMO_LIVE_REHEARSAL_ACCOUNT_ID)
     );
     expect(
       (await broker.getAccountSummary(DEMO_LIVE_REHEARSAL_ACCOUNT_ID))

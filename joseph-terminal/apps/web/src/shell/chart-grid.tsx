@@ -1,6 +1,13 @@
 /**
+ * @license
+ * Copyright 2026 Joseph Terminal contributors
+ * SPDX-License-Identifier: MIT
+ */
+
+/**
  * @fileoverview Chart grid for 1/2/4/8 layouts plus the chart context menu.
  */
+
 'use client';
 import {
   gridSizesFor,
@@ -49,7 +56,7 @@ export function ChartContextMenu({
       role="menu"
       aria-label="Chart actions"
       style={{left: menu.x, top: menu.y + 40}}
-      onPointerDown={event => event.stopPropagation()}
+      onPointerDown={event => void event.stopPropagation()}
     >
       <p className="chart-menu__price j-tabular">
         {menu.price === null
@@ -61,10 +68,11 @@ export function ChartContextMenu({
         role="menuitem"
         className="j-menu__item"
         onClick={() => {
-          if (menu.price !== null)
+          if (menu.price !== null) {
             void navigator.clipboard
               ?.writeText(String(menu.price))
               .catch(() => undefined);
+          }
           onClose();
         }}
       >
@@ -227,7 +235,7 @@ export function ChartGrid(): ReactElement {
           className="chart-grid__splitter"
           style={{left: `calc(${at * 100}% - 3px)`}}
           testId={`grid-splitter-col-${index}`}
-          onDrag={delta => resize('cols', index, delta)}
+          onDrag={delta => void resize('cols', index, delta)}
           onCommit={finish}
         />
       ))}
@@ -242,7 +250,7 @@ export function ChartGrid(): ReactElement {
           className="chart-grid__splitter"
           style={{top: `calc(${at * 100}% - 3px)`}}
           testId={`grid-splitter-row-${index}`}
-          onDrag={delta => resize('rows', index, delta)}
+          onDrag={delta => void resize('rows', index, delta)}
           onCommit={finish}
         />
       ))}
@@ -266,7 +274,7 @@ export function ChartGrid(): ReactElement {
             <ChartContextMenu
               menu={menu.menu}
               runtime={runtime}
-              onClose={() => setMenu(null)}
+              onClose={() => void setMenu(null)}
             />
           )}
         </div>

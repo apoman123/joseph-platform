@@ -1,6 +1,13 @@
 /**
+ * @license
+ * Copyright 2026 Joseph Terminal contributors
+ * SPDX-License-Identifier: MIT
+ */
+
+/**
  * @fileoverview Manifest helper for shell-owned features.
  */
+
 import type {FeatureManifest} from '@joseph/feature-registry';
 import {CONTRACT_VERSION} from '../../composition/runtime';
 

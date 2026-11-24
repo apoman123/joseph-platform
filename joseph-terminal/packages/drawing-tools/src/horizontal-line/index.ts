@@ -1,6 +1,13 @@
 /**
+ * @license
+ * Copyright 2026 Joseph Terminal contributors
+ * SPDX-License-Identifier: MIT
+ */
+
+/**
  * @fileoverview Horizontal line: one price level across the whole chart.
  */
+
 import {
   anchorPoints,
   applyStroke,

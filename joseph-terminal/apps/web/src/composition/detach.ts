@@ -1,4 +1,10 @@
 /**
+ * @license
+ * Copyright 2026 Joseph Terminal contributors
+ * SPDX-License-Identifier: MIT
+ */
+
+/**
  * @fileoverview Browser wiring of detachable panes.
  *
  * `startMainDetach` runs in the main window: it opens pop-out windows,
@@ -16,6 +22,7 @@
  * Order modes, accounts and trading state never cross windows: each window
  * runs its own provider connection and the same trading guards.
  */
+
 import {
   DETACHED_PANEL_KEY,
   HEARTBEAT_MS,
@@ -164,11 +171,11 @@ export function startMainDetach(
       )
     : null;
   const apply = (event: DetachEvent) =>
-    runtime.detached.update(state => detachReducer(state, event));
+    void runtime.detached.update(state => detachReducer(state, event));
   const send = (msg: PopoutMessage) => bus?.send(msg);
   const titleOf = (key: string) =>
     runtime.detached.get().panes.find(p => p.key === key)?.title ?? 'pane';
-  const disposers: (() => void)[] = [];
+  const disposers: Array<() => void> = [];
 
   // Restore what the saved layout remembers. Pop-outs that survived a reload
   // of this window claim their panes during the probe; the rest turn dormant.
@@ -177,10 +184,10 @@ export function startMainDetach(
   if (remembered.length > 0 && bus) {
     apply({type: 'probe', probing: true});
     const probe = setTimeout(
-      () => apply({type: 'probe', probing: false}),
+      () => void apply({type: 'probe', probing: false}),
       PROBE_MS
     );
-    disposers.push(() => clearTimeout(probe));
+    disposers.push(() => void clearTimeout(probe));
   }
 
   /**
@@ -243,7 +250,9 @@ export function startMainDetach(
     // Acknowledge first, so the workspace broadcasts below carry it.
     applied.set(from, last.seq);
     const before = runtime.workspace.get();
-    for (const entry of todo) runtime.dispatch(entry.action);
+    for (const entry of todo) {
+      runtime.dispatch(entry.action);
+    }
     if (runtime.workspace.get() === before) sendWorkspace();
   };
 
@@ -309,7 +318,9 @@ export function startMainDetach(
       let opened = 0;
       // Browsers allow one window per click unless pop-ups are allowed for
       // the site; try them all so an allowed site restores everything.
-      for (const pane of dormant) if (openWindow(pane)) opened += 1;
+      for (const pane of dormant) {
+        if (openWindow(pane)) opened += 1;
+      }
       const message = restoreMessage(opened, dormant.length);
       if (message) runtime.notifier.notify(message, 'warning');
     },
@@ -320,7 +331,7 @@ export function startMainDetach(
       runtime.commands.register({
         id: RESTORE_POPOUTS_COMMAND,
         title: 'Restore pop-outs',
-        run: () => actions.reopenAll(),
+        run: () => void actions.reopenAll(),
       })
     );
   } catch {
@@ -350,8 +361,9 @@ export function startMainDetach(
             if (
               env.now() - (docked.get(msg.key) ?? -Infinity) <
               DOCKED_QUIET_MS
-            )
+            ) {
               break;
+            }
             apply({
               type: 'seen',
               key: msg.key,
@@ -393,11 +405,12 @@ export function startMainDetach(
     CROSSHAIR_INTERVAL_MS,
     env.now
   );
-  disposers.push(() => crosshair.dispose());
+  disposers.push(() => void crosshair.dispose());
   disposers.push(
     runtime.crosshair.subscribe(value => {
-      if (!relaying && runtime.detached.get().panes.length > 0)
+      if (!relaying && runtime.detached.get().panes.length > 0) {
         crosshair.push(value);
+      }
     })
   );
 
@@ -449,8 +462,8 @@ export function startMainDetach(
   }, CHECK_MS);
   const beat = setInterval(() => send({type: 'main-heartbeat'}), HEARTBEAT_MS);
   disposers.push(
-    () => clearInterval(timer),
-    () => clearInterval(beat)
+    () => void clearInterval(timer),
+    () => void clearInterval(beat)
   );
   // Ask surviving pop-outs (e.g. after this window reloaded) to say hello.
   send({type: 'main-hello'});
@@ -461,7 +474,9 @@ export function startMainDetach(
       send({type: 'main-bye'});
     },
     dispose() {
-      for (const dispose of disposers.splice(0).reverse()) dispose();
+      for (const dispose of disposers.splice(0).reverse()) {
+        dispose();
+      }
       bus?.close();
     },
   };
@@ -561,7 +576,7 @@ export function startPopoutLink(
   const hello = () => send({type: 'popout-hello', ...report()});
   const heartbeat = () => send({type: 'heartbeat', ...report()});
   let relaying = false;
-  const disposers: (() => void)[] = [];
+  const disposers: Array<() => void> = [];
   if (bus) {
     disposers.push(
       bus.on(msg => {
@@ -617,7 +632,7 @@ export function startPopoutLink(
     env.now
   );
   disposers.push(
-    () => crosshair.dispose(),
+    () => void crosshair.dispose(),
     runtime.crosshair.subscribe(value => {
       if (!relaying) crosshair.push(value);
     }),
@@ -636,7 +651,7 @@ export function startPopoutLink(
           : now - mainSeen > MAIN_TIMEOUT_MS;
     if (silent) main.set('lost');
   }, HEARTBEAT_MS);
-  disposers.push(() => clearInterval(beat));
+  disposers.push(() => void clearInterval(beat));
   hello();
   return {
     main,
@@ -654,7 +669,9 @@ export function startPopoutLink(
       send({type: 'closed', key});
     },
     dispose() {
-      for (const dispose of disposers.splice(0).reverse()) dispose();
+      for (const dispose of disposers.splice(0).reverse()) {
+        dispose();
+      }
       bus?.close();
     },
   };

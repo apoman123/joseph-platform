@@ -1,8 +1,15 @@
 /**
+ * @license
+ * Copyright 2026 Joseph Terminal contributors
+ * SPDX-License-Identifier: MIT
+ */
+
+/**
  * @fileoverview Tests for the first-party tool list, plus contract checks
  * every tool must pass: schema-valid documents that survive persistence,
  * undoable edits, locking, visibility and anchor-indexed handles.
  */
+
 import {readFileSync, readdirSync} from 'node:fs';
 import {join} from 'node:path';
 import Ajv2020 from 'ajv/dist/2020';
@@ -53,8 +60,9 @@ function drawingValidator(): (value: unknown) => boolean {
   const ajv = new Ajv2020({strict: false, allErrors: true});
   addFormats(ajv);
   for (const file of readdirSync(dir)) {
-    if (file.endsWith('.schema.json'))
+    if (file.endsWith('.schema.json')) {
       ajv.addSchema(JSON.parse(readFileSync(join(dir, file), 'utf8')));
+    }
   }
   const validate = ajv.getSchema(
     'https://schemas.joseph.local/v1/workspace.schema.json#/$defs/DrawingDocument'
@@ -83,7 +91,9 @@ function anchorsFor(tool: ToolPlugin): DrawingAnchor[] {
 describe('FIRST_PARTY_TOOLS', () => {
   it('registers every tool with a unique id', () => {
     const registry = new ToolRegistry();
-    for (const tool of FIRST_PARTY_TOOLS) registry.register(tool);
+    for (const tool of FIRST_PARTY_TOOLS) {
+      registry.register(tool);
+    }
     expect(registry.list()).toHaveLength(37);
     expect(registry.list().map(t => t.manifest.id)).toEqual(
       expect.arrayContaining([

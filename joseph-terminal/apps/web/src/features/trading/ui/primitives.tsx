@@ -1,9 +1,16 @@
-'use client';
+/**
+ * @license
+ * Copyright 2026 Joseph Terminal contributors
+ * SPDX-License-Identifier: MIT
+ */
+
 /**
  * @fileoverview Small presentational primitives shared by the trading,
  * watchlist, screener, strategy, alerts and portfolio features. They only
  * compose the shared `j-` component classes.
  */
+
+'use client';
 import {
   VENUE_NAMES,
   parseInstrumentId,
@@ -220,7 +227,7 @@ export function ConfirmDialog({
     <div
       className={styles.backdrop}
       role="presentation"
-      onKeyDown={e => e.key === 'Escape' && onCancel()}
+      onKeyDown={e => e.key === 'Escape' && void onCancel()}
     >
       <div
         className="j-dialog"

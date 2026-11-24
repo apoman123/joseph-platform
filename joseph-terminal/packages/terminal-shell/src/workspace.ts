@@ -1,4 +1,10 @@
 /**
+ * @license
+ * Copyright 2026 Joseph Terminal contributors
+ * SPDX-License-Identifier: MIT
+ */
+
+/**
  * @fileoverview Workspace document model and pure reducer.
  *
  * Up to eight chart states are kept; the layout decides how many are shown,
@@ -7,6 +13,7 @@
  * corresponding sync option is on (charts with a link group sync only
  * within that group).
  */
+
 import type {
   ChartState,
   ChartType,
@@ -76,8 +83,9 @@ export function layerStyle(
   chart: ChartState,
   pluginId: string
 ): IndicatorLayerStyle {
-  const style = chart.indicator_layers.find(l => l.plugin_id === pluginId)
-    ?.style as IndicatorLayerStyle | undefined;
+  const style = chart.indicator_layers.find(
+    l => l.plugin_id === pluginId
+  )?.style;
   return style ?? {};
 }
 

@@ -1,9 +1,16 @@
 /**
+ * @license
+ * Copyright 2026 Joseph Terminal contributors
+ * SPDX-License-Identifier: MIT
+ */
+
+/**
  * @fileoverview Component tests for seconds/monthly timeframes (grouped
  * menu, venue availability, typed `5S`/`1M`), the generic `delta_source`
  * input, true-delta rows in the data window and the detached-pane
  * placeholder and re-open banner.
  */
+
 import type {ChartBar} from '@joseph/chart-core';
 import type {VenueStatusList} from '@joseph/contracts';
 import {activeChart, layerSettings} from '@joseph/terminal-shell';
@@ -107,8 +114,9 @@ describe('timeframe menu', () => {
     );
     fireEvent.click(screen.getByRole('button', {name: 'More'}));
     const menu = screen.getByRole('dialog', {name: 'All timeframes'});
-    for (const group of ['Seconds', 'Minutes', 'Hours', 'Days'])
+    for (const group of ['Seconds', 'Minutes', 'Hours', 'Days']) {
       expect(within(menu).getByRole('region', {name: group})).toBeVisible();
+    }
     expect(within(menu).getByTestId('timeframe-1M')).toHaveAttribute(
       'title',
       '1 month'
@@ -193,23 +201,24 @@ describe('delta source input', () => {
         <IndicatorSettingsDialog />
       </RuntimeProvider>
     );
-    act(() =>
-      runtime.indicatorSettings.set({
-        chartId: 'chart-1',
-        pluginId: 'order_flow_pressure',
-      })
+    act(
+      () =>
+        void runtime.indicatorSettings.set({
+          chartId: 'chart-1',
+          pluginId: 'order_flow_pressure',
+        })
     );
     const dialog = await screen.findByTestId('indicator-settings');
     const source = await within(dialog).findByLabelText('Delta source');
     expect(
-      within(source as HTMLElement)
+      within(source)
         .getAllByRole('option')
         .map(o => o.textContent)
     ).toEqual(['auto', 'estimate']);
     fireEvent.change(source, {target: {value: 'estimate'}});
     fireEvent.click(within(dialog).getByTestId('indicator-settings-save'));
-    await waitFor(() =>
-      expect(screen.queryByTestId('indicator-settings')).toBeNull()
+    await waitFor(
+      () => void expect(screen.queryByTestId('indicator-settings')).toBeNull()
     );
     expect(
       layerSettings(activeChart(runtime.workspace.get()), 'order_flow_pressure')

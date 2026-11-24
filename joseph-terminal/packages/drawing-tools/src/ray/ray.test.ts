@@ -1,6 +1,13 @@
 /**
+ * @license
+ * Copyright 2026 Joseph Terminal contributors
+ * SPDX-License-Identifier: MIT
+ */
+
+/**
  * @fileoverview Tests for the ray tool.
  */
+
 import {describe, expect, it} from 'vitest';
 import {
   TRANSFORM,
@@ -18,7 +25,7 @@ const ANCHORS = [
 describe('ray', () => {
   const doc = makeDoc(rayTool, ANCHORS);
   it('has a valid manifest', () =>
-    expect(manifestProblems(rayTool)).toEqual([]));
+    void expect(manifestProblems(rayTool)).toEqual([]));
   it('starts at the first anchor and runs to the right edge', () => {
     const ops = renderOps(rayTool, doc);
     expect(ops.find(o => o.op === 'moveTo')?.args).toEqual([100, 250]);

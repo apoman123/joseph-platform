@@ -1,4 +1,10 @@
 /**
+ * @license
+ * Copyright 2026 Joseph Terminal contributors
+ * SPDX-License-Identifier: MIT
+ */
+
+/**
  * @fileoverview Deterministic synthetic price path for DEMO mode.
  *
  * Price is a pure function of absolute time, so every request, timeframe
@@ -24,6 +30,7 @@
  * classified against quotes (`taker_buy_method: classified`), as on stock
  * exchanges, and the yield carries no volume.
  */
+
 import {
   CONTINUOUS_CALENDAR,
   Decimal,

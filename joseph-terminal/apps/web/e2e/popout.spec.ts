@@ -1,4 +1,10 @@
 /**
+ * @license
+ * Copyright 2026 Joseph Terminal contributors
+ * SPDX-License-Identifier: MIT
+ */
+
+/**
  * @fileoverview System tests of detachable panes in DEMO mode: a chart
  * popped out into its own window follows the main window and docks again
  * when the window closes; pop-outs keep running while the main window
@@ -6,6 +12,7 @@
  * meanwhile reach the reloaded main window); panes remembered by the layout
  * are offered as "Restore pop-outs" after the browser loses its windows.
  */
+
 import {expect, test, type Page} from '@playwright/test';
 import {openTerminal} from './support';
 import {openPanel} from './trading-helpers';
@@ -38,10 +45,12 @@ async function watchRestoreOffers(page: Page): Promise<void> {
     const seen: string[] = [];
     (window as unknown as {restoreOffers: string[]}).restoreOffers = seen;
     new MutationObserver(() => {
-      if (document.querySelector('[data-testid="detached-banner"]'))
+      if (document.querySelector('[data-testid="detached-banner"]')) {
         seen.push('banner');
-      if (document.querySelector('.detached[data-status="dormant"]'))
+      }
+      if (document.querySelector('.detached[data-status="dormant"]')) {
         seen.push('dormant');
+      }
     }).observe(document, {subtree: true, childList: true, attributes: true});
   });
 }
@@ -66,7 +75,9 @@ async function savedTimeframe(page: Page): Promise<string | null> {
   return page.evaluate(() => {
     const raw = localStorage.getItem('joseph.workspace.v1.default');
     const doc = raw
-      ? (JSON.parse(raw) as {charts?: {chart_id: string; timeframe: string}[]})
+      ? (JSON.parse(raw) as {
+          charts?: Array<{chart_id: string; timeframe: string}>;
+        })
       : null;
     return doc?.charts?.find(c => c.chart_id === 'chart-1')?.timeframe ?? null;
   });
@@ -279,7 +290,9 @@ test('restores several pop-outs with one action when pop-ups are allowed', async
   context.on('page', opened => restored.push(opened));
   await banner.getByTestId('reopen-detached').click();
   await expect.poll(() => restored.length).toBe(2);
-  for (const opened of restored) await expectLinked(opened);
+  for (const opened of restored) {
+    await expectLinked(opened);
+  }
   await expect(banner).toHaveCount(0);
   await expect(page.getByTestId('detached-chart:chart-1')).toHaveAttribute(
     'data-status',

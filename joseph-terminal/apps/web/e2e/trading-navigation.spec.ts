@@ -1,7 +1,14 @@
 /**
+ * @license
+ * Copyright 2026 Joseph Terminal contributors
+ * SPDX-License-Identifier: MIT
+ */
+
+/**
  * @fileoverview End-to-end: screener rows and alerts focus exact venue
  * instruments on the chart (DEMO mode).
  */
+
 import {expect, test} from '@playwright/test';
 import {loadTerminal, openPanel, ticket} from './trading-helpers';
 

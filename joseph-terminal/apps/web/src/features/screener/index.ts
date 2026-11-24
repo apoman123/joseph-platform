@@ -1,7 +1,14 @@
 /**
+ * @license
+ * Copyright 2026 Joseph Terminal contributors
+ * SPDX-License-Identifier: MIT
+ */
+
+/**
  * @fileoverview Screener feature: backend qualification results with every
  * gate's observed value, threshold and outcome.
  */
+
 import {createElement} from 'react';
 import type {WebFeature, WebSlotProps} from '../../shell/react-bindings';
 import {ScreenerPanel} from './screener-panel';

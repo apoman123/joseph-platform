@@ -1,7 +1,14 @@
 /**
+ * @license
+ * Copyright 2026 Joseph Terminal contributors
+ * SPDX-License-Identifier: MIT
+ */
+
+/**
  * @fileoverview Instrument identity and timeframe helpers mirroring the
  * Python domain kernel (`joseph.domain.instruments` / `timeframes`).
  */
+
 import type {
   InstrumentId,
   MarketType,

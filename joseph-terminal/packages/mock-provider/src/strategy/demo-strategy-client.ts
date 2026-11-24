@@ -1,8 +1,15 @@
 /**
+ * @license
+ * Copyright 2026 Joseph Terminal contributors
+ * SPDX-License-Identifier: MIT
+ */
+
+/**
  * @fileoverview DEMO implementation of `StrategyClient`: in-memory immutable
  * versions, activation rules (AUTO_LIVE is always rejected), a canned DEMO
  * backtest report and fixture signals.
  */
+
 import {
   ApiError,
   type AlertSubscription,
@@ -56,7 +63,7 @@ function apiError(
   status: number,
   code: ErrorCode,
   message: string,
-  fieldErrors: {field: string; message: string}[] = []
+  fieldErrors: Array<{field: string; message: string}> = []
 ): ApiError {
   return new ApiError(status, {
     code,
@@ -133,7 +140,9 @@ export class DemoStrategyClient implements StrategyClient {
    */
   emitSignal(signal: Signal): void {
     this.signals.unshift(signal);
-    for (const listener of [...this.signalListeners]) listener(signal);
+    for (const listener of [...this.signalListeners]) {
+      listener(signal);
+    }
   }
 
   /**
@@ -293,8 +302,9 @@ export class DemoStrategyClient implements StrategyClient {
     }
     const list = this.versions.get(strategyId);
     const index = list?.findIndex(v => v.version === request.version) ?? -1;
-    if (!list || index < 0)
+    if (!list || index < 0) {
       throw apiError(404, 'NOT_FOUND', 'Version not found.');
+    }
     for (let i = 0; i < list.length; i += 1) {
       const current = list[i];
       if (
@@ -329,8 +339,9 @@ export class DemoStrategyClient implements StrategyClient {
     const list = this.versions.get(strategyId);
     const index = list?.findIndex(v => v.state === 'ACTIVE') ?? -1;
     const active = list?.[index];
-    if (!list || !active)
+    if (!list || !active) {
       throw apiError(409, 'CONFLICT', 'No active version to pause.');
+    }
     const paused: StrategyVersion = {...active, state: 'PAUSED'};
     list[index] = paused;
     return paused;
@@ -348,18 +359,20 @@ export class DemoStrategyClient implements StrategyClient {
   ): Promise<BacktestReport> {
     const list = this.versions.get(strategyId);
     const version = list?.find(v => v.version === request.version);
-    if (!version)
+    if (!version) {
       throw apiError(
         404,
         'NOT_FOUND',
         'Save the strategy before running a backtest.'
       );
-    if (request.to_ms <= request.from_ms)
+    }
+    if (request.to_ms <= request.from_ms) {
       throw apiError(
         422,
         'VALIDATION_FAILED',
         'The end must be after the start.'
       );
+    }
     this.backtests += 1;
     const timeframe = version.definition.signal_timeframe;
     const bar = TIMEFRAME_MS[timeframe];

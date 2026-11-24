@@ -1,6 +1,13 @@
 /**
+ * @license
+ * Copyright 2026 Joseph Terminal contributors
+ * SPDX-License-Identifier: MIT
+ */
+
+/**
  * @fileoverview Tests for the measure tool.
  */
+
 import {
   createBarCalendar,
   dayNumberOf,
@@ -17,7 +24,8 @@ import {
 import {measure, priceRangeTool as tool} from '.';
 
 describe('price-range', () => {
-  it('has a valid manifest', () => expect(manifestProblems(tool)).toEqual([]));
+  it('has a valid manifest', () =>
+    void expect(manifestProblems(tool)).toEqual([]));
   it('measures price, percent, bars and duration', () => {
     expect(
       measure(

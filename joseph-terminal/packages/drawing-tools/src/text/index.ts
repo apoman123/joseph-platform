@@ -1,6 +1,13 @@
 /**
+ * @license
+ * Copyright 2026 Joseph Terminal contributors
+ * SPDX-License-Identifier: MIT
+ */
+
+/**
  * @fileoverview Anchored text note.
  */
+
 import {
   anchorPoints,
   drawHandles,
@@ -53,8 +60,8 @@ export const textTool: ToolPlugin = {
     ctx.font = `${size}px ${state.palette.fontFamily}`;
     ctx.fillStyle = doc.style.color;
     ctx.textBaseline = 'top';
-    noteLines(doc.text ?? '').forEach((line, i) =>
-      ctx.fillText(line, p.x, p.y + i * (size + 3))
+    noteLines(doc.text ?? '').forEach(
+      (line, i) => void ctx.fillText(line, p.x, p.y + i * (size + 3))
     );
     drawHandles(ctx, [p], state);
   },

@@ -1,4 +1,10 @@
 /**
+ * @license
+ * Copyright 2026 Joseph Terminal contributors
+ * SPDX-License-Identifier: MIT
+ */
+
+/**
  * @fileoverview Elliott impulse wave (1-2-3-4-5).
  *
  * - Anchors: six, placed in order: the origin (0) and the ends of waves
@@ -11,6 +17,7 @@
  * - Handles: the six anchors (handle index = anchor index).
  * - Style options: color, width, dash and labels. No fill.
  */
+
 import {createPatternTool, type PatternSpec} from '@joseph/drawing-core';
 
 /** Pattern geometry: wave labels. */

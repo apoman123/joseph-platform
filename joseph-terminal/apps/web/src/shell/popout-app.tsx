@@ -1,4 +1,10 @@
 /**
+ * @license
+ * Copyright 2026 Joseph Terminal contributors
+ * SPDX-License-Identifier: MIT
+ */
+
+/**
  * @fileoverview Pop-out window (`/popout?pane=…`): one chart pane or one
  * dock panel in its own browser window.
  *
@@ -12,6 +18,7 @@
  * keeps running while the main window reloads and reconnects to the new
  * main window by itself; changes made here meanwhile are sent to it then.
  */
+
 'use client';
 import {
   POPOUT_CHANNEL,
@@ -54,9 +61,9 @@ import {TimeframeControl} from './timeframe-menu';
 /** Titles of detachable panels. */
 const PANEL_TITLES: Readonly<Record<string, string>> = {
   'market-info': 'Market',
-  watchlist: 'Watchlist',
-  screener: 'Screener',
-  alerts: 'Alerts',
+  'watchlist': 'Watchlist',
+  'screener': 'Screener',
+  'alerts': 'Alerts',
 };
 
 /** Link status wording. */
@@ -154,8 +161,8 @@ function PopoutWindow({target}: {target: PopoutTarget}): ReactElement {
         ref: target.ref,
         title: () => paneTitle(runtime, target),
         hidden: () => document.visibilityState === 'hidden',
-        close: () => window.close(),
-        focus: () => window.focus(),
+        close: () => void window.close(),
+        focus: () => void window.focus(),
         geometry: () =>
           parseGeometry({
             left: window.screenX,
@@ -214,7 +221,7 @@ function PopoutWindow({target}: {target: PopoutTarget}): ReactElement {
               {chartExists && chartId ? (
                 <PopoutChart chartId={chartId} />
               ) : (
-                <MissingPane onClose={() => window.close()} />
+                <MissingPane onClose={() => void window.close()} />
               )}
             </main>
             <SlotTabs
@@ -273,7 +280,7 @@ function PopoutChart({chartId}: {chartId: string}): ReactElement | null {
   const chart = workspace.charts.find(c => c.chart_id === chartId);
   const [menu, setMenu] = useState<PaneMenu | null>(null);
   const onMenu = useCallback(
-    (_id: string, next: PaneMenu | null) => setMenu(next),
+    (_id: string, next: PaneMenu | null) => void setMenu(next),
     []
   );
   useEffect(() => {
@@ -297,7 +304,7 @@ function PopoutChart({chartId}: {chartId: string}): ReactElement | null {
         <ChartContextMenu
           menu={menu}
           runtime={runtime}
-          onClose={() => setMenu(null)}
+          onClose={() => void setMenu(null)}
         />
       )}
     </div>
@@ -356,7 +363,7 @@ function PopoutBar({
           <InstrumentSelector
             instrumentId={chart.instrument_id}
             onSelect={instrumentId =>
-              runtime.dispatch({
+              void runtime.dispatch({
                 type: 'setInstrument',
                 chartId: chart.chart_id,
                 instrumentId,
@@ -370,7 +377,7 @@ function PopoutBar({
             aria-label="Bar replay"
             aria-pressed={replayStates[chart.chart_id] !== undefined}
             title="Bar replay (Alt + Shift + R)"
-            onClick={() => run('chart.replay.toggle')}
+            onClick={() => void run('chart.replay.toggle')}
           >
             <History size={16} aria-hidden="true" />
           </button>
@@ -401,7 +408,7 @@ function PopoutBar({
             ? 'Switch to daylight theme'
             : 'Switch to night theme'
         }
-        onClick={() => run('theme.toggle')}
+        onClick={() => void run('theme.toggle')}
       >
         {theme === 'dark' ? (
           <Sun size={16} aria-hidden="true" />

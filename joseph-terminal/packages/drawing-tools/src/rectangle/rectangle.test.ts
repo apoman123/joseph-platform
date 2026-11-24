@@ -1,6 +1,13 @@
 /**
+ * @license
+ * Copyright 2026 Joseph Terminal contributors
+ * SPDX-License-Identifier: MIT
+ */
+
+/**
  * @fileoverview Tests for the rectangle tool.
  */
+
 import {describe, expect, it} from 'vitest';
 import {
   TRANSFORM,
@@ -15,7 +22,8 @@ describe('rectangle', () => {
     {time_ms: 600_000, price: '160'},
     {time_ms: 1_200_000, price: '150'},
   ]);
-  it('has a valid manifest', () => expect(manifestProblems(tool)).toEqual([]));
+  it('has a valid manifest', () =>
+    void expect(manifestProblems(tool)).toEqual([]));
   it('fills and strokes the normalized rectangle', () => {
     const ops = renderOps(tool, doc);
     expect(ops.find(o => o.op === 'fillRect')?.args).toEqual([

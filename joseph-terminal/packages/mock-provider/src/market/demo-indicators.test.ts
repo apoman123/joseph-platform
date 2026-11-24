@@ -1,8 +1,15 @@
 /**
+ * @license
+ * Copyright 2026 Joseph Terminal contributors
+ * SPDX-License-Identifier: MIT
+ */
+
+/**
  * @fileoverview Tests for DEMO indicator descriptors, market-structure
  * fixtures and point-in-time (replay) AOI queries, validated against the
  * contract schemas.
  */
+
 import {readFileSync, readdirSync} from 'node:fs';
 import {join} from 'node:path';
 import Ajv2020 from 'ajv/dist/2020';
@@ -25,8 +32,9 @@ function validator(def: string) {
   const ajv = new Ajv2020({strict: false, allErrors: true});
   addFormats(ajv);
   for (const file of readdirSync(SCHEMA_DIR)) {
-    if (file.endsWith('.schema.json'))
+    if (file.endsWith('.schema.json')) {
       ajv.addSchema(JSON.parse(readFileSync(join(SCHEMA_DIR, file), 'utf8')));
+    }
   }
   const validate = ajv.getSchema(`${BASE}indicators.schema.json#/$defs/${def}`);
   if (!validate) throw new Error(`missing ${def}`);

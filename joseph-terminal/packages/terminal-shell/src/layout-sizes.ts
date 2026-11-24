@@ -1,8 +1,15 @@
 /**
+ * @license
+ * Copyright 2026 Joseph Terminal contributors
+ * SPDX-License-Identifier: MIT
+ */
+
+/**
  * @fileoverview Resizable layout geometry (pure): chart-grid track sizes for
  * the multi-chart splitters and clamped dock sizes for the side and bottom
  * panels.
  */
+
 import type {LayoutId} from '@joseph/contracts';
 
 /** Track sizes of a chart grid as fractions that sum to 1. */

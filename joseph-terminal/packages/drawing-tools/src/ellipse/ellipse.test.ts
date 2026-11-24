@@ -1,6 +1,13 @@
 /**
+ * @license
+ * Copyright 2026 Joseph Terminal contributors
+ * SPDX-License-Identifier: MIT
+ */
+
+/**
  * @fileoverview Tests for the ellipse tool.
  */
+
 import {describe, expect, it} from 'vitest';
 import {
   TRANSFORM,
@@ -23,7 +30,8 @@ describe('ellipse', () => {
   ]);
   const unfilled = {...doc, style: {...doc.style, fill_color: null}};
 
-  it('has a valid manifest', () => expect(manifestProblems(tool)).toEqual([]));
+  it('has a valid manifest', () =>
+    void expect(manifestProblems(tool)).toEqual([]));
 
   it('inscribes the ellipse in the anchor box', () => {
     const e = ellipseGeometry({x: 200, y: 250}, {x: 100, y: 200});

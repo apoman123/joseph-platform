@@ -1,6 +1,13 @@
 /**
+ * @license
+ * Copyright 2026 Joseph Terminal contributors
+ * SPDX-License-Identifier: MIT
+ */
+
+/**
  * @fileoverview Tests for the arc tool.
  */
+
 import {distance} from '@joseph/drawing-core';
 import {describe, expect, it} from 'vitest';
 import {TRANSFORM, makeDoc, manifestProblems} from '../testing/harness';

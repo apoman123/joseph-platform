@@ -1,4 +1,10 @@
 /**
+ * @license
+ * Copyright 2026 Joseph Terminal contributors
+ * SPDX-License-Identifier: MIT
+ */
+
+/**
  * @fileoverview DEMO engine series for the engine-backed drawing tools:
  * `anchored_vwap` and `regression_channel`.
  *
@@ -19,6 +25,7 @@
  * message the terminal shows as is. Bar boundaries follow the instrument's
  * session calendar.
  */
+
 import {
   ApiError,
   CONTINUOUS_CALENDAR,
@@ -322,8 +329,9 @@ export function demoDrawingSeries(
         inWindow &&
         count < candles.length &&
         (candles[count]?.start_ms ?? Infinity) <= t
-      )
+      ) {
         count += 1;
+      }
       // The channel reads the point of its end bar (the first point); later
       // points are filled for the first few hundred bars only, which keeps
       // anchors far back cheap in the browser.

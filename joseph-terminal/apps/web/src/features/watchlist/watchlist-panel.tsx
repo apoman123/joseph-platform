@@ -1,9 +1,16 @@
-'use client';
+/**
+ * @license
+ * Copyright 2026 Joseph Terminal contributors
+ * SPDX-License-Identifier: MIT
+ */
+
 /**
  * @fileoverview Watchlist of exact-venue instruments with last price, 24h
  * change, normalized funding and data freshness. The same symbol on two
  * venues is two rows; nothing is merged across venues.
  */
+
+'use client';
 import {
   formatAge,
   formatCompactUsd,
@@ -62,13 +69,14 @@ function cellContent(
   failed: boolean
 ): ReactNode {
   if (column === 'data') {
-    if (snap)
+    if (snap) {
       return (
         <FeedBadge
           state={snap.stale ? 'STALE' : snap.feed_state}
           detail={snap.stale ? formatAge(snap.data_age_ms) : undefined}
         />
       );
+    }
     return failed ? (
       <FeedBadge state="UNAVAILABLE" />
     ) : (
@@ -103,7 +111,7 @@ type SnapshotMap = Record<string, MarketSnapshot | {error: string}>;
  * Moves an item within a list.
  * @param list List.
  * @param index Index to move.
- * @param delta -1 or +1.
+ * @param delta 1 or +1.
  * @return New list.
  */
 export function moveItem<T>(
@@ -149,7 +157,7 @@ export function WatchlistPanel({
   const selection = useStore(ctx.selection);
   const [query, setQuery] = useState('');
   const [results, setResults] = useState<Instrument[]>([]);
-  const rows = useRef<(HTMLTableRowElement | null)[]>([]);
+  const rows = useRef<Array<HTMLTableRowElement | null>>([]);
   const snapshots = usePolling<SnapshotMap>(
     async () => {
       const settled = await Promise.allSettled(
@@ -177,8 +185,8 @@ export function WatchlistPanel({
     let alive = true;
     const timer = setTimeout(() => {
       ctx.clients.market.listInstruments({q}).then(
-        response => alive && setResults(response.instruments.slice(0, 12)),
-        () => alive && setResults([])
+        response => alive && void setResults(response.instruments.slice(0, 12)),
+        () => alive && void setResults([])
       );
     }, 200);
     return () => {
@@ -209,7 +217,7 @@ export function WatchlistPanel({
   const ordered = sortRows(list, view.sort, snapshotById);
   const columns = WATCH_COLUMNS.filter(c => view.columns.includes(c.id));
   const sortBy = (key: WatchSortKey) =>
-    prefs.update(p => ({...p, sort: nextSort(p.sort, key)}));
+    void prefs.update(p => ({...p, sort: nextSort(p.sort, key)}));
   const ariaSort = (key: WatchSortKey) =>
     view.sort?.key === key
       ? view.sort.dir === 'asc'
@@ -249,7 +257,7 @@ export function WatchlistPanel({
           aria-label="Choose columns"
           aria-expanded={showColumns}
           data-testid="watch-columns"
-          onClick={() => setShowColumns(open => !open)}
+          onClick={() => void setShowColumns(open => !open)}
         >
           <Columns3 size={14} aria-hidden="true" />
         </button>
@@ -259,7 +267,7 @@ export function WatchlistPanel({
           <button
             type="button"
             aria-pressed={!qualifiedSource}
-            onClick={() => prefs.update(p => ({...p, source: 'mine'}))}
+            onClick={() => void prefs.update(p => ({...p, source: 'mine'}))}
           >
             My list
           </button>
@@ -267,7 +275,9 @@ export function WatchlistPanel({
             type="button"
             aria-pressed={qualifiedSource}
             data-testid="watch-source-qualified"
-            onClick={() => prefs.update(p => ({...p, source: 'qualified'}))}
+            onClick={() =>
+              void prefs.update(p => ({...p, source: 'qualified'}))
+            }
           >
             Qualified perpetuals
           </button>
@@ -282,7 +292,7 @@ export function WatchlistPanel({
                   checked={view.columns.includes(column.id)}
                   data-testid={`watch-column-${column.id}`}
                   onChange={event =>
-                    prefs.update(p => {
+                    void prefs.update(p => {
                       const next = event.target.checked
                         ? [...p.columns, column.id]
                         : p.columns.filter(c => c !== column.id);
@@ -316,7 +326,7 @@ export function WatchlistPanel({
             placeholder="Search BTC, ETH, SOL"
             value={query}
             autoComplete="off"
-            onChange={e => setQuery(e.target.value)}
+            onChange={e => void setQuery(e.target.value)}
             onKeyDown={e => {
               const first = results[0];
               if (e.key === 'Enter' && first) add(first.instrument_id);
@@ -338,7 +348,7 @@ export function WatchlistPanel({
                   <button
                     type="button"
                     className="j-menu__item"
-                    onClick={() => add(instrument.instrument_id)}
+                    onClick={() => void add(instrument.instrument_id)}
                   >
                     <InstrumentLabel
                       instrumentId={instrument.instrument_id}
@@ -379,7 +389,7 @@ export function WatchlistPanel({
                   <button
                     type="button"
                     className={styles.sortable}
-                    onClick={() => sortBy('symbol')}
+                    onClick={() => void sortBy('symbol')}
                   >
                     Instrument
                   </button>
@@ -395,7 +405,7 @@ export function WatchlistPanel({
                       type="button"
                       className={styles.sortable}
                       data-testid={`watch-sort-${column.id}`}
-                      onClick={() => sortBy(column.id)}
+                      onClick={() => void sortBy(column.id)}
                     >
                       {column.label}
                       {view.sort?.key === column.id
@@ -425,8 +435,8 @@ export function WatchlistPanel({
                     tabIndex={0}
                     aria-selected={selection.instrumentId === id}
                     className={styles.row}
-                    onClick={() => ctx.select({instrumentId: id})}
-                    onKeyDown={e => onRowKey(e, index, id)}
+                    onClick={() => void ctx.select({instrumentId: id})}
+                    onKeyDown={e => void onRowKey(e, index, id)}
                     data-testid={`watch-row-${id}`}
                   >
                     <td>

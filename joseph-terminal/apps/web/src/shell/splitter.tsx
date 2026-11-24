@@ -1,7 +1,14 @@
 /**
+ * @license
+ * Copyright 2026 Joseph Terminal contributors
+ * SPDX-License-Identifier: MIT
+ */
+
+/**
  * @fileoverview Accessible drag handle (`role="separator"`) for resizing
  * docks and chart-grid tracks with the pointer or the arrow keys.
  */
+
 'use client';
 import {useRef, type CSSProperties, type ReactElement} from 'react';
 

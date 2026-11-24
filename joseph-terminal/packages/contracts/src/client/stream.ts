@@ -1,4 +1,10 @@
 /**
+ * @license
+ * Copyright 2026 Joseph Terminal contributors
+ * SPDX-License-Identifier: MIT
+ */
+
+/**
  * @fileoverview Resumable WebSocket implementation of `StreamClient`.
  *
  * Reconnects with jittered exponential backoff, resubscribes with the last
@@ -6,6 +12,7 @@
  * heartbeats and forwards `snapshot_required` so consumers refetch REST
  * snapshots. It never assumes delivery is complete or ordered.
  */
+
 import type {
   ChannelSpec,
   ClientMessage,
@@ -329,7 +336,9 @@ export class WebSocketStreamClient implements StreamClient {
   private setStatus(status: StreamStatus): void {
     if (this.status === status) return;
     this.status = status;
-    for (const handler of [...this.statusHandlers]) handler(status);
+    for (const handler of [...this.statusHandlers]) {
+      handler(status);
+    }
   }
 }
 
@@ -364,6 +373,8 @@ function matches(envelope: StreamEnvelope, keys: ReadonlySet<string>): boolean {
  */
 function dedupeChannels(channels: readonly ChannelSpec[]): ChannelSpec[] {
   const seen = new Map<string, ChannelSpec>();
-  for (const spec of channels) seen.set(channelKey(spec), spec);
+  for (const spec of channels) {
+    seen.set(channelKey(spec), spec);
+  }
   return [...seen.values()];
 }

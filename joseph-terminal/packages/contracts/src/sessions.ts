@@ -1,4 +1,10 @@
 /**
+ * @license
+ * Copyright 2026 Joseph Terminal contributors
+ * SPDX-License-Identifier: MIT
+ */
+
+/**
  * @fileoverview Session calendars: calendar-aware bar boundaries mirroring
  * the market engine (`joseph.domain.sessions`).
  *
@@ -23,6 +29,7 @@
  * hours elsewhere, so arithmetic never fails while a list is loading; the
  * session cache replaces the calendar once the engine's list arrives.
  */
+
 import type {
   CalendarId,
   InstrumentId,
@@ -530,7 +537,7 @@ export class SessionCalendar implements BarCalendar {
   readonly timeZone: string;
   private readonly listed = new Map<number, Slot>();
   /** Inclusive local day ranges the list describes completely. */
-  private readonly known: [number, number][] = [];
+  private readonly known: Array<[number, number]> = [];
   private readonly byDay = new Map<number, Slot | null>();
   /** Contiguous materialized days `[lo, hi]` and their sessions. */
   private timeline: Slot[] = [];
@@ -554,8 +561,9 @@ export class SessionCalendar implements BarCalendar {
     this.fallback = options.fallback ?? null;
     for (const session of options.sessions ?? []) {
       const day = dayNumberOf(session.day);
-      if (!Number.isFinite(day) || session.close_ms <= session.open_ms)
+      if (!Number.isFinite(day) || session.close_ms <= session.open_ms) {
         continue;
+      }
       this.listed.set(day, {
         day,
         openMs: session.open_ms,
@@ -664,8 +672,9 @@ export class SessionCalendar implements BarCalendar {
       this.hi >= this.lo &&
       tsMs - margin >= this.fromMs &&
       tsMs + margin < this.toMs
-    )
+    ) {
       return;
+    }
     const day = localDayNumber(tsMs, this.timeZone);
     this.materialize(day - MAX_SCAN_DAYS);
     this.materialize(day + MAX_SCAN_DAYS);

@@ -1,8 +1,15 @@
 /**
+ * @license
+ * Copyright 2026 Joseph Terminal contributors
+ * SPDX-License-Identifier: MIT
+ */
+
+/**
  * @fileoverview Session-list cache: chunked, de-duplicated loading from the
  * engine endpoint, merged coverage, prefetch margins, failure back-off,
  * update notifications and the regular-hours fallback.
  */
+
 import {describe, expect, it, vi} from 'vitest';
 import {
   CONTINUOUS_CALENDAR,
@@ -32,12 +39,14 @@ function nyseList(query: SessionQuery): SessionList {
   const last = Math.floor(query.toMs / 86_400_000) + 1;
   for (let day = first; day <= last; day += 1) {
     const weekday = weekdayOf(day);
-    if (weekday === 0 || weekday === 6 || dayText(day) === '2026-11-26')
+    if (weekday === 0 || weekday === 6 || dayText(day) === '2026-11-26') {
       continue;
+    }
     const open = zonedTimeToUtc(day, hours.openMinute, hours.timeZone);
     const close = zonedTimeToUtc(day, hours.closeMinute, hours.timeZone);
-    if (close > query.fromMs && open < query.toMs)
+    if (close > query.fromMs && open < query.toMs) {
       sessions.push({day: dayText(day), open_ms: open, close_ms: close});
+    }
   }
   return {
     calendar: query.calendar,
@@ -127,7 +136,7 @@ describe('session calendar cache', () => {
     const seen: string[] = [];
     cache.subscribe(id => seen.push(id));
     cache.prefetch('USBOND', SESSION_CHUNK_MS * 10, SESSION_CHUNK_MS * 10 + 1);
-    await vi.waitFor(() => expect(seen).toEqual(['USBOND']));
+    await vi.waitFor(() => void expect(seen).toEqual(['USBOND']));
     const query = fetcher.mock.calls[0]?.[0];
     expect(query?.fromMs).toBeLessThan(SESSION_CHUNK_MS * 10);
     off();

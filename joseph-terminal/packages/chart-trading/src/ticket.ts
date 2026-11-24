@@ -1,4 +1,10 @@
 /**
+ * @license
+ * Copyright 2026 Joseph Terminal contributors
+ * SPDX-License-Identifier: MIT
+ */
+
+/**
  * @fileoverview Order ticket state machine and controller.
  *
  * Phases: DRAFT → PREVIEWING → PREVIEWED → CONFIRMING → SUBMITTING →
@@ -7,6 +13,7 @@
  * minted per confirmed action and reused for retries of that same action, so
  * double clicks and network retries can never create a second order.
  */
+
 import {
   ApiError,
   type Decimal,
@@ -396,7 +403,9 @@ export class TicketController {
     const next = ticketReducer(this.state, action);
     if (next === this.state) return;
     this.state = next;
-    for (const listener of [...this.listeners]) listener(next);
+    for (const listener of [...this.listeners]) {
+      listener(next);
+    }
   }
 
   /**

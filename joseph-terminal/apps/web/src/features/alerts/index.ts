@@ -1,7 +1,14 @@
 /**
+ * @license
+ * Copyright 2026 Joseph Terminal contributors
+ * SPDX-License-Identifier: MIT
+ */
+
+/**
  * @fileoverview Alerts feature: strategy signals with filters, local
  * acknowledgment, explanation traces and chart focus.
  */
+
 import type {Signal} from '@joseph/contracts';
 import {createStore, type Disposer} from '@joseph/feature-registry';
 import {createElement} from 'react';
@@ -34,8 +41,9 @@ export function triageFromSettings(settings: AlertSettings): SignalTriage {
   const snoozed: Record<string, number> = {};
   if (settings.snoozed && typeof settings.snoozed === 'object') {
     for (const [id, until] of Object.entries(settings.snoozed)) {
-      if (typeof until === 'number' && Number.isFinite(until))
+      if (typeof until === 'number' && Number.isFinite(until)) {
         snoozed[id] = until;
+      }
     }
   }
   return {
@@ -59,8 +67,9 @@ export function mergeSignals(
   const byId = new Map(current.map(s => [s.signal_id, s]));
   for (const signal of incoming) {
     const existing = byId.get(signal.signal_id);
-    if (!existing || signal.revision >= existing.revision)
+    if (!existing || signal.revision >= existing.revision) {
       byId.set(signal.signal_id, signal);
+    }
   }
   return [...byId.values()].sort(
     (a, b) =>
@@ -99,7 +108,7 @@ export const ALERTS_FEATURE: WebFeature = {
     );
     const triage = createStore<SignalTriage>(triageFromSettings(settings));
     const persist = () =>
-      ctx.settings.write<AlertSettings>({
+      void ctx.settings.write<AlertSettings>({
         acked: [...acked.get()],
         dismissed: [...triage.get().dismissed],
         snoozed: {...triage.get().snoozed},
@@ -122,7 +131,7 @@ export const ALERTS_FEATURE: WebFeature = {
     };
     void load();
     const timer = setInterval(() => void load(), 15_000);
-    disposers.push(() => clearInterval(timer));
+    disposers.push(() => void clearInterval(timer));
     disposers.push(
       ctx.clients.userStream.subscribe([{channel: 'signals'}], envelope => {
         if (
@@ -177,7 +186,9 @@ export const ALERTS_FEATURE: WebFeature = {
       })
     );
     return () => {
-      for (const dispose of disposers.splice(0).reverse()) dispose();
+      for (const dispose of disposers.splice(0).reverse()) {
+        dispose();
+      }
     };
   },
 };

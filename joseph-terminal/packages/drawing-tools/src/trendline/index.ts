@@ -1,7 +1,14 @@
 /**
+ * @license
+ * Copyright 2026 Joseph Terminal contributors
+ * SPDX-License-Identifier: MIT
+ */
+
+/**
  * @fileoverview Trendline between two time/price anchors, optionally
  * extended left and/or right.
  */
+
 import {
   anchorPoints,
   applyStroke,

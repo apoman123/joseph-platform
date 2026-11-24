@@ -1,7 +1,14 @@
 /**
+ * @license
+ * Copyright 2026 Joseph Terminal contributors
+ * SPDX-License-Identifier: MIT
+ */
+
+/**
  * @fileoverview Ray: a line through two anchors that continues to the right
  * edge of the chart.
  */
+
 import {
   anchorPoints,
   applyStroke,

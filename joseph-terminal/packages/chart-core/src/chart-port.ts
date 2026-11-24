@@ -1,10 +1,17 @@
 /**
+ * @license
+ * Copyright 2026 Joseph Terminal contributors
+ * SPDX-License-Identifier: MIT
+ */
+
+/**
  * @fileoverview `ChartPort`: Joseph's own chart abstraction.
  *
  * Only `src/adapters/lwc/` may import `lightweight-charts`. Everything else
  * (features, drawing tools, indicator visualization) talks to this port, so
  * the renderer can be replaced without touching strategy logic or contracts.
  */
+
 import type {
   BarCalendar,
   ChartType,
@@ -270,7 +277,7 @@ export interface CompareSeriesSpec {
   /** Line color (CSS). */
   color: string;
   /** Closes per bar; bars missing on the main series are skipped. */
-  points: readonly {timeMs: number; value: number}[];
+  points: ReadonlyArray<{timeMs: number; value: number}>;
 }
 
 /** Serializable view state for workspace persistence. */

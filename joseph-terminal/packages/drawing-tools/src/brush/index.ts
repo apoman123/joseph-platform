@@ -1,8 +1,15 @@
 /**
+ * @license
+ * Copyright 2026 Joseph Terminal contributors
+ * SPDX-License-Identifier: MIT
+ */
+
+/**
  * @fileoverview Brush: a freehand stroke recorded while the pointer is held
  * down. Points are stored as time/price anchors (at most 64), so the stroke
  * stays attached to the candles on zoom and resize.
  */
+
 import {
   MAX_ANCHORS,
   anchorPoints,

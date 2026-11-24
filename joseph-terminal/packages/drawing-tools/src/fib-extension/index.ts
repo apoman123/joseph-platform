@@ -1,8 +1,15 @@
 /**
+ * @license
+ * Copyright 2026 Joseph Terminal contributors
+ * SPDX-License-Identifier: MIT
+ */
+
+/**
  * @fileoverview Trend-based Fibonacci extension from three anchors A, B, C.
  *
  * Level `r` sits at `C + (B - A) * r`, using exact decimals.
  */
+
 import {Decimal} from '@joseph/contracts';
 import {
   anchorPoints,
@@ -42,7 +49,7 @@ export function extensionPrices(
   c: string,
   levels: readonly string[],
   tickSize: string | null
-): {level: string; price: string}[] {
+): Array<{level: string; price: string}> {
   const leg = Decimal.parse(b).sub(Decimal.parse(a));
   const origin = Decimal.parse(c);
   return levels.map(level => ({
@@ -112,8 +119,9 @@ export const fibExtensionTool: ToolPlugin = {
     for (let i = 0; i + 1 < points.length; i += 1) {
       const from = points[i];
       const to = points[i + 1];
-      if (from && to && distanceToSegment(point, from, to) <= tolerance)
+      if (from && to && distanceToSegment(point, from, to) <= tolerance) {
         return {part: 'body'};
+      }
     }
     return null;
   },

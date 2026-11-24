@@ -1,7 +1,14 @@
 /**
+ * @license
+ * Copyright 2026 Joseph Terminal contributors
+ * SPDX-License-Identifier: MIT
+ */
+
+/**
  * @fileoverview Production dependency license allowlist check, plus a
  * guard that the Lightweight Charts attribution is shipped.
  */
+
 import {execFileSync} from 'node:child_process';
 import {existsSync, readFileSync} from 'node:fs';
 import {join} from 'node:path';
@@ -43,10 +50,12 @@ const EXCEPTIONS = [
 function allowed(expression) {
   const clean = expression.replace(/[()]/g, '').trim();
   if (ALLOWED.has(clean)) return true;
-  if (clean.includes(' OR '))
+  if (clean.includes(' OR ')) {
     return clean.split(' OR ').some(part => allowed(part));
-  if (clean.includes(' AND '))
+  }
+  if (clean.includes(' AND ')) {
     return clean.split(' AND ').every(part => allowed(part));
+  }
   return false;
 }
 
@@ -65,10 +74,11 @@ for (const [license, packages] of Object.entries(byLicense)) {
       console.log(`Exception: ${pkg.name} (${license}): ${exception.reason}`);
       continue;
     }
-    if (!allowed(license))
+    if (!allowed(license)) {
       problems.push(
         `${pkg.name}@${pkg.versions?.join(',') ?? '?'}: ${license}`
       );
+    }
   }
 }
 
@@ -92,7 +102,9 @@ if (
 
 if (problems.length > 0) {
   console.error('License check failed:');
-  for (const problem of problems) console.error(`  ${problem}`);
+  for (const problem of problems) {
+    console.error(`  ${problem}`);
+  }
   process.exit(1);
 }
 console.log(

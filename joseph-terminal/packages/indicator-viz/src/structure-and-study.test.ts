@@ -1,7 +1,14 @@
 /**
+ * @license
+ * Copyright 2026 Joseph Terminal contributors
+ * SPDX-License-Identifier: MIT
+ */
+
+/**
  * @fileoverview Tests for market-structure rendering, per-kind filters and
  * colors, replay captions and the order-flow Delta % study pane.
  */
+
 import {readFileSync} from 'node:fs';
 import {join} from 'node:path';
 import type {

@@ -1,10 +1,17 @@
 /**
+ * @license
+ * Copyright 2026 Joseph Terminal contributors
+ * SPDX-License-Identifier: MIT
+ */
+
+/**
  * @fileoverview Heikin Ashi display transform.
  *
  * Heikin Ashi bars are synthetic smoothed prices. They are a rendering
  * option only and must never feed signals, risk or order prices; the chart
  * keeps the raw bars for every coordinate that can reach an order.
  */
+
 import type {ChartBar} from '../chart-port';
 
 /**

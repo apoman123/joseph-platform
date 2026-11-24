@@ -1,4 +1,10 @@
 /**
+ * @license
+ * Copyright 2026 Joseph Terminal contributors
+ * SPDX-License-Identifier: MIT
+ */
+
+/**
  * @fileoverview Curve.
  *
  * - Anchors: 3, the start, a control point and the end.
@@ -12,6 +18,7 @@
  * - Handles: start, control and end (indices 0-2).
  * - Style options: color, line width and dash. No fill.
  */
+
 import {
   anchorPoints,
   applyStroke,

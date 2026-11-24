@@ -1,9 +1,16 @@
 /**
+ * @license
+ * Copyright 2026 Joseph Terminal contributors
+ * SPDX-License-Identifier: MIT
+ */
+
+/**
  * @fileoverview Timeframe choices: TradingView-style typed resolutions
  * (`15`, `4H`, `1D`, `5S`, `1M`), menu groups, what a venue offers
  * (from its published capabilities) and the countdown to the bar close.
  * Resolutions the engine does not offer are reported, never approximated.
  */
+
 import {
   TIMEFRAMES,
   TIMEFRAME_MS,

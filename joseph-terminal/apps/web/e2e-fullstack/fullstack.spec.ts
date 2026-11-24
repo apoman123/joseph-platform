@@ -1,10 +1,17 @@
 /**
+ * @license
+ * Copyright 2026 Joseph Terminal contributors
+ * SPDX-License-Identifier: MIT
+ */
+
+/**
  * @fileoverview Browser → real engines: market data and backend AOIs render,
  * seconds bars and true delta come from the engine, engine-backed drawings
  * read engine series, a paper order placed in the ticket reaches the
  * execution engine, and the strategy builder validates against the Python
  * compiler.
  */
+
 import {expect, test, type Page} from '@playwright/test';
 import {API, TOKEN} from '../playwright.fullstack.config';
 import {
@@ -67,7 +74,7 @@ test('terminal runs on backend data, not the in-browser demo provider', async ({
   );
   await loadOnDemoVenue(page);
   const body = (await (await aois).json()) as {
-    aois: {source: string; kind: string}[];
+    aois: Array<{source: string; kind: string}>;
     feed_state: string;
   };
   // Python-computed AOIs arrived from the market engine and are provenance
@@ -104,7 +111,7 @@ test('engine indicator series and market structure reach the chart', async ({
   const seriesBody = (await (await series).json()) as {
     plugin_id: string;
     indicator_version: string;
-    points: {bar_start_ms: number; values: Record<string, unknown>}[];
+    points: Array<{bar_start_ms: number; values: Record<string, unknown>}>;
   };
   expect(seriesBody.plugin_id).toBe('order_flow_pressure');
   expect(seriesBody.indicator_version).not.toBe('demo');
@@ -112,8 +119,8 @@ test('engine indicator series and market structure reach the chart', async ({
   expect(seriesBody.points[0]?.values).toHaveProperty('delta_pct');
   // The current-timeframe structure port publishes swing labels or levels.
   const aoiBody = (await (await aois).json()) as {
-    aois: {source: string}[];
-    events: {source: string; name: string}[];
+    aois: Array<{source: string}>;
+    events: Array<{source: string; name: string}>;
   };
   const fromStructure = [...aoiBody.aois, ...aoiBody.events].filter(
     item => item.source === 'market_structure'
@@ -140,7 +147,7 @@ test('engine indicator series and market structure reach the chart', async ({
 interface SeriesBody {
   plugin_id: string;
   indicator_version: string;
-  points: {bar_start_ms: number; values: Record<string, unknown>}[];
+  points: Array<{bar_start_ms: number; values: Record<string, unknown>}>;
 }
 
 test('seconds bars and true delta come from the engine', async ({
@@ -149,14 +156,14 @@ test('seconds bars and true delta come from the engine', async ({
 }) => {
   const market = API.NEXT_PUBLIC_MARKET_API_URL;
   const venues = (await (await request.get(`${market}/v1/venues`)).json()) as {
-    venues: {
+    venues: Array<{
       capabilities: {
         venue: string;
         timeframes: string[];
         trade_built_timeframes?: string[];
         market_data: {taker_volume?: boolean};
       };
-    }[];
+    }>;
   };
   const mock = venues.venues.find(v => v.capabilities.venue === 'mock');
   expect(mock?.capabilities.timeframes).toEqual(
@@ -171,11 +178,11 @@ test('seconds bars and true delta come from the engine', async ({
   expect(candles.ok()).toBeTruthy();
   const bars = (
     (await candles.json()) as {
-      candles: {
+      candles: Array<{
         start_ms: number;
         end_ms: number;
         taker_buy_base_volume: string | null;
-      }[];
+      }>;
     }
   ).candles;
   expect(bars.length).toBeGreaterThan(10);
@@ -252,7 +259,11 @@ test('a paper order from the ticket is created by the execution engine', async (
           {headers: AUTH}
         );
         const body = (await response.json()) as {
-          orders: {quantity_base: string; source?: string; state: string}[];
+          orders: Array<{
+            quantity_base: string;
+            source?: string;
+            state: string;
+          }>;
         };
         return body.orders.filter(o => o.quantity_base.startsWith('0.002'))
           .length;
@@ -293,7 +304,7 @@ test('a notification subscription saved in the terminal is stored server-side', 
     {headers: AUTH}
   );
   const body = (await stored.json()) as {
-    subscriptions: {subscription_id: string; channel: string}[];
+    subscriptions: Array<{subscription_id: string; channel: string}>;
   };
   expect(body.subscriptions).toContainEqual(
     expect.objectContaining({subscription_id: 'desk-hook', channel: 'WEBHOOK'})

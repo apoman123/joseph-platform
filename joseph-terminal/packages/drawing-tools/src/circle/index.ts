@@ -1,4 +1,10 @@
 /**
+ * @license
+ * Copyright 2026 Joseph Terminal contributors
+ * SPDX-License-Identifier: MIT
+ */
+
+/**
  * @fileoverview Circle.
  *
  * - Anchors: 2, the centre and a point on the circumference.
@@ -10,6 +16,7 @@
  * - Handles: centre (index 0) and the radius point (index 1).
  * - Style options: color, line width and dash, fill (on by default).
  */
+
 import {
   anchorPoints,
   applyStroke,

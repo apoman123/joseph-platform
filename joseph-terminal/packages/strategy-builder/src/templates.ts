@@ -1,8 +1,15 @@
 /**
+ * @license
+ * Copyright 2026 Joseph Terminal contributors
+ * SPDX-License-Identifier: MIT
+ */
+
+/**
  * @fileoverview Strategy templates. Long A and Short B are the reference
  * rules from the V5 specification, identical to
  * `packages/contracts/fixtures/strategy.fixture.json`.
  */
+
 import type {Direction, StrategyDefinition} from '@joseph/contracts';
 
 /** Template descriptor. */

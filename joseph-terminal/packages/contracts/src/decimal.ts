@@ -1,4 +1,10 @@
 /**
+ * @license
+ * Copyright 2026 Joseph Terminal contributors
+ * SPDX-License-Identifier: MIT
+ */
+
+/**
  * @fileoverview Exact decimal arithmetic on contract `DecimalString`s.
  *
  * Prices and quantities cross the wire as strings. Any value that may end up

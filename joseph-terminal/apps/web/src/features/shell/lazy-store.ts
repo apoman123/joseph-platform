@@ -1,7 +1,14 @@
 /**
+ * @license
+ * Copyright 2026 Joseph Terminal contributors
+ * SPDX-License-Identifier: MIT
+ */
+
+/**
  * @fileoverview Store that starts work on first subscription and stops
  * after the last one (used for polling backend data per chart).
  */
+
 import {createStore, type ReadableStore} from '@joseph/feature-registry';
 
 /**
@@ -21,7 +28,7 @@ export function createLazyStore<T>(
     get: () => inner.get(),
     subscribe(listener) {
       subscribers += 1;
-      if (subscribers === 1) stop = start(value => inner.set(value));
+      if (subscribers === 1) stop = start(value => void inner.set(value));
       const unsubscribe = inner.subscribe(listener);
       return () => {
         unsubscribe();

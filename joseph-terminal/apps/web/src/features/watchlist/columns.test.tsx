@@ -1,7 +1,14 @@
 /**
+ * @license
+ * Copyright 2026 Joseph Terminal contributors
+ * SPDX-License-Identifier: MIT
+ */
+
+/**
  * @fileoverview Tests for watchlist columns, sorting and the qualified
  * source, and for screener presets.
  */
+
 import type {MarketSnapshot} from '@joseph/contracts';
 import {fireEvent, screen, waitFor, within} from '@testing-library/react';
 import {afterEach, describe, expect, it} from 'vitest';
@@ -41,7 +48,7 @@ function snap(extra: Partial<MarketSnapshot>): MarketSnapshot {
     data_age_ms: 0,
     stale: false,
     ...extra,
-  } as MarketSnapshot;
+  };
 }
 
 describe('watchlist columns and sorting', () => {

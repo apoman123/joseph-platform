@@ -1,7 +1,14 @@
 /**
+ * @license
+ * Copyright 2026 Joseph Terminal contributors
+ * SPDX-License-Identifier: MIT
+ */
+
+/**
  * @fileoverview End-to-end: paper order lifecycle through the ticket, the
  * Orders and Positions tabs, close and cancel (DEMO mode).
  */
+
 import {expect, test} from '@playwright/test';
 import {loadTerminal, openPanel, previewOrder, ticket} from './trading-helpers';
 

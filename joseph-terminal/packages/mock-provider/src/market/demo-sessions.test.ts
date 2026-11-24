@@ -1,4 +1,10 @@
 /**
+ * @license
+ * Copyright 2026 Joseph Terminal contributors
+ * SPDX-License-Identifier: MIT
+ */
+
+/**
  * @fileoverview DEMO session lists match the engine's calendars (NYSE
  * holidays and early closes, Treasury market days observed through the
  * engine's table and by rule afterwards, TWSE/TPEx closures), and DEMO
@@ -6,6 +12,7 @@
  * TWSE stock with its ladder, the TPEx bond ETF, the US bond ETF and the
  * 10-year yield.
  */
+
 import {
   SessionCalendar,
   EXCHANGE_HOURS,
@@ -124,10 +131,11 @@ describe('USBOND and XTAI rules', () => {
   it('uses the TWSE closures (typhoon day, lunar new year)', () => {
     expect(demoSessionOn('XTAI', day('2024-10-31'))).toBeNull();
     expect(demoSessionOn('XTAI', day('2024-10-30'))).not.toBeNull();
-    for (const d of [2, 3, 4, 5, 8, 9, 10])
+    for (const d of [2, 3, 4, 5, 8, 9, 10]) {
       expect(
         demoSessionOn('XTAI', day(`2027-02-${String(d).padStart(2, '0')}`))
       ).toBeNull();
+    }
     expect(demoSessionOn('XTAI', day('2027-02-01'))).not.toBeNull();
     expect(DEMO_XTAI_CLOSURES).toContain('2026-12-25');
   });

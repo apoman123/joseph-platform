@@ -1,7 +1,14 @@
 /**
+ * @license
+ * Copyright 2026 Joseph Terminal contributors
+ * SPDX-License-Identifier: MIT
+ */
+
+/**
  * @fileoverview Data health feature: venue feed status in the status bar
  * and a bottom-panel table with transport, lag, gaps and capabilities.
  */
+
 import type {VenueStatus} from '@joseph/contracts';
 import {VENUE_NAMES} from '@joseph/contracts';
 import type {ReadableStore} from '@joseph/feature-registry';
@@ -37,8 +44,9 @@ function badgeFor(status: VenueStatus): string {
   if (state === 'LIVE') return 'j-badge--live';
   if (state === 'POLL') return 'j-badge--poll';
   if (state === 'REPLAY') return 'j-badge--replay';
-  if (state === 'STALE' || status.health.state === 'UNAVAILABLE')
+  if (state === 'STALE' || status.health.state === 'UNAVAILABLE') {
     return 'j-badge--stale';
+  }
   return 'j-badge--muted';
 }
 
@@ -67,11 +75,13 @@ export function dataHealthFeature(_runtime: TerminalRuntime): WebFeature {
           const load = () =>
             ctx.clients.market
               .listVenues()
-              .then(list => alive && set({venues: list.venues, error: null}))
+              .then(
+                list => alive && void set({venues: list.venues, error: null})
+              )
               .catch(
                 (error: unknown) =>
                   alive &&
-                  set({
+                  void set({
                     venues: null,
                     error:
                       error instanceof Error ? error.message : 'Request failed',
@@ -104,12 +114,13 @@ export function dataHealthFeature(_runtime: TerminalRuntime): WebFeature {
             </div>
           );
         }
-        if (!venues)
+        if (!venues) {
           return (
             <p className="j-muted" style={{padding: 12}}>
               Loading venue status…
             </p>
           );
+        }
         const now = Date.now();
         return (
           <table className="j-table" aria-label="Venue data health">
@@ -182,12 +193,13 @@ export function dataHealthFeature(_runtime: TerminalRuntime): WebFeature {
        */
       function VenueDots(_props: WebSlotProps) {
         const {venues, error} = useStore(data);
-        if (error)
+        if (error) {
           return (
             <span className="statusbar__item j-neg">
               Market engine unreachable
             </span>
           );
+        }
         return (
           <span className="statusbar__item" aria-label="Venue feeds">
             {(venues ?? []).map(status => (

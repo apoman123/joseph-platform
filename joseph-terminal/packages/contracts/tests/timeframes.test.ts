@@ -1,8 +1,15 @@
 /**
+ * @license
+ * Copyright 2026 Joseph Terminal contributors
+ * SPDX-License-Identifier: MIT
+ */
+
+/**
  * @fileoverview Bar boundary arithmetic mirroring the engine's
  * `joseph.domain.timeframes`: seconds, weeks and calendar months
  * (February, leap years, December to January).
  */
+
 import {describe, expect, it} from 'vitest';
 import {
   TIMEFRAMES,

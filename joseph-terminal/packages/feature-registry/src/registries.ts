@@ -1,7 +1,14 @@
 /**
+ * @license
+ * Copyright 2026 Joseph Terminal contributors
+ * SPDX-License-Identifier: MIT
+ */
+
+/**
  * @fileoverview Host-side registries: commands, hotkeys, slots, events,
  * settings and chart overlay layers.
  */
+
 import type {OverlayLayer} from '@joseph/chart-core';
 import type {InstrumentId, Timeframe} from '@joseph/contracts';
 import {readJson, writeJson, type KeyValueStorage} from './storage';
@@ -185,12 +192,12 @@ export function createHotkeyRegistry(commands: CommandRegistry): HotkeyHost {
 export function createSlotRegistry<TView>(): SlotRegistry<TView> {
   const stores = new Map<
     UiSlot,
-    ReturnType<typeof createStore<readonly SlotContribution<TView>[]>>
+    ReturnType<typeof createStore<ReadonlyArray<SlotContribution<TView>>>>
   >();
   const storeFor = (slot: UiSlot) => {
     let store = stores.get(slot);
     if (!store) {
-      store = createStore<readonly SlotContribution<TView>[]>([]);
+      store = createStore<ReadonlyArray<SlotContribution<TView>>>([]);
       stores.set(slot, store);
     }
     return store;

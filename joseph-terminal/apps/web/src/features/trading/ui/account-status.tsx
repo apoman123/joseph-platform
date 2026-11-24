@@ -1,10 +1,17 @@
-'use client';
+/**
+ * @license
+ * Copyright 2026 Joseph Terminal contributors
+ * SPDX-License-Identifier: MIT
+ */
+
 /**
  * @fileoverview Broker and venue account status: connection, credentials
  * (held on the execution server, never entered here), the "awaiting API
  * SDK" state and settled cash, as reported by the execution engine.
  * Shared by the order ticket and the Accounts tab.
  */
+
+'use client';
 import {accountStatusView, cashSummary} from '@joseph/chart-trading';
 import type {AccountSummary} from '@joseph/contracts';
 import type {ReactNode} from 'react';

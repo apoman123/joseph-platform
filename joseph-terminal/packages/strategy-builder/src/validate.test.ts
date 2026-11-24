@@ -1,6 +1,13 @@
 /**
+ * @license
+ * Copyright 2026 Joseph Terminal contributors
+ * SPDX-License-Identifier: MIT
+ */
+
+/**
  * @fileoverview Client validation mirrors the schema and cross-field rules.
  */
+
 import type {StrategyDefinition} from '@joseph/contracts';
 import {describe, expect, it} from 'vitest';
 import {STRATEGY_TEMPLATES} from './templates';

@@ -1,9 +1,16 @@
 /**
+ * @license
+ * Copyright 2026 Joseph Terminal contributors
+ * SPDX-License-Identifier: MIT
+ */
+
+/**
  * @fileoverview Display formatting for prices, quantities and percentages.
  *
  * Formatting works on decimal strings so displayed values match exactly what
  * would be sent in an order; `number` is never used to build these strings.
  */
+
 import {Decimal, stepDecimals} from '@joseph/contracts';
 
 /**
@@ -75,7 +82,7 @@ export function formatSignedPct(
 export function formatCompactUsd(value: string | null | undefined): string {
   if (value == null || !Decimal.isValid(value)) return '—';
   const amount = Decimal.parse(value);
-  const units: readonly [string, string][] = [
+  const units: ReadonlyArray<[string, string]> = [
     ['1000000000', 'B'],
     ['1000000', 'M'],
     ['1000', 'K'],

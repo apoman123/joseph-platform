@@ -1,6 +1,13 @@
 /**
+ * @license
+ * Copyright 2026 Joseph Terminal contributors
+ * SPDX-License-Identifier: MIT
+ */
+
+/**
  * @fileoverview Theme resolution from CSS design tokens and tone colors.
  */
+
 import type {ChartTheme} from './chart-port';
 import type {OverlayTone} from './overlay-model';
 

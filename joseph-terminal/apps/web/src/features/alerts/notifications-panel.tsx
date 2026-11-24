@@ -1,8 +1,15 @@
 /**
+ * @license
+ * Copyright 2026 Joseph Terminal contributors
+ * SPDX-License-Identifier: MIT
+ */
+
+/**
  * @fileoverview Notification subscriptions: where (Telegram, LINE, e-mail,
  * webhook), which signals and when (quiet hours). Bot tokens and other
  * channel secrets are server configuration and never entered here.
  */
+
 'use client';
 import type {
   AlertSubscription,
@@ -41,7 +48,7 @@ const CHANNELS: Readonly<
 };
 
 /** Signal kinds offered as checkboxes, in plain language. */
-const KINDS: readonly {kind: SignalKind; label: string}[] = [
+const KINDS: ReadonlyArray<{kind: SignalKind; label: string}> = [
   {kind: 'ENTRY_CONFIRMED', label: 'Entries'},
   {kind: 'ENTRY_BLOCKED', label: 'Blocked entries'},
   {kind: 'PRE_SIGNAL', label: 'Setups forming'},
@@ -115,7 +122,7 @@ export function NotificationsPanel({
   }, [load]);
 
   const patch = (change: Partial<AlertSubscription>) =>
-    setDraft(current => ({...current, ...change}));
+    void setDraft(current => ({...current, ...change}));
   const configured = new Set(list?.configured_channels ?? []);
   const channel = CHANNELS[draft.channel];
 
@@ -160,7 +167,7 @@ export function NotificationsPanel({
               <tr
                 key={sub.subscription_id}
                 className={sub.enabled ? undefined : 'j-row--muted'}
-                onClick={() => setDraft(structuredClone(sub))}
+                onClick={() => void setDraft(structuredClone(sub))}
               >
                 <td>{sub.subscription_id}</td>
                 <td>{CHANNELS[sub.channel].label}</td>
@@ -216,7 +223,7 @@ export function NotificationsPanel({
               value={draft.subscription_id}
               placeholder="phone"
               onChange={e =>
-                patch({subscription_id: e.target.value.toLowerCase()})
+                void patch({subscription_id: e.target.value.toLowerCase()})
               }
               required
             />
@@ -226,7 +233,9 @@ export function NotificationsPanel({
             <select
               className="j-select"
               value={draft.channel}
-              onChange={e => patch({channel: e.target.value as UserChannel})}
+              onChange={e =>
+                void patch({channel: e.target.value as UserChannel})
+              }
             >
               {(Object.keys(CHANNELS) as UserChannel[]).map(key => (
                 <option key={key} value={key}>
@@ -241,7 +250,7 @@ export function NotificationsPanel({
               className="j-input"
               value={draft.target}
               placeholder={channel.placeholder}
-              onChange={e => patch({target: e.target.value.trim()})}
+              onChange={e => void patch({target: e.target.value.trim()})}
               required
             />
           </label>
@@ -250,7 +259,9 @@ export function NotificationsPanel({
             <select
               className="j-select"
               value={draft.min_severity}
-              onChange={e => patch({min_severity: e.target.value as Severity})}
+              onChange={e =>
+                void patch({min_severity: e.target.value as Severity})
+              }
             >
               {SEVERITIES.map(level => (
                 <option key={level} value={level}>
@@ -267,7 +278,7 @@ export function NotificationsPanel({
                   type="checkbox"
                   checked={draft.kinds.includes(kind)}
                   onChange={e =>
-                    patch({
+                    void patch({
                       kinds: e.target.checked
                         ? [...draft.kinds, kind]
                         : draft.kinds.filter(k => k !== kind),
@@ -283,7 +294,7 @@ export function NotificationsPanel({
               type="checkbox"
               checked={draft.quiet_hours !== null}
               onChange={e =>
-                patch({
+                void patch({
                   quiet_hours: e.target.checked
                     ? {
                         start: '23:00',
@@ -307,7 +318,7 @@ export function NotificationsPanel({
                   value={draft.quiet_hours.start}
                   onChange={e =>
                     draft.quiet_hours &&
-                    patch({
+                    void patch({
                       quiet_hours: {
                         ...draft.quiet_hours,
                         start: e.target.value,
@@ -324,7 +335,7 @@ export function NotificationsPanel({
                   value={draft.quiet_hours.end}
                   onChange={e =>
                     draft.quiet_hours &&
-                    patch({
+                    void patch({
                       quiet_hours: {...draft.quiet_hours, end: e.target.value},
                     })
                   }
@@ -337,7 +348,7 @@ export function NotificationsPanel({
             <input
               type="checkbox"
               checked={draft.enabled}
-              onChange={e => patch({enabled: e.target.checked})}
+              onChange={e => void patch({enabled: e.target.checked})}
             />
             Enabled
           </label>
@@ -359,7 +370,7 @@ export function NotificationsPanel({
             <button
               type="button"
               className="j-btn j-btn--ghost"
-              onClick={() => setDraft(blankDraft())}
+              onClick={() => void setDraft(blankDraft())}
             >
               Clear form
             </button>

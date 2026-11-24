@@ -1,10 +1,17 @@
 /**
+ * @license
+ * Copyright 2026 Joseph Terminal contributors
+ * SPDX-License-Identifier: MIT
+ */
+
+/**
  * @fileoverview Fibonacci retracement between a swing start and end.
  *
  * Level `r` sits at `end + (start - end) * r`: 0 at the end anchor and 1 at
  * the start anchor. Level prices are computed with exact decimals and
  * rounded to the instrument tick.
  */
+
 import {Decimal} from '@joseph/contracts';
 import {
   anchorPoints,
@@ -43,7 +50,7 @@ export function retracementPrices(
   end: string,
   levels: readonly string[],
   tickSize: string | null
-): {level: string; price: string}[] {
+): Array<{level: string; price: string}> {
   const s = Decimal.parse(start);
   const e = Decimal.parse(end);
   return levels.map(level => ({

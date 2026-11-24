@@ -1,10 +1,17 @@
 /**
+ * @license
+ * Copyright 2026 Joseph Terminal contributors
+ * SPDX-License-Identifier: MIT
+ */
+
+/**
  * @fileoverview Overlay view models for orders, positions and ticket drafts.
  *
  * Only declarative `OverlayLayer`s are produced; the chart host renders
  * them. Unknown-outcome orders are rendered as unknown — never as
  * canceled — and user-authored drafts use the `user` tone.
  */
+
 import type {OverlayLayer, PriceLineOverlay} from '@joseph/chart-core';
 import {
   Decimal,
@@ -222,14 +229,16 @@ export function buildDraftLayer(inputs: TicketInputs): OverlayLayer {
     });
   };
   const side = inputs.side === 'buy' ? 'Buy' : 'Sell';
-  if (needsLimitPrice(inputs.orderType))
+  if (needsLimitPrice(inputs.orderType)) {
     add('draft-limit', inputs.limitPrice, `Draft ${side.toLowerCase()} limit`);
-  if (needsTriggerPrice(inputs.orderType))
+  }
+  if (needsTriggerPrice(inputs.orderType)) {
     add(
       'draft-trigger',
       inputs.triggerPrice,
       `Draft ${side.toLowerCase()} trigger`
     );
+  }
   add('draft-sl', inputs.stopLoss, 'Draft stop-loss');
   add('draft-tp', inputs.takeProfit, 'Draft take-profit');
   return {layerId: DRAFT_LAYER_ID, zIndex: 45, visible: true, models};
@@ -283,8 +292,9 @@ export function interpretDrag(
     if (!order || !isOpenOrder(order)) return {kind: 'ignore'};
     const field = order.limit_price ? 'limit_price' : 'trigger_price';
     const from = order.limit_price ?? order.trigger_price;
-    if (!from || Decimal.parse(from).eq(Decimal.parse(rounded)))
+    if (!from || Decimal.parse(from).eq(Decimal.parse(rounded))) {
       return {kind: 'ignore'};
+    }
     return {kind: 'amend', order, field, from, price: rounded};
   }
   return {kind: 'ignore'};

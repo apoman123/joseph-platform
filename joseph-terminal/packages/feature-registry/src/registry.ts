@@ -1,4 +1,10 @@
 /**
+ * @license
+ * Copyright 2026 Joseph Terminal contributors
+ * SPDX-License-Identifier: MIT
+ */
+
+/**
  * @fileoverview `FeatureRegistry`: build-time composed feature lifecycle.
  *
  * Responsibilities: unique ids, dependency ordering, cycle and contract
@@ -7,6 +13,7 @@
  * tracked and disposed on deactivation even if the feature's own disposer
  * forgets to remove it.
  */
+
 import {SessionCalendarCache, type BackendClients} from '@joseph/contracts';
 import {createSettingsStore, type ChartLayerHost} from './registries';
 import type {KeyValueStorage} from './storage';
@@ -135,8 +142,9 @@ export class FeatureRegistry<TView> {
    */
   register(feature: TerminalFeature<TView>): void {
     const {id, version, removal} = feature.manifest;
-    if (!id || !version)
+    if (!id || !version) {
       throw new Error('Feature manifest needs id and version');
+    }
     if (!removal?.notes) {
       throw new Error(`Feature ${id} must declare a removal plan`);
     }
@@ -149,8 +157,10 @@ export class FeatureRegistry<TView> {
    * Registers several features.
    * @param features Features to register.
    */
-  registerAll(features: readonly TerminalFeature<TView>[]): void {
-    for (const feature of features) this.register(feature);
+  registerAll(features: ReadonlyArray<TerminalFeature<TView>>): void {
+    for (const feature of features) {
+      this.register(feature);
+    }
   }
 
   /**
@@ -268,7 +278,9 @@ export class FeatureRegistry<TView> {
       }
       order.push(id);
     };
-    for (const id of this.features.keys()) visit(id);
+    for (const id of this.features.keys()) {
+      visit(id);
+    }
     return order;
   }
 
@@ -344,7 +356,9 @@ export class FeatureRegistry<TView> {
       }
       this.active.set(id, {ctx, disposer, tracked});
     } catch (error) {
-      for (const dispose of tracked.reverse()) safeDispose(dispose);
+      for (const dispose of tracked.reverse()) {
+        safeDispose(dispose);
+      }
       this.failures.set(id, describeError(error));
       this.publishStatus();
       return false;
@@ -373,7 +387,9 @@ export class FeatureRegistry<TView> {
     if (!entry) return;
     this.active.delete(id);
     safeDispose(entry.disposer);
-    for (const dispose of [...entry.tracked].reverse()) safeDispose(dispose);
+    for (const dispose of [...entry.tracked].reverse()) {
+      safeDispose(dispose);
+    }
     this.publishStatus();
   }
 
@@ -412,7 +428,9 @@ export class FeatureRegistry<TView> {
 
   /** Deactivates every feature (reverse dependency order). */
   deactivateAll(): void {
-    for (const id of this.activationOrder().reverse()) this.deactivate(id);
+    for (const id of this.activationOrder().reverse()) {
+      this.deactivate(id);
+    }
   }
 
   /**
@@ -449,7 +467,7 @@ export class FeatureRegistry<TView> {
       featureId: feature.manifest.id,
       clients: host.clients,
       selection: host.selection,
-      select: patch => host.select(patch),
+      select: patch => void host.select(patch),
       capabilities: host.capabilities,
       commands: {
         register: command => track(host.commands.register(command)),
@@ -471,7 +489,7 @@ export class FeatureRegistry<TView> {
         register: provider => track(host.chartLayers.register(provider)),
       },
       events: {
-        emit: (type, payload) => host.events.emit(type, payload),
+        emit: (type, payload) => void host.events.emit(type, payload),
         on: (type, handler) => track(host.events.on(type, handler)),
       },
       notifier: host.notifier,

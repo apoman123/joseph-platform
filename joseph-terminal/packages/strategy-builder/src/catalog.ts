@@ -1,7 +1,14 @@
 /**
+ * @license
+ * Copyright 2026 Joseph Terminal contributors
+ * SPDX-License-Identifier: MIT
+ */
+
+/**
  * @fileoverview Catalog of rule nodes for the "add condition" menu, with
  * default factories and the indicator plugin each node depends on.
  */
+
 import type {
   AoiKind,
   Direction,

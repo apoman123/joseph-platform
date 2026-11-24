@@ -1,7 +1,14 @@
 /**
+ * @license
+ * Copyright 2026 Joseph Terminal contributors
+ * SPDX-License-Identifier: MIT
+ */
+
+/**
  * @fileoverview Arrow: an annotation line with an arrowhead at the second
  * anchor, used to point at a level or a candle.
  */
+
 import {
   anchorPoints,
   applyStroke,

@@ -1,4 +1,10 @@
 /**
+ * @license
+ * Copyright 2026 Joseph Terminal contributors
+ * SPDX-License-Identifier: MIT
+ */
+
+/**
  * @fileoverview Head and shoulders pattern (also inverse head and
  * shoulders when drawn upside down).
  *
@@ -13,6 +19,7 @@
  * - Handles: the seven anchors (handle index = anchor index).
  * - Style options: color, width, dash, fill (default off) and labels.
  */
+
 import {
   createPatternTool,
   type PatternSpec,

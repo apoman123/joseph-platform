@@ -1,9 +1,16 @@
 /**
+ * @license
+ * Copyright 2026 Joseph Terminal contributors
+ * SPDX-License-Identifier: MIT
+ */
+
+/**
  * @fileoverview Replay point-in-time and the bar countdown on session
  * calendars: the cursor bar closes at the calendar's bar end, the countdown
  * runs to the bar close in session and to the next open between sessions,
  * and `24x7` charts keep today's results.
  */
+
 import {
   CONTINUOUS_CALENDAR,
   createBarCalendar,

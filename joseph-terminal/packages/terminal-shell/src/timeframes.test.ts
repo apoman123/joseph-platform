@@ -1,8 +1,15 @@
 /**
+ * @license
+ * Copyright 2026 Joseph Terminal contributors
+ * SPDX-License-Identifier: MIT
+ */
+
+/**
  * @fileoverview Tests for TradingView-style timeframe input (seconds and
  * calendar months), venue availability, menu groups, the bar-close
  * countdown and calendar-aware replay point-in-time.
  */
+
 import {TIMEFRAMES, type VenueCapabilities} from '@joseph/contracts';
 import {describe, expect, it} from 'vitest';
 import {

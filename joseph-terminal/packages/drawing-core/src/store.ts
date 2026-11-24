@@ -1,10 +1,17 @@
 /**
+ * @license
+ * Copyright 2026 Joseph Terminal contributors
+ * SPDX-License-Identifier: MIT
+ */
+
+/**
  * @fileoverview Drawing store with a reversible command history.
  *
  * Every mutation is a `DrawingCommand` (Command pattern) so undo/redo is
  * exact. Consecutive commands sharing a `mergeKey` (e.g. one drag gesture)
  * collapse into one history entry. Locked drawings reject edits.
  */
+
 import type {DrawingDocument} from '@joseph/contracts';
 
 /** Store contents. */
@@ -253,7 +260,9 @@ export class DrawingStore {
     const entry = this.redoStack.pop();
     if (!entry) return false;
     let state = this.state;
-    for (const command of entry.commands) state = command.apply(state);
+    for (const command of entry.commands) {
+      state = command.apply(state);
+    }
     this.undoStack.push(entry);
     this.setState(state);
     return true;
@@ -281,7 +290,9 @@ export class DrawingStore {
    */
   private setState(state: DrawingState): void {
     this.state = state;
-    for (const listener of [...this.listeners]) listener(state);
+    for (const listener of [...this.listeners]) {
+      listener(state);
+    }
   }
 }
 

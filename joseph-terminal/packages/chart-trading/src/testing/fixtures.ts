@@ -1,6 +1,13 @@
 /**
+ * @license
+ * Copyright 2026 Joseph Terminal contributors
+ * SPDX-License-Identifier: MIT
+ */
+
+/**
  * @fileoverview Shared test fixtures for chart-trading unit tests.
  */
+
 import type {
   AccountSummary,
   Order,

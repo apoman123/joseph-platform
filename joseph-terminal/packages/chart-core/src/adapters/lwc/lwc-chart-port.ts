@@ -1,9 +1,16 @@
 /**
+ * @license
+ * Copyright 2026 Joseph Terminal contributors
+ * SPDX-License-Identifier: MIT
+ */
+
+/**
  * @fileoverview Lightweight Charts (Apache-2.0) implementation of `ChartPort`.
  *
  * This is the only module that imports `lightweight-charts`. It uses public
  * APIs only: series, price lines, the markers plugin and series primitives.
  */
+
 import {
   AreaSeries,
   BarSeries,
@@ -331,9 +338,9 @@ export class LwcChartPort implements ChartPort {
     });
     this.chart = chart;
     const onCrosshair = (param: MouseEventParams<Time>) =>
-      this.handleCrosshair(param);
+      void this.handleCrosshair(param);
     chart.subscribeCrosshairMove(onCrosshair);
-    this.cleanups.push(() => chart.unsubscribeCrosshairMove(onCrosshair));
+    this.cleanups.push(() => void chart.unsubscribeCrosshairMove(onCrosshair));
     const onRange = (range: LogicalRange | null) => {
       this.emit(
         'visibleRangeChange',
@@ -341,16 +348,21 @@ export class LwcChartPort implements ChartPort {
       );
     };
     chart.timeScale().subscribeVisibleLogicalRangeChange(onRange);
-    this.cleanups.push(() =>
-      chart.timeScale().unsubscribeVisibleLogicalRangeChange(onRange)
+    this.cleanups.push(
+      () => void chart.timeScale().unsubscribeVisibleLogicalRangeChange(onRange)
     );
-    this.listen('pointerdown', event =>
-      this.handlePointer('pointerDown', event)
+    this.listen(
+      'pointerdown',
+      event => void this.handlePointer('pointerDown', event)
     );
-    this.listen('pointermove', event =>
-      this.handlePointer('pointerMove', event)
+    this.listen(
+      'pointermove',
+      event => void this.handlePointer('pointerMove', event)
     );
-    this.listen('pointerup', event => this.handlePointer('pointerUp', event));
+    this.listen(
+      'pointerup',
+      event => void this.handlePointer('pointerUp', event)
+    );
     this.listen('contextmenu', event => {
       event.preventDefault();
       this.emit('contextMenu', this.pointerEvent(event as PointerEvent, 2));
@@ -361,7 +373,7 @@ export class LwcChartPort implements ChartPort {
         if (box) this.emit('resize', {width: box.width, height: box.height});
       });
       observer.observe(container);
-      this.cleanups.push(() => observer.disconnect());
+      this.cleanups.push(() => void observer.disconnect());
     }
     if (this.config) this.rebuildSeries();
   }
@@ -375,8 +387,8 @@ export class LwcChartPort implements ChartPort {
     const container = this.container;
     if (!container) return;
     container.addEventListener(type, handler, {capture: true});
-    this.cleanups.push(() =>
-      container.removeEventListener(type, handler, {capture: true})
+    this.cleanups.push(
+      () => void container.removeEventListener(type, handler, {capture: true})
     );
   }
 
@@ -396,7 +408,9 @@ export class LwcChartPort implements ChartPort {
       // Venue/instrument switches must never show the old venue's overlays,
       // studies or comparisons.
       this.bars = [];
-      for (const id of [...this.layers.keys()]) this.removeOverlayLayer(id);
+      for (const id of [...this.layers.keys()]) {
+        this.removeOverlayLayer(id);
+      }
       this.removeAuxSeries();
       this.studies.clear();
       this.removeCompareSeries();
@@ -465,13 +479,15 @@ export class LwcChartPort implements ChartPort {
         });
     }
     this.markers = createSeriesMarkers(this.series, []);
-    this.primitive = new HostPrimitive(ctx => this.paint(ctx));
+    this.primitive = new HostPrimitive(ctx => void this.paint(ctx));
     this.series.attachPrimitive(this.primitive);
     this.applySeriesOptions();
     this.buildAuxSeries();
     this.buildCompareSeries();
     this.renderData();
-    for (const layer of this.layers.values()) this.applyNativeLayer(layer);
+    for (const layer of this.layers.values()) {
+      this.applyNativeLayer(layer);
+    }
     this.refreshMarkers();
   }
 
@@ -480,8 +496,9 @@ export class LwcChartPort implements ChartPort {
     const chart = this.chart;
     if (!chart) return;
     if (this.volume) {
-      if (this.volumePrimitive)
+      if (this.volumePrimitive) {
         this.volume.detachPrimitive(this.volumePrimitive);
+      }
       chart.removeSeries(this.volume);
     }
     this.volume = null;
@@ -497,8 +514,9 @@ export class LwcChartPort implements ChartPort {
     }
     const panes = chart.panes();
     for (let index = panes.length - 1; index > 0; index -= 1) {
-      if ((panes[index]?.getSeries().length ?? 0) === 0)
+      if ((panes[index]?.getSeries().length ?? 0) === 0) {
         chart.removePane(index);
+      }
     }
   }
 
@@ -525,8 +543,8 @@ export class LwcChartPort implements ChartPort {
         scaleMargins: {top: 0.12, bottom: 0},
         borderColor: this.theme.border,
       });
-      this.volumePrimitive = new HostPrimitive(ctx =>
-        this.paintPaneTitle(ctx, 'Volume', undefined)
+      this.volumePrimitive = new HostPrimitive(
+        ctx => void this.paintPaneTitle(ctx, 'Volume', undefined)
       );
       this.volume.attachPrimitive(this.volumePrimitive);
       pane += 1;
@@ -578,8 +596,8 @@ export class LwcChartPort implements ChartPort {
         title: level.label,
       });
     }
-    const primitive = new HostPrimitive(ctx =>
-      this.paintPaneTitle(ctx, study.spec.title, study.spec.caption)
+    const primitive = new HostPrimitive(
+      ctx => void this.paintPaneTitle(ctx, study.spec.title, study.spec.caption)
     );
     series.attachPrimitive(primitive);
     study.series = series;
@@ -785,7 +803,9 @@ export class LwcChartPort implements ChartPort {
   private renderAuxData(): void {
     this.volume?.setData(this.bars.map(bar => this.toVolumePoint(bar)));
     const times = this.barTimes();
-    for (const study of this.studies.values()) this.renderStudy(study, times);
+    for (const study of this.studies.values()) {
+      this.renderStudy(study, times);
+    }
     this.renderCompare();
   }
 
@@ -841,7 +861,9 @@ export class LwcChartPort implements ChartPort {
    */
   setBars(bars: readonly ChartBar[]): void {
     const byTime = new Map<number, ChartBar>();
-    for (const bar of bars) byTime.set(bar.timeMs, bar);
+    for (const bar of bars) {
+      byTime.set(bar.timeMs, bar);
+    }
     this.bars = [...byTime.values()].sort((a, b) => a.timeMs - b.timeMs);
     this.index = indexFor(this.bars, this.config);
     this.renderData();
@@ -1240,8 +1262,9 @@ export class LwcChartPort implements ChartPort {
       const clicked = this.press && !this.press.moved && event.button === 0;
       this.press = null;
       this.emit('pointerUp', payload);
-      if (!this.interactive || this.isPanLocked())
+      if (!this.interactive || this.isPanLocked()) {
         this.applyInteractive(this.interactive);
+      }
       if (clicked) this.emit('click', payload);
       return;
     }

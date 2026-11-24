@@ -1,4 +1,10 @@
 /**
+ * @license
+ * Copyright 2026 Joseph Terminal contributors
+ * SPDX-License-Identifier: MIT
+ */
+
+/**
  * @fileoverview Drawing persistence per (workspace, exact instrument), plus
  * the drawing part of workspace export/import.
  *
@@ -15,6 +21,7 @@
  * else that cannot be read is dropped and counted. Documents of tools this
  * build does not know are ordinary documents and are kept.
  */
+
 import {
   TIMEFRAMES,
   isInstrumentId,

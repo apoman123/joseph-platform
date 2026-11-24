@@ -1,6 +1,13 @@
 /**
+ * @license
+ * Copyright 2026 Joseph Terminal contributors
+ * SPDX-License-Identifier: MIT
+ */
+
+/**
  * @fileoverview Feature manifest graph checks for the composed terminal.
  */
+
 import {describe, expect, it} from 'vitest';
 import {composeFeatures} from './features';
 import {createRuntime} from './runtime';

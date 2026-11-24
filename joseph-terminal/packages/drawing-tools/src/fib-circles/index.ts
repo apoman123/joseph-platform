@@ -1,4 +1,10 @@
 /**
+ * @license
+ * Copyright 2026 Joseph Terminal contributors
+ * SPDX-License-Identifier: MIT
+ */
+
+/**
  * @fileoverview Fibonacci circles.
  *
  * - Anchors: `[A, B]`. A is the centre; B lies on the 1.0 circle.
@@ -12,6 +18,7 @@
  * - Style options: color, width, dash, `show_labels` (level above each
  *   circle).
  */
+
 import {Decimal} from '@joseph/contracts';
 import {
   anchorPoints,
@@ -63,7 +70,7 @@ export function circleRadii(
   center: Point,
   onUnit: Point,
   levels: readonly string[]
-): {level: string; radius: number}[] {
+): Array<{level: string; radius: number}> {
   const unit = distance(center, onUnit);
   return levels.map(level => ({level, radius: unit * Number(level)}));
 }

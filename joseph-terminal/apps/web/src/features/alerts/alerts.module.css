@@ -1,3 +1,8 @@
+/*
+ * Copyright 2026 Joseph Terminal contributors
+ * SPDX-License-Identifier: MIT
+ */
+
 /* Alerts list. */
 .panel {
   display: grid;
@@ -5,92 +10,108 @@
   height: 100%;
   min-height: 0;
 }
+
 .toolbar {
+  align-items: center;
   display: flex;
   flex-wrap: wrap;
-  align-items: center;
   gap: var(--space-3);
   padding: var(--space-2) var(--space-3);
 }
+
 .inline {
-  display: flex;
   align-items: center;
+  display: flex;
   gap: var(--space-2);
 }
+
 .grow {
   flex: 1;
 }
+
 .scroll {
   min-height: 0;
   overflow: auto;
 }
+
 .expand {
-  padding: 0;
-  border: 0;
   background: none;
+  border: 0;
   cursor: pointer;
+  padding: 0;
 }
+
 .strategy {
+  color: var(--haze);
   max-width: 180px;
   overflow: hidden;
   text-overflow: ellipsis;
-  color: var(--haze);
 }
+
 .actions {
   display: flex;
-  justify-content: flex-end;
   gap: var(--space-1);
+  justify-content: flex-end;
 }
+
 .detail td {
+  background: var(--abyss);
   height: auto;
   padding: var(--space-2) var(--space-3);
-  background: var(--abyss);
   white-space: normal;
 }
+
 .message {
-  margin: 0 0 var(--space-2);
   color: var(--chalk);
   font-size: var(--text-sm);
+  margin: 0 0 var(--space-2);
 }
+
 .tree,
 .reasonChildren {
+  list-style: none;
   margin: 0;
   padding-left: var(--space-4);
-  list-style: none;
 }
+
 .tree {
   padding-left: 0;
 }
+
 .reason {
   margin: 2px 0;
 }
+
 .reasonLine {
-  display: flex;
   align-items: center;
-  gap: var(--space-2);
+  display: flex;
   font-size: var(--text-sm);
+  gap: var(--space-2);
 }
+
 .op {
-  min-width: 96px;
   color: var(--haze);
   font-size: var(--text-xs);
+  min-width: 96px;
 }
+
 .srOnly {
-  position: absolute;
-  width: 1px;
+  clip: rect(0 0 0 0);
   height: 1px;
   overflow: hidden;
-  clip: rect(0 0 0 0);
+  position: absolute;
+  width: 1px;
 }
 
 /* Notification subscription form: two columns on wide panels. */
 .notifyForm {
   display: grid;
-  grid-template-columns: repeat(auto-fill, minmax(200px, 1fr));
   gap: var(--space-3);
+  grid-template-columns: repeat(auto-fill, minmax(200px, 1fr));
   max-width: 880px;
   padding: var(--space-3);
 }
+
 .notifyForm > :global(.j-check),
 .notifyForm > :global(.j-notice),
 .notifyForm > .notifyKinds,
@@ -98,17 +119,18 @@
 .notifyForm > .actions {
   grid-column: 1 / -1;
 }
+
 .notifyKinds {
+  border: 0;
   display: flex;
   flex-wrap: wrap;
   gap: var(--space-2) var(--space-4);
   margin: 0;
   padding: 0;
-  border: 0;
 }
 
 .snooze select {
+  font-size: var(--text-sm);
   height: 24px;
   padding: 0 4px;
-  font-size: var(--text-sm);
 }

@@ -1,6 +1,13 @@
 /**
+ * @license
+ * Copyright 2026 Joseph Terminal contributors
+ * SPDX-License-Identifier: MIT
+ */
+
+/**
  * @fileoverview Bar replay controls shown inside a chart pane.
  */
+
 'use client';
 import type {ReplayState} from '@joseph/terminal-shell';
 import {
@@ -83,7 +90,7 @@ export function ReplayBar({
             className="j-btn j-btn--sm j-btn--ghost j-btn--icon"
             aria-label="Step back one bar"
             disabled={playing}
-            onClick={() => onStep(-1)}
+            onClick={() => void onStep(-1)}
           >
             <ChevronLeft size={15} aria-hidden="true" />
           </button>
@@ -107,7 +114,7 @@ export function ReplayBar({
             aria-label="Step forward one bar"
             data-testid="replay-step"
             disabled={atEnd || playing}
-            onClick={() => onStep(1)}
+            onClick={() => void onStep(1)}
           >
             <ChevronRight size={15} aria-hidden="true" />
           </button>

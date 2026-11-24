@@ -1,10 +1,17 @@
-'use client';
+/**
+ * @license
+ * Copyright 2026 Joseph Terminal contributors
+ * SPDX-License-Identifier: MIT
+ */
+
 /**
  * @fileoverview Strategy builder panel: settings, rule tree, risk and
  * notifications, JSON import/export, backtests and versions with
  * activation. Automatic live trading is visibly locked here; it can only be
  * enabled through an execution deployment with explicit consent.
  */
+
+'use client';
 import {formatFixed, formatUtcDateTime} from '@joseph/chart-trading';
 import {
   VENUES,
@@ -95,7 +102,7 @@ export function StrategyPanel({ctx, editor}: StrategyPanelProps): ReactNode {
     [def, allIssues]
   );
   const update = (patch: Partial<StrategyDefinition>) =>
-    editor.setDefinition({...def, ...patch});
+    void editor.setDefinition({...def, ...patch});
 
   return (
     <section
@@ -129,7 +136,7 @@ export function StrategyPanel({ctx, editor}: StrategyPanelProps): ReactNode {
             value=""
             aria-label="Start from a template"
             onChange={e =>
-              e.target.value && editor.applyTemplate(e.target.value)
+              e.target.value && void editor.applyTemplate(e.target.value)
             }
           >
             <option value="">Start from a template</option>
@@ -176,7 +183,7 @@ export function StrategyPanel({ctx, editor}: StrategyPanelProps): ReactNode {
             role="tab"
             className="j-tab"
             aria-selected={tab === id}
-            onClick={() => setTab(id)}
+            onClick={() => void setTab(id)}
           >
             {label}
           </button>
@@ -192,7 +199,7 @@ export function StrategyPanel({ctx, editor}: StrategyPanelProps): ReactNode {
             <button
               type="button"
               className="j-btn j-btn--ghost j-btn--sm"
-              onClick={() => setEditError(null)}
+              onClick={() => void setEditError(null)}
             >
               Dismiss
             </button>
@@ -207,7 +214,7 @@ export function StrategyPanel({ctx, editor}: StrategyPanelProps): ReactNode {
                 <input
                   className="j-input"
                   value={def.name}
-                  onChange={e => update({name: e.target.value})}
+                  onChange={e => void update({name: e.target.value})}
                 />
               </label>
               <label className="j-field">
@@ -216,7 +223,7 @@ export function StrategyPanel({ctx, editor}: StrategyPanelProps): ReactNode {
                   className="j-input"
                   value={def.strategy_id}
                   disabled={state.versions.length > 0}
-                  onChange={e => update({strategy_id: e.target.value})}
+                  onChange={e => void update({strategy_id: e.target.value})}
                 />
               </label>
               <div className={styles.row2}>
@@ -232,14 +239,14 @@ export function StrategyPanel({ctx, editor}: StrategyPanelProps): ReactNode {
                     <button
                       type="button"
                       aria-pressed={def.direction === 'LONG'}
-                      onClick={() => update({direction: 'LONG'})}
+                      onClick={() => void update({direction: 'LONG'})}
                     >
                       Long
                     </button>
                     <button
                       type="button"
                       aria-pressed={def.direction === 'SHORT'}
-                      onClick={() => update({direction: 'SHORT'})}
+                      onClick={() => void update({direction: 'SHORT'})}
                     >
                       Short
                     </button>
@@ -251,7 +258,9 @@ export function StrategyPanel({ctx, editor}: StrategyPanelProps): ReactNode {
                     className="j-select"
                     value={def.signal_timeframe}
                     onChange={e =>
-                      update({signal_timeframe: e.target.value as Timeframe})
+                      void update({
+                        signal_timeframe: e.target.value as Timeframe,
+                      })
                     }
                   >
                     {TIMEFRAME_ORDER.map(tf => (
@@ -292,7 +301,7 @@ export function StrategyPanel({ctx, editor}: StrategyPanelProps): ReactNode {
                     className="j-select"
                     value={def.universe.qualification}
                     onChange={e =>
-                      update({
+                      void update({
                         universe: {
                           ...def.universe,
                           qualification: e.target.value as
@@ -313,7 +322,7 @@ export function StrategyPanel({ctx, editor}: StrategyPanelProps): ReactNode {
                     className="j-select"
                     value={def.execution_mode}
                     onChange={e =>
-                      update({
+                      void update({
                         execution_mode: e.target
                           .value as StrategyDefinition['execution_mode'],
                       })
@@ -345,7 +354,7 @@ export function StrategyPanel({ctx, editor}: StrategyPanelProps): ReactNode {
               <h3 className={styles.sectionTitle}>Entry conditions</h3>
               <RuleEditor
                 root={def.when}
-                onChange={when => update({when})}
+                onChange={when => void update({when})}
                 issues={byNode}
                 direction={def.direction}
                 signalTf={def.signal_timeframe}
@@ -362,7 +371,7 @@ export function StrategyPanel({ctx, editor}: StrategyPanelProps): ReactNode {
                     inputMode="decimal"
                     value={def.risk.min_rr}
                     onChange={e =>
-                      update({risk: {...def.risk, min_rr: e.target.value}})
+                      void update({risk: {...def.risk, min_rr: e.target.value}})
                     }
                   />
                 </label>
@@ -374,7 +383,7 @@ export function StrategyPanel({ctx, editor}: StrategyPanelProps): ReactNode {
                     value={def.risk.fee_bps_estimate ?? ''}
                     placeholder="5"
                     onChange={e =>
-                      update({
+                      void update({
                         risk: {
                           ...def.risk,
                           fee_bps_estimate: e.target.value || undefined,
@@ -389,7 +398,7 @@ export function StrategyPanel({ctx, editor}: StrategyPanelProps): ReactNode {
                     className="j-select"
                     value={def.risk.stop_model}
                     onChange={e =>
-                      update({
+                      void update({
                         risk: {
                           ...def.risk,
                           stop_model: e.target
@@ -411,7 +420,7 @@ export function StrategyPanel({ctx, editor}: StrategyPanelProps): ReactNode {
                     className="j-select"
                     value={def.risk.target_model}
                     onChange={e =>
-                      update({
+                      void update({
                         risk: {
                           ...def.risk,
                           target_model: e.target
@@ -435,7 +444,7 @@ export function StrategyPanel({ctx, editor}: StrategyPanelProps): ReactNode {
                     max={10000}
                     value={def.notification.cooldown_bars}
                     onChange={e =>
-                      update({
+                      void update({
                         notification: {
                           ...def.notification,
                           cooldown_bars: Number(e.target.value),
@@ -450,7 +459,7 @@ export function StrategyPanel({ctx, editor}: StrategyPanelProps): ReactNode {
                   type="checkbox"
                   checked={def.notification.once_per_aoi}
                   onChange={e =>
-                    update({
+                    void update({
                       notification: {
                         ...def.notification,
                         once_per_aoi: e.target.checked,
@@ -524,7 +533,7 @@ function JsonTab({
           value={text}
           rows={6}
           placeholder="Paste a version 2 rule or a starter version 1 config"
-          onChange={e => setText(e.target.value)}
+          onChange={e => void setText(e.target.value)}
         />
       </label>
       <button
@@ -643,7 +652,7 @@ function BacktestTab({
             min={1}
             max={365}
             value={days}
-            onChange={e => setDays(e.target.value)}
+            onChange={e => void setDays(e.target.value)}
           />
         </label>
         <label className="j-field">
@@ -652,7 +661,7 @@ function BacktestTab({
             className="j-input j-tabular"
             inputMode="decimal"
             value={fee}
-            onChange={e => setFee(e.target.value)}
+            onChange={e => void setFee(e.target.value)}
           />
         </label>
       </div>
@@ -770,7 +779,9 @@ function VersionsTab({
             <select
               className="j-select"
               value={mode}
-              onChange={e => setMode(e.target.value as ActivateRequest['mode'])}
+              onChange={e =>
+                void setMode(e.target.value as ActivateRequest['mode'])
+              }
             >
               <option value="ALERT_ONLY">Alerts only</option>
               <option value="PAPER">Paper trading</option>
@@ -822,7 +833,7 @@ function VersionsTab({
                         type="button"
                         className="j-btn j-btn--sm"
                         disabled={busy}
-                        onClick={() => setPending(version)}
+                        onClick={() => void setPending(version)}
                       >
                         Activate version {version.version}
                       </button>
@@ -854,7 +865,7 @@ function VersionsTab({
           title={`Activate version ${pending.version}?`}
           confirmLabel={`Activate version ${pending.version} in ${modeName} mode`}
           busy={busy}
-          onCancel={() => setPending(null)}
+          onCancel={() => void setPending(null)}
           onConfirm={() => {
             const version = pending;
             setPending(null);

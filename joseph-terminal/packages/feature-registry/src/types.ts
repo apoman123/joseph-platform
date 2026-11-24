@@ -1,4 +1,10 @@
 /**
+ * @license
+ * Copyright 2026 Joseph Terminal contributors
+ * SPDX-License-Identifier: MIT
+ */
+
+/**
  * @fileoverview Feature extension API (V5 §3.4 / §10).
  *
  * Features are vetted modules composed at build time. Each declares a
@@ -7,6 +13,7 @@
  * layer it registered. Feature flags control exposure only; they can never
  * grant trading permission or bypass server-side risk.
  */
+
 import type {OverlayLayer} from '@joseph/chart-core';
 import type {
   BackendClients,
@@ -167,7 +174,7 @@ export interface SlotRegistry<TView> {
    * @param slot Slot name.
    * @return Store of contributions.
    */
-  observe(slot: UiSlot): ReadableStore<readonly SlotContribution<TView>[]>;
+  observe(slot: UiSlot): ReadableStore<ReadonlyArray<SlotContribution<TView>>>;
 }
 
 /** In-app events exchanged between features. */

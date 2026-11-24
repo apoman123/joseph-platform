@@ -1,4 +1,10 @@
 /**
+ * @license
+ * Copyright 2026 Joseph Terminal contributors
+ * SPDX-License-Identifier: MIT
+ */
+
+/**
  * @fileoverview Cash-equity and broker rules for the order ticket.
  *
  * Exchange-listed stocks and ETFs trade through securities brokers
@@ -16,6 +22,7 @@
  * server-side LIVE arming of an account (`live_armed_until_ms`,
  * `LIVE_NOT_ARMED`).
  */
+
 import {
   Decimal,
   EXCHANGE_HOURS,
@@ -212,8 +219,9 @@ function sortedLadder(ladder: readonly TickStep[] | undefined): TickStep[] {
 export function tickAt(instrument: EquityInstrument, price: Decimal): Decimal {
   let tick = Decimal.parse(instrument.tick_size);
   for (const step of sortedLadder(instrument.tick_ladder)) {
-    if (price.cmp(Decimal.parse(step.min_price)) >= 0)
+    if (price.cmp(Decimal.parse(step.min_price)) >= 0) {
       tick = Decimal.parse(step.tick_size);
+    }
   }
   return tick.isZero() ? Decimal.parse(instrument.tick_size) : tick;
 }
@@ -356,7 +364,7 @@ export function withinPriceLimit(
  * @return Reference close, or null without data.
  */
 export function referenceClose(
-  candles: readonly {close: string; is_final: boolean}[]
+  candles: ReadonlyArray<{close: string; is_final: boolean}>
 ): Decimal | null {
   const last = candles.at(-1);
   if (!last) return null;
@@ -402,8 +410,9 @@ export function parseEquityQuantity(
   text: string
 ): EquityQuantity {
   const trimmed = text.trim().replace(/,/g, '');
-  if (trimmed === '')
+  if (trimmed === '') {
     return {shares: null, lots: null, error: 'Enter a quantity.'};
+  }
   if (!Decimal.isValid(trimmed) || Decimal.parse(trimmed).isNegative()) {
     return {
       shares: null,
@@ -545,8 +554,9 @@ export function accountStatusView(account: AccountSummary): AccountStatusView {
     account.status === 'CONNECTED' ||
     account.status === 'READ_ONLY' ||
     account.status === 'PENDING_VERIFICATION'
-  )
+  ) {
     credentials = 'configured';
+  }
   let connection: AccountConnection;
   let connectionText: string;
   if (awaitingSdk) {
@@ -832,8 +842,9 @@ export function heldShares(
       position.instrument_id === instrumentId &&
       position.side === 'long' &&
       Decimal.isValid(position.quantity_base)
-    )
+    ) {
       held = held.add(Decimal.parse(position.quantity_base));
+    }
   }
   return held;
 }
@@ -1037,7 +1048,7 @@ export interface LiveConfirmation {
   /** Warning sentence. */
   warning: string;
   /** Label/value rows. */
-  rows: readonly [string, string][];
+  rows: ReadonlyArray<[string, string]>;
   /** Confirm button naming the exact action. */
   confirmLabel: string;
 }
@@ -1082,7 +1093,7 @@ export function liveConfirmation(
   const limit = priceText(request.limit_price);
   const trigger = priceText(request.trigger_price);
   const type = request.order_type.replace('_', '-');
-  const rows: [string, string][] = [
+  const rows: Array<[string, string]> = [
     ['Mode', 'LIVE money'],
     ['Broker', venue],
     ['Account', account.label],
@@ -1096,11 +1107,12 @@ export function liveConfirmation(
   if (trigger) rows.push(['Trigger', trigger]);
   rows.push(['Price', limit ?? 'Market (best available price)']);
   rows.push(['Time in force', request.time_in_force]);
-  if (notional && Decimal.isValid(notional))
+  if (notional && Decimal.isValid(notional)) {
     rows.push([
       'Estimated value',
       `${groupThousands(Decimal.parse(notional).toFixed(2))} ${currency}`,
     ]);
+  }
   return {
     title: 'Send a LIVE order',
     warning: `LIVE money: this order goes to ${venue} for account ${account.label} and may fill at once. The execution engine re-checks every risk limit before it is sent.`,

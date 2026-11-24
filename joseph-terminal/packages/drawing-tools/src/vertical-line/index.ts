@@ -1,6 +1,13 @@
 /**
+ * @license
+ * Copyright 2026 Joseph Terminal contributors
+ * SPDX-License-Identifier: MIT
+ */
+
+/**
  * @fileoverview Vertical line: marks one moment in time (UTC).
  */
+
 import {
   anchorPoints,
   applyStroke,

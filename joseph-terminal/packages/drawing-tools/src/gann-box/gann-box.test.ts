@@ -1,6 +1,13 @@
 /**
+ * @license
+ * Copyright 2026 Joseph Terminal contributors
+ * SPDX-License-Identifier: MIT
+ */
+
+/**
  * @fileoverview Tests for the Gann box tool.
  */
+
 import {describe, expect, it} from 'vitest';
 import {
   TRANSFORM,
@@ -18,7 +25,8 @@ describe('gann-box', () => {
     {time_ms: 3_000_000, price: '200'},
   ]);
 
-  it('has a valid manifest', () => expect(manifestProblems(tool)).toEqual([]));
+  it('has a valid manifest', () =>
+    void expect(manifestProblems(tool)).toEqual([]));
 
   it('divides time and price from the origin corner', () => {
     const grid = gannBoxGrid({x: 100, y: 400}, {x: 500, y: 0}, [

@@ -1,4 +1,10 @@
 /**
+ * @license
+ * Copyright 2026 Joseph Terminal contributors
+ * SPDX-License-Identifier: MIT
+ */
+
+/**
  * @fileoverview XABCD harmonic pattern (Gartley, bat, butterfly, crab...).
  *
  * - Anchors: five, placed in order X, A, B, C, D (time/price).
@@ -14,6 +20,7 @@
  * - Style options: color, width, dash, fill on/off (default on) and labels
  *   (point letters and ratios).
  */
+
 import {createPatternTool, type PatternSpec} from '@joseph/drawing-core';
 
 /** Pattern geometry: labels, ratio connectors and filled triangles. */

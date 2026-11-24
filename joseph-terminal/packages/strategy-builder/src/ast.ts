@@ -1,10 +1,17 @@
 /**
+ * @license
+ * Copyright 2026 Joseph Terminal contributors
+ * SPDX-License-Identifier: MIT
+ */
+
+/**
  * @fileoverview Immutable editing operations on the Rule AST.
  *
  * Every node carries a stable `id` so the editor, the server's reason tree
  * and validation messages can refer to the same node across edits. All
  * operations return a new tree and never mutate their input.
  */
+
 import type {RuleNode} from '@joseph/contracts';
 
 /** Group nodes with a `children` array. */
@@ -96,8 +103,8 @@ export function walk(
   const step = (node: RuleNode, depth: number, path: string) => {
     visit(node, depth, path);
     if (isGroup(node)) {
-      node.children.forEach((child, i) =>
-        step(child, depth + 1, `${path}/children/${i}`)
+      node.children.forEach(
+        (child, i) => void step(child, depth + 1, `${path}/children/${i}`)
       );
     } else if (isWrapper(node)) {
       step(node.child, depth + 1, `${path}/child`);
@@ -137,13 +144,14 @@ export function findNode(root: RuleNode, id: string): NodeLocation | null {
       found = {node, parent, index, path};
       return;
     }
-    childrenOf(node).forEach((child, i) =>
-      step(
-        child,
-        node,
-        i,
-        isGroup(node) ? `${path}/children/${i}` : `${path}/child`
-      )
+    childrenOf(node).forEach(
+      (child, i) =>
+        void step(
+          child,
+          node,
+          i,
+          isGroup(node) ? `${path}/children/${i}` : `${path}/child`
+        )
     );
   };
   step(root, null, 0, '');
@@ -330,8 +338,8 @@ export function replaceNode(
   id: string,
   node: RuleNode
 ): RuleNode {
-  const replacement = freshIds(root, {...node, id: undefined} as RuleNode);
-  return updateNode(root, id, () => ({...replacement, id}) as RuleNode);
+  const replacement = freshIds(root, {...node, id: undefined});
+  return updateNode(root, id, () => ({...replacement, id}));
 }
 
 /**
@@ -436,8 +444,9 @@ export function moveNode(
   }
   const without = removeNode(root, id);
   return updateNode(without, targetParentId, parent => {
-    if (!isGroup(parent))
+    if (!isGroup(parent)) {
       throw new AstEditError('Conditions can only be moved into a group.');
+    }
     const children = [...parent.children];
     children.splice(
       Math.max(0, Math.min(index, children.length)),
@@ -452,7 +461,7 @@ export function moveNode(
  * Moves a condition up or down within its group.
  * @param root Root node.
  * @param id Node id.
- * @param delta -1 for up, +1 for down.
+ * @param delta 1 for up, +1 for down.
  * @return New root (unchanged at the boundaries).
  */
 export function shiftNode(root: RuleNode, id: string, delta: -1 | 1): RuleNode {

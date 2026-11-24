@@ -1,9 +1,16 @@
 /**
+ * @license
+ * Copyright 2026 Joseph Terminal contributors
+ * SPDX-License-Identifier: MIT
+ */
+
+/**
  * @fileoverview Data window: values of the bar under the crosshair (OHLCV,
  * change, when the bar closes, the engine's Delta % with whether it is the
  * true delta or an estimate, and compared closes) plus the engine values of
  * engine-backed drawings (anchored VWAP, regression channel). Display only.
  */
+
 'use client';
 import type {ChartBar} from '@joseph/chart-core';
 import type {BarCalendar, Instrument, Timeframe} from '@joseph/contracts';
@@ -91,7 +98,7 @@ export function DataWindow({
       : null;
   const deltaBar = bar ? delta?.get(bar.timeMs) : undefined;
   const deltaValue = deltaBar?.value;
-  const rows: [string, string, string?, string?, string?][] = bar
+  const rows: Array<[string, string, string?, string?, string?]> = bar
     ? [
         ['Open', price(bar.open)],
         ['High', price(bar.high)],

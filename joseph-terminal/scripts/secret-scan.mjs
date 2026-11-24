@@ -1,8 +1,15 @@
 /**
+ * @license
+ * Copyright 2026 Joseph Terminal contributors
+ * SPDX-License-Identifier: MIT
+ */
+
+/**
  * @fileoverview Repository secret scanner (fast pre-commit/CI guard; run
  * gitleaks in CI as well). Fails on private keys, provider tokens, high
  * entropy secret assignments and committed .env files.
  */
+
 import {
   closeSync,
   fstatSync,
@@ -87,15 +94,18 @@ for (const file of walk(ROOT)) {
   }
   text.split('\n').forEach((line, index) => {
     for (const rule of RULES) {
-      if (rule.re.test(line))
+      if (rule.re.test(line)) {
         findings.push(`${rel}:${index + 1}: ${rule.name}`);
+      }
     }
   });
 }
 
 if (findings.length > 0) {
   console.error(`Secret scan found ${findings.length} problem(s):`);
-  for (const finding of findings) console.error(`  ${finding}`);
+  for (const finding of findings) {
+    console.error(`  ${finding}`);
+  }
   process.exit(1);
 }
 console.log('Secret scan passed: no credentials, keys or .env files found.');

@@ -1,10 +1,17 @@
 /**
+ * @license
+ * Copyright 2026 Joseph Terminal contributors
+ * SPDX-License-Identifier: MIT
+ */
+
+/**
  * @fileoverview Generates TypeScript types from the canonical JSON Schemas.
  *
  * All schema files are bundled into one document whose `$defs` hold every
  * definition (names must be unique across files), so each contract type is
  * emitted exactly once. Run with `--check` in CI to fail on drift.
  */
+
 import {readFileSync, readdirSync, writeFileSync, mkdirSync} from 'node:fs';
 import {dirname, join} from 'node:path';
 import {fileURLToPath} from 'node:url';
@@ -53,15 +60,25 @@ function localizeRefs(node) {
  */
 function bundle() {
   const defs = {};
-  const files = readdirSync(SCHEMA_DIR).filter(f => f.endsWith('.schema.json')).sort();
+  const files = readdirSync(SCHEMA_DIR)
+    .filter(f => f.endsWith('.schema.json'))
+    .sort();
   for (const file of files) {
     const schema = JSON.parse(readFileSync(join(SCHEMA_DIR, file), 'utf8'));
     for (const [name, def] of Object.entries(schema.$defs ?? {})) {
-      if (defs[name]) throw new Error(`Duplicate definition ${name} in ${file}`);
+      if (defs[name]) {
+        throw new Error(`Duplicate definition ${name} in ${file}`);
+      }
       defs[name] = localizeRefs(def);
     }
   }
-  return {$schema: 'https://json-schema.org/draft/2020-12/schema', title: 'JosephContracts', type: 'object', additionalProperties: false, $defs: defs};
+  return {
+    $schema: 'https://json-schema.org/draft/2020-12/schema',
+    title: 'JosephContracts',
+    type: 'object',
+    additionalProperties: false,
+    $defs: defs,
+  };
 }
 
 /**
@@ -75,17 +92,26 @@ async function main() {
     additionalProperties: false,
     declareExternallyReferenced: true,
     strictIndexSignatures: true,
-    style: {singleQuote: true, bracketSpacing: false, trailingComma: 'es5', printWidth: 80},
+    style: {
+      singleQuote: true,
+      bracketSpacing: false,
+      trailingComma: 'es5',
+      printWidth: 80,
+    },
   });
-  const source = raw.replace(
-    /\/\*\*\n \* This interface was referenced by `JosephContracts`'s JSON-Schema\n \* via the `definition` "JosephContracts"\.\n \*\/\nexport interface JosephContracts \{\}\n/,
-    ''
-  ).replace(/export interface JosephContracts \{\}\n/, '');
+  const source = raw
+    .replace(
+      /\/\*\*\n \* This interface was referenced by `JosephContracts`'s JSON-Schema\n \* via the `definition` "JosephContracts"\.\n \*\/\nexport interface JosephContracts \{\}\n/,
+      ''
+    )
+    .replace(/export interface JosephContracts \{\}\n/, '');
   const check = process.argv.includes('--check');
   if (check) {
     const current = readFileSync(OUTPUT, 'utf8');
     if (current !== source) {
-      console.error('Generated contracts are out of date. Run `pnpm contracts:gen`.');
+      console.error(
+        'Generated contracts are out of date. Run `pnpm contracts:gen`.'
+      );
       process.exit(1);
     }
     console.log('Generated contracts are up to date.');

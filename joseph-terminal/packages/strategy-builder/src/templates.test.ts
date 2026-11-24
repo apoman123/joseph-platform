@@ -1,6 +1,13 @@
 /**
+ * @license
+ * Copyright 2026 Joseph Terminal contributors
+ * SPDX-License-Identifier: MIT
+ */
+
+/**
  * @fileoverview Templates match the shared fixtures and the JSON Schema.
  */
+
 import {describe, expect, it} from 'vitest';
 import {STRATEGY_TEMPLATES} from './templates';
 import {readFixture, schemaErrors} from './testing/schema';

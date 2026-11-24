@@ -1,10 +1,17 @@
 /**
+ * @license
+ * Copyright 2026 Joseph Terminal contributors
+ * SPDX-License-Identifier: MIT
+ */
+
+/**
  * @fileoverview Terminal runtime: the composition root's object graph.
  *
  * Creates registries, stores and clients once per browser session and wires
  * them into the feature registry. Shell features receive this runtime;
  * third-party features only ever see their scoped `FeatureContext`.
  */
+
 import {
   SessionCalendarCache,
   type BackendClients,
@@ -105,7 +112,9 @@ export function createBroadcast<T>(): Broadcast<T> {
   const handlers = new Set<(value: T) => void>();
   return {
     emit(value) {
-      for (const handler of [...handlers]) handler(value);
+      for (const handler of [...handlers]) {
+        handler(value);
+      }
     },
     subscribe(handler) {
       handlers.add(handler);
@@ -383,7 +392,7 @@ export function createRuntime(
   const refreshSelection = () => {
     const next = deriveSelection();
     const current = selection.get();
-    const changed = (Object.keys(next) as (keyof TerminalSelection)[]).some(
+    const changed = (Object.keys(next) as Array<keyof TerminalSelection>).some(
       key => next[key] !== current[key]
     );
     if (changed) selection.set(next);
@@ -393,7 +402,7 @@ export function createRuntime(
   account.subscribe(refreshSelection);
   orderMode.subscribe(refreshSelection);
   // Only the main window writes the workspace; pop-outs mirror it.
-  if (role === 'main') workspace.subscribe(doc => autosaver.schedule(doc));
+  if (role === 'main') workspace.subscribe(doc => void autosaver.schedule(doc));
 
   const dispatch = (action: WorkspaceAction) => {
     const before = workspace.get();
@@ -414,7 +423,7 @@ export function createRuntime(
       const id = toastSeq;
       toasts.update(list => [...list.slice(-3), {id, message, tone}]);
       setTimeout(
-        () => toasts.update(list => list.filter(t => t.id !== id)),
+        () => void toasts.update(list => list.filter(t => t.id !== id)),
         6000
       );
     },
@@ -423,7 +432,7 @@ export function createRuntime(
     names: new Set(bundle.capabilities),
   });
   const theme = createStore<'dark' | 'light'>(savedTheme(storage));
-  theme.subscribe(value => storage.setItem('joseph.theme', value));
+  theme.subscribe(value => void storage.setItem('joseph.theme', value));
 
   const runtime: TerminalRuntime = {
     role,
@@ -467,16 +476,16 @@ export function createRuntime(
     templates: new TemplateRepository(storage),
     detached: createStore<DetachState>(EMPTY_DETACH_STATE),
     windows: createStore<WindowActions | null>(null),
-    adoptWorkspace: doc => workspace.set(pin(doc)),
+    adoptWorkspace: doc => void workspace.set(pin(doc)),
     flush: () => {
       if (role === 'main') autosaver.flush();
     },
   };
-  runtime.dataWindow.subscribe(on =>
-    storage.setItem('joseph.dataWindow', on ? 'on' : 'off')
+  runtime.dataWindow.subscribe(
+    on => void storage.setItem('joseph.dataWindow', on ? 'on' : 'off')
   );
-  runtime.drawing.magnet.subscribe(on =>
-    storage.setItem('joseph.magnet', on ? 'on' : 'off')
+  runtime.drawing.magnet.subscribe(
+    on => void storage.setItem('joseph.magnet', on ? 'on' : 'off')
   );
   runtime.registry = new FeatureRegistry<WebView>(
     {

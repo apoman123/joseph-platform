@@ -1,10 +1,17 @@
 /**
+ * @license
+ * Copyright 2026 Joseph Terminal contributors
+ * SPDX-License-Identifier: MIT
+ */
+
+/**
  * @fileoverview Market panel: snapshot (last, mark, index, bid/ask,
  * funding, open interest) and contract specs for the active instrument.
  * Securities show their listing exchange, currency, board lot, price limit
  * and session hours instead of perpetual fields; a Treasury yield shows
  * the yield in percent and its publication session.
  */
+
 import type {Instrument, MarketSnapshot} from '@joseph/contracts';
 import {
   EXCHANGE_HOURS,
@@ -169,12 +176,12 @@ export function marketInfoFeature(_runtime: TerminalRuntime): WebFeature {
               .getSnapshot(selection.instrumentId)
               .then(
                 snapshot =>
-                  alive && setData(d => ({...d, snapshot, error: null}))
+                  alive && void setData(d => ({...d, snapshot, error: null}))
               )
               .catch(
                 (error: unknown) =>
                   alive &&
-                  setData(d => ({
+                  void setData(d => ({
                     ...d,
                     error:
                       error instanceof Error ? error.message : 'Request failed',

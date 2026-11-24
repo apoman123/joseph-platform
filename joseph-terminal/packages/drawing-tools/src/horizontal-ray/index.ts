@@ -1,6 +1,13 @@
 /**
+ * @license
+ * Copyright 2026 Joseph Terminal contributors
+ * SPDX-License-Identifier: MIT
+ */
+
+/**
  * @fileoverview Horizontal ray: a price level starting at a point in time.
  */
+
 import {
   anchorPoints,
   applyStroke,

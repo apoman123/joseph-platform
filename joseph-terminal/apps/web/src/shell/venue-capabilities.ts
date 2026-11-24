@@ -1,9 +1,16 @@
 /**
+ * @license
+ * Copyright 2026 Joseph Terminal contributors
+ * SPDX-License-Identifier: MIT
+ */
+
+/**
  * @fileoverview Venue capabilities published by the market engine (or the
  * DEMO provider), cached once per runtime. Used to grey out timeframes a
  * venue does not serve; while unknown, nothing is hidden and the engine
  * remains the authority (it refuses what it does not serve).
  */
+
 'use client';
 import type {Venue, VenueCapabilities} from '@joseph/contracts';
 import {useEffect, useState} from 'react';

@@ -1,9 +1,16 @@
-'use client';
+/**
+ * @license
+ * Copyright 2026 Joseph Terminal contributors
+ * SPDX-License-Identifier: MIT
+ */
+
 /**
  * @fileoverview Object list: every drawing on the active chart's
  * instrument, top of the z order first, with select, show/hide, lock,
  * reorder and delete. All edits are undoable drawing commands.
  */
+
+'use client';
 import type {DrawingDocument} from '@joseph/contracts';
 import {
   reorderDrawing,
@@ -75,7 +82,7 @@ export function ObjectsPanel({runtime}: ObjectsPanelProps): ReactElement {
   const drawings = [...(store?.get().drawings ?? [])]
     .filter(doc => doc.instrument_id === selection.instrumentId)
     .reverse();
-  const bump = () => runtime.drawing.revision.update(n => n + 1);
+  const bump = () => void runtime.drawing.revision.update(n => n + 1);
   const now = () => Date.now();
   const select = (doc: DrawingDocument) => {
     runtime.drawing.controllers.get(selection.chartId)?.select(doc.drawing_id);
@@ -119,7 +126,7 @@ export function ObjectsPanel({runtime}: ObjectsPanelProps): ReactElement {
                   <button
                     type="button"
                     className="objects__select"
-                    onClick={() => select(doc)}
+                    onClick={() => void select(doc)}
                   >
                     <span
                       className="objects__swatch"
@@ -208,8 +215,9 @@ export function ObjectsPanel({runtime}: ObjectsPanelProps): ReactElement {
                     aria-label={`Delete ${name}`}
                     disabled={doc.locked}
                     onClick={() => {
-                      if (store.remove(doc.drawing_id) && isSelected)
+                      if (store.remove(doc.drawing_id) && isSelected) {
                         runtime.drawing.selection.set(null);
+                      }
                       bump();
                     }}
                   >

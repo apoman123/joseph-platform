@@ -1,7 +1,14 @@
 /**
+ * @license
+ * Copyright 2026 Joseph Terminal contributors
+ * SPDX-License-Identifier: MIT
+ */
+
+/**
  * @fileoverview Component tests for shell pieces (jsdom; the canvas chart
  * itself is covered by Playwright).
  */
+
 import {
   act,
   fireEvent,
@@ -119,8 +126,8 @@ describe('DrawingToolbar', () => {
     );
     expect(screen.getAllByRole('button').length).toBeGreaterThan(12);
     fireEvent.click(screen.getByTestId('tool-trendline'));
-    await waitFor(() =>
-      expect(runtime.drawing.activeTool.get()).toBe('trendline')
+    await waitFor(
+      () => void expect(runtime.drawing.activeTool.get()).toBe('trendline')
     );
     expect(screen.getByTestId('tool-trendline')).toHaveAttribute(
       'aria-pressed',
@@ -191,7 +198,7 @@ describe('chrome', () => {
     const input = await screen.findByRole('textbox', {name: 'Search commands'});
     fireEvent.change(input, {target: {value: 'eight charts'}});
     fireEvent.keyDown(input, {key: 'Enter'});
-    await waitFor(() => expect(runtime.workspace.get().layout).toBe('8'));
+    await waitFor(() => void expect(runtime.workspace.get().layout).toBe('8'));
     expect(screen.queryByRole('dialog')).toBeNull();
   });
 
@@ -207,7 +214,7 @@ describe('chrome', () => {
     expect(
       screen.getByRole('link', {name: /Lightweight Charts/})
     ).toHaveAttribute('href', expect.stringContaining('tradingview'));
-    act(() => runtime.notifier.notify('Saved', 'success'));
+    act(() => void runtime.notifier.notify('Saved', 'success'));
     expect(screen.getByText('Saved')).toBeInTheDocument();
   });
 });
