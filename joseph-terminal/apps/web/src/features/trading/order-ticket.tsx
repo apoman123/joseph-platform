@@ -21,10 +21,11 @@
  * `buildIntentRequest` strips thousands separators, parses them into
  * `Decimal`s, floors the quantity to the lot size, rounds prices to the
  * tick (with a warning) and sends decimal strings; hints and the preview
- * format decimal strings with
- * `formatStep`/`formatFixed`. No price or quantity that is shown or sent
- * passes through a binary float; only the reward-to-risk ratio is a
- * `number`, for display.
+ * format decimal strings with `formatStep`/`formatFixed`. Typed values
+ * never pass through a binary float. Prices picked on the chart (context
+ * menu, dragged lines) start as float coordinates and become decimals
+ * rounded to the tick before they reach the ticket. Only the
+ * reward-to-risk ratio stays a `number`, for display.
  *
  * LIVE needs three things: the server's permission for the account
  * (`modeAvailability`), a server-side arming of the account, and a dedicated
