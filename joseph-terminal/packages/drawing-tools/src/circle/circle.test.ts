@@ -1,6 +1,13 @@
 /**
+ * @license
+ * Copyright 2026 Joseph Terminal contributors
+ * SPDX-License-Identifier: MIT
+ */
+
+/**
  * @fileoverview Tests for the circle tool.
  */
+
 import {describe, expect, it} from 'vitest';
 import {
   TRANSFORM,
@@ -18,7 +25,8 @@ describe('circle', () => {
   ]);
   const unfilled = {...doc, style: {...doc.style, fill_color: null}};
 
-  it('has a valid manifest', () => expect(manifestProblems(tool)).toEqual([]));
+  it('has a valid manifest', () =>
+    void expect(manifestProblems(tool)).toEqual([]));
 
   it('measures the radius in pixels', () => {
     expect(circleRadius({x: 0, y: 0}, {x: 30, y: 40})).toBe(50);

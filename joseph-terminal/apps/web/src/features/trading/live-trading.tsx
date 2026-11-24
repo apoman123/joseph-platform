@@ -1,4 +1,9 @@
-'use client';
+/**
+ * @license
+ * Copyright 2026 Joseph Terminal contributors
+ * SPDX-License-Identifier: MIT
+ */
+
 /**
  * @fileoverview Live trading steps of the order ticket: arming LIVE for
  * one account and the dedicated LIVE confirmation.
@@ -14,6 +19,8 @@
  * with `LIVE_NOT_ARMED` (risk-reducing orders still pass), and it re-checks
  * every LIVE order (account permissions, risk limits, kill switches).
  */
+
+'use client';
 import {
   LIVE_ARM_DEFAULT_MS,
   LIVE_ARM_DURATIONS,
@@ -64,8 +71,9 @@ function armError(err: unknown): string {
     err && typeof err === 'object' && 'body' in err
       ? (err as {body?: {code?: unknown}}).body?.code
       : null;
-  if (code === 'STEP_UP_REQUIRED')
+  if (code === 'STEP_UP_REQUIRED') {
     return 'The execution engine did not accept the step-up code. Enter the current code from your authenticator app.';
+  }
   return errorMessage(err);
 }
 
@@ -128,7 +136,7 @@ export function ArmLivePanel({
         <input
           type="checkbox"
           checked={agreed}
-          onChange={e => setAgreed(e.target.checked)}
+          onChange={e => void setAgreed(e.target.checked)}
         />
         I understand that orders from this ticket use real money in{' '}
         {account.label}.
@@ -142,7 +150,7 @@ export function ArmLivePanel({
           className="j-select"
           value={duration}
           disabled={busy}
-          onChange={e => setDuration(Number(e.target.value))}
+          onChange={e => void setDuration(Number(e.target.value))}
         >
           {LIVE_ARM_DURATIONS.map(option => (
             <option key={option.ms} value={option.ms}>
@@ -163,7 +171,7 @@ export function ArmLivePanel({
           maxLength={8}
           value={code}
           disabled={busy}
-          onChange={e => setCode(e.target.value)}
+          onChange={e => void setCode(e.target.value)}
         />
         <span className="j-field__hint">
           {demo
@@ -253,7 +261,7 @@ export function LiveConfirmDialog({
           <input
             type="checkbox"
             checked={checked}
-            onChange={e => setChecked(e.target.checked)}
+            onChange={e => void setChecked(e.target.checked)}
           />
           Send this order with real money
         </label>

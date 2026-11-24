@@ -1,4 +1,10 @@
 /**
+ * @license
+ * Copyright 2026 Joseph Terminal contributors
+ * SPDX-License-Identifier: MIT
+ */
+
+/**
  * @fileoverview Fibonacci time zones.
  *
  * - Anchors: `[A, B]`. A starts zone 0 and B starts zone 1; only their
@@ -14,6 +20,7 @@
  * - Style options: color, width, dash, `show_labels` (Fibonacci number at
  *   the top of each line).
  */
+
 import {
   anchorPoints,
   applyStroke,
@@ -44,9 +51,9 @@ export function timeZoneTimes(
   startMs: number,
   unitMs: number,
   numbers: readonly number[] = FIB_TIME_ZONE_NUMBERS
-): {number: number; timeMs: number}[] {
+): Array<{number: number; timeMs: number}> {
   const seen = new Set<number>();
-  const zones: {number: number; timeMs: number}[] = [];
+  const zones: Array<{number: number; timeMs: number}> = [];
   for (const number of numbers) {
     const timeMs = startMs + unitMs * number;
     if (timeMs < 0 || seen.has(timeMs)) continue;
@@ -65,10 +72,10 @@ export function timeZoneTimes(
 function visibleLines(
   doc: DrawingDocument,
   transform: PixelTransform
-): {number: number; x: number}[] {
+): Array<{number: number; x: number}> {
   const [a, b] = doc.anchors;
   if (!a || !b) return [];
-  const lines: {number: number; x: number}[] = [];
+  const lines: Array<{number: number; x: number}> = [];
   for (const zone of timeZoneTimes(a.time_ms, b.time_ms - a.time_ms)) {
     const x = transform.timeToX(zone.timeMs);
     if (x === null || x < 0 || x > transform.width) continue;

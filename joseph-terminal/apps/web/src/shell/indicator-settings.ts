@@ -1,8 +1,15 @@
 /**
+ * @license
+ * Copyright 2026 Joseph Terminal contributors
+ * SPDX-License-Identifier: MIT
+ */
+
+/**
  * @fileoverview Pure helpers for the indicator settings form: reads a
  * plugin's published `input_schema`, validates user input against it and
  * reduces the result to overrides (values that differ from the defaults).
  */
+
 import {Decimal} from '@joseph/contracts';
 
 /** Supported field kinds. */
@@ -132,22 +139,27 @@ export function parseFieldValue(
       : {ok: false, error: `Choose one of ${field.choices?.join(', ')}`};
   }
   if (field.kind === 'integer') {
-    if (!/^-?\d+$/.test(text))
+    if (!/^-?\d+$/.test(text)) {
       return {ok: false, error: 'Enter a whole number'};
+    }
     const value = Number(text);
-    if (field.minimum !== undefined && value < Number(field.minimum))
+    if (field.minimum !== undefined && value < Number(field.minimum)) {
       return {ok: false, error: `At least ${field.minimum}`};
-    if (field.maximum !== undefined && value > Number(field.maximum))
+    }
+    if (field.maximum !== undefined && value > Number(field.maximum)) {
       return {ok: false, error: `At most ${field.maximum}`};
+    }
     return {ok: true, value};
   }
   if (!Decimal.isValid(text) || !/^-?(0|[1-9][0-9]*)(\.[0-9]+)?$/.test(text)) {
     return {ok: false, error: 'Enter a decimal number such as 0.25'};
   }
-  if (field.minimum !== undefined && cmp(text, String(field.minimum)) < 0)
+  if (field.minimum !== undefined && cmp(text, String(field.minimum)) < 0) {
     return {ok: false, error: `At least ${field.minimum}`};
-  if (field.maximum !== undefined && cmp(text, String(field.maximum)) > 0)
+  }
+  if (field.maximum !== undefined && cmp(text, String(field.maximum)) > 0) {
     return {ok: false, error: `At most ${field.maximum}`};
+  }
   return {ok: true, value: text};
 }
 

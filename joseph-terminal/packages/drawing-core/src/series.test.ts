@@ -1,8 +1,15 @@
 /**
+ * @license
+ * Copyright 2026 Joseph Terminal contributors
+ * SPDX-License-Identifier: MIT
+ */
+
+/**
  * @fileoverview Tests for engine series helpers and `DrawingSeriesSync`:
  * bar mapping, request identity, debounced re-requests, stale responses,
  * refresh on closed bars, errors and point-in-time (replay) filtering.
  */
+
 import type {IndicatorSeries, IndicatorSeriesQuery} from '@joseph/contracts';
 import {afterEach, beforeEach, describe, expect, it, vi} from 'vitest';
 import {createDrawing} from './document';
@@ -212,7 +219,7 @@ describe('DrawingSeriesSync', () => {
     fetch.mockImplementationOnce(
       query =>
         new Promise(resolve => {
-          release = () => resolve(response(query));
+          release = () => void resolve(response(query));
         })
     );
     store.update(

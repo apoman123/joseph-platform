@@ -1,9 +1,16 @@
 /**
+ * @license
+ * Copyright 2026 Joseph Terminal contributors
+ * SPDX-License-Identifier: MIT
+ */
+
+/**
  * @fileoverview DEMO signal fixtures shaped exactly like backend output.
  * They are static examples for offline UI work, not computed signals. The
  * signal bar's base volume and quote turnover come from the DEMO venue's
  * candle for that bar (as the engine copies them from the venue candle).
  */
+
 import type {ReasonNode, Signal} from '@joseph/contracts';
 import {DEMO_INSTRUMENT_SPECS, demoCandle} from '../market/prices';
 

@@ -1,10 +1,17 @@
 /**
+ * @license
+ * Copyright 2026 Joseph Terminal contributors
+ * SPDX-License-Identifier: MIT
+ */
+
+/**
  * @fileoverview System tests in DEMO mode for session markets: the market
  * picker's asset-class groups and name search, a session chart without
  * overnight or weekend gaps (`mock:stock:ACME` on XNYS), the market status
  * badge, the Treasury yield as a % line chart without an order ticket, and
  * the classified (Lee–Ready) delta source of stock bars.
  */
+
 import AxeBuilder from '@axe-core/playwright';
 import {expect, test, type Page} from '@playwright/test';
 import {
@@ -40,11 +47,13 @@ async function pickInstrument(
  * @param page Page.
  * @return Bars in order with the first x where each appeared.
  */
-async function sweepBars(page: Page): Promise<{label: string; x: number}[]> {
+async function sweepBars(
+  page: Page
+): Promise<Array<{label: string; x: number}>> {
   const box = await firstCanvas(page).boundingBox();
   if (!box) throw new Error('no chart');
   const time = page.getByTestId('data-window').locator('.data-window__time');
-  const seen: {label: string; x: number}[] = [];
+  const seen: Array<{label: string; x: number}> = [];
   for (let x = box.width * 0.35; x < box.width * 0.85; x += 2) {
     await page.mouse.move(box.x + x, box.y + box.height * 0.4);
     const label = (await time.textContent()) ?? '';
@@ -59,8 +68,14 @@ test('groups the market picker by asset class and finds Chinese names', async ({
   await openTerminal(page);
   await page.getByTestId('instrument-selector').click();
   const listbox = page.getByRole('listbox', {name: 'Instruments'});
-  for (const group of ['Crypto', 'Taiwan stocks', 'US stocks', 'Bonds & rates'])
+  for (const group of [
+    'Crypto',
+    'Taiwan stocks',
+    'US stocks',
+    'Bonds & rates',
+  ]) {
     await expect(listbox.getByRole('group', {name: group})).toBeVisible();
+  }
   await expect(
     listbox.getByRole('group', {name: 'US stocks'}).getByRole('option')
   ).toContainText(['ACME']);

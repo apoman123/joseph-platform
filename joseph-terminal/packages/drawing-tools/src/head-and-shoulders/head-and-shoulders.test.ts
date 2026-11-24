@@ -1,6 +1,13 @@
 /**
+ * @license
+ * Copyright 2026 Joseph Terminal contributors
+ * SPDX-License-Identifier: MIT
+ */
+
+/**
  * @fileoverview Tests for the head and shoulders tool.
  */
+
 import {describe, expect, it} from 'vitest';
 import {
   STATE,

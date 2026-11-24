@@ -1,9 +1,16 @@
-'use client';
+/**
+ * @license
+ * Copyright 2026 Joseph Terminal contributors
+ * SPDX-License-Identifier: MIT
+ */
+
 /**
  * @fileoverview Executions (fills), the audit log with chain verification,
  * and risk controls (kill switches with separate cancel and flatten
  * choices).
  */
+
+'use client';
 import {
   formatUtcDateTime,
   groupThousands,
@@ -243,7 +250,7 @@ export function RiskView({ctx, runtime}: ActivityViewProps): ReactNode {
                 <button
                   type="button"
                   className="j-btn j-btn--sm"
-                  onClick={() => prepare(false, s)}
+                  onClick={() => void prepare(false, s)}
                 >
                   Release {scopeName(s)} kill switch
                 </button>
@@ -258,14 +265,14 @@ export function RiskView({ctx, runtime}: ActivityViewProps): ReactNode {
           <button
             type="button"
             aria-pressed={scope === 'GLOBAL'}
-            onClick={() => setScope('GLOBAL')}
+            onClick={() => void setScope('GLOBAL')}
           >
             Everything
           </button>
           <button
             type="button"
             aria-pressed={scope === 'ACCOUNT'}
-            onClick={() => setScope('ACCOUNT')}
+            onClick={() => void setScope('ACCOUNT')}
           >
             One account
           </button>
@@ -276,7 +283,7 @@ export function RiskView({ctx, runtime}: ActivityViewProps): ReactNode {
             <select
               className="j-select"
               value={target ?? ''}
-              onChange={e => setAccountId(e.target.value)}
+              onChange={e => void setAccountId(e.target.value)}
             >
               {state.accounts.map(a => (
                 <option key={a.account_id} value={a.account_id}>
@@ -291,14 +298,14 @@ export function RiskView({ctx, runtime}: ActivityViewProps): ReactNode {
           <input
             className="j-input"
             value={reason}
-            onChange={e => setReason(e.target.value)}
+            onChange={e => void setReason(e.target.value)}
           />
         </label>
         <label className="j-check">
           <input
             type="checkbox"
             checked={cancelOrders}
-            onChange={e => setCancelOrders(e.target.checked)}
+            onChange={e => void setCancelOrders(e.target.checked)}
           />
           Also cancel open orders
         </label>
@@ -306,7 +313,7 @@ export function RiskView({ctx, runtime}: ActivityViewProps): ReactNode {
           <input
             type="checkbox"
             checked={flatten}
-            onChange={e => setFlatten(e.target.checked)}
+            onChange={e => void setFlatten(e.target.checked)}
           />
           Also close positions with reduce-only market orders
         </label>
@@ -318,7 +325,7 @@ export function RiskView({ctx, runtime}: ActivityViewProps): ReactNode {
         <button
           type="button"
           className="j-btn j-btn--ask"
-          onClick={() => prepare(true)}
+          onClick={() => void prepare(true)}
         >
           Review kill switch
         </button>
@@ -331,7 +338,7 @@ export function RiskView({ctx, runtime}: ActivityViewProps): ReactNode {
           confirmLabel={`${plan.request.engage ? 'Engage' : 'Release'} ${scopeName({scope: plan.request.scope, target_id: plan.request.target_id ?? null})} kill switch`}
           tone={plan.request.engage ? 'ask' : 'primary'}
           busy={busy}
-          onCancel={() => setPlan(null)}
+          onCancel={() => void setPlan(null)}
           onConfirm={() => void run()}
         >
           <ul data-testid="kill-switch-consequences">

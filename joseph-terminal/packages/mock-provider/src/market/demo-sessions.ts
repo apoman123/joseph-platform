@@ -1,4 +1,10 @@
 /**
+ * @license
+ * Copyright 2026 Joseph Terminal contributors
+ * SPDX-License-Identifier: MIT
+ */
+
+/**
  * @fileoverview DEMO session lists for the exchange calendars, standing in
  * for the engine's `GET /v1/calendars/{calendar_id}/sessions`.
  *
@@ -20,6 +26,7 @@
  *   2026-11-22 and published through 2027; TPEx keeps the same days);
  *   later dates follow the weekday rule.
  */
+
 import {
   CONTINUOUS_CALENDAR,
   EXCHANGE_HOURS,
@@ -306,7 +313,7 @@ const NYSE_HOLIDAYS = new Map<number, ReadonlySet<number>>();
 export function nyseHolidays(year: number): ReadonlySet<number> {
   const cached = NYSE_HOLIDAYS.get(year);
   if (cached) return cached;
-  const days: (number | null)[] = [
+  const days: Array<number | null> = [
     observed(dayOf(year, 1, 1), false),
     nthWeekday(year, 2, 0, 3),
     easterSunday(year) - 2,
@@ -409,8 +416,9 @@ export function demoSessionList(query: SessionQuery): SessionList {
     const last = localDayNumber(toMs, timeZone) + 1;
     for (let day = first; day <= last; day += 1) {
       const session = demoSessionOn(calendar, day);
-      if (session && session.close_ms > fromMs && session.open_ms < toMs)
+      if (session && session.close_ms > fromMs && session.open_ms < toMs) {
         sessions.push(session);
+      }
     }
   }
   return {calendar, sessions, from_ms: fromMs, to_ms: toMs};

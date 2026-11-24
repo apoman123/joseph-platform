@@ -1,8 +1,15 @@
 /**
+ * @license
+ * Copyright 2026 Joseph Terminal contributors
+ * SPDX-License-Identifier: MIT
+ */
+
+/**
  * @fileoverview Seconds and monthly timeframes on the time axis: session
  * separator units (minutes/hours for seconds, years for months), labels
  * and the axis label options.
  */
+
 import {shiftTimeframe} from '@joseph/contracts';
 import {describe, expect, it} from 'vitest';
 import {

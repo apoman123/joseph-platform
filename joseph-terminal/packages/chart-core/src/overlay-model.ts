@@ -1,4 +1,10 @@
 /**
+ * @license
+ * Copyright 2026 Joseph Terminal contributors
+ * SPDX-License-Identifier: MIT
+ */
+
+/**
  * @fileoverview Declarative overlay models rendered by the chart.
  *
  * Features (indicator visualization, chart trading, alerts) never touch the
@@ -6,6 +12,7 @@
  * the chart adapter renders them. Prices are contract decimal strings so the
  * values that may later become order parameters are never float-derived.
  */
+
 import type {DecimalString, TimestampMs} from '@joseph/contracts';
 
 /** Line dash style. */

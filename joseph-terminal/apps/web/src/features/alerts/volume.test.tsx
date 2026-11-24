@@ -1,7 +1,14 @@
 /**
+ * @license
+ * Copyright 2026 Joseph Terminal contributors
+ * SPDX-License-Identifier: MIT
+ */
+
+/**
  * @fileoverview Signal ranking by the signal bar's quote turnover: nulls
  * last, compact display and the explanatory tooltip.
  */
+
 import type {Signal} from '@joseph/contracts';
 import {fireEvent, screen, within} from '@testing-library/react';
 import {afterEach, describe, expect, it} from 'vitest';

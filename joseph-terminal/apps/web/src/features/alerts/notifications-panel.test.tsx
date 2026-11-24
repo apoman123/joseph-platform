@@ -1,6 +1,13 @@
 /**
+ * @license
+ * Copyright 2026 Joseph Terminal contributors
+ * SPDX-License-Identifier: MIT
+ */
+
+/**
  * @fileoverview Component tests for the notification subscriptions panel.
  */
+
 import {DemoStrategyClient} from '@joseph/mock-provider';
 import {render, screen, waitFor} from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
@@ -37,11 +44,12 @@ describe('NotificationsPanel', () => {
     await user.type(screen.getByLabelText('Chat id'), '123456789');
     await user.click(screen.getByLabelText(/quiet hours/));
     await user.click(screen.getByRole('button', {name: 'Save notification'}));
-    await waitFor(() =>
-      expect(notify).toHaveBeenCalledWith(
-        'Saved notification "phone"',
-        'success'
-      )
+    await waitFor(
+      () =>
+        void expect(notify).toHaveBeenCalledWith(
+          'Saved notification "phone"',
+          'success'
+        )
     );
     const row = await screen.findByRole('row', {name: /phone/});
     expect(row).toHaveTextContent('Telegram');

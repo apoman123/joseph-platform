@@ -1,6 +1,13 @@
 /**
+ * @license
+ * Copyright 2026 Joseph Terminal contributors
+ * SPDX-License-Identifier: MIT
+ */
+
+/**
  * @fileoverview Terminal route.
  */
+
 import type {ReactElement} from 'react';
 import {ClientTerminal} from './client-terminal';
 

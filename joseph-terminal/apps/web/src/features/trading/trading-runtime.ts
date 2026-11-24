@@ -1,4 +1,10 @@
 /**
+ * @license
+ * Copyright 2026 Joseph Terminal contributors
+ * SPDX-License-Identifier: MIT
+ */
+
+/**
  * @fileoverview Feature-scoped state of the trading feature: the ticket
  * controller, instrument metadata, order/position caches for chart layers,
  * the chart context menu and pending amendments. Lives for the feature's
@@ -9,6 +15,7 @@
  * the instrument's trading sessions for market-hours notices. Published
  * rates are not tradable, so they get no chart trading menu.
  */
+
 import {
   TicketController,
   buildContextMenu,
@@ -273,8 +280,9 @@ export function createTradingRuntime(
           markText && Decimal.isValid(markText)
             ? Decimal.parse(markText)
             : null;
-        if (controller.get().inputs.instrumentId === instrumentId)
+        if (controller.get().inputs.instrumentId === instrumentId) {
           controller.setMarket(precision, mark);
+        }
         meta.set({
           instrumentId,
           precision,
@@ -326,7 +334,9 @@ export function createTradingRuntime(
       });
     },
     dispose() {
-      for (const dispose of disposers.splice(0)) dispose();
+      for (const dispose of disposers.splice(0)) {
+        dispose();
+      }
     },
   };
 
@@ -375,7 +385,7 @@ export function createTradingRuntime(
     void runtime.refreshOrders();
     void runtime.loadMeta(controller.get().inputs.instrumentId);
   }, pollMs);
-  disposers.push(() => clearInterval(timer));
+  disposers.push(() => void clearInterval(timer));
   void runtime.refreshOrders();
   void runtime.loadMeta(selection.instrumentId);
   return runtime;

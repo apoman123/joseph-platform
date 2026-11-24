@@ -1,8 +1,15 @@
 /**
+ * @license
+ * Copyright 2026 Joseph Terminal contributors
+ * SPDX-License-Identifier: MIT
+ */
+
+/**
  * @fileoverview Chart tools feature: screenshot download (with a
  * provenance header), bar replay, session separators, data window and
  * workspace import commands.
  */
+
 import {
   VENUE_NAMES,
   parseInstrumentId,
@@ -62,10 +69,12 @@ export function importWorkspaceFile(
         !chart ||
         before.get(chartId) !== chart.instrument_id ||
         !restored.has(chart.instrument_id)
-      )
+      ) {
         continue;
-      if (runtime.drawing.selection.get()?.chartId === chartId)
+      }
+      if (runtime.drawing.selection.get()?.chartId === chartId) {
         runtime.drawing.selection.set(null);
+      }
       store.reset(repository.load(chart.instrument_id));
     }
     runtime.drawing.revision.update(n => n + 1);
@@ -143,8 +152,9 @@ export function screenshotFileName(chart: ChartState, nowMs: number): string {
 function loadImage(url: string): Promise<HTMLImageElement> {
   return new Promise((resolve, reject) => {
     const image = new Image();
-    image.onload = () => resolve(image);
-    image.onerror = () => reject(new Error('Screenshot image failed to load'));
+    image.onload = () => void resolve(image);
+    image.onerror = () =>
+      void reject(new Error('Screenshot image failed to load'));
     image.src = url;
   });
 }
@@ -265,7 +275,7 @@ export function chartToolsFeature(runtime: TerminalRuntime): WebFeature {
           id: 'chart.sessionSeparators',
           title: 'Show or hide session separators on the active chart',
           run: () =>
-            runtime.dispatch({
+            void runtime.dispatch({
               type: 'toggleSessionSeparators',
               chartId: active().chart_id,
             }),
@@ -273,7 +283,7 @@ export function chartToolsFeature(runtime: TerminalRuntime): WebFeature {
         ctx.commands.register({
           id: 'chart.dataWindow',
           title: 'Show or hide the data window',
-          run: () => runtime.dataWindow.update(on => !on),
+          run: () => void runtime.dataWindow.update(on => !on),
         }),
         ctx.commands.register({
           id: 'chart.fit',
@@ -313,7 +323,9 @@ export function chartToolsFeature(runtime: TerminalRuntime): WebFeature {
         ctx.hotkeys.bind('alt+0', 'chart.fit'),
       ];
       return () => {
-        for (const dispose of disposers.splice(0).reverse()) dispose();
+        for (const dispose of disposers.splice(0).reverse()) {
+          dispose();
+        }
         runtime.replay.set({});
       };
     },

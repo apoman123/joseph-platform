@@ -1,7 +1,14 @@
 /**
+ * @license
+ * Copyright 2026 Joseph Terminal contributors
+ * SPDX-License-Identifier: MIT
+ */
+
+/**
  * @fileoverview Long position planner: entry, target and stop boxes with
  * reward/risk. A planning aid only; it never places orders.
  */
+
 import {createPositionTool} from '@joseph/drawing-core';
 
 /** Long position tool. */

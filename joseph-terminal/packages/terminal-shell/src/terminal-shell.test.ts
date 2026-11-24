@@ -1,6 +1,13 @@
 /**
+ * @license
+ * Copyright 2026 Joseph Terminal contributors
+ * SPDX-License-Identifier: MIT
+ */
+
+/**
  * @fileoverview Tests for the workspace reducer, persistence and palette.
  */
+
 import {describe, expect, it, vi} from 'vitest';
 import {filterPalette, matchScore, paletteReducer} from './commands';
 import {

@@ -1,10 +1,17 @@
 /**
+ * @license
+ * Copyright 2026 Joseph Terminal contributors
+ * SPDX-License-Identifier: MIT
+ */
+
+/**
  * @fileoverview Shared long/short position (risk/reward) tool behaviour.
  *
  * Anchors: `[entry, target, stop]`. The entry anchor's time is the left
  * edge; the target anchor's time is the right edge. Levels are tick-rounded
  * exact decimals. The tool is a planning aid only: it never creates orders.
  */
+
 import {
   Decimal,
   type BarCalendar,

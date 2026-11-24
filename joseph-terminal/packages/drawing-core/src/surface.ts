@@ -1,4 +1,10 @@
 /**
+ * @license
+ * Copyright 2026 Joseph Terminal contributors
+ * SPDX-License-Identifier: MIT
+ */
+
+/**
  * @fileoverview Renderer-agnostic surface drawings attach to.
  *
  * Structurally compatible with `ChartPort` from `@joseph/chart-core`, so the

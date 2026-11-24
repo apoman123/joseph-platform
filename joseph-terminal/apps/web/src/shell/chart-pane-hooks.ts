@@ -1,8 +1,15 @@
 /**
+ * @license
+ * Copyright 2026 Joseph Terminal contributors
+ * SPDX-License-Identifier: MIT
+ */
+
+/**
  * @fileoverview Chart pane hooks for backend study panes (order-flow
  * Delta %), comparison overlays and session separators. Each hook owns its
  * subscriptions and removes what it added when the inputs change.
  */
+
 'use client';
 import {
   createSessionSeparatorLayer,
@@ -209,7 +216,7 @@ export function useCompare(
   const [entries, setEntries] = useState<readonly CompareEntry[]>([]);
   useEffect(() => {
     if (!port) return;
-    const list = key ? (key.split('|') as InstrumentId[]) : [];
+    const list = key ? key.split('|') : [];
     if (list.length === 0) {
       port.setCompareSeries([]);
       setEntries([]);

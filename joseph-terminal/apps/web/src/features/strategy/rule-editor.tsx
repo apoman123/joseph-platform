@@ -1,9 +1,16 @@
-'use client';
+/**
+ * @license
+ * Copyright 2026 Joseph Terminal contributors
+ * SPDX-License-Identifier: MIT
+ */
+
 /**
  * @fileoverview Visual Rule AST editor: nested group cards (all / any /
  * not), condition cards with plain-language summaries, inline editors per
  * node type and an "add condition" menu by category.
  */
+
+'use client';
 import type {
   AoiKind,
   Direction,
@@ -134,7 +141,7 @@ function NodeCard(props: NodeCardProps): ReactNode {
         type="button"
         className="j-btn j-btn--ghost j-btn--sm j-btn--icon"
         aria-label={`Move "${summary}" up`}
-        onClick={() => apply(props, () => shiftNode(props.root, id, -1))}
+        onClick={() => void apply(props, () => shiftNode(props.root, id, -1))}
       >
         <ArrowUp size={14} aria-hidden />
       </button>
@@ -142,21 +149,21 @@ function NodeCard(props: NodeCardProps): ReactNode {
         type="button"
         className="j-btn j-btn--ghost j-btn--sm j-btn--icon"
         aria-label={`Move "${summary}" down`}
-        onClick={() => apply(props, () => shiftNode(props.root, id, 1))}
+        onClick={() => void apply(props, () => shiftNode(props.root, id, 1))}
       >
         <ArrowDown size={14} aria-hidden />
       </button>
       <button
         type="button"
         className="j-btn j-btn--ghost j-btn--sm"
-        onClick={() => apply(props, () => wrapNode(props.root, id, 'NOT'))}
+        onClick={() => void apply(props, () => wrapNode(props.root, id, 'NOT'))}
       >
         Negate
       </button>
       <button
         type="button"
         className="j-btn j-btn--ghost j-btn--sm"
-        onClick={() => apply(props, () => wrapNode(props.root, id, 'ANY'))}
+        onClick={() => void apply(props, () => wrapNode(props.root, id, 'ANY'))}
       >
         Add alternatives
       </button>
@@ -164,7 +171,7 @@ function NodeCard(props: NodeCardProps): ReactNode {
         type="button"
         className="j-btn j-btn--ghost j-btn--sm j-btn--icon"
         aria-label={`Remove "${summary}"`}
-        onClick={() => apply(props, () => removeNode(props.root, id))}
+        onClick={() => void apply(props, () => removeNode(props.root, id))}
       >
         <Trash2 size={14} aria-hidden />
       </button>
@@ -203,7 +210,7 @@ function NodeCard(props: NodeCardProps): ReactNode {
               type="button"
               aria-pressed={node.op === 'ALL'}
               onClick={() =>
-                apply(props, () =>
+                void apply(props, () =>
                   replaceNode(props.root, id, {...node, op: 'ALL'})
                 )
               }
@@ -214,7 +221,7 @@ function NodeCard(props: NodeCardProps): ReactNode {
               type="button"
               aria-pressed={node.op === 'ANY'}
               onClick={() =>
-                apply(props, () =>
+                void apply(props, () =>
                   replaceNode(props.root, id, {...node, op: 'ANY'})
                 )
               }
@@ -232,7 +239,9 @@ function NodeCard(props: NodeCardProps): ReactNode {
             <button
               type="button"
               className="j-btn j-btn--ghost j-btn--sm"
-              onClick={() => apply(props, () => unwrapNode(props.root, id))}
+              onClick={() =>
+                void apply(props, () => unwrapNode(props.root, id))
+              }
             >
               Ungroup
             </button>
@@ -275,7 +284,7 @@ function NodeCard(props: NodeCardProps): ReactNode {
               max={200}
               value={node.bars}
               onChange={e =>
-                apply(props, () =>
+                void apply(props, () =>
                   setField(props.root, id, 'bars', Number(e.target.value))
                 )
               }
@@ -286,7 +295,7 @@ function NodeCard(props: NodeCardProps): ReactNode {
           <button
             type="button"
             className="j-btn j-btn--ghost j-btn--sm"
-            onClick={() => apply(props, () => unwrapNode(props.root, id))}
+            onClick={() => void apply(props, () => unwrapNode(props.root, id))}
           >
             Remove {node.op === 'NOT' ? 'negation' : 'wrapper'}
           </button>
@@ -309,7 +318,7 @@ function NodeCard(props: NodeCardProps): ReactNode {
           className="j-btn j-btn--ghost j-btn--sm j-btn--icon"
           aria-expanded={editing}
           aria-label={`Edit "${summary}"`}
-          onClick={() => setEditing(v => !v)}
+          onClick={() => void setEditing(v => !v)}
         >
           <Pencil size={14} aria-hidden />
         </button>
@@ -340,7 +349,7 @@ function AddConditionMenu(props: AddMenuProps): ReactNode {
         type="button"
         className="j-btn j-btn--sm"
         aria-expanded={open}
-        onClick={() => setOpen(v => !v)}
+        onClick={() => void setOpen(v => !v)}
       >
         Add condition
       </button>
@@ -399,7 +408,7 @@ function NodeFields(props: NodeFieldsProps): ReactNode {
   const {node} = props;
   const id = node.id ?? '';
   const set = (field: string, value: unknown) =>
-    apply(props, () => setField(props.root, id, field, value));
+    void apply(props, () => setField(props.root, id, field, value));
   const tfSelect = (
     field: string,
     value: Timeframe | undefined,
@@ -411,7 +420,7 @@ function NodeFields(props: NodeFieldsProps): ReactNode {
       <select
         className="j-select"
         value={value ?? ''}
-        onChange={e => set(field, e.target.value || undefined)}
+        onChange={e => void set(field, e.target.value || undefined)}
       >
         {optional && <option value="">Signal timeframe</option>}
         {TIMEFRAME_ORDER.map(tf => (
@@ -438,7 +447,10 @@ function NodeFields(props: NodeFieldsProps): ReactNode {
         max={max}
         value={value ?? ''}
         onChange={e =>
-          set(field, e.target.value === '' ? undefined : Number(e.target.value))
+          void set(
+            field,
+            e.target.value === '' ? undefined : Number(e.target.value)
+          )
         }
       />
     </label>
@@ -450,7 +462,7 @@ function NodeFields(props: NodeFieldsProps): ReactNode {
         className="j-input j-tabular"
         inputMode="decimal"
         value={value ?? ''}
-        onChange={e => set(field, e.target.value)}
+        onChange={e => void set(field, e.target.value)}
       />
     </label>
   );
@@ -459,14 +471,14 @@ function NodeFields(props: NodeFieldsProps): ReactNode {
       <button
         type="button"
         aria-pressed={value === 'bullish'}
-        onClick={() => set('side', 'bullish')}
+        onClick={() => void set('side', 'bullish')}
       >
         Bullish
       </button>
       <button
         type="button"
         aria-pressed={value === 'bearish'}
-        onClick={() => set('side', 'bearish')}
+        onClick={() => void set('side', 'bearish')}
       >
         Bearish
       </button>
@@ -485,7 +497,7 @@ function NodeFields(props: NodeFieldsProps): ReactNode {
             type="checkbox"
             checked={kinds.includes(kind)}
             onChange={e =>
-              set(
+              void set(
                 field,
                 e.target.checked
                   ? [...kinds, kind]
@@ -508,7 +520,7 @@ function NodeFields(props: NodeFieldsProps): ReactNode {
       <select
         className="j-select"
         value={value}
-        onChange={e => onChange(e.target.value as StructureEventName)}
+        onChange={e => void onChange(e.target.value as StructureEventName)}
       >
         {STRUCTURE_EVENTS.map(name => (
           <option key={name} value={name}>
@@ -534,7 +546,7 @@ function NodeFields(props: NodeFieldsProps): ReactNode {
                   type="checkbox"
                   checked={node.timeframes.includes(tf)}
                   onChange={e =>
-                    set(
+                    void set(
                       'timeframes',
                       e.target.checked
                         ? [...node.timeframes, tf]
@@ -550,14 +562,14 @@ function NodeFields(props: NodeFieldsProps): ReactNode {
             <button
               type="button"
               aria-pressed={node.value === 'BULLISH'}
-              onClick={() => set('value', 'BULLISH')}
+              onClick={() => void set('value', 'BULLISH')}
             >
               Bullish
             </button>
             <button
               type="button"
               aria-pressed={node.value === 'BEARISH'}
-              onClick={() => set('value', 'BEARISH')}
+              onClick={() => void set('value', 'BEARISH')}
             >
               Bearish
             </button>
@@ -567,7 +579,7 @@ function NodeFields(props: NodeFieldsProps): ReactNode {
             <select
               className="j-select"
               value={node.match ?? 'ALL'}
-              onChange={e => set('match', e.target.value)}
+              onChange={e => void set('match', e.target.value)}
             >
               <option value="ALL">All timeframes</option>
               <option value="K_OF_N">At least k of them</option>
@@ -578,7 +590,9 @@ function NodeFields(props: NodeFieldsProps): ReactNode {
             <input
               type="checkbox"
               checked={node.require_bos ?? false}
-              onChange={e => set('require_bos', e.target.checked || undefined)}
+              onChange={e =>
+                void set('require_bos', e.target.checked || undefined)
+              }
             />
             Latest break must be a BOS
           </label>
@@ -593,7 +607,7 @@ function NodeFields(props: NodeFieldsProps): ReactNode {
             <select
               className="j-select"
               value={node.zone}
-              onChange={e => set('zone', e.target.value)}
+              onChange={e => void set('zone', e.target.value)}
             >
               <option value="DISCOUNT">Discount</option>
               <option value="PREMIUM">Premium</option>
@@ -607,7 +621,7 @@ function NodeFields(props: NodeFieldsProps): ReactNode {
             <select
               className="j-select"
               value={node.price_source ?? 'close'}
-              onChange={e => set('price_source', e.target.value)}
+              onChange={e => void set('price_source', e.target.value)}
             >
               <option value="close">Close</option>
               <option value="high">High</option>
@@ -621,7 +635,9 @@ function NodeFields(props: NodeFieldsProps): ReactNode {
               className="j-input"
               value={node.range_group ?? ''}
               placeholder="None"
-              onChange={e => set('range_group', e.target.value || undefined)}
+              onChange={e =>
+                void set('range_group', e.target.value || undefined)
+              }
             />
             <span className="j-field__hint">
               Zones with the same group must come from one dealing range.
@@ -647,7 +663,7 @@ function NodeFields(props: NodeFieldsProps): ReactNode {
             <select
               className="j-select"
               value={node.touch ?? 'WICK'}
-              onChange={e => set('touch', e.target.value)}
+              onChange={e => void set('touch', e.target.value)}
             >
               <option value="WICK">Wick</option>
               <option value="BODY">Body</option>
@@ -661,7 +677,7 @@ function NodeFields(props: NodeFieldsProps): ReactNode {
               type="checkbox"
               checked={node.require_active !== false}
               onChange={e =>
-                set('require_active', e.target.checked ? undefined : false)
+                void set('require_active', e.target.checked ? undefined : false)
               }
             />
             Only areas still active
@@ -686,7 +702,7 @@ function NodeFields(props: NodeFieldsProps): ReactNode {
     case 'EVENT':
       fields = (
         <>
-          {eventSelect(node.name, name => set('name', name), 'Event')}
+          {eventSelect(node.name, name => void set('name', name), 'Event')}
           {number(
             'within_bars',
             node.within_bars,
@@ -707,7 +723,7 @@ function NodeFields(props: NodeFieldsProps): ReactNode {
                 {eventSelect(
                   step.name,
                   name =>
-                    set(
+                    void set(
                       'steps',
                       node.steps.map((s, j) => (j === i ? {...s, name} : s))
                     ),
@@ -718,7 +734,7 @@ function NodeFields(props: NodeFieldsProps): ReactNode {
                   className="j-btn j-btn--ghost j-btn--sm"
                   disabled={node.steps.length <= 2}
                   onClick={() =>
-                    set(
+                    void set(
                       'steps',
                       node.steps.filter((_s, j) => j !== i)
                     )
@@ -734,7 +750,7 @@ function NodeFields(props: NodeFieldsProps): ReactNode {
             className="j-btn j-btn--sm"
             disabled={node.steps.length >= 8}
             onClick={() =>
-              set('steps', [
+              void set('steps', [
                 ...node.steps,
                 {name: 'SELLER_FAILURE'} satisfies EventRef,
               ])
@@ -752,14 +768,14 @@ function NodeFields(props: NodeFieldsProps): ReactNode {
           <OperandField
             label="Value"
             operand={node.left}
-            onChange={v => set('left', v)}
+            onChange={v => void set('left', v)}
           />
           <label className="j-field">
             <span className="j-label">Comparison</span>
             <select
               className="j-select"
               value={node.cmp}
-              onChange={e => set('cmp', e.target.value)}
+              onChange={e => void set('cmp', e.target.value)}
             >
               <option value="gt">greater than</option>
               <option value="gte">at least</option>
@@ -772,7 +788,7 @@ function NodeFields(props: NodeFieldsProps): ReactNode {
           <OperandField
             label="Compared with"
             operand={node.right}
-            onChange={v => set('right', v)}
+            onChange={v => void set('right', v)}
           />
         </>
       );
@@ -783,17 +799,17 @@ function NodeFields(props: NodeFieldsProps): ReactNode {
           <OperandField
             label="Value"
             operand={node.value}
-            onChange={v => set('value', v)}
+            onChange={v => void set('value', v)}
           />
           <OperandField
             label="Low"
             operand={node.low}
-            onChange={v => set('low', v)}
+            onChange={v => void set('low', v)}
           />
           <OperandField
             label="High"
             operand={node.high}
-            onChange={v => set('high', v)}
+            onChange={v => void set('high', v)}
           />
         </>
       );
@@ -804,20 +820,20 @@ function NodeFields(props: NodeFieldsProps): ReactNode {
           <OperandField
             label="Value"
             operand={node.left}
-            onChange={v => set('left', v)}
+            onChange={v => void set('left', v)}
           />
           <div className="j-segmented" role="group" aria-label="Direction">
             <button
               type="button"
               aria-pressed={node.direction === 'ABOVE'}
-              onClick={() => set('direction', 'ABOVE')}
+              onClick={() => void set('direction', 'ABOVE')}
             >
               Above
             </button>
             <button
               type="button"
               aria-pressed={node.direction === 'BELOW'}
-              onClick={() => set('direction', 'BELOW')}
+              onClick={() => void set('direction', 'BELOW')}
             >
               Below
             </button>
@@ -825,7 +841,7 @@ function NodeFields(props: NodeFieldsProps): ReactNode {
           <OperandField
             label="Crossed value"
             operand={node.right}
-            onChange={v => set('right', v)}
+            onChange={v => void set('right', v)}
           />
         </>
       );
@@ -840,7 +856,7 @@ function NodeFields(props: NodeFieldsProps): ReactNode {
                 type="checkbox"
                 checked={node.sessions.includes(s)}
                 onChange={e =>
-                  set(
+                  void set(
                     'sessions',
                     e.target.checked
                       ? [...node.sessions, s]
@@ -875,7 +891,7 @@ function NodeFields(props: NodeFieldsProps): ReactNode {
           className="j-input"
           value={node.label ?? ''}
           placeholder="Optional label shown in alerts"
-          onChange={e => set('label', e.target.value || undefined)}
+          onChange={e => void set('label', e.target.value || undefined)}
         />
       </label>
     </div>
@@ -905,9 +921,9 @@ function OperandField({
   const changeKind = (kind: Operand['kind']) => {
     if (kind === 'const') onChange({kind, value: '0'});
     else if (kind === 'candle') onChange({kind, field: 'close'});
-    else if (kind === 'indicator')
+    else if (kind === 'indicator') {
       onChange({kind, plugin_id: 'auction_value_areas', field: 'poc'});
-    else onChange({kind, field: 'funding_8h_pct'});
+    } else onChange({kind, field: 'funding_8h_pct'});
   };
   return (
     <fieldset className={styles.operand}>
@@ -916,7 +932,7 @@ function OperandField({
         className="j-select"
         aria-label={`${label} type`}
         value={operand.kind}
-        onChange={e => changeKind(e.target.value as Operand['kind'])}
+        onChange={e => void changeKind(e.target.value as Operand['kind'])}
       >
         <option value="const">Number</option>
         <option value="candle">Candle value</option>
@@ -929,7 +945,7 @@ function OperandField({
           aria-label={`${label} number`}
           inputMode="decimal"
           value={operand.value}
-          onChange={e => onChange({...operand, value: e.target.value})}
+          onChange={e => void onChange({...operand, value: e.target.value})}
         />
       )}
       {operand.kind === 'candle' && (
@@ -938,7 +954,7 @@ function OperandField({
           aria-label={`${label} candle field`}
           value={operand.field}
           onChange={e =>
-            onChange({
+            void onChange({
               ...operand,
               field: e.target.value as typeof operand.field,
             })
@@ -957,13 +973,15 @@ function OperandField({
             className="j-input"
             aria-label={`${label} plugin`}
             value={operand.plugin_id}
-            onChange={e => onChange({...operand, plugin_id: e.target.value})}
+            onChange={e =>
+              void onChange({...operand, plugin_id: e.target.value})
+            }
           />
           <input
             className="j-input"
             aria-label={`${label} field`}
             value={operand.field}
-            onChange={e => onChange({...operand, field: e.target.value})}
+            onChange={e => void onChange({...operand, field: e.target.value})}
           />
         </>
       )}
@@ -973,7 +991,7 @@ function OperandField({
           aria-label={`${label} market field`}
           value={operand.field}
           onChange={e =>
-            onChange({
+            void onChange({
               ...operand,
               field: e.target.value as typeof operand.field,
             })

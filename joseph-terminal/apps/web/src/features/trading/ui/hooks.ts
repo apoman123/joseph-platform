@@ -1,7 +1,14 @@
-'use client';
+/**
+ * @license
+ * Copyright 2026 Joseph Terminal contributors
+ * SPDX-License-Identifier: MIT
+ */
+
 /**
  * @fileoverview Data hooks and lazy stores shared by the F6 features.
  */
+
+'use client';
 import {
   createStore,
   type Disposer,
@@ -53,7 +60,7 @@ export function usePolling<T>(
   const loader = useRef(load);
   loader.current = load;
   const [tick, setTick] = useState(0);
-  const refresh = useCallback(() => setTick(t => t + 1), []);
+  const refresh = useCallback(() => void setTick(t => t + 1), []);
   useEffect(() => {
     let alive = true;
     const run = () => {
@@ -89,7 +96,7 @@ export function usePolling<T>(
  * @return Derived read-only store.
  */
 export function derived<T>(
-  sources: readonly ReadableStore<unknown>[],
+  sources: ReadonlyArray<ReadableStore<unknown>>,
   compute: () => T
 ): ReadableStore<T> {
   const inner = createStore<T>(compute());
@@ -103,7 +110,7 @@ export function derived<T>(
       if (subscribers === 0) {
         inner.set(compute());
         attached = sources.map(source =>
-          source.subscribe(() => inner.set(compute()))
+          source.subscribe(() => void inner.set(compute()))
         );
       }
       subscribers += 1;
@@ -112,7 +119,9 @@ export function derived<T>(
         off();
         subscribers -= 1;
         if (subscribers === 0) {
-          for (const dispose of attached) dispose();
+          for (const dispose of attached) {
+            dispose();
+          }
           attached = [];
         }
       };
@@ -128,8 +137,8 @@ export function derived<T>(
 export function useNow(intervalMs = 1000): number {
   const [now, setNow] = useState(() => Date.now());
   useEffect(() => {
-    const timer = setInterval(() => setNow(Date.now()), intervalMs);
-    return () => clearInterval(timer);
+    const timer = setInterval(() => void setNow(Date.now()), intervalMs);
+    return () => void clearInterval(timer);
   }, [intervalMs]);
   return now;
 }

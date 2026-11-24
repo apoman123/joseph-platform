@@ -1,10 +1,17 @@
 /**
+ * @license
+ * Copyright 2026 Joseph Terminal contributors
+ * SPDX-License-Identifier: MIT
+ */
+
+/**
  * @fileoverview System tests of the TradingView-style chart workflows in
  * DEMO mode: volume and Delta % panes, market structure, indicator
  * settings, comparison, session breaks, data window, bar replay, the new
  * drawing tools with the style editor and object list, screenshots,
  * templates, alert triage and resizable docks.
  */
+
 import {expect, test, type Page} from '@playwright/test';
 import {openPanel} from './trading-helpers';
 import {

@@ -1,8 +1,15 @@
 /**
+ * @license
+ * Copyright 2026 Joseph Terminal contributors
+ * SPDX-License-Identifier: MIT
+ */
+
+/**
  * @fileoverview Workspace import with drawings: restored collections reach
  * storage, open charts that keep their instrument reload their drawings
  * at once, and the notification says what was imported.
  */
+
 import type {DrawingDocument} from '@joseph/contracts';
 import {DrawingRepository, DrawingStore} from '@joseph/drawing-core';
 import {

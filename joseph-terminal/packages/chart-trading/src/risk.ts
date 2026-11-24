@@ -1,9 +1,16 @@
 /**
+ * @license
+ * Copyright 2026 Joseph Terminal contributors
+ * SPDX-License-Identifier: MIT
+ */
+
+/**
  * @fileoverview Position-sizing and reward/risk helpers for the ticket.
  *
  * These are display aids. The server-side Risk Gateway computes the binding
  * verdict for every intent.
  */
+
 import {Decimal, type OrderSide} from '@joseph/contracts';
 
 /** Inputs for risk-based sizing. */

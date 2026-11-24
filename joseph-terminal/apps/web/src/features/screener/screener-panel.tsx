@@ -1,9 +1,16 @@
-'use client';
+/**
+ * @license
+ * Copyright 2026 Joseph Terminal contributors
+ * SPDX-License-Identifier: MIT
+ */
+
 /**
  * @fileoverview Screener: backend qualification results per exact venue
  * instrument. Every gate shows observed value, threshold and outcome; a
  * missing value is shown as missing, never as a pass.
  */
+
+'use client';
 import {
   formatCompactUsd,
   formatFixed,
@@ -32,7 +39,7 @@ export interface ScreenerPanelProps {
 }
 
 /** Gate columns in display order. */
-const GATES: readonly {gate: GateName; label: string; title: string}[] = [
+const GATES: ReadonlyArray<{gate: GateName; label: string; title: string}> = [
   {gate: 'TURNOVER_24H', label: 'Turnover', title: '24h quote turnover'},
   {gate: 'OPEN_INTEREST_USD', label: 'OI', title: 'Open interest in USD'},
   {
@@ -49,10 +56,10 @@ const GATES: readonly {gate: GateName; label: string; title: string}[] = [
 ];
 
 /** Status filter options. */
-const STATUS_FILTERS: readonly {
+const STATUS_FILTERS: ReadonlyArray<{
   value: QualificationStatus | 'ALL';
   label: string;
-}[] = [
+}> = [
   {value: 'ALL', label: 'All'},
   {value: 'QUALIFIED', label: 'Qualified'},
   {value: 'REJECTED', label: 'Rejected'},
@@ -263,7 +270,7 @@ export function ScreenerPanel({ctx}: ScreenerPanelProps): ReactNode {
             <select
               className="j-select"
               value={venue}
-              onChange={e => setVenue(e.target.value as Venue | '')}
+              onChange={e => void setVenue(e.target.value as Venue | '')}
             >
               <option value="">All venues</option>
               {VENUES.map(v => (
@@ -278,7 +285,7 @@ export function ScreenerPanel({ctx}: ScreenerPanelProps): ReactNode {
             <select
               className="j-select"
               value={sort}
-              onChange={e => setSort(e.target.value as SortKey)}
+              onChange={e => void setSort(e.target.value as SortKey)}
             >
               <option value="rank">Rank</option>
               <option value="status">Status</option>
@@ -331,7 +338,7 @@ export function ScreenerPanel({ctx}: ScreenerPanelProps): ReactNode {
               placeholder="Save filters as…"
               maxLength={40}
               value={presetName}
-              onChange={e => setPresetName(e.target.value)}
+              onChange={e => void setPresetName(e.target.value)}
             />
             <button
               type="submit"
@@ -346,7 +353,9 @@ export function ScreenerPanel({ctx}: ScreenerPanelProps): ReactNode {
                 type="button"
                 className="j-btn j-btn--sm j-btn--ghost"
                 onClick={() =>
-                  storePresets(presets.filter(p => p.name !== activePreset))
+                  void storePresets(
+                    presets.filter(p => p.name !== activePreset)
+                  )
                 }
               >
                 Delete “{activePreset}”
@@ -360,7 +369,7 @@ export function ScreenerPanel({ctx}: ScreenerPanelProps): ReactNode {
               key={option.value}
               type="button"
               aria-pressed={status === option.value}
-              onClick={() => setStatus(option.value)}
+              onClick={() => void setStatus(option.value)}
             >
               {option.label}
             </button>

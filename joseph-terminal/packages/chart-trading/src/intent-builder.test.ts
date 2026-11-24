@@ -1,6 +1,13 @@
 /**
+ * @license
+ * Copyright 2026 Joseph Terminal contributors
+ * SPDX-License-Identifier: MIT
+ */
+
+/**
  * @fileoverview Unit and property tests for the intent builder.
  */
+
 import {Decimal} from '@joseph/contracts';
 import {describe, expect, it} from 'vitest';
 import {

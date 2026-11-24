@@ -1,10 +1,17 @@
 /**
+ * @license
+ * Copyright 2026 Joseph Terminal contributors
+ * SPDX-License-Identifier: MIT
+ */
+
+/**
  * @fileoverview Maps backend indicator records to chart overlay models.
  *
  * Render-only: every value comes from the Python engine's `AoiRecord`,
  * `StructureEvent` and `IndicatorSnapshot` outputs. Nothing here derives a
  * trading signal from candles.
  */
+
 import type {
   BoxOverlay,
   MarkerOverlay,
@@ -480,10 +487,12 @@ export function buildIndicatorLayers(
   const shown = input.aois.filter(aoi => {
     if (aoi.instrument_id !== input.instrumentId) return false;
     const plugin = input.settings.plugins[aoi.source];
-    if (plugin && (!plugin.visible || plugin.hiddenKinds.includes(aoi.kind)))
+    if (plugin && (!plugin.visible || plugin.hiddenKinds.includes(aoi.kind))) {
       return false;
-    if (plugin?.shownKinds && !plugin.shownKinds.includes(aoi.kind))
+    }
+    if (plugin?.shownKinds && !plugin.shownKinds.includes(aoi.kind)) {
       return false;
+    }
     return !isEnded(aoi) || input.settings.showEnded;
   });
   for (const aoi of limitPerKind(
@@ -513,8 +522,9 @@ export function buildIndicatorLayers(
       structureBreaks.has(
         `${event.timeframe}|${event.bar_start_ms}|${event.name}`
       )
-    )
+    ) {
       continue;
+    }
     const marker = eventToMarker(event);
     if (marker) push(event.source, colored(marker, event.name, plugin?.colors));
     const line = eventToBreakLine(event);

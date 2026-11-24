@@ -1,6 +1,13 @@
 /**
+ * @license
+ * Copyright 2026 Joseph Terminal contributors
+ * SPDX-License-Identifier: MIT
+ */
+
+/**
  * @fileoverview 404 page.
  */
+
 import type {ReactElement} from 'react';
 import Link from 'next/link';
 

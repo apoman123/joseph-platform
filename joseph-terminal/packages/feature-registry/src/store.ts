@@ -1,4 +1,10 @@
 /**
+ * @license
+ * Copyright 2026 Joseph Terminal contributors
+ * SPDX-License-Identifier: MIT
+ */
+
+/**
  * @fileoverview Minimal observable store shared across features.
  *
  * Framework-free; the web app adapts it to React with
@@ -56,7 +62,9 @@ export function createStore<T>(initial: T): WritableStore<T> {
     set(next) {
       if (Object.is(next, value)) return;
       value = next;
-      for (const listener of [...listeners]) listener(value);
+      for (const listener of [...listeners]) {
+        listener(value);
+      }
     },
     update(updater) {
       this.set(updater(value));

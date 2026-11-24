@@ -1,9 +1,16 @@
-'use client';
+/**
+ * @license
+ * Copyright 2026 Joseph Terminal contributors
+ * SPDX-License-Identifier: MIT
+ */
+
 /**
  * @fileoverview Positions with reduce-only close and a two-step reverse
  * (close → confirmed flat → open). Each step is previewed and confirmed
  * separately; nothing assumes venue atomicity.
  */
+
+'use client';
 import {
   groupThousands,
   planClose,
@@ -252,8 +259,8 @@ function ReverseDialog({
           ? ctx.clients.execution.previewOrder(openRequest(plan))
           : null;
     load?.then(
-      p => alive && setPreview(p),
-      (err: unknown) => alive && setError(errorMessage(err))
+      p => alive && void setPreview(p),
+      (err: unknown) => alive && void setError(errorMessage(err))
     );
     return () => {
       alive = false;
@@ -412,14 +419,14 @@ export function PositionsView({ctx, runtime}: PositionsViewProps): ReactNode {
                   <button
                     type="button"
                     className="j-btn j-btn--sm"
-                    onClick={() => setClosing(position)}
+                    onClick={() => void setClosing(position)}
                   >
                     Close
                   </button>
                   <button
                     type="button"
                     className="j-btn j-btn--sm j-btn--ghost"
-                    onClick={() => setReversing(position)}
+                    onClick={() => void setReversing(position)}
                   >
                     Reverse
                   </button>
@@ -435,7 +442,7 @@ export function PositionsView({ctx, runtime}: PositionsViewProps): ReactNode {
           ctx={ctx}
           runtime={runtime}
           position={closing}
-          onDone={() => setClosing(null)}
+          onDone={() => void setClosing(null)}
         />
       )}
       {reversing && (
@@ -443,7 +450,7 @@ export function PositionsView({ctx, runtime}: PositionsViewProps): ReactNode {
           ctx={ctx}
           runtime={runtime}
           position={reversing}
-          onDone={() => setReversing(null)}
+          onDone={() => void setReversing(null)}
         />
       )}
     </div>

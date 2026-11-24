@@ -1,4 +1,10 @@
 /**
+ * @license
+ * Copyright 2026 Joseph Terminal contributors
+ * SPDX-License-Identifier: MIT
+ */
+
+/**
  * @fileoverview Session-list cache: loads exchange sessions from the market
  * engine (`GET /v1/calendars/{calendar_id}/sessions`) or the DEMO provider
  * and serves calendars built from them.
@@ -10,6 +16,7 @@
  * loaded yet follow the regular weekday hours, and subscribers are told
  * when better data arrives so charts recompute their bar boundaries.
  */
+
 import type {SessionQuery} from './client/ports';
 import type {
   CalendarId,
@@ -160,7 +167,9 @@ export class SessionCalendarCache {
       (Math.max(fromMs + 1, toMs) - 1) / SESSION_CHUNK_MS
     );
     const chunks: number[] = [];
-    for (let chunk = first; chunk <= last; chunk += 1) chunks.push(chunk);
+    for (let chunk = first; chunk <= last; chunk += 1) {
+      chunks.push(chunk);
+    }
     return chunks;
   }
 
@@ -180,7 +189,7 @@ export class SessionCalendarCache {
     if (!isExchangeCalendar(id) || !this.fetcher) return this.calendar(id);
     const state = this.state(id);
     const now = this.now();
-    const waits: Promise<void>[] = [];
+    const waits: Array<Promise<void>> = [];
     let run: number[] = [];
     const flush = () => {
       if (run.length > 0) waits.push(this.load(id, state, run));
@@ -264,14 +273,18 @@ export class SessionCalendarCache {
       })
       .catch(() => {
         const retryAt = this.now() + SESSION_RETRY_MS;
-        for (const chunk of chunks) state.failed.set(chunk, retryAt);
+        for (const chunk of chunks) {
+          state.failed.set(chunk, retryAt);
+        }
       })
       .finally(() => {
         for (const chunk of chunks) {
           if (state.pending.get(chunk) === promise) state.pending.delete(chunk);
         }
       });
-    for (const chunk of chunks) state.pending.set(chunk, promise);
+    for (const chunk of chunks) {
+      state.pending.set(chunk, promise);
+    }
     return promise;
   }
 

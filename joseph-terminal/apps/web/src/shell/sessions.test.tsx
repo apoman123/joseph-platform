@@ -1,10 +1,17 @@
 /**
+ * @license
+ * Copyright 2026 Joseph Terminal contributors
+ * SPDX-License-Identifier: MIT
+ */
+
+/**
  * @fileoverview Session markets in the shell: market groups and search
  * ranking (including Chinese names), the picker's tabs, badges and data
  * access flags, ladder-precision prices, yields in %, share and lot
  * volumes, exchange-time bar labels, the market status badge and the
  * classified delta source in the data window.
  */
+
 import type {ChartBar} from '@joseph/chart-core';
 import {
   createBarCalendar,
@@ -188,7 +195,7 @@ describe('market groups and search', () => {
       ...nasdaq,
       venue: 'cboe',
       display_name: 'Cboe BZX',
-    } as VenueCapabilities);
+    });
     expect(cboe.missingCredentials).toMatch(/^Alpaca API key missing/);
     expect(venueAccess(null)).toEqual({delay: null, missingCredentials: null});
     expect(delayLabel(7_200_000)).toBe('Delayed 2 h');
@@ -391,11 +398,12 @@ describe('instrument picker', () => {
         within(listbox).getByRole('group', {name: 'Taiwan stocks'})
       ).toBeVisible()
     );
-    for (const group of ['Crypto', 'US stocks', 'Bonds & rates'])
+    for (const group of ['Crypto', 'US stocks', 'Bonds & rates']) {
       expect(within(listbox).getByRole('group', {name: group})).toBeVisible();
+    }
     fireEvent.click(screen.getByTestId('market-group-bonds'));
-    await waitFor(() =>
-      expect(within(listbox).getAllByRole('option')).toHaveLength(3)
+    await waitFor(
+      () => void expect(within(listbox).getAllByRole('option')).toHaveLength(3)
     );
     expect(
       within(listbox).getByRole('option', {name: /00999B/})

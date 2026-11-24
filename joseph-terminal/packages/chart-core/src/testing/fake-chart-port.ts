@@ -1,10 +1,17 @@
 /**
+ * @license
+ * Copyright 2026 Joseph Terminal contributors
+ * SPDX-License-Identifier: MIT
+ */
+
+/**
  * @fileoverview In-memory `ChartPort` used by unit and component tests.
  *
  * Uses a linear transform: each bar is `barWidth` pixels wide starting at
  * `originMs`, and prices map linearly between `priceTop` and `priceBottom`.
  * Tests drive pointer events with `emit`.
  */
+
 import type {
   CanvasLayer,
   ChartBar,

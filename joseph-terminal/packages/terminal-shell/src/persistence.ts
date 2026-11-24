@@ -1,4 +1,10 @@
 /**
+ * @license
+ * Copyright 2026 Joseph Terminal contributors
+ * SPDX-License-Identifier: MIT
+ */
+
+/**
  * @fileoverview Workspace persistence: versioned storage with migrations,
  * JSON import/export, share links and debounced autosave.
  *
@@ -17,6 +23,7 @@
  * Files from a newer format are refused with an actionable message rather
  * than half-imported. Share links keep carrying the layout only.
  */
+
 import {
   isInstrumentId,
   type WorkspaceDocument,
@@ -136,8 +143,9 @@ export function validateWorkspace(value: unknown): string | null {
   if (!value || typeof value !== 'object') return 'Workspace must be an object';
   const doc = value as Partial<WorkspaceDocument>;
   if (doc.schema_version !== 1) return 'Unsupported workspace version';
-  if (typeof doc.workspace_id !== 'string' || !doc.workspace_id)
+  if (typeof doc.workspace_id !== 'string' || !doc.workspace_id) {
     return 'Missing workspace id';
+  }
   if (!doc.layout || !(doc.layout in LAYOUT_PANES)) return 'Unknown layout';
   if (
     !Array.isArray(doc.charts) ||
@@ -147,16 +155,19 @@ export function validateWorkspace(value: unknown): string | null {
     return 'A workspace needs 1 to 8 charts';
   }
   for (const chart of doc.charts) {
-    if (!chart || typeof chart.chart_id !== 'string')
+    if (!chart || typeof chart.chart_id !== 'string') {
       return 'Chart is missing an id';
+    }
     if (!isInstrumentId(String(chart.instrument_id))) {
       return `Chart ${chart.chart_id} has an invalid instrument id`;
     }
-    if (!Array.isArray(chart.indicator_layers))
+    if (!Array.isArray(chart.indicator_layers)) {
       return `Chart ${chart.chart_id} has no layers`;
+    }
   }
-  if (!doc.sync || typeof doc.sync.crosshair !== 'boolean')
+  if (!doc.sync || typeof doc.sync.crosshair !== 'boolean') {
     return 'Missing sync options';
+  }
   return null;
 }
 
@@ -173,7 +184,7 @@ function readWorkspaceValue(
   let raw = value;
   let migrated = false;
   if (raw && typeof raw === 'object' && !('schema_version' in raw)) {
-    raw = migrateWorkspaceV0(raw as LegacyV0Workspace, nowMs);
+    raw = migrateWorkspaceV0(raw, nowMs);
     migrated = true;
   }
   const error = validateWorkspace(raw);
@@ -337,7 +348,9 @@ export function exportWorkspaceFile(
 function toBase64Url(text: string): string {
   const bytes = new TextEncoder().encode(text);
   let binary = '';
-  for (const byte of bytes) binary += String.fromCharCode(byte);
+  for (const byte of bytes) {
+    binary += String.fromCharCode(byte);
+  }
   return btoa(binary)
     .replace(/\+/g, '-')
     .replace(/\//g, '_')

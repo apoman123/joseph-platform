@@ -1,6 +1,13 @@
 /**
+ * @license
+ * Copyright 2026 Joseph Terminal contributors
+ * SPDX-License-Identifier: MIT
+ */
+
+/**
  * @fileoverview Component tests for the portfolio feature.
  */
+
 import type {ExecutionClient, OrderIntentRequest} from '@joseph/contracts';
 import {screen, waitFor, within} from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
@@ -51,8 +58,9 @@ async function openLong(ctx: FakeContext): Promise<void> {
     request({order_type: 'market', limit_price: null}),
     `open-${Math.random()}`
   );
-  await waitFor(async () =>
-    expect((await ctx.broker.listPositions()).positions).toHaveLength(1)
+  await waitFor(
+    async () =>
+      void expect((await ctx.broker.listPositions()).positions).toHaveLength(1)
   );
 }
 
@@ -60,10 +68,11 @@ describe('portfolio', () => {
   it('cancels an open order after confirmation', async () => {
     const ctx = createFakeContext();
     await ctx.broker.submitIntent(request(), 'resting');
-    await waitFor(async () =>
-      expect((await ctx.broker.listOrders()).orders[0]?.state).toBe(
-        'ACKNOWLEDGED'
-      )
+    await waitFor(
+      async () =>
+        void expect((await ctx.broker.listOrders()).orders[0]?.state).toBe(
+          'ACKNOWLEDGED'
+        )
     );
     rendered = await renderFeature(
       PORTFOLIO_FEATURE,
@@ -81,8 +90,11 @@ describe('portfolio', () => {
         name: 'Cancel buy limit 0.01 at 90,000',
       })
     );
-    await waitFor(async () =>
-      expect((await ctx.broker.listOrders()).orders[0]?.state).toBe('CANCELED')
+    await waitFor(
+      async () =>
+        void expect((await ctx.broker.listOrders()).orders[0]?.state).toBe(
+          'CANCELED'
+        )
     );
     expect(
       ctx.notifications.some(n => /once the venue confirms/.test(n.message))
@@ -148,8 +160,11 @@ describe('portfolio', () => {
     });
     await waitFor(() => expect(confirm).toBeEnabled());
     await user.click(confirm);
-    await waitFor(async () =>
-      expect((await ctx.broker.listPositions()).positions).toHaveLength(0)
+    await waitFor(
+      async () =>
+        void expect((await ctx.broker.listPositions()).positions).toHaveLength(
+          0
+        )
     );
   });
 

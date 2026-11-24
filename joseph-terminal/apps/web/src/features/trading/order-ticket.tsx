@@ -1,4 +1,9 @@
-'use client';
+/**
+ * @license
+ * Copyright 2026 Joseph Terminal contributors
+ * SPDX-License-Identifier: MIT
+ */
+
 /**
  * @fileoverview Order ticket: draft → preview → confirm. Every order goes to
  * the execution engine as an intent; the browser never signs or sends venue
@@ -17,6 +22,8 @@
  * arming expired or was revoked elsewhere) the ticket returns to paper and
  * asks to arm again. Published rates have no ticket.
  */
+
+'use client';
 import {
   accountInstrumentMismatch,
   accountOrderTypes,
@@ -56,7 +63,6 @@ import {
   Decimal,
   instrumentCalendarId,
   type AccountSummary,
-  type OrderMode,
   type OrderType,
   type RiskCheckResult,
   type TimeInForce,
@@ -86,7 +92,7 @@ export interface OrderTicketProps {
 }
 
 /** Order type buttons. */
-const TYPE_OPTIONS: readonly {type: OrderType; label: string}[] = [
+const TYPE_OPTIONS: ReadonlyArray<{type: OrderType; label: string}> = [
   {type: 'market', label: 'Market'},
   {type: 'limit', label: 'Limit'},
   {type: 'stop_market', label: 'Stop'},
@@ -115,7 +121,7 @@ function outcomeClass(outcome: RiskCheckResult['outcome']): string {
 function useCalendarRevision(ctx: WebFeatureContext): number {
   const [revision, setRevision] = useState(0);
   useEffect(
-    () => ctx.calendars.subscribe(() => setRevision(n => n + 1)),
+    () => ctx.calendars.subscribe(() => void setRevision(n => n + 1)),
     [ctx.calendars]
   );
   return revision;
@@ -179,8 +185,9 @@ export function OrderTicket({ctx, runtime}: OrderTicketProps): ReactNode {
       precision
     );
     if (!preferred || preferred.account_id === inputs.accountId) return;
-    if (!inputs.accountId || changed)
+    if (!inputs.accountId || changed) {
       runtime.controller.edit({accountId: preferred.account_id});
+    }
   }, [
     accountList,
     routeKey,
@@ -216,8 +223,9 @@ export function OrderTicket({ctx, runtime}: OrderTicketProps): ReactNode {
     const fresh = equity && tifDefaulted.current !== inputs.instrumentId;
     if (equity && account && tifChoice.options.length > 0) {
       tifDefaulted.current = inputs.instrumentId;
-      if (fresh && tifChoice.options[0] !== inputs.timeInForce)
+      if (fresh && tifChoice.options[0] !== inputs.timeInForce) {
         patch.timeInForce = tifChoice.options[0] ?? 'DAY';
+      }
     }
     if (!equity) tifDefaulted.current = null;
     if (
@@ -225,21 +233,24 @@ export function OrderTicket({ctx, runtime}: OrderTicketProps): ReactNode {
       account &&
       tifChoice.options.length > 0 &&
       !tifChoice.options.includes(inputs.timeInForce)
-    )
+    ) {
       patch.timeInForce = tifChoice.options[0] ?? 'DAY';
+    }
     if (!equity && inputs.timeInForce === 'DAY') patch.timeInForce = 'GTC';
     // Intraday odd lots are limit DAY (ROD) orders only.
     if (oddLot && inputs.orderType !== 'limit') patch.orderType = 'limit';
-    if (equity && precision && inputs.lotMode === 'odd' && !oddAvailable)
+    if (equity && precision && inputs.lotMode === 'odd' && !oddAvailable) {
       patch.lotMode = 'board';
+    }
     if (inputs.outsideRth && (!equity || !rth.shown)) patch.outsideRth = false;
     if (
       equity &&
       !oddLot &&
       orderTypes.length > 0 &&
       !orderTypes.some(o => o.type === inputs.orderType)
-    )
+    ) {
       patch.orderType = orderTypes[0]?.type ?? 'limit';
+    }
     if (equity && (inputs.leverage || inputs.reduceOnly)) {
       patch.leverage = '';
       patch.reduceOnly = false;
@@ -292,7 +303,7 @@ export function OrderTicket({ctx, runtime}: OrderTicketProps): ReactNode {
     ) ?? 0;
   const liveArmed = armedUntil > now;
   const rememberArming = (accountId: string, untilMs: number | null) =>
-    runtime.liveArm.update(all => ({
+    void runtime.liveArm.update(all => ({
       ...all,
       [accountId]: {untilMs, atMs: Date.now()},
     }));
@@ -364,16 +375,18 @@ export function OrderTicket({ctx, runtime}: OrderTicketProps): ReactNode {
   );
   const [attempted, setAttempted] = useState(false);
   const touched = (name: string): boolean => {
-    if (attempted || name === 'notional' || name === 'instrumentId')
+    if (attempted || name === 'notional' || name === 'instrumentId') {
       return true;
+    }
     if (
       name === 'accountId' ||
       name === 'timeInForce' ||
       name === 'outsideRth' ||
       name === 'orderType' ||
       name === 'lotMode'
-    )
+    ) {
       return true;
+    }
     const value = (inputs as unknown as Record<string, unknown>)[name];
     return typeof value === 'string' ? value.trim() !== '' : true;
   };
@@ -381,7 +394,8 @@ export function OrderTicket({ctx, runtime}: OrderTicketProps): ReactNode {
     built.issues.filter(
       i => i.field === field && (i.severity === 'warning' || touched(field))
     );
-  const edit = (patch: Partial<TicketInputs>) => runtime.controller.edit(patch);
+  const edit = (patch: Partial<TicketInputs>) =>
+    void runtime.controller.edit(patch);
   const previewCurrent =
     state.preview !== null && state.previewRevision === state.inputRevision;
   const base = precision?.key.canonical_base ?? '';
@@ -389,8 +403,9 @@ export function OrderTicket({ctx, runtime}: OrderTicketProps): ReactNode {
 
   const [riskPct, setRiskPct] = useState('0.5');
   const riskQty = useMemo(() => {
-    if (equity || !account?.equity || !precision || !Decimal.isValid(riskPct))
+    if (equity || !account?.equity || !precision || !Decimal.isValid(riskPct)) {
       return null;
+    }
     const entry = built.limitPrice ?? built.triggerPrice ?? meta.mark;
     const stopText = inputs.stopLoss.replace(/,/g, '').trim();
     if (!entry || !Decimal.isValid(stopText)) return null;
@@ -505,7 +520,7 @@ export function OrderTicket({ctx, runtime}: OrderTicketProps): ReactNode {
       placeholder={placeholder}
       aria-invalid={errorsFor(name).some(i => i.severity === 'error')}
       disabled={busy}
-      onChange={e => edit({[name]: e.target.value})}
+      onChange={e => void edit({[name]: e.target.value})}
     />
   );
 
@@ -541,12 +556,15 @@ export function OrderTicket({ctx, runtime}: OrderTicketProps): ReactNode {
   const lotMode = oddLot ? 'odd' : 'board';
   const sharesHint = (() => {
     if (!equity || !precision) return undefined;
-    if (built.quantity && !built.quantity.isZero())
+    if (built.quantity && !built.quantity.isZero()) {
       return `= ${formatShares(precision, built.quantity)}`;
-    if (lot && lotMode === 'board')
+    }
+    if (lot && lotMode === 'board') {
       return `1 張 = ${groupedShares(lot)} shares`;
-    if (lot)
+    }
+    if (lot) {
       return `Odd lot: 1 to ${groupedShares(lot.sub(Decimal.parse('1')))} shares`;
+    }
     return 'Whole shares';
   })();
   const priceHint = (() => {
@@ -560,10 +578,11 @@ export function OrderTicket({ctx, runtime}: OrderTicketProps): ReactNode {
       );
     }
     const band = priceLimitBand(precision, reference);
-    if (band)
+    if (band) {
       parts.push(
         `today's limit ${formatEquityPrice(precision, band.lower)} – ${formatEquityPrice(precision, band.upper)} (±${band.pct.toString()}% of ${formatEquityPrice(precision, band.reference)})`
       );
+    }
     return parts.length > 0 ? parts.join('; ') : undefined;
   })();
 
@@ -616,7 +635,7 @@ export function OrderTicket({ctx, runtime}: OrderTicketProps): ReactNode {
             className="j-select"
             value={inputs.accountId ?? ''}
             disabled={busy}
-            onChange={e => edit({accountId: e.target.value || null})}
+            onChange={e => void edit({accountId: e.target.value || null})}
           >
             {!accountList.length && <option value="">No accounts</option>}
             {accountList.map(a => (
@@ -652,7 +671,7 @@ export function OrderTicket({ctx, runtime}: OrderTicketProps): ReactNode {
                     return;
                   }
                   setArming(false);
-                  edit({mode: m.mode as OrderMode});
+                  edit({mode: m.mode});
                 }}
               >
                 {m.mode === 'LIVE'
@@ -719,7 +738,7 @@ export function OrderTicket({ctx, runtime}: OrderTicketProps): ReactNode {
             className={`j-btn ${inputs.side === 'buy' ? 'j-btn--bid' : ''}`}
             aria-pressed={inputs.side === 'buy'}
             disabled={busy}
-            onClick={() => edit({side: 'buy'})}
+            onClick={() => void edit({side: 'buy'})}
           >
             Buy
           </button>
@@ -728,7 +747,7 @@ export function OrderTicket({ctx, runtime}: OrderTicketProps): ReactNode {
             className={`j-btn ${inputs.side === 'sell' ? 'j-btn--ask' : ''}`}
             aria-pressed={inputs.side === 'sell'}
             disabled={busy}
-            onClick={() => edit({side: 'sell'})}
+            onClick={() => void edit({side: 'sell'})}
           >
             Sell
           </button>
@@ -745,7 +764,7 @@ export function OrderTicket({ctx, runtime}: OrderTicketProps): ReactNode {
                   ? 'Intraday odd lots are limit orders only'
                   : undefined
               }
-              onClick={() => edit({orderType: option.type})}
+              onClick={() => void edit({orderType: option.type})}
             >
               {option.label}
             </button>
@@ -777,7 +796,7 @@ export function OrderTicket({ctx, runtime}: OrderTicketProps): ReactNode {
                     type="button"
                     aria-pressed={lotMode === 'board'}
                     disabled={busy}
-                    onClick={() => edit({lotMode: 'board', quantity: ''})}
+                    onClick={() => void edit({lotMode: 'board', quantity: ''})}
                   >
                     Board lot (張)
                   </button>
@@ -791,7 +810,7 @@ export function OrderTicket({ctx, runtime}: OrderTicketProps): ReactNode {
                         : 'This account cannot send intraday odd-lot orders'
                     }
                     onClick={() =>
-                      edit({
+                      void edit({
                         lotMode: 'odd',
                         quantity: '',
                         orderType: 'limit',
@@ -830,7 +849,7 @@ export function OrderTicket({ctx, runtime}: OrderTicketProps): ReactNode {
                     className="j-btn j-btn--sm j-btn--ghost"
                     disabled={!meta.mark || busy}
                     onClick={() =>
-                      meta.mark && edit({limitPrice: meta.mark.toString()})
+                      meta.mark && void edit({limitPrice: meta.mark.toString()})
                     }
                   >
                     Use last
@@ -854,7 +873,7 @@ export function OrderTicket({ctx, runtime}: OrderTicketProps): ReactNode {
                 value={inputs.timeInForce}
                 disabled={busy}
                 onChange={e =>
-                  edit({timeInForce: e.target.value as TimeInForce})
+                  void edit({timeInForce: e.target.value as TimeInForce})
                 }
               >
                 {tifChoice.options.map(tif => (
@@ -873,7 +892,7 @@ export function OrderTicket({ctx, runtime}: OrderTicketProps): ReactNode {
                     checked={inputs.outsideRth === true}
                     disabled={busy || !rth.enabled}
                     data-testid="outside-rth"
-                    onChange={e => edit({outsideRth: e.target.checked})}
+                    onChange={e => void edit({outsideRth: e.target.checked})}
                   />
                   Allow outside regular trading hours (IBKR)
                 </label>
@@ -914,7 +933,7 @@ export function OrderTicket({ctx, runtime}: OrderTicketProps): ReactNode {
                     className="j-btn j-btn--sm j-btn--ghost"
                     disabled={!meta.mark || busy}
                     onClick={() =>
-                      meta.mark && edit({limitPrice: meta.mark.toString()})
+                      meta.mark && void edit({limitPrice: meta.mark.toString()})
                     }
                   >
                     Use mark
@@ -933,7 +952,7 @@ export function OrderTicket({ctx, runtime}: OrderTicketProps): ReactNode {
                     value={inputs.triggerBasis}
                     disabled={busy}
                     onChange={e =>
-                      edit({
+                      void edit({
                         triggerBasis: e.target
                           .value as TicketInputs['triggerBasis'],
                       })
@@ -956,7 +975,7 @@ export function OrderTicket({ctx, runtime}: OrderTicketProps): ReactNode {
                     value={inputs.timeInForce}
                     disabled={busy}
                     onChange={e =>
-                      edit({
+                      void edit({
                         timeInForce: e.target.value as TimeInForce,
                       })
                     }
@@ -973,7 +992,7 @@ export function OrderTicket({ctx, runtime}: OrderTicketProps): ReactNode {
                 type="checkbox"
                 checked={inputs.reduceOnly}
                 disabled={busy}
-                onChange={e => edit({reduceOnly: e.target.checked})}
+                onChange={e => void edit({reduceOnly: e.target.checked})}
               />
               Reduce only
             </label>
@@ -999,7 +1018,7 @@ export function OrderTicket({ctx, runtime}: OrderTicketProps): ReactNode {
                     className="j-input j-tabular"
                     inputMode="decimal"
                     value={riskPct}
-                    onChange={e => setRiskPct(e.target.value)}
+                    onChange={e => void setRiskPct(e.target.value)}
                   />
                 </label>
                 <button
@@ -1007,7 +1026,7 @@ export function OrderTicket({ctx, runtime}: OrderTicketProps): ReactNode {
                   className="j-btn j-btn--sm"
                   disabled={!riskQty || riskQty.isZero() || busy}
                   onClick={() =>
-                    riskQty && edit({quantity: riskQty.toString()})
+                    riskQty && void edit({quantity: riskQty.toString()})
                   }
                 >
                   {riskQty && precision
@@ -1192,7 +1211,7 @@ export function OrderTicket({ctx, runtime}: OrderTicketProps): ReactNode {
           <button
             type="button"
             className="j-btn"
-            onClick={() => runtime.controller.dispatch({type: 'reset'})}
+            onClick={() => void runtime.controller.dispatch({type: 'reset'})}
           >
             New order
           </button>
@@ -1247,7 +1266,7 @@ export function OrderTicket({ctx, runtime}: OrderTicketProps): ReactNode {
           instrument={precision}
           account={account}
           busy={state.phase === 'SUBMITTING' || state.phase === 'CONFIRMING'}
-          onCancel={() => setLiveConfirm(false)}
+          onCancel={() => void setLiveConfirm(false)}
           onConfirm={() => {
             setLiveConfirm(false);
             void runtime.controller.confirm();
@@ -1321,7 +1340,7 @@ function AmendPanel({ctx, runtime}: OrderTicketProps): ReactNode {
         <button
           type="button"
           className="j-btn j-btn--ghost"
-          onClick={() => runtime.amend.set(null)}
+          onClick={() => void runtime.amend.set(null)}
           disabled={busy}
         >
           Keep current price

@@ -1,4 +1,10 @@
 /**
+ * @license
+ * Copyright 2026 Joseph Terminal contributors
+ * SPDX-License-Identifier: MIT
+ */
+
+/**
  * @fileoverview Elliott correction wave (A-B-C).
  *
  * - Anchors: four, placed in order: the origin (0) and the ends of waves
@@ -10,6 +16,7 @@
  * - Handles: the four anchors (handle index = anchor index).
  * - Style options: color, width, dash and labels. No fill.
  */
+
 import {createPatternTool, type PatternSpec} from '@joseph/drawing-core';
 
 /** Pattern geometry: wave labels. */

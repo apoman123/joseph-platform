@@ -1,4 +1,10 @@
 /**
+ * @license
+ * Copyright 2026 Joseph Terminal contributors
+ * SPDX-License-Identifier: MIT
+ */
+
+/**
  * @fileoverview Andrews pitchfork.
  *
  * - Anchors: `[P1, P2, P3]`. P1 is the pivot; P2 and P3 are the reaction
@@ -13,6 +19,7 @@
  * - Style options: color, width, dash, and `fill_color` between the outer
  *   tines (on by default; the style bar's Fill toggle turns it off).
  */
+
 import {
   anchorPoints,
   applyStroke,
@@ -113,7 +120,7 @@ export const pitchforkTool: ToolPlugin = {
       ctx.fillStyle = doc.style.fill_color;
       ctx.beginPath();
       g.fill.forEach((p, i) =>
-        i === 0 ? ctx.moveTo(p.x, p.y) : ctx.lineTo(p.x, p.y)
+        i === 0 ? void ctx.moveTo(p.x, p.y) : void ctx.lineTo(p.x, p.y)
       );
       ctx.closePath();
       ctx.fill();
@@ -130,9 +137,10 @@ export const pitchforkTool: ToolPlugin = {
     const handle = hitHandles([p1, p2, p3], point, tolerance);
     if (handle) return handle;
     const g = pitchforkTines(p1, p2, p3, transform.width, transform.height);
-    const lines: [Point, Point][] = [g.median, g.upper, g.lower, [p2, p3]];
-    if (lines.some(([a, b]) => distanceToSegment(point, a, b) <= tolerance))
+    const lines: Array<[Point, Point]> = [g.median, g.upper, g.lower, [p2, p3]];
+    if (lines.some(([a, b]) => distanceToSegment(point, a, b) <= tolerance)) {
       return {part: 'body'};
+    }
     return doc.style.fill_color && pointInPolygon(point, g.fill)
       ? {part: 'body'}
       : null;

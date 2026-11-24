@@ -1,8 +1,15 @@
 /**
+ * @license
+ * Copyright 2026 Joseph Terminal contributors
+ * SPDX-License-Identifier: MIT
+ */
+
+/**
  * @fileoverview DEMO seconds and monthly candles (calendar-correct, with
  * taker-buy volume), the capabilities that declare them, and the true
  * order-flow delta series, validated against the contract schemas.
  */
+
 import {readFileSync, readdirSync} from 'node:fs';
 import {join} from 'node:path';
 import Ajv2020 from 'ajv/dist/2020';
@@ -28,8 +35,9 @@ function validator(file: string, def: string) {
   const ajv = new Ajv2020({strict: false, allErrors: true});
   addFormats(ajv);
   for (const name of readdirSync(SCHEMA_DIR)) {
-    if (name.endsWith('.schema.json'))
+    if (name.endsWith('.schema.json')) {
       ajv.addSchema(JSON.parse(readFileSync(join(SCHEMA_DIR, name), 'utf8')));
+    }
   }
   const validate = ajv.getSchema(`${BASE}${file}#/$defs/${def}`);
   if (!validate) throw new Error(`missing ${def}`);

@@ -1,8 +1,15 @@
 /**
+ * @license
+ * Copyright 2026 Joseph Terminal contributors
+ * SPDX-License-Identifier: MIT
+ */
+
+/**
  * @fileoverview System tests in DEMO mode for seconds and monthly bars
  * (grouped menu, typed resolutions, bar-close countdown, data window), the
  * true order-flow delta and the signal ranking by bar volume.
  */
+
 import {expect, test, type Page} from '@playwright/test';
 import {firstCanvas, openTerminal, pickTimeframe} from './support';
 import {openPanel} from './trading-helpers';

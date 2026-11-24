@@ -1,9 +1,16 @@
 /**
+ * @license
+ * Copyright 2026 Joseph Terminal contributors
+ * SPDX-License-Identifier: MIT
+ */
+
+/**
  * @fileoverview Trading feature: order ticket, chart order/position/draft
  * layers, chart context menu and drag-to-amend. Every action becomes an
  * `OrderIntentRequest` previewed and confirmed through the execution
  * engine; nothing here can sign or send a venue order.
  */
+
 import {
   buildDraftLayer,
   buildOrderLayer,
@@ -11,7 +18,7 @@ import {
   interpretDrag,
 } from '@joseph/chart-trading';
 import type {OverlayLayer} from '@joseph/chart-core';
-import type {Disposer, ReadableStore} from '@joseph/feature-registry';
+import type {Disposer} from '@joseph/feature-registry';
 import {createElement} from 'react';
 import type {
   WebFeature,
@@ -95,7 +102,7 @@ export const TRADING_FEATURE: WebFeature = {
   },
   activate(ctx) {
     const runtime = createTradingRuntime(ctx);
-    const disposers: Disposer[] = [() => runtime.dispose()];
+    const disposers: Disposer[] = [() => void runtime.dispose()];
     disposers.push(
       ctx.slots.contribute('side-panel', {
         id: 'trading.ticket',
@@ -133,15 +140,12 @@ export const TRADING_FEATURE: WebFeature = {
         )
       ),
       ctx.chartLayers.register(chart =>
-        derived<OverlayLayer | null>(
-          [runtime.controller as ReadableStore<unknown>],
-          () => {
-            const {inputs} = runtime.controller.get();
-            return inputs.instrumentId === chart.instrumentId
-              ? buildDraftLayer(inputs)
-              : null;
-          }
-        )
+        derived<OverlayLayer | null>([runtime.controller], () => {
+          const {inputs} = runtime.controller.get();
+          return inputs.instrumentId === chart.instrumentId
+            ? buildDraftLayer(inputs)
+            : null;
+        })
       )
     );
     disposers.push(
@@ -150,8 +154,9 @@ export const TRADING_FEATURE: WebFeature = {
         void runtime.openMenu(event.chartId, event.instrumentId, event.price);
       }),
       ctx.events.on('ticket.open', event => {
-        if (ctx.selection.get().instrumentId !== event.instrumentId)
+        if (ctx.selection.get().instrumentId !== event.instrumentId) {
           ctx.select({instrumentId: event.instrumentId});
+        }
         const inputs = runtime.controller.get().inputs;
         runtime.controller.dispatch({
           type: 'replaceInputs',
@@ -191,33 +196,36 @@ export const TRADING_FEATURE: WebFeature = {
           tick,
           orders
         );
-        if (intent.kind === 'draft')
+        if (intent.kind === 'draft') {
           runtime.controller.edit({[intent.field]: intent.price});
-        else if (intent.kind === 'amend')
+        } else if (intent.kind === 'amend') {
           runtime.amend.set({
             order: intent.order,
             field: intent.field,
             from: intent.from,
             price: intent.price,
           });
+        }
       })
     );
     disposers.push(
       ctx.commands.register({
         id: 'trading.buy',
         title: 'New buy order',
-        run: () => runtime.controller.edit({side: 'buy'}),
+        run: () => void runtime.controller.edit({side: 'buy'}),
       }),
       ctx.commands.register({
         id: 'trading.sell',
         title: 'New sell order',
-        run: () => runtime.controller.edit({side: 'sell'}),
+        run: () => void runtime.controller.edit({side: 'sell'}),
       }),
       ctx.hotkeys.bind('alt+b', 'trading.buy'),
       ctx.hotkeys.bind('alt+s', 'trading.sell')
     );
     return () => {
-      for (const dispose of disposers.splice(0).reverse()) dispose();
+      for (const dispose of disposers.splice(0).reverse()) {
+        dispose();
+      }
     };
   },
 };

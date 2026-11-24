@@ -1,8 +1,15 @@
 /**
+ * @license
+ * Copyright 2026 Joseph Terminal contributors
+ * SPDX-License-Identifier: MIT
+ */
+
+/**
  * @fileoverview Tests for the engine-backed anchored VWAP tool: request
  * building, series interpretation (incl. engine refusals), rendering,
  * hit-testing and the data-window rows.
  */
+
 import {
   HttpMarketDataClient,
   type IndicatorSeriesPoint,
@@ -80,17 +87,21 @@ const READY = ready([point(2, 150), point(3, 152), point(4, 154)]);
  */
 function render(series: DrawingSeriesState | null): Op[] {
   const ops: Op[] = [];
-  const ctx = new Proxy({} as Record<string, unknown>, {
-    get(target, prop: string) {
-      if (prop === 'measureText')
-        return (text: string) => ({width: text.length * 6});
-      return (...args: unknown[]) => ops.push({op: prop, args});
-    },
-    set(_target, prop: string, value: unknown) {
-      ops.push({op: `set:${prop}`, args: [value]});
-      return true;
-    },
-  }) as unknown as CanvasRenderingContext2D;
+  const ctx = new Proxy(
+    {},
+    {
+      get(target, prop: string) {
+        if (prop === 'measureText') {
+          return (text: string) => ({width: text.length * 6});
+        }
+        return (...args: unknown[]) => ops.push({op: prop, args});
+      },
+      set(_target, prop: string, value: unknown) {
+        ops.push({op: `set:${prop}`, args: [value]});
+        return true;
+      },
+    }
+  ) as unknown as CanvasRenderingContext2D;
   tool.render(ctx, DOC, TRANSFORM, {...STATE, series});
   return ops;
 }

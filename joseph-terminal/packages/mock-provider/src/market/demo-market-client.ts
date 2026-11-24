@@ -1,7 +1,14 @@
 /**
+ * @license
+ * Copyright 2026 Joseph Terminal contributors
+ * SPDX-License-Identifier: MIT
+ */
+
+/**
  * @fileoverview DEMO implementation of `MarketDataClient` and a simulated
  * market stream. Every record carries `feed_state: 'DEMO'`.
  */
+
 import {
   type IndicatorSeries,
   type IndicatorSeriesQuery,
@@ -912,7 +919,7 @@ export class DemoMarketStream implements StreamClient {
       event_ts_ms: this.now(),
       correlation_id: null,
       channel,
-      payload: payload as Record<string, unknown>,
+      payload: payload,
     };
   }
 
@@ -928,7 +935,9 @@ export class DemoMarketStream implements StreamClient {
 
   /** Stops every timer. */
   close(): void {
-    for (const timer of this.timers) clearInterval(timer);
+    for (const timer of this.timers) {
+      clearInterval(timer);
+    }
     this.timers.clear();
   }
 }

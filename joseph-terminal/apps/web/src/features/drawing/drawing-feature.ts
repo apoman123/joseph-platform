@@ -1,7 +1,14 @@
 /**
+ * @license
+ * Copyright 2026 Joseph Terminal contributors
+ * SPDX-License-Identifier: MIT
+ */
+
+/**
  * @fileoverview Drawing features: history/selection commands and one
  * removable feature per drawing tool.
  */
+
 import type {ToolPlugin} from '@joseph/drawing-core';
 import {FIRST_PARTY_TOOLS} from '@joseph/drawing-tools';
 import {createElement} from 'react';
@@ -40,7 +47,7 @@ export function drawingFeature(runtime: TerminalRuntime): WebFeature {
       }
     ),
     activate(ctx) {
-      const bump = () => runtime.drawing.revision.update(n => n + 1);
+      const bump = () => void runtime.drawing.revision.update(n => n + 1);
       const store = () =>
         runtime.drawing.stores.get(runtime.selection.get().chartId);
       const commands = [
@@ -86,13 +93,16 @@ export function drawingFeature(runtime: TerminalRuntime): WebFeature {
           id: 'drawing.pointer',
           title: 'Use the pointer',
           run: () => {
-            for (const controller of runtime.drawing.controllers.values())
+            for (const controller of runtime.drawing.controllers.values()) {
               controller.setTool(null);
+            }
             runtime.drawing.activeTool.set(null);
           },
         },
       ];
-      for (const command of commands) ctx.commands.register(command);
+      for (const command of commands) {
+        ctx.commands.register(command);
+      }
       bindDefaultHotkeys(
         (combo, id) => ctx.hotkeys.bind(combo, id),
         commands.map(c => c.id)

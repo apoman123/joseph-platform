@@ -1,6 +1,13 @@
 /**
+ * @license
+ * Copyright 2026 Joseph Terminal contributors
+ * SPDX-License-Identifier: MIT
+ */
+
+/**
  * @fileoverview Tests for overlay view models and drag interpretation.
  */
+
 import {describe, expect, it} from 'vitest';
 import {defaultTicketInputs} from './intent-builder';
 import {

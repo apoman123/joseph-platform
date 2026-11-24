@@ -1,6 +1,13 @@
 /**
+ * @license
+ * Copyright 2026 Joseph Terminal contributors
+ * SPDX-License-Identifier: MIT
+ */
+
+/**
  * @fileoverview Plain-language rendering of rule nodes for condition cards.
  */
+
 import type {
   AoiKind,
   Operand,

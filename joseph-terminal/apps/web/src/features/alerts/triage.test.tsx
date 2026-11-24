@@ -1,7 +1,14 @@
 /**
+ * @license
+ * Copyright 2026 Joseph Terminal contributors
+ * SPDX-License-Identifier: MIT
+ */
+
+/**
  * @fileoverview Tests for signal ranking (newest, R multiple, confluence,
  * age, distance to AOI) and local snooze/dismiss triage.
  */
+
 import type {ReasonNode, Signal} from '@joseph/contracts';
 import {fireEvent, screen, waitFor, within} from '@testing-library/react';
 import {afterEach, describe, expect, it} from 'vitest';
@@ -44,7 +51,7 @@ function node(
     detail: '',
     result,
     children,
-  } as ReasonNode;
+  };
 }
 
 /**
@@ -136,16 +143,16 @@ describe('alerts triage UI', () => {
     fireEvent.change(within(row).getByTestId('signal-snooze'), {
       target: {value: '60'},
     });
-    await waitFor(() =>
-      expect(screen.queryByTestId('signal-demo-signal-1')).toBeNull()
+    await waitFor(
+      () => void expect(screen.queryByTestId('signal-demo-signal-1')).toBeNull()
     );
     fireEvent.click(
       within(screen.getByTestId('signal-demo-signal-2')).getByTestId(
         'signal-dismiss'
       )
     );
-    await waitFor(() =>
-      expect(screen.queryByTestId('signal-demo-signal-2')).toBeNull()
+    await waitFor(
+      () => void expect(screen.queryByTestId('signal-demo-signal-2')).toBeNull()
     );
     fireEvent.click(screen.getByTestId('alerts-show-hidden'));
     const restored = await screen.findByTestId('signal-demo-signal-2');

@@ -1,8 +1,15 @@
 /**
+ * @license
+ * Copyright 2026 Joseph Terminal contributors
+ * SPDX-License-Identifier: MIT
+ */
+
+/**
  * @fileoverview Tests for the engine-backed regression channel tool:
  * request building, point selection at the t2 bar, engine refusals,
  * rendering, hit-testing and the data-window rows.
  */
+
 import {
   HttpMarketDataClient,
   type IndicatorSeriesPoint,
@@ -78,14 +85,18 @@ function ready(
  */
 function drawnTexts(series: DrawingSeriesState | null): string[] {
   const ops: Op[] = [];
-  const ctx = new Proxy({} as Record<string, unknown>, {
-    get(_target, prop: string) {
-      if (prop === 'measureText')
-        return (text: string) => ({width: text.length * 6});
-      return (...args: unknown[]) => ops.push({op: prop, args});
-    },
-    set: () => true,
-  }) as unknown as CanvasRenderingContext2D;
+  const ctx = new Proxy(
+    {},
+    {
+      get(_target, prop: string) {
+        if (prop === 'measureText') {
+          return (text: string) => ({width: text.length * 6});
+        }
+        return (...args: unknown[]) => ops.push({op: prop, args});
+      },
+      set: () => true,
+    }
+  ) as unknown as CanvasRenderingContext2D;
   tool.render(ctx, DOC, TRANSFORM, {...STATE, series});
   return ops.filter(o => o.op === 'fillText').map(o => String(o.args[0]));
 }
@@ -144,14 +155,17 @@ describe('regression-channel', () => {
     const hidden = {...DOC, props: {show_pearson: false}};
     const ops: string[] = [];
     tool.render(
-      new Proxy({} as Record<string, unknown>, {
-        get: (_t, prop: string) =>
-          prop === 'measureText'
-            ? () => ({width: 10})
-            : (...args: unknown[]) =>
-                prop === 'fillText' && ops.push(String(args[0])),
-        set: () => true,
-      }) as unknown as CanvasRenderingContext2D,
+      new Proxy(
+        {},
+        {
+          get: (_t, prop: string) =>
+            prop === 'measureText'
+              ? () => ({width: 10})
+              : (...args: unknown[]) =>
+                  prop === 'fillText' && ops.push(String(args[0])),
+          set: () => true,
+        }
+      ) as unknown as CanvasRenderingContext2D,
       hidden,
       TRANSFORM,
       {...STATE, series}

@@ -1,6 +1,13 @@
 /**
+ * @license
+ * Copyright 2026 Joseph Terminal contributors
+ * SPDX-License-Identifier: MIT
+ */
+
+/**
  * @fileoverview Natural-language rendering of rule nodes.
  */
+
 import {describe, expect, it} from 'vitest';
 import {describeNode, describeTree} from './describe';
 import {STRATEGY_TEMPLATES} from './templates';

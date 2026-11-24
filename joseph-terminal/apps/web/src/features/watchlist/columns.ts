@@ -1,7 +1,14 @@
 /**
+ * @license
+ * Copyright 2026 Joseph Terminal contributors
+ * SPDX-License-Identifier: MIT
+ */
+
+/**
  * @fileoverview Watchlist columns and sorting (pure). Values come from the
  * market engine's snapshots; a missing value sorts last and shows a dash.
  */
+
 import type {MarketSnapshot} from '@joseph/contracts';
 
 /** Column ids. */
@@ -32,11 +39,11 @@ export interface WatchlistPrefs {
 }
 
 /** Column metadata in display order. */
-export const WATCH_COLUMNS: readonly {
+export const WATCH_COLUMNS: ReadonlyArray<{
   id: WatchColumn;
   label: string;
   title: string;
-}[] = [
+}> = [
   {id: 'last', label: 'Last', title: 'Last traded price'},
   {id: 'mark', label: 'Mark', title: 'Mark price'},
   {id: 'change', label: '24h', title: 'Change over 24 hours'},
@@ -100,10 +107,12 @@ export function sortValue(
  * @return Next sort.
  */
 export function nextSort(current: WatchSort, key: WatchSortKey): WatchSort {
-  if (!current || current.key !== key)
+  if (!current || current.key !== key) {
     return {key, dir: key === 'symbol' ? 'asc' : 'desc'};
-  if (current.dir === (key === 'symbol' ? 'asc' : 'desc'))
+  }
+  if (current.dir === (key === 'symbol' ? 'asc' : 'desc')) {
     return {key, dir: key === 'symbol' ? 'desc' : 'asc'};
+  }
   return null;
 }
 

@@ -1,7 +1,14 @@
 /**
+ * @license
+ * Copyright 2026 Joseph Terminal contributors
+ * SPDX-License-Identifier: MIT
+ */
+
+/**
  * @fileoverview Architecture tests: dependency rules, render-only
  * indicator visualization and the feature manifest graph.
  */
+
 import {spawnSync} from 'node:child_process';
 import {readFileSync, readdirSync, statSync} from 'node:fs';
 import {join, relative} from 'node:path';
@@ -20,8 +27,9 @@ function sources(dir: string): string[] {
     if (name === 'node_modules' || name.startsWith('.next')) continue;
     const path = join(dir, name);
     if (statSync(path).isDirectory()) out.push(...sources(path));
-    else if (/\.tsx?$/.test(name) && !/\.test\.tsx?$/.test(name))
+    else if (/\.tsx?$/.test(name) && !/\.test\.tsx?$/.test(name)) {
       out.push(path);
+    }
   }
   return out;
 }

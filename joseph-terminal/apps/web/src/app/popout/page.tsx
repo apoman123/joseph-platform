@@ -1,7 +1,14 @@
 /**
+ * @license
+ * Copyright 2026 Joseph Terminal contributors
+ * SPDX-License-Identifier: MIT
+ */
+
+/**
  * @fileoverview Pop-out window route (`/popout?pane=…&ws=…`): one chart or
  * dock panel detached from the main terminal window.
  */
+
 import type {Metadata} from 'next';
 import type {ReactElement} from 'react';
 import {ClientPopout} from './client-popout';

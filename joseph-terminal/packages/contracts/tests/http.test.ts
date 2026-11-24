@@ -1,7 +1,14 @@
 /**
+ * @license
+ * Copyright 2026 Joseph Terminal contributors
+ * SPDX-License-Identifier: MIT
+ */
+
+/**
  * @fileoverview Tests for the HTTP execution client's account live arming
  * calls (paths, methods, bodies and contract errors).
  */
+
 import {describe, expect, it, vi} from 'vitest';
 import {ApiError, HttpExecutionClient} from '../src/client/http';
 

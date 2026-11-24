@@ -1,10 +1,17 @@
 /**
+ * @license
+ * Copyright 2026 Joseph Terminal contributors
+ * SPDX-License-Identifier: MIT
+ */
+
+/**
  * @fileoverview Session calendars: the engine's scenarios (1h bars at the
  * 09:30 open, early closes, holidays, daylight saving, the TWSE 13:30
  * closing print, periodic bars, shift/floor/barsBetween round trips), the
  * regular-hours fallback, market status and the `24x7` parity with the UTC
  * timeframe math.
  */
+
 import {describe, expect, it} from 'vitest';
 import {
   CONTINUOUS_CALENDAR,
@@ -416,7 +423,7 @@ const ROUND_TRIP_TFS: readonly Timeframe[] = [
 ];
 
 describe('boundary arithmetic round trips (engine property test)', () => {
-  const cases: [string, SessionCalendar, number, number][] = [
+  const cases: Array<[string, SessionCalendar, number, number]> = [
     ['XNYS', XNYS, ny('2025-12-15'), ny('2027-02-01')],
     ['XTAI', XTAI, tpe('2026-10-01'), tpe('2026-12-20')],
     ['USBOND', USBOND, ny('2026-01-15'), ny('2026-12-15')],

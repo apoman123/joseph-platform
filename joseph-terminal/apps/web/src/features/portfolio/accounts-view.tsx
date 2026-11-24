@@ -1,4 +1,9 @@
-'use client';
+/**
+ * @license
+ * Copyright 2026 Joseph Terminal contributors
+ * SPDX-License-Identifier: MIT
+ */
+
 /**
  * @fileoverview Accounts tab: every trading account the execution engine
  * reports — paper accounts, crypto venue accounts and securities broker
@@ -9,6 +14,8 @@
  * (secret files) and are never entered in the browser; connecting or
  * enabling live trading happens on the execution engine.
  */
+
+'use client';
 import {
   accountExchanges,
   accountStatusView,
@@ -49,7 +56,7 @@ function money(account: AccountSummary, value: string | null | undefined) {
  * for the USD paper account.
  * @param account Account.
  * @return Text such as `Nasdaq, NYSE, Cboe BZX` or `Crypto, Nasdaq, NYSE,
- * Cboe BZX`.
+ *     Cboe BZX`.
  */
 function tradesText(account: AccountSummary): string {
   const exchanges = accountExchanges(account).map(

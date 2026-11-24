@@ -1,4 +1,9 @@
 /*
+ * Copyright 2026 Joseph Terminal contributors
+ * SPDX-License-Identifier: MIT
+ */
+
+/*
  * Joseph Terminal design tokens — "navigator's night chart".
  *
  * Roles, not raw colors, are referenced by components:
@@ -90,7 +95,7 @@
 :root[data-theme='light'] {
   color-scheme: light;
   --abyss: #eef3f2;
-  --hull: #ffffff;
+  --hull: #fff;
   --swell: #e6eef0;
   --swell-strong: #d9e5e9;
   --fathom: #c3d2d8;

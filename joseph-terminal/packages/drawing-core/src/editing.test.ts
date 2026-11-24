@@ -1,7 +1,14 @@
 /**
+ * @license
+ * Copyright 2026 Joseph Terminal contributors
+ * SPDX-License-Identifier: MIT
+ */
+
+/**
  * @fileoverview Tests for multi-click and freehand creation, decimation,
  * z-order moves and undoable style/text/flag edits.
  */
+
 import type {DrawingDocument} from '@joseph/contracts';
 import {describe, expect, it} from 'vitest';
 import {DrawingController} from './controller';
@@ -43,7 +50,7 @@ const TRANSFORM: PixelTransform = {
 
 /** Minimal surface firing synthetic pointer events. */
 class Surface implements DrawingSurface {
-  private readonly handlers = new Map<string, ((e: never) => void)[]>();
+  private readonly handlers = new Map<string, Array<(e: never) => void>>();
 
   /**
    * Subscribes to an event.
@@ -56,7 +63,7 @@ class Surface implements DrawingSurface {
     handler: (payload: SurfaceEventMap[E]) => void
   ): () => void {
     const list = this.handlers.get(event) ?? [];
-    list.push(handler as (e: never) => void);
+    list.push(handler);
     this.handlers.set(event, list);
     return () => undefined;
   }
@@ -237,8 +244,9 @@ describe('freehand creation (brush)', () => {
     const {controller, surface, store} = setup();
     controller.setTool('brush');
     surface.fire('pointerDown', 100, 100);
-    for (let i = 1; i <= 40; i += 1)
+    for (let i = 1; i <= 40; i += 1) {
       surface.fire('pointerMove', 100 + i * 5, 100 + (i % 3));
+    }
     surface.fire('pointerMove', 301, 101);
     surface.fire('pointerUp', 301, 101);
     const [doc] = store.get().drawings;

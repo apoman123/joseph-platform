@@ -1,6 +1,13 @@
 /**
+ * @license
+ * Copyright 2026 Joseph Terminal contributors
+ * SPDX-License-Identifier: MIT
+ */
+
+/**
  * @fileoverview Tests for the extended line tool.
  */
+
 import {describe, expect, it} from 'vitest';
 import {
   TRANSFORM,
@@ -18,7 +25,7 @@ const ANCHORS = [
 describe('extended line', () => {
   const doc = makeDoc(extendedLineTool, ANCHORS);
   it('has a valid manifest', () =>
-    expect(manifestProblems(extendedLineTool)).toEqual([]));
+    void expect(manifestProblems(extendedLineTool)).toEqual([]));
   it('spans both directions', () => {
     const ops = renderOps(extendedLineTool, doc);
     expect(ops.find(o => o.op === 'moveTo')?.args[0]).toBe(0);

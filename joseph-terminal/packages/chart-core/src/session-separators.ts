@@ -1,4 +1,10 @@
 /**
+ * @license
+ * Copyright 2026 Joseph Terminal contributors
+ * SPDX-License-Identifier: MIT
+ */
+
+/**
  * @fileoverview Session separators: thin vertical lines where a new
  * session (minute, hour, day, week, month or year, depending on the
  * timeframe) begins.
@@ -10,6 +16,7 @@
  * overnight or weekend gap was taken out). The layer is pure presentation;
  * it never changes bars or indicator inputs.
  */
+
 import type {Timeframe} from '@joseph/contracts';
 import {TIMEFRAME_MS, isCalendarTimeframe, zonedParts} from '@joseph/contracts';
 import type {CanvasLayer, CoordinateTransform} from './chart-port';

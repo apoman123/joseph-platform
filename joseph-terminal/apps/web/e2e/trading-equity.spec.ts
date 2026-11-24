@@ -1,4 +1,10 @@
 /**
+ * @license
+ * Copyright 2026 Joseph Terminal contributors
+ * SPDX-License-Identifier: MIT
+ */
+
+/**
  * @fileoverview End-to-end (DEMO): stocks route to the paper or broker
  * account listing their exchange (`tradable_venues`); the equity ticket
  * validates TWSE board lots and intraday odd lots (limit DAY only), the tick
@@ -8,6 +14,7 @@
  * Accounts tab shows routing, server-side credential state, settled cash
  * and Cathay awaiting its API SDK.
  */
+
 import {expect, test, type Page} from '@playwright/test';
 import {loadTerminal, openPanel, ticket} from './trading-helpers';
 

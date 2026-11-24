@@ -1,9 +1,16 @@
 /**
+ * @license
+ * Copyright 2026 Joseph Terminal contributors
+ * SPDX-License-Identifier: MIT
+ */
+
+/**
  * @fileoverview Floating style editor for the selected drawing: color,
  * width, dash, fill, extension, text, tool inputs (for example anchored
  * VWAP bands), lock, visibility, z-order and delete. Every change is an
  * undoable drawing-store command.
  */
+
 'use client';
 import type {DrawingDocument, DrawingStyle} from '@joseph/contracts';
 import {
@@ -74,11 +81,11 @@ export function DrawingStyleBar({chartId}: StyleBarProps): ReactElement | null {
       ? store?.find(selection.drawingId)
       : undefined;
   const [text, setText] = useState(doc?.text ?? '');
-  useEffect(() => setText(doc?.text ?? ''), [doc?.drawing_id, doc?.text]);
+  useEffect(() => void setText(doc?.text ?? ''), [doc?.drawing_id, doc?.text]);
   if (!store || !doc) return null;
   const tool = runtime.tools.get(doc.tool_id);
   const now = () => Date.now();
-  const bump = () => runtime.drawing.revision.update(n => n + 1);
+  const bump = () => void runtime.drawing.revision.update(n => n + 1);
   const restyle = (patch: Partial<DrawingStyle>) => {
     if (!restyleDrawing(store, doc.drawing_id, patch, now())) {
       runtime.notifier.notify(
@@ -112,7 +119,7 @@ export function DrawingStyleBar({chartId}: StyleBarProps): ReactElement | null {
       role="toolbar"
       aria-label={`Style of ${tool?.manifest.displayName ?? doc.tool_id}`}
       data-testid="drawing-style-bar"
-      onPointerDown={event => event.stopPropagation()}
+      onPointerDown={event => void event.stopPropagation()}
     >
       <span className="style-bar__name">
         {tool?.manifest.displayName ?? 'Unsupported drawing'}
@@ -128,7 +135,9 @@ export function DrawingStyleBar({chartId}: StyleBarProps): ReactElement | null {
             aria-pressed={style.color.toLowerCase() === color}
             disabled={locked}
             onClick={() =>
-              restyle(hasFill ? {color, fill_color: fillFor(color)} : {color})
+              void restyle(
+                hasFill ? {color, fill_color: fillFor(color)} : {color}
+              )
             }
           />
         ))}
@@ -152,7 +161,9 @@ export function DrawingStyleBar({chartId}: StyleBarProps): ReactElement | null {
           aria-label="Line width"
           value={style.line_width}
           disabled={locked}
-          onChange={event => restyle({line_width: Number(event.target.value)})}
+          onChange={event =>
+            void restyle({line_width: Number(event.target.value)})
+          }
         >
           {[1, 2, 3, 4].map(width => (
             <option key={width} value={width}>
@@ -169,7 +180,7 @@ export function DrawingStyleBar({chartId}: StyleBarProps): ReactElement | null {
           value={style.line_style}
           disabled={locked}
           onChange={event =>
-            restyle({
+            void restyle({
               line_style: event.target.value as DrawingStyle['line_style'],
             })
           }
@@ -193,7 +204,7 @@ export function DrawingStyleBar({chartId}: StyleBarProps): ReactElement | null {
                   type="checkbox"
                   checked={readInput(doc, input) === true}
                   disabled={locked}
-                  onChange={event => setInput(input, event.target.checked)}
+                  onChange={event => void setInput(input, event.target.checked)}
                 />
                 {input.label}
               </label>
@@ -205,7 +216,7 @@ export function DrawingStyleBar({chartId}: StyleBarProps): ReactElement | null {
                   aria-label={input.label}
                   value={String(readInput(doc, input))}
                   disabled={locked}
-                  onChange={event => setInput(input, event.target.value)}
+                  onChange={event => void setInput(input, event.target.value)}
                 >
                   {input.choices.map(choice => (
                     <option key={choice.value} value={choice.value}>
@@ -225,7 +236,7 @@ export function DrawingStyleBar({chartId}: StyleBarProps): ReactElement | null {
             checked={Boolean(style.fill_color)}
             disabled={locked}
             onChange={event =>
-              restyle({
+              void restyle({
                 fill_color: event.target.checked ? fillFor(style.color) : null,
               })
             }
@@ -239,7 +250,9 @@ export function DrawingStyleBar({chartId}: StyleBarProps): ReactElement | null {
             type="checkbox"
             checked={style.extend_right === true}
             disabled={locked}
-            onChange={event => restyle({extend_right: event.target.checked})}
+            onChange={event =>
+              void restyle({extend_right: event.target.checked})
+            }
           />
           Extend right
         </label>
@@ -250,7 +263,9 @@ export function DrawingStyleBar({chartId}: StyleBarProps): ReactElement | null {
             type="checkbox"
             checked={style.extend_left === true}
             disabled={locked}
-            onChange={event => restyle({extend_left: event.target.checked})}
+            onChange={event =>
+              void restyle({extend_left: event.target.checked})
+            }
           />
           Extend left
         </label>
@@ -262,7 +277,7 @@ export function DrawingStyleBar({chartId}: StyleBarProps): ReactElement | null {
           value={text}
           maxLength={2000}
           disabled={locked}
-          onChange={event => setText(event.target.value)}
+          onChange={event => void setText(event.target.value)}
           onBlur={() => {
             if (text !== (doc.text ?? '')) {
               retextDrawing(store, doc.drawing_id, text, now());
@@ -270,8 +285,9 @@ export function DrawingStyleBar({chartId}: StyleBarProps): ReactElement | null {
             }
           }}
           onKeyDown={event => {
-            if (event.key === 'Enter')
+            if (event.key === 'Enter') {
               (event.target as HTMLInputElement).blur();
+            }
           }}
         />
       )}
@@ -281,7 +297,7 @@ export function DrawingStyleBar({chartId}: StyleBarProps): ReactElement | null {
         className="j-btn j-btn--ghost j-btn--icon j-btn--sm"
         aria-label="Bring to front"
         title="Bring to front"
-        onClick={() => move('front')}
+        onClick={() => void move('front')}
       >
         <ArrowUpToLine size={14} aria-hidden="true" />
       </button>
@@ -290,7 +306,7 @@ export function DrawingStyleBar({chartId}: StyleBarProps): ReactElement | null {
         className="j-btn j-btn--ghost j-btn--icon j-btn--sm"
         aria-label="Send to back"
         title="Send to back"
-        onClick={() => move('back')}
+        onClick={() => void move('back')}
       >
         <ArrowDownToLine size={14} aria-hidden="true" />
       </button>

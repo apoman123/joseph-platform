@@ -1,9 +1,16 @@
 /**
+ * @license
+ * Copyright 2026 Joseph Terminal contributors
+ * SPDX-License-Identifier: MIT
+ */
+
+/**
  * @fileoverview Unit tests for cash-equity and broker rules: tick ladders,
  * price limits, board and odd lots, account status and `tradable_venues`
  * routing, time in force, order types, outside RTH, odd lots, closed
  * markets, cash, market-hours notices, LIVE confirmations and live arming.
  */
+
 import {
   CONTINUOUS_CALENDAR,
   Decimal,
@@ -708,12 +715,12 @@ describe('LIVE confirmation and arming', () => {
     expect(content.title).toBe('Send a LIVE order');
     expect(content.warning).toMatch(/^LIVE money: this order goes to SinoPac/);
     expect(Object.fromEntries(content.rows)).toMatchObject({
-      Mode: 'LIVE money',
-      Broker: 'SinoPac Securities (Shioaji)',
-      Account: 'sinopac account',
-      Action: 'Buy limit',
-      Quantity: '2 張 (2,000 shares)',
-      Price: '585 TWD',
+      'Mode': 'LIVE money',
+      'Broker': 'SinoPac Securities (Shioaji)',
+      'Account': 'sinopac account',
+      'Action': 'Buy limit',
+      'Quantity': '2 張 (2,000 shares)',
+      'Price': '585 TWD',
       'Time in force': 'DAY',
       'Estimated value': '1,170,000.00 TWD',
     });

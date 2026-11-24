@@ -1,8 +1,15 @@
 /**
+ * @license
+ * Copyright 2026 Joseph Terminal contributors
+ * SPDX-License-Identifier: MIT
+ */
+
+/**
  * @fileoverview Drawings on session calendars: anchor bars follow the
  * session grid, position tools are 24 session bars wide, and the series
  * sync records the calendar and the engine's refusal message.
  */
+
 import {
   ApiError,
   createBarCalendar,

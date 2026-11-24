@@ -1,6 +1,13 @@
 /**
+ * @license
+ * Copyright 2026 Joseph Terminal contributors
+ * SPDX-License-Identifier: MIT
+ */
+
+/**
  * @fileoverview JSON import/export and version diffing for strategies.
  */
+
 import type {StrategyDefinition} from '@joseph/contracts';
 import {ensureIds} from './ast';
 import {
@@ -118,11 +125,11 @@ export function diffDefinitions(
     if (Array.isArray(a) && Array.isArray(b)) {
       const length = Math.max(a.length, b.length);
       for (let i = 0; i < length; i += 1) {
-        if (i >= a.length)
+        if (i >= a.length) {
           changes.push({path: `${path}/${i}`, kind: 'added', after: b[i]});
-        else if (i >= b.length)
+        } else if (i >= b.length) {
           changes.push({path: `${path}/${i}`, kind: 'removed', before: a[i]});
-        else step(a[i], b[i], `${path}/${i}`);
+        } else step(a[i], b[i], `${path}/${i}`);
       }
       return;
     }
@@ -130,11 +137,11 @@ export function diffDefinitions(
       const keys = [...new Set([...Object.keys(a), ...Object.keys(b)])];
       for (const key of keys) {
         const child = `${path}/${key}`;
-        if (!(key in a))
+        if (!(key in a)) {
           changes.push({path: child, kind: 'added', after: b[key]});
-        else if (!(key in b))
+        } else if (!(key in b)) {
           changes.push({path: child, kind: 'removed', before: a[key]});
-        else step(a[key], b[key], child);
+        } else step(a[key], b[key], child);
       }
       return;
     }

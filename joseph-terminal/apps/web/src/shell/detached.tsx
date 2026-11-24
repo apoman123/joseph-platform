@@ -1,4 +1,10 @@
 /**
+ * @license
+ * Copyright 2026 Joseph Terminal contributors
+ * SPDX-License-Identifier: MIT
+ */
+
+/**
  * @fileoverview Main-window UI of detachable panes: the button that opens a
  * pane in another window, the placeholder left in its slot (focus or bring
  * back the window) and the banner that offers "Restore pop-outs" when the
@@ -6,6 +12,7 @@
  * from a click). After a reload of this window, pop-outs that kept running
  * reconnect on their own, so the banner waits for the short probe first.
  */
+
 'use client';
 import {
   dormantPanes,
@@ -69,7 +76,7 @@ export function PopOutButton({
       aria-label={`Open ${title} in another window`}
       title="Open in another window"
       data-testid={testId}
-      onClick={() => windows.detach(pane, title)}
+      onClick={() => void windows.detach(pane, title)}
     >
       <ExternalLink size={14} aria-hidden="true" />
     </button>
@@ -187,7 +194,7 @@ export function DetachedBanner(): ReactElement | null {
         className="j-btn j-btn--sm j-btn--primary"
         data-testid="reopen-detached"
         title="Open the remembered windows again (allow pop-ups for this site to restore all with one click)"
-        onClick={() => windows.reopenAll()}
+        onClick={() => void windows.reopenAll()}
       >
         Restore pop-outs
       </button>
@@ -195,7 +202,9 @@ export function DetachedBanner(): ReactElement | null {
         type="button"
         className="j-btn j-btn--sm j-btn--ghost"
         onClick={() => {
-          for (const pane of dormant) windows.redock(pane.key);
+          for (const pane of dormant) {
+            windows.redock(pane.key);
+          }
         }}
       >
         Keep here

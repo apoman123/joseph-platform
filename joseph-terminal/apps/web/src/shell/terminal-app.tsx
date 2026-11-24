@@ -1,6 +1,13 @@
 /**
+ * @license
+ * Copyright 2026 Joseph Terminal contributors
+ * SPDX-License-Identifier: MIT
+ */
+
+/**
  * @fileoverview Terminal application shell (client only).
  */
+
 'use client';
 import {
   POPOUT_CHANNEL,
@@ -80,7 +87,7 @@ export function TerminalApp(): ReactElement {
     const onKey = (event: KeyboardEvent) => {
       if (runtime.hotkeys.handle(event)) event.preventDefault();
     };
-    const onUnload = () => runtime.flush();
+    const onUnload = () => void runtime.flush();
     window.addEventListener('keydown', onKey);
     window.addEventListener('beforeunload', onUnload);
     return () => {
@@ -106,7 +113,7 @@ export function TerminalApp(): ReactElement {
     runtime.windows.set(controller.actions);
     // Tell pop-outs the main window is going (a reload usually), so they
     // keep their changes for the next main window.
-    const onHide = () => controller.goodbye();
+    const onHide = () => void controller.goodbye();
     window.addEventListener('pagehide', onHide);
     return () => {
       window.removeEventListener('pagehide', onHide);

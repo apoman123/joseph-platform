@@ -1,4 +1,10 @@
 /**
+ * @license
+ * Copyright 2026 Joseph Terminal contributors
+ * SPDX-License-Identifier: MIT
+ */
+
+/**
  * @fileoverview Browser → real market engine on session calendars.
  *
  * REQUIRES the market-engine branch that adds (merged in parallel):
@@ -12,6 +18,7 @@
  *      4xx refusal with a message beyond that.
  * Verified against main e5e72f7 (engine side merged).
  */
+
 import {
   EXCHANGE_HOURS,
   SessionCalendar,
@@ -57,17 +64,19 @@ test('the engine serves XNYS sessions and session-aligned ACME bars', async ({
   expect(list.sessions.length).toBeGreaterThan(30);
   for (const [i, session] of list.sessions.entries()) {
     expect(session.close_ms).toBeGreaterThan(session.open_ms);
-    if (i > 0)
+    if (i > 0) {
       expect(session.open_ms).toBeGreaterThan(
         list.sessions[i - 1]?.close_ms ?? 0
       );
+    }
   }
   // 24x7 has no sessions.
   const crypto = await request.get(`${MARKET}/v1/calendars/24x7/sessions`, {
     params: {from_ms: from, to_ms: to},
   });
-  if (crypto.ok())
+  if (crypto.ok()) {
     expect(((await crypto.json()) as SessionList).sessions).toEqual([]);
+  }
 
   const instruments = await request.get(`${MARKET}/v1/instruments`, {
     params: {venue: 'mock', q: 'ACME'},
@@ -133,8 +142,9 @@ test('the terminal loads sessions, labels exchange time and leaves no gaps', asy
     if (label && labels.at(-1) !== label) labels.push(label);
   }
   expect(labels.length).toBeGreaterThan(5);
-  for (const label of labels)
+  for (const label of labels) {
     expect(label).toMatch(/(09|10|11|12|13|14|15):30 ET$/);
+  }
   await expect(page.getByTestId('data-window')).toContainText(
     'Classified (Lee–Ready)'
   );
@@ -163,7 +173,7 @@ test('engine anchored VWAP accepts anchors beyond 2000 bars', async ({
   });
   expect(series.ok()).toBeTruthy();
   const body = (await series.json()) as {
-    points: {values: Record<string, unknown>}[];
+    points: Array<{values: Record<string, unknown>}>;
   };
   expect(body.points.some(p => typeof p.values.vwap === 'string')).toBeTruthy();
 });

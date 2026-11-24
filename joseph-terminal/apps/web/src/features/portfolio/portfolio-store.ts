@@ -1,8 +1,15 @@
 /**
+ * @license
+ * Copyright 2026 Joseph Terminal contributors
+ * SPDX-License-Identifier: MIT
+ */
+
+/**
  * @fileoverview Shared read model of the portfolio views: accounts, orders,
  * positions, fills, kill switches and the audit log. Refreshed on an
  * interval and whenever the authenticated user stream reports a change.
  */
+
 import type {
   AccountSummary,
   AuditEventList,
@@ -123,7 +130,9 @@ export function createPortfolioRuntime(
       return inFlight;
     },
     dispose() {
-      for (const dispose of disposers.splice(0)) dispose();
+      for (const dispose of disposers.splice(0)) {
+        dispose();
+      }
     },
   };
   disposers.push(
@@ -139,7 +148,7 @@ export function createPortfolioRuntime(
     )
   );
   const timer = setInterval(() => void runtime.refresh(), pollMs);
-  disposers.push(() => clearInterval(timer));
+  disposers.push(() => void clearInterval(timer));
   void runtime.refresh();
   return runtime;
 }

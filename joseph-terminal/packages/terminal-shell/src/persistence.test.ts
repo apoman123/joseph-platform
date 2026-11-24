@@ -1,8 +1,15 @@
 /**
+ * @license
+ * Copyright 2026 Joseph Terminal contributors
+ * SPDX-License-Identifier: MIT
+ */
+
+/**
  * @fileoverview Workspace export files: the format 2 envelope with
  * drawings, the format 0 → 1 → 2 migration path, size limits and the
  * actionable errors for files the terminal can't import.
  */
+
 import {readFileSync, readdirSync} from 'node:fs';
 import {join} from 'node:path';
 import Ajv2020 from 'ajv/dist/2020';
@@ -69,8 +76,9 @@ function contractErrors(definition: string, value: unknown): unknown[] {
   const ajv = new Ajv2020({strict: false, allErrors: true});
   addFormats(ajv);
   for (const file of readdirSync(SCHEMA_DIR)) {
-    if (file.endsWith('.schema.json'))
+    if (file.endsWith('.schema.json')) {
       ajv.addSchema(JSON.parse(readFileSync(join(SCHEMA_DIR, file), 'utf8')));
+    }
   }
   const validate = ajv.getSchema(
     `https://schemas.joseph.local/v1/workspace.schema.json#/$defs/${definition}`
@@ -140,7 +148,7 @@ describe('workspace export files', () => {
   });
 
   it('refuses oversize, malformed and unknown files with a reason', () => {
-    const cases: [string, RegExp][] = [
+    const cases: Array<[string, RegExp]> = [
       [' '.repeat(MAX_WORKSPACE_FILE_BYTES + 1), /larger than 2 MB/],
       ['{nope', /not valid JSON/],
       ['[1, 2]', /must be an object/],

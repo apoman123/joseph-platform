@@ -1,9 +1,16 @@
 /**
+ * @license
+ * Copyright 2026 Joseph Terminal contributors
+ * SPDX-License-Identifier: MIT
+ */
+
+/**
  * @fileoverview Build-time feature composition.
  *
  * Removing a feature is a one-line change here (or setting its manifest
  * lifecycle to REMOVED); saved data stays readable.
  */
+
 import {ALERTS_FEATURE} from '../features/alerts';
 import {dataHealthFeature} from '../features/data-health/data-health-feature';
 import {

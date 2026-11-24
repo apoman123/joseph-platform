@@ -1,9 +1,16 @@
 /**
+ * @license
+ * Copyright 2026 Joseph Terminal contributors
+ * SPDX-License-Identifier: MIT
+ */
+
+/**
  * @fileoverview Fetch-based HTTP implementations of the client ports.
  *
  * These clients carry only a short-lived bearer session token. Venue API
  * keys and signing material never exist in the browser.
  */
+
 import type {
   AccountList,
   AccountLiveConsentRequest,

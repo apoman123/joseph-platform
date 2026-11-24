@@ -1,4 +1,10 @@
 /**
+ * @license
+ * Copyright 2026 Joseph Terminal contributors
+ * SPDX-License-Identifier: MIT
+ */
+
+/**
  * @fileoverview Key-value storage port with memory and browser adapters.
  *
  * Browser storage can be unavailable (private windows, blocked site data),

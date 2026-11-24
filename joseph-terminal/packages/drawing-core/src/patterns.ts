@@ -1,4 +1,10 @@
 /**
+ * @license
+ * Copyright 2026 Joseph Terminal contributors
+ * SPDX-License-Identifier: MIT
+ */
+
+/**
  * @fileoverview Shared behaviour of multi-point chart patterns (XABCD,
  * ABCD, head and shoulders, Elliott waves, triangle pattern).
  *
@@ -8,6 +14,7 @@
  * `|leg| / |reference leg|` of the anchor prices, in exact decimals.
  * Each pattern tool lives in its own directory and passes its spec here.
  */
+
 import {
   Decimal,
   type DrawingAnchor,
@@ -52,7 +59,7 @@ export interface PatternSpec {
   /** Ratio labels on dashed connectors. */
   ratios?: readonly PatternRatio[];
   /** Polygons (anchor indices) filled with `style.fill_color`. */
-  fills?: readonly (readonly number[])[];
+  fills?: ReadonlyArray<readonly number[]>;
   /**
    * Guide lines derived from the anchor pixels (necklines, boundaries).
    * @param points Anchor pixels (complete pattern).
@@ -203,7 +210,7 @@ export function renderPattern(
     )) {
       ctx.beginPath();
       polygon.forEach((p, i) =>
-        i === 0 ? ctx.moveTo(p.x, p.y) : ctx.lineTo(p.x, p.y)
+        i === 0 ? void ctx.moveTo(p.x, p.y) : void ctx.lineTo(p.x, p.y)
       );
       ctx.closePath();
       ctx.fill();
@@ -286,14 +293,16 @@ export function hitTestPattern(
   for (const ratio of spec.ratios ?? []) {
     const from = points[ratio.along[0]];
     const to = points[ratio.along[1]];
-    if (from && to && distanceToPolyline(point, [from, to]) <= tolerance)
+    if (from && to && distanceToPolyline(point, [from, to]) <= tolerance) {
       return {part: 'body'};
+    }
   }
   const complete = points.length >= anchorCount;
   if (complete) {
     for (const guide of spec.guides?.(points, transform) ?? []) {
-      if (distanceToPolyline(point, guide.points) <= tolerance)
+      if (distanceToPolyline(point, guide.points) <= tolerance) {
         return {part: 'body'};
+      }
     }
   }
   if (

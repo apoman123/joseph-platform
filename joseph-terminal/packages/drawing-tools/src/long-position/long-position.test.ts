@@ -1,6 +1,13 @@
 /**
+ * @license
+ * Copyright 2026 Joseph Terminal contributors
+ * SPDX-License-Identifier: MIT
+ */
+
+/**
  * @fileoverview Tests for the long position planner.
  */
+
 import {positionMetrics} from '@joseph/drawing-core';
 import {describe, expect, it} from 'vitest';
 import {
@@ -14,7 +21,8 @@ import {longPositionTool as tool} from '.';
 
 describe('long-position', () => {
   const doc = makeDoc(tool, [{time_ms: 0, price: '150'}]);
-  it('has a valid manifest', () => expect(manifestProblems(tool)).toEqual([]));
+  it('has a valid manifest', () =>
+    void expect(manifestProblems(tool)).toEqual([]));
   it('expands one click into tick-rounded entry, target and stop', () => {
     expect(doc.anchors).toEqual([
       {time_ms: 0, price: '150'},

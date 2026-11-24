@@ -1,4 +1,10 @@
 /**
+ * @license
+ * Copyright 2026 Joseph Terminal contributors
+ * SPDX-License-Identifier: MIT
+ */
+
+/**
  * @fileoverview Client ports for the Joseph backends.
  *
  * Features depend on these interfaces only. The composition root injects
@@ -7,6 +13,7 @@
  * strategy clients; there is no browser path that signs or sends venue
  * orders directly.
  */
+
 import type {
   AccountList,
   AccountLiveConsentRequest,

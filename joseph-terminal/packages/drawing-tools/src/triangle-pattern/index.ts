@@ -1,4 +1,10 @@
 /**
+ * @license
+ * Copyright 2026 Joseph Terminal contributors
+ * SPDX-License-Identifier: MIT
+ */
+
+/**
  * @fileoverview Triangle pattern (symmetrical, ascending or descending
  * consolidation).
  *
@@ -14,6 +20,7 @@
  * - Handles: the four anchors (handle index = anchor index).
  * - Style options: color, width, dash, fill (default on) and labels.
  */
+
 import {
   createPatternTool,
   lineIntersection,

@@ -1,4 +1,10 @@
 /**
+ * @license
+ * Copyright 2026 Joseph Terminal contributors
+ * SPDX-License-Identifier: MIT
+ */
+
+/**
  * @fileoverview Provenance ribbon and badge: the terminal's signature.
  *
  * Every chart pane carries a ribbon on its top edge encoding where its data
@@ -6,6 +12,7 @@
  * replay, red with an age counter when stale, and a diagonal hatch for
  * synthetic DEMO data, which also always shows a "Demo data" label.
  */
+
 import type {ReactElement} from 'react';
 import type {FeedState} from '@joseph/contracts';
 import {formatAge} from './format';

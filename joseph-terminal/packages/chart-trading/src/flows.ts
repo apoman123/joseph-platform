@@ -1,4 +1,10 @@
 /**
+ * @license
+ * Copyright 2026 Joseph Terminal contributors
+ * SPDX-License-Identifier: MIT
+ */
+
+/**
  * @fileoverview Chart context menu, cancel/close/reverse and kill-switch
  * request models.
  *
@@ -6,6 +12,7 @@
  * explicit, separately confirmed steps (close → confirmed flat → open)
  * because no venue atomicity is assumed.
  */
+
 import {
   Decimal,
   type ClosePositionRequest,
@@ -61,15 +68,19 @@ export function buildContextMenu(
   ): string | null => {
     if (above === null) return null;
     if (type === 'limit') {
-      if (side === 'buy' && above)
+      if (side === 'buy' && above) {
         return 'Above the mark: fills immediately as a taker.';
-      if (side === 'sell' && !above)
+      }
+      if (side === 'sell' && !above) {
         return 'Below the mark: fills immediately as a taker.';
+      }
     } else {
-      if (side === 'buy' && !above)
+      if (side === 'buy' && !above) {
         return 'Below the mark: would trigger immediately.';
-      if (side === 'sell' && above)
+      }
+      if (side === 'sell' && above) {
         return 'Above the mark: would trigger immediately.';
+      }
     }
     return null;
   };
@@ -200,10 +211,12 @@ export function planClose(
   base: string,
   limitPrice: string | null = null
 ): ClosePlan | {error: string} {
-  if (position.side === 'flat')
+  if (position.side === 'flat') {
     return {error: 'There is no open position to close.'};
-  if (!Decimal.isValid(fraction))
+  }
+  if (!Decimal.isValid(fraction)) {
     return {error: 'Choose how much of the position to close.'};
+  }
   const part = Decimal.parse(fraction);
   if (part.isZero() || part.isNegative() || part.cmp(Decimal.parse('1')) > 0) {
     return {error: 'The close fraction must be between 0 and 100%.'};
@@ -211,8 +224,9 @@ export function planClose(
   const quantity = Decimal.parse(position.quantity_base)
     .mul(part)
     .floorToStep(Decimal.parse(lotSize));
-  if (quantity.isZero())
+  if (quantity.isZero()) {
     return {error: `That fraction is smaller than one lot (${lotSize}).`};
+  }
   if (orderType === 'limit' && (!limitPrice || !Decimal.isValid(limitPrice))) {
     return {error: 'Enter a limit price for a limit close.'};
   }
@@ -258,8 +272,9 @@ export interface ReversePlan {
 export function startReverse(
   position: Position
 ): ReversePlan | {error: string} {
-  if (position.side === 'flat')
+  if (position.side === 'flat') {
     return {error: 'There is no position to reverse.'};
+  }
   return {
     positionId: position.position_id,
     instrumentId: position.instrument_id,
@@ -360,8 +375,9 @@ export function planKillSwitch(
   form: KillSwitchForm
 ): KillSwitchPlan | {error: string} {
   const reason = form.reason.trim();
-  if (!reason)
+  if (!reason) {
     return {error: 'Enter a reason; it is recorded in the audit log.'};
+  }
   if (form.scope !== 'GLOBAL' && !form.targetId) {
     return {
       error: `Choose the ${form.scope.toLowerCase()} this switch applies to.`,

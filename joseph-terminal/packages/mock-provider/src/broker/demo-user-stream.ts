@@ -1,7 +1,14 @@
 /**
+ * @license
+ * Copyright 2026 Joseph Terminal contributors
+ * SPDX-License-Identifier: MIT
+ */
+
+/**
  * @fileoverview DEMO user stream: turns DEMO broker and strategy events
  * into contract `StreamEnvelope`s with monotonically increasing sequences.
  */
+
 import type {
   ChannelName,
   ChannelSpec,
@@ -47,7 +54,7 @@ export class DemoUserStream implements StreamClient {
     handler: StreamHandler;
   }>();
   private readonly statusListeners = new Set<(status: StreamStatus) => void>();
-  private readonly disposers: (() => void)[] = [];
+  private readonly disposers: Array<() => void> = [];
 
   /**
    * Creates the stream.
@@ -61,12 +68,13 @@ export class DemoUserStream implements StreamClient {
     private readonly now: () => number = Date.now
   ) {
     this.disposers.push(
-      broker.onEvent(event => this.publish(event.type, event.payload))
+      broker.onEvent(event => void this.publish(event.type, event.payload))
     );
-    if (signals)
+    if (signals) {
       this.disposers.push(
-        signals.onSignal(signal => this.publish('signal.created', signal))
+        signals.onSignal(signal => void this.publish('signal.created', signal))
       );
+    }
   }
 
   /**
@@ -130,8 +138,12 @@ export class DemoUserStream implements StreamClient {
   /** Closes the stream. */
   close(): void {
     this.status = 'CLOSED';
-    for (const dispose of this.disposers.splice(0)) dispose();
-    for (const listener of [...this.statusListeners]) listener('CLOSED');
+    for (const dispose of this.disposers.splice(0)) {
+      dispose();
+    }
+    for (const listener of [...this.statusListeners]) {
+      listener('CLOSED');
+    }
     this.subscriptions.clear();
   }
 }

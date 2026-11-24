@@ -1,10 +1,17 @@
 /**
+ * @license
+ * Copyright 2026 Joseph Terminal contributors
+ * SPDX-License-Identifier: MIT
+ */
+
+/**
  * @fileoverview Tests for the DEMO accounts against the execution contract:
  * USD and TWD paper accounts, IBKR paper, SinoPac simulation and live
  * (credentials missing), Cathay awaiting its API SDK; routing by
  * `tradable_venues`; order types, DAY for sessions only, intraday odd lots,
  * outside RTH, closed-market rules, long-only cash and settled cash.
  */
+
 import type {OrderIntentRequest} from '@joseph/contracts';
 import {describe, expect, it} from 'vitest';
 import {DemoExecutionClient} from './demo-execution-client';
@@ -68,7 +75,7 @@ function twse(patch: Partial<OrderIntentRequest> = {}): OrderIntentRequest {
  */
 function broker(now = CLOSED): DemoExecutionClient {
   return new DemoExecutionClient({
-    schedule: task => task(),
+    schedule: task => void task(),
     now: () => now,
     partialFills: false,
   });

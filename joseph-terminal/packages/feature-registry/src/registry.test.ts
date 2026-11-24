@@ -1,6 +1,13 @@
 /**
+ * @license
+ * Copyright 2026 Joseph Terminal contributors
+ * SPDX-License-Identifier: MIT
+ */
+
+/**
  * @fileoverview Tests for the feature registry lifecycle and host registries.
  */
+
 import type {BackendClients} from '@joseph/contracts';
 import {describe, expect, it, vi} from 'vitest';
 import {
@@ -45,7 +52,7 @@ function makeHost(capabilities: string[] = []) {
   const host: FeatureHost<string> = {
     clients: {} as BackendClients,
     selection,
-    select: patch => selection.update(s => ({...s, ...patch})),
+    select: patch => void selection.update(s => ({...s, ...patch})),
     capabilities: caps,
     commands,
     hotkeys: createHotkeyRegistry(commands),
@@ -115,12 +122,15 @@ describe('FeatureRegistry', () => {
     const {host} = makeHost();
     const registry = new FeatureRegistry(host, {contractVersion: 1});
     registry.register(leakyFeature('a'));
-    expect(() => registry.register(leakyFeature('a'))).toThrow(/Duplicate/);
-    expect(() =>
-      registry.register({
-        manifest: {...manifest('b'), removal: {notes: ''}},
-        activate: () => () => undefined,
-      })
+    expect(() => void registry.register(leakyFeature('a'))).toThrow(
+      /Duplicate/
+    );
+    expect(
+      () =>
+        void registry.register({
+          manifest: {...manifest('b'), removal: {notes: ''}},
+          activate: () => () => undefined,
+        })
     ).toThrow(/removal plan/);
   });
 
@@ -352,7 +362,7 @@ describe('host registries', () => {
       throw new Error('SecurityError');
     });
     expect(storage.getItem('k')).toBeNull();
-    expect(() => storage.setItem('k', 'v')).not.toThrow();
+    expect(() => void storage.setItem('k', 'v')).not.toThrow();
     expect(storage.keys('')).toEqual([]);
   });
 });

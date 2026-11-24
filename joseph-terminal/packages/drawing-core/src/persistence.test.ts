@@ -1,9 +1,16 @@
 /**
+ * @license
+ * Copyright 2026 Joseph Terminal contributors
+ * SPDX-License-Identifier: MIT
+ */
+
+/**
  * @fileoverview Drawing export and import for workspace files: listing the
  * workspace's instruments, export limits, defensive reading of untrusted
  * collections (migrations, contract limits, opaque newer-schema payloads,
  * unknown tools kept) and per-instrument restore.
  */
+
 import type {DrawingDocument} from '@joseph/contracts';
 import {describe, expect, it} from 'vitest';
 import {

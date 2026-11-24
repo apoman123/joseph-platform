@@ -1,4 +1,10 @@
 /**
+ * @license
+ * Copyright 2026 Joseph Terminal contributors
+ * SPDX-License-Identifier: MIT
+ */
+
+/**
  * @fileoverview Build-time terminal configuration from `NEXT_PUBLIC_*`.
  *
  * Without a market engine URL the terminal runs in DEMO mode on the

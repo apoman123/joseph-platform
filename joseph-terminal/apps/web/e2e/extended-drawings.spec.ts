@@ -1,9 +1,16 @@
 /**
+ * @license
+ * Copyright 2026 Joseph Terminal contributors
+ * SPDX-License-Identifier: MIT
+ */
+
+/**
  * @fileoverview System tests (DEMO) of the extended drawing tier and the
  * engine-backed tools: P3 shapes and patterns, anchored VWAP and the
  * regression channel. Canvas text is not in the DOM, so results are read
  * from the object list and the data window.
  */
+
 import {expect, test, type Page} from '@playwright/test';
 import {openPanel} from './trading-helpers';
 import {

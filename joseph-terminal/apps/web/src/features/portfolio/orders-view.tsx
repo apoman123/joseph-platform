@@ -1,9 +1,16 @@
-'use client';
+/**
+ * @license
+ * Copyright 2026 Joseph Terminal contributors
+ * SPDX-License-Identifier: MIT
+ */
+
 /**
  * @fileoverview Open orders (with cancel) and order history. Cancel is a
  * request: the order shows "Cancel pending" until the venue confirms, and
  * orders with an unknown outcome are explained, never shown as canceled.
  */
+
+'use client';
 import {
   cancelGuard,
   formatUtcDateTime,
@@ -183,7 +190,7 @@ export function OrdersView({ctx, runtime, mode}: OrdersViewProps): ReactNode {
                         className="j-btn j-btn--sm"
                         disabled={!guard.allowed}
                         title={guard.reason ?? undefined}
-                        onClick={() => setPending(order)}
+                        onClick={() => void setPending(order)}
                       >
                         Cancel
                       </button>
@@ -206,7 +213,7 @@ export function OrdersView({ctx, runtime, mode}: OrdersViewProps): ReactNode {
           confirmLabel={`Cancel ${describeOrder(pending)}`}
           tone="ask"
           busy={busy}
-          onCancel={() => setPending(null)}
+          onCancel={() => void setPending(null)}
           onConfirm={() => void cancel(pending)}
         >
           <p>

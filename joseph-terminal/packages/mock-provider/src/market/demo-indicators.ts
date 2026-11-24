@@ -1,4 +1,10 @@
 /**
+ * @license
+ * Copyright 2026 Joseph Terminal contributors
+ * SPDX-License-Identifier: MIT
+ */
+
+/**
  * @fileoverview Static DEMO indicator fixture.
  *
  * Records are precomputed shapes (not computed from candles in the
@@ -7,6 +13,7 @@
  * materialized at request time. TODO(integration): replace with records
  * exported by the Python engine for the `mock` venue.
  */
+
 import type {
   AoiKind,
   AoiState,

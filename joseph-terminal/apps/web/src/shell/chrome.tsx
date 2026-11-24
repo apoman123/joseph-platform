@@ -1,6 +1,13 @@
 /**
+ * @license
+ * Copyright 2026 Joseph Terminal contributors
+ * SPDX-License-Identifier: MIT
+ */
+
+/**
  * @fileoverview Status bar, toasts and command palette.
  */
+
 'use client';
 import {filterPalette} from '@joseph/terminal-shell';
 import {useEffect, useMemo, useRef, useState, type ReactElement} from 'react';
@@ -16,8 +23,8 @@ import {SlotInline} from './slot-host';
 function UtcClock() {
   const [now, setNow] = useState(() => Date.now());
   useEffect(() => {
-    const timer = setInterval(() => setNow(Date.now()), 1000);
-    return () => clearInterval(timer);
+    const timer = setInterval(() => void setNow(Date.now()), 1000);
+    return () => void clearInterval(timer);
   }, []);
   return (
     <span className="statusbar__item j-tabular" aria-label="UTC time">
@@ -85,7 +92,9 @@ export function CommandPalette(): ReactElement | null {
   const input = useRef<HTMLInputElement>(null);
   const hotkeyHints = useMemo(() => {
     const hints = new Map<string, string>();
-    for (const [combo, id] of runtime.hotkeys.bindings()) hints.set(id, combo);
+    for (const [combo, id] of runtime.hotkeys.bindings()) {
+      hints.set(id, combo);
+    }
     return hints;
   }, [runtime, state.open]); // eslint-disable-line react-hooks/exhaustive-deps
   const entries = useMemo(
@@ -104,18 +113,19 @@ export function CommandPalette(): ReactElement | null {
     if (state.open) input.current?.focus();
   }, [state.open]);
   if (!state.open) return null;
-  const close = () => runtime.palette.update(s => ({...s, open: false}));
+  const close = () => void runtime.palette.update(s => ({...s, open: false}));
   const runAt = (index: number) => {
     const entry = entries[index];
     if (!entry) return;
     close();
     void runtime.commands
       .execute(entry.id)
-      .catch((error: unknown) =>
-        runtime.notifier.notify(
-          error instanceof Error ? error.message : 'Command failed',
-          'error'
-        )
+      .catch(
+        (error: unknown) =>
+          void runtime.notifier.notify(
+            error instanceof Error ? error.message : 'Command failed',
+            'error'
+          )
       );
   };
   return (
@@ -125,7 +135,7 @@ export function CommandPalette(): ReactElement | null {
         role="dialog"
         aria-modal="true"
         aria-label="Command palette"
-        onPointerDown={e => e.stopPropagation()}
+        onPointerDown={e => void e.stopPropagation()}
       >
         <input
           ref={input}
@@ -134,7 +144,7 @@ export function CommandPalette(): ReactElement | null {
           aria-label="Search commands"
           value={state.query}
           onChange={e =>
-            runtime.palette.update(s => ({
+            void runtime.palette.update(s => ({
               ...s,
               query: e.target.value,
               index: 0,
@@ -142,18 +152,18 @@ export function CommandPalette(): ReactElement | null {
           }
           onKeyDown={e => {
             if (e.key === 'Escape') close();
-            else if (e.key === 'ArrowDown')
+            else if (e.key === 'ArrowDown') {
               runtime.palette.update(s => ({
                 ...s,
                 index: (s.index + 1) % Math.max(1, entries.length),
               }));
-            else if (e.key === 'ArrowUp')
+            } else if (e.key === 'ArrowUp') {
               runtime.palette.update(s => ({
                 ...s,
                 index:
                   (s.index - 1 + entries.length) % Math.max(1, entries.length),
               }));
-            else if (e.key === 'Enter') runAt(state.index);
+            } else if (e.key === 'Enter') runAt(state.index);
             else return;
             e.preventDefault();
           }}
@@ -167,9 +177,9 @@ export function CommandPalette(): ReactElement | null {
                 aria-selected={index === state.index}
                 className="j-menu__item palette__item"
                 onPointerEnter={() =>
-                  runtime.palette.update(s => ({...s, index}))
+                  void runtime.palette.update(s => ({...s, index}))
                 }
-                onClick={() => runAt(index)}
+                onClick={() => void runAt(index)}
               >
                 <span>{entry.title}</span>
                 {entry.shortcut && <kbd>{entry.shortcut}</kbd>}

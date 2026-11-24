@@ -1,4 +1,10 @@
 /**
+ * @license
+ * Copyright 2026 Joseph Terminal contributors
+ * SPDX-License-Identifier: MIT
+ */
+
+/**
  * @fileoverview `DrawingController`: binds surface pointer events to tool
  * plugins, the command store and rendering.
  *
@@ -7,6 +13,7 @@
  * Drawings whose tool is missing are rendered as an "unsupported drawing"
  * placeholder and are never deleted implicitly.
  */
+
 import type {
   BarCalendar,
   DrawingAnchor,
@@ -143,16 +150,16 @@ export class DrawingController {
     private readonly options: DrawingControllerOptions
   ) {
     this.disposers.push(
-      surface.on('pointerDown', event => this.onPointerDown(event)),
-      surface.on('pointerMove', event => this.onPointerMove(event)),
-      surface.on('pointerUp', event => this.onPointerUp(event)),
+      surface.on('pointerDown', event => void this.onPointerDown(event)),
+      surface.on('pointerMove', event => void this.onPointerMove(event)),
+      surface.on('pointerUp', event => void this.onPointerUp(event)),
       surface.addCanvasLayer({
         id: 'drawings',
         zIndex: 100,
-        draw: (ctx, transform) => this.render(ctx, transform),
+        draw: (ctx, transform) => void this.render(ctx, transform),
       }),
-      store.subscribe(() => surface.invalidate()),
-      tools.subscribe(() => surface.invalidate())
+      store.subscribe(() => void surface.invalidate()),
+      tools.subscribe(() => void surface.invalidate())
     );
   }
 
@@ -474,8 +481,9 @@ export class DrawingController {
       if (distance(draft.pressPoint, event) >= DRAG_SLOP_PX) {
         const tool = this.tools.get(draft.toolId);
         const anchor = this.anchorFor(event);
-        if (tool && anchor)
+        if (tool && anchor) {
           this.advanceMultiClick(tool, anchor, {x: event.x, y: event.y});
+        }
       }
       this.surface.invalidate();
       return;
@@ -647,7 +655,9 @@ export class DrawingController {
 
   /** Detaches every listener and the canvas layer. */
   dispose(): void {
-    for (const dispose of this.disposers.splice(0).reverse()) dispose();
+    for (const dispose of this.disposers.splice(0).reverse()) {
+      dispose();
+    }
     this.surface.setInteractive(true);
   }
 }
@@ -673,7 +683,9 @@ export function renderUnsupported(
   ctx.lineWidth = 1;
   ctx.beginPath();
   points.forEach((point, i) =>
-    i === 0 ? ctx.moveTo(point.x, point.y) : ctx.lineTo(point.x, point.y)
+    i === 0
+      ? void ctx.moveTo(point.x, point.y)
+      : void ctx.lineTo(point.x, point.y)
   );
   ctx.stroke();
   ctx.setLineDash([]);

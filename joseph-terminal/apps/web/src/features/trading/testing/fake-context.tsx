@@ -1,9 +1,16 @@
 /**
+ * @license
+ * Copyright 2026 Joseph Terminal contributors
+ * SPDX-License-Identifier: MIT
+ */
+
+/**
  * @fileoverview Self-contained fake `FeatureContext` for F6 component tests.
  *
  * Uses only the frozen feature-registry types and `createStore`, plus the
  * DEMO broker/strategy services, so tests do not depend on the shell.
  */
+
 import type {OverlayLayer} from '@joseph/chart-core';
 import {
   DEMO_BROKER_INSTRUMENTS,
@@ -55,13 +62,15 @@ export interface FakeContext extends WebFeatureContext {
   /** Events emitted through the bus. */
   readonly emitted: EmittedEvent[];
   /** Notifications shown. */
-  readonly notifications: {message: string; tone: string}[];
+  readonly notifications: Array<{message: string; tone: string}>;
   /** Registered layer providers. */
-  readonly layerProviders: ((chart: {
-    chartId: string;
-    instrumentId: string;
-    timeframe: TerminalSelection['timeframe'];
-  }) => ReadableStore<OverlayLayer | null>)[];
+  readonly layerProviders: Array<
+    (chart: {
+      chartId: string;
+      instrumentId: string;
+      timeframe: TerminalSelection['timeframe'];
+    }) => ReadableStore<OverlayLayer | null>
+  >;
   /** DEMO broker behind `clients.execution`. */
   readonly broker: DemoExecutionClient;
   /** DEMO strategy client behind `clients.strategy`. */
@@ -71,7 +80,7 @@ export interface FakeContext extends WebFeatureContext {
    * @param slot Slot.
    * @return Contributions.
    */
-  contributions(slot: UiSlot): readonly SlotContribution<WebView>[];
+  contributions(slot: UiSlot): ReadonlyArray<SlotContribution<WebView>>;
 }
 
 /** Static DEMO qualification report used by screener tests. */
@@ -352,12 +361,12 @@ export function createFakeContext(
   });
   const slots = new Map<
     UiSlot,
-    ReturnType<typeof createStore<readonly SlotContribution<WebView>[]>>
+    ReturnType<typeof createStore<ReadonlyArray<SlotContribution<WebView>>>>
   >();
   const slotStore = (slot: UiSlot) => {
     let store = slots.get(slot);
     if (!store) {
-      store = createStore<readonly SlotContribution<WebView>[]>([]);
+      store = createStore<ReadonlyArray<SlotContribution<WebView>>>([]);
       slots.set(slot, store);
     }
     return store;
@@ -368,7 +377,9 @@ export function createFakeContext(
   const events: EventBus = {
     emit(type, payload) {
       emitted.push({type, payload});
-      for (const handler of [...(listeners.get(type) ?? [])]) handler(payload);
+      for (const handler of [...(listeners.get(type) ?? [])]) {
+        handler(payload);
+      }
     },
     on(type, handler) {
       const set = listeners.get(type) ?? new Set();
@@ -379,7 +390,7 @@ export function createFakeContext(
       };
     },
   };
-  const notifications: {message: string; tone: string}[] = [];
+  const notifications: Array<{message: string; tone: string}> = [];
   const layerProviders: FakeContext['layerProviders'] = [];
   const settings = new Map<string, unknown>();
   const capabilities = createStore<CapabilitySet>({
@@ -399,8 +410,9 @@ export function createFakeContext(
     capabilities,
     commands: {
       register(command) {
-        if (commands.has(command.id))
+        if (commands.has(command.id)) {
           throw new Error(`Duplicate command ${command.id}`);
+        }
         commands.set(command.id, command);
         return () => {
           commands.delete(command.id);
@@ -420,7 +432,8 @@ export function createFakeContext(
         store.update(list =>
           [...list, contribution].sort((a, b) => a.order - b.order)
         );
-        return () => store.update(list => list.filter(c => c !== contribution));
+        return () =>
+          void store.update(list => list.filter(c => c !== contribution));
       },
       observe: slot => slotStore(slot),
     },

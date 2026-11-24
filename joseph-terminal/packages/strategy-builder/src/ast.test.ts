@@ -1,6 +1,13 @@
 /**
+ * @license
+ * Copyright 2026 Joseph Terminal contributors
+ * SPDX-License-Identifier: MIT
+ */
+
+/**
  * @fileoverview Unit and property tests for immutable AST edits.
  */
+
 import type {RuleNode, StrategyDefinition} from '@joseph/contracts';
 import {describe, expect, it} from 'vitest';
 import {

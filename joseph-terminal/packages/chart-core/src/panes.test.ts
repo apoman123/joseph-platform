@@ -1,7 +1,14 @@
 /**
+ * @license
+ * Copyright 2026 Joseph Terminal contributors
+ * SPDX-License-Identifier: MIT
+ */
+
+/**
  * @fileoverview Unit tests for session separators, study panes, comparison
  * series and user colors on overlays.
  */
+
 import {describe, expect, it} from 'vitest';
 import {paintOverlays} from './overlay-painter';
 import {

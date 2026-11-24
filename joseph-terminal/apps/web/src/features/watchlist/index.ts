@@ -1,7 +1,14 @@
 /**
+ * @license
+ * Copyright 2026 Joseph Terminal contributors
+ * SPDX-License-Identifier: MIT
+ */
+
+/**
  * @fileoverview Watchlist feature: exact-venue instruments with live
  * prices; selecting a row changes the active chart.
  */
+
 import {createStore} from '@joseph/feature-registry';
 import {createElement} from 'react';
 import type {

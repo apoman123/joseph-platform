@@ -1,7 +1,14 @@
 /**
+ * @license
+ * Copyright 2026 Joseph Terminal contributors
+ * SPDX-License-Identifier: MIT
+ */
+
+/**
  * @fileoverview Parallel channel: base line A-B plus a parallel line through
  * the third anchor C.
  */
+
 import {
   anchorPoints,
   applyStroke,

@@ -1,8 +1,15 @@
 /**
+ * @license
+ * Copyright 2026 Joseph Terminal contributors
+ * SPDX-License-Identifier: MIT
+ */
+
+/**
  * @fileoverview One chart pane: mounts the chart port, loads candles,
  * follows the stream, hosts drawings and feature overlay layers, and keeps
  * provenance visible at all times.
  */
+
 'use client';
 import type {ChartBar, ChartPort, OverlayLayer} from '@joseph/chart-core';
 import {themeFromCss} from '@joseph/chart-core';
@@ -80,13 +87,13 @@ const INITIAL_VISIBLE_BARS = 140;
 /** Age after which a live feed counts as stale. */
 const STALE_AFTER_MS = 60_000;
 /** Feed modes offered per chart (REPLAY is entered with bar replay). */
-const FEED_MODES: readonly [FeedMode, string][] = [
+const FEED_MODES: ReadonlyArray<[FeedMode, string]> = [
   ['AUTO', 'Auto feed'],
   ['NATIVE_WS', 'WebSocket'],
   ['REST_POLL', 'REST polling'],
 ];
 /** Link groups cycled from the pane header. */
-const LINK_GROUPS: readonly ChartState['link_group'][] = [
+const LINK_GROUPS: ReadonlyArray<ChartState['link_group']> = [
   null,
   'A',
   'B',
@@ -225,8 +232,9 @@ export function ChartPane({
     });
     return () => {
       disposed = true;
-      if (created && runtime.charts.get(chartId) === created)
+      if (created && runtime.charts.get(chartId) === created) {
         runtime.charts.delete(chartId);
+      }
       created?.destroy();
       setPort(null);
     };
@@ -241,10 +249,11 @@ export function ChartPane({
     runtime.clients.market
       .listInstruments({venue, q: venueMarketId})
       .then(list => {
-        if (alive)
+        if (alive) {
           setInstrument(
             list.instruments.find(i => i.instrument_id === instrumentId) ?? null
           );
+        }
       })
       .catch(() => undefined);
     return () => {
@@ -288,8 +297,9 @@ export function ChartPane({
       runtime.dispatch({type: 'setChartType', chartId, chartType: 'line'});
     } else if (marketType !== 'rate' && autoLine.current !== null) {
       autoLine.current = null;
-      if (type === 'line')
+      if (type === 'line') {
         runtime.dispatch({type: 'setChartType', chartId, chartType: 'candles'});
+      }
     }
   }, [marketType, instrumentId, chartId, runtime]);
 
@@ -383,8 +393,9 @@ export function ChartPane({
         if (
           candle.instrument_id !== instrumentId ||
           candle.timeframe !== timeframe
-        )
+        ) {
           return;
+        }
         const bar = toChartBar(candle);
         const bars = barsRef.current;
         const last = bars.at(-1);
@@ -392,8 +403,9 @@ export function ChartPane({
         if (last && bar.timeMs === last.timeMs) bars[bars.length - 1] = bar;
         else bars.push(bar);
         // A closed bar adds a point to engine-backed drawings (VWAP...).
-        if (bar.final || (last && bar.timeMs > last.timeMs))
+        if (bar.final || (last && bar.timeMs > last.timeMs)) {
           runtime.drawing.series.get(chartId)?.refresh();
+        }
         setBarCount(bars.length);
         // During replay new bars are kept but stay hidden behind the cursor.
         if (replayRef.current) return;
@@ -428,8 +440,8 @@ export function ChartPane({
 
   // Staleness clock.
   useEffect(() => {
-    const timer = setInterval(() => setNow(Date.now()), 1000);
-    return () => clearInterval(timer);
+    const timer = setInterval(() => void setNow(Date.now()), 1000);
+    return () => void clearInterval(timer);
   }, []);
   const ageMs = status.lastUpdateMs === null ? 0 : now - status.lastUpdateMs;
   const effectiveState: FeedState = replay
@@ -448,7 +460,7 @@ export function ChartPane({
   }, [runtime, chartId, effectiveState]);
   useEffect(
     () => () =>
-      runtime.feedStates.update(({[chartId]: _removed, ...rest}) => rest),
+      void runtime.feedStates.update(({[chartId]: _removed, ...rest}) => rest),
     [runtime, chartId]
   );
 
@@ -497,40 +509,47 @@ export function ChartPane({
       newId: ids.next,
       series: doc => seriesAsOf(series.get(doc.drawing_id), atMsRef.current),
       onToolChange: tool => {
-        if (runtime.selection.get().chartId === chartId)
+        if (runtime.selection.get().chartId === chartId) {
           runtime.drawing.activeTool.set(tool);
+        }
       },
       onSelectionChange: drawingId => {
         const current = runtime.drawing.selection.get();
         if (drawingId) runtime.drawing.selection.set({chartId, drawingId});
-        else if (current?.chartId === chartId)
+        else if (current?.chartId === chartId) {
           runtime.drawing.selection.set(null);
+        }
       },
     });
     const offAutosave = bindAutosave(store, repository, instrumentId);
-    const offStore = store.subscribe(() =>
-      runtime.drawing.revision.update(n => n + 1)
+    const offStore = store.subscribe(
+      () => void runtime.drawing.revision.update(n => n + 1)
     );
     runtime.drawing.controllers.set(chartId, controller);
     runtime.drawing.stores.set(chartId, store);
     runtime.drawing.series.set(chartId, series);
     const armed = runtime.drawing.activeTool.get();
-    if (armed && runtime.selection.get().chartId === chartId)
+    if (armed && runtime.selection.get().chartId === chartId) {
       controller.setTool(armed);
+    }
     runtime.drawing.revision.update(n => n + 1);
     return () => {
       offStore();
       offAutosave();
-      if (runtime.drawing.selection.get()?.chartId === chartId)
+      if (runtime.drawing.selection.get()?.chartId === chartId) {
         runtime.drawing.selection.set(null);
+      }
       controller.dispose();
       series.dispose();
-      if (runtime.drawing.series.get(chartId) === series)
+      if (runtime.drawing.series.get(chartId) === series) {
         runtime.drawing.series.delete(chartId);
-      if (runtime.drawing.controllers.get(chartId) === controller)
+      }
+      if (runtime.drawing.controllers.get(chartId) === controller) {
         runtime.drawing.controllers.delete(chartId);
-      if (runtime.drawing.stores.get(chartId) === store)
+      }
+      if (runtime.drawing.stores.get(chartId) === store) {
         runtime.drawing.stores.delete(chartId);
+      }
     };
     // tickSize is read lazily through the accessor.
   }, [port, instrumentId, timeframe, workspace.workspace_id, chartId, runtime]); // eslint-disable-line react-hooks/exhaustive-deps
@@ -559,10 +578,14 @@ export function ChartPane({
       port.setOverlayLayer({...layer, visible: layer.visible && visible});
       applied.add(layer.layerId);
     };
-    const subscriptions: (() => void)[] = [];
+    const subscriptions: Array<() => void> = [];
     const attach = () => {
-      for (const off of subscriptions.splice(0)) off();
-      for (const id of applied) port.removeOverlayLayer(id);
+      for (const off of subscriptions.splice(0)) {
+        off();
+      }
+      for (const id of applied) {
+        port.removeOverlayLayer(id);
+      }
       applied.clear();
       for (const provider of runtime.chartLayers.providers.get()) {
         const store = provider({chartId, instrumentId, timeframe, atMs});
@@ -583,8 +606,12 @@ export function ChartPane({
     const offProviders = runtime.chartLayers.providers.subscribe(attach);
     return () => {
       offProviders();
-      for (const off of subscriptions.splice(0)) off();
-      for (const id of applied) port.removeOverlayLayer(id);
+      for (const off of subscriptions.splice(0)) {
+        off();
+      }
+      for (const id of applied) {
+        port.removeOverlayLayer(id);
+      }
       latest.clear();
     };
   }, [port, chartId, instrumentId, timeframe, atMs, runtime]);
@@ -616,8 +643,12 @@ export function ChartPane({
       });
     });
     const offSync = runtime.crosshair.subscribe(({sourceChartId, point}) => {
-      if (sourceChartId === chartId || !runtime.workspace.get().sync.crosshair)
+      if (
+        sourceChartId === chartId ||
+        !runtime.workspace.get().sync.crosshair
+      ) {
         return;
+      }
       port.setCrosshair(point);
     });
     const offMenu = port.on('contextMenu', event => {
@@ -665,8 +696,9 @@ export function ChartPane({
           saved &&
           Math.abs(saved.from_ms - range.fromMs) < 1000 &&
           Math.abs(saved.to_ms - range.toMs) < 1000
-        )
+        ) {
           return;
+        }
         runtime.dispatch({
           type: 'setVisibleRange',
           chartId,
@@ -697,8 +729,9 @@ export function ChartPane({
       current &&
       Math.abs(current.fromMs - range.from_ms) < 1000 &&
       Math.abs(current.toMs - range.to_ms) < 1000
-    )
+    ) {
       return;
+    }
     port.setVisibleRange({fromMs: range.from_ms, toMs: range.to_ms});
   }, [port, range, workspace.sync.viewport]);
 
@@ -719,7 +752,7 @@ export function ChartPane({
   const replaySpeed = replay?.speed ?? 1;
   const updateReplay = useCallback(
     (change: (state: ReplayState) => ReplayState) =>
-      runtime.replay.update(all => {
+      void runtime.replay.update(all => {
         const current = all[chartId];
         return current ? {...all, [chartId]: change(current)} : all;
       }),
@@ -731,11 +764,12 @@ export function ChartPane({
       const times = barsRef.current.map(bar => bar.timeMs);
       updateReplay(state => stepReplay(state, times, 1));
     }, 1000 / replaySpeed);
-    return () => clearInterval(timer);
+    return () => void clearInterval(timer);
   }, [replayPhase, replaySpeed, updateReplay]);
   // Leaving the instrument or timeframe ends replay on this chart.
   useEffect(
-    () => () => runtime.replay.update(({[chartId]: _ended, ...rest}) => rest),
+    () => () =>
+      void runtime.replay.update(({[chartId]: _ended, ...rest}) => rest),
     [runtime, chartId, instrumentId, timeframe]
   );
 
@@ -854,7 +888,7 @@ export function ChartPane({
             title="Link group: linked charts follow each other when sync is on"
             aria-label={`${chart.link_group ? `Link ${chart.link_group}` : 'Unlinked'}: change link group`}
             onClick={() =>
-              runtime.dispatch({
+              void runtime.dispatch({
                 type: 'setLinkGroup',
                 chartId,
                 group:
@@ -873,7 +907,7 @@ export function ChartPane({
             value={chart.feed_mode === 'REPLAY' ? 'AUTO' : chart.feed_mode}
             title="Requested market-data transport"
             onChange={event =>
-              runtime.dispatch({
+              void runtime.dispatch({
                 type: 'setFeedMode',
                 chartId,
                 feedMode: event.target.value as FeedMode,
@@ -900,7 +934,7 @@ export function ChartPane({
                 type="button"
                 aria-label={`Stop comparing ${symbolOf(entry.instrumentId)}`}
                 onClick={() =>
-                  runtime.dispatch({
+                  void runtime.dispatch({
                     type: 'setCompare',
                     chartId,
                     instrumentIds: (chart.compare ?? []).filter(
@@ -972,7 +1006,7 @@ export function ChartPane({
             barsRef.current.map(bar => bar.timeMs)
           )}
           onStep={step =>
-            updateReplay(state =>
+            void updateReplay(state =>
               stepReplay(
                 state,
                 barsRef.current.map(bar => bar.timeMs),
@@ -981,14 +1015,14 @@ export function ChartPane({
             )
           }
           onPlayPause={() =>
-            updateReplay(state => ({
+            void updateReplay(state => ({
               ...state,
               phase: state.phase === 'playing' ? 'paused' : 'playing',
             }))
           }
-          onSpeed={() => updateReplay(nextReplaySpeed)}
+          onSpeed={() => void updateReplay(nextReplaySpeed)}
           onStartDefault={() =>
-            updateReplay(state =>
+            void updateReplay(state =>
               chooseReplayStart(
                 state,
                 barsRef.current.map(bar => bar.timeMs),
@@ -997,7 +1031,7 @@ export function ChartPane({
             )
           }
           onExit={() =>
-            runtime.replay.update(({[chartId]: _ended, ...rest}) => rest)
+            void runtime.replay.update(({[chartId]: _ended, ...rest}) => rest)
           }
         />
       )}

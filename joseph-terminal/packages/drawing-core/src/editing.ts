@@ -1,8 +1,15 @@
 /**
+ * @license
+ * Copyright 2026 Joseph Terminal contributors
+ * SPDX-License-Identifier: MIT
+ */
+
+/**
  * @fileoverview Object-list and style-editor operations as undoable store
  * commands: z-order changes, style patches, text edits, visibility and
  * locking. Each operation is one history entry.
  */
+
 import type {DrawingDocument, DrawingStyle} from '@joseph/contracts';
 import type {DrawingStore} from './store';
 

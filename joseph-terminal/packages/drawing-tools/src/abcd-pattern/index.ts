@@ -1,4 +1,10 @@
 /**
+ * @license
+ * Copyright 2026 Joseph Terminal contributors
+ * SPDX-License-Identifier: MIT
+ */
+
+/**
  * @fileoverview ABCD pattern (AB = CD measured move).
  *
  * - Anchors: four, placed in order A, B, C, D (time/price).
@@ -12,6 +18,7 @@
  * - Style options: color, width, dash and labels (letters and ratios).
  *   No fill.
  */
+
 import {createPatternTool, type PatternSpec} from '@joseph/drawing-core';
 
 /** Pattern geometry: labels and ratio connectors. */

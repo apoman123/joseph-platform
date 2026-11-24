@@ -1,7 +1,14 @@
 /**
+ * @license
+ * Copyright 2026 Joseph Terminal contributors
+ * SPDX-License-Identifier: MIT
+ */
+
+/**
  * @fileoverview Chart templates menu: save the active chart's presentation
  * under a name and apply saved templates to any chart.
  */
+
 'use client';
 import type {ChartState} from '@joseph/contracts';
 import {createTemplate, type ChartTemplate} from '@joseph/terminal-shell';
@@ -67,7 +74,7 @@ export function TemplatesMenu({
           placeholder="Name, e.g. Scalping"
           value={name}
           maxLength={60}
-          onChange={event => setName(event.target.value)}
+          onChange={event => void setName(event.target.value)}
         />
         <button
           type="submit"
@@ -108,7 +115,9 @@ export function TemplatesMenu({
                 className="j-btn j-btn--ghost j-btn--icon j-btn--sm"
                 aria-label={`Delete template ${template.name}`}
                 onClick={() =>
-                  setTemplates(runtime.templates.remove(template.template_id))
+                  void setTemplates(
+                    runtime.templates.remove(template.template_id)
+                  )
                 }
               >
                 <Trash2 size={13} aria-hidden="true" />

@@ -1,10 +1,17 @@
 /**
+ * @license
+ * Copyright 2026 Joseph Terminal contributors
+ * SPDX-License-Identifier: MIT
+ */
+
+/**
  * @fileoverview Unit tests for cash-equity order intents against the
  * execution contract: board and odd lots (limit DAY only), tick-ladder
  * rounding, daily price limits, time in force and order types from the
  * account's capabilities, `outside_rth`, closed-market rules, long-only cash
  * accounts, routing, rates, confirm labels and the controller's context.
  */
+
 import {
   Decimal,
   createBarCalendar,

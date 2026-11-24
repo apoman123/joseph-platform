@@ -1,6 +1,13 @@
 /**
+ * @license
+ * Copyright 2026 Joseph Terminal contributors
+ * SPDX-License-Identifier: MIT
+ */
+
+/**
  * @fileoverview Conversion of contract candles to render-only chart bars.
  */
+
 import type {ChartBar} from '@joseph/chart-core';
 import type {Candle} from '@joseph/contracts';
 

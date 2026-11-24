@@ -1,4 +1,10 @@
 /**
+ * @license
+ * Copyright 2026 Joseph Terminal contributors
+ * SPDX-License-Identifier: MIT
+ */
+
+/**
  * @fileoverview Detachable panes (pure model and window protocol).
  *
  * A chart pane or a dock panel can be popped out into its own browser
@@ -26,6 +32,7 @@
  * with its hello and heartbeats, so changes made while the main window is
  * reloading are replayed to the new main window instead of being lost.
  */
+
 import type {WorkspaceDocument} from '@joseph/contracts';
 import {workspaceReducer, type WorkspaceAction} from './workspace';
 
@@ -434,7 +441,9 @@ export function detachReducer(
       const lost = lostKeys(state, event.nowMs);
       if (lost.length === 0) return state;
       let next = state;
-      for (const key of lost) next = detachReducer(next, {type: 'close', key});
+      for (const key of lost) {
+        next = detachReducer(next, {type: 'close', key});
+      }
       return next;
     }
     default:
@@ -611,8 +620,9 @@ export function parseEnvelope(value: unknown): PopoutEnvelope | null {
       break;
     case 'crosshair': {
       const crosshair = msg.crosshair as Partial<SharedCrosshair> | undefined;
-      if (!crosshair || typeof crosshair.sourceChartId !== 'string')
+      if (!crosshair || typeof crosshair.sourceChartId !== 'string') {
         return null;
+      }
       break;
     }
     case 'focus':
@@ -624,14 +634,16 @@ export function parseEnvelope(value: unknown): PopoutEnvelope | null {
     case 'heartbeat': {
       const ref = parsePaneRef(msg.ref);
       if (!ref || msg.key !== paneKey(ref)) return null;
-      if (msg.pending !== undefined && parsePending(msg.pending) === null)
+      if (msg.pending !== undefined && parsePending(msg.pending) === null) {
         return null;
+      }
       break;
     }
     case 'action': {
       if (!isAction(msg.action)) return null;
-      if (msg.pending !== undefined && parsePending(msg.pending) === null)
+      if (msg.pending !== undefined && parsePending(msg.pending) === null) {
         return null;
+      }
       break;
     }
     default:
@@ -783,13 +795,13 @@ export function broadcastChannelPort(name: string): ChannelPort | null {
   if (typeof BroadcastChannel === 'undefined') return null;
   const channel = new BroadcastChannel(name);
   return {
-    postMessage: data => channel.postMessage(data),
+    postMessage: data => void channel.postMessage(data),
     onMessage: handler => {
-      const listener = (event: MessageEvent) => handler(event.data);
+      const listener = (event: MessageEvent) => void handler(event.data);
       channel.addEventListener('message', listener);
-      return () => channel.removeEventListener('message', listener);
+      return () => void channel.removeEventListener('message', listener);
     },
-    close: () => channel.close(),
+    close: () => void channel.close(),
   };
 }
 
@@ -811,7 +823,9 @@ export class MemoryChannelHub {
         const copy: unknown = structuredClone(data);
         for (const other of [...this.ports]) {
           if (other === self) continue;
-          for (const handler of [...other.handlers]) handler(copy);
+          for (const handler of [...other.handlers]) {
+            handler(copy);
+          }
         }
       },
       onMessage: handler => {

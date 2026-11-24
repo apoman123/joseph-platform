@@ -1,10 +1,17 @@
 /**
+ * @license
+ * Copyright 2026 Joseph Terminal contributors
+ * SPDX-License-Identifier: MIT
+ */
+
+/**
  * @fileoverview First-party drawing tools. Each tool lives in its own
  * directory and is also available as a subpath export
  * (`@joseph/drawing-tools/trendline`). Removing a tool from
  * `FIRST_PARTY_TOOLS` hides it; saved drawings stay readable as
  * unsupported placeholders.
  */
+
 import type {ToolPlugin} from '@joseph/drawing-core';
 import {abcdPatternTool} from './abcd-pattern';
 import {anchoredVwapTool} from './anchored-vwap';

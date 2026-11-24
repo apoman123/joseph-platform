@@ -1,4 +1,10 @@
 /**
+ * @license
+ * Copyright 2026 Joseph Terminal contributors
+ * SPDX-License-Identifier: MIT
+ */
+
+/**
  * @fileoverview DEMO instruments, static reference marks and accounts used
  * by the in-browser paper broker. Every value here is synthetic.
  *
@@ -15,6 +21,7 @@
  * rehearsal account (`DEMO_LIVE_REHEARSAL_ACCOUNT`) does, so arming can be
  * rehearsed without a backend.
  */
+
 import type {
   AccountStatus,
   HealthState,
@@ -452,8 +459,9 @@ export function demoRoutingProblem(
       ? null
       : `${account.label} does not route ${listingExchanges(instrument).join('/') || instrument.instrument_id} listings.`;
   }
-  if (account.venue !== 'mock')
+  if (account.venue !== 'mock') {
     return `${account.label} trades exchange-listed securities only.`;
+  }
   return account.currency === 'USD'
     ? null
     : `The ${account.currency} paper account trades ${account.currency} securities only.`;

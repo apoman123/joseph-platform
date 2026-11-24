@@ -1,10 +1,17 @@
 /**
+ * @license
+ * Copyright 2026 Joseph Terminal contributors
+ * SPDX-License-Identifier: MIT
+ */
+
+/**
  * @fileoverview React bindings for the framework-free feature registry.
  *
  * Features contribute `WebView` components to slots; every view receives
  * the feature's own `FeatureContext`, so it can only reach injected clients,
  * stores and registries.
  */
+
 import type {
   FeatureContext,
   ReadableStore,
@@ -36,7 +43,7 @@ export function useStore<T>(store: ReadableStore<T>): T {
   // A stable subscribe function per store: React re-subscribes whenever
   // this identity changes, which would restart lazily started stores.
   const subscribe = useCallback(
-    (listener: () => void) => store.subscribe(() => listener()),
+    (listener: () => void) => store.subscribe(() => void listener()),
     [store]
   );
   return useSyncExternalStore(

@@ -1,9 +1,16 @@
 /**
+ * @license
+ * Copyright 2026 Joseph Terminal contributors
+ * SPDX-License-Identifier: MIT
+ */
+
+/**
  * @fileoverview Timeframe control shared by the top bar and pop-out
  * windows: favorites, a grouped menu (seconds, minutes, hours, days) and a
  * typed resolution box. Timeframes the chart's venue does not publish are
  * disabled with the reason; the engine stays the authority.
  */
+
 'use client';
 import {
   TIMEFRAMES,
@@ -65,7 +72,7 @@ function CustomTimeframe({
           value={text}
           aria-invalid={error ? true : undefined}
           aria-describedby="tf-custom-help"
-          onChange={event => setText(event.target.value)}
+          onChange={event => void setText(event.target.value)}
         />
         <button type="submit" className="j-btn j-btn--sm">
           Go
@@ -102,7 +109,7 @@ export function TimeframeControl({chart}: TimeframeControlProps): ReactElement {
   const capabilities = useVenueCapabilities(runtime, venue);
   const offered = offeredTimeframes(capabilities);
   const select = (timeframe: Timeframe) =>
-    runtime.dispatch({type: 'setTimeframe', chartId, timeframe});
+    void runtime.dispatch({type: 'setTimeframe', chartId, timeframe});
   return (
     <nav className="timeframes" aria-label="Timeframe">
       {favorites.map(tf => {
@@ -115,7 +122,7 @@ export function TimeframeControl({chart}: TimeframeControlProps): ReactElement {
             aria-pressed={chart.timeframe === tf}
             disabled={!availability.offered}
             title={availability.note}
-            onClick={() => select(tf)}
+            onClick={() => void select(tf)}
           >
             {tf}
           </button>
@@ -182,7 +189,7 @@ export function TimeframeControl({chart}: TimeframeControlProps): ReactElement {
                           }
                           aria-pressed={favorite}
                           onClick={() =>
-                            runtime.dispatch({
+                            void runtime.dispatch({
                               type: 'toggleFavoriteTimeframe',
                               timeframe: tf,
                             })

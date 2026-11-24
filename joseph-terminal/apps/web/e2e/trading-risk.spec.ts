@@ -1,7 +1,14 @@
 /**
+ * @license
+ * Copyright 2026 Joseph Terminal contributors
+ * SPDX-License-Identifier: MIT
+ */
+
+/**
  * @fileoverview End-to-end: the kill switch blocks new opening orders and
  * is released explicitly (DEMO mode).
  */
+
 import {expect, test} from '@playwright/test';
 import {loadTerminal, openPanel, previewOrder, ticket} from './trading-helpers';
 

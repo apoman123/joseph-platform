@@ -1,6 +1,13 @@
 /**
+ * @license
+ * Copyright 2026 Joseph Terminal contributors
+ * SPDX-License-Identifier: MIT
+ */
+
+/**
  * @fileoverview Tests for the resumable WebSocket stream client.
  */
+
 import {afterEach, beforeEach, describe, expect, it, vi} from 'vitest';
 import type {StreamEnvelope} from '../src/generated/contracts';
 import {

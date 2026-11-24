@@ -1,8 +1,15 @@
 /**
+ * @license
+ * Copyright 2026 Joseph Terminal contributors
+ * SPDX-License-Identifier: MIT
+ */
+
+/**
  * @fileoverview Session calendars in the shell: a hook that follows the
  * session cache, and the market status badge (open/closed, next open,
  * holiday and early-close notices) shown on charts of session markets.
  */
+
 'use client';
 import {
   marketStatus,

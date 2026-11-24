@@ -1,6 +1,13 @@
 /**
+ * @license
+ * Copyright 2026 Joseph Terminal contributors
+ * SPDX-License-Identifier: MIT
+ */
+
+/**
  * @fileoverview Magnet snapping of pointer positions to bar OHLC.
  */
+
 import type {Point} from './geometry';
 import type {PixelTransform, SnapBar} from './surface';
 

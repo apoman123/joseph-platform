@@ -1,8 +1,15 @@
 /**
+ * @license
+ * Copyright 2026 Joseph Terminal contributors
+ * SPDX-License-Identifier: MIT
+ */
+
+/**
  * @fileoverview Strategy feature: visual Rule AST builder with server
  * validation, immutable versions, backtests and activation in alert, paper
  * or shadow mode. Automatic live trading cannot be enabled from here.
  */
+
 import {createElement} from 'react';
 import type {
   WebFeature,

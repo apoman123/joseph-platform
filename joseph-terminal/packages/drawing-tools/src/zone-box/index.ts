@@ -1,9 +1,16 @@
 /**
+ * @license
+ * Copyright 2026 Joseph Terminal contributors
+ * SPDX-License-Identifier: MIT
+ */
+
+/**
  * @fileoverview Zone box: a user-marked zone (for example a fair value gap
  * the trader wants to watch) with a 50% midline, an optional name and an
  * optional extension to the right edge. It is an annotation only; engine
  * AOIs are drawn by the indicator layers.
  */
+
 import {
   anchorPoints,
   applyStroke,

@@ -1,10 +1,17 @@
 /**
+ * @license
+ * Copyright 2026 Joseph Terminal contributors
+ * SPDX-License-Identifier: MIT
+ */
+
+/**
  * @fileoverview Signal dashboard ranking and triage (pure): sort keys
  * (newest, R multiple, confluence, bar volume, age, distance to the AOI),
  * confluence counts from the reason tree, AOI distance and local
  * snooze/dismiss.
  * Display only: nothing here changes what the engine decided.
  */
+
 import type {AoiRecord, ReasonNode, Signal} from '@joseph/contracts';
 
 /** Sort keys offered by the alerts panel. */
@@ -12,7 +19,7 @@ export type SignalSort =
   'newest' | 'rr' | 'confluence' | 'volume' | 'age' | 'distance';
 
 /** Sort labels in menu order. */
-export const SIGNAL_SORTS: readonly {id: SignalSort; label: string}[] = [
+export const SIGNAL_SORTS: ReadonlyArray<{id: SignalSort; label: string}> = [
   {id: 'newest', label: 'Newest'},
   {id: 'rr', label: 'R multiple'},
   {id: 'confluence', label: 'Confluence'},
@@ -51,7 +58,7 @@ export function confluenceOf(node: ReasonNode): number {
  */
 export function aoiDistancePct(
   price: number | null,
-  aois: readonly Pick<AoiRecord, 'lower' | 'upper'>[]
+  aois: ReadonlyArray<Pick<AoiRecord, 'lower' | 'upper'>>
 ): number | null {
   if (price === null || !Number.isFinite(price) || price <= 0) return null;
   let best: number | null = null;
@@ -131,17 +138,18 @@ export function sortSignals(
   return [...signals].sort((a, b) => {
     let result = 0;
     if (sort === 'rr') result = byNumber(rrOf(a), rrOf(b), true);
-    else if (sort === 'confluence')
+    else if (sort === 'confluence') {
       result = confluenceOf(b.reason_tree) - confluenceOf(a.reason_tree);
-    else if (sort === 'volume')
+    } else if (sort === 'volume') {
       result = byNumber(barQuoteVolumeOf(a), barQuoteVolumeOf(b), true);
-    else if (sort === 'age') result = a.bar_close_ms - b.bar_close_ms;
-    else if (sort === 'distance')
+    } else if (sort === 'age') result = a.bar_close_ms - b.bar_close_ms;
+    else if (sort === 'distance') {
       result = byNumber(
         distances[a.signal_id] ?? null,
         distances[b.signal_id] ?? null,
         false
       );
+    }
     return result || newest(a, b);
   });
 }

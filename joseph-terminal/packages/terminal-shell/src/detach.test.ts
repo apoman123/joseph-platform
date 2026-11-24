@@ -1,9 +1,16 @@
 /**
+ * @license
+ * Copyright 2026 Joseph Terminal contributors
+ * SPDX-License-Identifier: MIT
+ */
+
+/**
  * @fileoverview Tests for detachable panes: pane keys and links, saved
  * layout parsing, liveness (heartbeats, hidden budgets, crashed and
  * dormant windows, the reload probe), window geometry, the reducer, message
  * validation, the pop-out action queue and the channel bus.
  */
+
 import {describe, expect, it, vi} from 'vitest';
 import {
   DETACHED_PANEL_KEY,
@@ -259,7 +266,7 @@ describe('trailing throttle', () => {
   it('limits the rate and always delivers the last value', () => {
     vi.useFakeTimers();
     let clock = 0;
-    const sent: (number | null)[] = [];
+    const sent: Array<number | null> = [];
     const throttle = createTrailingThrottle<number | null>(
       v => sent.push(v),
       40,

@@ -1,9 +1,16 @@
 /**
+ * @license
+ * Copyright 2026 Joseph Terminal contributors
+ * SPDX-License-Identifier: MIT
+ */
+
+/**
  * @fileoverview Session markets on the time axis: the index has one slot per
  * bar (no overnight or weekend gap), off-data times are counted in session
  * bars, labels and separators use exchange time, and `24x7` charts keep the
  * duration-based arithmetic and UTC labels.
  */
+
 import {
   CONTINUOUS_CALENDAR,
   createBarCalendar,

@@ -1,4 +1,10 @@
 /**
+ * @license
+ * Copyright 2026 Joseph Terminal contributors
+ * SPDX-License-Identifier: MIT
+ */
+
+/**
  * @fileoverview DEMO indicator plugin descriptors.
  *
  * Input schemas mirror the market engine's `SettingSpec` declarations
@@ -6,6 +12,7 @@
  * be exercised without a backend. The DEMO fixture itself does not
  * recompute zones when inputs change; the engine does.
  */
+
 import {
   TIMEFRAMES,
   type AoiKind,

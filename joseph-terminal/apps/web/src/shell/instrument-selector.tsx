@@ -1,4 +1,10 @@
 /**
+ * @license
+ * Copyright 2026 Joseph Terminal contributors
+ * SPDX-License-Identifier: MIT
+ */
+
+/**
  * @fileoverview Instrument picker: asset-class groups (Crypto, Taiwan
  * stocks, US stocks, Bonds & rates), venue filter and search by symbol or
  * name — including Chinese names on TWSE and TPEx — over exact venue
@@ -9,6 +15,7 @@
  * and listing-exchange badges and say when a venue's data is delayed or
  * its data source has no API key configured.
  */
+
 'use client';
 import {
   VENUE_NAMES,
@@ -122,14 +129,19 @@ export function rankInstruments(
     const rank = searchRank(instrument, query) ?? fallback;
     if (rank === null) return;
     const known = byId.get(instrument.instrument_id);
-    if (!known || rank < known.rank)
+    if (!known || rank < known.rank) {
       byId.set(instrument.instrument_id, {instrument, rank});
+    }
   };
   // The engine matched these on its own rules; keep them even when the
   // browser's ranking does not recognize the match.
-  for (const instrument of symbolHits) consider(instrument, 3);
+  for (const instrument of symbolHits) {
+    consider(instrument, 3);
+  }
   if (query.trim()) {
-    for (const instrument of listings) consider(instrument, null);
+    for (const instrument of listings) {
+      consider(instrument, null);
+    }
   }
   const order = MARKET_GROUPS.map(g => g.id);
   return [...byId.values()]
@@ -232,7 +244,7 @@ function InstrumentOption({
           ? `${access.delay}: this deployment receives delayed data for ${VENUE_NAMES[venue]}`
           : item.instrument_id)
       }
-      onClick={() => onPick(item.instrument_id)}
+      onClick={() => void onPick(item.instrument_id)}
     >
       <span className="instrument-option__symbol">{item.display_symbol}</span>
       <span className="instrument-option__badges">
@@ -316,7 +328,7 @@ function InstrumentSearch({
   }, [runtime]);
   // Venues the symbol search asks: the chosen venue, else the venues of
   // the selected group (so an empty query still lists, say, TWSE), else all.
-  const searched = useMemo((): readonly (Venue | undefined)[] => {
+  const searched = useMemo((): ReadonlyArray<Venue | undefined> => {
     if (venue !== 'all') return [venue];
     if (group === 'all') return [undefined];
     const wanted = new Set<string>([...GROUP_VENUES[group], 'mock']);
@@ -343,7 +355,8 @@ function InstrumentSearch({
         })
         .catch(
           (e: unknown) =>
-            alive && setError(e instanceof Error ? e.message : 'Search failed')
+            alive &&
+            void setError(e instanceof Error ? e.message : 'Search failed')
         );
     }, 150);
     return () => {
@@ -421,7 +434,7 @@ function InstrumentSearch({
             aria-selected={group === g.id}
             className="instrument-search__group"
             data-testid={`market-group-${g.id}`}
-            onClick={() => setGroup(g.id)}
+            onClick={() => void setGroup(g.id)}
           >
             {g.label}
             {g.id !== 'all' && counts.get(g.id) !== undefined && (
@@ -440,7 +453,7 @@ function InstrumentSearch({
           id="venue-filter"
           className="j-select"
           value={venue}
-          onChange={e => setVenue(e.target.value as Venue | 'all')}
+          onChange={e => void setVenue(e.target.value as Venue | 'all')}
         >
           {!demo && <option value="all">All venues</option>}
           {venues.map(v => (
@@ -461,7 +474,7 @@ function InstrumentSearch({
           placeholder="Symbol or name, e.g. BTC, AAPL, 2330, 台積電"
           aria-label="Search instruments"
           value={query}
-          onChange={e => setQuery(e.target.value)}
+          onChange={e => void setQuery(e.target.value)}
         />
       </div>
       {demo && (

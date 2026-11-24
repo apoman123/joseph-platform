@@ -1,6 +1,13 @@
 /**
+ * @license
+ * Copyright 2026 Joseph Terminal contributors
+ * SPDX-License-Identifier: MIT
+ */
+
+/**
  * @fileoverview Unit tests for chart-core transforms, geometry and fakes.
  */
+
 import {describe, expect, it} from 'vitest';
 import {toLwcMarker} from './adapters/lwc/lwc-chart-port';
 import type {ChartBar} from './chart-port';

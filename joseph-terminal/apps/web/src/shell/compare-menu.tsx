@@ -1,7 +1,14 @@
 /**
+ * @license
+ * Copyright 2026 Joseph Terminal contributors
+ * SPDX-License-Identifier: MIT
+ */
+
+/**
  * @fileoverview Compare menu: overlay up to three other exact-venue
  * instruments on the active chart, each on a shared left percentage axis.
  */
+
 'use client';
 import {
   VENUE_NAMES,
@@ -60,7 +67,7 @@ export function CompareMenu({chart}: CompareMenuProps): ReactElement {
     };
   }, [query, runtime]);
   const set = (ids: readonly string[]) =>
-    runtime.dispatch({
+    void runtime.dispatch({
       type: 'setCompare',
       chartId: chart.chart_id,
       instrumentIds: ids,
@@ -86,7 +93,7 @@ export function CompareMenu({chart}: CompareMenuProps): ReactElement {
                   type="button"
                   className="j-btn j-btn--ghost j-btn--icon j-btn--sm"
                   aria-label={`Stop comparing ${venueMarketId}`}
-                  onClick={() => set(current.filter(x => x !== id))}
+                  onClick={() => void set(current.filter(x => x !== id))}
                 >
                   <X size={13} aria-hidden="true" />
                 </button>
@@ -105,7 +112,7 @@ export function CompareMenu({chart}: CompareMenuProps): ReactElement {
         value={query}
         disabled={full}
         autoComplete="off"
-        onChange={event => setQuery(event.target.value)}
+        onChange={event => void setQuery(event.target.value)}
       />
       {error && <p className="j-notice j-notice--danger">{error}</p>}
       {results.length > 0 && (

@@ -1,8 +1,15 @@
 /**
+ * @license
+ * Copyright 2026 Joseph Terminal contributors
+ * SPDX-License-Identifier: MIT
+ */
+
+/**
  * @fileoverview Integration tests of the engine-backed drawings in the
  * shell: the DEMO engine series flow through `DrawingSeriesSync` into the
  * object list, the data window and the style bar's tool inputs.
  */
+
 import {FakeChartPort} from '@joseph/chart-core';
 import {TIMEFRAME_MS, floorToTimeframe} from '@joseph/contracts';
 import {
@@ -88,7 +95,7 @@ async function mount(
     fetch: query => runtime.clients.market.getIndicatorSeries(query),
     instrumentId: () => 'mock:perp:BTCUSD',
     timeframe: () => '5m',
-    onChange: () => runtime.drawing.revision.update(n => n + 1),
+    onChange: () => void runtime.drawing.revision.update(n => n + 1),
     debounceMs: 0,
   });
   const controller = new DrawingController(
@@ -111,7 +118,7 @@ async function mount(
   runtime.drawing.stores.set('chart-1', store);
   runtime.drawing.controllers.set('chart-1', controller);
   runtime.drawing.series.set('chart-1', series);
-  await waitFor(() => expect(series.get('d1')?.status).toBe(settled));
+  await waitFor(() => void expect(series.get('d1')?.status).toBe(settled));
   return {runtime, store, series, id: doc.drawing_id};
 }
 
@@ -215,7 +222,7 @@ describe('engine-backed drawings in the shell', () => {
     });
     expect(store.find(id)?.props).toMatchObject({band_1: '1', band_2: '2'});
     expect(series.get(id)?.request.settings.band_2).toBe('2');
-    await waitFor(() => expect(series.get(id)?.status).toBe('ready'));
+    await waitFor(() => void expect(series.get(id)?.status).toBe('ready'));
     store.undo();
     expect(store.find(id)?.props).toMatchObject({band_2: '0'});
     setDrawingFlags(store, id, {locked: true}, Date.now());

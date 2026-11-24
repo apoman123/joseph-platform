@@ -1,8 +1,15 @@
 /**
+ * @license
+ * Copyright 2026 Joseph Terminal contributors
+ * SPDX-License-Identifier: MIT
+ */
+
+/**
  * @fileoverview Top bar: brand, instrument, timeframes, chart style,
  * indicator layers, layout and sync, provenance, order mode, theme and the
  * command palette.
  */
+
 'use client';
 import type {ReactElement} from 'react';
 import {
@@ -40,7 +47,7 @@ import {TemplatesMenu} from './templates-menu';
 import {TimeframeControl} from './timeframe-menu';
 
 /** Chart type labels. */
-const CHART_TYPES: readonly [ChartType, string][] = [
+const CHART_TYPES: ReadonlyArray<[ChartType, string]> = [
   ['candles', 'Candles'],
   ['bars', 'Bars'],
   ['line', 'Line'],
@@ -49,14 +56,14 @@ const CHART_TYPES: readonly [ChartType, string][] = [
 ];
 
 /** Price scale labels. */
-const SCALES: readonly [PriceScaleMode, string][] = [
+const SCALES: ReadonlyArray<[PriceScaleMode, string]> = [
   ['linear', 'Linear'],
   ['log', 'Logarithmic'],
   ['percent', 'Percent'],
 ];
 
 /** Layout options. */
-const LAYOUTS: readonly [LayoutId, string, typeof Square][] = [
+const LAYOUTS: ReadonlyArray<[LayoutId, string, typeof Square]> = [
   ['1', 'One chart', Square],
   ['2h', 'Two charts side by side', Columns2],
   ['2v', 'Two charts stacked', Rows2],
@@ -84,7 +91,9 @@ export function worstFeedState(
   states: Readonly<Record<string, FeedState>>
 ): FeedState {
   const values = Object.values(states);
-  for (const state of SEVERITY) if (values.includes(state)) return state;
+  for (const state of SEVERITY) {
+    if (values.includes(state)) return state;
+  }
   return 'CONNECTING';
 }
 
@@ -116,7 +125,7 @@ export function TopBar(): ReactElement {
       <InstrumentSelector
         instrumentId={chart.instrument_id}
         onSelect={instrumentId =>
-          runtime.dispatch({type: 'setInstrument', chartId, instrumentId})
+          void runtime.dispatch({type: 'setInstrument', chartId, instrumentId})
         }
       />
       <TimeframeControl chart={chart} />
@@ -129,7 +138,7 @@ export function TopBar(): ReactElement {
         className="j-select topbar__select"
         value={chart.chart_type}
         onChange={e =>
-          runtime.dispatch({
+          void runtime.dispatch({
             type: 'setChartType',
             chartId,
             chartType: e.target.value as ChartType,
@@ -150,7 +159,7 @@ export function TopBar(): ReactElement {
         className="j-select topbar__select topbar__select--narrow"
         value={chart.price_scale}
         onChange={e =>
-          runtime.dispatch({
+          void runtime.dispatch({
             type: 'setPriceScale',
             chartId,
             priceScale: e.target.value as PriceScaleMode,
@@ -190,7 +199,7 @@ export function TopBar(): ReactElement {
                       type="checkbox"
                       checked={visible}
                       onChange={() =>
-                        runtime.dispatch({
+                        void runtime.dispatch({
                           type: 'setIndicatorLayer',
                           chartId,
                           pluginId,
@@ -210,7 +219,7 @@ export function TopBar(): ReactElement {
                         checked={paneOn}
                         data-testid="delta-pane-toggle"
                         onChange={() =>
-                          runtime.dispatch({
+                          void runtime.dispatch({
                             type: 'setIndicatorLayerConfig',
                             chartId,
                             pluginId,
@@ -232,7 +241,7 @@ export function TopBar(): ReactElement {
                     aria-label={`${name} settings`}
                     data-testid={`indicator-settings-${pluginId}`}
                     onClick={() =>
-                      runtime.indicatorSettings.set({chartId, pluginId})
+                      void runtime.indicatorSettings.set({chartId, pluginId})
                     }
                   >
                     <Settings2 size={14} aria-hidden="true" />
@@ -246,7 +255,7 @@ export function TopBar(): ReactElement {
                 type="checkbox"
                 checked={chart.show_volume}
                 onChange={() =>
-                  runtime.dispatch({type: 'toggleVolume', chartId})
+                  void runtime.dispatch({type: 'toggleVolume', chartId})
                 }
               />
               Volume
@@ -256,7 +265,7 @@ export function TopBar(): ReactElement {
                 type="checkbox"
                 checked={chart.session_separators === true}
                 data-testid="session-separators-toggle"
-                onChange={() => run('chart.sessionSeparators')}
+                onChange={() => void run('chart.sessionSeparators')}
               />
               Session breaks (UTC)
             </label>
@@ -265,14 +274,14 @@ export function TopBar(): ReactElement {
                 type="checkbox"
                 checked={dataWindow}
                 data-testid="data-window-toggle"
-                onChange={() => run('chart.dataWindow')}
+                onChange={() => void run('chart.dataWindow')}
               />
               Data window
             </label>
             <button
               type="button"
               className="j-menu__item"
-              onClick={() => run('indicators.toggle-ended')}
+              onClick={() => void run('indicators.toggle-ended')}
             >
               Show or hide ended zones
             </button>
@@ -324,7 +333,7 @@ export function TopBar(): ReactElement {
                   checked={workspace.sync[key]}
                   data-testid={`sync-${key}`}
                   onChange={() =>
-                    runtime.dispatch({
+                    void runtime.dispatch({
                       type: 'setSync',
                       key,
                       value: !workspace.sync[key],
@@ -362,7 +371,7 @@ export function TopBar(): ReactElement {
         aria-pressed={replaying}
         title="Bar replay (Alt + Shift + R)"
         data-testid="replay-toggle"
-        onClick={() => run('chart.replay.toggle')}
+        onClick={() => void run('chart.replay.toggle')}
       >
         <History size={16} aria-hidden="true" />
       </button>
@@ -372,7 +381,7 @@ export function TopBar(): ReactElement {
         aria-label="Download chart screenshot"
         title="Screenshot (Alt + Shift + S)"
         data-testid="screenshot"
-        onClick={() => run('chart.screenshot')}
+        onClick={() => void run('chart.screenshot')}
       >
         <Camera size={16} aria-hidden="true" />
       </button>
@@ -402,7 +411,7 @@ export function TopBar(): ReactElement {
             : 'Switch to night theme'
         }
         data-testid="theme-toggle"
-        onClick={() => run('theme.toggle')}
+        onClick={() => void run('theme.toggle')}
       >
         {theme === 'dark' ? (
           <Sun size={16} aria-hidden="true" />
@@ -415,7 +424,7 @@ export function TopBar(): ReactElement {
         className="j-btn j-btn--ghost palette-trigger"
         aria-label="Open command palette"
         data-testid="palette-trigger"
-        onClick={() => run('palette.open')}
+        onClick={() => void run('palette.open')}
       >
         <Command size={14} aria-hidden="true" />
         <kbd>K</kbd>

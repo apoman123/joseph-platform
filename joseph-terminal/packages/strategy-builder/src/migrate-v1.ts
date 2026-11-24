@@ -1,9 +1,16 @@
 /**
+ * @license
+ * Copyright 2026 Joseph Terminal contributors
+ * SPDX-License-Identifier: MIT
+ */
+
+/**
  * @fileoverview Migration from the starter's v1 `StrategyConfig` to Rule AST
  * v2. Meaning is preserved condition by condition; anything that cannot be
  * expressed exactly is reported, never silently dropped, and the resulting
  * strategy is always ALERT_ONLY.
  */
+
 import type {
   AoiKind,
   AoiTouchNode,
@@ -131,8 +138,12 @@ function slug(id: string): string {
   // quadratic on long runs of dashes).
   let start = 0;
   let end = dashed.length;
-  while (start < end && dashed[start] === '-') start++;
-  while (end > start && dashed[end - 1] === '-') end--;
+  while (start < end && dashed[start] === '-') {
+    start++;
+  }
+  while (end > start && dashed[end - 1] === '-') {
+    end--;
+  }
   const cleaned = dashed.slice(start, end).slice(0, 63);
   return cleaned || 'migrated-strategy';
 }
@@ -215,10 +226,11 @@ export function migrateV1(config: StrategyConfigV1): MigrationResult {
   for (const kind of config.aoiAny ?? []) {
     const mapped = AOIS[kind];
     if (mapped) kinds.push(mapped);
-    else
+    else {
       report.unmapped.push(
         `aoiAny "${kind}" is ambiguous in v2 (choose BSL, SSL, EQH or EQL) and was not migrated`
       );
+    }
   }
   if (kinds.length) {
     children.push({
@@ -255,10 +267,11 @@ export function migrateV1(config: StrategyConfigV1): MigrationResult {
     );
   } else if (events.length >= 2) {
     const steps = events.slice(0, 8).map(name => ({name}));
-    if (events.length > 8)
+    if (events.length > 8) {
       report.unmapped.push(
         'triggerSequence steps beyond the eighth were not migrated'
       );
+    }
     children.push({
       op: 'SEQUENCE',
       id: id(),

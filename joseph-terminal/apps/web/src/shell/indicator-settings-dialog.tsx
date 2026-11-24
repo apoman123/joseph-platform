@@ -1,10 +1,17 @@
 /**
+ * @license
+ * Copyright 2026 Joseph Terminal contributors
+ * SPDX-License-Identifier: MIT
+ */
+
+/**
  * @fileoverview Indicator settings dialog for one chart layer: inputs built
  * from the plugin's published `input_schema` (validated, then sent to the
  * engine with every query), per-kind visibility and colors, event markers
  * and the sub-pane toggle. Settings are saved in the workspace, so they
  * travel with templates, exports and share links.
  */
+
 'use client';
 import type {
   AoiKind,
@@ -100,10 +107,11 @@ function SettingsForm({
         if (!found) setLoadError('The engine does not publish this indicator.');
       },
       (failure: unknown) => {
-        if (alive)
+        if (alive) {
           setLoadError(
             failure instanceof Error ? failure.message : 'Request failed'
           );
+        }
       }
     );
     return () => {
@@ -131,7 +139,7 @@ function SettingsForm({
     setValues(initialValues(fields, saved));
     // Only when the schema arrives; later edits are local until saved.
   }, [fields]); // eslint-disable-line react-hooks/exhaustive-deps
-  const close = () => runtime.indicatorSettings.set(null);
+  const close = () => void runtime.indicatorSettings.set(null);
   useEffect(() => {
     dialog.current
       ?.querySelector<HTMLElement>('input, select, button')
@@ -140,7 +148,7 @@ function SettingsForm({
       if (event.key === 'Escape') close();
     };
     window.addEventListener('keydown', onKey);
-    return () => window.removeEventListener('keydown', onKey);
+    return () => void window.removeEventListener('keydown', onKey);
   }, []); // eslint-disable-line react-hooks/exhaustive-deps
   if (!chart) return <></>;
   const outputKinds = plugin?.output_kinds ?? [];
@@ -196,7 +204,7 @@ function SettingsForm({
         aria-modal="true"
         aria-labelledby="indicator-dialog-title"
         data-testid="indicator-settings"
-        onPointerDown={event => event.stopPropagation()}
+        onPointerDown={event => void event.stopPropagation()}
       >
         <header className="dialog__head">
           <h2 id="indicator-dialog-title">{name}</h2>
@@ -244,7 +252,7 @@ function SettingsForm({
                           type="checkbox"
                           checked={value === true}
                           onChange={event =>
-                            setValues(v => ({
+                            void setValues(v => ({
                               ...v,
                               [field.name]: event.target.checked,
                             }))
@@ -263,7 +271,7 @@ function SettingsForm({
                             className="j-select"
                             value={String(value ?? '')}
                             onChange={event =>
-                              setValues(v => ({
+                              void setValues(v => ({
                                 ...v,
                                 [field.name]: event.target.value,
                               }))
@@ -286,7 +294,7 @@ function SettingsForm({
                             aria-invalid={error ? true : undefined}
                             aria-describedby={`${id}-help`}
                             onChange={event =>
-                              setValues(v => ({
+                              void setValues(v => ({
                                 ...v,
                                 [field.name]: event.target.value,
                               }))
@@ -321,7 +329,7 @@ function SettingsForm({
                       type="checkbox"
                       checked={shownKinds.includes(kind)}
                       onChange={event =>
-                        setKinds(
+                        void setKinds(
                           event.target.checked
                             ? [...shownKinds, kind]
                             : shownKinds.filter(k => k !== kind)
@@ -335,7 +343,7 @@ function SettingsForm({
                     aria-label={`Color of ${kind}`}
                     value={colors[kind] ?? DEFAULT_SWATCH}
                     onChange={event =>
-                      setColors(c => ({...c, [kind]: event.target.value}))
+                      void setColors(c => ({...c, [kind]: event.target.value}))
                     }
                   />
                 </div>
@@ -348,7 +356,7 @@ function SettingsForm({
               <input
                 type="checkbox"
                 checked={showEvents}
-                onChange={event => setShowEvents(event.target.checked)}
+                onChange={event => void setShowEvents(event.target.checked)}
               />
               Show event markers
             </label>
@@ -365,7 +373,7 @@ function SettingsForm({
                   aria-label={`Color of ${event}`}
                   value={colors[event] ?? DEFAULT_SWATCH}
                   onChange={e =>
-                    setColors(c => ({...c, [event]: e.target.value}))
+                    void setColors(c => ({...c, [event]: e.target.value}))
                   }
                 />
               </div>
@@ -376,7 +384,7 @@ function SettingsForm({
                   type="checkbox"
                   checked={pane}
                   data-testid="indicator-pane-toggle"
-                  onChange={event => setPane(event.target.checked)}
+                  onChange={event => void setPane(event.target.checked)}
                 />
                 Show the Delta % pane below the chart
               </label>

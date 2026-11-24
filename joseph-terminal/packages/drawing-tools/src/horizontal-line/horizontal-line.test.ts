@@ -1,6 +1,13 @@
 /**
+ * @license
+ * Copyright 2026 Joseph Terminal contributors
+ * SPDX-License-Identifier: MIT
+ */
+
+/**
  * @fileoverview Tests for the horizontal line tool.
  */
+
 import {describe, expect, it} from 'vitest';
 import {
   STATE,
@@ -14,7 +21,8 @@ import {horizontalLineTool as tool} from '.';
 
 describe('horizontal-line', () => {
   const doc = makeDoc(tool, [{time_ms: 120_000, price: '150'}]);
-  it('has a valid manifest', () => expect(manifestProblems(tool)).toEqual([]));
+  it('has a valid manifest', () =>
+    void expect(manifestProblems(tool)).toEqual([]));
   it('renders a full-width line with a price label', () => {
     const ops = renderOps(tool, doc);
     expect(ops.find(o => o.op === 'lineTo')?.args).toEqual([

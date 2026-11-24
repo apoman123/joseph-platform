@@ -1,6 +1,13 @@
 /**
+ * @license
+ * Copyright 2026 Joseph Terminal contributors
+ * SPDX-License-Identifier: MIT
+ */
+
+/**
  * @fileoverview Tests for the DEMO paper broker and user stream.
  */
+
 import {
   ApiError,
   type OrderIntentRequest,
@@ -13,7 +20,7 @@ import {DEMO_ACCOUNT_ID} from './instruments';
 
 /** Manual scheduler for deterministic lifecycles. */
 class ManualScheduler {
-  private readonly tasks: (() => void)[] = [];
+  private readonly tasks: Array<() => void> = [];
 
   /**
    * Queues a task.
@@ -26,14 +33,18 @@ class ManualScheduler {
   /** Runs only the tasks queued so far (one simulated latency step). */
   step(): void {
     const batch = this.tasks.splice(0);
-    for (const task of batch) task();
+    for (const task of batch) {
+      task();
+    }
   }
 
   /** Runs tasks until the queue is empty. */
   flush(): void {
     for (let i = 0; i < 100 && this.tasks.length; i += 1) {
       const batch = this.tasks.splice(0);
-      for (const task of batch) task();
+      for (const task of batch) {
+        task();
+      }
     }
   }
 }

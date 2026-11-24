@@ -1,6 +1,13 @@
 /**
+ * @license
+ * Copyright 2026 Joseph Terminal contributors
+ * SPDX-License-Identifier: MIT
+ */
+
+/**
  * @fileoverview Shared test harness for drawing tools (test-only module).
  */
+
 import type {DrawingAnchor, DrawingDocument} from '@joseph/contracts';
 import {
   createDrawing,
@@ -79,20 +86,24 @@ export interface Op {
  */
 export function renderOps(tool: ToolPlugin, doc: DrawingDocument): Op[] {
   const ops: Op[] = [];
-  const ctx = new Proxy({} as Record<string, unknown>, {
-    get(target, prop: string) {
-      if (prop === 'measureText')
-        return (text: string) => ({width: text.length * 6});
-      if (prop in target) return target[prop];
-      return (...args: unknown[]) => {
-        ops.push({op: prop, args});
-      };
-    },
-    set(target, prop: string, value: unknown) {
-      ops.push({op: `set:${prop}`, args: [value]});
-      return true;
-    },
-  }) as unknown as CanvasRenderingContext2D;
+  const ctx = new Proxy<Record<string, unknown>>(
+    {},
+    {
+      get(target, prop: string) {
+        if (prop === 'measureText') {
+          return (text: string) => ({width: text.length * 6});
+        }
+        if (prop in target) return target[prop];
+        return (...args: unknown[]) => {
+          ops.push({op: prop, args});
+        };
+      },
+      set(target, prop: string, value: unknown) {
+        ops.push({op: `set:${prop}`, args: [value]});
+        return true;
+      },
+    }
+  ) as unknown as CanvasRenderingContext2D;
   tool.render(ctx, doc, TRANSFORM, STATE);
   return ops;
 }

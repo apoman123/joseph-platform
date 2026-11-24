@@ -1,4 +1,10 @@
 /**
+ * @license
+ * Copyright 2026 Joseph Terminal contributors
+ * SPDX-License-Identifier: MIT
+ */
+
+/**
  * @fileoverview Small synchronous SHA-256 for DEMO hashes (definition
  * hashes and the demo audit chain). Not used for any security purpose.
  */
@@ -47,7 +53,9 @@ export function sha256Hex(text: string): string {
   ]);
   const w = new Uint32Array(64);
   for (let offset = 0; offset < padded.length; offset += 64) {
-    for (let i = 0; i < 16; i += 1) w[i] = view.getUint32(offset + i * 4);
+    for (let i = 0; i < 16; i += 1) {
+      w[i] = view.getUint32(offset + i * 4);
+    }
     for (let i = 16; i < 64; i += 1) {
       const w15 = w[i - 15] ?? 0;
       const w2 = w[i - 2] ?? 0;

@@ -1,4 +1,10 @@
 /**
+ * @license
+ * Copyright 2026 Joseph Terminal contributors
+ * SPDX-License-Identifier: MIT
+ */
+
+/**
  * @fileoverview End-to-end (DEMO): server-side LIVE arming rehearsed on the
  * opt-in simulated IBKR live account (`?demo-live-rehearsal=1`). Live opens
  * the arm step; a wrong step-up code is refused; the DEMO code arms the
@@ -6,6 +12,7 @@
  * expired arming both return the ticket to paper and Live needs arming
  * again. Without the opt-in no DEMO account offers LIVE.
  */
+
 import {expect, test, type Page} from '@playwright/test';
 import {openPanel, ticket} from './trading-helpers';
 

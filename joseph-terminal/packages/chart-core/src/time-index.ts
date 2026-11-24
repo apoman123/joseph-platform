@@ -1,4 +1,10 @@
 /**
+ * @license
+ * Copyright 2026 Joseph Terminal contributors
+ * SPDX-License-Identifier: MIT
+ */
+
+/**
  * @fileoverview Maps arbitrary times to fractional bar indices and back.
  *
  * Drawings anchor to arbitrary times (including the future and gaps), while
@@ -14,6 +20,7 @@
  * not a night's worth of empty bars. `24x7` calendars keep the exact
  * duration-based arithmetic.
  */
+
 import type {BarCalendar, Timeframe} from '@joseph/contracts';
 import type {ChartBar} from './chart-port';
 
@@ -42,7 +49,7 @@ export class TimeIndex {
    *     extrapolates by `durationMs`.
    */
   constructor(
-    bars: readonly Pick<ChartBar, 'timeMs'>[],
+    bars: ReadonlyArray<Pick<ChartBar, 'timeMs'>>,
     readonly durationMs: number,
     calendar?: TimeIndexCalendar | null
   ) {

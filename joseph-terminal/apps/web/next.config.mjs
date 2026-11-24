@@ -1,4 +1,10 @@
 /**
+ * @license
+ * Copyright 2026 Joseph Terminal contributors
+ * SPDX-License-Identifier: MIT
+ */
+
+/**
  * @fileoverview Next.js configuration: transpiles workspace packages and
  * sets security headers (CSP without eval in production).
  */
@@ -43,7 +49,6 @@ const csp = [
   "object-src 'none'",
 ].join('; ');
 
-
 /** Monorepo root, used for output file tracing. */
 const ROOT = path.join(path.dirname(fileURLToPath(import.meta.url)), '../..');
 
@@ -78,7 +83,10 @@ const nextConfig = {
           {key: 'X-Content-Type-Options', value: 'nosniff'},
           {key: 'Referrer-Policy', value: 'no-referrer'},
           {key: 'X-Frame-Options', value: 'DENY'},
-          {key: 'Permissions-Policy', value: 'camera=(), microphone=(), geolocation=(), payment=()'},
+          {
+            key: 'Permissions-Policy',
+            value: 'camera=(), microphone=(), geolocation=(), payment=()',
+          },
         ],
       },
     ];

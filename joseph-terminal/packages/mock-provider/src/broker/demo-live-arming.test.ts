@@ -1,10 +1,17 @@
 /**
+ * @license
+ * Copyright 2026 Joseph Terminal contributors
+ * SPDX-License-Identifier: MIT
+ */
+
+/**
  * @fileoverview Tests for server-side LIVE arming in the DEMO broker:
  * refusals (paper, unverified, unknown accounts, wrong step-up code, bad
  * lifetime), arming until a time, expiry, revocation, `LIVE_NOT_ARMED` in
  * the risk decision and on amend, risk-reducing closes while disarmed and
  * the audit trail.
  */
+
 import {ApiError, type OrderIntentRequest} from '@joseph/contracts';
 import {describe, expect, it} from 'vitest';
 import {
@@ -27,7 +34,7 @@ const HOUR = 3_600_000;
 /** Controllable clock and scheduler. */
 class Sim {
   nowMs = NY_OPEN;
-  private readonly tasks: (() => void)[] = [];
+  private readonly tasks: Array<() => void> = [];
 
   /**
    * Queues a task.
@@ -46,7 +53,9 @@ class Sim {
   /** Runs queued tasks until none are left. */
   flush(): void {
     for (let i = 0; i < 100 && this.tasks.length; i += 1) {
-      for (const task of this.tasks.splice(0)) task();
+      for (const task of this.tasks.splice(0)) {
+        task();
+      }
     }
   }
 }

@@ -1,6 +1,13 @@
 /**
+ * @license
+ * Copyright 2026 Joseph Terminal contributors
+ * SPDX-License-Identifier: MIT
+ */
+
+/**
  * @fileoverview Component tests for the order ticket and chart trading.
  */
+
 import type {OverlayLayer} from '@joseph/chart-core';
 import {act, screen, waitFor, within} from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
@@ -132,13 +139,14 @@ describe('order ticket', () => {
       ctx
     );
     await screen.findByText('Lot size 0.001, minimum 0.001');
-    act(() =>
-      ctx.events.emit('chart.contextMenu', {
-        chartId: 'chart-1',
-        instrumentId: 'mock:perp:BTCUSD',
-        price: 94980.04,
-        timeMs: null,
-      })
+    act(
+      () =>
+        void ctx.events.emit('chart.contextMenu', {
+          chartId: 'chart-1',
+          instrumentId: 'mock:perp:BTCUSD',
+          price: 94980.04,
+          timeMs: null,
+        })
     );
     const menuContribution = ctx.contributions('chart-context-menu')[0];
     if (!menuContribution) throw new Error('no menu');
@@ -189,9 +197,7 @@ describe('order ticket', () => {
       },
       'layer-test'
     );
-    await waitFor(() =>
-      expect((latest as OverlayLayer | null)?.models.length).toBe(1)
-    );
+    await waitFor(() => void expect(latest?.models.length).toBe(1));
     off();
   });
 
@@ -214,12 +220,13 @@ describe('order ticket', () => {
       'amend-test'
     );
     const orderId = response.orders[0]?.order_id ?? '';
-    await waitFor(async () =>
-      expect((await ctx.broker.listOrders()).orders[0]?.state).toBe(
-        'ACKNOWLEDGED'
-      )
+    await waitFor(
+      async () =>
+        void expect((await ctx.broker.listOrders()).orders[0]?.state).toBe(
+          'ACKNOWLEDGED'
+        )
     );
-    await waitFor(() => expect(ctx.layerProviders.length).toBe(3));
+    await waitFor(() => void expect(ctx.layerProviders.length).toBe(3));
     // Let the runtime see the acknowledged order.
     await act(async () => {
       await new Promise(resolve => setTimeout(resolve, 20));
@@ -227,23 +234,25 @@ describe('order ticket', () => {
     const runtimeOrders = await ctx.broker.listOrders();
     expect(runtimeOrders.orders).toHaveLength(1);
     await waitFor(() => {
-      act(() =>
-        ctx.events.emit('chart.overlayDragEnd', {
-          chartId: 'c',
-          layerId: 'chart-trading:orders',
-          modelId: orderId,
-          price: 91000.04,
-        })
+      act(
+        () =>
+          void ctx.events.emit('chart.overlayDragEnd', {
+            chartId: 'c',
+            layerId: 'chart-trading:orders',
+            modelId: orderId,
+            price: 91000.04,
+          })
       );
       expect(screen.getByTestId('amend-panel')).toBeInTheDocument();
     });
     await userEvent
       .setup()
       .click(screen.getByRole('button', {name: 'Move order to 91,000.0'}));
-    await waitFor(async () =>
-      expect((await ctx.broker.listOrders()).orders[0]?.limit_price).toBe(
-        '91000'
-      )
+    await waitFor(
+      async () =>
+        void expect(
+          (await ctx.broker.listOrders()).orders[0]?.limit_price
+        ).toBe('91000')
     );
   });
 });

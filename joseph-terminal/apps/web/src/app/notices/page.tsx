@@ -1,7 +1,14 @@
 /**
+ * @license
+ * Copyright 2026 Joseph Terminal contributors
+ * SPDX-License-Identifier: MIT
+ */
+
+/**
  * @fileoverview Third-party notices page (Apache-2.0 attribution for
  * Lightweight Charts and the terminal's MIT license).
  */
+
 import type {ReactElement} from 'react';
 import Link from 'next/link';
 

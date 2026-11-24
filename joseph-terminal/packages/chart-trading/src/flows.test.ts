@@ -1,7 +1,14 @@
 /**
+ * @license
+ * Copyright 2026 Joseph Terminal contributors
+ * SPDX-License-Identifier: MIT
+ */
+
+/**
  * @fileoverview Tests for context menu, cancel, close, reverse and kill
  * switch flows.
  */
+
 import {Decimal} from '@joseph/contracts';
 import {describe, expect, it} from 'vitest';
 import {

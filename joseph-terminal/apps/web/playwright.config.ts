@@ -1,7 +1,14 @@
 /**
+ * @license
+ * Copyright 2026 Joseph Terminal contributors
+ * SPDX-License-Identifier: MIT
+ */
+
+/**
  * @fileoverview Playwright system tests against a production build in DEMO
  * mode (no backend, synthetic `mock` venue).
  */
+
 import {defineConfig, devices} from '@playwright/test';
 
 /** Port used by the test server. */

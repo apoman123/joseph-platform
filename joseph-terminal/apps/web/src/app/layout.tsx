@@ -1,6 +1,13 @@
 /**
+ * @license
+ * Copyright 2026 Joseph Terminal contributors
+ * SPDX-License-Identifier: MIT
+ */
+
+/**
  * @fileoverview Root layout: fonts, design tokens and theme bootstrap.
  */
+
 import type {Metadata, Viewport} from 'next';
 import {Archivo} from 'next/font/google';
 import type {ReactNode, ReactElement} from 'react';

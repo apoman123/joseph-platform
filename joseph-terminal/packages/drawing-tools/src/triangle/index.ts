@@ -1,4 +1,10 @@
 /**
+ * @license
+ * Copyright 2026 Joseph Terminal contributors
+ * SPDX-License-Identifier: MIT
+ */
+
+/**
  * @fileoverview Triangle.
  *
  * - Anchors: 3, the vertices in placement order.
@@ -9,6 +15,7 @@
  * - Handles: the three vertices (indices 0-2).
  * - Style options: color, line width and dash, fill (on by default).
  */
+
 import {
   anchorPoints,
   applyStroke,
@@ -40,7 +47,7 @@ export const triangleTool: ToolPlugin = {
     if (points.length < 2) return;
     ctx.beginPath();
     points.forEach((p, i) =>
-      i === 0 ? ctx.moveTo(p.x, p.y) : ctx.lineTo(p.x, p.y)
+      i === 0 ? void ctx.moveTo(p.x, p.y) : void ctx.lineTo(p.x, p.y)
     );
     if (points.length === 3) {
       ctx.closePath();

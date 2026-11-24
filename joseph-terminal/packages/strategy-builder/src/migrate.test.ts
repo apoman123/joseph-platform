@@ -1,6 +1,13 @@
 /**
+ * @license
+ * Copyright 2026 Joseph Terminal contributors
+ * SPDX-License-Identifier: MIT
+ */
+
+/**
  * @fileoverview v1 → v2 migration preserves every mapped condition.
  */
+
 import type {RuleNode} from '@joseph/contracts';
 import {describe, expect, it} from 'vitest';
 import {walk} from './ast';

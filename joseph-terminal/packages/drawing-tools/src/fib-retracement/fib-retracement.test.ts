@@ -1,6 +1,13 @@
 /**
+ * @license
+ * Copyright 2026 Joseph Terminal contributors
+ * SPDX-License-Identifier: MIT
+ */
+
+/**
  * @fileoverview Tests for the Fibonacci retracement tool.
  */
+
 import {describe, expect, it} from 'vitest';
 import {
   TRANSFORM,
@@ -16,7 +23,8 @@ describe('fib-retracement', () => {
     {time_ms: 0, price: '100'},
     {time_ms: 600_000, price: '200'},
   ]);
-  it('has a valid manifest', () => expect(manifestProblems(tool)).toEqual([]));
+  it('has a valid manifest', () =>
+    void expect(manifestProblems(tool)).toEqual([]));
   it('computes exact, tick-rounded levels (0 at end, 1 at start)', () => {
     expect(retracementPrices('100', '200', ['0', '0.618', '1'], '0.1')).toEqual(
       [

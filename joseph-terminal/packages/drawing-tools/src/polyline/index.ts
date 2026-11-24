@@ -1,7 +1,14 @@
 /**
+ * @license
+ * Copyright 2026 Joseph Terminal contributors
+ * SPDX-License-Identifier: MIT
+ */
+
+/**
  * @fileoverview Polyline: connected segments placed one click at a time and
  * finished with a double-click or Escape.
  */
+
 import {
   MAX_ANCHORS,
   anchorPoints,

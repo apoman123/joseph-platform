@@ -1,7 +1,14 @@
 /**
+ * @license
+ * Copyright 2026 Joseph Terminal contributors
+ * SPDX-License-Identifier: MIT
+ */
+
+/**
  * @fileoverview Client-only loader for the terminal (no server rendering:
  * it depends on canvas, storage and live connections).
  */
+
 'use client';
 import type {ReactElement} from 'react';
 import dynamic from 'next/dynamic';

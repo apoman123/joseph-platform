@@ -1,7 +1,14 @@
 /**
+ * @license
+ * Copyright 2026 Joseph Terminal contributors
+ * SPDX-License-Identifier: MIT
+ */
+
+/**
  * @fileoverview Display formatting helpers (display only; never used to
  * compute order parameters).
  */
+
 import {
   Decimal,
   TIMEFRAME_MS,
@@ -81,7 +88,7 @@ export function formatNumber(
 export function formatUsdCompact(value: string | null | undefined): string {
   if (value == null || !Decimal.isValid(value)) return '—';
   const n = Number(value);
-  const units: [number, string][] = [
+  const units: Array<[number, string]> = [
     [1e12, 'T'],
     [1e9, 'B'],
     [1e6, 'M'],
@@ -194,10 +201,12 @@ export function formatBarTime(
       const month = MONTH_NAMES[Number(local.slice(5, 7)) - 1] ?? '';
       return `${month} ${local.slice(0, 4)}`;
     }
-    if (isSecondsTimeframe(timeframe))
+    if (isSecondsTimeframe(timeframe)) {
       return `${local.slice(0, 19).replace('T', ' ')} ${suffix}`;
-    if (TIMEFRAME_MS[timeframe] >= TIMEFRAME_MS['1d'])
+    }
+    if (TIMEFRAME_MS[timeframe] >= TIMEFRAME_MS['1d']) {
       return local.slice(0, 10);
+    }
     return `${local.slice(0, 16).replace('T', ' ')} ${suffix}`;
   }
   const iso = new Date(startMs).toISOString();
@@ -233,8 +242,9 @@ export function formatBarClose(
   if (zone && calendar) {
     const local = zonedIso(calendar.endOf(timeframe, startMs), zone);
     const suffix = zoneAbbreviation(zone);
-    if (TIMEFRAME_MS[timeframe] >= TIMEFRAME_MS['1d'])
+    if (TIMEFRAME_MS[timeframe] >= TIMEFRAME_MS['1d']) {
       return `${local.slice(0, 16).replace('T', ' ')} ${suffix}`;
+    }
     return `${local.slice(11, 19)} ${suffix}`;
   }
   const end = timeframeEnd(timeframe, startMs);
@@ -255,7 +265,7 @@ export function formatCompact(
 ): string {
   const n = typeof value === 'number' ? value : Number(value ?? NaN);
   if (value == null || value === '' || !Number.isFinite(n)) return '—';
-  const units: [number, string][] = [
+  const units: Array<[number, string]> = [
     [1e12, 'T'],
     [1e9, 'B'],
     [1e6, 'M'],
@@ -316,8 +326,9 @@ export function displayTickSize(
   high: number
 ): string {
   const ladder = instrument.tick_ladder ?? [];
-  if (ladder.length === 0 || !Number.isFinite(low) || !Number.isFinite(high))
+  if (ladder.length === 0 || !Number.isFinite(low) || !Number.isFinite(high)) {
     return instrument.tick_size;
+  }
   let finest = tickAt(instrument.tick_size, ladder, high);
   for (const step of ladder) {
     const min = Number(step.min_price);
@@ -381,7 +392,8 @@ export function formatVolume(
   const lot = lotSizeForVolume(instrument);
   if (lot) return `${formatNumber(volume / lot, 0)} 張`;
   const type = instrument?.key?.market_type;
-  if (type === 'stock' || type === 'etf')
+  if (type === 'stock' || type === 'etf') {
     return `${formatNumber(volume, 0)} sh`;
+  }
   return formatNumber(volume, 2);
 }

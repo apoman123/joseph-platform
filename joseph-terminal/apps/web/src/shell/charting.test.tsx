@@ -1,9 +1,16 @@
 /**
+ * @license
+ * Copyright 2026 Joseph Terminal contributors
+ * SPDX-License-Identifier: MIT
+ */
+
+/**
  * @fileoverview Component and unit tests for the charting additions:
  * indicator settings form and dialog, templates and compare menus, replay
  * and screenshot commands, the data window, the style bar and the object
  * list (jsdom; canvas rendering is covered by Playwright).
  */
+
 import type {ChartBar} from '@joseph/chart-core';
 import {createDrawing, createCommand, DrawingStore} from '@joseph/drawing-core';
 import {activeChart, layerSettings, layerStyle} from '@joseph/terminal-shell';
@@ -150,11 +157,12 @@ describe('IndicatorSettingsDialog', () => {
         <IndicatorSettingsDialog />
       </RuntimeProvider>
     );
-    act(() =>
-      runtime.indicatorSettings.set({
-        chartId: 'chart-1',
-        pluginId: 'order_flow_pressure',
-      })
+    act(
+      () =>
+        void runtime.indicatorSettings.set({
+          chartId: 'chart-1',
+          pluginId: 'order_flow_pressure',
+        })
     );
     const dialog = await screen.findByTestId('indicator-settings');
     const share = await within(dialog).findByLabelText('Min delta share');
@@ -164,8 +172,8 @@ describe('IndicatorSettingsDialog', () => {
     fireEvent.change(share, {target: {value: '0.35'}});
     fireEvent.click(within(dialog).getByTestId('indicator-pane-toggle'));
     fireEvent.click(within(dialog).getByTestId('indicator-settings-save'));
-    await waitFor(() =>
-      expect(screen.queryByTestId('indicator-settings')).toBeNull()
+    await waitFor(
+      () => void expect(screen.queryByTestId('indicator-settings')).toBeNull()
     );
     const chart = activeChart(runtime.workspace.get());
     expect(layerSettings(chart, 'order_flow_pressure')).toEqual({
@@ -181,28 +189,36 @@ describe('IndicatorSettingsDialog', () => {
         <IndicatorSettingsDialog />
       </RuntimeProvider>
     );
-    act(() =>
-      runtime.indicatorSettings.set({chartId: 'chart-1', pluginId: 'fvg_ifvg'})
+    act(
+      () =>
+        void runtime.indicatorSettings.set({
+          chartId: 'chart-1',
+          pluginId: 'fvg_ifvg',
+        })
     );
     const dialog = await screen.findByTestId('indicator-settings');
     fireEvent.click(
       await within(dialog).findByRole('checkbox', {name: 'IFVG'})
     );
     fireEvent.click(within(dialog).getByTestId('indicator-settings-save'));
-    await waitFor(() =>
-      expect(screen.queryByTestId('indicator-settings')).toBeNull()
+    await waitFor(
+      () => void expect(screen.queryByTestId('indicator-settings')).toBeNull()
     );
     const layer = activeChart(runtime.workspace.get()).indicator_layers.find(
       l => l.plugin_id === 'fvg_ifvg'
     );
     expect(layer?.kinds).toEqual(['FVG']);
-    act(() =>
-      runtime.indicatorSettings.set({chartId: 'chart-1', pluginId: 'fvg_ifvg'})
+    act(
+      () =>
+        void runtime.indicatorSettings.set({
+          chartId: 'chart-1',
+          pluginId: 'fvg_ifvg',
+        })
     );
     await screen.findByTestId('indicator-settings');
     fireEvent.keyDown(window, {key: 'Escape'});
-    await waitFor(() =>
-      expect(screen.queryByTestId('indicator-settings')).toBeNull()
+    await waitFor(
+      () => void expect(screen.queryByTestId('indicator-settings')).toBeNull()
     );
   });
 });
@@ -216,12 +232,14 @@ describe('TopBar chart tools', () => {
       </RuntimeProvider>
     );
     fireEvent.click(screen.getByTestId('replay-toggle'));
-    await waitFor(() =>
-      expect(runtime.replay.get()['chart-1']?.phase).toBe('select')
+    await waitFor(
+      () => void expect(runtime.replay.get()['chart-1']?.phase).toBe('select')
     );
     expect(runtime.selection.get().replay).toBe(true);
     fireEvent.click(screen.getByTestId('replay-toggle'));
-    await waitFor(() => expect(runtime.selection.get().replay).toBe(false));
+    await waitFor(
+      () => void expect(runtime.selection.get().replay).toBe(false)
+    );
 
     runtime.dispatch({
       type: 'setChartType',

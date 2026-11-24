@@ -1,4 +1,10 @@
 /**
+ * @license
+ * Copyright 2026 Joseph Terminal contributors
+ * SPDX-License-Identifier: MIT
+ */
+
+/**
  * @fileoverview Anchored VWAP: the market engine's volume-weighted average
  * price from one anchor bar forward, with optional standard-deviation
  * bands. The browser computes nothing; it requests the series and draws it.
@@ -29,6 +35,7 @@
  *   color, 1 px, dashed); `fill_color` fills band 1 (off by default);
  *   `show_labels` tags the latest value. Inputs: band 1-3 multipliers.
  */
+
 import {
   CONTINUOUS_CALENDAR,
   type BarCalendar,
@@ -179,8 +186,9 @@ function lineOf(
   const line: PlotPoint[] = [];
   for (const point of points) {
     const value = decimalValue(point, key);
-    if (value !== null)
+    if (value !== null) {
       line.push({timeMs: point.bar_start_ms, value: Number(value)});
+    }
   }
   return line;
 }
@@ -357,7 +365,7 @@ export const anchoredVwapTool: ToolPlugin = {
         ctx.fillStyle = doc.style.fill_color;
         ctx.beginPath();
         [...upper, ...lower].forEach((p, i) =>
-          i === 0 ? ctx.moveTo(p.x, p.y) : ctx.lineTo(p.x, p.y)
+          i === 0 ? void ctx.moveTo(p.x, p.y) : void ctx.lineTo(p.x, p.y)
         );
         ctx.closePath();
         ctx.fill();
@@ -429,16 +437,18 @@ export const anchoredVwapTool: ToolPlugin = {
     for (const band of view.bands) {
       const upper = decimalValue(point, `upper_${band.k}`);
       const lower = decimalValue(point, `lower_${band.k}`);
-      if (upper !== null)
+      if (upper !== null) {
         rows.push({
           label: `VWAP +${band.multiplier}σ`,
           value: formatPrice(upper, tickSize),
         });
-      if (lower !== null)
+      }
+      if (lower !== null) {
         rows.push({
           label: `VWAP −${band.multiplier}σ`,
           value: formatPrice(lower, tickSize),
         });
+      }
     }
     return rows;
   },

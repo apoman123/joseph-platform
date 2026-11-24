@@ -1,6 +1,13 @@
 /**
+ * @license
+ * Copyright 2026 Joseph Terminal contributors
+ * SPDX-License-Identifier: MIT
+ */
+
+/**
  * @fileoverview Tests for the arrow tool.
  */
+
 import {describe, expect, it} from 'vitest';
 import {
   TRANSFORM,
@@ -15,7 +22,8 @@ describe('arrow', () => {
     {time_ms: 0, price: '150'},
     {time_ms: 1_000_000, price: '150'},
   ]);
-  it('has a valid manifest', () => expect(manifestProblems(tool)).toEqual([]));
+  it('has a valid manifest', () =>
+    void expect(manifestProblems(tool)).toEqual([]));
   it('fills an arrowhead at the tip', () => {
     const ops = renderOps(tool, doc);
     expect(ops.filter(o => o.op === 'closePath')).toHaveLength(1);

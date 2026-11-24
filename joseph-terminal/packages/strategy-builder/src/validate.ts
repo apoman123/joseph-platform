@@ -1,9 +1,16 @@
 /**
+ * @license
+ * Copyright 2026 Joseph Terminal contributors
+ * SPDX-License-Identifier: MIT
+ */
+
+/**
  * @fileoverview Client-side structural validation mirroring
  * `strategy.schema.json` plus cross-field rules (k ≤ n, sequence windows,
  * range groups). The server's `/validate` remains authoritative; this gives
  * immediate feedback and the same JSON-pointer paths.
  */
+
 import {
   Decimal,
   type Timeframe,
@@ -147,12 +154,13 @@ export function validateDefinition(definition: unknown): ClientValidation {
     };
   }
   const d = definition;
-  if (d.schema_version !== 2)
+  if (d.schema_version !== 2) {
     err(
       '/schema_version',
       'schema_version',
       'Only rule schema version 2 is supported.'
     );
+  }
   if (typeof d.strategy_id !== 'string' || !STRATEGY_ID.test(d.strategy_id)) {
     err(
       '/strategy_id',
@@ -174,16 +182,18 @@ export function validateDefinition(definition: unknown): ClientValidation {
       'Keep the description under 2000 characters.'
     );
   }
-  if (!DIRECTIONS.includes(String(d.direction)))
+  if (!DIRECTIONS.includes(String(d.direction))) {
     err('/direction', 'enum', 'Direction must be LONG or SHORT.');
+  }
   const signalTf = TIMEFRAME_ORDER.includes(d.signal_timeframe as Timeframe)
     ? (d.signal_timeframe as Timeframe)
     : null;
-  if (!signalTf)
+  if (!signalTf) {
     err('/signal_timeframe', 'enum', 'Choose a supported signal timeframe.');
-  else timeframes.add(signalTf);
-  if (!MODES.includes(String(d.execution_mode)))
+  } else timeframes.add(signalTf);
+  if (!MODES.includes(String(d.execution_mode))) {
     err('/execution_mode', 'enum', 'Choose an execution mode.');
+  }
   if (d.execution_mode === 'AUTO_LIVE') {
     warn(
       '/execution_mode',
@@ -208,8 +218,9 @@ export function validateDefinition(definition: unknown): ClientValidation {
       err('/universe/venues', 'minItems', 'Choose at least one venue.');
     } else {
       u.venues.forEach((v, i) => {
-        if (!VENUES.includes(String(v)))
+        if (!VENUES.includes(String(v))) {
           err(`/universe/venues/${i}`, 'enum', `Unknown venue ${String(v)}.`);
+        }
       });
     }
     for (const list of ['whitelist', 'blacklist'] as const) {
@@ -246,29 +257,34 @@ export function validateDefinition(definition: unknown): ClientValidation {
     err('/risk', 'required', 'Define the risk model.');
   } else {
     const r = d.risk;
-    if (!isNonNegDecimal(r.min_rr))
+    if (!isNonNegDecimal(r.min_rr)) {
       err(
         '/risk/min_rr',
         'decimal',
         'Minimum R:R must be a non-negative number.'
       );
-    if (!['AOI_INVALIDATION', 'SWING', 'ATR'].includes(String(r.stop_model)))
+    }
+    if (!['AOI_INVALIDATION', 'SWING', 'ATR'].includes(String(r.stop_model))) {
       err('/risk/stop_model', 'enum', 'Choose a stop model.');
+    }
     if (
       !['NEAREST_OPPOSING_LIQUIDITY', 'FIXED_R'].includes(
         String(r.target_model)
       )
-    )
+    ) {
       err('/risk/target_model', 'enum', 'Choose a target model.');
-    if (r.target_model === 'FIXED_R' && !isNonNegDecimal(r.fixed_r))
+    }
+    if (r.target_model === 'FIXED_R' && !isNonNegDecimal(r.fixed_r)) {
       err('/risk/fixed_r', 'required', 'A fixed-R target needs an R multiple.');
+    }
     for (const key of [
       'stop_buffer_atr',
       'fee_bps_estimate',
       'max_risk_pct_equity',
     ] as const) {
-      if (r[key] !== undefined && !isNonNegDecimal(r[key]))
+      if (r[key] !== undefined && !isNonNegDecimal(r[key])) {
         err(`/risk/${key}`, 'decimal', 'Must be a non-negative number.');
+      }
     }
   }
 
@@ -277,18 +293,20 @@ export function validateDefinition(definition: unknown): ClientValidation {
     err('/notification', 'required', 'Define notification settings.');
   } else {
     const n = d.notification;
-    if (!isInt(n.cooldown_bars, 0, 10000))
+    if (!isInt(n.cooldown_bars, 0, 10000)) {
       err(
         '/notification/cooldown_bars',
         'range',
         'Cooldown must be 0 to 10000 bars.'
       );
-    if (typeof n.once_per_aoi !== 'boolean')
+    }
+    if (typeof n.once_per_aoi !== 'boolean') {
       err(
         '/notification/once_per_aoi',
         'type',
         'Choose whether to alert once per AOI.'
       );
+    }
     if (
       n.emit !== undefined &&
       (!Array.isArray(n.emit) ||
@@ -351,24 +369,27 @@ export function validateDefinition(definition: unknown): ClientValidation {
     }
     switch (value.kind) {
       case 'const':
-        if (typeof value.value !== 'string' || !Decimal.isValid(value.value))
+        if (typeof value.value !== 'string' || !Decimal.isValid(value.value)) {
           err(`${path}/value`, 'decimal', 'Enter a number.');
+        }
         break;
       case 'candle':
         if (
           !['open', 'high', 'low', 'close', 'base_volume'].includes(
             String(value.field)
           )
-        )
+        ) {
           err(`${path}/field`, 'enum', 'Choose a candle field.');
+        }
         checkTf(value.tf, `${path}/tf`, false);
         break;
       case 'indicator':
-        if (typeof value.plugin_id !== 'string' || !value.plugin_id)
+        if (typeof value.plugin_id !== 'string' || !value.plugin_id) {
           err(`${path}/plugin_id`, 'required', 'Choose an indicator.');
-        else plugins.add(value.plugin_id);
-        if (typeof value.field !== 'string' || !value.field)
+        } else plugins.add(value.plugin_id);
+        if (typeof value.field !== 'string' || !value.field) {
           err(`${path}/field`, 'required', 'Choose an indicator value.');
+        }
         checkTf(value.tf, `${path}/tf`, false);
         break;
       case 'market':
@@ -387,20 +408,22 @@ export function validateDefinition(definition: unknown): ClientValidation {
       default:
         err(`${path}/kind`, 'enum', 'Unknown value type.');
     }
-    if (value.bars_ago !== undefined && !isInt(value.bars_ago, 0, 200))
+    if (value.bars_ago !== undefined && !isInt(value.bars_ago, 0, 200)) {
       err(`${path}/bars_ago`, 'range', 'Bars ago must be 0 to 200.');
+    }
   };
   const checkKinds = (value: unknown, path: string, max: number) => {
     if (!Array.isArray(value) || value.length === 0) {
       err(path, 'minItems', 'Choose at least one AOI kind.');
       return;
     }
-    if (value.length > max)
+    if (value.length > max) {
       err(path, 'maxItems', `Choose at most ${max} AOI kinds.`);
+    }
     value.forEach((kind, i) => {
-      if (!AOI_KINDS.includes(String(kind)))
+      if (!AOI_KINDS.includes(String(kind))) {
         err(`${path}/${i}`, 'enum', `Unknown AOI kind ${String(kind)}.`);
-      else plugins.add(AOI_KIND_PLUGIN[kind as keyof typeof AOI_KIND_PLUGIN]);
+      } else plugins.add(AOI_KIND_PLUGIN[kind as keyof typeof AOI_KIND_PLUGIN]);
     });
   };
   const checkEvent = (value: unknown, path: string) => {
@@ -444,11 +467,11 @@ export function validateDefinition(definition: unknown): ClientValidation {
       }
     }
     if (node.id !== undefined) {
-      if (typeof node.id !== 'string' || node.id.length > 64)
+      if (typeof node.id !== 'string' || node.id.length > 64) {
         err(`${path}/id`, 'type', 'Node ids are strings up to 64 characters.');
-      else if (ids.has(node.id))
+      } else if (ids.has(node.id)) {
         err(`${path}/id`, 'duplicate_id', `Duplicate node id ${node.id}.`);
-      else ids.add(node.id);
+      } else ids.add(node.id);
     }
     if (
       node.label !== undefined &&
@@ -468,14 +491,15 @@ export function validateDefinition(definition: unknown): ClientValidation {
           );
           return;
         }
-        if (children.length > 32)
+        if (children.length > 32) {
           err(
             `${path}/children`,
             'maxItems',
             'A group holds at most 32 conditions.'
           );
-        children.forEach((child, i) =>
-          visit(child, `${path}/children/${i}`, depth + 1)
+        }
+        children.forEach(
+          (child, i) => void visit(child, `${path}/children/${i}`, depth + 1)
         );
         return;
       }
@@ -483,13 +507,15 @@ export function validateDefinition(definition: unknown): ClientValidation {
         visit(node.child, `${path}/child`, depth + 1);
         return;
       case 'PERSIST_FOR':
-        if (!isInt(node.bars, 1, 200))
+        if (!isInt(node.bars, 1, 200)) {
           err(`${path}/bars`, 'range', 'Bars must be 1 to 200.');
+        }
         visit(node.child, `${path}/child`, depth + 1);
         return;
       case 'WITHIN_BARS':
-        if (!isInt(node.bars, 0, 200))
+        if (!isInt(node.bars, 0, 200)) {
           err(`${path}/bars`, 'range', 'Bars must be 0 to 200.');
+        }
         visit(node.child, `${path}/child`, depth + 1);
         return;
       case 'BIAS': {
@@ -498,13 +524,16 @@ export function validateDefinition(definition: unknown): ClientValidation {
         if (!Array.isArray(tfs) || tfs.length === 0 || tfs.length > 6) {
           err(`${path}/timeframes`, 'items', 'Choose 1 to 6 bias timeframes.');
         } else {
-          tfs.forEach((tf, i) => checkTf(tf, `${path}/timeframes/${i}`, true));
-          if (new Set(tfs).size !== tfs.length)
+          tfs.forEach(
+            (tf, i) => void checkTf(tf, `${path}/timeframes/${i}`, true)
+          );
+          if (new Set(tfs).size !== tfs.length) {
             err(
               `${path}/timeframes`,
               'uniqueItems',
               'Each timeframe may appear once.'
             );
+          }
           if (
             signalTf &&
             tfs.some(
@@ -520,34 +549,38 @@ export function validateDefinition(definition: unknown): ClientValidation {
             );
           }
         }
-        if (node.value !== 'BULLISH' && node.value !== 'BEARISH')
+        if (node.value !== 'BULLISH' && node.value !== 'BEARISH') {
           err(`${path}/value`, 'enum', 'Bias must be bullish or bearish.');
+        }
         if (
           node.match !== undefined &&
           node.match !== 'ALL' &&
           node.match !== 'K_OF_N'
-        )
+        ) {
           err(`${path}/match`, 'enum', 'Match must be ALL or K_OF_N.');
+        }
         if (node.match === 'K_OF_N') {
           const n = Array.isArray(tfs) ? tfs.length : 0;
-          if (!isInt(node.k, 1, 6))
+          if (!isInt(node.k, 1, 6)) {
             err(
               `${path}/k`,
               'required',
               'Choose how many timeframes must agree.'
             );
-          else if (node.k > n)
+          } else if (node.k > n) {
             err(
               `${path}/k`,
               'k_exceeds_n',
               `k (${node.k}) cannot exceed the number of timeframes (${n}).`
             );
+          }
         }
         if (
           node.require_bos !== undefined &&
           typeof node.require_bos !== 'boolean'
-        )
+        ) {
           err(`${path}/require_bos`, 'type', 'Must be true or false.');
+        }
         return;
       }
       case 'PRICE_IN_ZONE':
@@ -556,8 +589,9 @@ export function validateDefinition(definition: unknown): ClientValidation {
           !['PREMIUM', 'DISCOUNT', 'EQUILIBRIUM', 'OTE'].includes(
             String(node.zone)
           )
-        )
+        ) {
           err(`${path}/zone`, 'enum', 'Choose a zone.');
+        }
         checkTf(node.tf, `${path}/tf`, true);
         if (
           node.price_source !== undefined &&
@@ -592,53 +626,64 @@ export function validateDefinition(definition: unknown): ClientValidation {
         return;
       case 'AOI_TOUCH':
         checkKinds(node.kinds, `${path}/kinds`, 8);
-        if (node.side !== 'bullish' && node.side !== 'bearish')
+        if (node.side !== 'bullish' && node.side !== 'bearish') {
           err(`${path}/side`, 'enum', 'Choose bullish or bearish.');
+        }
         checkTf(node.tf, `${path}/tf`, false);
-        if (!isInt(node.within_bars, 0, 200))
+        if (!isInt(node.within_bars, 0, 200)) {
           err(
             `${path}/within_bars`,
             'range',
             'Lookback must be 0 to 200 bars.'
           );
+        }
         if (
           node.touch !== undefined &&
           !['WICK', 'BODY', 'CLOSE'].includes(String(node.touch))
-        )
+        ) {
           err(`${path}/touch`, 'enum', 'Touch must be wick, body or close.');
+        }
         if (
           node.require_active !== undefined &&
           typeof node.require_active !== 'boolean'
-        )
+        ) {
           err(`${path}/require_active`, 'type', 'Must be true or false.');
-        if (node.min_quality !== undefined && !isInt(node.min_quality, 0, 100))
+        }
+        if (
+          node.min_quality !== undefined &&
+          !isInt(node.min_quality, 0, 100)
+        ) {
           err(`${path}/min_quality`, 'range', 'Quality is 0 to 100.');
+        }
         return;
       case 'AOI_OVERLAP':
         checkKinds(node.kinds_a, `${path}/kinds_a`, 19);
         checkKinds(node.kinds_b, `${path}/kinds_b`, 19);
-        if (node.side !== 'bullish' && node.side !== 'bearish')
+        if (node.side !== 'bullish' && node.side !== 'bearish') {
           err(`${path}/side`, 'enum', 'Choose bullish or bearish.');
+        }
         checkTf(node.tf, `${path}/tf`, false);
         if (
           node.min_overlap_pct !== undefined &&
           !isNonNegDecimal(node.min_overlap_pct)
-        )
+        ) {
           err(
             `${path}/min_overlap_pct`,
             'decimal',
             'Enter a non-negative percentage.'
           );
+        }
         return;
       case 'EVENT':
         checkEvent(node.name, `${path}/name`);
         checkTf(node.tf, `${path}/tf`, false);
-        if (!isInt(node.within_bars, 0, 200))
+        if (!isInt(node.within_bars, 0, 200)) {
           err(
             `${path}/within_bars`,
             'range',
             'Lookback must be 0 to 200 bars.'
           );
+        }
         return;
       case 'SEQUENCE': {
         const steps = node.steps;
@@ -672,8 +717,11 @@ export function validateDefinition(definition: unknown): ClientValidation {
       case 'COMPARE':
         checkOperand(node.left, `${path}/left`);
         checkOperand(node.right, `${path}/right`);
-        if (!['gt', 'gte', 'lt', 'lte', 'eq', 'neq'].includes(String(node.cmp)))
+        if (
+          !['gt', 'gte', 'lt', 'lte', 'eq', 'neq'].includes(String(node.cmp))
+        ) {
           err(`${path}/cmp`, 'enum', 'Choose a comparison.');
+        }
         return;
       case 'IN_RANGE':
         checkOperand(node.value, `${path}/value`);
@@ -683,41 +731,46 @@ export function validateDefinition(definition: unknown): ClientValidation {
       case 'CROSSES':
         checkOperand(node.left, `${path}/left`);
         checkOperand(node.right, `${path}/right`);
-        if (node.direction !== 'ABOVE' && node.direction !== 'BELOW')
+        if (node.direction !== 'ABOVE' && node.direction !== 'BELOW') {
           err(`${path}/direction`, 'enum', 'Choose above or below.');
+        }
         return;
       case 'SESSION': {
         const sessions = node.sessions;
-        if (!Array.isArray(sessions) || sessions.length === 0)
+        if (!Array.isArray(sessions) || sessions.length === 0) {
           err(`${path}/sessions`, 'minItems', 'Choose at least one session.');
-        else
+        } else {
           sessions.forEach((s, i) => {
-            if (!['ASIA', 'LONDON', 'NEW_YORK'].includes(String(s)))
+            if (!['ASIA', 'LONDON', 'NEW_YORK'].includes(String(s))) {
               err(`${path}/sessions/${i}`, 'enum', 'Unknown session.');
+            }
           });
+        }
         return;
       }
       case 'RISK_REWARD':
-        if (!isNonNegDecimal(node.min_rr))
+        if (!isNonNegDecimal(node.min_rr)) {
           err(
             `${path}/min_rr`,
             'decimal',
             'Minimum R:R must be a non-negative number.'
           );
+        }
         return;
       default:
         return;
     }
   };
-  if (d.when === undefined)
+  if (d.when === undefined) {
     err('/when', 'required', 'Add at least one condition.');
-  else visit(d.when, '/when', 1);
-  if (maxDepth > 8)
+  } else visit(d.when, '/when', 1);
+  if (maxDepth > 8) {
     warn(
       '/when',
       'deep_tree',
       'Rules nested deeper than 8 levels are hard to review.'
     );
+  }
 
   return {
     valid: errors.length === 0,

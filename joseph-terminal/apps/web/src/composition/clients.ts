@@ -1,6 +1,13 @@
 /**
+ * @license
+ * Copyright 2026 Joseph Terminal contributors
+ * SPDX-License-Identifier: MIT
+ */
+
+/**
  * @fileoverview Builds the backend clients injected into every feature.
  */
+
 import {
   ApiError,
   HttpExecutionClient,

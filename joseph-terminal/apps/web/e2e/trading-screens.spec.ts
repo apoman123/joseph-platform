@@ -1,7 +1,14 @@
 /**
+ * @license
+ * Copyright 2026 Joseph Terminal contributors
+ * SPDX-License-Identifier: MIT
+ */
+
+/**
  * @fileoverview Captures review screenshots of the trading and strategy
  * panels (DEMO mode) into `e2e/screenshots/`.
  */
+
 import {expect, test} from '@playwright/test';
 import {loadTerminal, openPanel, previewOrder} from './trading-helpers';
 

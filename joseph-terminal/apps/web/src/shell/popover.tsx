@@ -1,6 +1,13 @@
 /**
+ * @license
+ * Copyright 2026 Joseph Terminal contributors
+ * SPDX-License-Identifier: MIT
+ */
+
+/**
  * @fileoverview Accessible popover anchored to a trigger button.
  */
+
 'use client';
 import {
   useEffect,
@@ -74,7 +81,7 @@ export function Popover({
         aria-expanded={open}
         aria-controls={id}
         data-testid={testId}
-        onClick={() => setOpen(value => !value)}
+        onClick={() => void setOpen(value => !value)}
       >
         {label}
       </button>
@@ -85,7 +92,7 @@ export function Popover({
           role="dialog"
           aria-label={ariaLabel}
         >
-          {children(() => setOpen(false))}
+          {children(() => void setOpen(false))}
         </div>
       )}
     </div>

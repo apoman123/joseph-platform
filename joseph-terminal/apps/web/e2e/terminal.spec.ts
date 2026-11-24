@@ -1,6 +1,13 @@
 /**
+ * @license
+ * Copyright 2026 Joseph Terminal contributors
+ * SPDX-License-Identifier: MIT
+ */
+
+/**
  * @fileoverview System tests of the chart stack in DEMO mode.
  */
+
 import AxeBuilder from '@axe-core/playwright';
 import {expect, test} from '@playwright/test';
 import {
@@ -69,8 +76,11 @@ test('draws a trendline and rectangle that survive a reload, with undo and redo'
     BTC_DRAWINGS_KEY
   );
   const anchors =
-    (JSON.parse(raw ?? '{}') as {drawings: {anchors: {price: string}[]}[]})
-      .drawings[0]?.anchors ?? [];
+    (
+      JSON.parse(raw ?? '{}') as {
+        drawings: Array<{anchors: Array<{price: string}>}>;
+      }
+    ).drawings[0]?.anchors ?? [];
   expect(anchors.every(a => /^\d+(\.\d+)?$/.test(a.price))).toBe(true);
 });
 
@@ -85,8 +95,9 @@ test('shows four synced charts and restores the layout after reload', async ({
   await expect(page.getByTestId('sync-crosshair')).toBeChecked();
   await page.keyboard.press('Escape');
   const box = await page.getByTestId('chart-canvas').first().boundingBox();
-  if (box)
+  if (box) {
     await page.mouse.move(box.x + box.width * 0.5, box.y + box.height * 0.5);
+  }
   await page.waitForTimeout(500);
   await page.screenshot({path: `${SHOTS}/03-four-charts.png`});
   await page.reload();
