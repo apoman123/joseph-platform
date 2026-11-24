@@ -5,9 +5,15 @@
  */
 
 /**
- * @fileoverview Repository secret scanner (fast pre-commit/CI guard; run
- * gitleaks in CI as well). Fails on private keys, provider tokens, high
- * entropy secret assignments and committed .env files.
+ * @fileoverview Secret scanner for the terminal's working tree (`pnpm
+ * secrets:scan`, run in CI).
+ *
+ * Reports, as `path:line: rule`, every line that matches one of `RULES`
+ * (private key blocks, AWS/GitHub/Slack/Telegram tokens, 64-digit hex private
+ * keys, and long quoted values assigned to secret-like names such as
+ * `api_key`), plus every `.env` file other than `.env.example`, and exits with
+ * status 1 if there is any finding. It reads files on disk, not git history,
+ * so it is a fast guard that complements a history scanner such as gitleaks.
  */
 
 import {
@@ -21,7 +27,10 @@ import {
 import {join, relative} from 'node:path';
 import {fileURLToPath} from 'node:url';
 
+/** The joseph-terminal directory, the parent of this script's folder. */
 const ROOT = join(fileURLToPath(new URL('.', import.meta.url)), '..');
+
+/** Directory names never entered: dependencies, build output and reports. */
 const SKIP_DIRS = new Set([
   'node_modules',
   '.next',
@@ -32,16 +41,26 @@ const SKIP_DIRS = new Set([
   '.git',
   '.turbo',
 ]);
+
+/** Binary assets and lock files, which are not scanned. */
 const SKIP_FILES =
   /\.(png|jpe?g|gif|ico|woff2?|ttf|zip|lock)$|pnpm-lock\.yaml$/;
-/** Paths allowed to contain example tokens (documented fakes). */
+
+/**
+ * Relative paths whose contents are not scanned because they hold fake
+ * example tokens: this script's own patterns, unit tests and fixture data.
+ * The `.env` check still applies to them.
+ */
 const ALLOWLIST = [
   /^scripts\/secret-scan\.mjs$/,
   /\.test\.tsx?$/,
   /\/fixtures\//,
 ];
 
-/** Detection rules. */
+/**
+ * Detection rules, each a named pattern matched against one line at a time.
+ * The patterns have no `g` flag, so `test` keeps no state between lines.
+ */
 const RULES = [
   {
     name: 'private key block',
@@ -59,10 +78,11 @@ const RULES = [
 ];
 
 /**
- * Walks the repository.
- * @param dir Directory.
- * @param out Collected files.
- * @return Files.
+ * Collects every file under a directory, recursively, skipping `SKIP_DIRS`.
+ * @param {string} dir Absolute path of the directory to walk.
+ * @param {string[]=} out Array the file paths are appended to; callers omit
+ *     it and the recursion passes it down.
+ * @return {string[]} `out`, holding the absolute path of every file found.
  */
 function walk(dir, out = []) {
   for (const name of readdirSync(dir)) {

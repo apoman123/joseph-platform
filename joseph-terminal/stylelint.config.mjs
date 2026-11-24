@@ -17,7 +17,10 @@
 
 import {licenseHeaderPlugin} from './scripts/lint/stylelint-plugin-local.mjs';
 
-/** Lowercase words joined by single hyphens (htmlcssguide "Class Name Delimiters"). */
+/**
+ * Lowercase words joined by single hyphens (htmlcssguide "Class Name
+ * Delimiters").
+ */
 const KEBAB = '[a-z][a-z0-9]*(?:-[a-z0-9]+)*';
 
 /**

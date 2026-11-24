@@ -11,7 +11,8 @@
  * Formatting is Prettier's job (`pnpm format:check`); this config checks
  * everything else that a machine can: exports, comments and JSDoc, naming,
  * language features, the type system and the licence header. Rules a machine
- * cannot judge are listed for review in docs/standards/CODING_STANDARDS.md.
+ * cannot judge are listed for review in the platform repository's
+ * docs/standards/CODING_STANDARDS.md (one level above joseph-terminal).
  *
  * Inline exceptions name the rule and give a reason after ` -- `:
  * `// eslint-disable-next-line <rule> -- <reason>`.

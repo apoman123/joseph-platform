@@ -5,7 +5,8 @@
  */
 
 /**
- * @fileoverview Shared DOM test setup: jest-dom matchers and cleanup.
+ * @fileoverview Setup file for the jsdom test projects: registers the
+ * jest-dom matchers and unmounts rendered React trees after each test.
  */
 
 import '@testing-library/jest-dom/vitest';

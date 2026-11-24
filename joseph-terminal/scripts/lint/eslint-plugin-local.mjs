@@ -72,7 +72,7 @@ const TODO_FORM = /^\s*(?:\*\s*)?TODO: \S+(?: \S+)* - \S/;
 const KEBAB_STEM = /^[a-z0-9]+(?:-[a-z0-9]+)*$/;
 
 /**
- * Whether a comment is the only thing on the lines it spans.
+ * Returns whether a comment is the only thing on the lines it spans.
  * @param {import('eslint').SourceCode} sourceCode Source being linted.
  * @param {import('estree').Comment} comment Comment to test.
  * @return {boolean} True when no code shares its first or last line.
@@ -85,8 +85,8 @@ function isStandalone(sourceCode, comment) {
 }
 
 /**
- * Whether a comment is a JSX child comment (`{/* ... *\/}`), the only comment
- * syntax JSX allows between elements.
+ * Returns whether a comment is a JSX child comment (`{/* ... *\/}`), the only
+ * comment syntax JSX allows between elements.
  * @param {import('eslint').SourceCode} sourceCode Source being linted.
  * @param {import('estree').Comment} comment Comment to test.
  * @return {boolean} True for a comment inside an empty JSX expression.
@@ -97,7 +97,9 @@ function isJsxChildComment(sourceCode, comment) {
 }
 
 /**
- * Rewrites a standalone block comment as consecutive `//` lines.
+ * Returns a standalone block comment rewritten as consecutive `//` lines at
+ * the comment's indentation, without its `*` gutter or blank first and last
+ * lines.
  * @param {import('eslint').SourceCode} sourceCode Source being linted.
  * @param {import('estree').Comment} comment Block comment to rewrite.
  * @return {string} Replacement text for the comment's range.
@@ -138,7 +140,7 @@ function nodesStartingAt(sourceCode, token) {
 }
 
 /**
- * Whether a node is a CommonJS export assignment (`module.exports = ...`).
+ * Returns whether a statement is a CommonJS export assignment.
  * @param {import('estree').Node} node Candidate statement.
  * @return {boolean} True for `module.exports = ...` or `exports.x = ...`.
  */
@@ -159,7 +161,7 @@ function isCommonJsExport(node) {
 }
 
 /**
- * Whether a variable declaration lives inside a function (a local).
+ * Returns whether a variable declaration is inside a function (a local).
  * @param {import('estree').Node} node A VariableDeclaration.
  * @return {boolean} True when an enclosing function exists.
  */
@@ -290,12 +292,17 @@ const commentStyle = {
   },
 };
 
-/** Requires TODOs in Google's `TODO: <link or owner> - <what>` form. */
+/**
+ * Requires TODOs in Google's `TODO: <link or owner> - <what>` form and
+ * reports `FIXME`, `XXX` and `HACK` markers.
+ */
 const todoFormat = {
   meta: {
     type: 'suggestion',
     docs: {
       description: 'Require TODO: <link or owner> - <what>.',
+      // The form is the Python guide's (section 3.12); the project uses it
+      // in every language.
       url: 'https://google.github.io/styleguide/pyguide.html#312-todo-comments',
     },
     schema: [],
@@ -333,7 +340,7 @@ const todoFormat = {
 };
 
 /**
- * Whether the line after a node or comment is blank (or the file ends).
+ * Returns whether the line after a node or comment is blank or past the end.
  * @param {import('eslint').SourceCode} sourceCode Source being linted.
  * @param {number} line 1-based line the node or comment ends on.
  * @return {boolean} True when line + 1 is empty or past the end.
@@ -344,7 +351,7 @@ function isFollowedByBlankLine(sourceCode, line) {
 }
 
 /**
- * Whether a statement may sit among the imports: a directive such as
+ * Returns whether a statement may sit among the imports: a directive such as
  * `'use client'` (which Next.js requires before the imports) or a re-export.
  * @param {import('estree').Node} statement Top-level statement.
  * @return {boolean} True for directives and `export ... from` statements.
@@ -518,7 +525,12 @@ const jsdocTagIndent = {
             continue;
           }
           let tag = null;
+          // Column where the tag line's description starts (after the tag,
+          // an optional `{type}` and, for `@param`-like tags, the name);
+          // wrapped lines lined up with it are also accepted.
           let alignColumn = -1;
+          // `comment.value` omits the opening `/*`; `offset` tracks the
+          // source index of each line's first character.
           let offset = comment.range[0] + 2;
           for (const line of comment.value.split('\n')) {
             const lineStart = offset;
@@ -526,6 +538,7 @@ const jsdocTagIndent = {
             const match = /^(\s*\* ?)(\s*)(.*)$/.exec(line);
             if (!match) continue;
             const [, prefix, indent, text] = match;
+            // A blank line ends the current tag's text.
             if (text === '' || text === '/') {
               tag = null;
               continue;
@@ -578,6 +591,8 @@ const filenameCase = {
     return {
       Program(node) {
         const name = path.basename(context.filename);
+        // A dotfile such as `.dependency-cruiser.cjs` is checked without its
+        // leading dot.
         const stem = name.replace(/^\./, '').split('.')[0];
         if (KEBAB_STEM.test(stem)) return;
         context.report({node, messageId: 'name', data: {name}});

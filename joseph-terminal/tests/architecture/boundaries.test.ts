@@ -5,8 +5,9 @@
  */
 
 /**
- * @fileoverview Architecture tests: dependency rules, render-only
- * indicator visualization and the feature manifest graph.
+ * @fileoverview Architecture tests: the dependency-cruiser rules, the
+ * lightweight-charts (LWC) adapter boundary, render-only indicator
+ * visualization and the absence of signing or secret APIs in browser code.
  */
 
 import {spawnSync} from 'node:child_process';
@@ -14,12 +15,14 @@ import {readFileSync, readdirSync, statSync} from 'node:fs';
 import {join, relative} from 'node:path';
 import {describe, expect, it} from 'vitest';
 
+/** The joseph-terminal directory. */
 const ROOT = join(__dirname, '..', '..');
 
 /**
- * Lists source files under a directory.
- * @param dir Directory.
- * @return Files.
+ * Lists the non-test `.ts`/`.tsx` files under a directory, recursively,
+ * skipping `node_modules` and Next.js build folders.
+ * @param dir Absolute path of the directory to walk.
+ * @return Absolute paths of the source files found.
  */
 function sources(dir: string): string[] {
   const out: string[] = [];
