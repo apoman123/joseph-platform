@@ -3,9 +3,11 @@
 
 """Risk Gateway: the only component that can authorize an order.
 
-Every check in ``checks.PIPELINE`` runs for every intent. ALLOW requires
-that no check FAILs or is UNKNOWN; a check that raises is treated as
-UNKNOWN (fail closed).
+Every check of the pipeline (``checks.PIPELINE`` by default) runs for every
+intent, in order and without short-circuiting, so the decision records all
+reasons at once. The decision is ALLOW only when every check returns PASS,
+WARN or SKIP. A check that raises counts as UNKNOWN, and UNKNOWN blocks:
+missing knowledge never authorizes an order (fail closed).
 """
 
 from __future__ import annotations
@@ -22,7 +24,14 @@ _LOG = logging.getLogger(__name__)
 
 
 class RiskGateway:
-    """Deny-by-default policy pipeline."""
+    """Deny-by-default pre-trade policy pipeline.
+
+    Each check result maps to a candidate decision: FAIL gives REJECT when
+    the check's spec has ``reject_on_fail``, else PAUSE when it has
+    ``pause_on_fail``, else BLOCK; UNKNOWN gives BLOCK; PASS, WARN and SKIP
+    give none. The final decision is the most severe candidate, ranked
+    ALLOW < REJECT < PAUSE < BLOCK, and ALLOW only when there is none.
+    """
 
     def __init__(
         self,
@@ -32,8 +41,8 @@ class RiskGateway:
         """Initializes the gateway.
 
         Args:
-            pipeline: Ordered checks.
-            policy_version: Policy identifier recorded on decisions.
+            pipeline: Checks to run, in the order their results are recorded.
+            policy_version: Policy identifier recorded on every decision.
         """
         self._pipeline = pipeline
         self._policy_version = policy_version
@@ -41,11 +50,15 @@ class RiskGateway:
     def evaluate(self, ctx: context.RiskContext) -> risk.RiskDecision:
         """Runs every check and aggregates a decision.
 
+        Never raises for a failing check: the exception is logged and the
+        check is recorded as UNKNOWN with code ``INTERNAL``, which blocks.
+
         Args:
-            ctx: Risk context.
+            ctx: Inputs of the evaluation; ``ctx.now_ms`` becomes the
+                decision time.
 
         Returns:
-            Decision with one result per check.
+            The decision, with one result per check in pipeline order.
         """
         results: list[risk.RiskCheckResult] = []
         verdict = enums.Decision.ALLOW
@@ -58,7 +71,7 @@ class RiskGateway:
         for spec in self._pipeline:
             try:
                 result = spec.fn(ctx)
-            except Exception as err:
+            except Exception as err:  # noqa: BLE001 - isolation point: a raising check is recorded as UNKNOWN (blocks) and the other checks still run.
                 _LOG.exception("risk check %s raised", spec.fn.__name__)
                 result = risk.RiskCheckResult(
                     check=spec.fn.__name__,

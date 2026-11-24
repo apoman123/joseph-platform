@@ -3,10 +3,13 @@
 
 """Kill switch service.
 
-Engaging blocks new opening orders immediately (the Risk Gateway reads the
-switch on every intent). Cancelling working orders and flattening positions
-are separate explicit options executed through the normal OMS path, so they
-remain audited and reduce-only.
+Engaging a switch blocks new exposure from the next intent on: the OMS
+(order management system) puts the tenant's switches into the risk context
+of every intent, and the Risk Gateway check ``kill_switch.engaged`` fails
+every order in scope that is not risk-reducing. Cancelling working orders
+and flattening positions are separate, explicit options of engaging. They
+run through the normal OMS path, so they stay audited, and flattening
+orders are reduce-only.
 """
 
 from __future__ import annotations
@@ -27,7 +30,7 @@ _LOG = logging.getLogger(__name__)
 
 
 class KillSwitchService:
-    """Engages, releases and lists kill switches."""
+    """Engages, releases and lists the kill switches of tenants."""
 
     def __init__(
         self,
@@ -44,7 +47,7 @@ class KillSwitchService:
             oms: OMS for cancels and closes.
             audit_log: Audit log.
             clock: Time source.
-            publisher: Stream publisher.
+            publisher: Stream publisher of ``risk.kill_switch`` events.
         """
         self._uow = uow_factory
         self._oms = oms
@@ -61,12 +64,12 @@ class KillSwitchService:
             principal: Caller.
 
         Returns:
-            Switches.
+            Every stored switch of the caller's tenant, engaged or released.
         """
         with self._uow() as uow:
             return uow.kill_switches.list(principal.tenant_id)
 
-    async def set(  # noqa: PLR0917
+    async def set(  # noqa: PLR0917 - the API router and tests pass the kill switch body fields positionally.
         self,
         principal: identity.Principal,
         scope: enums.KillSwitchScope,
@@ -78,20 +81,35 @@ class KillSwitchService:
     ) -> kill_switch.KillSwitch:
         """Engages or releases a switch.
 
+        The new state replaces the stored switch of the same scope and
+        target, and is audited (``kill_switch.engaged`` or
+        ``kill_switch.released``) in the same transaction. After the
+        commit it is published, then the optional actions run: each
+        working, non-reduce-only order in scope is cancelled, and for each
+        open position in scope a full close (fraction 1) is submitted as a
+        reduce-only MARKET intent with source EMERGENCY, through the risk
+        checks like any order. A failing cancel or close is logged and
+        skipped; it does not undo the switch or stop the other actions.
+
         Args:
             principal: Caller.
             scope: Scope.
-            target_id: Account or strategy for scoped switches.
+            target_id: Account id (ACCOUNT) or strategy version or strategy
+                id (STRATEGY); ignored for GLOBAL.
             engage: Engage (True) or release (False).
-            cancel_open_orders: Cancel working opening orders on engage.
-            flatten_positions: Close positions in scope on engage.
+            cancel_open_orders: Cancel working opening orders on engage;
+                ignored on release.
+            flatten_positions: Close positions in scope on engage (GLOBAL
+                and ACCOUNT switches only); ignored on release.
             reason: Operator reason.
 
         Returns:
             New state.
 
         Raises:
-            ExecutionError: ``VALIDATION_FAILED`` or ``NOT_FOUND``.
+            ExecutionError: ``VALIDATION_FAILED`` when a scoped switch has no
+                target, or ``NOT_FOUND`` when an ACCOUNT target is not an
+                account of the caller's tenant.
         """
         if scope is enums.KillSwitchScope.GLOBAL:
             target_id = None
@@ -135,26 +153,24 @@ class KillSwitchService:
                 else None,
                 payload=switch.to_contract(),
             )
-            in_scope_orders = (
-                [
+            if engage and cancel_open_orders:
+                in_scope_orders = [
                     o
                     for o in uow.orders.list(tenant_id=principal.tenant_id)
                     if o.state.is_working
                     and not o.reduce_only
                     and switch.applies_to(o.account_id, o.strategy_version_id)
                 ]
-                if engage and cancel_open_orders
-                else []
-            )
-            in_scope_positions = (
-                [
+            else:
+                in_scope_orders = []
+            if engage and flatten_positions:
+                in_scope_positions = [
                     p
                     for p in uow.positions.list(tenant_id=principal.tenant_id)
-                    if self._position_in_scope(switch, p.account_id)
+                    if _position_in_scope(switch, p.account_id)
                 ]
-                if engage and flatten_positions
-                else []
-            )
+            else:
+                in_scope_positions = []
         self._publisher.publish(
             principal.tenant_id,
             "risk.kill_switch",
@@ -193,24 +209,22 @@ class KillSwitchService:
                 )
         return switch
 
-    @staticmethod
-    def _position_in_scope(
-        switch: kill_switch.KillSwitch, account_id: str
-    ) -> bool:
-        """Checks whether a position's account is covered by a switch.
 
-        Strategy switches never flatten whole positions because positions
-        are netted across strategies.
+def _position_in_scope(switch: kill_switch.KillSwitch, account_id: str) -> bool:
+    """Checks whether a position's account is covered by a switch.
 
-        Args:
-            switch: Switch.
-            account_id: Position account.
+    Strategy switches never flatten whole positions because positions
+    are netted across strategies.
 
-        Returns:
-            True when the position should be flattened.
-        """
-        if switch.scope is enums.KillSwitchScope.GLOBAL:
-            return True
-        if switch.scope is enums.KillSwitchScope.ACCOUNT:
-            return switch.target_id == account_id
-        return False
+    Args:
+        switch: Switch.
+        account_id: Position account.
+
+    Returns:
+        True when the position should be flattened.
+    """
+    if switch.scope is enums.KillSwitchScope.GLOBAL:
+        return True
+    if switch.scope is enums.KillSwitchScope.ACCOUNT:
+        return switch.target_id == account_id
+    return False

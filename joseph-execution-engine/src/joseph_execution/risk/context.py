@@ -1,7 +1,10 @@
 # Copyright 2026 apoman123
 # SPDX-License-Identifier: MIT
 
-"""Inputs of a risk evaluation, gathered by the OMS before checks run."""
+"""Inputs of a risk evaluation, gathered by the OMS before checks run.
+
+OMS: the order management system (``oms.service``).
+"""
 
 from __future__ import annotations
 
@@ -31,33 +34,43 @@ class RiskContext:
     Attributes:
         request: Normalized intent request.
         principal: Caller.
-        now_ms: Evaluation time.
-        limits: Effective account limits.
-        live_trading_enabled: Global LIVE flag.
-        emergency_halt: Platform-wide halt flag.
+        now_ms: Evaluation time, UTC epoch milliseconds.
+        limits: Effective account limits (stored values clamped to the
+            platform hard caps, in the account currency).
+        live_trading_enabled: Deployment-wide LIVE flag
+            (``JOSEPH_LIVE_TRADING_ENABLED``).
+        emergency_halt: Platform-wide halt flag (``JOSEPH_EMERGENCY_HALT``).
         account: Target account (``None`` if missing).
-        capabilities: Negotiated adapter capabilities.
-        adapter_health: Adapter/private stream health.
+        capabilities: Negotiated adapter capabilities (``None`` when the
+            adapter could not report them).
+        adapter_health: Adapter/private stream health (``None`` when the
+            adapter could not report it).
         instrument: Instrument metadata.
         quote: Latest quote.
         book: Order book.
         position: Current position of the instrument in this mode.
-        open_position_count: Open positions of the account (this mode).
-        gross_notional: Gross notional of the account's positions.
+        open_position_count: Positions of the account in this mode with a
+            non-zero quantity.
+        gross_notional: Gross notional of the account's positions at marks.
         equity: Account equity.
-        available_margin: Free margin after reservations.
-        daily_realized_pnl: Realized PnL since UTC midnight.
-        account_state_unknown: Unknown orders or position mismatch exist.
-        kill_switches: Kill switches of the tenant.
+        available_margin: Free margin after positions and reservations.
+        daily_realized_pnl: Realized PnL since 00:00 UTC (negative is a
+            loss).
+        account_state_unknown: Orders in UNKNOWN_RECONCILING or positions
+            flagged unknown exist on the account.
+        kill_switches: Kill switches of the tenant, engaged or not.
         deployment: Deployment for STRATEGY intents.
-        signal_age_ms: Age of the originating signal.
+        signal_age_ms: Age of the originating signal in milliseconds.
         signal_intents: Intents already created for the signal.
-        strategy_open_orders: Working opening orders of the same strategy
-            and instrument.
-        recent_rejects: Venue rejects inside the spike window.
-        notional: Order notional at the reference price.
+        strategy_open_orders: Working opening (not reduce-only) orders of
+            the same strategy version and instrument.
+        recent_rejects: Venue rejects inside ``limits.reject_window_ms``,
+            counted up to ``limits.reject_spike_threshold + 1``.
+        notional: Order notional at the reference price (quantity x price
+            x contract multiplier).
         margin_required: Margin needed by the order.
-        slippage_pct: Estimated market-order slippage.
+        slippage_pct: Estimated market-order slippage in percent of the
+            best price (``None`` when the book is too thin).
         sessions: Exchange sessions around ``now_ms`` for securities
             (``None`` when unknown or not gathered).
         previous_close: Reference price of daily limits (securities).
@@ -112,7 +125,7 @@ class RiskContext:
 
     @property
     def long_qty(self) -> decimal.Decimal:
-        """Returns the long quantity held (0 when flat, short or unknown)."""
+        """The long base quantity held (0 when flat, short or unknown)."""
         if self.position is None or self.position.signed_qty <= 0:
             return decimal.Decimal(0)
         return self.position.signed_qty
@@ -121,8 +134,9 @@ class RiskContext:
     def risk_reducing(self) -> bool:
         """Whether the order can only reduce the current position.
 
-        True only for reduce-only orders on the side opposite to an existing
-        position with quantity not exceeding it.
+        True only for a reduce-only order on the side opposite to a known,
+        non-flat position, for at most the position's quantity. Several
+        checks let such orders through while new exposure is blocked.
         """
         req = self.request
         if not req.reduce_only or self.position is None:
