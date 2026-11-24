@@ -21,7 +21,7 @@ def _entry_signal() -> signal_domain.Signal:
     """Runs Long A and returns its entry signal.
 
     Returns:
-        Signal.
+        The first signal Long A emits over its scenario frames.
     """
     definition = fixtures.strategy_definitions()[fixtures.LONG_A]
     plan = compiler.compile_strategy(definition).plan
@@ -39,11 +39,9 @@ def _entry_signal() -> signal_domain.Signal:
         ),
         mode="PAPER",
     )
-    found = [
-        s
-        for f in scenarios.long_a_frames()
-        for s in proc.step(f, evaluated_at_ms=f.close_ms).signals
-    ]
+    found: list[signal_domain.Signal] = []
+    for frame in scenarios.long_a_frames():
+        found.extend(proc.step(frame, evaluated_at_ms=frame.close_ms).signals)
     return found[0]
 
 

@@ -1,7 +1,7 @@
 # Copyright 2026 apoman123
 # SPDX-License-Identifier: MIT
 
-"""SQL persistence: immutability, uniqueness and checkpoints."""
+"""SQL strategy persistence: immutability, uniqueness and checkpoints."""
 
 from __future__ import annotations
 
@@ -18,14 +18,14 @@ from joseph.strategy.testing import fixtures
 
 
 def _version(n: int, tenant: str = "tenant-a") -> versions.StrategyVersion:
-    """Builds a stored version.
+    """Builds a VALIDATED Long A version.
 
     Args:
         n: Version number.
-        tenant: Tenant.
+        tenant: Owning tenant id.
 
     Returns:
-        Version.
+        The version, not yet stored.
     """
     definition = fixtures.strategy_definitions()[fixtures.LONG_A]
     return fixtures.make_version(
@@ -50,7 +50,7 @@ def test_versions_round_trip_and_are_unique(engine: sa.Engine) -> None:
 
 
 def test_database_rejects_definition_rewrites(engine: sa.Engine) -> None:
-    """A trigger forbids rewriting a stored definition or hash."""
+    """Triggers forbid definition rewrites; lifecycle updates still apply."""
     sql.create_schema(engine)
     repo = sql.SqlStrategyRepository(engine)
     repo.add(_version(1))

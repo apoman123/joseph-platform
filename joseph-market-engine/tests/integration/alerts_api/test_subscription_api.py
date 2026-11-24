@@ -15,8 +15,8 @@ from fastapi import testclient
 from joseph import bootstrap
 from joseph.platform import config
 
-_A = {"Authorization": "Bearer token-a"}
-_B = {"Authorization": "Bearer token-b"}
+_AUTH_A = {"Authorization": "Bearer token-a"}
+_AUTH_B = {"Authorization": "Bearer token-b"}
 
 
 @pytest.fixture
@@ -24,7 +24,8 @@ def client() -> Iterator[testclient.TestClient]:
     """Runs the full app on the DEMO venue with two tenants.
 
     Yields:
-        Test client.
+        A client for the running app; ``token-a`` and ``token-b``
+        authenticate tenant-a and tenant-b.
     """
     settings = dataclasses.replace(
         config.Settings(),
@@ -45,10 +46,10 @@ def _body(**overrides: object) -> dict[str, object]:
     """Builds a Telegram subscription body.
 
     Args:
-        **overrides: Fields to replace.
+        **overrides: Contract fields to replace.
 
     Returns:
-        Contract ``AlertSubscription``.
+        Contract ``AlertSubscription`` with Taipei overnight quiet hours.
     """
     body: dict[str, object] = {
         "subscription_id": "phone",
@@ -73,13 +74,13 @@ def test_upsert_and_list_conform_to_contract(
     client: testclient.TestClient,
     contract_validate: Callable[[str, str, object], None],
 ) -> None:
-    """Stored subscriptions round-trip and report configured channels."""
+    """Upserts and lists match the contract, name channels, hide the token."""
     stored = client.put(
-        "/v1/alerts/subscriptions/phone", json=_body(), headers=_A
+        "/v1/alerts/subscriptions/phone", json=_body(), headers=_AUTH_A
     )
     assert stored.status_code == 200, stored.text
     contract_validate("signal.schema.json", "AlertSubscription", stored.json())
-    listed = client.get("/v1/alerts/subscriptions", headers=_A).json()
+    listed = client.get("/v1/alerts/subscriptions", headers=_AUTH_A).json()
     contract_validate("signal.schema.json", "AlertSubscriptionList", listed)
     assert [s["subscription_id"] for s in listed["subscriptions"]] == ["phone"]
     assert "TELEGRAM" in listed["configured_channels"]
@@ -103,7 +104,7 @@ def test_bad_targets_are_rejected(
     response = client.put(
         "/v1/alerts/subscriptions/bad",
         json=_body(subscription_id="bad", channel=channel, target=target),
-        headers=_A,
+        headers=_AUTH_A,
     )
     assert response.status_code == 422
     assert response.json()["code"] == "VALIDATION_FAILED"
@@ -115,7 +116,7 @@ def test_unknown_time_zone_is_rejected(client: testclient.TestClient) -> None:
         quiet_hours={"start": "23:00", "end": "07:00", "tz": "Mars/Olympus"}
     )
     response = client.put(
-        "/v1/alerts/subscriptions/phone", json=body, headers=_A
+        "/v1/alerts/subscriptions/phone", json=body, headers=_AUTH_A
     )
     assert response.status_code == 422
 
@@ -124,7 +125,7 @@ def test_subscriptions_are_tenant_scoped(
     client: testclient.TestClient,
 ) -> None:
     """Tenant B never sees tenant A's subscriptions; auth is required."""
-    client.put("/v1/alerts/subscriptions/phone", json=_body(), headers=_A)
-    listed_b = client.get("/v1/alerts/subscriptions", headers=_B).json()
+    client.put("/v1/alerts/subscriptions/phone", json=_body(), headers=_AUTH_A)
+    listed_b = client.get("/v1/alerts/subscriptions", headers=_AUTH_B).json()
     assert listed_b["subscriptions"] == []
     assert client.get("/v1/alerts/subscriptions").status_code == 401

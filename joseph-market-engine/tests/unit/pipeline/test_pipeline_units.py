@@ -24,7 +24,7 @@ _BTC = instruments.InstrumentId.parse("binance:perp:BTCUSDT")
 
 
 def test_merge_requirements_unions_plugins_per_signal_timeframe() -> None:
-    """Two plans on 5m share one engine computing every plugin."""
+    """Plans per signal timeframe merge their plugins and longest history."""
     a = compiler.EngineRequirements(
         TF.M5, {"fvg_ifvg": frozenset({TF.M5})}, history_bars=50
     )
@@ -49,26 +49,55 @@ def test_fetch_windows_extend_higher_timeframes() -> None:
     assert windows[TF.H4] < start - 60 * TF.H4.duration_ms
 
 
+@dataclasses.dataclass
+class _Record:
+    """The qualification record fields the gate reads.
+
+    Attributes:
+        instrument_id: Canonical instrument id.
+        status: Qualification status.
+    """
+
+    instrument_id: str
+    status: policy.Status
+
+
+@dataclasses.dataclass
+class _Report:
+    """The qualification report fields the gate reads.
+
+    Attributes:
+        records: One record per instrument, best ranked first.
+    """
+
+    records: list[_Record]
+
+
 class _FakeService:
-    """Qualification service stub returning fixed records."""
+    """Qualification service stub returning fixed records.
+
+    Attributes:
+        statuses: Status per instrument id, in ranking order.
+        fail: Whether ``report`` raises, as a venue outage would.
+    """
 
     def __init__(self, statuses: dict[str, policy.Status]) -> None:
         """Initializes the stub.
 
         Args:
-            statuses: Status per instrument id.
+            statuses: Status per instrument id, in ranking order.
         """
         self.statuses = statuses
         self.fail = False
 
-    async def report(self, venue: instruments.Venue) -> object:
-        """Returns a report-like object.
+    async def report(self, venue: instruments.Venue) -> _Report:
+        """Returns the fixed records as a report.
 
         Args:
             venue: Venue (unused).
 
         Returns:
-            Object with ``records``.
+            A report with one record per entry of ``statuses``.
 
         Raises:
             RuntimeError: When ``fail`` is set.
@@ -76,37 +105,27 @@ class _FakeService:
         del venue
         if self.fail:
             raise RuntimeError("venue down")
-
-        @dataclasses.dataclass
-        class Record:
-            """Minimal record."""
-
-            instrument_id: str
-            status: policy.Status
-
-        @dataclasses.dataclass
-        class Report:
-            """Minimal report."""
-
-            records: list[Record]
-
-        return Report([Record(k, v) for k, v in self.statuses.items()])
+        return _Report([_Record(k, v) for k, v in self.statuses.items()])
 
 
 class _Clock:
-    """Settable clock."""
+    """Settable clock.
+
+    Attributes:
+        now: Current time in epoch ms; tests assign it directly.
+    """
 
     def __init__(self) -> None:
         """Initializes at t=0."""
         self.now = 0
 
     def now_ms(self) -> int:
-        """Returns the time."""
+        """Returns the settable time in epoch ms."""
         return self.now
 
 
 async def test_gate_is_tristate_and_honors_minimum_minutes() -> None:
-    """Missing is UNKNOWN, rejected is FALSE, recent qualification waits."""
+    """The gate is tri-state, waits minimum minutes, survives refresh errors."""
     service = _FakeService(
         {
             "binance:perp:A": policy.Status.QUALIFIED,
@@ -115,7 +134,7 @@ async def test_gate_is_tristate_and_honors_minimum_minutes() -> None:
         }
     )
     clock = _Clock()
-    gate = qualification.CachedQualificationGate(service, clock)  # type: ignore[arg-type]
+    gate = qualification.CachedQualificationGate(service, clock)  # type: ignore[arg-type]  # a stub stands in for QualificationService
     await gate.refresh([instruments.Venue.BINANCE])
     t = tristate.TriState
     assert gate.qualification("binance:perp:A", 0, 0) is t.TRUE
@@ -134,11 +153,11 @@ def _snapshot(ts: int, oi: str) -> market.MarketSnapshot:
     """Builds a snapshot with open interest.
 
     Args:
-        ts: Observation time.
-        oi: Open interest notional.
+        ts: Observation time, epoch ms.
+        oi: Open interest notional in USD, a decimal string.
 
     Returns:
-        Snapshot.
+        A live BTCUSDT perpetual snapshot.
     """
     return market.MarketSnapshot(
         instrument_id=_BTC,

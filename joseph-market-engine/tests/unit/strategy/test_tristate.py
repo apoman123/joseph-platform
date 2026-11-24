@@ -51,7 +51,7 @@ def test_disjunction_table(a: tristate.TriState, b: tristate.TriState) -> None:
 
 
 def test_negation_keeps_unknown() -> None:
-    """NOT UNKNOWN is UNKNOWN."""
+    """NOT swaps TRUE and FALSE and keeps UNKNOWN."""
     assert tristate.negate(T.TRUE) is T.FALSE
     assert tristate.negate(T.FALSE) is T.TRUE
     assert tristate.negate(T.UNKNOWN) is T.UNKNOWN
@@ -81,7 +81,7 @@ def test_k_of_n(
 
 
 def test_of_maps_optional_booleans() -> None:
-    """None maps to UNKNOWN."""
+    """``of`` maps True and False to TRUE and FALSE, and None to UNKNOWN."""
     assert T.of(None) is T.UNKNOWN
     assert T.of(True) is T.TRUE
     assert T.of(False) is T.FALSE

@@ -34,10 +34,10 @@ def _service(
     """Builds a service over the mock venue.
 
     Args:
-        clock: Clock.
+        clock: Clock shared by the venue, router and service.
 
     Returns:
-        Service and adapter.
+        The service and the mock adapter behind it.
     """
     adapter = mock.MockAdapter(clock)
     adapters = {instruments.Venue.MOCK: adapter}
@@ -117,11 +117,7 @@ async def test_mock_stream_finalizes_bars_on_the_clock() -> None:
     clock = clock_lib.ManualClock(_NOW + 30_000)
 
     async def tick(_: float) -> None:
-        """Advances the clock one minute per sleep.
-
-        Args:
-            _: Ignored delay.
-        """
+        """Advances the clock one minute per sleep, whatever the delay."""
         clock.advance(60_000)
 
     adapter = mock.MockAdapter(clock, sleep=tick)
@@ -196,29 +192,28 @@ async def test_service_serves_cached_closed_bars_without_refetch() -> None:
     """Closed bars already stored are not fetched again."""
     clock = clock_lib.ManualClock(_NOW)
     svc, adapter = _service(clock)
-    calls = 0
+    calls: list[tuple[Any, ...]] = []
     original = adapter.fetch_candles
 
     async def counting(*args: Any, **kwargs: Any) -> list[market.Candle]:
-        """Counts adapter calls.
+        """Records the call, then delegates to the real fetch.
 
         Args:
-            *args: Positional arguments.
-            **kwargs: Keyword arguments.
+            *args: Positional arguments of ``fetch_candles``.
+            **kwargs: Keyword arguments of ``fetch_candles``.
 
         Returns:
-            Candles.
+            The candles the mock venue returns.
         """
-        nonlocal calls
-        calls += 1
+        calls.append(args)
         return await original(*args, **kwargs)
 
-    adapter.fetch_candles = counting  # type: ignore[method-assign]
+    adapter.fetch_candles = counting  # type: ignore[method-assign]  # spy replaces the bound method to count fetches
     start = _NOW - 3_600_000
     end = timeframes.Timeframe.M5.floor(_NOW)
     await svc.get_candles(_BTC, timeframes.Timeframe.M5, start, end)
     await svc.get_candles(_BTC, timeframes.Timeframe.M5, start, end)
-    assert calls == 1
+    assert len(calls) == 1
 
 
 async def test_snapshot_is_cached_for_one_second() -> None:
@@ -232,7 +227,7 @@ async def test_snapshot_is_cached_for_one_second() -> None:
 
 
 async def test_registry_search_keeps_venues_separate() -> None:
-    """Search returns exact-venue instruments best-match first."""
+    """Registry search finds symbols; a venue with no adapter is not found."""
     clock = clock_lib.ManualClock(_NOW)
     adapters = {instruments.Venue.MOCK: mock.MockAdapter(clock)}
     reg = registry.InstrumentRegistry(adapters)
@@ -244,29 +239,29 @@ async def test_registry_search_keeps_venues_separate() -> None:
         await reg.all_instruments(instruments.Venue.BINANCE)
 
 
+class _Down:
+    """Venue adapter whose venue is unreachable."""
+
+    async def list_instruments(self) -> list[object]:
+        """Fails like an unreachable venue.
+
+        Returns:
+            Never returns.
+
+        Raises:
+            errors.VenueUnavailableError: Always.
+        """
+        raise errors.VenueUnavailableError("down")
+
+
 async def test_registry_reports_unreachable_venue_without_failing() -> None:
     """One failing venue does not break global search."""
-
-    class Down:
-        """Adapter that is unreachable."""
-
-        async def list_instruments(self) -> list[object]:
-            """Raises venue unavailable.
-
-            Returns:
-                Never returns.
-
-            Raises:
-                errors.VenueUnavailableError: Always.
-            """
-            raise errors.VenueUnavailableError("down")
-
     clock = clock_lib.ManualClock(_NOW)
     adapters = {
         instruments.Venue.MOCK: mock.MockAdapter(clock),
-        instruments.Venue.BITGET: Down(),
+        instruments.Venue.BITGET: _Down(),
     }
-    reg = registry.InstrumentRegistry(adapters)  # type: ignore[arg-type]
+    reg = registry.InstrumentRegistry(adapters)  # type: ignore[arg-type]  # _Down fakes only list_instruments of the adapter port
     assert len(await reg.search("btc")) == 1
     assert instruments.Venue.BITGET in reg.errors
     with pytest.raises(errors.VenueUnavailableError):

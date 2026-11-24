@@ -10,6 +10,7 @@ import decimal
 import json
 import pathlib
 from collections.abc import AsyncIterator
+from collections.abc import Callable
 
 import pytest
 
@@ -34,16 +35,16 @@ _D = decimal.Decimal
 def _candle(
     instrument: instruments.InstrumentId, start: int, final: bool, now: int
 ) -> market.Candle:
-    """Builds a candle.
+    """Builds a flat 1m candle.
 
     Args:
         instrument: Instrument.
-        start: Bar start.
-        final: Finality.
-        now: Receipt time.
+        start: Bar start, epoch milliseconds.
+        final: Whether the bar is final.
+        now: Receipt time, epoch milliseconds.
 
     Returns:
-        Candle.
+        The candle, all prices and the volume 1.
     """
     return market.Candle(
         instrument_id=instrument,
@@ -63,7 +64,16 @@ def _candle(
 
 
 class FakeAdapter:
-    """Controllable ``MarketDataPort`` double."""
+    """Controllable ``MarketDataPort`` double.
+
+    Attributes:
+        venue: Venue the double serves.
+        native: Whether native candles are advertised.
+        stream_fails: Whether the stream raises immediately.
+        clock: Clock stamping receipts; the stream advances it.
+        fetches: Number of candle fetches.
+        streams: Number of candle streams opened.
+    """
 
     def __init__(
         self,
@@ -91,7 +101,7 @@ class FakeAdapter:
         """Returns fake capabilities.
 
         Returns:
-            Capabilities.
+            REST history of 1m bars; native candles only if advertised.
         """
         return capabilities.VenueCapabilities(
             venue=self.venue,
@@ -113,17 +123,17 @@ class FakeAdapter:
         end_ms: int,
         limit: int | None = None,
     ) -> list[market.Candle]:
-        """Returns one live candle per call.
+        """Returns one live candle per call and counts the fetch.
 
         Args:
-            instrument: Instrument.
-            timeframe: Resolution.
-            start_ms: Start.
-            end_ms: End.
+            instrument: Instrument of the candle.
+            timeframe: Ignored.
+            start_ms: Ignored.
+            end_ms: Ignored.
             limit: Ignored.
 
         Returns:
-            Candles.
+            A live candle at ``_T0``, received now.
         """
         del timeframe, start_ms, end_ms, limit
         self.fetches += 1
@@ -137,13 +147,16 @@ class FakeAdapter:
     ) -> AsyncIterator[market.Candle]:
         """Yields candles or fails.
 
+        Counts the stream when it starts.
+
         Args:
-            instrument: Instrument.
-            timeframe: Resolution.
+            instrument: Instrument of the candles.
+            timeframe: Ignored.
             tracker: Ignored.
 
         Yields:
-            Candles.
+            A live candle at ``_T0`` every 10 ms; each advances the clock by
+            1 ms.
 
         Raises:
             errors.VenueUnavailableError: When configured to fail.
@@ -159,11 +172,7 @@ class FakeAdapter:
 
 
 async def _sleep(_: float) -> None:
-    """Yields control without waiting.
-
-    Args:
-        _: Ignored delay.
-    """
+    """Sleeps 5 ms whatever the delay, so retry loops yield to the test."""
     await asyncio.sleep(0.005)
 
 
@@ -176,15 +185,19 @@ def _router(
 ) -> feed_router.FeedRouter:
     """Builds a router around a fake adapter.
 
+    The router retries native streams only after an hour, so a session
+    stays on the transport it first falls back to.
+
     Args:
         adapter: Fake adapter.
         clock: Clock.
-        store: Optional store.
-        replay: Optional replay source.
-        emitted: Optional sink of ``(mode, candle)``.
+        store: Store; None uses a new one.
+        replay: Replay source; None configures none.
+        emitted: Receives ``(mode, candle)`` per emitted candle; None drops
+            them.
 
     Returns:
-        Router.
+        The router.
     """
 
     async def on_candle(
@@ -204,7 +217,7 @@ def _router(
             emitted.append((session.mode.value, candle))
 
     return feed_router.FeedRouter(
-        {adapter.venue: adapter},  # type: ignore[dict-item]
+        {adapter.venue: adapter},  # type: ignore[dict-item]  # implements only the MarketDataPort methods the router uses
         store or candle_store.CandleStore(),
         clock,
         replay=replay,
@@ -214,17 +227,22 @@ def _router(
     )
 
 
-async def _wait_for(predicate: object, limit_s: float = 2.0) -> None:
+async def _wait_for(
+    predicate: Callable[[], object], limit_s: float = 2.0
+) -> None:
     """Waits until ``predicate()`` is truthy.
 
     Args:
         predicate: Zero-argument callable.
         limit_s: Seconds before giving up.
+
+    Raises:
+        TimeoutError: ``predicate()`` stayed falsy for ``limit_s`` seconds.
     """
 
     async def loop() -> None:
         """Polls the predicate (state lives in the router under test)."""
-        while not predicate():  # type: ignore[operator]  # noqa: ASYNC110
+        while not predicate():  # noqa: ASYNC110 - polls state that the router's tasks change; there is no event to await
             await asyncio.sleep(0.005)
 
     await asyncio.wait_for(loop(), limit_s)
@@ -363,7 +381,7 @@ async def test_sessions_are_reference_counted() -> None:
 
 
 def test_illegal_transition_raises() -> None:
-    """The transition table is enforced."""
+    """A stopped session cannot go LIVE: the transition table is enforced."""
     session = feed_router.FeedSession(
         instrument=instruments.InstrumentId.parse("binance:perp:BTCUSDT"),
         timeframe=_TF,
@@ -376,7 +394,7 @@ def test_illegal_transition_raises() -> None:
 
 
 def test_unknown_venue_is_not_found() -> None:
-    """Disabled venues are reported, not guessed."""
+    """A venue without an adapter raises NotFoundError instead of guessing."""
     clock = clock_lib.ManualClock(_T0)
     adapter = FakeAdapter(instruments.Venue.BINANCE, True, False, clock)
     router = _router(adapter, clock)

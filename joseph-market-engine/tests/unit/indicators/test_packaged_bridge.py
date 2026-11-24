@@ -11,6 +11,7 @@ import pickle
 import zoneinfo
 from collections.abc import Mapping
 from collections.abc import Sequence
+from typing import NoReturn
 
 import pytest
 from smc_indicators import fvg_ifvg
@@ -38,7 +39,12 @@ _AOI = structures.AoiState
 
 
 class _Scripted:
-    """Library stand-in that replays scripted zones and events."""
+    """Library stand-in that replays scripted zones and events.
+
+    Attributes:
+        script: ``(zones, events)`` to return, one entry per bar.
+        index: Index of the next entry to return.
+    """
 
     def __init__(
         self,
@@ -58,10 +64,10 @@ class _Scripted:
         """Returns the next scripted result.
 
         Args:
-            bar: Ignored library bar.
+            bar: Library bar; only its time is used.
 
         Returns:
-            Scripted result.
+            The next entry as a result stamped with the bar's time.
         """
         zones, events = self.script[self.index]
         self.index += 1
@@ -78,7 +84,14 @@ _SCRIPT: list[tuple[list[smc_types.Zone], list[smc_types.Event]]] = []
 
 
 class _ScriptedPlugin(bridge.PackagedPlugin):
-    """Adapter around ``_Scripted`` for testing the generic bridge."""
+    """Adapter around ``_Scripted`` for testing the generic bridge.
+
+    Attributes:
+        PLUGIN_ID: Registry id.
+        DISPLAY_NAME: Name shown to users.
+        DESCRIPTION: One-line description.
+        SETTINGS: Settings schema; only the tick size.
+    """
 
     PLUGIN_ID = "scripted"
     DISPLAY_NAME = "Scripted"
@@ -99,7 +112,7 @@ class _ScriptedPlugin(bridge.PackagedPlugin):
             timeframe: Ignored.
 
         Returns:
-            Objects by role.
+            The library objects by role: one ``_Scripted`` over ``_SCRIPT``.
         """
         del settings, tick, timeframe
         return {"main": _Scripted(_SCRIPT)}
@@ -114,13 +127,13 @@ class _ScriptedPlugin(bridge.PackagedPlugin):
         """Replays one scripted bar.
 
         Args:
-            payload: Live payload.
+            payload: Live payload holding the ``_Scripted`` object.
             bar: Bar input.
             settings: Ignored.
             step: Ignored.
 
         Returns:
-            Library step.
+            The scripted zones and events of this bar.
         """
         del settings, step
         scripted = payload.objects["main"]
@@ -130,18 +143,18 @@ class _ScriptedPlugin(bridge.PackagedPlugin):
 
 
 def _zone(
-    zone_id: str, kind: str, side: int = 1, **meta: object
+    zone_id: str, kind: str, side: int = 1, **meta: smc_types.Value
 ) -> smc_types.Zone:
-    """Builds a library zone.
+    """Builds a library zone spanning 100 to 101.
 
     Args:
         zone_id: Library id.
-        kind: Library kind.
-        side: Side.
-        **meta: Zone meta.
+        kind: Library kind, such as ``FVG``.
+        side: ``1`` bullish, ``-1`` bearish, ``0`` neutral.
+        **meta: Script-specific zone fields.
 
     Returns:
-        Zone.
+        A zone created and confirmed at the default start time.
     """
     return smc_types.Zone(
         zone_id=zone_id,
@@ -151,7 +164,7 @@ def _zone(
         bottom=100.0,
         origin_time_ms=testing.DEFAULT_START_MS,
         confirmed_time_ms=testing.DEFAULT_START_MS,
-        meta=meta,  # type: ignore[arg-type]
+        meta=meta,
     )
 
 
@@ -159,6 +172,8 @@ def _run_script(
     script: list[tuple[list[smc_types.Zone], list[smc_types.Event]]],
 ) -> list[tuple[structures.IndicatorSnapshot, protocol.PluginOutput]]:
     """Runs the scripted plugin over random bars.
+
+    Sets the module-level ``_SCRIPT`` that the plugin reads.
 
     Args:
         script: Per-bar library output.
@@ -253,7 +268,7 @@ class _Evil:
         """Reduces to ``os.getcwd()``.
 
         Returns:
-            Reduce tuple.
+            The callable and its arguments for unpickling.
         """
         return os.getcwd, ()
 
@@ -358,7 +373,7 @@ def test_fvg_adapter_publishes_exactly_the_library_zones(seed: int) -> None:
 
 @pytest.mark.parametrize("seed", [4, 5])
 def test_structure_and_liquidity_adapters_match_the_library(seed: int) -> None:
-    """Event counts of the adapters equal the library's."""
+    """The adapters publish the library's events in order, under aliases."""
     candles = testing.random_walk(500, seed=seed, timeframe=M5)
     bars = [convert.to_bar(c) for c in candles]
     for library, plugin in (
@@ -371,12 +386,13 @@ def test_structure_and_liquidity_adapters_match_the_library(seed: int) -> None:
             packaged.LiquiditySweepsPlugin(),
         ),
     ):
-        names = [
-            event.name
-            for result in library.run(bars)
-            for event in result.events
-            if plugin._event_name(event) is not None
-        ]
+        names: list[str] = []
+        for result in library.run(bars):
+            names.extend(
+                event.name
+                for event in result.events
+                if plugin._event_name(event) is not None
+            )
         got = testing.event_names(
             testing.run_bars(plugin, candles, settings={"tick_size": "0.01"})
         )
@@ -385,7 +401,7 @@ def test_structure_and_liquidity_adapters_match_the_library(seed: int) -> None:
 
 
 def test_settings_outside_the_pine_bounds_are_rejected_up_front() -> None:
-    """Out-of-range inputs fail at initialize with a validation error."""
+    """Out-of-range settings and unsupported timeframes fail at initialize."""
     plugin = packaged.FvgIfvgPlugin()
     with pytest.raises(errors.ValidationFailedError):
         plugin.initialize(testing.DEFAULT_INSTRUMENT, M5, {"max_zones": 101})
@@ -395,35 +411,52 @@ def test_settings_outside_the_pine_bounds_are_rejected_up_front() -> None:
         )
 
 
+class _Strict(_ScriptedPlugin):
+    """Adapter whose library refuses every configuration.
+
+    Attributes:
+        PLUGIN_ID: Registry id; it prefixes the validation message.
+    """
+
+    PLUGIN_ID = "strict"
+
+    def _build(
+        self,
+        settings: Mapping[str, settings_lib.SettingValue],
+        tick: decimal.Decimal,
+        timeframe: timeframes.Timeframe,
+    ) -> NoReturn:
+        """Rejects the configuration as the library would.
+
+        Args:
+            settings: Ignored.
+            tick: Ignored.
+            timeframe: Ignored.
+
+        Raises:
+            ValueError: Always.
+        """
+        del settings, tick, timeframe
+        raise ValueError("nope")
+
+
 def test_library_rejections_become_validation_errors() -> None:
     """A rule the settings schema cannot express still yields a 422."""
-
-    class _Strict(_ScriptedPlugin):
-        """Adapter whose library refuses every configuration."""
-
-        PLUGIN_ID = "strict"
-
-        def _build(
-            self,
-            settings: Mapping[str, settings_lib.SettingValue],
-            tick: decimal.Decimal,
-            timeframe: timeframes.Timeframe,
-        ) -> dict[str, object]:
-            """Rejects the configuration.
-
-            Args:
-                settings: Ignored.
-                tick: Ignored.
-                timeframe: Ignored.
-
-            Raises:
-                ValueError: Always.
-            """
-            del settings, tick, timeframe
-            raise ValueError("nope")
-
     with pytest.raises(errors.ValidationFailedError, match="strict: nope"):
         _Strict().initialize(testing.DEFAULT_INSTRUMENT, M5, None)
+
+
+def _explode(bar: smc_types.Bar) -> NoReturn:
+    """Fails like a library bug would.
+
+    Args:
+        bar: Library bar.
+
+    Raises:
+        RuntimeError: Always.
+    """
+    del bar
+    raise RuntimeError("library failure")
 
 
 def test_a_failed_bar_does_not_corrupt_the_previous_state() -> None:
@@ -439,20 +472,7 @@ def test_a_failed_bar_does_not_corrupt_the_previous_state() -> None:
     assert payload is not None and state.cell.head == state.version
     indicator = payload.objects["main"]
     assert isinstance(indicator, fvg_ifvg.FvgIfvg)
-
-    def _explode(bar: smc_types.Bar) -> smc_types.Result:
-        """Fails like a library bug would.
-
-        Args:
-            bar: Library bar.
-
-        Raises:
-            RuntimeError: Always.
-        """
-        del bar
-        raise RuntimeError("library failure")
-
-    indicator.update = _explode  # type: ignore[method-assign]
+    indicator.update = _explode  # type: ignore[method-assign]  # simulate a library crash mid-bar
     with pytest.raises(RuntimeError):
         plugin.on_bar_closed(state, protocol.BarInput(candles[30]))
     assert state.cell.head == -1

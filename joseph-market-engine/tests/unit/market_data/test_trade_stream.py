@@ -9,6 +9,8 @@ import contextlib
 import decimal
 import json
 from collections.abc import AsyncIterator
+from typing import NoReturn
+from typing import TypeAlias
 
 import pytest
 
@@ -26,19 +28,20 @@ _ID = instruments.InstrumentId.parse("binance:perp:BTCUSDT")
 _T0 = 1_795_349_070_000
 _D = decimal.Decimal
 
-Frame = tuple[int, str]
+Frame: TypeAlias = tuple[int, str]
+"""Milliseconds to advance the clock by, then the frame text to deliver."""
 
 
 def _trade(trade_id: int, ts: int, price: str = "100") -> market.Trade:
-    """Builds a trade.
+    """Builds a buyer-initiated trade of one ``_ID`` contract.
 
     Args:
-        trade_id: Trade id.
-        ts: Venue time.
-        price: Price.
+        trade_id: Venue trade id, converted with ``str``.
+        ts: Venue event time in epoch milliseconds, also the receive time.
+        price: Price as a decimal string.
 
     Returns:
-        Trade.
+        The trade.
     """
     return market.Trade(
         instrument_id=_ID,
@@ -56,10 +59,10 @@ def _trades_frame(*rows: tuple[int, int]) -> str:
     """Encodes ``(id, ts)`` trades as a test frame.
 
     Args:
-        *rows: Trade ids and venue times.
+        *rows: Trade id and venue time in epoch milliseconds of each trade.
 
     Returns:
-        Frame text.
+        The JSON frame text that ``_parse`` reads.
     """
     return json.dumps({"trades": [{"id": i, "ts": t} for i, t in rows]})
 
@@ -68,14 +71,14 @@ def _parse(raw: str | bytes, now_ms: int) -> list[market.Trade]:
     """Parses a test frame (``pong`` and acks carry no trades).
 
     Args:
-        raw: Frame.
-        now_ms: Receipt time.
+        raw: JSON frame text.
+        now_ms: Receipt time (ignored).
 
     Returns:
-        Trades.
+        The frame's trades; none for a frame without ``trades``.
 
     Raises:
-        ValueError: For a frame marked broken.
+        ValueError: The frame has ``"broken"`` set.
     """
     del now_ms
     message = json.loads(raw)
@@ -85,13 +88,21 @@ def _parse(raw: str | bytes, now_ms: int) -> list[market.Trade]:
 
 
 class FakeConnection:
-    """Delivers ``(advance_ms, frame)`` pairs, then disconnects."""
+    """WebSocket double that delivers scripted frames, then disconnects.
 
-    def __init__(self, frames: list[Frame], clock: clock_lib.ManualClock):
+    Attributes:
+        frames: Frames left to deliver, each after its clock advance.
+        clock: Clock advanced as frames arrive.
+        sent: Every message sent, in order.
+    """
+
+    def __init__(
+        self, frames: list[Frame], clock: clock_lib.ManualClock
+    ) -> None:
         """Initializes the connection.
 
         Args:
-            frames: Clock advances and frames.
+            frames: Frames to deliver, each after its clock advance.
             clock: Clock advanced as frames arrive.
         """
         self.frames = list(frames)
@@ -99,21 +110,21 @@ class FakeConnection:
         self.sent: list[str] = []
 
     async def send(self, message: str) -> None:
-        """Records a sent frame.
+        """Records a sent message in ``sent``.
 
         Args:
-            message: Frame.
+            message: Message text.
         """
         self.sent.append(message)
 
     async def recv(self) -> str:
-        """Returns the next frame.
+        """Advances the clock and returns the next frame.
 
         Returns:
-            Frame.
+            The next frame text.
 
         Raises:
-            OSError: When the script is exhausted.
+            OSError: No frame is left (the connection drops).
         """
         if not self.frames:
             raise OSError("disconnected")
@@ -123,7 +134,14 @@ class FakeConnection:
 
 
 class FakeConnector:
-    """Hands out scripted connections (``None`` fails to connect)."""
+    """Connect function double that hands out scripted connections.
+
+    Attributes:
+        scripts: Frame scripts left, one per connection attempt; ``None``
+            fails that attempt.
+        clock: Clock the connections advance.
+        connections: Every connection opened, in order.
+    """
 
     def __init__(
         self, scripts: list[list[Frame] | None], clock: clock_lib.ManualClock
@@ -131,8 +149,9 @@ class FakeConnector:
         """Initializes the connector.
 
         Args:
-            scripts: One frame script per connection attempt.
-            clock: Clock.
+            scripts: One frame script per connection attempt; ``None`` fails
+                that attempt.
+            clock: Clock the connections advance.
         """
         self.scripts = list(scripts)
         self.clock = clock
@@ -140,16 +159,16 @@ class FakeConnector:
 
     @contextlib.asynccontextmanager
     async def __call__(self, url: str) -> AsyncIterator[FakeConnection]:
-        """Opens the next scripted connection.
+        """Opens the next scripted connection and records it.
 
         Args:
-            url: Ignored.
+            url: Stream URL (ignored).
 
         Yields:
-            Connection.
+            The connection.
 
         Raises:
-            OSError: For failing attempts or exhausted scripts.
+            OSError: The attempt is scripted to fail or no script is left.
         """
         del url
         if not self.scripts:
@@ -163,21 +182,17 @@ class FakeConnector:
 
 
 async def _no_sleep(_: float) -> None:
-    """Returns immediately.
-
-    Args:
-        _: Ignored delay.
-    """
+    """Returns at once, whatever the requested delay."""
 
 
 def _spec(replays: bool = False) -> ws.WsTradeSpec:
-    """Builds a test stream spec.
+    """Builds a test stream spec that parses frames with ``_parse``.
 
     Args:
         replays: Whether the venue replays recent trades on subscribe.
 
     Returns:
-        Spec.
+        The spec.
     """
     return ws.WsTradeSpec(
         url="wss://test",
@@ -193,10 +208,11 @@ async def _events(
     """Collects events until the stream gives up.
 
     Args:
-        stream: Event stream.
+        stream: Event stream; its final ``VenueUnavailableError`` is
+            swallowed.
 
     Returns:
-        Events.
+        The events in stream order.
     """
     out: list[ws.TradeStreamEvent] = []
     with contextlib.suppress(errors.VenueUnavailableError):
@@ -209,24 +225,23 @@ def _ids(events: list[ws.TradeStreamEvent]) -> list[str]:
     """Lists delivered trade ids.
 
     Args:
-        events: Events.
+        events: Stream events.
 
     Returns:
-        Trade ids in order.
+        Ids of the trades in ``TradesReceived`` events, in order.
     """
-    return [
-        t.trade_id
-        for e in events
-        if isinstance(e, ws.TradesReceived)
-        for t in e.trades
-    ]
+    ids: list[str] = []
+    for event in events:
+        if isinstance(event, ws.TradesReceived):
+            ids.extend(trade.trade_id for trade in event.trades)
+    return ids
 
 
 def _starts(events: list[ws.TradeStreamEvent]) -> list[int | None]:
     """Lists coverage starts.
 
     Args:
-        events: Events.
+        events: Stream events.
 
     Returns:
         ``complete_from_ms`` of every ``CoverageStart``.
@@ -237,7 +252,7 @@ def _starts(events: list[ws.TradeStreamEvent]) -> list[int | None]:
 
 
 async def test_first_connection_without_backfill_has_unknown_start() -> None:
-    """Coverage starts at the first trade; every frame proves delivery."""
+    """Without backfill the start is unknown; every frame proves delivery."""
     clock = clock_lib.ManualClock(_T0)
     connector = FakeConnector(
         [[(5, _trades_frame((1, _T0 + 1))), (5, '{"pong":1}')]], clock
@@ -263,14 +278,14 @@ async def test_prime_backfill_starts_known_coverage() -> None:
     calls: list[tuple[int, int]] = []
 
     async def backfill(start: int, end: int) -> trades_lib.TradeCoverage:
-        """Returns one trade.
+        """Records the request in ``calls`` and serves one trade.
 
         Args:
-            start: Start.
-            end: End.
+            start: Requested inclusive start, epoch milliseconds.
+            end: Requested exclusive end, epoch milliseconds.
 
         Returns:
-            Coverage.
+            Complete coverage of the span with one trade at ``_T0 + 1_200``.
         """
         calls.append((start, end))
         return trades_lib.TradeCoverage((_trade(7, _T0 + 1_200),), start, end)
@@ -301,14 +316,15 @@ async def test_reconnect_backfills_missed_trades_and_dedupes() -> None:
     requests: list[tuple[int, int]] = []
 
     async def backfill(start: int, end: int) -> trades_lib.TradeCoverage:
-        """Returns the overlap plus one missed trade.
+        """Records the request in ``requests`` and serves the outage.
 
         Args:
-            start: Start.
-            end: End.
+            start: Requested inclusive start, epoch milliseconds.
+            end: Requested exclusive end, epoch milliseconds.
 
         Returns:
-            Coverage.
+            Complete coverage of the span: one already seen trade and one
+            missed trade.
         """
         requests.append((start, end))
         return trades_lib.TradeCoverage(
@@ -365,24 +381,24 @@ async def test_reconnect_without_backfill_records_gap() -> None:
     assert tracker.gaps == 1
 
 
+async def _failing_backfill(start: int, end: int) -> NoReturn:
+    """Fails every REST backfill.
+
+    Args:
+        start: Requested inclusive start (ignored).
+        end: Requested exclusive end (ignored).
+
+    Raises:
+        errors.VenueUnavailableError: Always.
+    """
+    del start, end
+    raise errors.VenueUnavailableError("down")
+
+
 async def test_failed_backfill_records_gap_and_breaks_coverage() -> None:
     """A REST failure during recovery is a gap, never silently bridged."""
     clock = clock_lib.ManualClock(_T0)
     tracker = health.FeedHealthTracker(instruments.Venue.BITGET)
-
-    async def backfill(start: int, end: int) -> trades_lib.TradeCoverage:
-        """Fails.
-
-        Args:
-            start: Start.
-            end: End.
-
-        Raises:
-            errors.VenueUnavailableError: Always.
-        """
-        del start, end
-        raise errors.VenueUnavailableError("down")
-
     events = await _events(
         ws.trade_stream_events(
             _spec(),
@@ -394,7 +410,7 @@ async def test_failed_backfill_records_gap_and_breaks_coverage() -> None:
                 ],
                 clock,
             ),
-            backfill=backfill,
+            backfill=_failing_backfill,
             max_failures=2,
             sleep=_no_sleep,
             tracker=tracker,
@@ -405,22 +421,22 @@ async def test_failed_backfill_records_gap_and_breaks_coverage() -> None:
     assert tracker.last_error is not None
 
 
+async def _tail_backfill(start: int, end: int) -> trades_lib.TradeCoverage:
+    """Serves a page-capped backfill that covers only the outage's tail.
+
+    Args:
+        start: Requested inclusive start, epoch milliseconds.
+        end: Requested exclusive end, epoch milliseconds.
+
+    Returns:
+        Coverage without trades that starts 5 ms after ``start``.
+    """
+    return trades_lib.TradeCoverage((), start + 5, end)
+
+
 async def test_incomplete_backfill_is_not_recovery() -> None:
     """A page-capped backfill that misses the resume point breaks coverage."""
     clock = clock_lib.ManualClock(_T0)
-
-    async def backfill(start: int, end: int) -> trades_lib.TradeCoverage:
-        """Covers only the tail of the outage.
-
-        Args:
-            start: Start.
-            end: End.
-
-        Returns:
-            Coverage starting after ``start``.
-        """
-        return trades_lib.TradeCoverage((), start + 5, end)
-
     events = await _events(
         ws.trade_stream_events(
             _spec(),
@@ -432,7 +448,7 @@ async def test_incomplete_backfill_is_not_recovery() -> None:
                 ],
                 clock,
             ),
-            backfill=backfill,
+            backfill=_tail_backfill,
             max_failures=2,
             sleep=_no_sleep,
         )
@@ -518,7 +534,7 @@ async def test_trade_stream_gives_up_after_max_failures() -> None:
 
 
 async def test_stream_trades_yields_trades_only() -> None:
-    """The plain trade stream hides coverage bookkeeping."""
+    """The plain trade stream yields de-duplicated trades only."""
     clock = clock_lib.ManualClock(_T0)
     out: list[str] = []
     with contextlib.suppress(errors.VenueUnavailableError):
@@ -535,24 +551,25 @@ async def test_stream_trades_yields_trades_only() -> None:
     assert out == ["1", "2"]
 
 
+async def _primed_backfill(start: int, end: int) -> trades_lib.TradeCoverage:
+    """Serves the history that primes the stream.
+
+    Args:
+        start: Requested inclusive start, epoch milliseconds.
+        end: Requested exclusive end, epoch milliseconds.
+
+    Returns:
+        Complete coverage of the span with one trade at ``_T0 + 1_100``, in
+        the bar that is live when the stream starts.
+    """
+    return trades_lib.TradeCoverage(
+        (_trade(1, _T0 + 1_100, "100"),), start, end
+    )
+
+
 async def test_trade_candles_finalize_on_heartbeat_after_grace() -> None:
-    """A quiet bar turns final once a later frame proves delivery."""
+    """A quiet bar turns final once a frame proves delivery past the grace."""
     clock = clock_lib.ManualClock(_T0 + 1_500)
-
-    async def backfill(start: int, end: int) -> trades_lib.TradeCoverage:
-        """Returns the primed history.
-
-        Args:
-            start: Start.
-            end: End.
-
-        Returns:
-            Coverage with one trade in the live bar.
-        """
-        return trades_lib.TradeCoverage(
-            (_trade(1, _T0 + 1_100, "100"),), start, end
-        )
-
     connector = FakeConnector(
         [
             [
@@ -574,7 +591,7 @@ async def test_trade_candles_finalize_on_heartbeat_after_grace() -> None:
             builder,
             clock=clock,
             connect=connector,
-            backfill=backfill,
+            backfill=_primed_backfill,
             grace_ms=1_500,
             max_failures=1,
             sleep=_no_sleep,
@@ -588,7 +605,7 @@ async def test_trade_candles_finalize_on_heartbeat_after_grace() -> None:
 
 
 async def test_trade_candles_record_gap_for_discarded_open_bar() -> None:
-    """An unrecoverable outage drops the open bar and records it."""
+    """An unrecoverable outage drops the open bar and records a gap."""
     clock = clock_lib.ManualClock(_T0)
     tracker = health.FeedHealthTracker(instruments.Venue.MEXC)
     builder = trade_bars.TradeBarBuilder(

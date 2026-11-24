@@ -43,7 +43,7 @@ def _rows(name: str) -> list[list[object]]:
         name: File name without extension.
 
     Returns:
-        Kline rows.
+        The kline rows as JSON arrays.
     """
     path = _FIXTURES / "venues" / "binance" / f"{name}.json"
     rows: list[list[object]] = json.loads(path.read_text())
@@ -58,7 +58,7 @@ def _klines(name: str, tf: timeframes.Timeframe) -> list[market.Candle]:
         tf: Timeframe of the rows.
 
     Returns:
-        Candles.
+        The candles, received at ``_CAPTURED``.
     """
     return [
         binance.parse_kline_row(row, _BTC, tf, _CAPTURED) for row in _rows(name)
@@ -76,20 +76,21 @@ def _day(
     tf: timeframes.Timeframe = _TF.D1,
     received: int = 0,
 ) -> market.Candle:
-    """Builds a child bar.
+    """Builds a child bar for aggregation.
 
     Args:
-        start: Bar start.
-        final: Finality.
-        taker: Taker buy volume.
-        method: Buy-volume method.
-        price: Open/close price.
-        instrument: Instrument.
+        start: Bar start, epoch milliseconds.
+        final: Whether the bar is final.
+        taker: Taker buy base volume as a decimal string; None leaves it
+            unknown.
+        method: How the taker buy volume was measured.
+        price: Open and close price; high and low are one above and below.
+        instrument: Instrument of the bar.
         tf: Child timeframe.
-        received: Receipt time.
+        received: Receipt time, epoch milliseconds.
 
     Returns:
-        Candle.
+        The candle, with base volume 2, quote turnover 20 and 3 trades.
     """
     return market.Candle(
         instrument_id=instrument,
@@ -202,7 +203,7 @@ def test_missing_closed_child_leaves_the_period_a_gap() -> None:
 
 
 def test_live_period_is_closed_children_plus_current_child() -> None:
-    """The current month folds closed days and today's (missing) bar."""
+    """The live month folds the closed days, then today's bar once it exists."""
     now = _NOV + 5 * _DAY + 3_600_000
     closed = [_day(_NOV + i * _DAY) for i in range(5)]
     month = aggregation.aggregate(
@@ -249,7 +250,7 @@ def test_closed_period_with_unconfirmed_child_is_not_final() -> None:
 
 
 def test_optional_sums_need_every_child() -> None:
-    """Taker volume is dropped when one child lacks it or methods differ."""
+    """Optional sums are dropped when a child lacks them or methods conflict."""
     now = _NOV + 3 * _DAY
     missing = [_day(_NOV), _day(_NOV + _DAY, taker=None), _day(_NOV + 2 * _DAY)]
     month = aggregation.aggregate(

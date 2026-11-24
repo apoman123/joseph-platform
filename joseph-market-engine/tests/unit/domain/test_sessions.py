@@ -91,7 +91,7 @@ XTAI = sessions.XTAI
     ],
 )
 def test_nyse_holidays_have_no_session(day: datetime.date) -> None:
-    """Published NYSE closures (2026/2027 schedules, ad hoc days)."""
+    """Published NYSE closures, ad hoc days included, have no session."""
     assert XNYS.session(day) is None
 
 
@@ -110,7 +110,7 @@ def test_saturday_new_year_is_not_observed_on_friday() -> None:
     ],
 )
 def test_early_closes(day: datetime.date, close_hour: int) -> None:
-    """Day after Thanksgiving, Christmas Eve and July 3 close at 13:00."""
+    """Early-close days end at 13:00; the day before Thanksgiving does not."""
     found = XNYS.session(day)
     assert found is not None
     assert found.close_ms == _ny(day.year, day.month, day.day, close_hour)
@@ -176,7 +176,7 @@ def test_shift_skips_weekends_and_holidays() -> None:
 
 
 def test_periodic_bars() -> None:
-    """Daily = session, weekly = ISO week, monthly = calendar month."""
+    """Daily bars are sessions, weekly ISO weeks, monthly calendar months."""
     tuesday = _ny(2026, 11, 24, 11)
     assert XNYS.floor(TF.D1, tuesday) == _ny(2026, 11, 24, 9, 30)
     assert XNYS.end_of(TF.D1, _ny(2026, 11, 24, 9, 30)) == _ny(2026, 11, 24, 16)
@@ -204,7 +204,7 @@ def test_last_closed_start_respects_sessions() -> None:
 
 
 def test_nesting_rules() -> None:
-    """Intraday bars nest by divisibility; anything intraday nests in 1d."""
+    """Intraday bars nest by divisibility and in 1d; weeks not in months."""
     assert XNYS.contains(TF.H4, TF.H1)
     assert XNYS.contains(TF.D1, TF.H4)
     assert XNYS.contains(TF.D1, TF.H12)
@@ -398,7 +398,7 @@ def test_calendar_lookup_by_instrument() -> None:
 
 
 def test_sessions_listing() -> None:
-    """Sessions overlapping a window, in order."""
+    """Listing returns the sessions overlapping a window, in order."""
     listed = XNYS.sessions(_ny(2026, 11, 20, 12), _ny(2026, 11, 24))
     assert [s.day for s in listed] == [D(2026, 11, 20), D(2026, 11, 23)]
     assert listed[0].to_contract()["day"] == "2026-11-20"
@@ -412,11 +412,14 @@ def test_candles_validate_against_the_calendar() -> None:
         """Builds a flat equity bar.
 
         Args:
-            start_ms: Bar start.
-            end_ms: Bar end.
+            start_ms: Bar start, epoch ms.
+            end_ms: Bar end, epoch ms.
 
         Returns:
             The candle.
+
+        Raises:
+            ValueError: The bounds do not fit the instrument's calendar.
         """
         price = decimal.Decimal(1)
         return market.Candle(

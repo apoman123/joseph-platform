@@ -42,14 +42,14 @@ def _minute(
 
     Args:
         offset: Minutes after the open.
-        close: Close.
-        final: Finality.
-        count: Trade count.
-        taker: Buy volume.
+        close: High and close as a decimal string.
+        final: Whether the bar is final.
+        count: Trade count, or None when unknown.
+        taker: Classified buy volume, or None when unknown.
         instrument: Instrument.
 
     Returns:
-        Candle.
+        A bar that opens at 10 with low 9, volume 2 and turnover 20.
     """
     return session_bars.candle(
         instrument_id=instrument,
@@ -205,15 +205,15 @@ def _tape(
     """Builds a tape-C trade relative to the open.
 
     Args:
-        trade_id: Id.
+        trade_id: Trade id.
         offset_ms: Milliseconds after the open.
-        price: Price.
+        price: Price as a decimal string.
         size: Shares.
-        conditions: Sale conditions.
+        conditions: Sale condition codes.
         side: Classified side.
 
     Returns:
-        Trade.
+        The tape-C trade.
     """
     return us_trade_bars.TapeTrade(
         trade_id=trade_id,
@@ -338,14 +338,14 @@ def _print(
     """Builds a tape-C trade at an absolute time.
 
     Args:
-        trade_id: Id.
-        ts_ms: Trade time.
-        price: Price.
+        trade_id: Trade id.
+        ts_ms: Trade time in epoch milliseconds.
+        price: Price as a decimal string.
         size: Shares.
-        conditions: Sale conditions.
+        conditions: Sale condition codes.
 
     Returns:
-        Trade.
+        The tape-C trade, classified as a buy.
     """
     return us_trade_bars.TapeTrade(
         trade_id=trade_id,
@@ -491,10 +491,10 @@ def _last_minute(*, final: bool = True) -> market.Candle:
     """Builds the session's last 1m bar as Alpaca reports it.
 
     Args:
-        final: Finality.
+        final: Whether the bar is final.
 
     Returns:
-        Candle without the closing print.
+        The 15:59 bar without the closing print.
     """
     return dataclasses.replace(
         _minute(389, "10.00", final=final, count=4),
@@ -554,43 +554,43 @@ def test_fold_closing_prints_follows_the_update_rules() -> None:
     assert folded.quote_turnover is None
 
 
+def _fold(
+    bar: market.Candle | None, prints: list[us_trade_bars.TapeTrade]
+) -> market.Candle | None:
+    """Folds closing prints into the regular session's last minute.
+
+    Args:
+        bar: The last minute's bar, or None for a quiet minute.
+        prints: Closing prints to fold.
+
+    Returns:
+        The folded bar, not final; None when nothing sets a price.
+    """
+    return us_trade_bars.fold_closing_prints(
+        bar,
+        prints,
+        instrument_id=_AAPL,
+        timeframe=_TF.M1,
+        start_ms=_LAST_MINUTE,
+        now_ms=_CLOSE + 70_000,
+        source="alpaca.rest",
+        is_final=False,
+    )
+
+
 def test_fold_closing_prints_without_a_bar_or_prints() -> None:
     """A quiet last minute gets a bar from a price print, else nothing."""
     cross = _print("cross", _CLOSE + 4, "10.10", 9_000, ("@", "6"))
     odd = _print("odd", _CLOSE + 900, "10.90", 30, ("@", "6", "I"))
-
-    def fold(
-        bar: market.Candle | None, prints: list[us_trade_bars.TapeTrade]
-    ) -> market.Candle | None:
-        """Folds prints into the last minute.
-
-        Args:
-            bar: Last minute bar.
-            prints: Closing prints.
-
-        Returns:
-            Folded bar.
-        """
-        return us_trade_bars.fold_closing_prints(
-            bar,
-            prints,
-            instrument_id=_AAPL,
-            timeframe=_TF.M1,
-            start_ms=_LAST_MINUTE,
-            now_ms=_CLOSE + 70_000,
-            source="alpaca.rest",
-            is_final=False,
-        )
-
-    created = fold(None, [cross, odd])
+    created = _fold(None, [cross, odd])
     assert created is not None and not created.is_final
     assert created.open == created.high == created.low == created.close
     assert created.close == _D("10.10") and created.base_volume == _D(9_030)
     assert created.source == "alpaca.rest" and created.trade_count == 2
-    assert fold(None, [odd]) is None
-    assert fold(None, []) is None
+    assert _fold(None, [odd]) is None
+    assert _fold(None, []) is None
     bar = _last_minute()
-    unchanged = fold(bar, [])
+    unchanged = _fold(bar, [])
     assert unchanged == dataclasses.replace(bar, is_final=False)
 
 

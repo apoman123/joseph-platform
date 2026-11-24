@@ -6,6 +6,7 @@
 from __future__ import annotations
 
 import logging
+import pathlib
 
 import pytest
 
@@ -22,7 +23,7 @@ from joseph.platform import redaction
 
 
 def test_settings_from_env_parses_every_field() -> None:
-    """All JOSEPH_* variables are honored."""
+    """JOSEPH_* variables are parsed, normalized and clamped."""
     settings = config.Settings.from_env(
         {
             "JOSEPH_DEV_TOKENS": "tok-a:tenant-01:user-01, tok-b:tenant-02:u2",
@@ -151,7 +152,7 @@ def test_redacting_filter_applies_to_formatted_records(
     logger = logging.getLogger("joseph.test.redaction")
     handler = logging.Handler()
     records: list[logging.LogRecord] = []
-    handler.emit = records.append  # type: ignore[method-assign,assignment]
+    handler.emit = records.append  # type: ignore[method-assign,assignment]  # collect records instead of emitting them
     handler.addFilter(redaction.RedactingFilter())
     logger.addHandler(handler)
     try:
@@ -181,31 +182,32 @@ def test_metrics_render_prometheus_text() -> None:
         counter.inc(-1)
 
 
+async def _failing_handler(event: events.DomainEvent) -> None:
+    """Fails on every event, as a buggy subscriber would.
+
+    Args:
+        event: Published event.
+
+    Raises:
+        RuntimeError: Always.
+    """
+    raise RuntimeError(event.event_type)
+
+
 async def test_event_bus_isolates_failing_handlers() -> None:
     """One failing handler does not block the others."""
     event_bus = bus.EventBus()
     seen: list[str] = []
 
     async def good(event: events.DomainEvent) -> None:
-        """Records the event.
+        """Records the event type in ``seen``.
 
         Args:
-            event: Event.
+            event: Published event.
         """
         seen.append(event.event_type)
 
-    async def bad(event: events.DomainEvent) -> None:
-        """Always fails.
-
-        Args:
-            event: Event.
-
-        Raises:
-            RuntimeError: Always.
-        """
-        raise RuntimeError(event.event_type)
-
-    event_bus.subscribe("x.happened", bad)
+    event_bus.subscribe("x.happened", _failing_handler)
     unsubscribe = event_bus.subscribe("*", good)
     event = events.DomainEvent("x.happened", {}, "k1", 1)
     await event_bus.publish(event)
@@ -264,8 +266,10 @@ def test_inbox_deduplicates_per_consumer() -> None:
     assert inbox.processed("alerts") == ["k1"]
 
 
-def test_file_database_creates_parent_directory(tmp_path: object) -> None:
-    """File-based SQLite URLs create their directory."""
+def test_file_database_creates_parent_directory(
+    tmp_path: pathlib.Path,
+) -> None:
+    """A file SQLite URL in a missing directory builds an engine on it."""
     path = f"{tmp_path}/nested/market.db"
     engine = db.create_engine(f"sqlite:///{path}")
     assert engine.url.database == path

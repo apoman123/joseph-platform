@@ -7,6 +7,7 @@ from __future__ import annotations
 
 import decimal
 from collections.abc import Callable
+from typing import TypeAlias
 
 import pytest
 
@@ -16,18 +17,19 @@ from joseph.market_data.domain import trades as trades_lib
 
 _ID = instruments.InstrumentId.parse("lighter:perp:BTC")
 _D = decimal.Decimal
-Validate = Callable[[str, str, object], None]
+Validate: TypeAlias = Callable[[str, str, object], None]
+"""``contract_validate(schema_file, definition, instance)`` from conftest."""
 
 
 def _trade(trade_id: int, ts: int) -> market.Trade:
-    """Builds a trade.
+    """Builds a Lighter-shaped buy trade received 5 ms after it happened.
 
     Args:
-        trade_id: Trade id.
-        ts: Venue time.
+        trade_id: Venue trade id, converted with ``str``.
+        ts: Venue event time, epoch milliseconds.
 
     Returns:
-        Trade.
+        The trade.
     """
     return market.Trade(
         instrument_id=_ID,
@@ -43,7 +45,7 @@ def _trade(trade_id: int, ts: int) -> market.Trade:
 
 
 def test_recent_ids_forget_oldest_and_report_membership() -> None:
-    """The bounded set keeps the newest ids only."""
+    """The bounded id set keeps the newest ids and filters repeated trades."""
     seen = trades_lib.RecentIds(2)
     assert seen.add("a") and seen.add("b")
     assert not seen.add("a")
@@ -74,7 +76,7 @@ def test_keep_latest_cuts_at_whole_milliseconds() -> None:
 
 
 def test_coverage_rejects_inverted_or_outside_trades() -> None:
-    """Coverage intervals are validated."""
+    """Coverage rejects inverted spans and trades outside its span."""
     with pytest.raises(ValueError, match="ends before"):
         trades_lib.TradeCoverage((), 10, 5)
     with pytest.raises(ValueError, match="outside"):
@@ -99,7 +101,7 @@ def test_suffix_and_prefix_coverage_drop_cut_milliseconds() -> None:
 
 
 def test_trade_contract_is_schema_valid(contract_validate: Validate) -> None:
-    """Trades serialize to the contract ``Trade``."""
+    """Trades serialize to a valid contract ``Trade`` with plain decimals."""
     payload = trades_lib.to_contract(_trade(42, 1_795_348_718_291))
     contract_validate("market.schema.json", "Trade", payload)
     assert payload["base_quantity"] == "0.0002"

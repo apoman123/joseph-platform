@@ -29,6 +29,7 @@ from joseph.market_data.app import registry
 from joseph.market_data.app import service as service_lib
 from joseph.market_data.domain import candles as candle_rules
 from joseph.market_data.domain import trade_bars
+from joseph.market_data.domain import trades as trades_lib
 
 TF = timeframes.Timeframe
 NY = zoneinfo.ZoneInfo("America/New_York")
@@ -80,11 +81,11 @@ def _hour_starts(first: int, count: int) -> list[int]:
     """Returns consecutive XNYS 1h bar starts.
 
     Args:
-        first: First bar start.
+        first: Start of the first bar in epoch milliseconds.
         count: Number of bars.
 
     Returns:
-        Bar starts.
+        The starts of ``count`` AAPL session bars from ``first`` on.
     """
     return testing.bar_starts(TF.H1, first, count, AAPL)
 
@@ -93,12 +94,12 @@ def _trade(ts: int, price: str, trade_id: str) -> market.Trade:
     """Builds a buyer-aggressed AAPL trade.
 
     Args:
-        ts: Venue time.
-        price: Price.
+        ts: Venue and receive time in epoch milliseconds.
+        price: Price as a decimal string.
         trade_id: Venue trade id.
 
     Returns:
-        Trade.
+        A one-share trade.
     """
     return market.Trade(
         instrument_id=AAPL,
@@ -207,9 +208,12 @@ def test_paging_helpers_take_the_calendar() -> None:
         TF.H1, _ny(2026, 11, 20), end, 3, calendar=XNYS
     )
     assert start == _ny(2026, 11, 27, 11, 30)
-    assert base.newest_window_start(
-        TF.H1, saturday, saturday + 1, 3, calendar=XNYS
-    ) == (monday_open)
+    assert (
+        base.newest_window_start(
+            TF.H1, saturday, saturday + 1, 3, calendar=XNYS
+        )
+        == monday_open
+    )
 
 
 def test_guard_calendar_comes_from_the_streamed_candles() -> None:
@@ -280,7 +284,7 @@ def test_closing_auction_print_joins_the_last_twse_bar() -> None:
 def test_bars_from_coverage_label_classified_buy_volume() -> None:
     """Trade-built bars carry the venue's buy-volume method."""
     open_ = _ny(2026, 11, 30, 9, 30)
-    coverage = market_trades(open_)
+    coverage = _market_trades(open_)
     rows = trade_bars.bars_from_coverage(
         coverage,
         AAPL,
@@ -295,16 +299,16 @@ def test_bars_from_coverage_label_classified_buy_volume() -> None:
     }
 
 
-def market_trades(open_: int) -> trade_bars.trades_lib.TradeCoverage:
+def _market_trades(open_: int) -> trades_lib.TradeCoverage:
     """Builds a complete two-second trade coverage after the open.
 
     Args:
-        open_: Session open.
+        open_: Session open in epoch milliseconds.
 
     Returns:
-        Coverage.
+        Coverage of ``[open_, open_ + 2 s)`` holding two AAPL trades.
     """
-    return trade_bars.trades_lib.TradeCoverage(
+    return trades_lib.TradeCoverage(
         from_ms=open_,
         to_ms=open_ + 2_000,
         trades=(_trade(open_, "10", "x"), _trade(open_ + 1_500, "11", "y")),
@@ -318,10 +322,10 @@ def _adapter(now: int) -> mock.MockAdapter:
     """Builds the DEMO adapter at a fixed time.
 
     Args:
-        now: Clock time.
+        now: Clock time in epoch milliseconds.
 
     Returns:
-        Adapter.
+        The DEMO adapter on a manual clock stopped at ``now``.
     """
     return mock.MockAdapter(clock_lib.ManualClock(now))
 
@@ -433,25 +437,25 @@ async def test_demo_lists_the_stock_with_listing_metadata() -> None:
 
 
 def _service(
-    now: int, adapter: object | None = None
+    now: int, adapter: mock.MockAdapter | None = None
 ) -> service_lib.MarketDataService:
     """Builds the market-data service over the DEMO venue.
 
     Args:
-        now: Clock time.
+        now: Clock time in epoch milliseconds.
         adapter: Optional adapter replacing the DEMO one.
 
     Returns:
-        Service.
+        The service, storing up to 60,000 bars per series.
     """
     clock = clock_lib.ManualClock(now)
     adapters = {instruments.Venue.MOCK: adapter or mock.MockAdapter(clock)}
     store = candle_store.CandleStore(max_bars_per_series=60_000)
     return service_lib.MarketDataService(
-        adapters,  # type: ignore[arg-type]
-        registry.InstrumentRegistry(adapters),  # type: ignore[arg-type]
+        adapters,
+        registry.InstrumentRegistry(adapters),
         store,
-        feed_router.FeedRouter(adapters, store, clock),  # type: ignore[arg-type]
+        feed_router.FeedRouter(adapters, store, clock),
         clock,
     )
 
@@ -501,7 +505,7 @@ def test_calendar_sessions_list_and_limits() -> None:
     week = service_lib.calendar_sessions(
         "XNYS", _ny(2026, 11, 23), _ny(2026, 11, 30)
     )
-    assert [s["day"] for s in week["sessions"]] == [  # type: ignore[union-attr]
+    assert [s["day"] for s in week["sessions"]] == [  # type: ignore[attr-defined]  # the contract dict types its values as object
         "2026-11-23",
         "2026-11-24",
         "2026-11-25",
@@ -518,7 +522,11 @@ def test_calendar_sessions_list_and_limits() -> None:
 
 
 class _CountingMock(mock.MockAdapter):
-    """DEMO adapter that counts history calls and can cap their size."""
+    """DEMO adapter that counts history calls and can cap their size.
+
+    Attributes:
+        calls: Number of ``fetch_candles`` calls so far.
+    """
 
     def __init__(self, clock: clock_lib.Clock, cap: int | None = None) -> None:
         """Initializes the adapter.
@@ -544,12 +552,12 @@ class _CountingMock(mock.MockAdapter):
         Args:
             instrument: Instrument.
             timeframe: Resolution.
-            start_ms: Inclusive start.
-            end_ms: Exclusive end.
-            limit: Optional maximum bars.
+            start_ms: Inclusive start in epoch milliseconds.
+            end_ms: Exclusive end in epoch milliseconds.
+            limit: Optional maximum bars, passed to the DEMO adapter.
 
         Returns:
-            Candles.
+            The DEMO bars of the window, cut to the oldest ``cap`` if set.
         """
         self.calls += 1
         rows: Sequence[market.Candle] = await super().fetch_candles(

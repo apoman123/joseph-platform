@@ -53,30 +53,33 @@ class _Http:
     """Scripted ``VenueHttp`` stand-in.
 
     Attributes:
-        calls: Requested ``(path, params)``.
+        answers: Response body, error to raise or ``params`` callable, keyed
+            by path.
+        calls: Every ``(path, params)`` requested, in order.
     """
 
     def __init__(self, answers: dict[str, Any]) -> None:
         """Initializes the stub.
 
         Args:
-            answers: Response (or exception) per path.
+            answers: Response body, error to raise or callable that maps the
+                query parameters to a body, keyed by path.
         """
         self.answers = answers
         self.calls: list[tuple[str, dict[str, Any] | None]] = []
 
     async def get(self, path: str, params: dict[str, Any] | None = None) -> Any:
-        """Returns the scripted answer of a path.
+        """Records the request and returns the scripted answer of its path.
 
         Args:
-            path: Path.
-            params: Query parameters.
+            path: Request path; must be scripted.
+            params: Query parameters, passed to a callable answer.
 
         Returns:
-            Scripted body.
+            The scripted body, or what the callable answer returns.
 
         Raises:
-            errors.JosephError: When scripted.
+            errors.JosephError: The answer scripted for ``path`` is an error.
         """
         self.calls.append((path, params))
         answer = self.answers[path]
@@ -98,19 +101,19 @@ def _adapter(
     """Builds an adapter over scripted clients.
 
     Args:
-        clock: Clock.
-        openapi: OpenAPI answers.
-        www: www answers.
-        mis: MIS answers.
-        **kwargs: Adapter options.
+        clock: Time source of the adapter.
+        openapi: Answers of the OpenAPI client by path; none when omitted.
+        www: Answers of the website client by path; none when omitted.
+        mis: Answers of the MIS client by path; none when omitted.
+        **kwargs: Keyword options of ``TwseAdapter``.
 
     Returns:
-        Adapter.
+        The adapter.
     """
     return twse.TwseAdapter(
-        _Http(openapi or {}),  # type: ignore[arg-type]
-        _Http(www or {}),  # type: ignore[arg-type]
-        _Http(mis or {}),  # type: ignore[arg-type]
+        _Http(openapi or {}),  # type: ignore[arg-type]  # _Http stands in for VenueHttp
+        _Http(www or {}),  # type: ignore[arg-type]  # _Http stands in for VenueHttp
+        _Http(mis or {}),  # type: ignore[arg-type]  # _Http stands in for VenueHttp
         clock,
         **kwargs,
     )
@@ -118,10 +121,10 @@ def _adapter(
 
 @pytest.fixture(autouse=True)
 def _restore_xtai() -> Iterator[None]:
-    """Restores runtime XTAI closures after each test.
+    """Restores the XTAI closures added at runtime after each test.
 
     Yields:
-        Nothing.
+        Nothing; the test runs while suspended.
     """
     saved = set(sessions.XTAI._extra_closures)
     yield
@@ -130,7 +133,7 @@ def _restore_xtai() -> Iterator[None]:
 
 
 def test_dates_and_numbers_parse_twse_formats() -> None:
-    """ROC, Gregorian and grouped numbers parse; junk is rejected."""
+    """ROC dates, grouped numbers and MIS keys parse; junk is rejected."""
     assert twse.roc_date("1151120") == datetime.date(2026, 11, 20)
     assert twse.roc_date("115/11/02") == datetime.date(2026, 11, 2)
     assert twse.listing_date("19940905") == datetime.date(1994, 9, 5)
@@ -175,7 +178,7 @@ async def test_refresh_calendar_adds_new_closures_once_a_day() -> None:
 
 
 async def test_refresh_calendar_tolerates_unreachable_schedules() -> None:
-    """Schedule failures are logged and retried later."""
+    """An unreachable schedule gives no closures instead of an error."""
     adapter = _adapter(
         clock_lib.ManualClock(_OPEN),
         openapi={
@@ -234,7 +237,7 @@ def test_etf_classes_follow_code_type_and_index() -> None:
 
 
 def test_mis_records_parse_or_are_rejected() -> None:
-    """Empty, malformed and market-order levels are handled."""
+    """Empty or malformed records fail; market-order levels are dropped."""
     assert twse.parse_mis_record({"c": "", "tv": "-"}, 0) is None
     assert (
         twse.parse_mis_record({"c": "1", "tlong": "x", "d": "20261123"}, 0)
@@ -271,12 +274,12 @@ def _mis_body(codes: list[str], tlong: int, lots: int) -> dict[str, Any]:
     """Builds a minimal MIS body.
 
     Args:
-        codes: Codes with records.
-        tlong: Data time.
-        lots: Cumulative board lots.
+        codes: Stock codes that get a record.
+        tlong: Data time of every record, epoch milliseconds.
+        lots: Cumulative volume in board lots of 1,000 shares.
 
     Returns:
-        Body.
+        A ``getStockInfo.jsp`` body with one record per code, last price 100.
     """
     return {
         "rtcode": "0000",
@@ -297,25 +300,26 @@ def _mis_body(codes: list[str], tlong: int, lots: int) -> dict[str, Any]:
     }
 
 
+def _answer_known_codes(params: dict[str, Any]) -> dict[str, Any]:
+    """Answers ``getStockInfo.jsp`` for every requested code except 0000.
+
+    Args:
+        params: Query parameters; ``ex_ch`` lists ``tse_<code>.tw`` keys
+            joined by ``|``.
+
+    Returns:
+        A body with a record per known code at the open.
+    """
+    codes = [c[4:-3] for c in params["ex_ch"].split("|")]
+    return _mis_body([c for c in codes if c != "0000"], _OPEN, 1)
+
+
 async def test_mis_client_caches_and_coalesces() -> None:
     """Concurrent callers share one request; fresh codes come from memory."""
     clock = clock_lib.ManualClock(_OPEN)
     path = "/stock/api/getStockInfo.jsp"
-
-    def answer(params: dict[str, Any]) -> dict[str, Any]:
-        """Returns records for the requested codes.
-
-        Args:
-            params: Query.
-
-        Returns:
-            Body.
-        """
-        codes = [c[4:-3] for c in params["ex_ch"].split("|")]
-        return _mis_body([c for c in codes if c != "0000"], _OPEN, 1)
-
-    http = _Http({path: answer})
-    client = twse.MisClient(http, clock, batch=2)  # type: ignore[arg-type]
+    http = _Http({path: _answer_known_codes})
+    client = twse.MisClient(http, clock, batch=2)  # type: ignore[arg-type]  # _Http stands in for VenueHttp
     first, second = await asyncio.gather(
         client.quotes(["2330", "0050"]), client.quotes(["2317", "0000"])
     )
@@ -335,19 +339,22 @@ async def test_mis_client_serves_callers_arriving_mid_request() -> None:
     seen: list[str] = []
 
     class _Slow(_Http):
-        """Stub whose first request waits for a release."""
+        """Stub whose first request waits for ``release``.
+
+        Records each ``ex_ch`` in ``seen`` and sets ``started``.
+        """
 
         async def get(
             self, path: str, params: dict[str, Any] | None = None
         ) -> Any:
-            """Answers after the release.
+            """Answers every requested code; the first call after the release.
 
             Args:
-                path: Path.
-                params: Query.
+                path: Request path (ignored).
+                params: Query parameters; ``ex_ch`` lists the MIS keys.
 
             Returns:
-                Body.
+                A body with a record per requested code at the open.
             """
             assert params is not None
             seen.append(params["ex_ch"])
@@ -357,7 +364,7 @@ async def test_mis_client_serves_callers_arriving_mid_request() -> None:
             codes = [c[4:-3] for c in params["ex_ch"].split("|")]
             return _mis_body(codes, _OPEN, 1)
 
-    client = twse.MisClient(_Slow({}), clock_lib.ManualClock(_OPEN))  # type: ignore[arg-type]
+    client = twse.MisClient(_Slow({}), clock_lib.ManualClock(_OPEN))  # type: ignore[arg-type]  # _Http stands in for VenueHttp
     first = asyncio.create_task(client.quotes(["2330"]))
     await asyncio.wait_for(started.wait(), 5)
     second = asyncio.create_task(client.quotes(["0050"]))
@@ -371,7 +378,7 @@ async def test_mis_client_serves_callers_arriving_mid_request() -> None:
 async def test_mis_client_reports_errors_to_every_caller() -> None:
     """A MIS error reaches all coalesced callers."""
     http = _Http({"/stock/api/getStockInfo.jsp": {"rtcode": "9999"}})
-    client = twse.MisClient(http, clock_lib.ManualClock(0))  # type: ignore[arg-type]
+    client = twse.MisClient(http, clock_lib.ManualClock(0))  # type: ignore[arg-type]  # _Http stands in for VenueHttp
     results = await asyncio.gather(
         client.quotes(["2330"]), client.quotes(["0050"]), return_exceptions=True
     )
@@ -385,10 +392,12 @@ async def test_recorder_polls_during_sessions_and_expires_watches() -> None:
     lots = iter(range(1, 100))
 
     async def sleep(seconds: float) -> None:
-        """Advances the clock instead of sleeping.
+        """Advances the clock instead of sleeping and keeps 2330 watched.
+
+        After 70 sleeps it clears the watch list, so the poller stops.
 
         Args:
-            seconds: Requested sleep.
+            seconds: Requested delay.
         """
         sleeps.append(seconds)
         clock.advance(int(seconds * 1000))
@@ -398,13 +407,13 @@ async def test_recorder_polls_during_sessions_and_expires_watches() -> None:
             adapter._watch["2330"] = clock.now_ms()  # Charts keep asking.
 
     def answer(params: dict[str, Any]) -> dict[str, Any]:
-        """Returns a snapshot with growing volume.
+        """Answers with a 2330 record whose volume grows by a lot per call.
 
         Args:
-            params: Query.
+            params: Query parameters (ignored).
 
         Returns:
-            Body.
+            A body stamped with the current clock time.
         """
         del params
         return _mis_body(["2330"], clock.now_ms(), next(lots))
@@ -547,14 +556,15 @@ def test_snapshot_builder_on_recorded_mis_data() -> None:
     builder = snapshot_bars.SnapshotBarBuilder(
         instruments.InstrumentId.parse("twse:etf:0050"), source="test"
     )
-    quotes = [
-        q
-        for item in _load("mis_recorded")["responses"]
-        for r in item["response"]["msgArray"]
-        if (q := twse.parse_mis_record(r, item["received_ms"])) is not None
-        and q.code == "0050"
-    ]
-    trades = [t for q in quotes for t in builder.apply(q.snapshot)]
+    quotes: list[twse.MisQuote] = []
+    for item in _load("mis_recorded")["responses"]:
+        for record in item["response"]["msgArray"]:
+            quote = twse.parse_mis_record(record, item["received_ms"])
+            if quote is not None and quote.code == "0050":
+                quotes.append(quote)
+    trades: list[snapshot_bars.DerivedTrade] = []
+    for quote in quotes:
+        trades.extend(builder.apply(quote.snapshot))
     baseline, latest = quotes[0].snapshot, builder.latest
     assert latest is not None
     assert sum(t.quantity for t in trades) == (
@@ -606,15 +616,15 @@ def test_snapshot_builder_coverage_is_the_recording() -> None:
 
 
 def _tpe_ms(day: datetime.date, hour: int, minute: int = 0) -> int:
-    """Returns the UTC epoch ms of a Taipei time.
+    """Returns a Taipei wall time in epoch milliseconds.
 
     Args:
-        day: Date.
-        hour: Hour.
-        minute: Minute.
+        day: Calendar date.
+        hour: Hour of the day, Taipei time.
+        minute: Minute of the hour.
 
     Returns:
-        Milliseconds.
+        Epoch milliseconds.
     """
     moment = datetime.datetime.combine(day, datetime.time(hour, minute))
     return int(moment.replace(tzinfo=_TPE).timestamp() * 1000)
@@ -640,13 +650,13 @@ async def test_month_read_on_its_29th_is_read_again_later(venue: str) -> None:
     reads: list[str] = []
 
     def answer(params: dict[str, Any]) -> dict[str, Any]:
-        """Counts reads of the monthly report.
+        """Records each read of the monthly report in ``reads``.
 
         Args:
-            params: Query.
+            params: Query parameters; ``date`` names the month.
 
         Returns:
-            An empty month.
+            An empty month in the venue's ``stat`` spelling.
         """
         reads.append(str(params["date"]))
         return {"stat": "OK" if venue == "twse" else "ok", "data": []}
@@ -659,16 +669,16 @@ async def test_month_read_on_its_29th_is_read_again_later(venue: str) -> None:
         instrument = _ID
     else:
         adapter = tpex.TpexAdapter(
-            _Http({}),  # type: ignore[arg-type]
-            _Http({"/www/zh-tw/afterTrading/tradingStock": answer}),  # type: ignore[arg-type]
-            _Http({}),  # type: ignore[arg-type]
+            _Http({}),  # type: ignore[arg-type]  # _Http stands in for VenueHttp
+            _Http({"/www/zh-tw/afterTrading/tradingStock": answer}),  # type: ignore[arg-type]  # _Http stands in for VenueHttp
+            _Http({}),  # type: ignore[arg-type]  # _Http stands in for VenueHttp
             clock,
         )
         instrument = instruments.InstrumentId.parse("tpex:stock:6488")
     await adapter._month(instrument, 2026, 9)
     clock.advance(2 * 86_400_000)  # 1 October: September has ended.
     await adapter._month(instrument, 2026, 9)
-    assert len(reads) == 2  # Before the fix this came from the cache.
+    assert len(reads) == 2  # Read before its end: not cached as complete.
     clock.advance(40 * 86_400_000)
     await adapter._month(instrument, 2026, 9)
     assert len(reads) == 2  # Complete as of its read: cached for good.
@@ -676,10 +686,10 @@ async def test_month_read_on_its_29th_is_read_again_later(venue: str) -> None:
 
 
 async def _parked(seconds: float) -> None:
-    """Keeps the MIS recorder idle (tests apply snapshots by hand).
+    """Waits forever, which parks the MIS recorder; tests apply snapshots.
 
     Args:
-        seconds: Ignored.
+        seconds: Requested delay (ignored).
     """
     del seconds
     await asyncio.Event().wait()
@@ -688,12 +698,15 @@ async def _parked(seconds: float) -> None:
 def _listed(clock: clock_lib.ManualClock, archive: Any) -> twse.TwseAdapter:
     """Builds a TWSE adapter over an archive with the listings loaded.
 
+    The MIS answers always carry one 2330 record stamped with ``clock``; the
+    recorder loop is parked.
+
     Args:
-        clock: Clock.
-        archive: Bar archive.
+        clock: Time source of the adapter and the MIS answers.
+        archive: Bar archive the adapter records into.
 
     Returns:
-        Adapter.
+        The adapter.
     """
     adapter = _adapter(
         clock,
@@ -761,13 +774,19 @@ async def test_recorded_minutes_and_coverage_survive_a_restart() -> None:
 
 
 class _BrokenArchive:
-    """Bar archive whose every call fails."""
+    """Bar archive whose every call fails.
+
+    Attributes:
+        minutes: Same as ``put``: raises ``RuntimeError``.
+        coverage: Same as ``put``: raises ``RuntimeError``.
+        prune: Same as ``put``: raises ``RuntimeError``.
+    """
 
     def put(self, *args: object) -> None:
-        """Fails.
+        """Fails like a full disk.
 
         Args:
-            *args: Ignored.
+            *args: Call arguments (ignored).
 
         Raises:
             RuntimeError: Always.

@@ -98,7 +98,7 @@ def test_secrets_never_reach_log_records(
     handler = logging.Handler()
     handler.addFilter(redaction.RedactingFilter())
     records: list[str] = []
-    handler.emit = lambda record: records.append(record.getMessage())  # type: ignore[method-assign]
+    handler.emit = lambda record: records.append(record.getMessage())  # type: ignore[method-assign]  # replace emit to capture the filtered messages
     logger.addHandler(handler)
     try:
         logger.warning("key is %s", "very-private-key")
@@ -181,12 +181,12 @@ def _bar(
     """Builds a one-minute bar of 2330.
 
     Args:
-        start: Start.
-        final: Finality.
+        start: Bar start in epoch milliseconds.
+        final: Whether the bar is final.
         taker: Whether it carries classified buy volume.
 
     Returns:
-        Candle.
+        A kbar-sourced bar of three trades.
     """
     return market.Candle(
         instrument_id=_ID,

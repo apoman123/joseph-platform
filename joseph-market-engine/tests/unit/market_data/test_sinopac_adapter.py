@@ -56,7 +56,7 @@ def _local(day: datetime.date, *hms: int) -> datetime.datetime:
         *hms: Hour, minute, second and microsecond.
 
     Returns:
-        Naive datetime.
+        The naive Taipei wall time.
     """
     stamp = datetime.datetime(day.year, day.month, day.day, *hms, tzinfo=_TPE)
     return stamp.replace(tzinfo=None)  # Shioaji streams naive Taipei time.
@@ -70,7 +70,7 @@ def _ms(day: datetime.date, *hms: int) -> int:
         *hms: Hour, minute, second and microsecond.
 
     Returns:
-        Milliseconds.
+        UTC epoch milliseconds.
     """
     return int(_local(day, *hms).replace(tzinfo=_TPE).timestamp() * 1000)
 
@@ -100,7 +100,7 @@ class _Http:
         """Initializes the stub.
 
         Args:
-            answers: Response per path.
+            answers: Body, or a callable of the query parameters, per path.
         """
         self.answers = answers or {}
         self.calls: list[str] = []
@@ -109,11 +109,11 @@ class _Http:
         """Returns the scripted answer of a path.
 
         Args:
-            path: Path.
-            params: Query parameters.
+            path: Request path.
+            params: Query parameters, passed to a callable answer.
 
         Returns:
-            Scripted body.
+            The scripted body, or the callable answer's result.
 
         Raises:
             errors.VenueUnavailableError: For unscripted paths.
@@ -129,19 +129,19 @@ class _Http:
 
 
 async def _inline(fn: Callable[[], Any]) -> Any:
-    """Runs an SDK call on the loop.
+    """Runs an SDK call on the loop (tests need no thread).
 
     Args:
-        fn: Call.
+        fn: Zero-argument SDK call.
 
     Returns:
-        Its result.
+        The call's result.
     """
     return fn()
 
 
 async def _blocked(seconds: float) -> None:
-    """Parks the MIS recorder (tests drive it by hand).
+    """Parks the MIS recorder for good (tests drive it by hand).
 
     Args:
         seconds: Ignored.
@@ -154,20 +154,20 @@ def _mis(clock: clock_lib.Clock) -> dict[str, Any]:
     """Scripts MIS answers whose volume grows with the clock.
 
     Args:
-        clock: Clock.
+        clock: Clock that stamps the records and drives the volume.
 
     Returns:
-        Answers per path.
+        The answer of the MIS quote path, keyed by that path.
     """
 
     def answer(params: dict[str, Any] | None) -> dict[str, Any]:
         """Returns one 2330 record.
 
         Args:
-            params: Query.
+            params: Ignored query parameters.
 
         Returns:
-            Body.
+            An MIS body stamped with the clock's time.
         """
         del params
         now = clock.now_ms()
@@ -206,6 +206,9 @@ def _build(
 ) -> tuple[twse.TaiwanExchangeAdapter, fake_shioaji.FakeShioaji]:
     """Builds a TWSE or TPEx adapter with a Shioaji source.
 
+    The instrument list is preloaded from the fixtures, so the adapter makes
+    no listing request.
+
     Args:
         clock: Clock.
         fake: Fake SDK (a fresh one by default).
@@ -233,9 +236,9 @@ def _build(
     }
     cls = twse.TwseAdapter if venue == "twse" else tpex.TpexAdapter
     adapter = cls(
-        _Http(),  # type: ignore[arg-type]
-        _Http(www),  # type: ignore[arg-type]
-        _Http(_mis(clock)),  # type: ignore[arg-type]
+        _Http(),  # type: ignore[arg-type]  # _Http fakes only get() and close() of VenueHttp
+        _Http(www),  # type: ignore[arg-type]  # _Http fakes only get() and close() of VenueHttp
+        _Http(_mis(clock)),  # type: ignore[arg-type]  # _Http fakes only get() and close() of VenueHttp
         clock,
         sleep=_blocked,
         sinopac=source,
@@ -269,7 +272,7 @@ def _archive() -> bar_archive_sql.SqlBarArchive:
     """Creates an in-memory SQLite bar archive.
 
     Returns:
-        Archive.
+        An empty archive.
     """
     return bar_archive_sql.SqlBarArchive(db.create_engine("sqlite://"))
 
@@ -287,7 +290,8 @@ def _kbar(
         lots: Volume in lots.
 
     Returns:
-        Row.
+        A ``FakeShioaji.kbars_rows`` row ``(label, open, high, low, close,
+        lots, amount)``.
     """
     return (
         _local(day, hour, minute),
@@ -307,13 +311,13 @@ def _tick(
 
     Args:
         at: Naive Taipei time.
-        price: Price.
-        lots: Lots.
+        price: Price as a decimal string.
+        lots: Lots the tick traded.
         total: Day lots through the tick.
-        kind: tick_type.
+        kind: Shioaji ``tick_type`` (1 buy, 2 sell, 0 undetermined).
 
     Returns:
-        Tick.
+        A tick with a fixed day open, high, low and price change.
     """
     return fake_shioaji.FakeTick(
         "2330",
@@ -336,7 +340,7 @@ def _book(at: datetime.datetime) -> fake_shioaji.FakeBidAsk:
         at: Naive Taipei time.
 
     Returns:
-        Update.
+        An update with two bid and two ask levels.
     """
     return fake_shioaji.FakeBidAsk(
         "2330", at, ["100", "99.5"], [3, 4], ["100.5", "101"], [2, 1]
@@ -363,7 +367,7 @@ def _restore_xtai() -> Iterator[None]:
 
 
 async def test_capabilities_add_seconds_trades_and_quota_notes() -> None:
-    """With Shioaji the venue offers seconds bars and trades, honestly."""
+    """Shioaji adds seconds bars and trades; without keys they are refused."""
     clock = clock_lib.ManualClock(_ms(_DAY, 7))
     adapter, _ = _build(clock)
     caps = adapter.capabilities()
@@ -575,7 +579,7 @@ async def _next(stream: AsyncIterator[Any], push: Callable[[], None]) -> Any:
     """Pushes stream input once the stream waits, then reads one update.
 
     Args:
-        stream: Stream.
+        stream: Stream to read.
         push: Feeds the fake SDK.
 
     Returns:
@@ -595,15 +599,15 @@ async def _until(
     """Pushes stream input, then reads updates until one matches.
 
     Args:
-        stream: Stream.
-        push: Feeds the fake SDK.
+        stream: Stream to read.
+        push: Feeds the fake SDK once, before the first read.
         done: Predicate of the wanted update.
 
     Returns:
         The matching update.
 
     Raises:
-        AssertionError: When no update matches.
+        AssertionError: None of the first ten updates matches.
     """
     update = await _next(stream, push)
     for _ in range(10):
@@ -634,7 +638,8 @@ async def test_seconds_and_trade_streams_follow_the_ticks() -> None:
     )
     assert proved.candles[0].is_final
     assert proved.covered == ((_ms(_DAY, 10, 0, 40) + 1, _ms(_DAY, 10, 0, 43)),)
-    fake.push_tick(_tick(_local(_DAY, 10, 0, 50), "101", 1, 160))  # A gap.
+    # The day volume jumps from 153 to 160 lots: a gap.
+    fake.push_tick(_tick(_local(_DAY, 10, 0, 50), "101", 1, 160))
     after = await _until(
         stream,
         lambda: fake.push_tick(
@@ -654,7 +659,7 @@ async def test_seconds_and_trade_streams_follow_the_ticks() -> None:
     fake.push_event(2, "connect failed")
     await _settle()
     with pytest.raises(errors.VenueUnavailableError, match="session event"):
-        for _ in range(10):  # Updates queued before the failure first.
+        for _ in range(10):  # Updates queued before the failure come first.
             await asyncio.wait_for(anext(stream), 5)
     with pytest.raises(errors.VenueUnavailableError):
         await asyncio.wait_for(anext(trades), 5)
@@ -662,7 +667,7 @@ async def test_seconds_and_trade_streams_follow_the_ticks() -> None:
 
 
 async def test_minute_and_daily_streams_seed_then_follow_ticks() -> None:
-    """The minute stream seeds today's kbars; the daily one the reports."""
+    """Minute streams seed today's kbars, then follow ticks, as day bars do."""
     clock = clock_lib.ManualClock(_ms(_DAY, 10, 0, 30))
     adapter, fake = _build(clock)
     fake.kbars_rows[("2330", _DAY)] = [_kbar(_DAY, 10, 0, 99.0, 5)]
@@ -712,7 +717,7 @@ async def test_minute_and_daily_streams_seed_then_follow_ticks() -> None:
         lambda: fake.push_tick(_tick(_local(_DAY, 10, 3, 6), "100", 1, 22)),
     )
     assert week.candles[0].timeframe is timeframes.Timeframe.W1
-    await stream.aclose()  # type: ignore[attr-defined]
+    await stream.aclose()  # type: ignore[attr-defined]  # the port types it as AsyncIterator; the generator has aclose()
     await adapter.close()
 
 
@@ -819,12 +824,12 @@ def _bar(start: int, source: str, final: bool = True) -> market.Candle:
     """Builds a one-minute bar.
 
     Args:
-        start: Start.
+        start: Bar start in epoch milliseconds.
         source: Source label.
-        final: Finality.
+        final: Whether the bar is final.
 
     Returns:
-        Candle.
+        A flat 1m bar.
     """
     return market.Candle(
         instrument_id=_ID,

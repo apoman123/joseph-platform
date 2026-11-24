@@ -6,10 +6,14 @@
 from __future__ import annotations
 
 import dataclasses
+import itertools
+from collections.abc import Sequence
 
 import pytest
 
 from joseph.domain import errors
+from joseph.domain import market
+from joseph.domain import structures
 from joseph.domain import timeframes
 from joseph.indicators import catalog
 from joseph.indicators import testing
@@ -19,15 +23,17 @@ TF = timeframes.Timeframe
 M1, M5, H1, H4 = TF.M1, TF.M5, TF.H1, TF.H4
 
 
-def _data(minutes: int = 900, seed: int = 21) -> dict[TF, list]:  # type: ignore[type-arg]
+def _data(
+    minutes: int = 900, seed: int = 21
+) -> dict[timeframes.Timeframe, list[market.Candle]]:
     """Builds consistent 1m/5m/1h/4h candles by aggregation.
 
     Args:
         minutes: Number of 1m bars.
-        seed: Random seed.
+        seed: Random-walk seed.
 
     Returns:
-        Candles per timeframe.
+        Candles per timeframe; higher bars aggregate the 1m walk.
     """
     m1 = testing.random_walk(minutes, seed=seed)
     return {
@@ -44,7 +50,8 @@ def _engine(
     """Builds an engine with a 5m signal timeframe.
 
     Args:
-        plugins: Plugin specs (defaults to MTF daily bias + order flow).
+        plugins: Plugin specs by plugin id. None or empty runs daily bias on
+            5m/1h/4h plus order-flow pressure and auction value areas on 5m.
 
     Returns:
         The engine.
@@ -61,14 +68,17 @@ def _engine(
     )
 
 
-def _fingerprint(frames: list) -> list:  # type: ignore[type-arg]
+def _fingerprint(
+    frames: Sequence[structures.BarFrame],
+) -> list[tuple[object, ...]]:
     """Serializes frames for equality checks.
 
     Args:
         frames: Bar frames.
 
     Returns:
-        Comparable JSON-compatible structure.
+        Per frame: close time, sorted snapshot summaries, event contracts and
+        the missing-bar count.
     """
     return [
         (
@@ -91,7 +101,7 @@ def _fingerprint(frames: list) -> list:  # type: ignore[type-arg]
 
 
 def test_required_timeframes_include_dependencies() -> None:
-    """Intrabar and aux timeframes are consumed automatically."""
+    """Required timeframes add the plugins' intrabar and auxiliary inputs."""
     assert _engine().required_timeframes == frozenset(
         {TF.M1, TF.M5, TF.H1, TF.H4, TF.D1}
     )
@@ -121,12 +131,13 @@ def test_higher_timeframe_snapshots_are_never_from_open_bars() -> None:
 def test_hourly_events_appear_in_the_frame_closing_with_the_hour() -> None:
     """HTF events land in the 5m frame whose close equals the HTF close."""
     frames = _engine().run(_data(minutes=3000, seed=4))
-    htf_events = [
-        (frame.close_ms, event)
-        for frame in frames
-        for event in frame.events
-        if event.timeframe is not M5
-    ]
+    htf_events: list[tuple[int, structures.StructureEvent]] = []
+    for frame in frames:
+        htf_events.extend(
+            (frame.close_ms, event)
+            for event in frame.events
+            if event.timeframe is not M5
+        )
     assert htf_events, "expected at least one higher-timeframe event"
     for close_ms, event in htf_events:
         assert event.confirmed_at_ms == close_ms
@@ -198,7 +209,7 @@ def test_checkpoint_restore_continues_identically() -> None:
     """Restoring mid-stream reproduces the remaining frames exactly."""
     data = _data(minutes=1500, seed=8)
     ordered = sorted(
-        (c for series in data.values() for c in series),
+        itertools.chain.from_iterable(data.values()),
         key=lambda c: (c.end_ms, c.timeframe.duration_ms),
     )
     reference = _engine()
@@ -236,7 +247,7 @@ def test_invalid_configurations_are_rejected() -> None:
 
 
 def test_foreign_instrument_is_rejected() -> None:
-    """Candles of another instrument raise."""
+    """A candle of another instrument raises ValueError."""
     other = testing.make_candle(
         M5,
         testing.DEFAULT_START_MS,

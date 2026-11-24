@@ -52,7 +52,11 @@ def _budget(seconds: float = _BUDGET_S) -> float:
 
 
 class _Source:
-    """In-memory 1m candle source."""
+    """In-memory 1m candle source.
+
+    Attributes:
+        candles: 1m candles served; tests may replace the list.
+    """
 
     def __init__(self, candles: list[market.Candle]) -> None:
         """Stores candles.
@@ -74,11 +78,11 @@ class _Source:
         Args:
             instrument_id: Ignored.
             timeframe: Ignored (1m only).
-            start_ms: Window start.
-            end_ms: Window end.
+            start_ms: Window start, inclusive, epoch ms.
+            end_ms: Window end, exclusive, epoch ms.
 
         Returns:
-            Candles.
+            The stored candles that start inside the window.
         """
         del instrument_id, timeframe
         return [c for c in self.candles if start_ms <= c.start_ms < end_ms]
@@ -106,7 +110,7 @@ def test_five_thousand_bars_all_plugins_within_budget() -> None:
     per_frame = elapsed / len(frames) * 1000
     series = sum(len(spec.timeframes) for spec in plugins.values())
     message = f"[perf] {len(frames)} frames, {series} series, {elapsed:.2f}s"
-    print(message, f"({per_frame:.2f} ms/frame)")  # noqa: T201
+    print(message, f"({per_frame:.2f} ms/frame)")  # noqa: T201 - the benchmark reports its timings on purpose
     assert len(frames) == 5_000
     assert elapsed < _budget(), message
 
@@ -148,8 +152,8 @@ def test_fifty_thousand_bar_anchored_vwap_within_budget() -> None:
     warm = request()
     warm_s = time.perf_counter() - started
     message = f"[perf] anchored 50k cold {cold_s:.2f}s, next bar {warm_s:.2f}s"
-    print(message)  # noqa: T201
-    assert len(cold["points"]) == 49_999  # type: ignore[arg-type]
-    assert len(warm["points"]) == 50_000  # type: ignore[arg-type]
+    print(message)  # noqa: T201 - the benchmark reports its timings on purpose
+    assert len(cold["points"]) == 49_999  # type: ignore[arg-type]  # contract payloads are typed dict[str, object]
+    assert len(warm["points"]) == 50_000  # type: ignore[arg-type]  # contract payloads are typed dict[str, object]
     assert cold_s < _budget(_ANCHORED_BUDGET_S), message
     assert warm_s < _budget(_INCREMENTAL_BUDGET_S), message

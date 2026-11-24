@@ -20,20 +20,21 @@ import sys
 import time
 from collections.abc import Callable
 from collections.abc import Iterator
+from typing import TypeAlias
 
 import httpx
 import pytest
 import websockets
 
-Validate = Callable[[str, str, object], None]
+Validate: TypeAlias = Callable[[str, str, object], None]
 _PROJECT = pathlib.Path(__file__).resolve().parents[3]
 
 
 def _free_port() -> int:
-    """Finds a free TCP port.
+    """Finds a free TCP port on the loopback interface.
 
     Returns:
-        Port number.
+        A port that was free when checked; another process may take it.
     """
     with socket.socket() as sock:
         sock.bind(("127.0.0.1", 0))
@@ -44,11 +45,14 @@ def _free_port() -> int:
 def server(tmp_path_factory: pytest.TempPathFactory) -> Iterator[str]:
     """Runs the engine in a subprocess.
 
+    The server's output goes to ``server.log`` in a temporary directory; the
+    handle is passed to the child and not closed by the test.
+
     Args:
         tmp_path_factory: Temporary directory factory.
 
     Yields:
-        Base URL.
+        Base URL of the healthy server, which is stopped afterwards.
 
     Raises:
         RuntimeError: If the server does not become healthy.
@@ -151,10 +155,10 @@ def test_websocket_stream_over_tcp(
     """A real WebSocket client receives sequenced candle envelopes."""
 
     async def scenario() -> list[dict[str, object]]:
-        """Subscribes and collects envelopes.
+        """Subscribes and collects envelopes until two candle updates arrive.
 
         Returns:
-            Envelopes.
+            Every envelope received, in order.
         """
         url = server.replace("http", "ws") + "/v1/stream/market?token=sys-token"
         async with websockets.connect(url) as ws:

@@ -72,6 +72,9 @@ def contract_validate() -> Callable[[str, str, object], None]:
             schema_file: File name such as ``market.schema.json``.
             definition: ``$defs`` entry such as ``Candle``.
             instance: JSON-compatible value to validate.
+
+        Raises:
+            jsonschema.ValidationError: ``instance`` does not conform.
         """
         schema = {"$ref": f"{_BASE_URI}{schema_file}#/$defs/{definition}"}
         validator = jsonschema.Draft202012Validator(
@@ -100,7 +103,7 @@ def _fixture(venue: str, name: str) -> Any:
     """Loads a JSON fixture.
 
     Args:
-        venue: Venue directory.
+        venue: Venue directory under ``fixtures/venues``.
         name: File name without extension.
 
     Returns:
@@ -115,10 +118,10 @@ def _ok(payload: Any) -> httpx.Response:
     """Builds a JSON response.
 
     Args:
-        payload: Body.
+        payload: JSON-serializable body.
 
     Returns:
-        Response.
+        A 200 response carrying ``payload``.
     """
     return httpx.Response(200, json=payload)
 
@@ -127,10 +130,10 @@ def _twse_openapi(request: httpx.Request) -> httpx.Response:
     """Serves the TWSE OpenAPI fixtures.
 
     Args:
-        request: Request.
+        request: Mocked request.
 
     Returns:
-        Response.
+        The captured response for a known path, else a 404.
     """
     names = {
         "/v1/exchangeReport/STOCK_DAY_ALL": "stock_day_all",
@@ -148,10 +151,11 @@ def _twse_www(request: httpx.Request) -> httpx.Response:
     """Serves STOCK_DAY months and holiday schedules.
 
     Args:
-        request: Request.
+        request: Mocked request.
 
     Returns:
-        Response (TWSE's no-data body for anything not captured).
+        The captured response, TWSE's no-data body for a month or year not
+        captured, or a 404 for any other path.
     """
     params = request.url.params
     if request.url.path.endswith("/holidaySchedule/holidaySchedule"):
@@ -171,7 +175,7 @@ def _twse_www(request: httpx.Request) -> httpx.Response:
     return httpx.Response(404)
 
 
-def mis_response(
+def _mis_response(
     channels: list[str], series: str = "mis_series"
 ) -> dict[str, Any]:
     """Builds a MIS body for channels from the newest captured responses.
@@ -211,13 +215,13 @@ def _twse_mis(request: httpx.Request) -> httpx.Response:
     """Serves MIS snapshots of both markets from the captured series.
 
     Args:
-        request: Request.
+        request: Mocked request; ``ex_ch`` lists the channels.
 
     Returns:
-        Response.
+        A ``getStockInfo.jsp`` body with one record per requested channel.
     """
     channels = request.url.params.get("ex_ch", "").split("|")
-    return _ok(mis_response([c for c in channels if c]))
+    return _ok(_mis_response([c for c in channels if c]))
 
 
 _TPEX_OPENAPI = {
@@ -228,7 +232,7 @@ _TPEX_OPENAPI = {
 }
 
 
-def tpex_empty_month(code: str, date: str) -> dict[str, Any]:
+def _tpex_empty_month(code: str, date: str) -> dict[str, Any]:
     """Returns what TPEx's tradingStock answers for a month without data.
 
     Args:
@@ -251,11 +255,12 @@ def _tpex(request: httpx.Request) -> httpx.Response:
     """Serves the TPEx OpenAPI, tradingStock and tradingDate fixtures.
 
     Args:
-        request: Request.
+        request: Mocked request.
 
     Returns:
-        Response (TPEx's empty month for months not captured, its no-data
-        body for years not published).
+        The captured response; TPEx's empty month for a month not
+        captured, its no-data body for a year not published, or a 404 for
+        any other path.
     """
     path, params = request.url.path, request.url.params
     name = _TPEX_OPENAPI.get(path)
@@ -275,7 +280,7 @@ def _tpex(request: httpx.Request) -> httpx.Response:
                 payload = json.loads(file.read_text("utf-8"))
                 if payload.get("date", "")[:6] == month:
                     return _ok(payload)
-        return _ok(tpex_empty_month(code, date))
+        return _ok(_tpex_empty_month(code, date))
     return httpx.Response(404)
 
 
@@ -283,10 +288,10 @@ def _nasdaqtrader(request: httpx.Request) -> httpx.Response:
     """Serves the symbol-directory slices.
 
     Args:
-        request: Request.
+        request: Mocked request; the last path segment names the file.
 
     Returns:
-        Response.
+        The captured text file, or a 404 when there is none.
     """
     name = request.url.path.rsplit("/", 1)[-1]
     path = _VENUE_FIXTURES / "nasdaqtrader" / name
@@ -299,10 +304,11 @@ def _alpaca(request: httpx.Request) -> httpx.Response:
     """Serves Alpaca fixtures (401 without key headers, like Alpaca).
 
     Args:
-        request: Request.
+        request: Mocked request.
 
     Returns:
-        Response.
+        The captured response for AAPL, an empty page for other symbols, a
+        401 without keys, or a 404 for any other path.
     """
     if not request.headers.get("APCA-API-KEY-ID"):
         return httpx.Response(401, json={"message": "unauthorized."})
@@ -333,10 +339,10 @@ def _treasury(request: httpx.Request) -> httpx.Response:
     """Serves Treasury CSV years (header only for years not captured).
 
     Args:
-        request: Request.
+        request: Mocked request; ``type`` picks the nominal or real curve.
 
     Returns:
-        Response.
+        The captured CSV of the year, or a header-only CSV.
     """
     year = request.url.path.split("/")[-2]
     curve = (
@@ -348,11 +354,11 @@ def _treasury(request: httpx.Request) -> httpx.Response:
     return httpx.Response(200, text='Date,"3 Mo","10 Yr"\n')
 
 
-def install_exchange_routes(router: respx.Router) -> None:
+def _install_exchange_routes(router: respx.Router) -> None:
     """Registers the TWSE, TPEx, Nasdaq Trader, Alpaca and Treasury routes.
 
     Args:
-        router: respx router.
+        router: respx router to add the routes to.
     """
     router.route(host="openapi.twse.com.tw").mock(side_effect=_twse_openapi)
     router.route(host="www.twse.com.tw").mock(side_effect=_twse_www)
@@ -368,6 +374,6 @@ def exchange_routes() -> Callable[[respx.Router], None]:
     """Provides the installer of exchange and rate venue fixture routes.
 
     Returns:
-        ``install(router)``.
+        ``install(router)``, which adds the routes to a respx router.
     """
-    return install_exchange_routes
+    return _install_exchange_routes

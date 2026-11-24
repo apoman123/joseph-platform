@@ -24,7 +24,7 @@ def _app(with_auth: bool = True) -> fastapi.FastAPI:
         with_auth: Whether an authenticator is configured.
 
     Returns:
-        App.
+        An app whose ``/me`` echoes the principal and ``/boom`` fails.
     """
     app = fastapi.FastAPI()
     if with_auth:
@@ -43,7 +43,7 @@ def _app(with_auth: bool = True) -> fastapi.FastAPI:
             principal: Authenticated principal.
 
         Returns:
-            Tenant and user.
+            The principal's tenant and user ids.
         """
         return {"tenant": principal.tenant_id, "user": principal.user_id}
 
@@ -89,6 +89,6 @@ def test_internal_errors_hide_details() -> None:
 
 
 def test_status_mapping_covers_contract_codes() -> None:
-    """Every mapped domain code has an HTTP status."""
+    """Rate limiting maps to HTTP 429 and stale market data to 503."""
     assert api_errors.STATUS_BY_CODE["RATE_LIMITED"] == 429
     assert api_errors.STATUS_BY_CODE["MARKET_STALE"] == 503

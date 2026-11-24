@@ -10,6 +10,7 @@ import datetime
 import decimal
 import hashlib
 import io
+import itertools
 import pathlib
 import zipfile
 
@@ -58,7 +59,7 @@ def _zip(text: str, name: str = "BTCDOMUSDT-aggTrades-2026-11-21.csv") -> bytes:
         name: Member name.
 
     Returns:
-        Zip bytes.
+        The zip archive bytes.
     """
     buffer = io.BytesIO()
     with zipfile.ZipFile(buffer, "w", zipfile.ZIP_DEFLATED) as archive:
@@ -85,7 +86,7 @@ def _checksum(payload: bytes) -> str:
         payload: File bytes.
 
     Returns:
-        ``<sha256>  <name>``.
+        The ``<sha256>  <name>`` line for the fixture day's zip.
     """
     digest = hashlib.sha256(payload).hexdigest()
     return f"{digest}  BTCDOMUSDT-aggTrades-2026-11-21.zip\n"
@@ -155,7 +156,7 @@ def test_day_seconds_match_the_live_builder() -> None:
         binance_vision.day_seconds(lines, _ID, _DAY, received_ms=9, batch=5)
     )
     assert len(chunks) > 1
-    bars = [bar for chunk in chunks for bar in chunk]
+    bars = list(itertools.chain.from_iterable(chunks))
     trades = list(binance_vision.parse_rows(lines, _ID, 9))
     start = binance_vision.day_start_ms(_DAY)
     coverage = trades_lib.TradeCoverage(
@@ -228,8 +229,8 @@ async def test_download_is_verified_cached_and_imported(
             """Records archive writes.
 
             Args:
-                rows: Aggregates.
-                covered: Coverage.
+                rows: Second aggregates written in one chunk.
+                covered: Intervals the chunk covers.
             """
             received.append((len(rows), covered))
 
@@ -341,16 +342,16 @@ async def test_downloads_are_bounded_and_deduplicated(
 ) -> None:
     """At most ``max_concurrency`` downloads run; one per day at a time."""
     payload = _zip(_csv())
-    active = [0, 0]
+    active = [0, 0]  # Running and peak concurrent checksum requests.
 
     async def slow(request: httpx.Request) -> httpx.Response:
         """Serves a checksum slowly while counting concurrency.
 
         Args:
-            request: Request.
+            request: Checksum request.
 
         Returns:
-            Response.
+            The checksum body for the requested file.
         """
         active[0] += 1
         active[1] = max(active[1], active[0])

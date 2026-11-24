@@ -24,6 +24,7 @@ from collections.abc import AsyncIterator
 from collections.abc import Callable
 from collections.abc import Iterator
 from typing import Any
+from typing import TypeAlias
 
 import httpx
 import pytest
@@ -43,7 +44,7 @@ from joseph.market_data.app import registry
 from joseph.market_data.app import service as service_lib
 from joseph.market_data.domain import candles as candle_rules
 
-Validate = Callable[[str, str, object], None]
+Validate: TypeAlias = Callable[[str, str, object], None]
 _D = decimal.Decimal
 _TF = timeframes.Timeframe
 _FIXTURES = (
@@ -73,7 +74,7 @@ def _load(name: str) -> dict[str, Any]:
         name: File name without extension.
 
     Returns:
-        Parsed JSON.
+        The parsed fixture object.
     """
     payload: dict[str, Any] = json.loads(
         (_FIXTURES / f"{name}.json").read_text("utf-8")
@@ -128,8 +129,10 @@ class _Api:
     def __call__(self, request: httpx.Request) -> httpx.Response:
         """Serves rows inside the inclusive ``[start, end]`` window.
 
+        Each request is recorded in ``requests``.
+
         Args:
-            request: Request.
+            request: Request to a bars, trades or quotes endpoint.
 
         Returns:
             Response shaped like Alpaca's (one page).
@@ -196,7 +199,7 @@ class _Gate:
         """Ignores client frames.
 
         Args:
-            message: Frame.
+            message: Client frame.
         """
         del message
 
@@ -204,7 +207,7 @@ class _Gate:
         """Waits for the next released frame.
 
         Returns:
-            Frame.
+            The next frame put on ``frames``.
         """
         return await self.frames.get()
 
@@ -220,12 +223,12 @@ def _adapter(
 
     Args:
         venue: ``nasdaq`` or ``cboe``.
-        clock: Clock.
+        clock: Clock for the adapter.
         cfg: Alpaca configuration.
-        gate: Stream connection.
+        gate: Stream connection to open; None opens a new idle one each time.
 
     Returns:
-        Adapter.
+        The venue's Alpaca adapter.
     """
 
     @contextlib.asynccontextmanager
@@ -236,7 +239,7 @@ def _adapter(
             url: Ignored.
 
         Yields:
-            Connection.
+            The gated connection.
         """
         del url
         yield gate or _Gate()
@@ -259,7 +262,7 @@ def _bar_frame(row: dict[str, Any]) -> str:
         row: REST bar object.
 
     Returns:
-        Frame.
+        The JSON frame.
     """
     return json.dumps([{"T": "b", "S": "AAPL", **row}])
 
@@ -269,10 +272,10 @@ def _row(rows: list[dict[str, Any]], ts_ms: int) -> dict[str, Any]:
 
     Args:
         rows: Alpaca bars.
-        ts_ms: Bar time.
+        ts_ms: Bar time, epoch milliseconds.
 
     Returns:
-        The bar.
+        The first bar stamped at ``ts_ms``.
     """
     return next(r for r in rows if alpaca.rfc3339_ms(r["t"]) == ts_ms)
 
@@ -328,7 +331,7 @@ async def test_last_minute_gains_the_closing_print(
 
 
 async def test_hour_four_hour_and_day_closes_agree(api: _Api) -> None:
-    """1m, 1h, 4h and 1d bars of the session all close at the cross."""
+    """1m, 5m, 1h, 4h and 1d bars of the session all close at the cross."""
     clock = clock_lib.ManualClock(_CLOSE + 9 * 3_600_000)
     adapter = _adapter(instruments.Venue.NASDAQ, clock)
     closes = {}
@@ -421,10 +424,10 @@ def _sessions_before(
 
     Args:
         last: Newest session.
-        count: Sessions.
+        count: Number of sessions to list.
 
     Returns:
-        Ascending sessions.
+        The sessions, oldest first.
     """
     out = [last]
     while len(out) < count:
@@ -435,12 +438,13 @@ def _sessions_before(
 def _serve_sessions(api: _Api, days: list[sessions.Session]) -> None:
     """Gives AAPL a last minute, a post-close minute and a cross per day.
 
-    The last minute of day ``i`` closes at ``100 + i``, its cross prints
-    at ``100.5 + i``.
+    The last minute of day ``i`` closes at ``100 + i`` and its cross prints
+    at ``100.5 + i``; the post-close minute and a Form T trade are at
+    ``200 + i``.
 
     Args:
-        api: Endpoints.
-        days: Sessions.
+        api: Endpoints whose AAPL minutes and trades are replaced.
+        days: Sessions to serve, oldest first.
     """
     api.minutes["AAPL"] = []
     api.trades["AAPL"] = []
@@ -490,7 +494,7 @@ def _hole(day: sessions.Session) -> candle_rules.Span:
         day: Session.
 
     Returns:
-        Slot.
+        The ``(start, end)`` span of the session's last minute.
     """
     return (day.close_ms - _MINUTE, day.close_ms)
 
@@ -552,10 +556,10 @@ async def test_service_repairs_pending_sessions_once(
     }
     store = candle_store.CandleStore()
     svc = service_lib.MarketDataService(
-        adapters,  # type: ignore[arg-type]
-        registry.InstrumentRegistry(adapters),  # type: ignore[arg-type]
+        adapters,
+        registry.InstrumentRegistry(adapters),
         store,
-        feed_router.FeedRouter(adapters, store, clock),  # type: ignore[arg-type]
+        feed_router.FeedRouter(adapters, store, clock),
         clock,
     )
     batch = await svc.get_batch(
@@ -597,10 +601,10 @@ async def test_live_minute_stream_folds_the_print_after_the_window(
         """Streams the fixture bar at an instant and waits for an update.
 
         Args:
-            ts_ms: Bar time.
+            ts_ms: Time of the fixture bar to stream, epoch milliseconds.
 
         Returns:
-            The next update.
+            The next coverage update.
         """
         gate.frames.put_nowait(_bar_frame(_row(rows, ts_ms)))
         return await asyncio.wait_for(anext(stream), 5)
@@ -617,7 +621,7 @@ async def test_live_minute_stream_folds_the_print_after_the_window(
     assert api.closing_requests() == []
     clock.current_ms = _CLOSE + 90_000
     folded = await release(_CLOSE)  # Alpaca's post-market 16:00 bar.
-    await stream.aclose()  # type: ignore[attr-defined]
+    await stream.aclose()  # type: ignore[attr-defined]  # stream_candle_coverage is typed AsyncIterator; its generator has aclose()
     (bar,) = folded.candles
     assert bar.start_ms == _CLOSE - _MINUTE and bar.is_final
     assert bar.close == _CROSS and bar.source == "alpaca.ws"

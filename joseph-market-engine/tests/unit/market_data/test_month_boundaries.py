@@ -32,8 +32,8 @@ def _ms(year: int, month: int, day: int = 1) -> int:
 
     Args:
         year: Year.
-        month: Month.
-        day: Day.
+        month: Month (1-12).
+        day: Day of the month.
 
     Returns:
         Epoch milliseconds.
@@ -46,7 +46,7 @@ def _month_row(start_ms: int) -> list[object]:
     """Builds a Binance 1M kline row.
 
     Args:
-        start_ms: Month start.
+        start_ms: Month start in epoch milliseconds.
 
     Returns:
         Row with taker buy volume at index 9.
@@ -146,43 +146,45 @@ def test_find_gaps_is_linear_in_present_bars() -> None:
     assert gaps[1][0] == start + 2_000
 
 
+def _trade(ts: int) -> market.Trade:
+    """Builds a one-unit taker-buy trade whose id is its timestamp.
+
+    Args:
+        ts: Venue and receive time in epoch milliseconds.
+
+    Returns:
+        The trade.
+    """
+    return market.Trade(
+        _ID,
+        str(ts),
+        ts,
+        ts,
+        _D(1),
+        _D(1),
+        market.AggressorSide.BUY,
+        False,
+    )
+
+
 async def test_suffix_chunks_keep_the_newest_complete_trades() -> None:
     """Forward-paging venues return a complete suffix under a page cap."""
     end = 100_000
     calls: list[tuple[int, int]] = []
 
-    def trade(ts: int) -> market.Trade:
-        """Builds a trade.
-
-        Args:
-            ts: Venue time.
-
-        Returns:
-            Trade.
-        """
-        return market.Trade(
-            _ID,
-            str(ts),
-            ts,
-            ts,
-            _D(1),
-            _D(1),
-            market.AggressorSide.BUY,
-            False,
-        )
-
     async def page(start: int, stop: int) -> trades_lib.TradeCoverage:
         """Returns one trade per 1,000 ms, at most three per page.
 
         Args:
-            start: Start.
-            stop: End.
+            start: Window start in epoch milliseconds, inclusive.
+            stop: Window end in epoch milliseconds, exclusive.
 
         Returns:
-            Prefix coverage.
+            Coverage of the window's first three trades, complete only when
+            the window holds no more than three.
         """
         calls.append((start, stop))
-        rows = [trade(t) for t in range(start - start % 1_000, stop, 1_000)]
+        rows = [_trade(t) for t in range(start - start % 1_000, stop, 1_000)]
         rows = [t for t in rows if t.venue_event_ts_ms >= start]
         return trades_lib.coverage_from_prefix(
             rows[:3], start, stop, complete=len(rows) <= 3

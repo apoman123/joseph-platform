@@ -65,7 +65,7 @@ def _adapter(venue: instruments.Venue) -> ports.MarketDataPort:
         venue: Venue.
 
     Returns:
-        Adapter.
+        The adapter, without derived bars or recorded delta.
     """
     return factory.build_adapters(
         [venue], clock_lib.SystemClock(), client=httpx.AsyncClient(timeout=30)
@@ -90,11 +90,11 @@ async def test_live_binance_archive_day_equals_its_daily_kline(
     def sink(
         rows: list[market.Candle], covered: list[recorded_trades.Interval]
     ) -> None:
-        """Writes into the memory archive.
+        """Writes one import batch into the memory archive.
 
         Args:
-            rows: Aggregates.
-            covered: Coverage.
+            rows: 1s aggregates.
+            covered: Intervals the rows prove complete.
         """
         archive.put(_QUIET, rows, covered)
 
@@ -174,11 +174,11 @@ async def test_live_bitget_archive_day_is_verified_and_matches_rest(
     def sink(
         rows: list[market.Candle], covered: list[recorded_trades.Interval]
     ) -> None:
-        """Writes into the memory archive.
+        """Writes one import batch into the memory archive.
 
         Args:
-            rows: Aggregates.
-            covered: Coverage.
+            rows: 1s aggregates.
+            covered: Intervals the rows prove complete.
         """
         store.put(quiet, rows, covered)
 
@@ -219,11 +219,11 @@ async def test_live_lighter_archive_day_folds_to_its_daily_candle() -> None:
     def sink(
         rows: list[market.Candle], covered: list[recorded_trades.Interval]
     ) -> None:
-        """Writes into the memory archive.
+        """Writes one import batch into the memory archive.
 
         Args:
-            rows: Aggregates.
-            covered: Coverage.
+            rows: 1s aggregates.
+            covered: Intervals the rows prove complete.
         """
         store.put(btc, rows, covered)
 
@@ -269,7 +269,7 @@ async def test_live_lighter_archive_day_folds_to_its_daily_candle() -> None:
         for m in enriched
         if m.base_volume > 0
     )
-    print(  # noqa: T201
+    print(  # noqa: T201 - the opt-in live run reports how much it downloaded
         f"lighter archive {day}: {transferred} of {remote.size} bytes in "
         f"{requests} requests"
     )
@@ -345,7 +345,7 @@ async def test_live_aggregated_calendar_months(
 async def test_live_trade_history_gives_true_delta(
     venue: instruments.Venue,
 ) -> None:
-    """A closed minute covered by REST trades gets the venue's volume."""
+    """A closed minute covered by REST trades gets a true taker delta."""
     clock = clock_lib.SystemClock()
     raw = _adapter(venue)
     assert isinstance(raw, base.BaseVenueAdapter)

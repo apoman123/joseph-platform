@@ -1,7 +1,7 @@
 # Copyright 2026 apoman123
 # SPDX-License-Identifier: MIT
 
-"""Session calendars over HTTP and contract validity of the DEMO stock."""
+"""Integration tests for session calendars over HTTP and the DEMO stock."""
 
 from __future__ import annotations
 
@@ -9,6 +9,7 @@ import datetime
 import json
 import zoneinfo
 from collections.abc import Callable
+from typing import TypeAlias
 
 import httpx
 from fastapi import testclient
@@ -16,7 +17,7 @@ from fastapi import testclient
 from joseph.domain import sessions
 from joseph.domain import timeframes
 
-Validate = Callable[[str, str, object], None]
+Validate: TypeAlias = Callable[[str, str, object], None]
 NY = zoneinfo.ZoneInfo("America/New_York")
 ACME = "mock:stock:ACME"
 
@@ -41,7 +42,7 @@ def _error(response: httpx.Response, status: int, code: str) -> None:
     """Asserts a contract error response.
 
     Args:
-        response: Response.
+        response: Response to check.
         status: Expected HTTP status.
         code: Expected error code.
     """
@@ -52,7 +53,7 @@ def _error(response: httpx.Response, status: int, code: str) -> None:
 def test_sessions_endpoint_lists_exchange_sessions(
     demo_client: testclient.TestClient, contract_validate: Validate
 ) -> None:
-    """XNYS skips Thanksgiving and closes early the day after."""
+    """XNYS skips Thanksgiving and closes early after; calendars validate."""
     body = demo_client.get(
         "/v1/calendars/XNYS/sessions",
         params={"from_ms": _ny(2026, 11, 23), "to_ms": _ny(2026, 11, 28)},

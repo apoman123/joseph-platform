@@ -42,10 +42,10 @@ TOKENS = {
 
 
 def _principal(request: fastapi.Request) -> identity.Principal:
-    """Test authentication dependency.
+    """Authenticates a request against ``TOKENS``.
 
     Args:
-        request: Request.
+        request: Incoming request with an ``Authorization`` header.
 
     Returns:
         Principal for the bearer token.
@@ -61,7 +61,7 @@ def _principal(request: fastapi.Request) -> identity.Principal:
 
 
 class _Provider:
-    """Frame provider returning the Long A world."""
+    """Frame provider returning the Long A scenario for any request."""
 
     async def frames(
         self,
@@ -71,17 +71,17 @@ class _Provider:
         from_ms: int,
         to_ms: int,
     ) -> Sequence[structures.BarFrame]:
-        """Returns scenario frames.
+        """Returns the Long A scenario frames.
 
         Args:
-            instrument_id: Instrument.
-            signal_tf: Signal timeframe.
-            requirements: Requirements.
-            from_ms: Start.
-            to_ms: End.
+            instrument_id: Instrument (ignored).
+            signal_tf: Signal timeframe (ignored).
+            requirements: Engine requirements (ignored).
+            from_ms: Window start (ignored).
+            to_ms: Window end (ignored).
 
         Returns:
-            Frames.
+            The scenario frames.
         """
         del instrument_id, signal_tf, requirements, from_ms, to_ms
         return scenarios.long_a_frames()
@@ -89,13 +89,13 @@ class _Provider:
 
 @pytest.fixture
 def client(manual_clock: clock.ManualClock) -> Iterator[testclient.TestClient]:
-    """Builds an app with the three routers.
+    """Builds an app with the strategy, signal and backtest routers.
 
     Args:
-        manual_clock: Clock.
+        manual_clock: Clock of the version service.
 
     Yields:
-        Test client.
+        A client for the running app, with in-memory stores.
     """
     versions = version_service.StrategyVersionService(
         memory.InMemoryStrategyRepository(), manual_clock
@@ -129,10 +129,10 @@ def _auth(token: str = "token-a") -> dict[str, str]:
     """Builds an auth header.
 
     Args:
-        token: Token.
+        token: Bearer token; a key of ``TOKENS`` authenticates.
 
     Returns:
-        Headers.
+        The request headers.
     """
     return {"Authorization": f"Bearer {token}"}
 
@@ -141,7 +141,7 @@ def _long_a() -> dict[str, object]:
     """Returns the Long A fixture payload.
 
     Returns:
-        JSON-compatible definition.
+        A fresh copy of the JSON-compatible definition.
     """
     valid = fixtures.load_fixture("strategy")["valid"]
     assert isinstance(valid, list)
@@ -152,7 +152,7 @@ def test_authoring_flow(
     client: testclient.TestClient,
     contract_validate: Callable[[str, str, object], None],
 ) -> None:
-    """Create, list, version, validate, activate and pause over HTTP."""
+    """HTTP authoring creates, lists, versions, validates, activates, pauses."""
     created = client.post("/v1/strategies", json=_long_a(), headers=_auth())
     assert created.status_code == 201
     contract_validate("strategy.schema.json", "StrategyVersion", created.json())
@@ -226,7 +226,7 @@ def test_tenant_isolation_and_auth(client: testclient.TestClient) -> None:
 
 
 def test_schema_violations_are_rejected(client: testclient.TestClient) -> None:
-    """Code-like nodes and float decimals fail request validation."""
+    """Code-like nodes, float decimals and malformed ids fail validation."""
     bad = _long_a()
     bad["when"] = {"op": "EVAL", "code": "__import__('os')"}
     assert (
@@ -285,7 +285,7 @@ def test_signal_listing(
     client: testclient.TestClient,
     contract_validate: Callable[[str, str, object], None],
 ) -> None:
-    """The signal list endpoint returns a contract list."""
+    """The signal list matches the contract and refuses a zero limit."""
     response = client.get(
         "/v1/signals?kind=ENTRY_CONFIRMED,ENTRY_BLOCKED&limit=10",
         headers=_auth(),

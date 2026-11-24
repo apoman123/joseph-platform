@@ -10,6 +10,7 @@ import dataclasses
 import decimal
 from collections.abc import AsyncGenerator
 from collections.abc import AsyncIterator
+from typing import TypeAlias
 
 import pytest
 
@@ -40,7 +41,8 @@ _HL_TF = tuple(
     if tf not in (_TF.H6, _TF.W1, _TF.MN1)
 )
 
-Script = list[tuple[int, market.Candle]]
+Script: TypeAlias = list[tuple[int, market.Candle]]
+"""Stream script: ``(clock time, update)`` pairs, delivered in order."""
 
 
 def _bar(
@@ -55,15 +57,17 @@ def _bar(
     """Builds a venue bar without taker volume.
 
     Args:
-        start: Bar start.
+        start: Bar start, epoch milliseconds.
         tf: Timeframe.
-        final: Finality.
+        final: Whether the bar is final; final bars come from REST, others
+            from the WebSocket.
         price: Close price.
         volume: Base volume.
-        received: Receipt time.
+        received: Receipt time, epoch milliseconds.
 
     Returns:
-        Candle.
+        The candle: open 10, low 9, high one above the larger of open and
+        close, 4 trades.
     """
     return market.Candle(
         instrument_id=_HL,
@@ -84,7 +88,19 @@ def _bar(
 
 
 class FakeInner:
-    """Venue adapter double (Hyperliquid-like timeframes)."""
+    """Venue adapter double (Hyperliquid-like timeframes).
+
+    Attributes:
+        clock: Clock advanced by the stream script.
+        rows: Bars served per timeframe.
+        script: ``(clock time, update)`` pairs streamed in order.
+        native_ws: Whether native candle streams exist.
+        tfs: Native timeframes.
+        venue: Venue the double serves.
+        taker: Whether klines carry taker volume.
+        fetches: ``(timeframe, start, end)`` of every candle fetch.
+        calls: Names of the delegated calls received, in order.
+    """
 
     def __init__(
         self,
@@ -122,7 +138,8 @@ class FakeInner:
         """Returns capabilities of the double.
 
         Returns:
-            Capabilities.
+            REST history and native trades; candles and taker volume as
+            configured.
         """
         return capabilities.VenueCapabilities(
             venue=self.venue,
@@ -148,17 +165,17 @@ class FakeInner:
         end_ms: int,
         limit: int | None = None,
     ) -> list[market.Candle]:
-        """Serves stored bars of a range.
+        """Serves stored bars of a range and records the fetch.
 
         Args:
-            instrument: Instrument.
+            instrument: Ignored.
             timeframe: Resolution.
-            start_ms: Inclusive start.
-            end_ms: Exclusive end.
-            limit: Optional maximum.
+            start_ms: Inclusive start, epoch milliseconds.
+            end_ms: Exclusive end, epoch milliseconds.
+            limit: Keeps only the newest ``limit`` bars; None keeps all.
 
         Returns:
-            Bars.
+            The stored bars starting in ``[start_ms, end_ms)``.
         """
         del instrument
         self.fetches.append((timeframe, start_ms, end_ms))
@@ -178,12 +195,12 @@ class FakeInner:
         """Streams the script.
 
         Args:
-            instrument: Instrument.
-            timeframe: Resolution.
-            tracker: Health tracker.
+            instrument: Ignored.
+            timeframe: Ignored.
+            tracker: Ignored.
 
         Returns:
-            Async iterator.
+            The scripted updates.
 
         Raises:
             errors.UnsupportedError: Without native streams.
@@ -196,7 +213,7 @@ class FakeInner:
         """Yields scripted updates, advancing the clock.
 
         Yields:
-            Updates.
+            Each scripted update, once the clock is at its time.
         """
         for at, update in self.script:
             self.clock.advance(at - self.clock.now_ms())
@@ -220,7 +237,7 @@ class FakeInner:
             instrument: Instrument.
 
         Returns:
-            Snapshot.
+            A placeholder live snapshot.
         """
         self.calls.append("fetch_snapshot")
         return market.MarketSnapshot(instrument, quality.FeedState.LIVE, "x", 0)
@@ -258,7 +275,7 @@ class FakeInner:
             instrument: Instrument.
 
         Returns:
-            Open interest.
+            A placeholder open interest of 1.
         """
         self.calls.append("fetch_open_interest")
         return market.OpenInterest(instrument, _D(1), _D(1), "x", 0)
@@ -272,7 +289,7 @@ class FakeInner:
             instrument: Instrument.
 
         Returns:
-            Funding.
+            A placeholder predicted funding rate of 0.
         """
         self.calls.append("fetch_funding")
         return market.Funding(
@@ -297,10 +314,10 @@ class FakeInner:
         return self._no_trades()
 
     async def _no_trades(self) -> AsyncGenerator[market.Trade, None]:
-        """Yields nothing.
+        """Ends at once without a trade.
 
         Yields:
-            Nothing.
+            Nothing; the stream is empty.
         """
         for trade in ():
             yield trade
@@ -315,10 +332,10 @@ class FakeInner:
         """Records the call.
 
         Args:
-            instrument: Instrument.
-            start_ms: Start.
-            end_ms: End.
-            limit: Limit.
+            instrument: Ignored.
+            start_ms: Ignored.
+            end_ms: Ignored.
+            limit: Ignored.
 
         Returns:
             Empty list.
@@ -340,9 +357,9 @@ class FakeInner:
         """Streams no trade events (recorder capability).
 
         Args:
-            instrument: Instrument.
-            tracker: Health tracker.
-            prime_from_ms: Prime point.
+            instrument: Ignored.
+            tracker: Ignored.
+            prime_from_ms: Ignored.
 
         Returns:
             Idle stream.
@@ -350,10 +367,10 @@ class FakeInner:
         return self._idle()
 
     async def _idle(self) -> AsyncGenerator[ws.TradeStreamEvent, None]:
-        """Idles forever.
+        """Idles for an hour, longer than any test runs.
 
         Yields:
-            Nothing.
+            A frame event, only after the hour.
         """
         await asyncio.sleep(3_600)
         yield ws.FrameReceived(0)
@@ -368,13 +385,13 @@ class FakeInner:
         """Returns empty coverage.
 
         Args:
-            instrument: Instrument.
-            start_ms: Start.
-            end_ms: End.
-            max_pages: Budget.
+            instrument: Ignored.
+            start_ms: Ignored.
+            end_ms: End of the request, epoch milliseconds.
+            max_pages: Ignored.
 
         Returns:
-            Empty coverage.
+            Empty coverage of the empty span at ``end_ms``.
         """
         return trades_lib.TradeCoverage((), end_ms, end_ms)
 
@@ -385,12 +402,12 @@ def _days(
     """Builds consecutive daily bars.
 
     Args:
-        first: First day start.
+        first: First day start, epoch milliseconds.
         count: Number of days.
         live_last: Whether the last day is in progress.
 
     Returns:
-        Bars.
+        The daily bars, all final unless ``live_last``.
     """
     return [
         _bar(first + i * _DAY, final=not (live_last and i == count - 1))
@@ -411,7 +428,7 @@ def _recorder(
         Recorder (not started).
     """
     return trade_recorder.TradeRecorder(
-        {inner.venue: inner},  # type: ignore[dict-item]
+        {inner.venue: inner},
         trade_archive.MemoryTradeArchive(),
         clock,
     )
@@ -498,6 +515,33 @@ async def test_stream_builds_the_live_month_and_rolls_over() -> None:
     assert inner.fetches[-1] == (_TF.D1, _DEC + _DAY, _DEC + 2 * _DAY)
 
 
+async def _fail_backfills(
+    instrument: instruments.InstrumentId,
+    timeframe: timeframes.Timeframe,
+    start_ms: int,
+    end_ms: int,
+    limit: int | None = None,
+) -> list[market.Candle]:
+    """Serves the December seed request empty and fails every other fetch.
+
+    Args:
+        instrument: Ignored.
+        timeframe: Ignored.
+        start_ms: Inclusive start, epoch milliseconds.
+        end_ms: Exclusive end, epoch milliseconds.
+        limit: Ignored.
+
+    Returns:
+        No bars, for the seed request of December's days.
+
+    Raises:
+        errors.VenueUnavailableError: For any other request (the backfills).
+    """
+    if start_ms == _DEC and end_ms == _DEC + 31 * _DAY:
+        return []
+    raise errors.VenueUnavailableError("down")
+
+
 async def test_stream_tolerates_a_failed_child_backfill() -> None:
     """A child backfill error is recorded and the stream continues."""
     clock = clock_lib.ManualClock(_DEC + 3 * _DAY)
@@ -505,34 +549,7 @@ async def test_stream_tolerates_a_failed_child_backfill() -> None:
         clock,
         script=[(_DEC + 3 * _DAY + 1, _bar(_DEC + 3 * _DAY, final=False))],
     )
-
-    async def broken(
-        instrument: instruments.InstrumentId,
-        timeframe: timeframes.Timeframe,
-        start_ms: int,
-        end_ms: int,
-        limit: int | None = None,
-    ) -> list[market.Candle]:
-        """Fails after the seed request.
-
-        Args:
-            instrument: Instrument.
-            timeframe: Resolution.
-            start_ms: Start.
-            end_ms: End.
-            limit: Limit.
-
-        Returns:
-            Nothing on the seed.
-
-        Raises:
-            errors.VenueUnavailableError: For backfills.
-        """
-        if start_ms == _DEC and end_ms == _DEC + 31 * _DAY:
-            return []
-        raise errors.VenueUnavailableError("down")
-
-    inner.fetch_candles = broken  # type: ignore[method-assign]
+    inner.fetch_candles = _fail_backfills  # type: ignore[method-assign]  # swaps in a fetch that fails every child backfill
     tracker = health.FeedHealthTracker(instruments.Venue.HYPERLIQUID)
     adapter = derived_bars.DerivedBarsAdapter(inner, clock)
     updates = [u async for u in adapter.stream_candles(_HL, _TF.MN1, tracker)]
@@ -593,8 +610,8 @@ async def test_fetch_attaches_recorded_delta_only_to_covered_bars() -> None:
     rows = await adapter.fetch_candles(_HL, _TF.M1, _NOV, _NOV + 180_000)
     assert rows[0].taker_buy_base_volume == _D(2)
     assert rows[0].taker_buy_method is market.BuyVolumeMethod.TAKER
-    assert rows[1].taker_buy_base_volume is None  # volume mismatch
-    assert rows[2].taker_buy_base_volume is None  # not covered
+    assert rows[1].taker_buy_base_volume is None  # Volume mismatch.
+    assert rows[2].taker_buy_base_volume is None  # Not covered.
 
 
 async def test_stream_waits_for_the_recorder_at_a_bar_close() -> None:
@@ -617,26 +634,26 @@ async def test_stream_waits_for_the_recorder_at_a_bar_close() -> None:
         """Records the wait and archives the minute.
 
         Args:
-            instrument: Instrument.
-            end_ms: Bar end.
-            timeout_s: Timeout.
+            instrument: Ignored.
+            end_ms: Bar end, epoch milliseconds.
+            timeout_s: Ignored.
 
         Returns:
-            True.
+            True: the minute is recorded.
         """
         waits.append(end_ms)
         _covered_minute(recorder, _NOV, "4")
         return True
 
-    recorder.wait_recorded = wait  # type: ignore[method-assign]
-    recorder.recording = lambda instrument: True  # type: ignore[method-assign]
+    recorder.wait_recorded = wait  # type: ignore[method-assign]  # stub records the minute instead of waiting
+    recorder.recording = lambda instrument: True  # type: ignore[method-assign]  # stub: the instrument is being recorded
     adapter = derived_bars.DerivedBarsAdapter(inner, clock, recorder=recorder)
     updates = [u async for u in adapter.stream_candles(_HL, _TF.M1)]
     assert [u.taker_buy_base_volume for u in updates] == [None, _D(2)]
     assert waits == [close]
     seconds = adapter.stream_candles(_HL, _TF.S1)
     assert isinstance(seconds, AsyncIterator)
-    await seconds.aclose()  # type: ignore[attr-defined]
+    await seconds.aclose()  # type: ignore[attr-defined]  # stream_candles is typed AsyncIterator; its generator has aclose()
 
 
 async def test_other_calls_are_delegated() -> None:
@@ -672,7 +689,7 @@ def test_wrap_leaves_the_demo_venue_alone() -> None:
     hl = FakeInner(clock)
     mock = FakeInner(clock, venue=instruments.Venue.MOCK)
     wrapped = derived_bars.wrap(
-        {hl.venue: hl, mock.venue: mock},  # type: ignore[dict-item]
+        {hl.venue: hl, mock.venue: mock},
         clock,
     )
     assert isinstance(

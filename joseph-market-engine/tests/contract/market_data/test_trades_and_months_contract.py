@@ -15,11 +15,13 @@ import asyncio
 import contextlib
 import datetime
 import decimal
+import itertools
 import json
 import pathlib
 from collections.abc import AsyncIterator
 from collections.abc import Callable
 from typing import Any
+from typing import TypeAlias
 
 import httpx
 import pytest
@@ -39,7 +41,7 @@ from joseph.market_data.adapters import mexc
 from joseph.market_data.app import ports
 from joseph.market_data.domain import trades as trades_lib
 
-Validate = Callable[[str, str, object], None]
+Validate: TypeAlias = Callable[[str, str, object], None]
 _D = decimal.Decimal
 _BUY = market.AggressorSide.BUY
 _SELL = market.AggressorSide.SELL
@@ -60,7 +62,7 @@ def _fixture(venue: str, name: str) -> Any:
     """Reads a captured fixture.
 
     Args:
-        venue: Venue directory.
+        venue: Venue directory under ``fixtures/venues``.
         name: File name without extension.
 
     Returns:
@@ -80,7 +82,7 @@ def _id(venue: instruments.Venue) -> instruments.InstrumentId:
     """Returns the BTC perpetual of a venue.
 
     Args:
-        venue: Venue.
+        venue: Crypto venue with a BTC perpetual.
 
     Returns:
         Instrument id.
@@ -95,13 +97,17 @@ def _utc(ms: int) -> datetime.datetime:
         ms: Epoch milliseconds.
 
     Returns:
-        Datetime.
+        The UTC datetime of ``ms``.
     """
     return datetime.datetime.fromtimestamp(ms / 1000, datetime.UTC)
 
 
 class _FrameConnection:
-    """Replays captured frames, then idles."""
+    """Replays captured frames, then idles.
+
+    Attributes:
+        frames: Frames still to deliver, oldest first.
+    """
 
     def __init__(self, frames: list[str]) -> None:
         """Initializes the connection.
@@ -112,18 +118,18 @@ class _FrameConnection:
         self.frames = list(frames)
 
     async def send(self, message: str) -> None:
-        """Accepts a sent frame.
+        """Accepts and discards a sent frame.
 
         Args:
-            message: Frame.
+            message: Frame payload.
         """
         del message
 
     async def recv(self) -> str:
-        """Returns the next frame or idles.
+        """Returns the next frame, or idles for an hour once none are left.
 
         Returns:
-            Frame.
+            The next frame; an empty string only after the idle wait.
         """
         if self.frames:
             return self.frames.pop(0)
@@ -140,11 +146,11 @@ def _adapter(
 
     Args:
         venue: Venue.
-        clock: Clock.
-        frames: Optional frames.
+        clock: Clock the adapter reads.
+        frames: Frames each connection replays, or None for none.
 
     Returns:
-        Adapter.
+        The adapter the factory builds for ``venue``.
     """
 
     @contextlib.asynccontextmanager
@@ -155,7 +161,7 @@ def _adapter(
             url: Ignored.
 
         Yields:
-            Connection.
+            A new replaying connection.
         """
         del url
         yield _FrameConnection(frames or [])
@@ -164,7 +170,7 @@ def _adapter(
         [venue],
         clock,
         client=httpx.AsyncClient(),
-        connect=connect,  # type: ignore[arg-type]
+        connect=connect,
     )[venue]
 
 
@@ -174,8 +180,12 @@ def _check_trades(
     """Asserts trades are contract-valid, unique and ascending.
 
     Args:
-        trades: Trades.
+        trades: Trades to check.
         contract_validate: Schema validator.
+
+    Raises:
+        AssertionError: A trade breaks one of these properties.
+        jsonschema.ValidationError: A trade breaks the Trade contract.
     """
     assert trades
     for trade in trades:
@@ -194,9 +204,11 @@ def test_binance_agg_trade_frames(contract_validate: Validate) -> None:
     instrument = _id(instruments.Venue.BINANCE)
     frames = _fixture("binance", "ws_agg_trade")["frames"]
     assert binance.parse_ws_agg_trade(frames[0], instrument, 0) == []
-    trades = [
-        t for f in frames for t in binance.parse_ws_agg_trade(f, instrument, 1)
-    ]
+    trades = list(
+        itertools.chain.from_iterable(
+            binance.parse_ws_agg_trade(f, instrument, 1) for f in frames
+        )
+    )
     _check_trades(trades, contract_validate)
     raw = json.loads(frames[1])
     first = trades[0]
@@ -208,14 +220,16 @@ def test_binance_agg_trade_frames(contract_validate: Validate) -> None:
 
 
 def test_bitget_trade_frames(contract_validate: Validate) -> None:
-    """Bitget ``side`` is the taker side; frames list newest first."""
+    """Bitget ``side`` is the taker side; newest-first data parses ascending."""
     instrument = _id(instruments.Venue.BITGET)
     frames = _fixture("bitget", "ws_trade")["frames"]
     assert bitget.parse_trade_frame(frames[0], instrument, 0) == []
     assert bitget.parse_trade_frame("pong", instrument, 0) == []
-    trades = [
-        t for f in frames for t in bitget.parse_trade_frame(f, instrument, 1)
-    ]
+    trades = list(
+        itertools.chain.from_iterable(
+            bitget.parse_trade_frame(f, instrument, 1) for f in frames
+        )
+    )
     _check_trades(trades, contract_validate)
     raw = json.loads(frames[1])["data"][0]
     match = next(t for t in trades if t.trade_id == raw["tradeId"])
@@ -233,9 +247,11 @@ def test_mexc_deal_frames_convert_contracts(
         mexc.parse_deal_frame(capture["frames"][0], instrument, size, 0) == []
     )
     frames = capture["frames"][1:] + capture["object_frames"]
-    trades = [
-        t for f in frames for t in mexc.parse_deal_frame(f, instrument, size, 1)
-    ]
+    trades = list(
+        itertools.chain.from_iterable(
+            mexc.parse_deal_frame(f, instrument, size, 1) for f in frames
+        )
+    )
     _check_trades(trades[: len(trades) - 3], contract_validate)
     raw = json.loads(capture["frames"][1])["data"][0]
     first = trades[0]
@@ -253,11 +269,11 @@ def test_hyperliquid_trade_frames(contract_validate: Validate) -> None:
     assert hyperliquid.parse_trades_frame(frames[0], instrument, 0) == []
     replay = hyperliquid.parse_trades_frame(frames[1], instrument, 1)
     assert len(replay) == 30
-    trades = [
-        t
-        for f in frames
-        for t in hyperliquid.parse_trades_frame(f, instrument, 1)
-    ]
+    trades = list(
+        itertools.chain.from_iterable(
+            hyperliquid.parse_trades_frame(f, instrument, 1) for f in frames
+        )
+    )
     _check_trades(trades, contract_validate)
     raw = json.loads(frames[1])["data"][0]
     first = replay[0]
@@ -266,15 +282,15 @@ def test_hyperliquid_trade_frames(contract_validate: Validate) -> None:
 
 
 def test_lighter_trade_frames(contract_validate: Validate) -> None:
-    """``is_maker_ask`` true means the aggressor bought."""
+    """``is_maker_ask`` true is a buy; error frames raise, deleverages drop."""
     instrument = _id(instruments.Venue.LIGHTER)
     frames = _fixture("lighter", "ws_trade")["frames"]
     assert lighter.parse_trade_frame(frames[0], instrument, 1, 0) == []
-    trades = [
-        t
-        for f in frames
-        for t in lighter.parse_trade_frame(f, instrument, 1, 1)
-    ]
+    trades = list(
+        itertools.chain.from_iterable(
+            lighter.parse_trade_frame(f, instrument, 1, 1) for f in frames
+        )
+    )
     _check_trades(trades, contract_validate)
     raw = json.loads(frames[2])["trades"][0]
     match = next(t for t in trades if t.trade_id == str(raw["trade_id"]))
@@ -473,7 +489,7 @@ async def test_trade_streams_replay_captured_frames(
     got: list[market.Trade] = []
     for _ in range(3):
         got.append(await asyncio.wait_for(anext(stream), 5))
-    await stream.aclose()  # type: ignore[attr-defined]
+    await stream.aclose()  # type: ignore[attr-defined]  # stream_trades is typed AsyncIterator; its generator has aclose()
     _check_trades(got, contract_validate)
 
 
@@ -489,7 +505,7 @@ async def test_seconds_candles_stream_from_replayed_trades(
         _id(instruments.Venue.HYPERLIQUID), timeframes.Timeframe.S5
     )
     first = await asyncio.wait_for(anext(stream), 5)
-    await stream.aclose()  # type: ignore[attr-defined]
+    await stream.aclose()  # type: ignore[attr-defined]  # stream_candles is typed AsyncIterator; its generator has aclose()
     contract_validate("market.schema.json", "Candle", first.to_contract())
     assert first.source == "hyperliquid.trades"
     assert first.timeframe is timeframes.Timeframe.S5
@@ -497,7 +513,7 @@ async def test_seconds_candles_stream_from_replayed_trades(
 
 
 def test_trade_capabilities_are_truthful() -> None:
-    """Seconds bars are declared only where a trade stream exists."""
+    """Seconds bars, months, taker volume and history are declared truly."""
     clock = clock_lib.ManualClock(0)
     caps = {
         v: _adapter(v, clock).capabilities()

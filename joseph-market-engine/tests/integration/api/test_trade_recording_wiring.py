@@ -7,6 +7,7 @@ from __future__ import annotations
 
 import dataclasses
 import pathlib
+from typing import Any
 
 import pytest
 
@@ -25,15 +26,15 @@ from joseph.platform import config
 _T0 = 1_795_349_040_000
 
 
-def _settings(tmp_path: pathlib.Path, **overrides: object) -> config.Settings:
+def _settings(tmp_path: pathlib.Path, **overrides: Any) -> config.Settings:
     """Builds settings for real venues without network side effects.
 
     Args:
-        tmp_path: Scratch directory.
-        **overrides: Field overrides.
+        tmp_path: Scratch directory for the archive directories.
+        **overrides: ``Settings`` field overrides.
 
     Returns:
-        Settings.
+        The settings, with the pipeline off.
     """
     base = config.Settings(
         database_url="sqlite://",
@@ -47,13 +48,13 @@ def _settings(tmp_path: pathlib.Path, **overrides: object) -> config.Settings:
         binance_archive_dir=str(tmp_path / "vision"),
         bitget_archive_dir=str(tmp_path / "bitget"),
     )
-    return dataclasses.replace(base, **overrides)  # type: ignore[arg-type]
+    return dataclasses.replace(base, **overrides)
 
 
 async def test_container_records_trades_and_wraps_real_venues(
     tmp_path: pathlib.Path,
 ) -> None:
-    """Real venues are wrapped; candles of a live session lease recording."""
+    """Real venues get derived bars and archives; zero capacity records none."""
     container = bootstrap.build_container(
         _settings(
             tmp_path,
@@ -109,7 +110,8 @@ async def test_container_records_trades_and_wraps_real_venues(
     on_candle = container.router._on_candle
     assert on_candle is not None
     await on_candle(session, candle, candle_rules.MergeAction.INSERTED)
-    assert not recorder.recording(instrument)  # capacity 0 in this test
+    # trade_record_max_instruments=0 leaves no lease to grant.
+    assert not recorder.recording(instrument)
     await container.aclose()
 
 

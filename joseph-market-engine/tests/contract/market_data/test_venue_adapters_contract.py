@@ -1,7 +1,7 @@
 # Copyright 2026 apoman123
 # SPDX-License-Identifier: MIT
 
-"""Contract tests: captured venue payloads → canonical, schema-valid objects.
+"""Contract tests: captured venue payloads become schema-valid objects.
 
 Each adapter parses real responses captured from the public APIs
 (``fixtures/venues``) served through respx; every produced object must
@@ -18,6 +18,7 @@ import pathlib
 from collections.abc import AsyncIterator
 from collections.abc import Callable
 from typing import Any
+from typing import TypeAlias
 
 import httpx
 import pytest
@@ -31,9 +32,10 @@ from joseph.domain import timeframes
 from joseph.market_data.adapters import alpaca
 from joseph.market_data.adapters import binance
 from joseph.market_data.adapters import factory
+from joseph.market_data.adapters import ws
 from joseph.market_data.app import ports
 
-Validate = Callable[[str, str, object], None]
+Validate: TypeAlias = Callable[[str, str, object], None]
 _D = decimal.Decimal
 _BTC = {
     instruments.Venue.BINANCE: "binance:perp:BTCUSDT",
@@ -52,8 +54,10 @@ _EXCHANGE = [
     instruments.Venue.CBOE,
     instruments.Venue.TREASURY,
 ]
-"""Exchange and rate venues; venue-specific tests live in
-``test_exchange_venues_contract.py``."""
+"""Exchange and rate venues.
+
+Their venue-specific tests live in ``test_exchange_venues_contract.py``.
+"""
 _ALL_REAL = [*_REAL, *_EXCHANGE]
 _ALPACA_TEST_KEYS = alpaca.AlpacaConfig(key_id="test-key", secret_key="test")
 
@@ -62,7 +66,7 @@ def _fixture(venue: str, name: str) -> Any:
     """Reads a captured fixture file.
 
     Args:
-        venue: Venue directory.
+        venue: Venue directory under ``fixtures/venues``.
         name: File name without extension.
 
     Returns:
@@ -79,7 +83,12 @@ def _fixture(venue: str, name: str) -> Any:
 
 
 class _FrameConnection:
-    """Replays captured frames, then idles."""
+    """Replays captured frames, then idles.
+
+    Attributes:
+        frames: Frames still to deliver, oldest first.
+        sent: Frames the adapter sent, in order.
+    """
 
     def __init__(self, frames: list[str]) -> None:
         """Initializes the connection.
@@ -94,15 +103,15 @@ class _FrameConnection:
         """Records a sent frame.
 
         Args:
-            message: Frame.
+            message: Frame payload.
         """
         self.sent.append(message)
 
     async def recv(self) -> str:
-        """Returns the next frame or idles.
+        """Returns the next frame, or idles for an hour once none are left.
 
         Returns:
-            Frame.
+            The next frame; an empty string only after the idle wait.
         """
         if self.frames:
             return self.frames.pop(0)
@@ -110,14 +119,14 @@ class _FrameConnection:
         return ""
 
 
-def _connector(frames: list[str]) -> Callable[[str], object]:
-    """Builds a connector replaying frames.
+def _connector(frames: list[str]) -> ws.ConnectFn:
+    """Builds a connector whose every connection replays ``frames``.
 
     Args:
-        frames: Frames.
+        frames: Frames each connection delivers.
 
     Returns:
-        Connector.
+        The connect function.
     """
 
     @contextlib.asynccontextmanager
@@ -128,7 +137,7 @@ def _connector(frames: list[str]) -> Callable[[str], object]:
             url: Ignored URL.
 
         Yields:
-            Connection.
+            A new replaying connection.
         """
         del url
         yield _FrameConnection(frames)
@@ -141,21 +150,21 @@ def _adapter(
     clock: clock_lib.Clock,
     frames: list[str] | None = None,
 ) -> ports.MarketDataPort:
-    """Builds one adapter with an injected client.
+    """Builds one adapter with an injected client and test Alpaca keys.
 
     Args:
         venue: Venue.
-        clock: Clock.
-        frames: Optional WebSocket frames.
+        clock: Clock the adapter reads.
+        frames: WebSocket frames each connection replays, or None for none.
 
     Returns:
-        Adapter.
+        The adapter the factory builds for ``venue``.
     """
     return factory.build_adapters(
         [venue],
         clock,
         client=httpx.AsyncClient(),
-        connect=_connector(frames or []),  # type: ignore[arg-type]
+        connect=_connector(frames or []),
         alpaca_config=_ALPACA_TEST_KEYS,
     )[venue]
 
@@ -310,7 +319,7 @@ async def test_binance_metadata_details(
 async def test_hyperliquid_tick_rule_and_delisting(
     venue_api: respx.Router, capture_clock: clock_lib.ManualClock
 ) -> None:
-    """Tick size follows the 5-significant-figure rule."""
+    """Ticks follow the 5-significant-figure rule; delisted coins are kept."""
     del venue_api
     rows = {
         r.instrument_id.venue_market_id: r
@@ -432,7 +441,7 @@ async def test_ws_frames_parse_to_live_candles(
     instrument = instruments.InstrumentId.parse(_BTC[venue])
     stream = adapter.stream_candles(instrument, timeframes.Timeframe.M1)
     first = await asyncio.wait_for(anext(stream), 5)
-    await stream.aclose()  # type: ignore[attr-defined]
+    await stream.aclose()  # type: ignore[attr-defined]  # stream_candles is typed AsyncIterator; its generator has aclose()
     contract_validate("market.schema.json", "Candle", first.to_contract())
     assert first.start_ms == 1_795_277_340_000
     assert not first.is_final

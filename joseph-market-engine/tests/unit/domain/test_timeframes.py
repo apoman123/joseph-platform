@@ -1,7 +1,7 @@
 # Copyright 2026 apoman123
 # SPDX-License-Identifier: MIT
 
-"""Timeframe boundary arithmetic: seconds, fixed and calendar-month bars."""
+"""Unit tests for timeframe boundaries: seconds, fixed and month bars."""
 
 from __future__ import annotations
 
@@ -141,12 +141,15 @@ def _candle(
 
     Args:
         timeframe: Bar resolution.
-        start_ms: Bar start.
-        end_ms: Bar end.
-        taker: Optional taker buy base volume.
+        start_ms: Bar start, epoch ms.
+        end_ms: Bar end, epoch ms.
+        taker: Taker buy base volume as a decimal string, or None for none.
 
     Returns:
         The candle.
+
+    Raises:
+        ValueError: The bounds or the taker volume are invalid.
     """
     return market.Candle(
         instrument_id=instruments.InstrumentId.parse("mock:perp:BTCUSD"),

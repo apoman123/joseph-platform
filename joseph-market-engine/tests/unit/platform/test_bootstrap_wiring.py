@@ -1,7 +1,7 @@
 # Copyright 2026 apoman123
 # SPDX-License-Identifier: MIT
 
-"""Unit tests: composition-root helpers (alert senders, channel policy)."""
+"""Unit tests for composition-root helpers: senders, channels, logging."""
 
 from __future__ import annotations
 
@@ -56,7 +56,7 @@ class _Repository:
         """Initializes the stub.
 
         Args:
-            answer: Version or exception.
+            answer: Version to return, or an exception to raise.
         """
         self.answer = answer
 
@@ -64,15 +64,15 @@ class _Repository:
         """Returns the scripted version.
 
         Args:
-            tenant_id: Tenant.
-            strategy_id: Strategy.
-            number: Version number.
+            tenant_id: Tenant (unused).
+            strategy_id: Strategy (unused).
+            number: Version number (unused).
 
         Returns:
-            Version.
+            The scripted version.
 
         Raises:
-            LookupError: When scripted.
+            Exception: ``answer``, when it is an exception.
         """
         del tenant_id, strategy_id, number
         if isinstance(self.answer, Exception):
@@ -82,9 +82,9 @@ class _Repository:
 
 def test_channel_policy_defaults_to_the_ui() -> None:
     """Unknown or malformed versions notify the UI only."""
-    missing = bootstrap._channel_policy(_Repository(None))  # type: ignore[arg-type]
+    missing = bootstrap._channel_policy(_Repository(None))  # type: ignore[arg-type]  # a stub stands in for the strategy repository
     assert missing("t1", "s1:v1") == frozenset({"UI"})
-    broken = bootstrap._channel_policy(_Repository(LookupError("x")))  # type: ignore[arg-type]
+    broken = bootstrap._channel_policy(_Repository(LookupError("x")))  # type: ignore[arg-type]  # a stub stands in for the strategy repository
     assert broken("t1", "s1:v2") == frozenset({"UI"})
     assert broken("t1", "no-version") == frozenset({"UI"})
 

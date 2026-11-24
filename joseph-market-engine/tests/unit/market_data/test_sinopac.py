@@ -38,7 +38,7 @@ def _local(day: datetime.date, *hms: int) -> datetime.datetime:
         *hms: Hour, minute, second and microsecond.
 
     Returns:
-        Naive datetime.
+        The naive Taipei wall time.
     """
     stamp = datetime.datetime(day.year, day.month, day.day, *hms, tzinfo=_TPE)
     return stamp.replace(tzinfo=None)  # Shioaji streams naive Taipei time.
@@ -52,7 +52,7 @@ def _ms(day: datetime.date, *hms: int) -> int:
         *hms: Hour, minute, second and microsecond.
 
     Returns:
-        Milliseconds.
+        UTC epoch milliseconds.
     """
     return int(_local(day, *hms).replace(tzinfo=_TPE).timestamp() * 1000)
 
@@ -61,10 +61,10 @@ async def _inline(fn: Callable[[], Any]) -> Any:
     """Runs an SDK call on the loop (tests need no thread).
 
     Args:
-        fn: Call.
+        fn: Zero-argument SDK call.
 
     Returns:
-        Its result.
+        The call's result.
     """
     return fn()
 
@@ -74,7 +74,7 @@ def _source(
     api: fake_shioaji.FakeShioaji | None = None,
     **config: Any,
 ) -> tuple[sinopac.SinopacSource, fake_shioaji.FakeShioaji]:
-    """Builds a source over the fake SDK.
+    """Builds and acquires a source over the fake SDK.
 
     Args:
         clock: Clock.
@@ -113,9 +113,10 @@ def test_timestamps_sides_and_ids_follow_shioaji_conventions() -> None:
     assert sinopac.tick_side(0) is market.AggressorSide.UNKNOWN
     assert sinopac.tick_side("x") is market.AggressorSide.UNKNOWN
     assert sinopac.trade_id("2330", _DAY, 15) == "2330-20261123-15"
-    assert sinopac.error_kind(
-        fake_shioaji.MarketDataQueryUsageLimitError()
-    ) == ("quota")
+    assert (
+        sinopac.error_kind(fake_shioaji.MarketDataQueryUsageLimitError())
+        == "quota"
+    )
     assert sinopac.error_kind(fake_shioaji.TokenError()) == "auth"
     assert sinopac.error_kind(RuntimeError()) == "outage"
     assert sinopac.quota_reset_ms(_ms(_DAY, 7, 0)) == _ms(_DAY, 8, 0)
@@ -141,7 +142,7 @@ def test_kbars_are_labeled_by_their_minute_end() -> None:
         Open=[100.0, 101.5, 1.0, 1.0, 1.0],
         High=[101.0, 102.0, 1.0, 1.0, 1.0],
         Low=[99.5, 101.0, 1.0, 1.0, 1.0],
-        Close=[100.5, 101.5, 1.0, 1.0, "bad"],  # type: ignore[list-item]
+        Close=[100.5, 101.5, 1.0, 1.0, "bad"],  # type: ignore[list-item]  # deliberately malformed close; parse_kbars must skip the row
         Volume=[10, 25, 1, 1, 1],
         Amount=[1_005_000.0, 2_537_500.0, 1.0, 1.0, 1.0],
     )
@@ -182,7 +183,7 @@ def test_ticks_keep_regular_session_board_lots() -> None:
             fake_shioaji.wall_ns(_local(_DAY, 14, 30)),
             fake_shioaji.wall_ns(_local(_DAY, 9, 0, 3)),
         ],
-        close=[100.0, 100.5, 100.0, 101.0, 101.0, "x"],  # type: ignore[list-item]
+        close=[100.0, 100.5, 100.0, 101.0, 101.0, "x"],  # type: ignore[list-item]  # deliberately malformed price; parse_ticks must skip the tick
         volume=[50, 2, 0, 30, 7, 1],
         tick_type=[0, 1, 2, 0, 2, 1],
     )
@@ -266,9 +267,10 @@ def test_whole_minutes_keep_only_settled_minutes() -> None:
         _ms(_DAY, 13, 0),
         _ms(_DAY, 13, 30),
     )
-    assert sinopac.whole_minutes(
-        (_ms(_DAY, 9, 0, 10), _ms(_DAY, 9, 0, 50))
-    ) is (None)
+    assert (
+        sinopac.whole_minutes((_ms(_DAY, 9, 0, 10), _ms(_DAY, 9, 0, 50)))
+        is None
+    )
     assert sinopac.whole_minutes((0, 1)) is None
 
 
@@ -284,14 +286,14 @@ def _tick(
 
     Args:
         at: Naive Taipei time.
-        price: Price.
-        lots: Lots.
+        price: Price as a decimal string.
+        lots: Lots the tick traded.
         total: Day lots through the tick.
-        kind: tick_type.
-        **extra: Other fields.
+        kind: Shioaji ``tick_type`` (1 buy, 2 sell, 0 undetermined).
+        **extra: Other ``FakeTick`` fields, such as ``simtrade``.
 
     Returns:
-        Tick.
+        A tick with a fixed day open, high, low and price change.
     """
     return fake_shioaji.FakeTick(
         "2330",
@@ -313,10 +315,10 @@ def _book(at: datetime.datetime, **extra: Any) -> fake_shioaji.FakeBidAsk:
 
     Args:
         at: Naive Taipei time.
-        **extra: Other fields.
+        **extra: Other ``FakeBidAsk`` fields, such as ``simtrade``.
 
     Returns:
-        Update.
+        An update whose zero and empty bid levels carry no quote.
     """
     return fake_shioaji.FakeBidAsk(
         "2330",
@@ -348,9 +350,8 @@ def test_feed_proves_continuity_with_the_day_volume() -> None:
     assert feed.segments[0].from_ms == _ms(_DAY, 9, 0)  # Nothing before.
     feed.apply_tick(_tick(_local(_DAY, 9, 0, 30), "100", 2, 42), 0)
     assert len(feed.segments) == 1
-    assert feed.apply_tick(_tick(_local(_DAY, 9, 0, 31), "100", 2, 42), 0)[
-        -1
-    ].kind == ("quote")  # A repeat.
+    repeat = feed.apply_tick(_tick(_local(_DAY, 9, 0, 31), "100", 2, 42), 0)
+    assert repeat[-1].kind == "quote"  # Same day volume: no new trade.
     events = feed.apply_tick(_tick(_local(_DAY, 9, 2, 0), "101", 1, 50, 2), 0)
     assert "segment" in [e.kind for e in events]
     assert feed.segments[1].from_ms == _ms(_DAY, 9, 2) + 1
@@ -428,9 +429,8 @@ def test_feed_seed_joins_history_only_when_it_proves_continuity() -> None:
     assert feed.seed(history)
     assert feed.segments[0].from_ms == _ms(_DAY, 9, 0)
     assert feed.segments[1].first == 3
-    assert [t.trade_id for t in feed.segment_trades(0)][
-        -1
-    ] == "2330-20261123-55"
+    seeded = [t.trade_id for t in feed.segment_trades(0)]
+    assert seeded[-1] == "2330-20261123-55"
     assert feed.seed(history)  # Already from the open.
 
 
@@ -460,6 +460,18 @@ async def test_source_logs_in_once_and_redacts_credentials(
     assert "logout" in fake.calls
 
 
+def _missing_sdk() -> sinopac.SjDataFactory:
+    """Fails like an image built without the ``sinopac`` extra.
+
+    Returns:
+        Never returns.
+
+    Raises:
+        errors.VenueUnavailableError: Always.
+    """
+    raise errors.VenueUnavailableError("shioaji is not installed")
+
+
 async def test_source_without_credentials_or_sdk_is_disabled() -> None:
     """Missing keys or a missing SDK disable Shioaji for good."""
     clock = clock_lib.ManualClock(_ms(_DAY, 7, 0))
@@ -468,26 +480,17 @@ async def test_source_without_credentials_or_sdk_is_disabled() -> None:
     assert "not set" in source.status_note()
     with pytest.raises(errors.VenueUnavailableError):
         await source.ticks("2330", "TSE", _PREV)
-
-    def missing() -> sinopac.SjDataFactory:
-        """Fails like an image without the extra.
-
-        Raises:
-            errors.VenueUnavailableError: Always.
-        """
-        raise errors.VenueUnavailableError("shioaji is not installed")
-
     keyed = sinopac.SinopacSource(
         sinopac.SinopacConfig(api_key="a" * 8, secret_key="b" * 8),
         clock,
-        factory=missing,
+        factory=_missing_sdk,
     )
     assert not keyed.check_sdk()
     assert "not installed" in (keyed.unavailable() or "")
     late = sinopac.SinopacSource(
         sinopac.SinopacConfig(api_key="a" * 8, secret_key="b" * 8),
         clock,
-        factory=missing,
+        factory=_missing_sdk,
     )
     with pytest.raises(errors.VenueUnavailableError):
         await late.kbars("2330", "TSE", _PREV, _PREV)
@@ -643,11 +646,15 @@ class _SdkModule:
     """Stand-in for the imported ``shioaji`` module."""
 
     class QuoteVersion:
-        """``sj.QuoteVersion``."""
+        """``sj.QuoteVersion``.
+
+        Attributes:
+            v1: The quote protocol version the source subscribes with.
+        """
 
         v1 = "v1"
 
-    @staticmethod
+    @staticmethod  # noqa: GPY035 - the class stands in for the shioaji module and Shioaji is called on it, not on an instance
     def Shioaji(simulation: bool) -> str:  # noqa: N802 - the SDK's name.
         """Builds a client.
 

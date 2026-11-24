@@ -6,6 +6,8 @@
 from __future__ import annotations
 
 from collections.abc import Callable
+from typing import Any
+from typing import TypeAlias
 
 import httpx
 import pytest
@@ -19,21 +21,21 @@ from joseph.market_data.adapters import mock
 from joseph.screening.app import service
 from joseph.screening.domain import policy
 
-Validate = Callable[[str, str, object], None]
+Validate: TypeAlias = Callable[[str, str, object], None]
 
 
 def _service(
-    venues: list[instruments.Venue], clock: clock_lib.Clock, **kwargs: object
+    venues: list[instruments.Venue], clock: clock_lib.Clock, **kwargs: Any
 ) -> service.QualificationService:
     """Builds a service over fixture-backed adapters.
 
     Args:
-        venues: Venues.
-        clock: Clock.
-        **kwargs: Service options.
+        venues: Venues to build adapters for.
+        clock: Clock of the adapters and the service.
+        **kwargs: ``QualificationService`` options such as ``top_n``.
 
     Returns:
-        Service.
+        The service.
     """
     adapters = factory.build_adapters(
         venues,
@@ -41,7 +43,7 @@ def _service(
         client=httpx.AsyncClient(),
         alpaca_config=alpaca.AlpacaConfig(key_id="test", secret_key="test"),
     )
-    return service.QualificationService(adapters, clock, **kwargs)  # type: ignore[arg-type]
+    return service.QualificationService(adapters, clock, **kwargs)
 
 
 @pytest.mark.parametrize(

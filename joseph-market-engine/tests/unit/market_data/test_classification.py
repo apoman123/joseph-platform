@@ -77,7 +77,7 @@ def test_tick_test_compares_with_the_last_different_price(
 
 
 def test_lee_ready_uses_quote_rule_then_tick_test() -> None:
-    """The midpoint falls back to the tick test."""
+    """Off-midpoint trades use the quote rule; midpoint trades the tick test."""
     bid, ask = _D("10.00"), _D("10.02")
     assert classification.lee_ready(_D("10.02"), bid, ask, _D("10.05")) is _BUY
     assert classification.lee_ready(_D("10.01"), bid, ask, _D("10.00")) is _BUY
@@ -99,7 +99,7 @@ def test_tick_tracker_remembers_zero_ticks() -> None:
 
 
 def test_classifier_counts_rules_and_resets() -> None:
-    """A trade sequence is classified by quote, tick or not at all."""
+    """The classifier counts each rule's trades; reset forgets the last tick."""
     classifier = classification.LeeReadyClassifier()
     bid, ask = _D("10.00"), _D("10.02")
     assert classifier.classify(_D("10.01"), bid, ask) is _UNKNOWN

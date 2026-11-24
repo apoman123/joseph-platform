@@ -41,13 +41,13 @@ def _load(name: str) -> Any:
 
 
 def _ms(year: int, month: int, day: int, hour: int = 10) -> int:
-    """Returns a Taipei time in epoch milliseconds.
+    """Returns a Taipei wall-clock time in epoch milliseconds.
 
     Args:
-        year: Year.
-        month: Month.
-        day: Day.
-        hour: Hour.
+        year: Calendar year.
+        month: Month, 1-12.
+        day: Day of the month.
+        hour: Hour of the day, Taipei time.
 
     Returns:
         Epoch milliseconds.
@@ -60,30 +60,33 @@ class _Http:
     """Scripted ``VenueHttp`` stand-in.
 
     Attributes:
-        calls: Requested ``(path, params)``.
+        answers: Response body, error to raise or ``params`` callable, keyed
+            by path.
+        calls: Every ``(path, params)`` requested, in order.
     """
 
     def __init__(self, answers: dict[str, Any]) -> None:
         """Initializes the stub.
 
         Args:
-            answers: Response, exception or callable per path.
+            answers: Response body, error to raise or callable that maps the
+                query parameters to a body, keyed by path.
         """
         self.answers = answers
         self.calls: list[tuple[str, dict[str, Any] | None]] = []
 
     async def get(self, path: str, params: dict[str, Any] | None = None) -> Any:
-        """Returns the scripted answer of a path.
+        """Records the request and returns the scripted answer of its path.
 
         Args:
-            path: Path.
-            params: Query parameters.
+            path: Request path; must be scripted.
+            params: Query parameters, passed to a callable answer.
 
         Returns:
-            Scripted body.
+            The scripted body, or what the callable answer returns.
 
         Raises:
-            errors.JosephError: When scripted.
+            errors.JosephError: The answer scripted for ``path`` is an error.
         """
         self.calls.append((path, params))
         answer = self.answers[path]
@@ -101,38 +104,55 @@ def _adapter(
     """Builds an adapter over scripted clients.
 
     Args:
-        clock: Clock.
-        www: Website answers.
+        clock: Time source of the adapter.
+        www: Answers of the website client by path; none when omitted. The
+            OpenAPI and MIS clients answer nothing.
 
     Returns:
-        Adapter.
+        The adapter.
     """
     return tpex.TpexAdapter(
-        _Http({}),  # type: ignore[arg-type]
-        _Http(www or {}),  # type: ignore[arg-type]
-        _Http({}),  # type: ignore[arg-type]
+        _Http({}),  # type: ignore[arg-type]  # _Http stands in for VenueHttp
+        _Http(www or {}),  # type: ignore[arg-type]  # _Http stands in for VenueHttp
+        _Http({}),  # type: ignore[arg-type]  # _Http stands in for VenueHttp
         clock,
     )
 
 
 def _schedule(rows: str) -> dict[str, Any]:
-    """Wraps table rows like ``bulletin/tradingDate``.
+    """Wraps table rows the way ``bulletin/tradingDate`` returns them.
 
     Args:
-        rows: ``<tr>`` rows.
+        rows: HTML ``<tr>`` rows.
 
     Returns:
-        Body.
+        The response body.
     """
     return {"data": {"html": f"<table>{rows}</table>"}, "stat": "ok"}
 
 
+def _schedule_with_2030_holiday(params: dict[str, Any]) -> dict[str, Any]:
+    """Answers ``bulletin/tradingDate`` with a closure on 2030-03-05.
+
+    Args:
+        params: Query parameters; ``date`` is the year asked for.
+
+    Returns:
+        A schedule with the closure for the year 2030, "no data" otherwise.
+    """
+    if params["date"] != "2030":
+        return {"stat": "no data"}
+    return _schedule(
+        "<tr><td>測試休市</td><td>3月5日</td><td>二</td><td></td></tr>"
+    )
+
+
 @pytest.fixture(autouse=True)
 def _restore_xtai() -> Iterator[None]:
-    """Restores runtime XTAI closures after each test.
+    """Restores the XTAI closures added at runtime after each test.
 
     Yields:
-        Nothing.
+        Nothing; the test runs while suspended.
     """
     saved = set(sessions.XTAI._extra_closures)
     yield
@@ -141,7 +161,7 @@ def _restore_xtai() -> Iterator[None]:
 
 
 def test_codes_dates_and_channels_follow_tpex_formats() -> None:
-    """Listing-day marks, ETF codes and ``otc_`` channels parse."""
+    """ROC dates with listing marks, ETF codes and ``otc_`` MIS keys parse."""
     assert tpex.trading_day("115/11/23") == (datetime.date(2026, 11, 23), False)
     assert tpex.trading_day("106/01/17*") == (datetime.date(2017, 1, 17), True)
     assert tpex.trading_day("106/01/17\uff0a")[1]
@@ -155,7 +175,7 @@ def test_codes_dates_and_channels_follow_tpex_formats() -> None:
 
 
 def test_etf_classes_and_limits_follow_codes_and_published_limits() -> None:
-    """B/D codes are bonds; limit-up 9999.95 means no limit; 2x is 20 %."""
+    """B/D codes and bond names are bonds; 9999.95 is no limit; L is 20 %."""
     bond = instruments.AssetClass.BOND
     equity = instruments.AssetClass.EQUITY
     assert tpex.etf_asset_class("00679B", "元大美債20年") is bond
@@ -172,7 +192,7 @@ def test_etf_classes_and_limits_follow_codes_and_published_limits() -> None:
 
 
 def test_listing_rules_mark_halts_first_five_days_and_exclusions() -> None:
-    """Suspensions halt a code; first-five-day listings have no limit."""
+    """Suspensions halt; first-five-day listings have no limit; 8349A drops."""
     now = _ms(2026, 11, 18)
     quotes = [
         {"SecuritiesCompanyCode": "7848", "CompanyName": "騏億鑫"},
@@ -244,9 +264,10 @@ def test_schedule_closures_read_stock_rows_only() -> None:
     assert all(day.weekday() < 5 for day in closures)
     late = tpex.schedule_closures(payload, 2026, datetime.date(2026, 12, 1))
     assert late == {datetime.date(2026, 12, 25)}
-    assert tpex.schedule_closures(
-        {"stat": "none"}, 2028, datetime.date.min
-    ) == (set())
+    assert (
+        tpex.schedule_closures({"stat": "none"}, 2028, datetime.date.min)
+        == set()
+    )
     odd = _schedule(
         "<tr><td>x</td><td>2月30日</td><td>一</td><td>y</td></tr>"
         "<tr><td>紀念日</td><td>3月3日</td><td>五</td></tr>"
@@ -260,24 +281,9 @@ async def test_refresh_calendar_adds_new_closures_once_a_day() -> None:
     """A newly published weekday closure is added to XTAI, once per day."""
     holiday = datetime.date(2030, 3, 5)
     assert sessions.XTAI.session(holiday) is not None
-
-    def answer(params: dict[str, Any]) -> dict[str, Any]:
-        """Publishes the holiday in its year only.
-
-        Args:
-            params: Query.
-
-        Returns:
-            Body.
-        """
-        if params["date"] != "2030":
-            return {"stat": "no data"}
-        return _schedule(
-            "<tr><td>測試休市</td><td>3月5日</td><td>二</td><td></td></tr>"
-        )
-
     adapter = _adapter(
-        clock_lib.ManualClock(_ms(2030, 1, 2)), {_SCHEDULE: answer}
+        clock_lib.ManualClock(_ms(2030, 1, 2)),
+        {_SCHEDULE: _schedule_with_2030_holiday},
     )
     assert await adapter.refresh_calendar() == {holiday}
     assert sessions.XTAI.session(holiday) is None
@@ -285,7 +291,7 @@ async def test_refresh_calendar_adds_new_closures_once_a_day() -> None:
 
 
 async def test_refresh_calendar_tolerates_unreachable_schedules() -> None:
-    """Schedule failures are logged and retried later."""
+    """An unreachable schedule gives no closures instead of an error."""
     adapter = _adapter(
         clock_lib.ManualClock(_ms(2030, 1, 2)),
         {_SCHEDULE: errors.VenueUnavailableError("down")},
@@ -294,7 +300,7 @@ async def test_refresh_calendar_tolerates_unreachable_schedules() -> None:
 
 
 def test_trading_stock_rows_scale_and_skip_bad_rows() -> None:
-    """Thousands become shares and TWD; malformed and empty rows skip."""
+    """Thousands scale to shares and TWD; bad rows skip; ``*`` marks listing."""
     payload = {
         "stat": "ok",
         "tables": [
@@ -346,9 +352,9 @@ async def test_listing_date_learned_from_history_survives_reloads() -> None:
         }
     )
     adapter = tpex.TpexAdapter(
-        openapi,  # type: ignore[arg-type]
-        www,  # type: ignore[arg-type]
-        _Http({}),  # type: ignore[arg-type]
+        openapi,  # type: ignore[arg-type]  # _Http stands in for VenueHttp
+        www,  # type: ignore[arg-type]  # _Http stands in for VenueHttp
+        _Http({}),  # type: ignore[arg-type]  # _Http stands in for VenueHttp
         clock,
     )
     await adapter.list_instruments()

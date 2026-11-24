@@ -16,6 +16,8 @@ import io
 import json
 import pathlib
 import zipfile
+from typing import Any
+from typing import TypeAlias
 
 import httpx
 import pytest
@@ -41,17 +43,18 @@ _PART_URL = (
     "XTZUSDT_20261121_001.zip"
 )
 
-Written = list[tuple[int, list[recorded_trades.Interval]]]
+Written: TypeAlias = list[tuple[int, list[recorded_trades.Interval]]]
+"""Archive writes seen by a sink: ``(row count, covered intervals)``."""
 
 
-def _json(name: str) -> object:
+def _json(name: str) -> Any:
     """Loads a JSON fixture.
 
     Args:
         name: File name without extension.
 
     Returns:
-        Parsed JSON.
+        The parsed JSON.
     """
     return json.loads((_FIXTURES / f"{name}.json").read_text())
 
@@ -60,7 +63,7 @@ def _part() -> bytes:
     """Returns the real archive part.
 
     Returns:
-        Zip bytes.
+        The zip bytes of the captured part.
     """
     return (_FIXTURES / "archive_XTZUSDT_20261121_001.zip").read_bytes()
 
@@ -72,7 +75,7 @@ def _zip(text: str) -> bytes:
         text: CSV content.
 
     Returns:
-        Zip bytes.
+        The zip archive bytes.
     """
     buffer = io.BytesIO()
     with zipfile.ZipFile(buffer, "w") as archive:
@@ -93,7 +96,7 @@ def _parts(root: pathlib.Path) -> list[pathlib.Path]:
 
 
 async def _no_sleep(seconds: float) -> None:
-    """Records nothing and returns at once.
+    """Skips the archive client's waits.
 
     Args:
         seconds: Ignored.
@@ -101,24 +104,22 @@ async def _no_sleep(seconds: float) -> None:
     del seconds
 
 
-def _archive(
-    root: pathlib.Path, **kwargs: object
-) -> bitget_archive.BitgetArchive:
+def _archive(root: pathlib.Path, **kwargs: Any) -> bitget_archive.BitgetArchive:
     """Builds an archive client on an injected HTTP client.
 
     Args:
         root: Cache directory.
-        **kwargs: Constructor overrides.
+        **kwargs: Constructor overrides; ``sleep`` defaults to no waiting.
 
     Returns:
-        Client.
+        The archive client.
     """
-    values: dict[str, object] = {"sleep": _no_sleep}
+    values: dict[str, Any] = {"sleep": _no_sleep}
     values.update(kwargs)
     return bitget_archive.BitgetArchive(
         root,
         client=httpx.AsyncClient(),
-        **values,  # type: ignore[arg-type]
+        **values,
     )
 
 
@@ -143,7 +144,7 @@ def _routes(router: respx.Router, part: bytes | None = None) -> None:
 
 
 def test_days_are_cut_at_midnight_utc8() -> None:
-    """A Bitget day starts at 16:00 UTC the day before."""
+    """A Bitget day starts at 16:00 UTC the day before; parts are numbered."""
     start, end = bitget_archive.day_bounds(_DAY)
     assert start == 1_795_190_400_000
     assert end - start == bitget_archive.DAY_MS
@@ -171,7 +172,7 @@ def test_real_part_folds_to_bitgets_own_daily_kline() -> None:
         market.AggressorSide.SELL,
     }
     found = bitget_archive.totals(trades)
-    row = _json("archive_history_candles_1D")["data"][1]  # type: ignore[index]
+    row = _json("archive_history_candles_1D")["data"][1]
     expected = bitget_archive.DayTotals(
         _D(row[2]), _D(row[3]), _D(row[4]), _D(row[5]), _D(row[6])
     )
@@ -209,8 +210,8 @@ async def test_import_verifies_the_day_and_archives_it(
         """Records archive writes.
 
         Args:
-            rows: Aggregates.
-            covered: Coverage.
+            rows: Second aggregates written in one chunk.
+            covered: Intervals the chunk covers.
         """
         written.append((len(rows), covered))
 
@@ -270,17 +271,17 @@ async def test_list_calls_are_spaced_and_validated(
     waits: list[float] = []
 
     async def sleep(seconds: float) -> None:
-        """Records a wait.
+        """Records a wait without waiting.
 
         Args:
-            seconds: Delay.
+            seconds: Requested delay in seconds.
         """
         waits.append(seconds)
 
     archive = _archive(
         tmp_path, sleep=sleep, monotonic=lambda: 10.0, list_interval_s=1.5
     )
-    entry = dict(_json("archive_list")["data"][0])  # type: ignore[index]
+    entry = dict(_json("archive_list")["data"][0])
     other_day = {**entry, "dateTime": 1}
     duplicate = {**entry}
     with respx.mock() as router:

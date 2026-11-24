@@ -13,6 +13,7 @@ import asyncio
 import datetime
 import os
 from collections.abc import Callable
+from typing import TypeAlias
 
 import httpx
 import pytest
@@ -34,7 +35,7 @@ pytestmark = [
     ),
 ]
 
-Validate = Callable[[str, str, object], None]
+Validate: TypeAlias = Callable[[str, str, object], None]
 _BOUNDARY_LAG_MS = 10_000
 """How long after a bar closes a venue may still omit the next one."""
 
@@ -63,10 +64,10 @@ def _live(
     """Builds a live adapter for the BTC perpetual of a venue.
 
     Args:
-        venue: Venue.
+        venue: Crypto venue.
 
     Returns:
-        Adapter, instrument and clock.
+        The adapter, the venue's BTC perpetual and the system clock.
     """
     clock = clock_lib.SystemClock()
     adapter = factory.build_adapters(
@@ -136,7 +137,7 @@ async def test_live_native_candle_stream(venue: instruments.Venue) -> None:
         instruments.InstrumentId.parse(_BTC[venue]), timeframes.Timeframe.M1
     )
     candle = await asyncio.wait_for(anext(stream), 30)
-    await stream.aclose()  # type: ignore[attr-defined]
+    await stream.aclose()  # type: ignore[attr-defined]  # stream_candles is typed AsyncIterator; its generator has aclose()
     assert candle.timeframe is timeframes.Timeframe.M1
     assert candle.start_ms == timeframes.Timeframe.M1.floor(clock.now_ms()) or (
         candle.is_final
@@ -156,7 +157,7 @@ async def test_live_trade_streams(
     trades: list[market.Trade] = []
     for _ in range(3):
         trades.append(await asyncio.wait_for(anext(stream), 60))
-    await stream.aclose()  # type: ignore[attr-defined]
+    await stream.aclose()  # type: ignore[attr-defined]  # stream_trades is typed AsyncIterator; its generator has aclose()
     await adapter.close()
     for trade in trades:
         contract_validate(
@@ -204,7 +205,10 @@ async def test_live_seconds_candles_from_trade_stream(
         """Waits for the first final bar.
 
         Returns:
-            Final candle.
+            The first final candle of ``stream``.
+
+        Raises:
+            AssertionError: The stream ended without a final bar.
         """
         async for candle in stream:
             if candle.is_final:
@@ -212,7 +216,7 @@ async def test_live_seconds_candles_from_trade_stream(
         raise AssertionError("stream ended")
 
     candle = await asyncio.wait_for(first_final(), 90)
-    await stream.aclose()  # type: ignore[attr-defined]
+    await stream.aclose()  # type: ignore[attr-defined]  # stream_candles is typed AsyncIterator; its generator has aclose()
     await adapter.close()
     assert candle.timeframe is timeframes.Timeframe.S1
     assert candle.source == f"{venue.value}.trades"

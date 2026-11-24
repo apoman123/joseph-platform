@@ -29,7 +29,7 @@ def _levels(
         *pairs: ``(price, qty)`` strings.
 
     Returns:
-        Levels.
+        The levels as decimal ``(price, qty)`` pairs.
     """
     return [(_D(p), _D(q)) for p, q in pairs]
 
@@ -38,7 +38,7 @@ def _builder() -> books.OrderBookBuilder:
     """Returns a builder with a snapshot at update id 100.
 
     Returns:
-        Builder.
+        The builder: bids 99 and 98, asks 101 and 102, a 1 s age budget.
     """
     builder = books.OrderBookBuilder(_ID, "test", max_age_ms=1_000)
     builder.apply_snapshot(
@@ -54,16 +54,16 @@ def _builder() -> books.OrderBookBuilder:
 def _diff(
     builder: books.OrderBookBuilder, first: int, final: int, prev: int
 ) -> books.ApplyResult:
-    """Applies a Binance diff with fixed levels.
+    """Applies a Binance diff that sets bid 99 to 3 and removes ask 101.
 
     Args:
-        builder: Builder.
-        first: ``U``.
-        final: ``u``.
-        prev: ``pu``.
+        builder: Builder to update.
+        first: First update id of the event (Binance ``U``).
+        final: Final update id of the event (``u``).
+        prev: Final update id of the previous event (``pu``).
 
     Returns:
-        Apply result.
+        The builder's verdict on the diff.
     """
     return builder.apply_binance_diff(
         first_update_id=first,
@@ -147,12 +147,12 @@ def _book(
     """Builds a book.
 
     Args:
-        bids: Bid levels.
-        asks: Ask levels.
-        stale: Staleness flag.
+        bids: Bid levels as ``(price, qty)`` strings.
+        asks: Ask levels as ``(price, qty)`` strings.
+        stale: Whether to mark the book stale.
 
     Returns:
-        Order book.
+        The order book.
     """
     book = books.snapshot_book(
         _ID,

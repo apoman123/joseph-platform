@@ -19,7 +19,7 @@ def _raw_long_a() -> dict[str, object]:
     """Returns a deep copy of the Long A fixture payload.
 
     Returns:
-        JSON-compatible definition.
+        The definition in contract form, safe to mutate.
     """
     valid = fixtures.load_fixture("strategy")["valid"]
     assert isinstance(valid, list)
@@ -117,7 +117,7 @@ def test_any_change_changes_the_hash() -> None:
 
 
 def test_canonical_json_is_sorted_and_normalized() -> None:
-    """Canonical JSON sorts keys and normalizes decimals."""
+    """Canonical JSON sorts keys and normalizes decimals; hashes are sha256."""
     definition = ast.parse_definition(_raw_long_a())
     text = definition.canonical_json()
     parsed = json.loads(text)
@@ -150,4 +150,4 @@ def test_models_are_immutable() -> None:
     """Parsed definitions cannot be mutated in place."""
     definition = ast.parse_definition(_raw_long_a())
     with pytest.raises(pydantic.ValidationError):
-        definition.name = "changed"  # type: ignore[misc]
+        definition.name = "changed"

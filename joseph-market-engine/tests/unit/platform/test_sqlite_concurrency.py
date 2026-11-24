@@ -1,11 +1,11 @@
 # Copyright 2026 apoman123
 # SPDX-License-Identifier: MIT
 
-"""Regression test: a reader must never block a writer's commit.
+"""Regression test: an open reader must never block a writer's commit.
 
-The default SQLite rollback journal let one connection's read transaction
-block another connection's commit; because commits run on the event loop
-the whole engine froze. ``create_engine`` now enables WAL.
+With SQLite's default rollback journal, one connection's read transaction
+blocks another connection's commit; commits run on the event loop, so that
+freezes the whole engine. ``create_engine`` therefore enables WAL.
 """
 
 from __future__ import annotations

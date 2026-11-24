@@ -9,6 +9,7 @@ import dataclasses
 import decimal
 from collections.abc import Callable
 from collections.abc import Sequence
+from typing import Any
 
 import pytest
 
@@ -38,7 +39,7 @@ class _Provider:
     """Frame provider returning prepared frames.
 
     Attributes:
-        calls: Recorded call arguments.
+        calls: ``(instrument_id, signal timeframe, requirements)`` per call.
     """
 
     def __init__(self, frames: Sequence[structures.BarFrame]) -> None:
@@ -58,17 +59,17 @@ class _Provider:
         from_ms: int,
         to_ms: int,
     ) -> Sequence[structures.BarFrame]:
-        """Returns the prepared frames.
+        """Returns the prepared frames and records the call.
 
         Args:
             instrument_id: Instrument.
             signal_tf: Signal timeframe.
             requirements: Engine requirements.
-            from_ms: Start.
-            to_ms: End.
+            from_ms: Window start (ignored).
+            to_ms: Window end (ignored).
 
         Returns:
-            Frames.
+            The prepared frames, whatever the window.
         """
         self.calls.append((str(instrument_id), signal_tf.value, requirements))
         del from_ms, to_ms
@@ -76,10 +77,10 @@ class _Provider:
 
 
 def _winning_world() -> list[structures.BarFrame]:
-    """Long A world where price later reaches the 110 target.
+    """Builds the Long A scenario with bar 35 reaching the 110 target.
 
     Returns:
-        Frames.
+        The scenario frames.
     """
     frames = scenarios.long_a_frames()
     factory = frame_testing.FrameFactory()
@@ -99,10 +100,10 @@ def services(
     """Builds a backtest service with Long A stored for tenant-a.
 
     Args:
-        manual_clock: Clock.
+        manual_clock: Clock of the version service.
 
     Returns:
-        ``build(frames) -> service``.
+        ``build(frames) -> service``; each service runs over ``frames``.
     """
     versions = version_service.StrategyVersionService(
         memory.InMemoryStrategyRepository(), manual_clock
@@ -110,13 +111,13 @@ def services(
     versions.create(ALICE, fixtures.strategy_definitions()[fixtures.LONG_A])
 
     def build(frames: Sequence[structures.BarFrame]) -> service.BacktestService:
-        """Creates the service over frames.
+        """Creates a service whose provider returns ``frames``.
 
         Args:
-            frames: Frames.
+            frames: Frames every backtest sees.
 
         Returns:
-            Service.
+            The service.
         """
         return service.BacktestService(
             versions, runner.BacktestRunner(_Provider(frames))
@@ -125,14 +126,14 @@ def services(
     return build
 
 
-def _request(**changes: object) -> runner.BacktestRequest:
-    """Builds a request covering all scenario bars.
+def _request(**changes: Any) -> runner.BacktestRequest:
+    """Builds a request covering all 40 scenario bars of BTCUSDT.
 
     Args:
-        **changes: Field overrides.
+        **changes: ``BacktestRequest`` field overrides.
 
     Returns:
-        Request.
+        The request, with 4 bps fees and 2 bps slippage.
     """
     base = runner.BacktestRequest(
         version=1,
@@ -143,7 +144,7 @@ def _request(**changes: object) -> runner.BacktestRequest:
         slippage_bps=D(2),
         max_hold_bars=96,
     )
-    return dataclasses.replace(base, **changes)  # type: ignore[arg-type]
+    return dataclasses.replace(base, **changes)
 
 
 async def test_report_contains_trade_and_metrics(
@@ -177,7 +178,7 @@ async def test_backtest_matches_live_processing(
         [Sequence[structures.BarFrame]], service.BacktestService
     ],
 ) -> None:
-    """Backtest signals equal those of the live instance processor."""
+    """Repeated backtests match and duplicated frames change no signal."""
     frames = _winning_world()
     report = await services(frames).run(ALICE, fixtures.LONG_A, _request())
     again = await services(frames).run(ALICE, fixtures.LONG_A, _request())
