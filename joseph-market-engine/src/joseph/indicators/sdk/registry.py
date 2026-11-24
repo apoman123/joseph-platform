@@ -1,7 +1,7 @@
 # Copyright 2026 apoman123
 # SPDX-License-Identifier: MIT
 
-"""Compile-time plugin registry with lifecycle (V5 §10).
+"""Compile-time plugin registry with lifecycle.
 
 Plugins are vetted modules registered at build time, never fetched
 remotely. Disabling or removing a plugin keeps its metadata so that saved
@@ -18,6 +18,7 @@ from joseph.domain import errors
 from joseph.indicators.sdk import protocol
 
 SUPPORTED_SCHEMA_VERSIONS = frozenset({1})
+"""Plugin output schema versions that ``register`` accepts."""
 
 
 class Lifecycle(enum.StrEnum):

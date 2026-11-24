@@ -123,7 +123,8 @@ def infer_tick(candle: market.Candle) -> decimal.Decimal:
         candle: First candle of a series.
 
     Returns:
-        ``10 ** -places`` for the most precise OHLC price.
+        ``10 ** -places`` for the most precise OHLC price, with at most 12
+        places.
     """
     places = 0
     for value in (candle.open, candle.high, candle.low, candle.close):
@@ -155,7 +156,9 @@ class _Cell:
 
     Attributes:
         payload: Live library state, or ``None`` before the first bar.
-        head: Version of the state the payload corresponds to.
+        head: Version of the state the payload corresponds to; ``-1`` when
+            the payload must not be reused (after a restore or a failed
+            bar).
     """
 
     __slots__ = ("head", "payload")
@@ -265,6 +268,17 @@ class PackagedPlugin(base.BasePlugin[PackagedState]):
     ``_advance``; optional hooks customize kinds, identities and events.
     ``_build_series`` lets a plugin build objects that depend on the
     instrument (its session calendar), e.g. an anchor bar start.
+
+    Attributes:
+        VERSION: The installed library version, so the published
+            ``indicator_version`` changes with the library.
+        PINE_SOURCE: Path of the ported Pine script in the library
+            repository, appended to the published description; empty for a
+            Python-native study.
+        EVENT_ALIASES: Library event name to contract event name, for
+            events whose names differ.
+        KIND_ALIASES: Library zone kind to contract AOI kind, for kinds
+            whose names differ.
     """
 
     VERSION: ClassVar[str] = library_version()
@@ -274,7 +288,7 @@ class PackagedPlugin(base.BasePlugin[PackagedState]):
 
     @property
     def licensing_status(self) -> str:
-        """Returns the licensing status of a Pine port."""
+        """The contract ``LicensingStatus`` of a Pine port."""
         return LICENSING_PINE_PORT
 
     def info(self) -> dict[str, object]:
@@ -434,6 +448,8 @@ class PackagedPlugin(base.BasePlugin[PackagedState]):
         """
         tick = settings_lib.get_decimal(settings, TICK_SETTING)
         try:
+            # The real tick may come from the first bar; any positive tick
+            # serves to validate the settings.
             self._build_series(
                 header,
                 settings,
@@ -487,7 +503,8 @@ class PackagedPlugin(base.BasePlugin[PackagedState]):
         logged = state.log.oldest_first() if state.log is not None else []
         if state.base:
             restored = codec.loads(state.base)
-            assert isinstance(restored, Payload)
+            if not isinstance(restored, Payload):
+                raise AssertionError("a packaged base must hold a Payload")
             payload = restored
         elif logged:
             payload = self._fresh(state.header, logged[0].candle)
@@ -544,8 +561,8 @@ class PackagedPlugin(base.BasePlugin[PackagedState]):
         try:
             out = self._advance(payload, bar, header.settings_map(), step)
         except BaseException:
-            # The live objects may be half-updated: force a rebuild from
-            # ``state.blob`` on the next call instead of reusing them.
+            # The live objects may be half-updated: force a rebuild from the
+            # state's base and log on the next call instead of reusing them.
             cell.head = -1
             raise
         live, zone_ids, keys, sources = self._aois(
@@ -560,7 +577,7 @@ class PackagedPlugin(base.BasePlugin[PackagedState]):
         current = frozenset(zone_ids)
         alive = frozenset(keys)
         ended = tuple(
-            self.end_aoi(
+            base.end_aoi(
                 aoi, header, self._end_state(zone_id, out.events, current)
             )
             for zone_id, key, aoi in zip(
@@ -574,13 +591,13 @@ class PackagedPlugin(base.BasePlugin[PackagedState]):
         version = state.version + 1
         length = (state.log.length if state.log is not None else 0) + 1
         if length >= SNAPSHOT_EVERY:
-            snapshot, snapshot_version, log = (
+            new_base, new_base_version, log = (
                 codec.dumps(payload),
                 version,
                 None,
             )
         else:
-            snapshot, snapshot_version = state.base, state.base_version
+            new_base, new_base_version = state.base, state.base_version
             log = _Log(bar, state.log, length)
         cell.head = version
         new_state = PackagedState(
@@ -592,8 +609,8 @@ class PackagedPlugin(base.BasePlugin[PackagedState]):
             values=tuple(out.values.items()),
             cell=cell,
             sources=sources,
-            base=snapshot,
-            base_version=snapshot_version,
+            base=new_base,
+            base_version=new_base_version,
             log=log,
         )
         return base.StepResult(
@@ -681,7 +698,8 @@ class PackagedPlugin(base.BasePlugin[PackagedState]):
         """
         lower = convert.price(min(zone.bottom, zone.top), step)
         upper = convert.price(max(zone.bottom, zone.top), step)
-        assert lower is not None and upper is not None
+        if lower is None or upper is None:
+            raise AssertionError("library zones have finite bounds")
         meta = {
             name: convert.scalar(value, step)
             for name, value in zone.meta.items()
@@ -706,6 +724,9 @@ class PackagedPlugin(base.BasePlugin[PackagedState]):
             range_id=str(range_id) if range_id is not None else None,
             meta=meta,
         )
+        # The library stamps confirmation with the open time of the
+        # confirming bar; the AOI is confirmed at that bar's close, and never
+        # later than the bar being processed.
         calendar = sessions.for_instrument(header.instrument_id)
         try:
             confirmed_end = calendar.end_of(
@@ -779,15 +800,16 @@ class PackagedPlugin(base.BasePlugin[PackagedState]):
     def dump_state(self, state: PackagedState) -> object:
         """Encodes a JSON-compatible checkpoint.
 
-        Args:
-            state: Current state.
-
         The library objects are rebuilt from the state's own base and log
         (never read from the shared cell), so the result depends only on the
         state and is identical however often it is taken.
 
+        Args:
+            state: Current state.
+
         Returns:
-            Checkpoint data.
+            Checkpoint data: the SDK-encoded header, AOIs and values plus
+            the pickled library payload as base64.
         """
         if state.log is None:
             blob = state.base

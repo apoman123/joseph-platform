@@ -19,6 +19,7 @@ from collections.abc import Mapping
 from collections.abc import Sequence
 from typing import Any
 from typing import ClassVar
+from typing import TypeAlias
 
 from joseph.domain import ids
 from joseph.domain import instruments
@@ -30,10 +31,13 @@ from joseph.indicators.sdk import settings as settings_lib
 from joseph.indicators.sdk import state_codec
 
 LICENSING_CLEAN_ROOM = "CLEAN_ROOM_FROM_SPEC"
+"""Default contract ``LicensingStatus``; Pine-port adapters override it."""
+
 PARITY_SPEC_ONLY = "SPEC_ONLY"
-"""Default statuses; adapters of Pine ports override ``licensing_status``."""
+"""Default contract ``ParityStatus``: no Pine golden export to compare."""
 
 ALL_TIMEFRAMES: tuple[tfs.Timeframe, ...] = tuple(tfs.Timeframe)
+"""Every supported timeframe, the default of ``BasePlugin.TIMEFRAMES``."""
 
 
 _COMMON_STATE_TYPES: tuple[type, ...] = (
@@ -75,6 +79,25 @@ class BasePlugin[StateT](abc.ABC):
     Subclasses set the ``ClassVar`` metadata and implement the hooks.
     The state type must be a frozen dataclass with a ``header`` field of
     type ``protocol.SeriesHeader``.
+
+    Attributes:
+        PLUGIN_ID: Unique plugin id, e.g. ``"fvg_ifvg"``; also the
+            ``source`` of every published AOI and event.
+        VERSION: Semantic version of the algorithm (``indicator_version``).
+        SCHEMA_VERSION: Output schema version; the registry accepts only
+            supported ones.
+        DISPLAY_NAME: Human-readable name.
+        DESCRIPTION: One-sentence description.
+        TIMEFRAMES: Series timeframes ``initialize`` accepts (all by
+            default).
+        OUTPUT_KINDS: AOI kinds the plugin can publish.
+        OUTPUT_EVENTS: Event names the plugin can publish.
+        SETTINGS: Setting specifications, which define the input schema,
+            the defaults and override validation.
+        STATE_TYPES: Dataclass and enum types of the plugin state beyond
+            the common SDK ones, needed to restore checkpoints.
+        METHOD: Calculation method of published AOIs and, unless
+            ``snapshot_method`` says otherwise, of snapshots.
     """
 
     PLUGIN_ID: ClassVar[str]
@@ -93,57 +116,57 @@ class BasePlugin[StateT](abc.ABC):
 
     @property
     def plugin_id(self) -> str:
-        """Returns the unique plugin id."""
+        """The unique plugin id, ``PLUGIN_ID``."""
         return self.PLUGIN_ID
 
     @property
     def indicator_version(self) -> str:
-        """Returns the algorithm version."""
+        """The algorithm version, ``VERSION``."""
         return self.VERSION
 
     @property
     def schema_version(self) -> int:
-        """Returns the output schema version."""
+        """The output schema version, ``SCHEMA_VERSION``."""
         return self.SCHEMA_VERSION
 
     @property
     def display_name(self) -> str:
-        """Returns the display name."""
+        """The display name, ``DISPLAY_NAME``."""
         return self.DISPLAY_NAME
 
     @property
     def description(self) -> str:
-        """Returns the description."""
+        """The description, ``DESCRIPTION``."""
         return self.DESCRIPTION
 
     @property
     def warmup_bars(self) -> int:
-        """Returns warmup bars for default settings."""
+        """The warm-up bar count for the default settings."""
         return self.warmup_for(self.default_settings())
 
     @property
     def timeframes(self) -> tuple[tfs.Timeframe, ...]:
-        """Returns supported series timeframes."""
+        """The supported series timeframes, ``TIMEFRAMES``."""
         return self.TIMEFRAMES
 
     @property
     def output_kinds(self) -> tuple[structures.AoiKind, ...]:
-        """Returns published AOI kinds."""
+        """The publishable AOI kinds, ``OUTPUT_KINDS``."""
         return self.OUTPUT_KINDS
 
     @property
     def output_events(self) -> tuple[structures.StructureEventName, ...]:
-        """Returns published event names."""
+        """The publishable event names, ``OUTPUT_EVENTS``."""
         return self.OUTPUT_EVENTS
 
     @property
     def licensing_status(self) -> str:
-        """Returns the licensing status (clean-room implementation)."""
+        """The contract ``LicensingStatus`` (clean-room by default)."""
         return LICENSING_CLEAN_ROOM
 
     @property
     def parity_status(self) -> str:
-        """Returns the parity status (no Pine golden export yet)."""
+        """The contract ``ParityStatus`` (``SPEC_ONLY`` by default)."""
         return PARITY_SPEC_ONLY
 
     def snapshot_method(
@@ -161,7 +184,7 @@ class BasePlugin[StateT](abc.ABC):
         Returns:
             ``METHOD`` by default.
         """
-        del values
+        del values  # Unused.
         return self.METHOD
 
     def input_schema(self) -> dict[str, object]:
@@ -196,7 +219,7 @@ class BasePlugin[StateT](abc.ABC):
         Returns:
             Number of bars before outputs are meaningful.
         """
-        del settings
+        del settings  # Unused.
         return 1
 
     def required_streams(
@@ -214,7 +237,7 @@ class BasePlugin[StateT](abc.ABC):
         Returns:
             Stream names.
         """
-        del settings, timeframe
+        del settings, timeframe  # Unused.
         return frozenset({protocol.CHART_STREAM})
 
     def lookback(
@@ -229,7 +252,7 @@ class BasePlugin[StateT](abc.ABC):
         Returns:
             Number of completed bars to supply.
         """
-        del settings, stream
+        del settings, stream  # Unused.
         return 0
 
     def initialize(
@@ -399,7 +422,7 @@ class BasePlugin[StateT](abc.ABC):
         Returns:
             The header.
         """
-        header: protocol.SeriesHeader = state.header  # type: ignore[attr-defined]
+        header: protocol.SeriesHeader = state.header  # type: ignore[attr-defined]  # StateT is unbounded; the class contract requires a header field.
         return header
 
     def _with_header(
@@ -416,7 +439,7 @@ class BasePlugin[StateT](abc.ABC):
         """
         replaced: StateT = dataclasses.replace(
             state,
-            header=header,  # type: ignore[type-var]
+            header=header,  # type: ignore[type-var]  # StateT is unbounded; the class contract makes it a dataclass.
         )
         return replaced
 
@@ -519,52 +542,6 @@ class BasePlugin[StateT](abc.ABC):
             meta=dict(meta or {}),
         )
 
-    @staticmethod
-    def end_aoi(
-        aoi: structures.Aoi,
-        header: protocol.SeriesHeader,
-        state: structures.AoiState,
-    ) -> structures.Aoi:
-        """Marks an AOI as no longer live at the current bar.
-
-        Args:
-            aoi: The AOI.
-            header: Header advanced to the current bar.
-            state: Terminal state (inverted, swept, invalidated, expired).
-
-        Returns:
-            Updated AOI.
-        """
-        return dataclasses.replace(
-            aoi,
-            state=state,
-            invalidated_at_ms=header.as_of_ms,
-            as_of_ms=header.as_of_ms,
-        )
-
-    @staticmethod
-    def touch_aoi(
-        aoi: structures.Aoi,
-        header: protocol.SeriesHeader,
-        quality_score: int | None,
-    ) -> structures.Aoi:
-        """Marks an AOI as tested with a decayed score.
-
-        Args:
-            aoi: The AOI.
-            header: Header advanced to the current bar.
-            quality_score: New score.
-
-        Returns:
-            Updated AOI.
-        """
-        return dataclasses.replace(
-            aoi,
-            state=structures.AoiState.TESTED,
-            quality_score=quality_score,
-            as_of_ms=header.as_of_ms,
-        )
-
     # ------------------------------------------------------------- hooks
 
     @abc.abstractmethod
@@ -578,6 +555,9 @@ class BasePlugin[StateT](abc.ABC):
         Args:
             header: Fresh header.
             settings: Resolved settings.
+
+        Returns:
+            The state before any bar, holding ``header``.
         """
 
     @abc.abstractmethod
@@ -593,6 +573,10 @@ class BasePlugin[StateT](abc.ABC):
             state: Previous state (must not be mutated).
             header: Header advanced to this bar.
             bar: Bar input.
+
+        Returns:
+            The new state and the bar's events and AOI changes; the base
+            class then stores the advanced header in the state.
         """
 
     @abc.abstractmethod
@@ -603,8 +587,58 @@ class BasePlugin[StateT](abc.ABC):
 
         Args:
             state: Current state.
+
+        Returns:
+            ``(live_aois, values)``: the AOIs still live and the published
+            scalar values (see ``joseph.domain.structures``).
         """
 
 
-AnyPlugin = BasePlugin[Any]
+def end_aoi(
+    aoi: structures.Aoi,
+    header: protocol.SeriesHeader,
+    state: structures.AoiState,
+) -> structures.Aoi:
+    """Marks an AOI as no longer live at the current bar.
+
+    Args:
+        aoi: The AOI.
+        header: Header advanced to the current bar.
+        state: Terminal state (inverted, swept, invalidated, expired).
+
+    Returns:
+        Updated AOI.
+    """
+    return dataclasses.replace(
+        aoi,
+        state=state,
+        invalidated_at_ms=header.as_of_ms,
+        as_of_ms=header.as_of_ms,
+    )
+
+
+def touch_aoi(
+    aoi: structures.Aoi,
+    header: protocol.SeriesHeader,
+    quality_score: int | None,
+) -> structures.Aoi:
+    """Marks an AOI as tested with a decayed score.
+
+    Args:
+        aoi: The AOI.
+        header: Header advanced to the current bar.
+        quality_score: New score.
+
+    Returns:
+        Updated AOI.
+    """
+    return dataclasses.replace(
+        aoi,
+        state=structures.AoiState.TESTED,
+        quality_score=quality_score,
+        as_of_ms=header.as_of_ms,
+    )
+
+
+AnyPlugin: TypeAlias = BasePlugin[Any]
 """Type alias for heterogeneous plugin collections."""

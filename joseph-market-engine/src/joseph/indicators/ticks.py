@@ -30,10 +30,13 @@ class TickSizeSource(Protocol):
     async def tick_size(
         self, instrument_id: instruments.InstrumentId
     ) -> decimal.Decimal | None:
-        """Returns the tick size, or ``None`` when unknown.
+        """Looks up the tick size of an instrument.
 
         Args:
             instrument_id: Exact venue instrument.
+
+        Returns:
+            The tick size, or ``None`` when unknown.
         """
         ...
 
@@ -62,7 +65,8 @@ def _unset(value: object) -> bool:
         value: Raw override value.
 
     Returns:
-        True for missing, empty or zero values.
+        True for missing, empty or zero values; False for anything else,
+        including text that is not a number (validation rejects it later).
     """
     if value is None or value == "":
         return True
@@ -87,7 +91,12 @@ def with_tick_size(
         tick: Instrument tick size, or ``None`` when unknown.
 
     Returns:
-        New per-plugin overrides with ``tick_size`` filled where missing.
+        New per-plugin overrides with ``tick_size`` filled where missing;
+        a copy of ``settings`` when ``tick`` is unknown or not positive.
+
+    Raises:
+        NotFoundError: If a plugin id is not registered.
+        UnsupportedError: If a plugin is disabled or removed.
     """
     merged = {key: dict(value) for key, value in settings.items()}
     if tick is None or tick <= 0:
@@ -118,5 +127,5 @@ async def resolve(
         return None
     try:
         return await source.tick_size(instrument_id)
-    except Exception:
+    except Exception:  # noqa: BLE001 - isolation point: a failed lookup falls back to plugins inferring the tick from prices
         return None

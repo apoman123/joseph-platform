@@ -22,6 +22,7 @@ import random
 from collections.abc import Iterable
 from collections.abc import Mapping
 from collections.abc import Sequence
+from typing import TypeAlias
 
 from joseph.domain import decimals
 from joseph.domain import instruments
@@ -32,16 +33,20 @@ from joseph.domain import structures
 from joseph.domain import timeframes
 from joseph.indicators.sdk import protocol
 
-Number = str | int | decimal.Decimal
+Number: TypeAlias = str | int | decimal.Decimal
 """Accepted numeric input for builders."""
 
 DEFAULT_INSTRUMENT = instruments.InstrumentId.parse("binance:perp:BTCUSDT")
-# 2026-11-16 00:00:00 UTC (a Monday), aligned for every timeframe.
+"""24x7 instrument used when a builder is given none."""
+
 DEFAULT_START_MS = 1_794_787_200_000
+"""2026-11-16 00:00:00 UTC (a Monday), aligned for every timeframe."""
+
 STOCK_INSTRUMENT = instruments.InstrumentId.parse("mock:stock:ACME")
 """DEMO stock on the XNYS calendar (09:30-16:00 America/New_York)."""
-# 2026-11-16 09:30 America/New_York (14:30 UTC), a Monday session open.
+
 STOCK_START_MS = 1_794_839_400_000
+"""2026-11-16 09:30 America/New_York (14:30 UTC), a Monday session open."""
 
 
 def bar_starts(
@@ -349,8 +354,7 @@ def event_names(
     Returns:
         Event occurrences in order.
     """
-    return [
-        (index, event.name.value)
-        for index, (_, output) in enumerate(results)
-        for event in output.events
-    ]
+    names: list[tuple[int, str]] = []
+    for index, (_, output) in enumerate(results):
+        names.extend((index, event.name.value) for event in output.events)
+    return names

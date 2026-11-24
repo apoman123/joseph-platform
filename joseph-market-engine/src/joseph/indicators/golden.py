@@ -18,9 +18,9 @@ Two fixture families live under ``fixtures/indicators/``:
        "final_values": {"active_count": 1},
        "final_aois": [{"kind": "FVG", "state": "active", ...subset...}]}}
 
-``pine_exports/<venue>/<symbol>/<tf>/<range>.jsonl`` (to be produced from
-the pinned private Pine repository once access is granted). Line 1 is a
-header ``{"format": "joseph.pine_export.v1", "plugin_id", "pine_commit",
+``pine_exports/<venue>/<symbol>/<tf>/<range>.jsonl`` (exported from
+TradingView runs of the pinned Pine sources; none is checked in yet). Line 1
+is a header ``{"format": "joseph.pine_export.v1", "plugin_id", "pine_commit",
 "settings"}``; every following line is one closed bar ``{"bar": [start_ms,
 o, h, l, c, v], "events": [names...], "values": {...}}``. The parity
 harness compares bar by bar and reports the first divergence.
@@ -45,6 +45,7 @@ from joseph.indicators.sdk import protocol
 from joseph.indicators.sdk import registry as registry_lib
 
 PINE_EXPORT_FORMAT = "joseph.pine_export.v1"
+"""``format`` value of a Pine export header line."""
 
 
 @dataclasses.dataclass(frozen=True, slots=True)
@@ -259,7 +260,8 @@ def compare_pine_export(
         registry: Registry providing the plugin.
 
     Returns:
-        Divergences (first 20).
+        Divergences, oldest bar first; the comparison stops after the bar
+        that brings the count to 20 or more.
 
     Raises:
         ValueError: If the header format is unknown.
@@ -300,7 +302,7 @@ def run_snapshots(
     plugin: protocol.IndicatorPlugin,
     candles: Sequence[market.Candle],
 ) -> list[structures.IndicatorSnapshot]:
-    """Convenience wrapper returning only snapshots.
+    """Runs a plugin with default settings and keeps only its snapshots.
 
     Args:
         plugin: Plugin.

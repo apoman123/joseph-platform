@@ -21,6 +21,8 @@ from typing import Any
 
 from joseph.domain import instruments
 
+# Type tags of encoded values. An encoded enum keeps its value under "v" and
+# an encoded dataclass its fields under "f".
 _DC = "__dc__"
 _DEC = "__dec__"
 _ENUM = "__enum__"

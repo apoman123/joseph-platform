@@ -16,11 +16,12 @@ import decimal
 import enum
 from collections.abc import Mapping
 from collections.abc import Sequence
+from typing import TypeAlias
 
 from joseph.domain import decimals
 from joseph.domain import errors
 
-SettingValue = int | bool | str | decimal.Decimal
+SettingValue: TypeAlias = int | bool | str | decimal.Decimal
 """Resolved setting value type."""
 
 
@@ -41,7 +42,7 @@ class SettingSpec:
         name: Setting key.
         kind: Value kind.
         default: Default value (``Decimal`` for decimal settings).
-        description: Human readable meaning.
+        description: Human-readable meaning.
         minimum: Optional inclusive lower bound (int/decimal kinds).
         maximum: Optional inclusive upper bound (int/decimal kinds).
         choices: Allowed values for ``ENUM`` settings.
@@ -72,7 +73,10 @@ class SettingSpec:
         elif self.kind is SettingKind.DECIMAL:
             schema["type"] = "string"
             schema["pattern"] = r"^-?(0|[1-9][0-9]*)(\.[0-9]+)?$"
-            assert isinstance(self.default, decimal.Decimal)
+            if not isinstance(self.default, decimal.Decimal):
+                raise AssertionError(
+                    f"decimal setting {self.name!r} needs a Decimal default"
+                )
             schema["default"] = decimals.format_decimal(self.default)
         elif self.kind is SettingKind.BOOL:
             schema["type"] = "boolean"
@@ -127,7 +131,8 @@ class SettingSpec:
                 raise errors.ValidationFailedError(
                     f"setting {self.name!r} must be one of {self.choices}"
                 )
-            assert isinstance(raw, str)
+            if not isinstance(raw, str):
+                raise AssertionError(f"choices of {self.name!r} are strings")
             value = raw
         self._check_range(value)
         return value

@@ -33,6 +33,7 @@ import bisect
 import collections
 import contextlib
 import dataclasses
+import itertools
 import json
 from collections.abc import Iterator
 from collections.abc import Mapping
@@ -62,13 +63,16 @@ class CandleSource(Protocol):
         start_ms: int,
         end_ms: int,
     ) -> Sequence[market.Candle]:
-        """Returns candles whose start lies in ``[start_ms, end_ms)``.
+        """Fetches the candles whose start lies in ``[start_ms, end_ms)``.
 
         Args:
             instrument_id: Exact venue instrument.
             timeframe: Bar resolution.
             start_ms: Inclusive window start.
             end_ms: Exclusive window end.
+
+        Returns:
+            The candles, in any order; a still-open bar may be included.
         """
         ...
 
@@ -150,8 +154,8 @@ class _SeriesRun:
         rows: Contract values per point (tuples in ``keys`` order).
         keys: Value keys of the rows.
         last_start: Newest fed candle start per timeframe.
-        as_of_ms: Close of the newest frame.
-        feed_state: Provenance of the newest frame.
+        as_of_ms: Close of the newest frame (0 before any frame).
+        feed_state: Contract ``FeedState`` value of the newest frame.
     """
 
     def __init__(
@@ -260,7 +264,7 @@ class IndicatorQueryService:
         self._source = candle_source
         self._registry = registry
         self._clock = clock
-        self._config = config or QueryConfig()
+        self._config = QueryConfig() if config is None else config
         self._ticks = tick_sizes
         self._runs: collections.OrderedDict[tuple[str, ...], _SeriesRun] = (
             collections.OrderedDict()
@@ -294,6 +298,13 @@ class IndicatorQueryService:
 
         Returns:
             Contract ``IndicatorSnapshotList``.
+
+        Raises:
+            ValidationFailedError: If no plugin is selected or the request
+                does not fit the plugins or the instrument's calendar.
+            NotFoundError: If a plugin id is not registered.
+            UnsupportedError: If a plugin is disabled or removed.
+            MissingDataError: If no closed candle is available.
         """
         result = await self._compute(
             instrument_id, timeframe, plugin_ids, at_ms, settings
@@ -324,7 +335,15 @@ class IndicatorQueryService:
             settings: Optional per-plugin setting overrides.
 
         Returns:
-            Contract ``AoiList``.
+            Contract ``AoiList``; ``events`` keeps the newest
+            ``max_events`` events of the series timeframe.
+
+        Raises:
+            ValidationFailedError: If no plugin is selected or the request
+                does not fit the plugins or the instrument's calendar.
+            NotFoundError: If a plugin id is not registered.
+            UnsupportedError: If a plugin is disabled or removed.
+            MissingDataError: If no closed candle is available.
         """
         result = await self._compute(
             instrument_id, timeframe, plugin_ids, at_ms, settings
@@ -335,12 +354,14 @@ class IndicatorQueryService:
             snapshot = last.snapshot(plugin_id, timeframe)
             if snapshot is not None:
                 aois.extend(aoi.to_contract() for aoi in snapshot.aois)
-        events = [
-            event.to_contract()
-            for frame in result.frames
-            for event in frame.events
-            if event.timeframe is timeframe
-        ][-self._config.max_events :]
+        events: list[dict[str, object]] = []
+        for frame in result.frames:
+            events.extend(
+                event.to_contract()
+                for event in frame.events
+                if event.timeframe is timeframe
+            )
+        events = events[-self._config.max_events :]
         return {
             "instrument_id": str(instrument_id),
             "timeframe": timeframe.value,
@@ -375,6 +396,14 @@ class IndicatorQueryService:
 
         Returns:
             Contract ``IndicatorSeries``.
+
+        Raises:
+            ValidationFailedError: If the request does not fit the plugin or
+                the instrument's calendar, or an anchor lies beyond
+                ``max_anchored_bars``.
+            NotFoundError: If the plugin id is not registered.
+            UnsupportedError: If the plugin is disabled or removed.
+            MissingDataError: If no closed candle is available.
         """
         end_ms = self._clock.now_ms()
         calendar = sessions.for_instrument(instrument_id)
@@ -665,8 +694,9 @@ class IndicatorQueryService:
         }
         fetched = await self._fetch(plan, since)
         before = (engine.stats.revisions_ignored, engine.stats.out_of_order)
+        # The engine's event-time order (see ``IndicatorEngine.run``).
         candles = sorted(
-            (c for rows in fetched.values() for c in rows),
+            itertools.chain.from_iterable(fetched.values()),
             key=lambda c: (c.end_ms, c.timeframe.duration_ms, c.start_ms),
         )
         frames = engine.feed(candles)
