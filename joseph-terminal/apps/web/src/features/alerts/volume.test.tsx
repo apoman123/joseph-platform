@@ -33,13 +33,14 @@ afterEach(() => {
 });
 
 /**
- * Builds a minimal signal.
- * @param id Id.
- * @param closeMs Bar close.
+ * Builds a partial signal with the fields volume ranking reads.
+ * @param id Signal id.
+ * @param closeMs Bar close time (UTC ms).
  * @param quote Quote turnover (decimal string or null).
  * @return Signal.
  */
 function signal(id: string, closeMs: number, quote: string | null): Signal {
+  // A deliberate partial mock: ranking reads only these fields.
   return {
     signal_id: id,
     bar_close_ms: closeMs,

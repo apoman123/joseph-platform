@@ -5,9 +5,10 @@
  */
 
 /**
- * @fileoverview Alerts: strategy signals newest first with filters, local
- * acknowledgment, the explanation trace (reason tree) and a jump to the
- * exact venue, instrument, bar and AOI on the chart.
+ * @fileoverview Alerts: strategy signals newest first with filters, sorting,
+ * local acknowledgment, snooze and dismiss, the explanation trace (reason
+ * tree) and a jump to the exact venue, instrument, bar and AOI (area of
+ * interest) on the chart.
  */
 
 'use client';
@@ -51,7 +52,7 @@ import styles from './alerts.module.css';
 export interface AlertsState {
   /** Signals newest first. */
   signals: readonly Signal[];
-  /** Load error. */
+  /** Message of the last failed load, or null. */
   error: string | null;
   /** Whether the first load finished. */
   loaded: boolean;
@@ -69,15 +70,20 @@ export interface AlertsPanelProps {
   triage: WritableStore<SignalTriage>;
 }
 
-/** Signals considered for AOI distances (newest first). */
+/**
+ * Number of newest signals whose AOI distance is measured; each distinct
+ * series and instrument costs an AOI and a snapshot request.
+ */
 const DISTANCE_LIMIT = 60;
 
 /**
- * Computes the distance from the latest price to each signal's AOIs.
- * Prices and AOIs come from the market engine; nothing is inferred.
+ * Measures the distance from the latest price (mark, else last) to each
+ * signal's AOIs, again every 30 s. Prices and AOIs come from the market
+ * engine; nothing is inferred.
  * @param ctx Feature context.
  * @param signals Signals (newest first).
- * @return Percent distance by signal id (null when unknown).
+ * @return Percent distance by signal id (null when unknown); signals past
+ *     `DISTANCE_LIMIT` are absent.
  */
 export function useAoiDistances(
   ctx: WebFeatureContext,
@@ -154,7 +160,7 @@ export function useAoiDistances(
   return distances;
 }
 
-/** Kind filter groups. */
+/** Kind filter groups; `kinds: null` shows every kind. */
 const FILTERS: ReadonlyArray<{
   id: string;
   label: string;
@@ -227,7 +233,8 @@ export function ReasonTree({node}: {node: ReasonNode}): ReactNode {
 
 /**
  * Renders the alerts panel.
- * @param props Props.
+ * @param props Feature context and the feature's signal, acknowledgment and
+ *     triage stores.
  * @return Panel element.
  */
 export function AlertsPanel({
@@ -245,6 +252,7 @@ export function AlertsPanel({
   const [showHidden, setShowHidden] = useState(false);
   const [sort, setSort] = useState<SignalSort>('newest');
   const [open, setOpen] = useState<string | null>(null);
+  // A coarse clock: snoozes wake within 30 s of their time.
   const [now, setNow] = useState(() => Date.now());
   useEffect(() => {
     const timer = setInterval(() => void setNow(Date.now()), 30_000);
@@ -296,6 +304,7 @@ export function AlertsPanel({
       aoiIds: signal.aoi_ids,
     });
   };
+  // Only the newest 500 acknowledgments are kept, so settings stay bounded.
   const acknowledge = (id: string) =>
     void acked.set([id, ...ackedIds.filter(x => x !== id)].slice(0, 500));
 
@@ -522,6 +531,8 @@ export function AlertsPanel({
                             <select
                               className="j-select"
                               aria-label="Snooze"
+                              // Always back on the prompt: the select acts
+                              // as a menu of durations.
                               value=""
                               data-testid="signal-snooze"
                               onChange={e => {

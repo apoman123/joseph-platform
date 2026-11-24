@@ -25,6 +25,7 @@ function makeContext(client: DemoStrategyClient): {
   notify: ReturnType<typeof vi.fn>;
 } {
   const notify = vi.fn();
+  // A deliberate partial context: the panel uses only these two members.
   const ctx = {
     clients: {strategy: client},
     notifier: {notify},

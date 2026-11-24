@@ -39,9 +39,11 @@ export interface WatchlistSettings {
 }
 
 /**
- * Reads view preferences from stored settings defensively.
+ * Reads view preferences from stored settings defensively (they may come
+ * from an older or edited store).
  * @param stored Stored settings.
- * @return Preferences.
+ * @return Preferences; unknown columns, a malformed sort and an unknown
+ *     source fall back to the defaults, the manual order and `mine`.
  */
 export function prefsFromSettings(stored: WatchlistSettings): WatchlistPrefs {
   const sort = stored.sort;
@@ -73,7 +75,7 @@ export const LIVE_WATCHLIST: readonly string[] = [
   'bitget:perp:BTCUSDT',
 ];
 
-/** The watchlist feature. */
+/** The watchlist feature; it persists rows, columns, sort and source. */
 export const WATCHLIST_FEATURE: WebFeature = {
   manifest: {
     id: 'watchlist',
@@ -117,7 +119,7 @@ export const WATCHLIST_FEATURE: WebFeature = {
       offPrefs();
     };
     /**
-     * Slot view bound to the feature's item store.
+     * Renders the panel bound to the feature's item and preference stores.
      * @param props Slot props.
      * @return Element.
      */

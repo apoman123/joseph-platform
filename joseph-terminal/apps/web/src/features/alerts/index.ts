@@ -5,8 +5,10 @@
  */
 
 /**
- * @fileoverview Alerts feature: strategy signals with filters, local
- * acknowledgment, explanation traces and chart focus.
+ * @fileoverview Alerts feature: strategy signals (polled every 15 s and
+ * merged with user-stream updates) with filters, local acknowledgment and
+ * triage, explanation traces and chart focus, plus the notification
+ * subscriptions panel.
  */
 
 import type {Signal} from '@joseph/contracts';
@@ -35,7 +37,7 @@ export interface AlertSettings {
 /**
  * Reads the triage part of stored settings defensively.
  * @param settings Stored settings.
- * @return Triage state.
+ * @return Triage state; entries of the wrong type are dropped.
  */
 export function triageFromSettings(settings: AlertSettings): SignalTriage {
   const snoozed: Record<string, number> = {};
@@ -56,6 +58,9 @@ export function triageFromSettings(settings: AlertSettings): SignalTriage {
 
 /**
  * Merges signals by id, keeping the highest revision, newest bar first.
+ * Polls and the stream can deliver the same signal in any order; comparing
+ * revisions keeps a late, older copy from replacing a newer one, and an
+ * equal revision simply replaces the stored copy.
  * @param current Existing signals.
  * @param incoming New or updated signals.
  * @return Merged list.
@@ -138,17 +143,19 @@ export const ALERTS_FEATURE: WebFeature = {
           envelope.type === 'signal.created' ||
           envelope.type === 'signal.updated'
         ) {
+          // Signal events carry a contract `Signal` as their payload.
           state.update(s => ({
             ...s,
             signals: mergeSignals(s.signals, [envelope.payload as Signal]),
           }));
         } else if (envelope.type === 'snapshot_required') {
+          // The stream missed events: reload the list.
           void load();
         }
       })
     );
     /**
-     * Slot view bound to the alert stores.
+     * Renders the alerts panel bound to the feature's stores.
      * @param props Slot props.
      * @return Element.
      */
@@ -162,7 +169,7 @@ export const ALERTS_FEATURE: WebFeature = {
     }
     const view: WebView = AlertsSlot;
     /**
-     * Slot view for notification subscriptions.
+     * Renders the notification subscriptions panel.
      * @param props Slot props.
      * @return Element.
      */

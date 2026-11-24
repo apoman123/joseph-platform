@@ -8,8 +8,11 @@
  * @fileoverview Signal dashboard ranking and triage (pure): sort keys
  * (newest, R multiple, confluence, bar volume, age, distance to the AOI),
  * confluence counts from the reason tree, AOI distance and local
- * snooze/dismiss.
- * Display only: nothing here changes what the engine decided.
+ * snooze/dismiss. The R multiple is reward divided by risk; an AOI is an
+ * area of interest (a zone the engine tracks).
+ *
+ * Display only: nothing here changes what the engine decided. Decimal
+ * strings become numbers here only to rank and measure, never to show.
  */
 
 import type {AoiRecord, ReasonNode, Signal} from '@joseph/contracts';
@@ -33,7 +36,7 @@ export const SNOOZE_MINUTES: readonly number[] = [15, 60, 240];
 
 /** Local triage of signals (persisted in feature settings). */
 export interface SignalTriage {
-  /** Dismissed signal ids (hidden until "show dismissed"). */
+  /** Dismissed signal ids, newest first (hidden unless shown on request). */
   dismissed: readonly string[];
   /** Snoozed signal id to wake-up time (UTC ms). */
   snoozed: Readonly<Record<string, number>>;
@@ -77,9 +80,9 @@ export function aoiDistancePct(
 }
 
 /**
- * Parses a decimal string R multiple.
+ * Returns a signal's R multiple as a number, for ranking.
  * @param signal Signal.
- * @return Number or null.
+ * @return Number, or null when absent or not a finite number.
  */
 function rrOf(signal: Signal): number | null {
   const value = signal.rr == null ? NaN : Number(signal.rr);
@@ -104,10 +107,10 @@ export function barQuoteVolumeOf(signal: Signal): number | null {
 }
 
 /**
- * Compares nullable numbers, keeping nulls last.
- * @param a First.
- * @param b Second.
- * @param descending Larger first.
+ * Compares nullable numbers, keeping nulls last in either direction.
+ * @param a First value.
+ * @param b Second value.
+ * @param descending Whether larger values come first.
  * @return Comparator result.
  */
 function byNumber(
@@ -122,7 +125,9 @@ function byNumber(
 }
 
 /**
- * Sorts signals for display (stable; ties fall back to newest).
+ * Sorts signals for display; ties fall back to newest first. Missing
+ * values (R multiple, volume, distance) sort last; distance sorts nearest
+ * first.
  * @param signals Signals.
  * @param sort Sort key.
  * @param distances Distance to AOI by signal id (percent).
@@ -155,11 +160,11 @@ export function sortSignals(
 }
 
 /**
- * Whether a signal is hidden by snooze right now.
+ * Returns whether a signal is hidden by a snooze right now.
  * @param triage Triage state.
  * @param signalId Signal id.
- * @param nowMs Clock.
- * @return True while snoozed.
+ * @param nowMs Current time (UTC ms).
+ * @return True until the snooze's wake-up time.
  */
 export function isSnoozed(
   triage: SignalTriage,
@@ -171,11 +176,11 @@ export function isSnoozed(
 }
 
 /**
- * Snoozes a signal, dropping expired snoozes.
+ * Snoozes a signal, dropping expired snoozes so the settings stay small.
  * @param triage Triage state.
  * @param signalId Signal id.
- * @param minutes Duration.
- * @param nowMs Clock.
+ * @param minutes Duration in minutes.
+ * @param nowMs Current time (UTC ms).
  * @return Next triage state.
  */
 export function snooze(
@@ -193,7 +198,8 @@ export function snooze(
 }
 
 /**
- * Dismisses or restores a signal (kept to the newest 500 ids).
+ * Dismisses or restores a signal. Only the newest 500 dismissed ids are
+ * kept, so the settings stay bounded.
  * @param triage Triage state.
  * @param signalId Signal id.
  * @param dismissed Whether to dismiss.
@@ -212,10 +218,10 @@ export function setDismissed(
 }
 
 /**
- * Formats a snooze wake-up time.
- * @param untilMs Wake-up (UTC ms).
- * @param nowMs Clock.
- * @return Text such as `for 42 min`.
+ * Formats the time left on a snooze.
+ * @param untilMs Wake-up time (UTC ms).
+ * @param nowMs Current time (UTC ms).
+ * @return Text such as `for 42 min` or `for 1.5 h`; at least one minute.
  */
 export function snoozeLabel(untilMs: number, nowMs: number): string {
   const minutes = Math.max(1, Math.round((untilMs - nowMs) / 60_000));
