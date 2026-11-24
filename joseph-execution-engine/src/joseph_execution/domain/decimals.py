@@ -10,22 +10,28 @@ import decimal
 ZERO = decimal.Decimal(0)
 ONE = decimal.Decimal(1)
 HUNDRED = decimal.Decimal(100)
-BPS = decimal.Decimal(10_000)
+BPS = decimal.Decimal(10_000)  # Basis points in one whole (100%).
 
+# Used only by ``fmt``, whose ``normalize`` rounds to 38 significant digits.
 _CONTEXT = decimal.Context(prec=38, rounding=decimal.ROUND_HALF_EVEN)
 
 
 def to_decimal(value: object) -> decimal.Decimal:
-    """Parses a value into ``Decimal`` without binary-float rounding.
+    """Parses a value into ``Decimal`` without binary-float artefacts.
+
+    A ``float`` goes through its shortest ``repr``, so ``0.1`` becomes
+    ``Decimal("0.1")`` rather than the exact binary expansion; strings are
+    stripped of surrounding whitespace.
 
     Args:
         value: ``str``, ``int``, ``float`` or ``Decimal``.
 
     Returns:
-        The exact decimal.
+        The decimal.
 
     Raises:
-        ValueError: If the value is not a finite number.
+        ValueError: If the value is a ``bool``, another unsupported type,
+            text that is not a number, or not finite (NaN, infinity).
     """
     if isinstance(value, bool):
         raise ValueError("booleans are not numeric values")
@@ -48,13 +54,16 @@ def to_decimal(value: object) -> decimal.Decimal:
 
 
 def to_optional(value: object) -> decimal.Decimal | None:
-    """Parses an optional decimal, preserving ``None`` and empty strings.
+    """Parses an optional decimal; ``None`` and ``""`` mean absent.
 
     Args:
-        value: Value or ``None``.
+        value: Value accepted by ``to_decimal``, ``None`` or ``""``.
 
     Returns:
-        Decimal or ``None``.
+        The decimal, or ``None`` for ``None`` and ``""``.
+
+    Raises:
+        ValueError: If a present value is rejected by ``to_decimal``.
     """
     if value is None or value == "":
         return None
@@ -68,7 +77,8 @@ def fmt(value: decimal.Decimal) -> str:
         value: Finite decimal.
 
     Returns:
-        Plain decimal text without exponent or trailing zeros.
+        Plain decimal text without exponent or trailing zeros; ``"0"`` for
+        zero, including negative zero.
     """
     if value.is_zero():
         return "0"
@@ -85,7 +95,7 @@ def fmt_optional(value: decimal.Decimal | None) -> str | None:
         value: Decimal or ``None``.
 
     Returns:
-        Text or ``None``.
+        ``fmt(value)``, or ``None`` when ``value`` is ``None``.
     """
     return None if value is None else fmt(value)
 
@@ -93,7 +103,7 @@ def fmt_optional(value: decimal.Decimal | None) -> str | None:
 def floor_to_step(
     value: decimal.Decimal, step: decimal.Decimal
 ) -> decimal.Decimal:
-    """Rounds down to a multiple of ``step`` (never increases exposure).
+    """Rounds down to a multiple of ``step`` (never increases a quantity).
 
     Args:
         value: Value to round.
@@ -137,10 +147,11 @@ def is_multiple(value: decimal.Decimal, step: decimal.Decimal) -> bool:
 
     Args:
         value: Value.
-        step: Positive increment.
+        step: Increment.
 
     Returns:
-        True when aligned.
+        True when ``value`` is an exact multiple of ``step``; False when it
+        is not or when ``step`` is not positive.
     """
     if step <= ZERO:
         return False

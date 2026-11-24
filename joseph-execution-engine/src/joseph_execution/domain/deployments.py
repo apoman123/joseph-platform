@@ -5,8 +5,10 @@
 
 A deployment binds one immutable strategy version to one account. AUTO_LIVE
 stays PENDING_CONSENT until a scoped, expiring consent exists; consent is
-bound by hash to the account, venue, strategy version, instruments and
-notional, so editing any of them (or deploying a new version) invalidates it.
+bound by hash to the account, venue, strategy version, allowed instruments,
+notional and leverage caps and expiry, so changing any of them (or
+deploying a new version) invalidates it. All times are UTC epoch
+milliseconds.
 """
 
 from __future__ import annotations
@@ -23,14 +25,20 @@ from joseph_execution.domain import ids
 
 @dataclasses.dataclass(frozen=True, slots=True)
 class DeploymentLimits:
-    """Per-deployment limits (in addition to account limits).
+    """Per-deployment limits, applied on top of the account's limits.
+
+    Where both set a cap, the stricter one applies to the deployment's
+    orders.
 
     Attributes:
-        max_notional: Maximum notional per order.
-        max_open_positions: Maximum concurrently open positions.
-        max_daily_loss: Daily realized loss that pauses the deployment.
+        max_notional: Maximum notional per order, in the account currency.
+        max_open_positions: Maximum open positions of the account when an
+            order of the deployment opens a new one.
+        max_daily_loss: Cap on the account's realized loss since 00:00 UTC
+            (a positive amount); reaching it pauses new exposure.
         allowed_instruments: Instrument allow-list. Empty means any for
-            PAPER/SHADOW; AUTO_LIVE requires a non-empty list.
+            PAPER/SHADOW; AUTO_LIVE trades listed instruments only, and
+            its consent requires a non-empty list.
         max_leverage: Leverage cap.
     """
 
@@ -59,10 +67,15 @@ class DeploymentLimits:
         """Parses contract limits.
 
         Args:
-            body: Contract ``DeploymentLimits``.
+            body: Contract ``DeploymentLimits``; a missing or empty
+                ``allowed_instruments`` gives an empty allow-list.
 
         Returns:
             Limits.
+
+        Raises:
+            KeyError: If a required field is missing.
+            ValueError: If a number is invalid.
         """
         instruments = body.get("allowed_instruments") or []
         return cls(
@@ -71,7 +84,7 @@ class DeploymentLimits:
             max_daily_loss=decimals.to_decimal(body["max_daily_loss"]),
             allowed_instruments=tuple(
                 str(x)
-                for x in instruments  # type: ignore[attr-defined]
+                for x in instruments  # type: ignore[attr-defined]  # untyped JSON; the contract makes it a list of ids.
             ),
             max_leverage=decimals.to_decimal(body["max_leverage"]),
         )
@@ -83,8 +96,10 @@ class SizingModel:
 
     Attributes:
         model: ``RISK_PCT`` or ``FIXED_QTY``.
-        risk_pct: Percent of equity risked between entry and stop.
-        fixed_qty: Fixed base quantity.
+        risk_pct: Percent of equity risked between entry and stop, in
+            ``(0, 5]``; required for ``RISK_PCT``.
+        fixed_qty: Fixed base quantity, positive; required for
+            ``FIXED_QTY``.
     """
 
     model: str
@@ -95,7 +110,8 @@ class SizingModel:
         """Validates the sizing model.
 
         Raises:
-            ExecutionError: With ``VALIDATION_FAILED`` on bad input.
+            ExecutionError: With ``VALIDATION_FAILED`` for an unknown model
+                or when the model's own field is missing or out of range.
         """
         if self.model == "RISK_PCT":
             if self.risk_pct is None or not (
@@ -136,6 +152,11 @@ class SizingModel:
 
         Returns:
             Sizing model.
+
+        Raises:
+            KeyError: If ``model`` is missing.
+            ValueError: If a number is invalid.
+            ExecutionError: With ``VALIDATION_FAILED`` from validation.
         """
         return cls(
             model=str(body["model"]),
@@ -150,9 +171,9 @@ class LiveConsent:
 
     Attributes:
         consented_at_ms: When consent was given.
-        expires_at_ms: When it lapses.
-        scope_hash: Hash of the consented scope.
-        actor: Consenting user.
+        expires_at_ms: When it lapses; it is expired from this instant on.
+        scope_hash: ``consent_scope_hash`` of the consented scope.
+        actor: Consenting user, as an audit actor label.
     """
 
     consented_at_ms: int
@@ -187,7 +208,9 @@ def consent_scope_hash(
         account_id: Account.
         venue: Account venue.
         strategy_version_id: Exact immutable strategy version.
-        limits: Deployment limits (instruments and notional are bound).
+        limits: Deployment limits; the allowed instruments (in any order),
+            ``max_notional`` and ``max_leverage`` are bound, the loss and
+            position limits are not.
         expires_at_ms: Consent expiry.
 
     Returns:
@@ -207,7 +230,7 @@ def consent_scope_hash(
 
 @dataclasses.dataclass(frozen=True, slots=True)
 class Deployment:
-    """Binding of a strategy version to an account.
+    """A binding of one strategy version to one account.
 
     Attributes:
         deployment_id: Identifier.
@@ -220,7 +243,8 @@ class Deployment:
         sizing: Sizing model.
         created_at_ms: Creation time.
         updated_at_ms: Last change.
-        live_consent: Consent for AUTO_LIVE, if given.
+        live_consent: Consent for AUTO_LIVE, if given (dropped when the
+            deployment is disabled).
     """
 
     deployment_id: str
@@ -239,11 +263,13 @@ class Deployment:
         """Checks that AUTO_LIVE consent exists, is unexpired and in scope.
 
         Args:
-            venue: Account venue.
+            venue: Venue of the deployment's account, as it is now.
             now_ms: Current time.
 
         Returns:
-            True only for a matching, unexpired consent.
+            True only when consent exists, ``now_ms`` is before its expiry
+            and its scope hash matches the deployment's current account,
+            venue, strategy version and limits.
         """
         consent = self.live_consent
         if consent is None or now_ms >= consent.expires_at_ms:

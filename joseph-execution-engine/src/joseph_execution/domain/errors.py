@@ -7,13 +7,16 @@ from __future__ import annotations
 
 
 class ExecutionError(Exception):
-    """Base class for expected execution-engine errors.
+    """An expected execution-engine failure with a contract error code.
+
+    The API turns it into an error response carrying ``code``.
 
     Attributes:
         code: Contract ``ErrorCode`` value such as ``"RISK_LIMIT"``.
         message: Plain-language explanation.
         retryable: Whether retrying the same request may succeed.
-        details: Optional JSON-compatible details for the response body.
+        details: JSON-compatible details for the response body; empty when
+            none were given.
     """
 
     def __init__(
@@ -28,9 +31,10 @@ class ExecutionError(Exception):
 
         Args:
             code: Contract error code.
-            message: Human readable explanation.
-            retryable: Retry hint for clients.
-            details: Optional structured details.
+            message: Plain-language explanation; ``str(error)`` is
+                ``"<code>: <message>"``.
+            retryable: Whether retrying the same request may succeed.
+            details: Optional JSON-compatible details.
         """
         super().__init__(f"{code}: {message}")
         self.code = code
@@ -40,7 +44,14 @@ class ExecutionError(Exception):
 
 
 class InvalidTransitionError(ExecutionError):
-    """An order state transition is not permitted by the state machine."""
+    """An order state transition the state machine does not permit.
+
+    Carries the contract code ``CONFLICT``.
+
+    Attributes:
+        current: State the order is in.
+        target: State that was requested.
+    """
 
     def __init__(self, current: str, target: str) -> None:
         """Initializes the error.
@@ -57,7 +68,11 @@ class InvalidTransitionError(ExecutionError):
 
 
 class AdapterTimeoutError(ExecutionError):
-    """A venue call timed out; the outcome of the request is unknown."""
+    """A venue call that timed out, so its outcome is unknown.
+
+    Carries ``ORDER_UNKNOWN`` and is retryable: the OMS reconciles the
+    order with the venue instead of assuming it failed.
+    """
 
     def __init__(self, message: str = "venue request timed out") -> None:
         """Initializes the error.
@@ -69,9 +84,14 @@ class AdapterTimeoutError(ExecutionError):
 
 
 class AdapterUnavailableError(ExecutionError):
-    """A venue adapter cannot serve the request (refused before sending)."""
+    """A request the venue adapter refused before sending anything.
 
-    def __init__(self, message: str, *, code: str = "VENUE_UNAVAILABLE"):
+    Nothing reached the venue, so the OMS may treat the order as failed.
+    """
+
+    def __init__(
+        self, message: str, *, code: str = "VENUE_UNAVAILABLE"
+    ) -> None:
         """Initializes the error.
 
         Args:
@@ -82,7 +102,10 @@ class AdapterUnavailableError(ExecutionError):
 
 
 class MarketDataUnavailableError(ExecutionError):
-    """Market data required for a decision could not be obtained."""
+    """Market data needed for a decision that could not be obtained.
+
+    Carries ``MARKET_STALE`` and is retryable.
+    """
 
     def __init__(self, message: str) -> None:
         """Initializes the error.
@@ -99,7 +122,7 @@ class MarketDataUnavailableError(ExecutionError):
 
 
 class VenueRejectedError(ExecutionError):
-    """The venue definitively refused a request; it is never retried.
+    """A request the venue definitively refused; it is never retried.
 
     The request reached the venue and was not executed, so no order (or
     amendment or cancel) exists because of it. Subclasses distinguish the
@@ -124,7 +147,7 @@ class VenueRejectedError(ExecutionError):
             code: Contract error code.
             message: Explanation (never contains credentials).
             venue: Venue code.
-            venue_code: Venue error code.
+            venue_code: The venue's own error code, if any.
         """
         super().__init__(
             code,
@@ -137,7 +160,7 @@ class VenueRejectedError(ExecutionError):
 
 
 class InsufficientMarginError(VenueRejectedError):
-    """The venue refused an order for lack of margin or balance."""
+    """An order the venue refused for lack of margin or balance."""
 
     def __init__(
         self, message: str, *, venue: str, venue_code: str | None = None
@@ -155,7 +178,7 @@ class InsufficientMarginError(VenueRejectedError):
 
 
 class OrderRejectedError(VenueRejectedError):
-    """The venue refused the request's parameters (price, size, flags).
+    """A request whose parameters (price, size, flags) the venue refused.
 
     ``code`` is ``VALIDATION_FAILED`` unless a more specific contract code
     applies (``INVALID_TICK_SIZE``, ``INVALID_LOT_SIZE``, ``MIN_NOTIONAL``,
@@ -182,7 +205,11 @@ class OrderRejectedError(VenueRejectedError):
 
 
 class VenuePermissionError(VenueRejectedError):
-    """The credentials lack a permission (trading scope, KYC, IP, key)."""
+    """A request refused because the credentials lack a permission.
+
+    For example a trading scope, KYC (know-your-customer) status, an
+    allowed IP address or a valid key.
+    """
 
     def __init__(
         self, message: str, *, venue: str, venue_code: str | None = None
@@ -200,12 +227,13 @@ class VenuePermissionError(VenueRejectedError):
 
 
 class RateLimitedError(AdapterUnavailableError):
-    """A request was refused for rate limiting; it was not executed.
+    """A request refused for rate limiting; it was not executed.
 
     Raised before sending when the local limiter has no budget, or when
-    the venue answers 429/418. Retrying later may succeed.
+    the venue answers HTTP 429 or 418. Carries ``RATE_LIMITED``.
 
     Attributes:
+        retryable: Always True: retrying later may succeed.
         retry_after_s: Seconds the venue asked to wait, if known.
     """
 
@@ -216,7 +244,7 @@ class RateLimitedError(AdapterUnavailableError):
 
         Args:
             message: Explanation.
-            retry_after_s: Venue ``Retry-After`` hint.
+            retry_after_s: Venue ``Retry-After`` hint in seconds, if any.
         """
         super().__init__(message, code="RATE_LIMITED")
         self.retryable = True

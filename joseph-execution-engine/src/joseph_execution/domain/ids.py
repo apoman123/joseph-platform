@@ -12,12 +12,21 @@ import threading
 import time
 import uuid
 
+# Process-wide UUIDv7 generator state: ``uuid7`` must see the last
+# timestamp and counter of every caller in the process to stay monotonic.
+# ``_LOCK`` makes the read-modify-write safe if callers run on several
+# threads.
 _LOCK = threading.Lock()
 _STATE = {"last_ms": 0, "seq": 0}
 
 
 def uuid7(now_ms: int | None = None) -> str:
     """Generates a monotonic RFC 9562 UUIDv7.
+
+    Ids sort in generation order within the process, even when the clock
+    stalls or steps back: the timestamp then stays at the last one used and
+    the 12-bit counter in ``rand_a`` (RFC 9562 method 1) increments; when
+    the counter wraps, the timestamp advances by one millisecond.
 
     Args:
         now_ms: Optional timestamp override in UTC epoch milliseconds.
@@ -33,10 +42,14 @@ def uuid7(now_ms: int | None = None) -> str:
             if _STATE["seq"] == 0:
                 ms += 1
         else:
+            # A random 10-bit start leaves at least 3072 increments of
+            # headroom in the 12-bit counter within one millisecond.
             _STATE["seq"] = int.from_bytes(os.urandom(2), "big") & 0x03FF
         _STATE["last_ms"] = ms
         seq = _STATE["seq"]
     rand_b = int.from_bytes(os.urandom(8), "big") & ((1 << 62) - 1)
+    # Layout: 48-bit ms timestamp, version 7, 12-bit counter, variant 0b10,
+    # 62 random bits.
     value = (ms & ((1 << 48) - 1)) << 80
     value |= 0x7 << 76
     value |= seq << 64
@@ -76,10 +89,11 @@ def stable_id(prefix: str, *parts: object) -> str:
 
     Args:
         prefix: Readable prefix.
-        *parts: Values defining the entity.
+        *parts: Values defining the entity; joined with ``|`` after ``str``.
 
     Returns:
-        Identifier like ``pos_3f1c2a9b0d4e5f60``.
+        ``<prefix>_`` plus the first 16 hex digits of the parts' SHA-256,
+        e.g. ``pos_3f1c2a9b0d4e5f60``.
     """
     digest = sha256_hex("|".join(str(part) for part in parts))
     return f"{prefix}_{digest[:16]}"
@@ -92,6 +106,7 @@ def client_order_id(intent_id: str) -> str:
         intent_id: UUIDv7 text.
 
     Returns:
-        Client order id such as ``j0193f0a0...``.
+        ``j`` plus the first 30 hex digits of the intent id without dashes
+        (letters and digits only), such as ``j0193f0a0...``.
     """
     return "j" + intent_id.replace("-", "")[:30]

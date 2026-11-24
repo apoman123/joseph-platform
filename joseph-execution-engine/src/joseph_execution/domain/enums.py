@@ -1,7 +1,10 @@
 # Copyright 2026 apoman123
 # SPDX-License-Identifier: MIT
 
-"""Enumerations mirroring ``execution.schema.json`` and ``common``."""
+"""Enumerations mirroring ``execution.schema.json`` and ``common``.
+
+Member values are wire values of the contracts and must not change.
+"""
 
 from __future__ import annotations
 
@@ -32,7 +35,10 @@ class Venue(enum.StrEnum):
 
 
 class Broker(enum.StrEnum):
-    """Securities brokers (contract ``Broker``); account venues too."""
+    """Securities brokers (contract ``Broker``).
+
+    The values double as the ``venue`` of broker accounts.
+    """
 
     IBKR = "ibkr"
     SINOPAC = "sinopac"
@@ -47,7 +53,7 @@ class OrderSide(enum.StrEnum):
 
     @property
     def opposite(self) -> OrderSide:
-        """Returns the other side."""
+        """The other side: ``SELL`` for ``BUY`` and vice versa."""
         return OrderSide.SELL if self is OrderSide.BUY else OrderSide.BUY
 
 
@@ -71,8 +77,8 @@ class OrderType(enum.StrEnum):
 class TimeInForce(enum.StrEnum):
     """Time in force.
 
-    ``DAY`` (TWSE ``ROD``) expires at the close of the exchange session and
-    applies to exchange-listed securities only.
+    ``DAY`` (TWSE ``ROD``, rest of day) expires at the close of the
+    exchange session and applies to exchange-listed securities only.
     """
 
     GTC = "GTC"
@@ -90,14 +96,17 @@ class MarginMode(enum.StrEnum):
 
 
 class PriceBasis(enum.StrEnum):
-    """Trigger price basis."""
+    """Trigger price basis: the mark price or the last trade price."""
 
     MARK = "mark"
     LAST = "last"
 
 
 class IntentSource(enum.StrEnum):
-    """Where an intent originated."""
+    """Where an intent originated.
+
+    ``EMERGENCY`` intents are the flattening orders of a kill switch.
+    """
 
     MANUAL_TICKET = "MANUAL_TICKET"
     CHART = "CHART"
@@ -116,7 +125,17 @@ class IntentSource(enum.StrEnum):
 
 
 class OrderMode(enum.StrEnum):
-    """Order mode. LIVE is disabled by default and fails closed."""
+    """Order mode: whether an order reaches a real venue.
+
+    ``PAPER`` orders fill in the paper simulator and ``SHADOW`` orders are
+    only recorded; neither sends anything to a venue. ``LIVE`` sends real
+    orders and is opt-in: the Risk Gateway's ``mode.allowed`` check fails
+    it unless the account lists ``LIVE`` in its modes, the global
+    live-trading gate (off by default) is on and the venue adapter reports
+    ``AVAILABLE``. Strategy orders also need an enabled ``AUTO_LIVE``
+    deployment with valid consent, and manual orders an armed account
+    (risk-reducing ones are let through with a warning).
+    """
 
     PAPER = "PAPER"
     SHADOW = "SHADOW"
@@ -124,7 +143,10 @@ class OrderMode(enum.StrEnum):
 
 
 class OrderState(enum.StrEnum):
-    """OMS order states (contract ``OrderState``)."""
+    """OMS (order management system) order states (contract ``OrderState``).
+
+    The permitted transitions are ``orders.TRANSITIONS``.
+    """
 
     DRAFT = "DRAFT"
     VALIDATED = "VALIDATED"
@@ -142,7 +164,7 @@ class OrderState(enum.StrEnum):
 
     @property
     def is_terminal(self) -> bool:
-        """Whether the state is absorbing."""
+        """Whether the state is absorbing (no transition leaves it)."""
         return self in TERMINAL_STATES
 
     @property
@@ -155,6 +177,8 @@ class OrderState(enum.StrEnum):
         )
 
 
+# Final outcomes; ``UNKNOWN_RECONCILING`` is not one: reconciliation still
+# resolves it.
 TERMINAL_STATES = frozenset(
     {
         OrderState.FILLED,
@@ -196,7 +220,7 @@ class RiskDomain(enum.StrEnum):
 class CheckOutcome(enum.StrEnum):
     """Outcome of one risk check."""
 
-    PASS = "PASS"  # noqa: S105
+    PASS = "PASS"  # noqa: S105 - outcome enum value, not a password.
     FAIL = "FAIL"
     WARN = "WARN"
     SKIP = "SKIP"
@@ -204,7 +228,13 @@ class CheckOutcome(enum.StrEnum):
 
 
 class Decision(enum.StrEnum):
-    """Risk Gateway verdict."""
+    """Risk Gateway verdict; only ``ALLOW`` authorizes an order.
+
+    ``REJECT``: a check found the order itself invalid. ``PAUSE``: a check
+    that pauses trading failed. ``BLOCK``: any other check failed or could
+    not decide (fail closed). A decision carries the most severe verdict,
+    ranked ALLOW < REJECT < PAUSE < BLOCK.
+    """
 
     ALLOW = "ALLOW"
     REJECT = "REJECT"
@@ -213,7 +243,10 @@ class Decision(enum.StrEnum):
 
 
 class KillSwitchScope(enum.StrEnum):
-    """Kill switch scope (GLOBAL = every account/strategy of a tenant)."""
+    """Kill switch scope (``GLOBAL`` covers every account and strategy).
+
+    Scopes never cross tenants: ``GLOBAL`` means the whole tenant.
+    """
 
     GLOBAL = "GLOBAL"
     ACCOUNT = "ACCOUNT"
@@ -221,7 +254,14 @@ class KillSwitchScope(enum.StrEnum):
 
 
 class DeploymentMode(enum.StrEnum):
-    """Strategy deployment mode."""
+    """Strategy deployment mode.
+
+    ``PAPER`` and ``SHADOW`` deployments are enabled on creation and send
+    PAPER and SHADOW intents. ``AUTO_LIVE`` sends LIVE intents and is
+    opt-in: it starts ``PENDING_CONSENT``, is enabled only by an expiring,
+    step-up-verified consent, and every one of its orders still has to pass
+    the LIVE gates of ``OrderMode``.
+    """
 
     PAPER = "PAPER"
     SHADOW = "SHADOW"
@@ -229,7 +269,7 @@ class DeploymentMode(enum.StrEnum):
 
     @property
     def order_mode(self) -> OrderMode:
-        """Returns the order mode used by intents of this deployment."""
+        """The order mode of this deployment's intents (AUTO_LIVE: LIVE)."""
         if self is DeploymentMode.PAPER:
             return OrderMode.PAPER
         if self is DeploymentMode.SHADOW:
@@ -238,7 +278,13 @@ class DeploymentMode(enum.StrEnum):
 
 
 class DeploymentState(enum.StrEnum):
-    """Deployment lifecycle state."""
+    """Deployment lifecycle state.
+
+    Only ``ENABLED`` deployments trade. ``PENDING_CONSENT`` is an
+    ``AUTO_LIVE`` deployment awaiting consent; ``DISABLED`` was switched off
+    by the user (its consent dropped). ``REVOKED`` is a contract state the
+    engine treats like ``DISABLED``; no engine path sets it.
+    """
 
     ENABLED = "ENABLED"
     DISABLED = "DISABLED"
@@ -274,7 +320,11 @@ class HealthState(enum.StrEnum):
 
 
 class FeedState(enum.StrEnum):
-    """Market-data provenance (contract ``FeedState``)."""
+    """Market-data provenance (contract ``FeedState``).
+
+    LIVE orders that add exposure need ``LIVE`` data (Risk Gateway check
+    ``data.quote_fresh``).
+    """
 
     LIVE = "LIVE"
     POLL = "POLL"

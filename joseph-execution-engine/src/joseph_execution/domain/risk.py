@@ -23,16 +23,16 @@ rate. Deployments override it with ``JOSEPH_TWD_LIMIT_FACTOR``.
 
 @dataclasses.dataclass(frozen=True, slots=True)
 class RiskCheckResult:
-    """Outcome of one risk check.
+    """The outcome of one risk check.
 
     Attributes:
         check: Dotted check name, e.g. ``size.tick``.
         domain: Risk domain.
         outcome: PASS, FAIL, WARN, SKIP or UNKNOWN.
         message: Plain-language explanation.
-        code: Contract error code for failures.
-        observed: Observed value as text.
-        limit: Limit value as text.
+        code: Contract error code of a failure; ``None`` when there is none.
+        observed: Observed value as text, if the check reports one.
+        limit: Limit value as text, if the check reports one.
     """
 
     check: str
@@ -62,14 +62,15 @@ class RiskCheckResult:
 
 @dataclasses.dataclass(frozen=True, slots=True)
 class RiskDecision:
-    """Verdict of the Risk Gateway.
+    """A verdict of the Risk Gateway over one intent.
 
     Attributes:
-        decision: ALLOW, REJECT, BLOCK or PAUSE.
-        checks: Every evaluated check.
-        policy_version: Policy identifier.
-        evaluated_at_ms: Evaluation time.
-        reservation_id: Reservation created for an allowed intent.
+        decision: ALLOW, REJECT, BLOCK or PAUSE; only ALLOW authorizes.
+        checks: Every evaluated check, in pipeline order.
+        policy_version: Identifier of the risk policy that was applied.
+        evaluated_at_ms: Evaluation time, UTC epoch milliseconds.
+        reservation_id: Margin reservation created for an allowed intent;
+            ``None`` until one is attached.
     """
 
     decision: enums.Decision
@@ -80,14 +81,15 @@ class RiskDecision:
 
     @property
     def allowed(self) -> bool:
-        """Returns True only for ALLOW."""
+        """Whether the decision is ALLOW; every other verdict denies."""
         return self.decision is enums.Decision.ALLOW
 
     def failures(self) -> list[RiskCheckResult]:
         """Returns the checks that failed or were unknown.
 
         Returns:
-            Failing checks in evaluation order.
+            Checks with outcome FAIL or UNKNOWN, in evaluation order (WARN
+            and SKIP are not failures).
         """
         return [
             check
@@ -100,7 +102,8 @@ class RiskDecision:
         """Returns the most relevant error code of a non-allowed decision.
 
         Returns:
-            Contract error code, ``RISK_LIMIT`` by default.
+            Code of the first failing check that has one, else
+            ``RISK_LIMIT``.
         """
         for check in self.failures():
             if check.code:
@@ -137,10 +140,14 @@ class RiskDecision:
         """Rebuilds a decision from its stored contract form.
 
         Args:
-            body: Contract ``RiskDecision``.
+            body: Contract ``RiskDecision`` as stored with an intent.
 
         Returns:
-            Decision.
+            Decision; a missing or non-list ``checks`` gives no checks.
+
+        Raises:
+            KeyError: If a required field is missing.
+            ValueError: If an enum value or the time is invalid.
         """
         raw = body.get("checks")
         raw_checks: list[dict[str, object]] = (

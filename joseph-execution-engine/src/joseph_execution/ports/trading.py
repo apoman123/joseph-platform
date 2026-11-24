@@ -3,8 +3,10 @@
 
 """Venue trading port.
 
-Only the OMS holds a reference to adapters (through ``AdapterResolver``);
-strategies, UI features and notification channels never do.
+Only the execution core (the OMS, or order management system, the account
+service and reconciliation) reaches adapters, through ``AdapterResolver``;
+strategies, UI features and notification channels never do. Quantities are
+in base units and times are UTC epoch milliseconds.
 """
 
 from __future__ import annotations
@@ -21,20 +23,21 @@ from joseph_execution.domain import enums
 
 @dataclasses.dataclass(frozen=True, slots=True)
 class VenueOrderRequest:
-    """Order as sent to a venue adapter.
+    """An order as sent to a venue adapter.
 
     Attributes:
         account_id: Account.
-        instrument_id: Instrument.
-        client_order_id: Idempotent client order id.
+        instrument_id: Canonical instrument id.
+        client_order_id: Client order id, unique per account; the OMS
+            reconciles unknown outcomes by it.
         side: Side.
-        order_type: Type.
+        order_type: Order type.
         quantity_base: Quantity.
         time_in_force: Time in force.
         reduce_only: Reduce-only flag.
-        limit_price: Limit price.
-        trigger_price: Trigger price.
-        trigger_basis: Trigger basis.
+        limit_price: Limit price, for limit and stop-limit orders.
+        trigger_price: Trigger price, for stop orders.
+        trigger_basis: Trigger basis, for stop orders.
         leverage: Leverage.
         margin_mode: Margin mode.
         outside_rth: Allow execution outside regular trading hours
@@ -59,13 +62,16 @@ class VenueOrderRequest:
 
 @dataclasses.dataclass(frozen=True, slots=True)
 class VenueFill:
-    """Fill reported by a venue.
+    """A fill reported by a venue.
+
+    The OMS deduplicates fills by ``exchange_fill_id``, so adapters may
+    report the same fill more than once.
 
     Attributes:
-        exchange_fill_id: Venue fill id.
-        client_order_id: Order client id.
-        price: Price.
-        quantity_base: Quantity.
+        exchange_fill_id: Venue fill id, unique per account.
+        client_order_id: Client order id of the filled order.
+        price: Fill price.
+        quantity_base: Filled quantity.
         fee: Fee (positive = paid).
         fee_asset: Fee currency.
         liquidity: ``maker`` or ``taker``.
@@ -84,11 +90,11 @@ class VenueFill:
 
 @dataclasses.dataclass(frozen=True, slots=True)
 class VenueOrderState:
-    """Order state as reported by the venue.
+    """An order's state as reported by the venue.
 
     Attributes:
         client_order_id: Client order id.
-        exchange_order_id: Venue order id.
+        exchange_order_id: Venue order id, if the venue assigned one.
         status: ACKNOWLEDGED, PARTIALLY_FILLED, FILLED, CANCELED,
             REJECTED or EXPIRED.
         filled_base: Cumulative filled quantity.
@@ -106,12 +112,14 @@ class VenueOrderState:
 
 @dataclasses.dataclass(frozen=True, slots=True)
 class VenueSubmitResult:
-    """Synchronous response of a submit.
+    """The synchronous response to a submit.
 
     Attributes:
-        accepted: Whether the venue accepted the order.
+        accepted: Whether the venue accepted the order; False means the
+            venue rejected it and ``state`` is REJECTED.
         state: Order state at response time.
-        fills: Fills included in the response.
+        fills: Fills included in the response; the OMS fetches the rest
+            when ``state.filled_base`` exceeds their total.
     """
 
     accepted: bool
@@ -121,11 +129,11 @@ class VenueSubmitResult:
 
 @dataclasses.dataclass(frozen=True, slots=True)
 class VenueEvent:
-    """Private account stream event.
+    """A private account stream event.
 
     Attributes:
         account_id: Account.
-        sequence: Venue/adapter sequence number.
+        sequence: Venue or adapter sequence number.
         order: Order update, if any.
         fill: Fill, if any.
         position: Position update, if any (live venue streams).
@@ -145,12 +153,12 @@ class VenueEvent:
 
 @dataclasses.dataclass(frozen=True, slots=True)
 class VenuePosition:
-    """Position as reported by the venue.
+    """A position as reported by the venue.
 
     Attributes:
-        instrument_id: Instrument.
-        signed_qty: Signed base quantity.
-        entry_price: Average entry.
+        instrument_id: Canonical instrument id.
+        signed_qty: Signed base quantity (> 0 long, < 0 short).
+        entry_price: Average entry price, if the venue reports it.
         unmanaged_note: Why Joseph does not manage this holding (e.g. an
             emerging-board stock in a SinoPac account); ``None`` for
             positions on a venue Joseph routes. Reconciliation skips
@@ -173,7 +181,7 @@ class VenueAccountSnapshot:
     """Account balances as reported by the venue.
 
     Attributes:
-        equity: Total equity.
+        equity: Total equity, in ``currency``.
         available_margin: Free margin (cash accounts: cash available for
             purchases).
         currency: Currency.
@@ -191,11 +199,18 @@ class VenueAccountSnapshot:
 
 
 class TradingAdapter(Protocol):
-    """Venue execution adapter (one per venue or simulator)."""
+    """A venue execution adapter (one per venue or simulator).
+
+    A venue's rejection of a submit is a result with ``accepted=False``,
+    never an exception. Read methods raise ``ExecutionError`` when the
+    venue cannot be read, and callers then treat the data as unknown; the
+    order methods' ``Raises`` sections say how the OMS reads each
+    exception.
+    """
 
     @property
     def name(self) -> str:
-        """Returns the adapter name, e.g. ``paper`` or ``binance``."""
+        """The adapter name, e.g. ``paper`` or ``binance``."""
         ...
 
     async def capabilities(
@@ -207,12 +222,16 @@ class TradingAdapter(Protocol):
             account_id: Account.
 
         Returns:
-            Capabilities.
+            Capabilities; LIVE orders need ``status`` ``AVAILABLE``.
+
+        Raises:
+            ExecutionError: If they cannot be determined; the Risk Gateway
+                then fails LIVE orders closed.
         """
         ...
 
     async def health(self) -> enums.HealthState:
-        """Returns adapter/private-stream health."""
+        """Returns the health of the adapter and its private stream."""
         ...
 
     async def account_snapshot(self, account_id: str) -> VenueAccountSnapshot:
@@ -257,10 +276,11 @@ class TradingAdapter(Protocol):
 
         Args:
             account_id: Account.
-            since_ms: Lower bound.
+            since_ms: Earliest fill time to include; 0 for every fill the
+                venue still reports.
 
         Returns:
-            Fills.
+            Fills, possibly including ones already recorded.
         """
         ...
 
@@ -269,15 +289,20 @@ class TradingAdapter(Protocol):
     ) -> VenueSubmitResult:
         """Submits an order.
 
+        Any exception other than ``AdapterUnavailableError`` leaves the
+        outcome unknown to the OMS, which then reconciles the order.
+
         Args:
             request: Order.
 
         Returns:
-            Venue response.
+            Venue response; a venue rejection is a result with
+            ``accepted=False``.
 
         Raises:
-            AdapterTimeoutError: Outcome unknown.
-            AdapterUnavailableError: Refused before sending.
+            AdapterTimeoutError: Outcome unknown; the OMS reconciles.
+            AdapterUnavailableError: Refused before sending; the OMS marks
+                the order FAILED.
         """
         ...
 
@@ -291,7 +316,13 @@ class TradingAdapter(Protocol):
             client_order_id: Order.
 
         Returns:
-            Venue state after the request (may be FILLED on a race).
+            Venue state after the request; an order that finished first
+            reports its final state (may be FILLED on a race).
+
+        Raises:
+            AdapterTimeoutError: Outcome unknown; the OMS reconciles.
+            ExecutionError: The cancel definitely failed; the order keeps
+                working.
         """
         ...
 
@@ -308,9 +339,9 @@ class TradingAdapter(Protocol):
         Args:
             account_id: Account.
             client_order_id: Order.
-            limit_price: New limit price.
-            trigger_price: New trigger price.
-            quantity_base: New quantity.
+            limit_price: New limit price, or ``None`` to keep it.
+            trigger_price: New trigger price, or ``None`` to keep it.
+            quantity_base: New quantity, or ``None`` to keep it.
 
         Returns:
             Venue state after amendment.
@@ -327,7 +358,12 @@ class TradingAdapter(Protocol):
             client_order_id: Order.
 
         Returns:
-            Venue state, or ``None`` if the venue has no such order.
+            Venue state, or ``None`` only when the venue confirms it has no
+            such order: the OMS may then resubmit with the same client id.
+
+        Raises:
+            ExecutionError: If the venue cannot be queried; the OMS retries
+                later.
         """
         ...
 
@@ -335,6 +371,11 @@ class TradingAdapter(Protocol):
         self, account_id: str
     ) -> AsyncIterator[VenueEvent]:
         """Streams private account events.
+
+        Events may repeat (the OMS applies them idempotently); after a
+        reconnect an implementation replays a REST snapshot as events with
+        ``resync=True``. When the iterator ends or raises, the stream
+        supervisor restarts it after a delay.
 
         Args:
             account_id: Account.
@@ -346,7 +387,7 @@ class TradingAdapter(Protocol):
 
 
 class AdapterResolver(Protocol):
-    """Resolves the adapter for an account and order mode."""
+    """A resolver of the adapter for an account and order mode."""
 
     def resolve(
         self, account: accounts.Account, mode: enums.OrderMode
@@ -358,6 +399,7 @@ class AdapterResolver(Protocol):
             mode: Order mode.
 
         Returns:
-            Adapter (PAPER -> paper, SHADOW -> shadow, LIVE -> venue).
+            Adapter (PAPER -> paper, SHADOW -> shadow, LIVE -> venue); a
+            fail-closed adapter for a LIVE venue without one.
         """
         ...

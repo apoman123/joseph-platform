@@ -1,7 +1,10 @@
 # Copyright 2026 apoman123
 # SPDX-License-Identifier: MIT
 
-"""Accounts, negotiated trading capabilities and LIVE arming."""
+"""Accounts, negotiated trading capabilities and LIVE arming.
+
+All times are UTC epoch milliseconds.
+"""
 
 from __future__ import annotations
 
@@ -12,10 +15,13 @@ from joseph_execution.domain import enums
 from joseph_execution.domain import ids
 
 LIVE_ARM_DEFAULT_MS = 8 * 3_600_000
-"""Default (and default maximum) lifetime of an account LIVE arming."""
+"""Default lifetime (8 hours) of an account LIVE arming, in milliseconds.
+
+Also the default of the configurable maximum lifetime.
+"""
 
 LIVE_ARM_CEILING_MS = 24 * 3_600_000
-"""Hard ceiling of an account LIVE arming; configuration cannot exceed it."""
+"""Hard ceiling (24 hours) of an arming lifetime; config cannot exceed it."""
 
 LIVE_ARM_ACKNOWLEDGEMENT = (
     "Manual LIVE orders on this account use real money until the arming "
@@ -26,14 +32,14 @@ LIVE_ARM_ACKNOWLEDGEMENT = (
 
 @dataclasses.dataclass(frozen=True, slots=True)
 class TradingCapabilities:
-    """What a venue adapter can do for an account (runtime negotiated).
+    """What a venue adapter can do for an account, negotiated at runtime.
 
     Attributes:
         venue: Venue code.
-        status: Trading availability.
+        status: Trading availability; LIVE orders need ``AVAILABLE``.
         order_types: Supported order types.
         time_in_force: Supported time-in-force values.
-        native_reduce_only: Venue-native reduce-only.
+        native_reduce_only: Venue-native reduce-only orders.
         native_stop_loss: Venue-held stop-loss triggers.
         native_take_profit: Venue-held take-profit orders.
         native_oco: Venue-native one-cancels-other.
@@ -116,21 +122,23 @@ class TradingCapabilities:
 
 @dataclasses.dataclass(frozen=True, slots=True)
 class Account:
-    """An account the tenant trades (paper or venue).
+    """An account the tenant trades (paper, venue or broker).
 
     Attributes:
         account_id: Identifier.
         tenant_id: Owning tenant.
-        venue: Venue code (``mock`` for paper).
+        venue: Venue or broker code (``mock`` for paper accounts).
         label: Display label.
         status: Connection status.
-        modes: Order modes permitted for this account.
+        modes: Order modes permitted for this account; LIVE orders need
+            ``LIVE`` here (paper accounts are created without it).
         currency: Settlement currency.
         created_at_ms: Creation time.
-        starting_equity: Paper starting equity (``None`` for venue).
-        is_paper: True for the simulated paper account.
-        credential_id: Encrypted credential reference, if any.
-        withdrawal_disabled: User attested the key cannot withdraw.
+        starting_equity: Paper starting equity (``None`` for venue
+            accounts).
+        is_paper: True for the simulated paper accounts.
+        credential_id: Reference to the encrypted credential, if any.
+        withdrawal_disabled: The user attested the key cannot withdraw.
     """
 
     account_id: str
@@ -167,10 +175,11 @@ def paper_currency(account_id: str) -> str:
     """Returns the currency encoded in a paper account id.
 
     Args:
-        account_id: Paper account id.
+        account_id: Paper account id from ``paper_account_id``.
 
     Returns:
-        ``TWD`` for ``acct-twd-paper-*``, else ``USD``.
+        The upper-cased ``<currency>`` of ``acct-<currency>-paper-*`` (e.g.
+        ``TWD``), else ``USD``.
     """
     head = account_id.partition("-paper-")[0]
     if head.startswith("acct-"):
@@ -185,12 +194,13 @@ def live_arming_scope_hash(
 
     The arming is bound to one account of one tenant, its venue and stored
     credential, the granting actor and the expiry, so a record cannot be
-    replayed onto another account or stretched in storage.
+    replayed onto another account or stretched in storage, and replacing
+    the account's credential voids it.
 
     Args:
         account: Armed account.
         granted_by: Granting actor.
-        expires_at_ms: Expiry.
+        expires_at_ms: Expiry (exclusive).
 
     Returns:
         ``sha256:<hex>`` scope hash.
@@ -212,16 +222,18 @@ class LiveArming:
 
     Granted with a step-up code (the same verification as AUTO_LIVE
     deployment consent); the Risk Gateway refuses manual LIVE orders that
-    would add exposure unless an arming is valid.
+    would add exposure unless the arming's ``state`` is ``ARMED``.
+    Risk-reducing orders pass without it.
 
     Attributes:
         tenant_id: Owning tenant.
         account_id: Armed account.
         granted_at_ms: When it was granted.
-        expires_at_ms: When it lapses.
+        expires_at_ms: When it lapses; it is expired from this instant on.
         granted_by: Granting actor.
         acknowledgement: Risk acknowledgement the actor accepted.
-        scope_hash: Hash binding the record to its account and expiry.
+        scope_hash: ``live_arming_scope_hash`` binding the record to its
+            account, credential, granting actor and expiry.
         revoked_at_ms: When it was revoked, if it was.
         revoked_by: Revoking actor (or ``system``), if revoked.
     """
@@ -246,14 +258,18 @@ class LiveArming:
     ) -> LiveArming:
         """Creates an arming for an account.
 
+        The caller has already verified the step-up code and the
+        acknowledgement.
+
         Args:
             account: Account to arm.
             granted_by: Granting actor.
             now_ms: Grant time.
-            duration_ms: Lifetime (validated by the caller).
+            duration_ms: Lifetime in milliseconds; the caller enforces the
+                configured maximum.
 
         Returns:
-            New arming.
+            New, unrevoked arming expiring at ``now_ms + duration_ms``.
         """
         expires = now_ms + duration_ms
         return cls(
@@ -269,12 +285,17 @@ class LiveArming:
     def state(self, account: Account, now_ms: int) -> str:
         """Describes the arming at a time.
 
+        Revocation is checked first, then expiry, then scope: the arming
+        must belong to ``account``'s tenant and id, and its scope hash must
+        match the account as it is now (same venue and credential).
+
         Args:
             account: The account the arming is checked against.
             now_ms: Current time.
 
         Returns:
-            ``ARMED``, ``REVOKED``, ``EXPIRED`` or ``OUT_OF_SCOPE``.
+            ``REVOKED``, ``EXPIRED`` (``now_ms >= expires_at_ms``),
+            ``OUT_OF_SCOPE`` or, when every check passes, ``ARMED``.
         """
         if self.revoked_at_ms is not None:
             return "REVOKED"
@@ -299,7 +320,7 @@ class LiveArming:
             now_ms: Current time.
 
         Returns:
-            True only for a matching, unexpired, unrevoked arming.
+            True only when ``state`` is ``ARMED``.
         """
         return self.state(account, now_ms) == "ARMED"
 
@@ -311,7 +332,8 @@ class LiveArming:
             now_ms: Revocation time.
 
         Returns:
-            Revoked arming.
+            A copy revoked at ``now_ms`` by ``actor``; ``self`` unchanged
+            when it was already revoked (the first revocation is kept).
         """
         if self.revoked_at_ms is not None:
             return self
