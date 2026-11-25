@@ -616,7 +616,7 @@ function NodeFields(props: NodeFieldsProps): ReactNode {
         : renamed;
     });
 
-  let fields: ReactNode = null;
+  let fields: ReactNode;
   switch (node.op) {
     case 'STATE':
       fields = (

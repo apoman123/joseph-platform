@@ -227,6 +227,8 @@ describe('engine-backed drawings in the shell', () => {
     expect(store.find(id)?.props).toMatchObject({band_2: '0'});
     setDrawingFlags(store, id, {locked: true}, Date.now());
     runtime.drawing.revision.update(n => n + 1);
-    await waitFor(() => expect(screen.getByLabelText('Band 2')).toBeDisabled());
+    await waitFor(
+      () => void expect(screen.getByLabelText('Band 2')).toBeDisabled()
+    );
   });
 });

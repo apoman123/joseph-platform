@@ -84,10 +84,10 @@ async function renderOn(
     ctx
   );
   const picker = () => screen.getByRole('combobox', {name: 'Account'});
-  await waitFor(() => expect(picker()).toHaveValue(routed));
+  await waitFor(() => void expect(picker()).toHaveValue(routed));
   if (options.select) {
     await userEvent.setup().selectOptions(picker(), options.select);
-    await waitFor(() => expect(picker()).toHaveValue(options.select));
+    await waitFor(() => void expect(picker()).toHaveValue(options.select));
   }
   return rendered;
 }

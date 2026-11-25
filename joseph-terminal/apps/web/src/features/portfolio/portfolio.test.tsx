@@ -160,7 +160,7 @@ describe('portfolio', () => {
     const confirm = await screen.findByRole('button', {
       name: 'Close 100% of long 0.01 BTCUSD with a reduce-only market sell',
     });
-    await waitFor(() => expect(confirm).toBeEnabled());
+    await waitFor(() => void expect(confirm).toBeEnabled());
     await user.click(confirm);
     await waitFor(
       async () =>
@@ -189,14 +189,14 @@ describe('portfolio', () => {
     const step1 = await screen.findByRole('button', {
       name: 'Step 1: close long 0.01',
     });
-    await waitFor(() => expect(step1).toBeEnabled());
+    await waitFor(() => void expect(step1).toBeEnabled());
     await user.click(step1);
     const step2 = await screen.findByRole(
       'button',
       {name: 'Step 2: open short 0.01'},
       {timeout: 5000}
     );
-    await waitFor(() => expect(step2).toBeEnabled());
+    await waitFor(() => void expect(step2).toBeEnabled());
     await user.click(step2);
     await waitFor(async () => {
       const {positions} = await ctx.broker.listPositions();

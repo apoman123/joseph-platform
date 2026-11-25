@@ -44,15 +44,23 @@ const AUTH = {Authorization: `Bearer ${TOKEN}`};
  */
 async function loadOnDemoVenue(page: Page): Promise<void> {
   await loadTerminal(page);
-  await page.getByTestId('instrument-selector').click();
-  await page.getByLabel('Search instruments').fill('BTC');
-  await page
-    .getByRole('option', {name: /BTCUSD/})
-    .first()
-    .click();
-  await expect(
-    page.getByTestId('chart-pane-chart-1').locator('.pane__symbol')
-  ).toHaveText('BTCUSD');
+  const symbol = page
+    .getByTestId('chart-pane-chart-1')
+    .locator('.pane__symbol');
+  // Search results can re-render while they load, so a click may land on a
+  // list that is being replaced: retry the pick until the chart switches.
+  await expect(async () => {
+    if ((await symbol.textContent()) === 'BTCUSD') return;
+    if (!(await page.getByLabel('Search instruments').isVisible())) {
+      await page.getByTestId('instrument-selector').click();
+    }
+    await page.getByLabel('Search instruments').fill('BTC');
+    await page
+      .getByRole('option', {name: /BTCUSD/})
+      .first()
+      .click({timeout: 5_000});
+    await expect(symbol).toHaveText('BTCUSD', {timeout: 5_000});
+  }).toPass({timeout: 45_000});
   await expect(page.getByText('Loading candles…')).toHaveCount(0);
 }
 

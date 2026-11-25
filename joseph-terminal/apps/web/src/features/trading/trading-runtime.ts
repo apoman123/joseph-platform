@@ -264,7 +264,7 @@ export function createTradingRuntime(
       const seq = (metaSeq += 1);
       if (isRateInstrumentId(instrumentId)) {
         // Published rates have no ticket: only the name is needed.
-        let entry: InstrumentPrecision | null = null;
+        let entry: InstrumentPrecision | null;
         try {
           entry = await fetchPrecision(instrumentId);
         } catch {
@@ -337,7 +337,7 @@ export function createTradingRuntime(
         menu.set(null);
         return;
       }
-      let precision: InstrumentPrecision | null = null;
+      let precision: InstrumentPrecision | null;
       try {
         precision = await fetchPrecision(instrumentId);
       } catch {

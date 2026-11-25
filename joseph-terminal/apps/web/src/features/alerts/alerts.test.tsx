@@ -87,8 +87,9 @@ describe('alerts', () => {
         bar_close_ms: base.bar_close_ms + 300_000,
       })
     );
-    await waitFor(() =>
-      expect(screen.getByTestId('signal-streamed-1')).toBeInTheDocument()
+    await waitFor(
+      () =>
+        void expect(screen.getByTestId('signal-streamed-1')).toBeInTheDocument()
     );
   });
 

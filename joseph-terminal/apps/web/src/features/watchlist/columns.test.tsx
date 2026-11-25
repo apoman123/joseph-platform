@@ -119,8 +119,11 @@ describe('watchlist columns and sorting', () => {
       screen.getAllByRole('button', {name: /Move .* up/})[0]
     ).toBeDisabled();
     fireEvent.click(screen.getByTestId('watch-source-qualified'));
-    await waitFor(() =>
-      expect(screen.getByText(/currently marks Qualified/)).toBeInTheDocument()
+    await waitFor(
+      () =>
+        void expect(
+          screen.getByText(/currently marks Qualified/)
+        ).toBeInTheDocument()
     );
     const stored = rendered.ctx.settings.read<{
       columns: string[];

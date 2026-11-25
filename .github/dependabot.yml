@@ -9,6 +9,16 @@ updates:
         dependency-type: development
       react-next:
         patterns: ['react', 'react-dom', 'next', '@types/react*']
+    ignore:
+      # typescript-eslint does not support TypeScript 7 yet.
+      - dependency-name: typescript
+        versions: ['>=7']
+      # @vitejs/plugin-react 6 needs Vite 8; the repo is on Vite 7.
+      - dependency-name: '@vitejs/plugin-react'
+        versions: ['>=6']
+      # Node typings follow the Node 22 runtime used in CI and images.
+      - dependency-name: '@types/node'
+        update-types: ['version-update:semver-major']
   - package-ecosystem: uv
     directory: /joseph-market-engine
     schedule: {interval: weekly}

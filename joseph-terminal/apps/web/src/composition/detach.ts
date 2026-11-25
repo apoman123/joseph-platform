@@ -201,7 +201,7 @@ export function startMainDetach(
    */
   const openWindow = (pane: DetachedPane): boolean => {
     const url = popoutUrl(pane.ref, runtime.workspace.get().workspace_id);
-    let handle: Window | null = null;
+    let handle: Window | null;
     try {
       handle = env.open(
         url,
@@ -450,7 +450,7 @@ export function startMainDetach(
   const timer = setInterval(() => {
     const now = env.now();
     for (const [key, handle] of [...handles]) {
-      let closed = false;
+      let closed: boolean;
       try {
         closed = handle.closed;
       } catch {

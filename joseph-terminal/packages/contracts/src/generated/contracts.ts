@@ -1222,7 +1222,7 @@ export interface IndicatorSnapshot {
    * Published values, keyed as declared in the plugin's `output_values`.
    */
   values: {
-    [k: string]: IndicatorValue;
+    [k: string]: IndicatorValue | undefined;
   };
   warmup_complete: boolean;
   data_quality: DataQuality;
@@ -1461,7 +1461,7 @@ export interface IndicatorPluginList {
 export interface IndicatorSeriesPoint {
   bar_start_ms: TimestampMs;
   values: {
-    [k: string]: IndicatorValue;
+    [k: string]: IndicatorValue | undefined;
   };
 }
 /**

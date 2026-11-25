@@ -31,8 +31,8 @@ describe('watchlist', () => {
   it('shows exact-venue rows with prices and selects on click', async () => {
     rendered = await renderFeature(WATCHLIST_FEATURE, 'side-panel');
     const row = await screen.findByTestId('watch-row-mock:perp:ETHUSD');
-    await waitFor(() =>
-      expect(within(row).getByText('3,400')).toBeInTheDocument()
+    await waitFor(
+      () => void expect(within(row).getByText('3,400')).toBeInTheDocument()
     );
     expect(within(row).getByText('+1.25%')).toBeInTheDocument();
     await userEvent.setup().click(row);
@@ -102,7 +102,7 @@ describe('screener', () => {
     expect(within(row).getByText('Missing data')).toBeInTheDocument();
     const missing = row.querySelectorAll('[data-gate-state="missing"]');
     expect(missing).toHaveLength(2);
-    missing.forEach(cell => expect(cell).toHaveTextContent('Missing'));
+    missing.forEach(cell => void expect(cell).toHaveTextContent('Missing'));
     expect(row.querySelector('[data-gate-state="fail"]')).toHaveTextContent(
       '0.120%'
     );
@@ -114,10 +114,11 @@ describe('screener', () => {
     const user = userEvent.setup();
     await screen.findByTestId('screener-row-mock:perp:BTCUSD');
     await user.click(screen.getByRole('button', {name: 'Qualified'}));
-    await waitFor(() =>
-      expect(
-        screen.queryByTestId('screener-row-mock:perp:SOLUSD')
-      ).not.toBeInTheDocument()
+    await waitFor(
+      () =>
+        void expect(
+          screen.queryByTestId('screener-row-mock:perp:SOLUSD')
+        ).not.toBeInTheDocument()
     );
     await user.click(screen.getByTestId('screener-row-mock:perp:BTCUSD'));
     expect(rendered.ctx.selection.get().instrumentId).toBe('mock:perp:BTCUSD');

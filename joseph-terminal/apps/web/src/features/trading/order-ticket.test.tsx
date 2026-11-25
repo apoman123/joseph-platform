@@ -38,10 +38,11 @@ async function renderTicket(): Promise<RenderedFeature> {
     'trading.ticket'
   );
   await screen.findByText('Lot size 0.001, minimum 0.001');
-  await waitFor(() =>
-    expect(screen.getByRole('combobox', {name: 'Account'})).toHaveValue(
-      'acct-paper-demo'
-    )
+  await waitFor(
+    () =>
+      void expect(screen.getByRole('combobox', {name: 'Account'})).toHaveValue(
+        'acct-paper-demo'
+      )
   );
   return rendered;
 }

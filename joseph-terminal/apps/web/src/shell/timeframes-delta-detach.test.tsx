@@ -159,8 +159,9 @@ describe('timeframe menu', () => {
     );
     fireEvent.click(screen.getByRole('button', {name: 'More'}));
     const menu = screen.getByRole('dialog', {name: 'All timeframes'});
-    await waitFor(() =>
-      expect(within(menu).getByTestId('timeframe-30s')).toBeDisabled()
+    await waitFor(
+      () =>
+        void expect(within(menu).getByTestId('timeframe-30s')).toBeDisabled()
     );
     expect(within(menu).getByTestId('timeframe-30s')).toHaveAttribute(
       'title',

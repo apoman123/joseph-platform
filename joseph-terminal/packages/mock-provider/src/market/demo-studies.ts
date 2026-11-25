@@ -40,7 +40,6 @@ import {
   type IndicatorSeries,
   type IndicatorSeriesPoint,
   type IndicatorSeriesQuery,
-  type IndicatorValue,
   type Timeframe,
 } from '@joseph/contracts';
 import {anchoredVwapPoints} from './demo-drawing-series';
@@ -88,8 +87,8 @@ const VWAP_PERIODS: Readonly<Record<string, Timeframe>> = {
   month: '1M',
 };
 
-/** Values of one point by key. */
-type PointValues = Record<string, IndicatorValue>;
+/** Values of one point by key, typed like the contract's point values. */
+type PointValues = IndicatorSeriesPoint['values'];
 
 /**
  * Formats a computed number as a decimal string.

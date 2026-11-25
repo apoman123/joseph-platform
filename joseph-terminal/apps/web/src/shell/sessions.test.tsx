@@ -395,10 +395,11 @@ describe('instrument picker', () => {
     );
     fireEvent.click(screen.getByTestId('instrument-selector'));
     const listbox = await screen.findByRole('listbox', {name: 'Instruments'});
-    await waitFor(() =>
-      expect(
-        within(listbox).getByRole('group', {name: 'Taiwan stocks'})
-      ).toBeVisible()
+    await waitFor(
+      () =>
+        void expect(
+          within(listbox).getByRole('group', {name: 'Taiwan stocks'})
+        ).toBeVisible()
     );
     for (const group of ['Crypto', 'US stocks', 'Bonds & rates']) {
       expect(within(listbox).getByRole('group', {name: group})).toBeVisible();
@@ -496,7 +497,9 @@ describe('market panel helpers', () => {
     expect(await screen.findByTestId('market-name')).toHaveTextContent(
       '示範半導體'
     );
-    await waitFor(() => expect(screen.getByText('Board lot')).toBeVisible());
+    await waitFor(
+      () => void expect(screen.getByText('Board lot')).toBeVisible()
+    );
     expect(screen.getByText('±10% of the reference price')).toBeVisible();
     expect(screen.getByText(/09:00–13:30 Asia\/Taipei/)).toBeVisible();
     expect(screen.queryByText('Funding (8h)')).toBeNull();

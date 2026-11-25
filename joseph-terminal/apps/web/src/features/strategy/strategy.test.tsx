@@ -295,10 +295,11 @@ describe('strategy builder', () => {
     const {ctx} = await renderBuilder();
     const user = userEvent.setup();
     await user.click(screen.getByRole('button', {name: 'Save strategy'}));
-    await waitFor(() =>
-      expect(screen.getByTestId('strategy-version')).toHaveTextContent(
-        'Version 1'
-      )
+    await waitFor(
+      () =>
+        void expect(screen.getByTestId('strategy-version')).toHaveTextContent(
+          'Version 1'
+        )
     );
     await user.clear(screen.getByRole('textbox', {name: 'Name'}));
     await user.type(
@@ -309,10 +310,11 @@ describe('strategy builder', () => {
       'Version 1, edited'
     );
     await user.click(screen.getByRole('button', {name: 'Save new version'}));
-    await waitFor(() =>
-      expect(screen.getByTestId('strategy-version')).toHaveTextContent(
-        'Version 2'
-      )
+    await waitFor(
+      () =>
+        void expect(screen.getByTestId('strategy-version')).toHaveTextContent(
+          'Version 2'
+        )
     );
     expect(
       screen.getByRole('option', {name: 'Automatic live (locked)'})
@@ -369,10 +371,11 @@ describe('strategy builder', () => {
     await user.click(screen.getByRole('tab', {name: 'Backtest'}));
     expect(screen.getByText('Save the strategy first')).toBeInTheDocument();
     await user.click(screen.getByRole('button', {name: 'Save strategy'}));
-    await waitFor(() =>
-      expect(screen.getByTestId('strategy-version')).toHaveTextContent(
-        'Version 1'
-      )
+    await waitFor(
+      () =>
+        void expect(screen.getByTestId('strategy-version')).toHaveTextContent(
+          'Version 1'
+        )
     );
     await user.click(
       await screen.findByRole('button', {name: 'Run backtest of version 1'})
