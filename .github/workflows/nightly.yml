@@ -22,7 +22,7 @@ jobs:
         working-directory: joseph-market-engine
     steps:
       - uses: actions/checkout@v7
-      - uses: astral-sh/setup-uv@d4b2f3b6ecc6e67c4457f6d3e41ec42d3d0fcb86 # v5.4.2
+      - uses: astral-sh/setup-uv@1db35dd8eee11c5894872e0b383ae6c406cf738d # v10.4.0
         with:
           enable-cache: true
           cache-dependency-glob: joseph-market-engine/uv.lock
