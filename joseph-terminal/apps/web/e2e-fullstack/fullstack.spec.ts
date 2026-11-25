@@ -226,10 +226,17 @@ test('seconds bars and true delta come from the engine', async ({
   const body = (await (await series).json()) as SeriesBody;
   expect(body.indicator_version).not.toBe('demo');
   expect(body.points.some(p => p.values.method === 'taker_volume')).toBe(true);
-  await hoverChart(page, 0.75, 0.4);
-  await expect(page.getByTestId('data-window')).toContainText(
-    'True (taker volume)'
-  );
+  // A 5 s bar without trades shows no delta, so sweep the crosshair until
+  // it rests on a bar that has one.
+  const dataWindow = page.getByTestId('data-window');
+  let fraction = 0.75;
+  await expect(async () => {
+    await hoverChart(page, fraction, 0.4);
+    fraction = fraction > 0.3 ? fraction - 0.03 : 0.75;
+    await expect(dataWindow).toContainText('True (taker volume)', {
+      timeout: 1_000,
+    });
+  }).toPass({timeout: 30_000});
   await page.screenshot({path: 'e2e/screenshots/28-fullstack-seconds.png'});
 });
 
