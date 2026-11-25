@@ -15,6 +15,7 @@
     "esModuleInterop": true,
     "skipLibCheck": true,
     "noEmit": true,
-    "types": ["vitest/globals"]
+    // Vitest 4 no longer pulls in Node typings; tests and configs use them.
+    "types": ["vitest/globals", "node"]
   }
 }

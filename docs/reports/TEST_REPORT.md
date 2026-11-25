@@ -10,7 +10,7 @@ Results of every test tier on the final code, for contributors and reviewers. En
 | Live venue (opt-in, public APIs) | Market engine | **44 passed**, 1 skipped (no Alpaca key), 1 deselected (SinoPac data, needs keys): five crypto venues including MEXC Protobuf and the Lighter archive, TWSE, TPEx, Nasdaq Trader, Treasury. One Binance assertion failed once at a minute boundary; the test now allows 10 s of venue lag and passed 8/8 on reruns |
 | Unit, integration, contract, architecture, security, chaos, property, in-process system | Execution engine | **976 passed** (behaviour tests plus the per-file style checks), 9 skipped (7 need real credentials: 5 venue testnets, IBKR paper, SinoPac simulation; 2 opt-in network) · 96% line coverage. Venues run against mocks and official signature vectors; IBKR and Shioaji against fake clients |
 | Live venue (opt-in) | Execution engine | **2 passed**: MEXC private-stream Protobuf decoding against the live public stream |
-| Unit, component, contract, architecture (Vitest) | Terminal | **995 passed** (111 files) · 86% line coverage (the browser tiers cover the canvas adapter) |
+| Unit, component, contract, architecture (Vitest) | Terminal | **995 passed** (111 files) · 84% line coverage (Vitest 4 counts statements more strictly than 3) (the browser tiers cover the canvas adapter) |
 | Browser system, DEMO (Playwright + axe) | Terminal | **47 passed** |
 | Full-stack browser: production build + both engines | All three | **12 passed** |
 | Cross-service system (real processes, HTTP + WebSocket) | Both engines | **118 passed** (cross-service tests plus the per-file style checks) |
