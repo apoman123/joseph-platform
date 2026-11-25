@@ -143,14 +143,19 @@ test('the terminal loads sessions, labels exchange time and leaves no gaps', asy
   if (!box) throw new Error('no chart');
   const time = page.getByTestId('data-window').locator('.data-window__time');
   // Sweep the crosshair in 3 px steps and collect the distinct bar times
-  // the data window shows: all must be NYSE session bars.
-  const labels: string[] = [];
-  for (let x = box.width * 0.4; x < box.width * 0.8; x += 3) {
-    await page.mouse.move(box.x + x, box.y + box.height * 0.4);
-    const label = (await time.textContent()) ?? '';
-    if (label && labels.at(-1) !== label) labels.push(label);
-  }
-  expect(labels.length).toBeGreaterThan(5);
+  // the data window shows: all must be NYSE session bars. The 1h load can
+  // start after the loading check above passes, so retry the sweep until
+  // the chart shows enough bars.
+  let labels: string[] = [];
+  await expect(async () => {
+    labels = [];
+    for (let x = box.width * 0.4; x < box.width * 0.8; x += 3) {
+      await page.mouse.move(box.x + x, box.y + box.height * 0.4);
+      const label = (await time.textContent()) ?? '';
+      if (label && labels.at(-1) !== label) labels.push(label);
+    }
+    expect(labels.length).toBeGreaterThan(5);
+  }).toPass({timeout: 30_000});
   for (const label of labels) {
     expect(label).toMatch(/(09|10|11|12|13|14|15):30 ET$/);
   }
