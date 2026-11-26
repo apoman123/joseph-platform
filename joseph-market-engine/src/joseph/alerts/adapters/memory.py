@@ -17,7 +17,7 @@ class InMemorySubscriptionRepository:
 
     def __init__(self) -> None:
         """Initializes an empty store."""
-        self._rows: dict[str, model.Subscription] = {}
+        self._rows: dict[tuple[str, str], model.Subscription] = {}
 
     def list_for_tenant(self, tenant_id: str) -> Sequence[model.Subscription]:
         """Lists a tenant's subscriptions.
@@ -36,7 +36,21 @@ class InMemorySubscriptionRepository:
         Args:
             subscription: Subscription.
         """
-        self._rows[subscription.subscription_id] = subscription
+        self._rows[(subscription.tenant_id, subscription.subscription_id)] = (
+            subscription
+        )
+
+    def delete(self, tenant_id: str, subscription_id: str) -> bool:
+        """Deletes only the specified tenant's subscription.
+
+        Args:
+            tenant_id: Owning tenant identifier.
+            subscription_id: Public subscription identifier.
+
+        Returns:
+            True when a subscription was removed, otherwise False.
+        """
+        return self._rows.pop((tenant_id, subscription_id), None) is not None
 
 
 class InMemoryOutbox:

@@ -15,8 +15,10 @@
     ".next/e2e/types/**/*.ts",
     ".next/types/**/*.ts",
     "e2e/**/*.ts",
+    "e2e-fullstack/**/*.ts",
     "next-env.d.ts",
     "playwright.config.ts",
+    "playwright.fullstack.config.ts",
     "src/**/*.ts",
     "src/**/*.tsx",
     ".next/fullstack/types/**/*.ts"

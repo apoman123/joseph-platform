@@ -23,4 +23,6 @@ Session markets (2026-11-23) added no-gap session axes, the status badge, the as
 
 Mostly by E specs (`terminal`, `trading-*`) and U `stream.test.ts`: the use-case rule builder, notifications with one-click locate, chart orders, gated auto-live and kill switch, standalone DEMO; the layout's toolbar (now 18 grouped tools), selector, timeframe control, chart type, layout menu, data-quality badge, candles, AOI boxes, event markers, trading lines, crosshair, tabs, 1/2/4/8 sync, layout save; all interactions; core chart types, scales, favorites, health, persistence, workspaces, editing and hotkeys, backend AOIs; drawing milestones P0–P2 (lines, Fibonacci, ranges, long/short, channels); screener filters, alert locate, history, channels, builder and deployments; chart-layer boundaries (chart core holds no rules or credentials, indicator-viz renders backend records only, chart trading drafts intents only, venue switch clears overlays).
 
-No requirement is open. Data-depth limits are in the [user manual](../USER_MANUAL.md#delta) and the [README](../../README.md#known-limitations).
+No requirement in that original design plan was open at the audit date.
+This is not a claim of TradingView feature parity. See the broader
+[2026-11-26 comparison and roadmap](TRADINGVIEW_GAPS_2026_11_26.md). Data-depth limits are in the [user manual](../USER_MANUAL.md#delta) and the [README](../../README.md#known-limitations).

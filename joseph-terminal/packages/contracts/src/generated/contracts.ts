@@ -1996,7 +1996,7 @@ export interface QuietHours {
  */
 export interface AlertSubscription {
   subscription_id: string;
-  channel: 'TELEGRAM' | 'LINE' | 'EMAIL' | 'WEBHOOK';
+  channel: 'TELEGRAM' | 'LINE' | 'EMAIL' | 'WEBHOOK' | 'WHATSAPP' | 'WEB_PUSH';
   /**
    * Telegram chat id, LINE user id, e-mail address or https webhook URL.
    */
@@ -2012,6 +2012,25 @@ export interface AlertSubscription {
   strategy_ids: string[];
   enabled: boolean;
   quiet_hours?: QuietHours | null;
+  /**
+   * Private browser PushSubscription input. Never returned. Required for initial WEB_PUSH registration.
+   */
+  web_push?: {
+    /**
+     * HTTPS endpoint on a supported browser push service.
+     */
+    endpoint: string;
+    keys: {
+      /**
+       * Base64url uncompressed P-256 public encryption key.
+       */
+      p256dh: string;
+      /**
+       * Base64url 16-byte authentication secret; write only.
+       */
+      auth: string;
+    };
+  };
 }
 /**
  * This interface was referenced by `JosephContracts`'s JSON-Schema
@@ -2023,8 +2042,47 @@ export interface AlertSubscriptionList {
    * Channels the server has credentials for; others dead-letter with a clear reason.
    */
   configured_channels: (
-    'UI' | 'TELEGRAM' | 'LINE' | 'EMAIL' | 'WEBHOOK' | 'EXECUTION'
+    | 'UI'
+    | 'TELEGRAM'
+    | 'LINE'
+    | 'EMAIL'
+    | 'WEBHOOK'
+    | 'EXECUTION'
+    | 'WHATSAPP'
+    | 'WEB_PUSH'
   )[];
+  /**
+   * Public VAPID application server key, or null when push is not configured.
+   */
+  web_push_public_key?: string | null;
+}
+/**
+ * Tenant delivery progress. Delivered means provider acceptance, not receipt or read confirmation.
+ *
+ * This interface was referenced by `JosephContracts`'s JSON-Schema
+ * via the `definition` "AlertDelivery".
+ */
+export interface AlertDelivery {
+  /**
+   * Opaque durable outbox identifier.
+   */
+  delivery_id: string;
+  /**
+   * Notification channel.
+   */
+  channel: string;
+  /**
+   * Pending retry, provider accepted, or permanently failed.
+   */
+  status: 'PENDING' | 'DELIVERED' | 'DEAD';
+  /**
+   * Completed delivery attempts.
+   */
+  attempts: number;
+  /**
+   * Redacted last failure, if any.
+   */
+  last_error: string | null;
 }
 /**
  * TRUE when every child is TRUE; FALSE when any child is FALSE; otherwise UNKNOWN.
@@ -2682,7 +2740,9 @@ export interface NotificationPolicy {
   cooldown_bars: number;
   once_per_aoi: boolean;
   emit?: SignalKind[];
-  channels?: ('UI' | 'TELEGRAM' | 'LINE' | 'EMAIL' | 'WEBHOOK')[];
+  channels?: (
+    'UI' | 'TELEGRAM' | 'LINE' | 'EMAIL' | 'WEBHOOK' | 'WHATSAPP' | 'WEB_PUSH'
+  )[];
 }
 /**
  * This interface was referenced by `JosephContracts`'s JSON-Schema

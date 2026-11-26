@@ -57,6 +57,7 @@ const csp = [
   "base-uri 'self'",
   "form-action 'self'",
   "object-src 'none'",
+  "worker-src 'self'",
 ].join('; ');
 
 /** Monorepo root, used for output file tracing. */
@@ -84,6 +85,13 @@ const nextConfig = {
   distDir: process.env.NEXT_DIST_DIR || '.next',
   async headers() {
     return [
+      {
+        source: '/alerts-sw.js',
+        headers: [
+          {key: 'Cache-Control', value: 'no-cache'},
+          {key: 'Service-Worker-Allowed', value: '/'},
+        ],
+      },
       {
         source: '/:path*',
         headers: [

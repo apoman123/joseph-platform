@@ -210,7 +210,7 @@ jobs:
         if: failure()
         with:
           name: e2e-fullstack-evidence
-          path: joseph-terminal/apps/web/test-results
+          path: joseph-terminal/apps/web/test-results-fullstack
           if-no-files-found: ignore
 
   images:
@@ -296,6 +296,30 @@ jobs:
             NEXT_PUBLIC_EXECUTION_API_URL=${{ vars.PUBLIC_EXECUTION_API_URL }}
             NEXT_PUBLIC_EXECUTION_WS_URL=${{ vars.PUBLIC_EXECUTION_WS_URL }}
       # A first push creates the package; confirm it did not start public.
+      - name: Terminal image serves push worker and install assets
+        if: matrix.image == 'joseph-terminal'
+        env:
+          TERMINAL_IMAGE: ghcr.io/${{ steps.owner.outputs.name }}/${{ matrix.image }}@${{ steps.build.outputs.digest }}
+        run: |
+          docker pull "$TERMINAL_IMAGE"
+          docker run --detach --name terminal-smoke "$TERMINAL_IMAGE"
+          trap 'docker rm --force terminal-smoke >/dev/null' EXIT
+          docker exec terminal-smoke node --input-type=module -e '
+            let ready = false;
+            for (let attempt = 0; attempt < 30; attempt++) {
+              try { ready = (await fetch("http://localhost:3000/")).ok; } catch {}
+              if (ready) break;
+              await new Promise(resolve => setTimeout(resolve, 1000));
+            }
+            if (!ready) throw new Error("Terminal did not start");
+            for (const path of ["/alerts-sw.js", "/manifest.webmanifest", "/icon-192.png", "/icon-512.png"]) {
+              const response = await fetch(`http://localhost:3000${path}`);
+              if (!response.ok) throw new Error(`${path}: ${response.status}`);
+              if (path.endsWith(".js") && !(await response.text()).includes("showNotification")) throw new Error("Missing push worker");
+              if (path.endsWith(".webmanifest") && (await response.json()).display !== "standalone") throw new Error("Invalid install manifest");
+              console.log(`Verified ${path}`);
+            }
+          '
       - name: Engine image is private
         if: matrix.image != 'joseph-terminal'
         uses: ./.github/actions/private-image

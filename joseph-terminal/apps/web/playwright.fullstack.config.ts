@@ -11,6 +11,29 @@
  */
 
 import {defineConfig, devices} from '@playwright/test';
+import {generateKeyPairSync} from 'node:crypto';
+
+/**
+ * Generates ephemeral test-only VAPID keys; no production secrets are used.
+ * @return Environment values accepted by the market engine's push sender.
+ */
+function testPushKeys(): Record<string, string> {
+  const {privateKey} = generateKeyPairSync('ec', {namedCurve: 'prime256v1'});
+  const jwk = privateKey.export({format: 'jwk'});
+  const publicKey = Buffer.concat([
+    Buffer.from([4]),
+    Buffer.from(jwk.x ?? '', 'base64url'),
+    Buffer.from(jwk.y ?? '', 'base64url'),
+  ]).toString('base64url');
+  return {
+    JOSEPH_WEB_PUSH_PRIVATE_KEY: jwk.d ?? '',
+    JOSEPH_WEB_PUSH_PUBLIC_KEY: publicKey,
+    JOSEPH_WEB_PUSH_CONTACT: 'mailto:tests@example.com',
+  };
+}
+
+/** Per-run application keys enable registration tests without real recipients. */
+const PUSH_KEYS = testPushKeys();
 
 /** Port of the web server. */
 const WEB = Number(process.env.E2E_WEB_PORT ?? 3158);
@@ -44,6 +67,7 @@ const ENGINE_ENV = {
 
 export default defineConfig({
   testDir: './e2e-fullstack',
+  outputDir: './test-results-fullstack',
   timeout: 90_000,
   expect: {timeout: 15_000},
   workers: 1,
@@ -68,6 +92,7 @@ export default defineConfig({
       reuseExistingServer: false,
       env: {
         ...ENGINE_ENV,
+        ...PUSH_KEYS,
         JOSEPH_DEMO_ONLY: 'true',
         JOSEPH_DATABASE_URL: 'sqlite://',
         JOSEPH_EXECUTION_URL: `http://127.0.0.1:${EXECUTION}`,

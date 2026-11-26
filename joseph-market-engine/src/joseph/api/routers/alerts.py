@@ -73,4 +73,64 @@ def build_router(
         """
         return service.upsert(principal, subscription_id, body)
 
+    @router.delete(
+        "/v1/alerts/subscriptions/{subscription_id}", status_code=204
+    )
+    def delete_subscription(
+        principal: principal_dep, subscription_id: str
+    ) -> fastapi.Response:
+        """Deletes a notification destination owned by the caller.
+
+        Args:
+            principal: Authenticated tenant principal.
+            subscription_id: Public subscription identifier.
+
+        Returns:
+            Empty HTTP 204 response after deletion.
+
+        Raises:
+            errors.NotFoundError: If the owned destination does not exist.
+        """
+        service.delete(principal, subscription_id)
+        return fastapi.Response(status_code=204)
+
+    @router.post(
+        "/v1/alerts/subscriptions/{subscription_id}/test", status_code=202
+    )
+    def test_subscription(
+        principal: principal_dep, subscription_id: str
+    ) -> dict[str, object]:
+        """Queues a notification-only test for an enabled destination.
+
+        Args:
+            principal: Authenticated tenant principal.
+            subscription_id: Public subscription identifier.
+
+        Returns:
+            Pending delivery metadata for status polling.
+
+        Raises:
+            errors.NotFoundError: If no owned destination exists.
+            errors.UnsupportedError: If disabled or not configured.
+        """
+        return service.test(principal, subscription_id)
+
+    @router.get("/v1/alerts/deliveries/{delivery_id}")
+    def get_delivery(
+        principal: principal_dep, delivery_id: str
+    ) -> dict[str, object]:
+        """Returns the caller's progress without private device data.
+
+        Args:
+            principal: Authenticated tenant principal.
+            delivery_id: Opaque delivery identifier.
+
+        Returns:
+            Public delivery status and redacted error metadata.
+
+        Raises:
+            errors.NotFoundError: If absent or inaccessible to the caller.
+        """
+        return service.delivery(principal, delivery_id)
+
     return router

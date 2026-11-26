@@ -35,6 +35,18 @@ class SubscriptionRepository(Protocol):
         """
         ...
 
+    def delete(self, tenant_id: str, subscription_id: str) -> bool:
+        """Deletes a subscription owned by the supplied tenant.
+
+        Args:
+            tenant_id: Authenticated tenant identifier.
+            subscription_id: Public subscription identifier.
+
+        Returns:
+            True when an owned subscription was removed, otherwise False.
+        """
+        ...
+
 
 class OutboxRepository(Protocol):
     """A durable at-least-once delivery outbox."""

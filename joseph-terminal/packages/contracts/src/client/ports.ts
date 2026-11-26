@@ -18,6 +18,7 @@ import type {
   AccountList,
   AccountLiveConsentRequest,
   AlertSubscription,
+  AlertDelivery,
   AlertSubscriptionList,
   AccountSummary,
   ActivateRequest,
@@ -307,6 +308,24 @@ export interface StrategyClient {
   putAlertSubscription(
     subscription: AlertSubscription
   ): Promise<AlertSubscription>;
+  /**
+   * Removes an owned notification destination.
+   * @param subscriptionId Public subscription id.
+   * @return Completion after deletion.
+   */
+  deleteAlertSubscription(subscriptionId: string): Promise<void>;
+  /**
+   * Queues a notification-only test, without producing a trading signal.
+   * @param subscriptionId Enabled destination id.
+   * @return Durable delivery status for polling.
+   */
+  testAlertSubscription(subscriptionId: string): Promise<AlertDelivery>;
+  /**
+   * Reads tenant-scoped provider delivery progress.
+   * @param deliveryId Opaque durable delivery id.
+   * @return Redacted delivery metadata; acceptance does not imply receipt.
+   */
+  getAlertDelivery(deliveryId: string): Promise<AlertDelivery>;
 }
 
 /** Authenticated execution trust boundary: accounts, orders, risk. */

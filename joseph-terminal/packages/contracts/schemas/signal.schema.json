@@ -380,7 +380,9 @@
             "TELEGRAM",
             "LINE",
             "EMAIL",
-            "WEBHOOK"
+            "WEBHOOK",
+            "WHATSAPP",
+            "WEB_PUSH"
           ]
         },
         "target": {
@@ -418,6 +420,41 @@
               "type": "null"
             }
           ]
+        },
+        "web_push": {
+          "type": "object",
+          "writeOnly": true,
+          "description": "Private browser PushSubscription input. Never returned. Required for initial WEB_PUSH registration.",
+          "additionalProperties": false,
+          "required": [
+            "endpoint",
+            "keys"
+          ],
+          "properties": {
+            "endpoint": {
+              "type": "string",
+              "maxLength": 2048,
+              "description": "HTTPS endpoint on a supported browser push service."
+            },
+            "keys": {
+              "type": "object",
+              "additionalProperties": false,
+              "required": [
+                "p256dh",
+                "auth"
+              ],
+              "properties": {
+                "p256dh": {
+                  "type": "string",
+                  "description": "Base64url uncompressed P-256 public encryption key."
+                },
+                "auth": {
+                  "type": "string",
+                  "description": "Base64url 16-byte authentication secret; write only."
+                }
+              }
+            }
+          }
         }
       }
     },
@@ -446,10 +483,63 @@
               "LINE",
               "EMAIL",
               "WEBHOOK",
-              "EXECUTION"
+              "EXECUTION",
+              "WHATSAPP",
+              "WEB_PUSH"
             ]
           },
           "description": "Channels the server has credentials for; others dead-letter with a clear reason."
+        },
+        "web_push_public_key": {
+          "type": [
+            "string",
+            "null"
+          ],
+          "description": "Public VAPID application server key, or null when push is not configured."
+        }
+      }
+    },
+    "AlertDelivery": {
+      "title": "AlertDelivery",
+      "type": "object",
+      "additionalProperties": false,
+      "description": "Tenant delivery progress. Delivered means provider acceptance, not receipt or read confirmation.",
+      "required": [
+        "delivery_id",
+        "channel",
+        "status",
+        "attempts",
+        "last_error"
+      ],
+      "properties": {
+        "delivery_id": {
+          "type": "string",
+          "description": "Opaque durable outbox identifier."
+        },
+        "channel": {
+          "type": "string",
+          "description": "Notification channel."
+        },
+        "status": {
+          "type": "string",
+          "enum": [
+            "PENDING",
+            "DELIVERED",
+            "DEAD"
+          ],
+          "description": "Pending retry, provider accepted, or permanently failed."
+        },
+        "attempts": {
+          "type": "integer",
+          "minimum": 0,
+          "description": "Completed delivery attempts."
+        },
+        "last_error": {
+          "type": [
+            "string",
+            "null"
+          ],
+          "description": "Redacted last failure, if any."
         }
       }
     }

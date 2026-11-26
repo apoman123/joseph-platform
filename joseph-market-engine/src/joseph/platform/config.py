@@ -16,6 +16,7 @@ from __future__ import annotations
 import dataclasses
 import os
 import pathlib
+import re
 from collections.abc import Mapping
 
 import dotenv
@@ -42,19 +43,43 @@ _DATA_FEED_ENV_NAMES = frozenset(
         "JOSEPH_FRED_API_KEY",
     }
 )
+_ALERT_ENV_NAMES = frozenset(
+    {
+        "JOSEPH_TELEGRAM_BOT_TOKEN",
+        "JOSEPH_LINE_CHANNEL_TOKEN",
+        "JOSEPH_WEBHOOK_SECRET",
+        "JOSEPH_SMTP_HOST",
+        "JOSEPH_SMTP_PORT",
+        "JOSEPH_SMTP_FROM",
+        "JOSEPH_SMTP_USERNAME",
+        "JOSEPH_SMTP_PASSWORD",
+        "JOSEPH_WHATSAPP_ACCESS_TOKEN",
+        "JOSEPH_WHATSAPP_PHONE_NUMBER_ID",
+        "JOSEPH_WHATSAPP_TEMPLATE",
+        "JOSEPH_WHATSAPP_LANGUAGE",
+        "JOSEPH_WHATSAPP_API_VERSION",
+        "JOSEPH_WEB_PUSH_PRIVATE_KEY",
+        "JOSEPH_WEB_PUSH_PUBLIC_KEY",
+        "JOSEPH_WEB_PUSH_CONTACT",
+    }
+)
 
 
-def data_feed_environment(source: Mapping[str, str]) -> Mapping[str, str]:
+def data_feed_environment(
+    source: Mapping[str, str], *, include_alerts: bool = False
+) -> Mapping[str, str]:
     """Loads selected data-feed settings from an optional dotenv file.
 
     Args:
         source: Environment variables. JOSEPH_MARKET_ENV_FILE optionally
             names a UTF-8 dotenv file. Explicit environment entries win,
             including empty values. Variable interpolation is disabled.
+        include_alerts: Whether to also load the explicit alert settings
+            whitelist. False preserves the data-feed-only reader.
 
     Returns:
         Merged settings without changing the process environment. Only
-        data-feed settings and their secret-file paths are loaded, so
+        selected settings and their secret-file paths are loaded, so
         execution credentials cannot enter market settings from this file.
 
     Raises:
@@ -68,14 +93,16 @@ def data_feed_environment(source: Mapping[str, str]) -> Mapping[str, str]:
             values = dotenv.dotenv_values(stream=stream, interpolate=False)
     except (OSError, UnicodeError) as exc:
         raise ValueError("JOSEPH_MARKET_ENV_FILE is not readable") from exc
+    names = (
+        _DATA_FEED_ENV_NAMES | _ALERT_ENV_NAMES
+        if include_alerts
+        else _DATA_FEED_ENV_NAMES
+    )
     selected = {
         key: value
         for key, value in values.items()
         if value is not None
-        and (
-            key in _DATA_FEED_ENV_NAMES
-            or key.removesuffix("_FILE") in _DATA_FEED_ENV_NAMES
-        )
+        and (key in names or key.removesuffix("_FILE") in names)
     }
     return {**selected, **source}
 
@@ -362,6 +389,21 @@ class Settings:
             ``JOSEPH_INDICATOR_PLUGINS_REQUIRED``. Default none.
         telegram_bot_token: Telegram bot token (secret),
             ``JOSEPH_TELEGRAM_BOT_TOKEN``. Default none (channel off).
+        whatsapp_access_token: Secret Meta Business token; default none.
+            Environment variable JOSEPH_WHATSAPP_ACCESS_TOKEN.
+        whatsapp_phone_number_id: Numeric business sender id; default none.
+            Environment variable JOSEPH_WHATSAPP_PHONE_NUMBER_ID.
+        whatsapp_template: Approved one-body-parameter template name;
+            JOSEPH_WHATSAPP_TEMPLATE, default none.
+        whatsapp_language: Approved locale; JOSEPH_WHATSAPP_LANGUAGE, en_US.
+        whatsapp_api_version: Graph API version;
+            JOSEPH_WHATSAPP_API_VERSION, default v27.0.
+        web_push_private_key: Secret base64url raw P-256 private key;
+            JOSEPH_WEB_PUSH_PRIVATE_KEY, default none.
+        web_push_public_key: Matching public application server key;
+            JOSEPH_WEB_PUSH_PUBLIC_KEY, default none.
+        web_push_contact: VAPID mailto or HTTPS contact;
+            JOSEPH_WEB_PUSH_CONTACT, default none.
         line_channel_token: LINE Messaging API channel token (secret),
             ``JOSEPH_LINE_CHANNEL_TOKEN``. Default none (channel off).
         webhook_secret: HMAC secret for outbound webhooks (secret),
@@ -456,6 +498,14 @@ class Settings:
     indicator_plugins_disabled: tuple[str, ...] = ()
     indicator_plugins_required: tuple[str, ...] = ()
     telegram_bot_token: str | None = None
+    whatsapp_access_token: str | None = None
+    whatsapp_phone_number_id: str | None = None
+    whatsapp_template: str | None = None
+    whatsapp_language: str = "en_US"
+    whatsapp_api_version: str = "v27.0"
+    web_push_private_key: str | None = None
+    web_push_public_key: str | None = None
+    web_push_contact: str | None = None
     line_channel_token: str | None = None
     webhook_secret: str | None = None
     smtp_host: str | None = None
@@ -545,7 +595,22 @@ class Settings:
                 choice, a number that does not parse, a bad dev token
                 entry or an unreadable secret or market environment file.
         """
-        source = data_feed_environment(os.environ if env is None else env)
+        source = data_feed_environment(
+            os.environ if env is None else env, include_alerts=True
+        )
+        phone_id = source.get("JOSEPH_WHATSAPP_PHONE_NUMBER_ID") or None
+        version = source.get("JOSEPH_WHATSAPP_API_VERSION", "v27.0")
+        template = source.get("JOSEPH_WHATSAPP_TEMPLATE") or None
+        if (phone_id and not phone_id.isascii()) or (
+            phone_id and not phone_id.isdigit()
+        ):
+            raise ValueError(
+                "JOSEPH_WHATSAPP_PHONE_NUMBER_ID must contain ASCII digits"
+            )
+        if not re.fullmatch(r"v[0-9]{1,2}\.[0-9]{1,2}", version):
+            raise ValueError("invalid JOSEPH_WHATSAPP_API_VERSION")
+        if template and not re.fullmatch(r"[a-z][a-z0-9_]{0,511}", template):
+            raise ValueError("invalid JOSEPH_WHATSAPP_TEMPLATE")
         venues = tuple(
             instruments.Venue(name.strip().lower())
             for name in source.get(
@@ -608,14 +673,31 @@ class Settings:
             indicator_plugins_required=_names(
                 source.get("JOSEPH_INDICATOR_PLUGINS_REQUIRED", "")
             ),
-            telegram_bot_token=source.get("JOSEPH_TELEGRAM_BOT_TOKEN") or None,
-            line_channel_token=source.get("JOSEPH_LINE_CHANNEL_TOKEN") or None,
-            webhook_secret=source.get("JOSEPH_WEBHOOK_SECRET") or None,
+            telegram_bot_token=secret_value(
+                source, "JOSEPH_TELEGRAM_BOT_TOKEN"
+            ),
+            whatsapp_access_token=secret_value(
+                source, "JOSEPH_WHATSAPP_ACCESS_TOKEN"
+            ),
+            whatsapp_phone_number_id=phone_id,
+            whatsapp_template=template,
+            whatsapp_language=source.get("JOSEPH_WHATSAPP_LANGUAGE", "en_US"),
+            whatsapp_api_version=version,
+            web_push_private_key=secret_value(
+                source, "JOSEPH_WEB_PUSH_PRIVATE_KEY"
+            ),
+            web_push_public_key=source.get("JOSEPH_WEB_PUSH_PUBLIC_KEY")
+            or None,
+            web_push_contact=source.get("JOSEPH_WEB_PUSH_CONTACT") or None,
+            line_channel_token=secret_value(
+                source, "JOSEPH_LINE_CHANNEL_TOKEN"
+            ),
+            webhook_secret=secret_value(source, "JOSEPH_WEBHOOK_SECRET"),
             smtp_host=source.get("JOSEPH_SMTP_HOST") or None,
             smtp_port=int(source.get("JOSEPH_SMTP_PORT", "587")),
             smtp_from=source.get("JOSEPH_SMTP_FROM") or None,
             smtp_username=source.get("JOSEPH_SMTP_USERNAME") or None,
-            smtp_password=source.get("JOSEPH_SMTP_PASSWORD") or None,
+            smtp_password=secret_value(source, "JOSEPH_SMTP_PASSWORD"),
             alpaca_key_id=secret_value(source, "JOSEPH_ALPACA_KEY_ID"),
             alpaca_secret_key=secret_value(source, "JOSEPH_ALPACA_SECRET_KEY"),
             alpaca_feed=_alpaca_feed(source.get("JOSEPH_ALPACA_FEED", "iex")),

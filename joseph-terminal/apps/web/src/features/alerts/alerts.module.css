@@ -54,6 +54,17 @@
   justify-content: flex-end;
 }
 
+.deviceCard {
+  border-bottom: 1px solid var(--fathom);
+  padding: var(--space-3);
+}
+
+.deviceCard p {
+  color: var(--haze);
+  font-size: var(--text-sm);
+  max-width: 80ch;
+}
+
 .detail td {
   background: var(--abyss);
   height: auto;

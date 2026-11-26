@@ -719,7 +719,9 @@ class RiskModel(_Model):
     max_risk_pct_equity: NonNegativeDecimalStr | None = None
 
 
-ChannelName: TypeAlias = Literal["UI", "TELEGRAM", "LINE", "EMAIL", "WEBHOOK"]
+ChannelName: TypeAlias = Literal[
+    "UI", "TELEGRAM", "WHATSAPP", "WEB_PUSH", "LINE", "EMAIL", "WEBHOOK"
+]
 """Notification channels selectable in a strategy."""
 
 

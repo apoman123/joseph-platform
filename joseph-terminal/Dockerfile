@@ -39,6 +39,7 @@ WORKDIR /app
 COPY --from=build --chown=node:node /repo/apps/web/.next/standalone ./
 # The standalone output leaves out static assets; serve them from here.
 COPY --from=build --chown=node:node /repo/apps/web/.next/static ./apps/web/.next/static
+COPY --from=build --chown=node:node /repo/apps/web/public ./apps/web/public
 COPY --from=build --chown=node:node /repo/LICENSE /repo/NOTICE ./
 # The node image's built-in non-root user.
 USER node

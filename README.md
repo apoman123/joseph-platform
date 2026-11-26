@@ -61,8 +61,9 @@ Docker Compose read data-feed settings from `deploy/.env`, copied from
 `deploy/.env.example`. Exported environment variables take precedence.
 Restart the market engine after changing keys. For another file, run
 `make dev-market MARKET_ENV_FILE=/absolute/path/to/market.env`. Direct uvicorn
-launches can set `JOSEPH_MARKET_ENV_FILE` to that path. Only market-data
-settings are imported from this file by the market engine.
+launches can set `JOSEPH_MARKET_ENV_FILE` to that path. Only allowlisted market-data and alert-delivery
+settings are imported from this file by the market engine. Trading credentials
+remain in the execution engine.
 A missing optional key leaves only that source
 unavailable. Trading API keys and broker credentials belong to the separate
 execution engine ([broker setup](docs/BROKERS.md)).
@@ -160,3 +161,62 @@ These come from venues, data plans or law; code cannot remove them.
 - **Plugin packages:** indicator plugin packages you install are not covered by this licence; check their terms before using or redistributing an image that contains one.
 
 Third-party components and obligations: [licensing report](docs/reports/LICENSING_REPORT.md).
+
+
+### Alert delivery
+
+Open **Notifications** to add Telegram or WhatsApp destinations, select signal
+kinds/severity/quiet hours, or **Enable push on this device**. Save a destination
+and use **Send test** to check delivery. The test queues a notification through
+the durable outbox; it never creates an order or executable trading signal.
+`DELIVERED` means the provider accepted the message, not that the person read it.
+Failures retry up to six attempts; permanent failures are reported in the panel.
+Quiet hours and strategy filters apply to strategy signals; explicit tests bypass
+them. Deleting a destination stops future routing; a message already queued for
+Telegram/WhatsApp may still arrive. Push destinations can be edited, disabled,
+and deleted like other channels. Expired push endpoints are disabled automatically.
+If a device expires, delete its destination and enable push on that device again
+to obtain a fresh browser registration.
+
+Set the following **on the market engine** in `deploy/.env` (or an explicit
+`JOSEPH_MARKET_ENV_FILE`), then restart it. Never put these secrets into
+`NEXT_PUBLIC_*` variables. Secret settings also accept `_FILE` paths. Compose
+passes these settings to the market container; direct launches must export them
+or point to the environment file. Partial configuration leaves that channel off.
+
+| Channel | Server configuration | Recipient setup |
+|---|---|---|
+| Telegram | `JOSEPH_TELEGRAM_BOT_TOKEN` from [BotFather](https://core.telegram.org/bots/features#botfather) | Start a private chat with your bot first. Obtain your numeric chat id from the official [getUpdates API](https://core.telegram.org/bots/api#getupdates), or use a group/channel id where the bot can post. Enter that id in Notifications. |
+| WhatsApp | `JOSEPH_WHATSAPP_ACCESS_TOKEN`, `JOSEPH_WHATSAPP_PHONE_NUMBER_ID`, `JOSEPH_WHATSAPP_TEMPLATE`; optional `JOSEPH_WHATSAPP_LANGUAGE=en_US`, `JOSEPH_WHATSAPP_API_VERSION=v27.0` | Use the official Meta WhatsApp Business Cloud API. Create an approved template with exactly **one BODY text parameter**, for example `Joseph alert: {{1}}`. Configure the matching template language. Add an opted-in recipient as `+` plus country code and number. Meta test senders only message approved test recipients. |
+| Browser/mobile Web Push | `JOSEPH_WEB_PUSH_PRIVATE_KEY`, `JOSEPH_WEB_PUSH_PUBLIC_KEY`, `JOSEPH_WEB_PUSH_CONTACT=mailto:you@example.com` | Serve the terminal over HTTPS (localhost works for development). Press Enable push on this device and allow permission. On iOS/iPadOS 16.4+, first use Add to Home Screen, then open the installed app. Repeat on each device. |
+
+Generate one VAPID key pair, copy the output into your protected environment file,
+and keep that pair stable across restarts and replicas:
+
+```bash
+cd joseph-market-engine
+uv run python scripts/generate_push_keys.py
+```
+
+The private key stays on the server; only the public application key is returned
+to browsers. Browser endpoint and encryption keys are stored privately in the
+market database and omitted from subscription responses. Back up that database
+and restrict access to it. Rotate VAPID keys only with a plan to delete and
+re-enable affected device registrations. This service worker displays alerts; it
+does not cache prices or provide offline trading. Background push depends on OS,
+browser, installation and permission settings; it is not a native mobile app.
+
+WhatsApp template approval, recipient consent, token permissions and any Meta
+messaging charges are required by [Meta's Cloud API](https://developers.facebook.com/documentation/business-messaging/whatsapp/messages/send-messages/).
+An approved template lets this implementation send outside the 24-hour customer
+service window. No unofficial WhatsApp Web session or personal-account automation
+is used. See [WebKit's Web Push requirements](https://webkit.org/blog/13878/) for
+Apple mobile devices.
+
+**Strategy routing:** destination registration does not override a strategy's
+notification policy. Include `TELEGRAM`, `WHATSAPP` and/or `WEB_PUSH` in the
+strategy definition's `notification.channels`, then save/activate that version.
+Existing strategies retain their current channel policy. Push follows the same
+quiet hours, severity, signal-kind and strategy filters as other channels. These
+are strategy-signal alerts; standalone price and drawing alerts remain separate
+roadmap items in the [TradingView comparison](docs/reports/TRADINGVIEW_GAPS_2026_11_26.md).

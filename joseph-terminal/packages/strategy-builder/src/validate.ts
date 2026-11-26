@@ -83,7 +83,15 @@ const SIGNAL_KINDS = [
   'QUALIFICATION_CHANGED',
   'POSITION_EXITED',
 ];
-const CHANNELS = ['UI', 'TELEGRAM', 'LINE', 'EMAIL', 'WEBHOOK'];
+const CHANNELS = [
+  'UI',
+  'TELEGRAM',
+  'WHATSAPP',
+  'WEB_PUSH',
+  'LINE',
+  'EMAIL',
+  'WEBHOOK',
+];
 const NODE_KEYS: Readonly<Record<string, readonly string[]>> = {
   ALL: ['children'],
   ANY: ['children'],

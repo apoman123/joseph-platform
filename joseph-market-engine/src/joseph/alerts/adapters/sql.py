@@ -6,6 +6,7 @@
 from __future__ import annotations
 
 import datetime
+import hashlib
 import json
 from collections.abc import Mapping
 from collections.abc import Sequence
@@ -304,6 +305,9 @@ def _subscription_json(subscription: model.Subscription) -> str:
             "strategy_ids": sorted(subscription.strategy_ids),
             "enabled": subscription.enabled,
             "quiet_hours": _quiet_json(subscription.quiet_hours),
+            "web_push": subscription.web_push.to_payload()
+            if subscription.web_push
+            else None,
         },
         sort_keys=True,
     )
@@ -342,6 +346,12 @@ def _subscription_from_json(text: str) -> model.Subscription:
         Subscription.
     """
     data = json.loads(text)
+    push = data.get("web_push")
+    registration = None
+    if push:
+        registration = model.WebPushRegistration(
+            push["endpoint"], push["keys"]["p256dh"], push["keys"]["auth"]
+        )
     return model.Subscription(
         subscription_id=data["subscription_id"],
         tenant_id=data["tenant_id"],
@@ -352,7 +362,22 @@ def _subscription_from_json(text: str) -> model.Subscription:
         strategy_ids=frozenset(data.get("strategy_ids", [])),
         enabled=bool(data.get("enabled", True)),
         quiet_hours=_quiet_from_json(data.get("quiet_hours")),
+        web_push=registration,
     )
+
+
+def _subscription_key(tenant_id: str, subscription_id: str) -> str:
+    """Builds an unambiguous tenant-scoped storage key within the legacy column.
+
+    Args:
+        tenant_id: Owning tenant identifier.
+        subscription_id: Public subscription identifier.
+
+    Returns:
+        Sixty-four-character key containing a 240-bit SHA-256 digest prefix.
+    """
+    payload = json.dumps([tenant_id, subscription_id]).encode()
+    return "sub-" + hashlib.sha256(payload).hexdigest()[:60]
 
 
 class SqlSubscriptionRepository:
@@ -391,26 +416,54 @@ class SqlSubscriptionRepository:
     def upsert(self, subscription: model.Subscription) -> None:
         """Creates or replaces a subscription by its id.
 
-        Updates first and inserts when no row matched, in one transaction.
+        Uses a tenant-derived storage key for new rows. Legacy unscoped
+        keys are updated only when they already belong to this tenant.
 
         Args:
             subscription: Subscription.
         """
         body = _subscription_json(subscription)
+        storage_id = _subscription_key(
+            subscription.tenant_id, subscription.subscription_id
+        )
         with self.engine.begin() as conn:
             updated = conn.execute(
                 SUBSCRIPTIONS.update()
                 .where(
-                    SUBSCRIPTIONS.c.subscription_id
-                    == subscription.subscription_id
+                    SUBSCRIPTIONS.c.tenant_id == subscription.tenant_id,
+                    SUBSCRIPTIONS.c.subscription_id.in_(
+                        [storage_id, subscription.subscription_id]
+                    ),
                 )
                 .values(tenant_id=subscription.tenant_id, body_json=body)
             )
             if updated.rowcount == 0:
                 conn.execute(
                     SUBSCRIPTIONS.insert().values(
-                        subscription_id=subscription.subscription_id,
+                        subscription_id=storage_id,
                         tenant_id=subscription.tenant_id,
                         body_json=body,
                     )
                 )
+
+    def delete(self, tenant_id: str, subscription_id: str) -> bool:
+        """Deletes an owned subscription using either storage-key format.
+
+        Args:
+            tenant_id: Authenticated tenant identifier.
+            subscription_id: Public subscription identifier.
+
+        Returns:
+            True when an owned row was removed, otherwise False.
+        """
+        storage_id = _subscription_key(tenant_id, subscription_id)
+        with self.engine.begin() as conn:
+            result = conn.execute(
+                SUBSCRIPTIONS.delete().where(
+                    SUBSCRIPTIONS.c.tenant_id == tenant_id,
+                    SUBSCRIPTIONS.c.subscription_id.in_(
+                        [storage_id, subscription_id]
+                    ),
+                )
+            )
+        return result.rowcount > 0

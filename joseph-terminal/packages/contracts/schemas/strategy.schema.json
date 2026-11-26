@@ -1038,7 +1038,9 @@
               "TELEGRAM",
               "LINE",
               "EMAIL",
-              "WEBHOOK"
+              "WEBHOOK",
+              "WHATSAPP",
+              "WEB_PUSH"
             ]
           }
         }

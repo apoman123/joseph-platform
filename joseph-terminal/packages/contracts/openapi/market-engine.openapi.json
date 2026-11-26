@@ -1408,6 +1408,8 @@
               "enum": [
                 "UI",
                 "TELEGRAM",
+                "WHATSAPP",
+                "WEB_PUSH",
                 "LINE",
                 "EMAIL",
                 "WEBHOOK"
@@ -2499,6 +2501,51 @@
         ]
       }
     },
+    "/v1/alerts/deliveries/{delivery_id}": {
+      "get": {
+        "description": "Returns the caller's progress without private device data.\n\nArgs:\n    principal: Authenticated tenant principal.\n    delivery_id: Opaque delivery identifier.\n\nReturns:\n    Public delivery status and redacted error metadata.\n\nRaises:\n    errors.NotFoundError: If absent or inaccessible to the caller.",
+        "operationId": "get_delivery_v1_alerts_deliveries__delivery_id__get",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "delivery_id",
+            "required": true,
+            "schema": {
+              "title": "Delivery Id",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "additionalProperties": true,
+                  "title": "Response Get Delivery V1 Alerts Deliveries  Delivery Id  Get",
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Get Delivery",
+        "tags": [
+          "alerts"
+        ]
+      }
+    },
     "/v1/alerts/subscriptions": {
       "get": {
         "description": "Lists the caller's subscriptions.\n\nArgs:\n    principal: Caller; only their tenant's subscriptions are listed.\n\nReturns:\n    Contract ``AlertSubscriptionList``: subscriptions on\n    user-managed channels and the channels with server credentials.",
@@ -2524,6 +2571,40 @@
       }
     },
     "/v1/alerts/subscriptions/{subscription_id}": {
+      "delete": {
+        "description": "Deletes a notification destination owned by the caller.\n\nArgs:\n    principal: Authenticated tenant principal.\n    subscription_id: Public subscription identifier.\n\nReturns:\n    Empty HTTP 204 response after deletion.\n\nRaises:\n    errors.NotFoundError: If the owned destination does not exist.",
+        "operationId": "delete_subscription_v1_alerts_subscriptions__subscription_id__delete",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "subscription_id",
+            "required": true,
+            "schema": {
+              "title": "Subscription Id",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "204": {
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Delete Subscription",
+        "tags": [
+          "alerts"
+        ]
+      },
       "put": {
         "description": "Creates or replaces a subscription.\n\nArgs:\n    principal: Caller; the subscription belongs to their tenant.\n    subscription_id: Identifier from the path.\n    body: Contract ``AlertSubscription``.\n\nReturns:\n    Stored contract ``AlertSubscription``.\n\nRaises:\n    errors.ValidationFailedError: If the id or a body field is\n        invalid (422).",
         "operationId": "put_subscription_v1_alerts_subscriptions__subscription_id__put",
@@ -2575,6 +2656,51 @@
           }
         },
         "summary": "Put Subscription",
+        "tags": [
+          "alerts"
+        ]
+      }
+    },
+    "/v1/alerts/subscriptions/{subscription_id}/test": {
+      "post": {
+        "description": "Queues a notification-only test for an enabled destination.\n\nArgs:\n    principal: Authenticated tenant principal.\n    subscription_id: Public subscription identifier.\n\nReturns:\n    Pending delivery metadata for status polling.\n\nRaises:\n    errors.NotFoundError: If no owned destination exists.\n    errors.UnsupportedError: If disabled or not configured.",
+        "operationId": "test_subscription_v1_alerts_subscriptions__subscription_id__test_post",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "subscription_id",
+            "required": true,
+            "schema": {
+              "title": "Subscription Id",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "202": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "additionalProperties": true,
+                  "title": "Response Test Subscription V1 Alerts Subscriptions  Subscription Id  Test Post",
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Test Subscription",
         "tags": [
           "alerts"
         ]

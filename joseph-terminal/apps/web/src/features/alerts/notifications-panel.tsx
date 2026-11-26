@@ -13,6 +13,7 @@
 'use client';
 import type {
   AlertSubscription,
+  AlertDelivery,
   AlertSubscriptionList,
   Severity,
   SignalKind,
@@ -21,6 +22,7 @@ import {useCallback, useEffect, useState, type ReactElement} from 'react';
 import type {WebFeatureContext} from '../../shell/react-bindings';
 import {errorMessage} from '../trading/ui/hooks';
 import styles from './alerts.module.css';
+import {enableDevicePush, removeDevicePush} from './device-push';
 
 /** Channels a user can subscribe to. */
 type UserChannel = AlertSubscription['channel'];
@@ -33,6 +35,16 @@ const CHANNELS: Readonly<
     label: 'Telegram',
     target: 'Chat id',
     placeholder: '123456789',
+  },
+  WHATSAPP: {
+    label: 'WhatsApp',
+    target: 'Phone number',
+    placeholder: '+14155552671',
+  },
+  WEB_PUSH: {
+    label: 'Browser / mobile push',
+    target: 'Device id',
+    placeholder: 'Use Enable push on this device',
   },
   LINE: {
     label: 'LINE',
@@ -109,6 +121,10 @@ export function NotificationsPanel({
   const [draft, setDraft] = useState<AlertSubscription>(blankDraft);
   const [error, setError] = useState<string | null>(null);
   const [saving, setSaving] = useState(false);
+  const [busy, setBusy] = useState(false);
+  const [delivery, setDelivery] = useState<AlertDelivery | null>(null);
+  const [pollUntil, setPollUntil] = useState(0);
+  const [message, setMessage] = useState<string | null>(null);
 
   const load = useCallback(async () => {
     try {
@@ -122,6 +138,27 @@ export function NotificationsPanel({
   useEffect(() => {
     void load();
   }, [load]);
+
+  useEffect(() => {
+    if (!delivery || delivery.status !== 'PENDING' || Date.now() >= pollUntil) {
+      return;
+    }
+    let active = true;
+    const timer = setTimeout(() => {
+      void ctx.clients.strategy
+        .getAlertDelivery(delivery.delivery_id)
+        .then(result => {
+          if (active) setDelivery(result);
+        })
+        .catch(err => {
+          if (active) setError(errorMessage(err));
+        });
+    }, 1000);
+    return () => {
+      active = false;
+      clearTimeout(timer);
+    };
+  }, [ctx, delivery, pollUntil]);
 
   const patch = (change: Partial<AlertSubscription>) =>
     void setDraft(current => ({...current, ...change}));
@@ -145,6 +182,63 @@ export function NotificationsPanel({
     }
   };
 
+  const test = async (subscriptionId: string) => {
+    setBusy(true);
+    setError(null);
+    try {
+      setDelivery(
+        await ctx.clients.strategy.testAlertSubscription(subscriptionId)
+      );
+      setPollUntil(Date.now() + 60_000);
+    } catch (err) {
+      setError(errorMessage(err));
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  const remove = async (sub: AlertSubscription) => {
+    setBusy(true);
+    try {
+      await ctx.clients.strategy.deleteAlertSubscription(sub.subscription_id);
+      if (sub.channel === 'WEB_PUSH') {
+        try {
+          await removeDevicePush(sub.target);
+        } catch {
+          setMessage(
+            'Destination removed from the server. If this browser still shows a push subscription, disable notifications in its settings.'
+          );
+        }
+      }
+      if (draft.subscription_id === sub.subscription_id) setDraft(blankDraft());
+      await load();
+    } catch (err) {
+      setError(errorMessage(err));
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  const enablePush = async () => {
+    setBusy(true);
+    setError(null);
+    try {
+      const saved = await enableDevicePush(
+        ctx.clients.strategy,
+        list?.web_push_public_key ?? ''
+      );
+      setDraft(saved);
+      setMessage(
+        'Push enabled on this device. Use Send test to check delivery.'
+      );
+      await load();
+    } catch (err) {
+      setError(errorMessage(err));
+    } finally {
+      setBusy(false);
+    }
+  };
+
   return (
     <div className={styles.panel} data-testid="notifications-panel">
       {error && (
@@ -153,6 +247,41 @@ export function NotificationsPanel({
         </div>
       )}
       <div className={styles.scroll}>
+        <section
+          className={styles.deviceCard}
+          aria-label="Browser and mobile push"
+        >
+          <strong>Receive alerts on this device</strong>
+          <p>
+            Enable background notifications, then send a test. On iPhone or
+            iPad, add Joseph to your Home Screen and open it there. HTTPS and
+            notification permission are required.
+          </p>
+          <button
+            type="button"
+            className="j-btn"
+            disabled={busy || !list?.web_push_public_key}
+            onClick={() => void enablePush()}
+          >
+            Enable push on this device
+          </button>
+          {list && !list.web_push_public_key && (
+            <p className="j-field__hint">
+              An operator must configure Web Push keys on the market engine
+              first. See README → Alert delivery.
+            </p>
+          )}
+          {message && <p role="status">{message}</p>}
+        </section>
+        {delivery && (
+          <p className="j-notice" role="status">
+            {delivery.status === 'DELIVERED'
+              ? 'Test accepted by the provider. Check the receiving device; acceptance is not a read receipt.'
+              : delivery.status === 'DEAD'
+                ? `Test failed: ${delivery.last_error ?? 'Delivery rejected'}`
+                : `Test queued (${delivery.attempts} attempts). Delivery may retry; check this destination before sending another test.`}
+          </p>
+        )}
         <table className="j-table" aria-label="Notification subscriptions">
           <thead>
             <tr>
@@ -162,6 +291,7 @@ export function NotificationsPanel({
               <th>Signals</th>
               <th>Quiet hours</th>
               <th>Status</th>
+              <th>Actions</th>
             </tr>
           </thead>
           <tbody>
@@ -169,10 +299,17 @@ export function NotificationsPanel({
               <tr
                 key={sub.subscription_id}
                 className={sub.enabled ? undefined : 'j-row--muted'}
-                // A deep copy, so editing the draft never changes the list.
-                onClick={() => void setDraft(structuredClone(sub))}
               >
-                <td>{sub.subscription_id}</td>
+                <td>
+                  <button
+                    type="button"
+                    className="j-btn j-btn--ghost"
+                    aria-label={`Edit ${sub.subscription_id}`}
+                    onClick={() => void setDraft(structuredClone(sub))}
+                  >
+                    {sub.subscription_id}
+                  </button>
+                </td>
                 <td>{CHANNELS[sub.channel].label}</td>
                 <td>{sub.target}</td>
                 <td>
@@ -197,6 +334,30 @@ export function NotificationsPanel({
                   ) : (
                     <span className="j-badge j-badge--muted">Off</span>
                   )}
+                </td>
+                <td>
+                  <div className={styles.actions}>
+                    <button
+                      type="button"
+                      className="j-btn"
+                      disabled={
+                        busy || !sub.enabled || !configured.has(sub.channel)
+                      }
+                      onClick={() => void test(sub.subscription_id)}
+                      aria-label={`Send test to ${sub.subscription_id}`}
+                    >
+                      Send test
+                    </button>
+                    <button
+                      type="button"
+                      className="j-btn j-btn--ghost"
+                      disabled={busy}
+                      onClick={() => void remove(sub)}
+                      aria-label={`Delete ${sub.subscription_id}`}
+                    >
+                      Delete
+                    </button>
+                  </div>
                 </td>
               </tr>
             ))}
@@ -237,7 +398,7 @@ export function NotificationsPanel({
               className="j-select"
               value={draft.channel}
               onChange={e =>
-                void patch({channel: e.target.value as UserChannel})
+                void patch({channel: e.target.value as UserChannel, target: ''})
               }
             >
               {(Object.keys(CHANNELS) as UserChannel[]).map(key => (
@@ -255,8 +416,18 @@ export function NotificationsPanel({
               placeholder={channel.placeholder}
               onChange={e => void patch({target: e.target.value.trim()})}
               required
+              readOnly={draft.channel === 'WEB_PUSH'}
             />
           </label>
+          {(draft.channel === 'WHATSAPP' || draft.channel === 'TELEGRAM') && (
+            <p className="j-field__hint">
+              {draft.channel === 'WHATSAPP'
+                ? 'Use an opted-in international phone number. The server needs a Meta Business token, phone number id and approved template. Meta charges may apply.'
+                : 'Start a chat with your Telegram bot first. Enter your numeric chat id; the bot token stays on the server.'}{' '}
+              See README → Alert delivery. Strategy alerts must also allow this
+              channel.
+            </p>
+          )}
           <label className="j-field">
             <span className="j-label">Lowest severity</span>
             <select

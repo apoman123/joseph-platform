@@ -15,6 +15,7 @@ import type {
   AccountList,
   AccountLiveConsentRequest,
   AlertSubscription,
+  AlertDelivery,
   AlertSubscriptionList,
   AccountSummary,
   ActivateRequest,
@@ -581,6 +582,42 @@ export class HttpStrategyClient implements StrategyClient {
       `/v1/alerts/subscriptions/${encodeURIComponent(subscription.subscription_id)}`,
       undefined,
       subscription
+    );
+  }
+
+  /**
+   * Deletes an owned destination.
+   * @param subscriptionId Public subscription id.
+   * @return Completion after HTTP 204.
+   */
+  deleteAlertSubscription(subscriptionId: string): Promise<void> {
+    return this.http.request(
+      'DELETE',
+      `/v1/alerts/subscriptions/${encodeURIComponent(subscriptionId)}`
+    );
+  }
+
+  /**
+   * Queues an explicit test notification without executing a trade.
+   * @param subscriptionId Enabled, configured destination id.
+   * @return Pending delivery metadata.
+   */
+  testAlertSubscription(subscriptionId: string): Promise<AlertDelivery> {
+    return this.http.request(
+      'POST',
+      `/v1/alerts/subscriptions/${encodeURIComponent(subscriptionId)}/test`
+    );
+  }
+
+  /**
+   * Reads a tenant-scoped delivery's progress.
+   * @param deliveryId Opaque outbox delivery identifier.
+   * @return Public metadata with a redacted failure when present.
+   */
+  getAlertDelivery(deliveryId: string): Promise<AlertDelivery> {
+    return this.http.request(
+      'GET',
+      `/v1/alerts/deliveries/${encodeURIComponent(deliveryId)}`
     );
   }
 }

@@ -42,12 +42,7 @@ const TEST_FILES = ['**/*.test.{ts,tsx}', '**/tests/**/*.{ts,tsx}'];
  * TypeScript files outside every tsconfig `include`; the project service
  * type-checks them with tsconfig.base.json.
  */
-const DEFAULT_PROJECT_FILES = [
-  'vitest.config.ts',
-  'tests/*/*.ts',
-  'apps/web/playwright.fullstack.config.ts',
-  'apps/web/e2e-fullstack/*.ts',
-];
+const DEFAULT_PROJECT_FILES = ['vitest.config.ts'];
 
 /** Declarations that need JSDoc in addition to the plugin defaults. */
 const JSDOC_CONTEXTS = [

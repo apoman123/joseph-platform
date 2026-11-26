@@ -15,6 +15,7 @@ import {
   TIMEFRAME_MS,
   type ActivateRequest,
   type AlertSubscription,
+  type AlertDelivery,
   type AlertSubscriptionList,
   type BacktestReport,
   type BacktestRequest,
@@ -505,8 +506,40 @@ export class DemoStrategyClient implements StrategyClient {
       });
     }
     const stored = structuredClone(subscription);
+    delete stored.web_push;
     this.subscriptions.set(stored.subscription_id, stored);
     return stored;
+  }
+
+  /**
+   * Deletes an in-memory DEMO destination.
+   * @param subscriptionId Public destination id.
+   * @return Completion without external calls.
+   */
+  async deleteAlertSubscription(subscriptionId: string): Promise<void> {
+    this.subscriptions.delete(subscriptionId);
+  }
+
+  /**
+   * Explains that DEMO mode cannot deliver external test messages.
+   * @param subscriptionId Destination id for the user-facing error.
+   * @return Rejected promise; no simulated delivery is claimed.
+   * @throws Error explaining that real engines must be connected.
+   */
+  async testAlertSubscription(subscriptionId: string): Promise<AlertDelivery> {
+    throw new Error(
+      `Connect the market engine to test ${subscriptionId}; DEMO mode does not send notifications.`
+    );
+  }
+
+  /**
+   * Rejects status queries because DEMO mode never sends notifications.
+   * @param deliveryId Opaque identifier requested by the caller.
+   * @return Rejected promise without a fabricated delivery.
+   * @throws Error explaining that no external delivery exists.
+   */
+  async getAlertDelivery(deliveryId: string): Promise<AlertDelivery> {
+    throw new Error(`No external delivery ${deliveryId} exists in DEMO mode.`);
   }
 
   /**

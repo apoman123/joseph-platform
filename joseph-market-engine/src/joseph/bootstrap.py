@@ -32,6 +32,7 @@ import httpx
 import sqlalchemy as sa
 
 from joseph.alerts.adapters import channels as alert_channels
+from joseph.alerts.adapters import mobile as mobile_alerts
 from joseph.alerts.adapters import sql as alerts_sql
 from joseph.alerts.app import dispatcher as alert_dispatcher
 from joseph.alerts.app import ports as alert_ports
@@ -515,6 +516,7 @@ def _senders(
     settings: config.Settings,
     hub: streaming.StreamHub,
     client: httpx.AsyncClient,
+    subscriptions: alert_ports.SubscriptionRepository | None = None,
 ) -> Mapping[alert_model.Channel, alert_ports.ChannelSender]:
     """Builds alert senders for every configured channel.
 
@@ -522,6 +524,7 @@ def _senders(
         settings: Settings (channel credentials).
         hub: Stream hub for UI delivery.
         client: Shared HTTP client.
+        subscriptions: Optional tenant-scoped private browser device store.
 
     Returns:
         Sender per channel; unconfigured channels are absent and their
@@ -545,6 +548,31 @@ def _senders(
     if settings.telegram_bot_token:
         senders[alert_model.Channel.TELEGRAM] = alert_channels.TelegramSender(
             client, settings.telegram_bot_token
+        )
+    if (
+        settings.whatsapp_access_token
+        and settings.whatsapp_phone_number_id
+        and settings.whatsapp_template
+    ):
+        senders[alert_model.Channel.WHATSAPP] = mobile_alerts.WhatsAppSender(
+            client,
+            settings.whatsapp_access_token,
+            settings.whatsapp_phone_number_id,
+            settings.whatsapp_template,
+            language=settings.whatsapp_language,
+            version=settings.whatsapp_api_version,
+        )
+    if (
+        settings.web_push_private_key
+        and settings.web_push_public_key
+        and settings.web_push_contact
+        and subscriptions is not None
+    ):
+        senders[alert_model.Channel.WEB_PUSH] = mobile_alerts.WebPushSender(
+            subscriptions,
+            settings.web_push_private_key,
+            settings.web_push_public_key,
+            settings.web_push_contact,
         )
     if settings.line_channel_token:
         senders[alert_model.Channel.LINE] = alert_channels.LineSender(
@@ -620,7 +648,9 @@ def build_signal_stack(container: Container) -> SignalStack:
     http_client = httpx.AsyncClient(timeout=settings.http_timeout_s)
     outbox = alerts_sql.SqlOutbox(engine)
     subscription_repo = alerts_sql.SqlSubscriptionRepository(engine)
-    senders = _senders(settings, container.stream_hub, http_client)
+    senders = _senders(
+        settings, container.stream_hub, http_client, subscription_repo
+    )
     dispatcher = alert_dispatcher.AlertDispatcher(
         outbox,
         subscription_repo,
@@ -689,7 +719,12 @@ def build_signal_stack(container: Container) -> SignalStack:
         dispatcher=dispatcher,
         outbox_worker=worker,
         subscriptions=alert_subscriptions.SubscriptionService(
-            subscription_repo, [channel.value for channel in senders]
+            subscription_repo,
+            [channel.value for channel in senders],
+            outbox=outbox,
+            web_push_public_key=settings.web_push_public_key
+            if alert_model.Channel.WEB_PUSH in senders
+            else None,
         ),
         pipeline=pipeline,
         http_client=http_client,

@@ -29,6 +29,13 @@ const archivo = Archivo({
 export const metadata: Metadata = {
   title: 'Joseph Terminal',
   description: 'Open-source multi-venue perpetuals charting terminal.',
+  manifest: '/manifest.webmanifest',
+  icons: {icon: '/icon.svg', apple: '/icon-192.png'},
+  appleWebApp: {
+    capable: true,
+    title: 'Joseph',
+    statusBarStyle: 'black-translucent',
+  },
 };
 
 /** Viewport and browser theme colour (matches the dark background). */

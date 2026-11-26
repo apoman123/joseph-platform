@@ -5,6 +5,7 @@
 
 from __future__ import annotations
 
+import dataclasses
 import datetime
 
 import pytest
@@ -89,6 +90,31 @@ def _sub(channel: model.Channel, **kwargs: object) -> model.Subscription:
 
 _NOW = 1_795_133_100_200
 _ALL = frozenset({"UI", "TELEGRAM", "LINE", "EMAIL", "WEBHOOK"})
+
+
+@pytest.mark.parametrize("channel", [C.WHATSAPP, C.WEB_PUSH])
+def test_mobile_channels_preserve_policy_filters_and_quiet_hours(
+    channel: model.Channel,
+) -> None:
+    """Applies existing policy, filters and quiet hours to both mobile channels.
+
+    Args:
+        channel: Newly supported WhatsApp or standard Web Push channel.
+
+    Returns:
+        None after checking opt-in routing and critical severity bypass.
+    """
+    sub = _sub(channel)
+    assert not model.route(_signal(), [sub], frozenset({"UI"}), _NOW).deliveries
+    allowed = frozenset({channel.value})
+    assert len(model.route(_signal(), [sub], allowed, _NOW).deliveries) == 1
+    filtered = dataclasses.replace(sub, strategy_ids=frozenset({"other"}))
+    assert not model.route(_signal(), [filtered], allowed, _NOW).deliveries
+    quiet = model.QuietHours(datetime.time(0), datetime.time(23, 59), "UTC")
+    held = dataclasses.replace(sub, quiet_hours=quiet)
+    assert not model.route(_signal(), [held], allowed, _NOW).deliveries
+    critical = dataclasses.replace(_signal(), severity="CRITICAL")
+    assert len(model.route(critical, [held], allowed, _NOW).deliveries) == 1
 
 
 def test_routes_matching_subscriptions_and_ui() -> None:

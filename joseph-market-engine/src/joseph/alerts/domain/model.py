@@ -25,6 +25,8 @@ class Channel(enum.StrEnum):
 
     UI = "UI"
     TELEGRAM = "TELEGRAM"
+    WHATSAPP = "WHATSAPP"
+    WEB_PUSH = "WEB_PUSH"
     LINE = "LINE"
     EMAIL = "EMAIL"
     WEBHOOK = "WEBHOOK"
@@ -32,7 +34,13 @@ class Channel(enum.StrEnum):
 
 
 PUSH_CHANNELS: frozenset[Channel] = frozenset(
-    {Channel.TELEGRAM, Channel.LINE, Channel.EMAIL}
+    {
+        Channel.TELEGRAM,
+        Channel.WHATSAPP,
+        Channel.WEB_PUSH,
+        Channel.LINE,
+        Channel.EMAIL,
+    }
 )
 """Channels silenced during quiet hours."""
 
@@ -112,6 +120,32 @@ class QuietHours:
 
 
 @dataclasses.dataclass(frozen=True, slots=True)
+class WebPushRegistration:
+    """Private browser registration used for encrypted Web Push delivery.
+
+    Attributes:
+        endpoint: HTTPS capability URL of an approved browser push service.
+        p256dh: Base64url uncompressed P-256 public key, 65 decoded bytes.
+        auth: Base64url authentication secret, 16 decoded bytes.
+    """
+
+    endpoint: str = dataclasses.field(repr=False)
+    p256dh: str = dataclasses.field(repr=False)
+    auth: str = dataclasses.field(repr=False)
+
+    def to_payload(self) -> dict[str, object]:
+        """Builds the private SDK payload, never an API response.
+
+        Returns:
+            Subscription endpoint and encryption keys for the push SDK.
+        """
+        return {
+            "endpoint": self.endpoint,
+            "keys": {"p256dh": self.p256dh, "auth": self.auth},
+        }
+
+
+@dataclasses.dataclass(frozen=True, slots=True)
 class Subscription:
     """A user's request to receive signals on a channel.
 
@@ -119,13 +153,16 @@ class Subscription:
         subscription_id: Identifier.
         tenant_id: Owning tenant.
         channel: Delivery channel.
-        target: Chat id, LINE user id, e-mail address or webhook URL.
+        target: Chat id, E.164 WhatsApp phone number, device identifier,
+            LINE user id, e-mail address or webhook URL.
         kinds: Signal kinds to receive (empty = all).
         min_severity: Lowest severity delivered (``INFO``, ``WARNING``,
             ``ENTRY`` or ``CRITICAL``).
         strategy_ids: Strategies to receive (empty = all).
         enabled: Whether active.
         quiet_hours: Optional quiet-hours window (push channels only).
+        web_push: Optional private browser registration, stored only on
+            WEB_PUSH subscriptions and omitted from API responses.
     """
 
     subscription_id: str
@@ -137,6 +174,9 @@ class Subscription:
     strategy_ids: frozenset[str] = frozenset()
     enabled: bool = True
     quiet_hours: QuietHours | None = None
+    web_push: WebPushRegistration | None = dataclasses.field(
+        default=None, repr=False
+    )
 
     def wants(self, signal: signal_domain.Signal) -> bool:
         """Checks the subscription filters.
@@ -373,6 +413,11 @@ def format_text(payload: Mapping[str, object]) -> str:
         Plain text, cut to 4,000 characters (Telegram allows 4,096).
     """
     kind = str(payload.get("kind", ""))
+    if kind == "NOTIFICATION_TEST":
+        return (
+            "Joseph test alert\nYour notification connection is working. "
+            "No trade was placed."
+        )
     close_ms = payload.get("bar_close_ms")
     when = ""
     if isinstance(close_ms, int):
