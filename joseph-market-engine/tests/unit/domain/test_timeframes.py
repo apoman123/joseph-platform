@@ -77,6 +77,17 @@ def test_seconds_floor_and_end() -> None:
     assert not TF.S15.contains(TF.S30)
 
 
+def test_additional_fixed_periods_follow_their_utc_grid() -> None:
+    """Align 10m, 45m and 8h periods without confusing them with months."""
+    stamp = _ms(2026, 11, 25, 8, 47)
+    assert TF.M10.floor(stamp) == _ms(2026, 11, 25, 8, 40)
+    assert TF.M45.floor(stamp) == _ms(2026, 11, 25, 8, 15)
+    assert TF.H8.floor(stamp) == _ms(2026, 11, 25, 8)
+    assert TF.H8.contains(TF.M10)
+    assert TF.M45.contains(TF.M1)
+    assert not TF.M45.contains(TF.M10)
+
+
 @pytest.mark.parametrize(
     ("moment", "start", "end"),
     [

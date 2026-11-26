@@ -71,7 +71,10 @@ def _live(
     """
     clock = clock_lib.SystemClock()
     adapter = factory.build_adapters(
-        [venue], clock, client=httpx.AsyncClient(timeout=20)
+        [venue],
+        clock,
+        crypto_source="native",
+        client=httpx.AsyncClient(timeout=20),
     )[venue]
     return adapter, instruments.InstrumentId.parse(_BTC[venue]), clock
 
@@ -83,7 +86,10 @@ async def test_live_rest_endpoints(
     """Instruments, candles, snapshot, book, OI and funding work live."""
     clock = clock_lib.SystemClock()
     adapter = factory.build_adapters(
-        [venue], clock, client=httpx.AsyncClient(timeout=20)
+        [venue],
+        clock,
+        crypto_source="native",
+        client=httpx.AsyncClient(timeout=20),
     )[venue]
     instrument = instruments.InstrumentId.parse(_BTC[venue])
     listed = {i.instrument_id for i in await adapter.list_instruments()}
@@ -131,7 +137,10 @@ async def test_live_native_candle_stream(venue: instruments.Venue) -> None:
     """Native WebSocket candle streams deliver a live bar."""
     clock = clock_lib.SystemClock()
     adapter = factory.build_adapters(
-        [venue], clock, client=httpx.AsyncClient(timeout=20)
+        [venue],
+        clock,
+        crypto_source="native",
+        client=httpx.AsyncClient(timeout=20),
     )[venue]
     stream = adapter.stream_candles(
         instruments.InstrumentId.parse(_BTC[venue]), timeframes.Timeframe.M1

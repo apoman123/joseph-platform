@@ -296,7 +296,7 @@ describe('TopBar chart tools', () => {
     );
     fireEvent.click(screen.getByRole('button', {name: 'More'}));
     const input = screen.getByLabelText('Type a resolution');
-    fireEvent.change(input, {target: {value: '10m'}});
+    fireEvent.change(input, {target: {value: '7m'}});
     fireEvent.submit(input.closest('form') as HTMLFormElement);
     expect(await screen.findByRole('alert')).toHaveTextContent('not offered');
     fireEvent.change(input, {target: {value: '4H'}});

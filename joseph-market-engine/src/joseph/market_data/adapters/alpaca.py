@@ -671,6 +671,58 @@ def to_market_trade(
     )
 
 
+def trade_preview(
+    payload: Mapping[str, Any],
+    instrument: instruments.InstrumentId,
+    timeframe: timeframes.Timeframe,
+    previous: market.Candle | None,
+    now_ms: int,
+) -> market.Candle | None:
+    """Updates an unfinished session bar from a qualifying live trade.
+
+    Args:
+        payload: Alpaca trade message with price, size, time and conditions.
+        instrument: Exact stock or ETF identifier.
+        timeframe: Minute or daily base resolution.
+        previous: Existing bar for the trade's bucket, or None.
+        now_ms: Receipt time in epoch milliseconds.
+
+    Returns:
+        Live unfinished preview, or the previous bar for an out-of-session
+        or out-of-order trade. Authoritative bar messages replace previews.
+    """
+    trade = parse_trade(payload, market.AggressorSide.UNKNOWN)
+    calendar = sessions.XNYS
+    if not calendar.is_open(trade.ts_ms):
+        return previous
+    start = calendar.floor(timeframe, trade.ts_ms)
+    if previous is not None and previous.start_ms != start:
+        previous = None
+    if (
+        previous is not None
+        and previous.event_ts_ms is not None
+        and trade.ts_ms < previous.event_ts_ms
+    ):
+        return previous
+    # The fold primitive applies the tape's sale-condition rules to any
+    # ordered prints, including trades inside an unfinished regular bar.
+    bar = us_trade_bars.fold_closing_prints(
+        previous,
+        [trade],
+        instrument_id=instrument,
+        timeframe=timeframe,
+        start_ms=start,
+        now_ms=now_ms,
+        source=f"{SOURCE}.trades.ws",
+        is_final=False,
+    )
+    if bar is None:
+        return None
+    return dataclasses.replace(
+        bar, source=f"{SOURCE}.trades.ws", feed_state=quality.FeedState.LIVE
+    )
+
+
 def changed_candle(
     previous: market.Candle | None, candle: market.Candle
 ) -> bool:
@@ -2648,13 +2700,13 @@ class AlpacaAdapter(base.BaseVenueAdapter):
                 if candles or covered:
                     yield candle_rules.CandleCoverage(tuple(candles), covered)
 
-    async def _minute_stream(
+    async def _minute_stream(  # noqa: PLR0912, PLR0915 - explicit stream message state machine
         self,
         instrument: instruments.InstrumentId,
         timeframe: timeframes.Timeframe,
         tracker: health.FeedHealthTracker | None,
     ) -> AsyncGenerator[candle_rules.CandleCoverage, None]:
-        """Streams 1m bars, or aggregates them on the XNYS grid.
+        """Streams trade-driven previews and authoritative XNYS minute bars.
 
         The current aggregate is seeded from REST minute bars; it becomes
         final once a minute at or after its end arrives or a minute after
@@ -2680,6 +2732,7 @@ class AlpacaAdapter(base.BaseVenueAdapter):
         calendar = sessions.XNYS
         minutes: dict[int, market.Candle] = {}
         emitted: dict[int, market.Candle] = {}
+        previews: set[int] = set()
         delay = self.config.delay_ms
         closes = _LiveCloses(instrument, self._source)
 
@@ -2692,7 +2745,12 @@ class AlpacaAdapter(base.BaseVenueAdapter):
             Returns:
                 Changed aggregates.
             """
-            rows = closes.fold(minutes.values(), now_ms)
+            rows = [
+                dataclasses.replace(bar, is_final=False)
+                if bar.start_ms in previews
+                else bar
+                for bar in closes.fold(minutes.values(), now_ms)
+            ]
             if timeframe is not _M1:
                 rows = unsettled(
                     session_bars.aggregate(
@@ -2711,7 +2769,10 @@ class AlpacaAdapter(base.BaseVenueAdapter):
             return changed
 
         events = self._events(
-            instrument, ("bars", "updatedBars", "statuses"), tracker, 15.0
+            instrument,
+            ("bars", "updatedBars", "statuses", "trades"),
+            tracker,
+            1.0,
         )
         chain = candle_rules.StreamCoverage()
         async with contextlib.aclosing(events):
@@ -2741,11 +2802,27 @@ class AlpacaAdapter(base.BaseVenueAdapter):
                     )
                     if update is not None:
                         minutes[update.start_ms] = update
+                        previews.discard(update.start_ms)
                         closes.note(update.start_ms)
                     if payload.get("T") == "b":
                         minute = rfc3339_ms(str(payload["t"]))
                         span = chain.observe(minute, minute + _M1.duration_ms)
                         covered = closes.prove(span)
+                if kind == "msg" and payload.get("T") == "t":
+                    ts = rfc3339_ms(str(payload["t"]))
+                    if calendar.is_open(ts):
+                        start = calendar.floor(_M1, ts)
+                        if start == calendar.floor(_M1, now - delay):
+                            preview = trade_preview(
+                                payload,
+                                instrument,
+                                _M1,
+                                minutes.get(start),
+                                now,
+                            )
+                            if preview is not None:
+                                minutes[start] = preview
+                                previews.add(start)
                 covered += await closes.learn(now)
                 changed = current(now)
                 if changed or covered:
@@ -2753,17 +2830,18 @@ class AlpacaAdapter(base.BaseVenueAdapter):
                 cutoff = now - 2 * timeframe.duration_ms - _D1.duration_ms
                 for start in [s for s in minutes if s < cutoff]:
                     del minutes[start]
+                    previews.discard(start)
                 for start in [s for s in emitted if s < cutoff]:
                     del emitted[start]
                 closes.prune(cutoff)
 
-    async def _daily_stream(
+    async def _daily_stream(  # noqa: PLR0912 - explicit stream message state machine
         self,
         instrument: instruments.InstrumentId,
         timeframe: timeframes.Timeframe,
         tracker: health.FeedHealthTracker | None,
     ) -> AsyncGenerator[candle_rules.CandleCoverage, None]:
-        """Streams the day's bar (``dailyBars``), or its week or month.
+        """Streams trade-driven daily previews and authoritative daily bars.
 
         Args:
             instrument: Instrument.
@@ -2777,7 +2855,7 @@ class AlpacaAdapter(base.BaseVenueAdapter):
         days: dict[int, market.Candle] = {}
         last: market.Candle | None = None
         events = self._events(
-            instrument, ("dailyBars", "statuses"), tracker, 60.0
+            instrument, ("dailyBars", "statuses", "trades"), tracker, 1.0
         )
         async with contextlib.aclosing(events):
             seeded = False
@@ -2804,6 +2882,15 @@ class AlpacaAdapter(base.BaseVenueAdapter):
                         days[update.start_ms] = dataclasses.replace(
                             update, is_final=False
                         )
+                if kind == "msg" and payload.get("T") == "t":
+                    ts = rfc3339_ms(str(payload["t"]))
+                    if sessions.XNYS.is_open(ts):
+                        start = sessions.XNYS.floor(_D1, ts)
+                        preview = trade_preview(
+                            payload, instrument, _D1, days.get(start), now
+                        )
+                        if preview is not None:
+                            days[start] = preview
                 if not days:
                     continue
                 if timeframe is _D1:

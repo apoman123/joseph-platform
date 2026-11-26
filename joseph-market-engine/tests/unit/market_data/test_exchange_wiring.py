@@ -39,6 +39,7 @@ def _raw() -> dict[instruments.Venue, ports.MarketDataPort]:
         factory.build_adapters(
             _VENUES,
             clock_lib.ManualClock(0),
+            crypto_source="native",
             client=httpx.AsyncClient(),
             alpaca_config=alpaca.AlpacaConfig(key_id="k", secret_key="s"),
         )
@@ -143,6 +144,7 @@ async def test_twse_hosts_never_exceed_three_requests_per_five_seconds() -> (
     adapters = factory.build_adapters(
         [instruments.Venue.TWSE, instruments.Venue.TPEX],
         clock_lib.ManualClock(0),
+        crypto_source="native",
         client=httpx.AsyncClient(),
     )
     listed = adapters[instruments.Venue.TWSE]

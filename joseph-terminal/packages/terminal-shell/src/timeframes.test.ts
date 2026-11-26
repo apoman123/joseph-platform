@@ -52,6 +52,9 @@ describe('typed resolutions', () => {
     ['1m', '1m'],
     ['1min', '1m'],
     ['240', '4h'],
+    ['10', '10m'],
+    ['45m', '45m'],
+    ['8h', '8h'],
     ['1440', '1d'],
     ['7D', '1w'],
   ])('maps %s to %s', (input, expected) => {

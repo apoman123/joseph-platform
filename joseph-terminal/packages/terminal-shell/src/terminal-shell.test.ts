@@ -238,3 +238,42 @@ describe('command palette', () => {
     ).toBe(2);
   });
 });
+
+describe('unbounded saved chart tabs', () => {
+  it('selects tabs beyond the split-layout count and preserves independent settings', () => {
+    let doc = BASE;
+    for (let index = 0; index < 32; index += 1) {
+      doc = workspaceReducer(
+        doc,
+        {
+          type: 'addChart',
+          chartId: `new-${index}`,
+          instrumentId: 'mock:perp:ETHUSD',
+        },
+        index + 2
+      );
+    }
+    expect(doc.charts).toHaveLength(33);
+    expect(visibleCharts(doc).map(chart => chart.chart_id)).toEqual(['new-31']);
+    doc = workspaceReducer(
+      doc,
+      {type: 'setTimeframe', chartId: 'new-31', timeframe: '1d'},
+      50
+    );
+    doc = workspaceReducer(
+      doc,
+      {type: 'setActiveChart', chartId: 'chart-1'},
+      51
+    );
+    expect(visibleCharts(doc)[0]?.instrument_id).toBe('mock:perp:BTCUSD');
+    doc = workspaceReducer(
+      doc,
+      {type: 'setActiveChart', chartId: 'new-31'},
+      52
+    );
+    expect(visibleCharts(doc)[0]?.timeframe).toBe('1d');
+    doc = workspaceReducer(doc, {type: 'closeChart', chartId: 'new-31'}, 53);
+    expect(doc.active_chart_id).toBe('new-30');
+    expect(visibleCharts(doc)[0]?.chart_id).toBe('new-30');
+  });
+});

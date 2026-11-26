@@ -5,7 +5,7 @@ The market engine serves market data, perpetual screening, indicators, strategie
 ## Run and test
 
 ```bash
-uv sync                                              # add --extra sinopac for SinoPac data
+uv sync
 JOSEPH_DEV_TOKENS=dev-local-token:tenant-01:user-01 \
   uv run uvicorn joseph.bootstrap:create_application --factory --port 8000
 uv run pytest                                        # all offline tiers
@@ -31,9 +31,19 @@ Indicator plugin packages install into this environment with `make plugins` from
 
 ## Venues
 
-`GET /v1/venues` lists only implemented, verified capabilities; any other request is refused with `UNSUPPORTED`. Every venue except Alpaca and Treasury has order-book snapshots; only SinoPac data streams books.
+`GET /v1/venues` lists the enabled market-data venues. In normal operation,
+the five crypto venues use the free `ccxt` async REST adapter. Their bars and
+snapshots carry `POLL` provenance, and each venue advertises only the OHLCV
+resolutions and methods exposed by its CCXT exchange class. Free CCXT Pro
+provides public WebSocket candle subscriptions, with trade-driven candle
+updates for Lighter. Active charts show LIVE after exchange events arrive;
+REST fallback remains POLL. Exchange-labelled RWA and equity perpetuals are
+retained, including namespace-safe Hyperliquid HIP-3 IDs. Alpaca IEX and Fugle venues are
+only constructed after their free-plan keys are configured; the Treasury
+daily feed works without a key, with optional FRED series when its key is set.
+The Dashboard groups the five crypto venues under one CCXT provider.
 
-### Crypto perpetuals (verified live 2026-11-22/23)
+### Legacy native crypto adapters (not selected by the running market engine)
 
 | Venue | Klines | `1M` | Taker volume | Trade history (REST) | Public archive |
 |---|---|---|---|---|---|
@@ -63,9 +73,9 @@ Trade streams and their aggressor side (checked against the best bid and ask):
 
 | Venue | Source | Calendar | Intraday | Delta |
 |---|---|---|---|---|
-| `twse`, `tpex` | Official lists, daily reports and MIS snapshots; optional SinoPac | XTAI | Recorded MIS (coarse, no seconds) or Shioaji | Classified (quote rule; Shioaji `tick_type`) |
+| `twse`, `tpex` | Official lists and bulk snapshots; optional free-tier Fugle per-symbol candles and quotes | XTAI | Recorded MIS or Fugle 1m history since 2023-05-23; no seconds | Classified (quote rule) |
 | `nasdaq`, `nyse`, `cboe` | Nasdaq Trader listings, Alpaca data | XNYS | Alpaca minutes on the XNYS grid; seconds from 30 min of trades | Classified (Lee-Ready) |
-| `treasury` | Treasury.gov par and real yields | USBOND | Daily only; not tradable | — |
+| `treasury` | Treasury.gov par and real yields; optional FRED daily rates/spreads under separate `FRED_*` codes | USBOND | Daily only; not tradable | — |
 
 #### Taiwan
 
@@ -74,13 +84,13 @@ Trade streams and their aggressor side (checked against the best bid and ask):
 - **Rate limits:** MIS responses are cached server-side (data advances every 4–120 s); TWSE blocks clients above about 3 requests per 5 s, so www.twse.com.tw, openapi.twse.com.tw and MIS (shared by TWSE and TPEx) are each paced at 1 request per 2 s without bursts. www.tpex.org.tw is paced at 1 request per 2 s.
 - **TPEx listings** come from the OpenAPI datasets `tpex_mainboard_quotes`, `mopsfin_t187ap03_O`, `tpex_ipo_no_limit` and `tpex_cmode`: stocks and ETFs, including bond ETFs (sixth character `B`, or `D` for active; asset class `BOND`). Not served: 興櫃 (emerging board), foreign-currency counters (`K`/`C`), preferreds, ETNs, warrants. Suspended companies are `HALTED`.
 - **TPEx history** goes back to 1994 with volume exact to 1,000 shares, including odd-lot and after-hours trades but not block trades; prices are unadjusted. TPEx uses the XTAI calendar (its daily index history has exactly the XTAI sessions in every month 2005–2026); new closures are added to XTAI at runtime. Screening uses TWD thresholds (`tpex_equity`, `tpex_bond` in `screening/domain/policy.py`).
-- **SinoPac data** (`adapters/sinopac.py`, `JOSEPH_TW_DATA_SOURCE=sinopac`): 1m kbars back to 2020-03-02 (3m–12h aggregated), live 1m and seconds bars from ticks, seconds history from tick history, streamed 5-level books, classified buy volume. Board lots only (no odd-lot, after-hours or block trades); listings, limits and `1d`/`1w`/`1M` stay official. Quotas: 50 queries per 10 s; 10 tick and 270 kbar queries in trading hours; 500 MB–10 GB of data a day (reset 08:00 Taipei); 200 subscriptions; 5 connections per person, shared with trading. On failure it falls back to official data (`twse.mis`/`tpex.mis`, `DEGRADED`); a bar never mixes sources. Opt-in test, outside trading hours: `JOSEPH_SINOPAC_DATA_TESTS=1 uv run --extra sinopac pytest tests/network/test_live_sinopac.py -m sinopac_data`.
+- **Fugle free tier** (`JOSEPH_TW_DATA_SOURCE=fugle`, `JOSEPH_FUGLE_API_KEY`): per-symbol 1m history from 2023-05-23, daily history from 2010, and current-session 1m candles/quotes by REST polling. Longer periods are aggregated on XTAI; seconds bars, bulk Fugle snapshots and Taiwan futures/options are unavailable on this free integration. Official lists, screening snapshots and MIS books remain separate sources.
 
 #### United States
 
 `adapters/alpaca.py` needs an Alpaca market-data key. Exchange `Z` in Nasdaq Trader's `otherlisted` file maps to `cboe` (e.g. `cboe:etf:GOVT`); IEX, NYSE Texas, TXSE and OTC listings, preferreds, units, warrants and rights are skipped. Free plan: 200 requests per minute, one stream, 30 symbols. Ticks are 0.01, or 0.0001 below $1.
 
-- **Closing print:** on `sip`/`delayed_sip`, each session's official closing print (condition `6`) is read once per symbol from `[close, close + 60 s)` and folded into the last minute bar, so 1m, 1h, 4h and 1d closes agree. At most 20 requests per fetch and 60 per minute; until read, that minute stays out of coverage (a gap). `iex` reads nothing.
+- **IEX scope:** the free IEX feed has no consolidated closing cross. Quotes and bars retain Alpaca IEX provenance.
 
 ## API
 

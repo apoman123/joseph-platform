@@ -18,6 +18,7 @@ from joseph.domain import clock
 from joseph.domain import errors
 from joseph.domain import instruments
 from joseph.domain import market
+from joseph.domain import sessions
 from joseph.domain import timeframes
 from joseph.indicators import catalog
 from joseph.indicators import service
@@ -175,6 +176,20 @@ def test_aois_are_point_in_time(
     assert latest["as_of_ms"] == data[TF.M5][-1].end_ms
 
 
+def test_daily_aois_skip_incompatible_default_pivots(
+    client: testclient.TestClient,
+) -> None:
+    """A default daily AOI query works while explicit daily pivots fail."""
+    query = {"instrument_id": BTC, "tf": "1d"}
+    default = client.get("/v1/aois", params=query)
+    assert default.status_code == 200
+    assert default.json()["timeframe"] == "1d"
+
+    explicit = client.get("/v1/aois", params={**query, "set": "pivot_points"})
+    assert explicit.status_code == 400
+    assert "chart must be shorter" in explicit.json()["message"]
+
+
 def test_invalid_parameters_are_rejected(client: testclient.TestClient) -> None:
     """Bad ids and timeframes fail validation; unknown plugins are 404."""
     bad_tf = client.get("/v1/aois", params={"instrument_id": BTC, "tf": "7m"})
@@ -214,3 +229,34 @@ def test_service_requests_bounded_windows(
     )
     windows = {tf: end - start for tf, start, end in source.requests}
     assert windows[TF.M1] < windows[TF.M5]
+
+
+async def test_monthly_series_caps_intrabar_history() -> None:
+    """Caps lower-timeframe downloads while retaining missing coverage.
+
+    Returns:
+        None. Validates requested history and older null delta values.
+    """
+    start = TF.MN1.floor(testing.DEFAULT_START_MS)
+    months = [
+        testing.make_candle(TF.MN1, TF.MN1.shift(start, i), 100, 101, 99, 100)
+        for i in range(24)
+    ]
+    now = months[-1].end_ms
+    source = _Source({TF.MN1: months})
+    query = service.IndicatorQueryService(
+        source,
+        catalog.build_default_registry(),
+        clock.ManualClock(now),
+        service.QueryConfig(lookback_bars=24, max_intrabar_bars=100),
+    )
+    result = await query.series(
+        testing.DEFAULT_INSTRUMENT, TF.MN1, "volume_delta"
+    )
+    hourly = next(request for request in source.requests if request[0] is TF.H1)
+    assert sessions.CONTINUOUS.bars_between(*hourly) == 100
+    points = result["points"]
+    assert isinstance(points, list)
+    assert len(points) == 24
+    assert all(point["values"]["delta_pct"] is None for point in points)
+    assert all(point["values"]["intrabar_count"] == 0 for point in points)

@@ -38,12 +38,15 @@ class Timeframe(enum.StrEnum):
     M1 = "1m"
     M3 = "3m"
     M5 = "5m"
+    M10 = "10m"
     M15 = "15m"
     M30 = "30m"
+    M45 = "45m"
     H1 = "1h"
     H2 = "2h"
     H4 = "4h"
     H6 = "6h"
+    H8 = "8h"
     H12 = "12h"
     D1 = "1d"
     W1 = "1w"
@@ -165,12 +168,15 @@ _DURATIONS_MS: dict[Timeframe, int] = {
     Timeframe.M1: _MINUTE_MS,
     Timeframe.M3: 3 * _MINUTE_MS,
     Timeframe.M5: 5 * _MINUTE_MS,
+    Timeframe.M10: 10 * _MINUTE_MS,
     Timeframe.M15: 15 * _MINUTE_MS,
     Timeframe.M30: 30 * _MINUTE_MS,
+    Timeframe.M45: 45 * _MINUTE_MS,
     Timeframe.H1: _HOUR_MS,
     Timeframe.H2: 2 * _HOUR_MS,
     Timeframe.H4: 4 * _HOUR_MS,
     Timeframe.H6: 6 * _HOUR_MS,
+    Timeframe.H8: 8 * _HOUR_MS,
     Timeframe.H12: 12 * _HOUR_MS,
     Timeframe.D1: _DAY_MS,
     Timeframe.W1: 7 * _DAY_MS,

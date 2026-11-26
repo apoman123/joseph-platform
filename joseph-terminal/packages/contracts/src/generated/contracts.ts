@@ -109,12 +109,15 @@ export type Timeframe =
   | '1m'
   | '3m'
   | '5m'
+  | '10m'
   | '15m'
   | '30m'
+  | '45m'
   | '1h'
   | '2h'
   | '4h'
   | '6h'
+  | '8h'
   | '12h'
   | '1d'
   | '1w'
@@ -3050,35 +3053,11 @@ export interface WorkspaceDocument {
   sync: SyncOptions;
   active_chart_id: string;
   /**
+   * Saved chart tabs without a fixed count limit; layout controls visible panes.
+   *
    * @minItems 1
-   * @maxItems 8
    */
-  charts:
-    | [ChartState]
-    | [ChartState, ChartState]
-    | [ChartState, ChartState, ChartState]
-    | [ChartState, ChartState, ChartState, ChartState]
-    | [ChartState, ChartState, ChartState, ChartState, ChartState]
-    | [ChartState, ChartState, ChartState, ChartState, ChartState, ChartState]
-    | [
-        ChartState,
-        ChartState,
-        ChartState,
-        ChartState,
-        ChartState,
-        ChartState,
-        ChartState,
-      ]
-    | [
-        ChartState,
-        ChartState,
-        ChartState,
-        ChartState,
-        ChartState,
-        ChartState,
-        ChartState,
-        ChartState,
-      ];
+  charts: [ChartState, ...ChartState[]];
   favorites?: {
     timeframes?: Timeframe[];
     instruments?: InstrumentId[];

@@ -194,16 +194,23 @@ export function ChartPane({
   // Refs carry the latest values into chart and stream callbacks without
   // re-subscribing them on every render.
   const barsRef = useRef<ChartBar[]>([]);
+  const loadEarlierRef = useRef<((fromMs: number) => void) | null>(null);
   // Bars actually displayed (truncated during replay).
   const shownRef = useRef<readonly ChartBar[]>([]);
   const [barCount, setBarCount] = useState(0);
+  const [loadAttempt, setLoadAttempt] = useState(0);
   const chartRef = useRef(chart);
   chartRef.current = chart;
   const workspace = useStore(runtime.workspace);
   const theme = useStore(runtime.theme);
   const dataWindow = useStore(runtime.dataWindow);
   const replayStates = useStore(runtime.replay);
-  const {chart_id: chartId, instrument_id: instrumentId, timeframe} = chart;
+  const {
+    chart_id: chartId,
+    instrument_id: instrumentId,
+    timeframe,
+    feed_mode: feedMode,
+  } = chart;
   const replay: ReplayState | null = replayStates[chartId] ?? null;
   const replayRef = useRef(replay);
   replayRef.current = replay;
@@ -330,6 +337,11 @@ export function ChartPane({
   useEffect(() => {
     if (!port) return;
     let alive = true;
+    const historyController = new AbortController();
+    let loadingHistory = false;
+    let loadingEarlier = false;
+    let exhausted = false;
+    let retryAfterMs = 0;
     setStatus({
       phase: 'loading',
       feedState: 'CONNECTING',
@@ -337,14 +349,90 @@ export function ChartPane({
       lastUpdateMs: null,
     });
     barsRef.current = [];
-    setLastBar(null);
-    let batchState: FeedState = 'CONNECTING';
-    const load = () =>
-      runtime.clients.market
-        .getCandles({instrumentId, timeframe, limit: HISTORY_BARS})
+    shownRef.current = [];
+    setBarCount(0);
+    port.setBars([]);
+    /** Loads the next page when the viewport reaches the first loaded bars. */
+    const loadEarlier = (fromMs: number): void => {
+      const bars = barsRef.current;
+      const oldest = bars[0]?.timeMs;
+      if (
+        oldest === undefined ||
+        loadingHistory ||
+        loadingEarlier ||
+        exhausted ||
+        replayRef.current
+      ) {
+        return;
+      }
+      const threshold = calendarRef.current.shift(timeframe, oldest, 50);
+      if (fromMs > threshold || Date.now() < retryAfterMs) return;
+      loadingEarlier = true;
+      void runtime.clients.market
+        .getCandles({
+          instrumentId,
+          timeframe,
+          toMs: oldest,
+          limit: HISTORY_BARS,
+          signal: historyController.signal,
+        })
         .then(batch => {
           if (!alive) return;
-          const bars = batch.candles.map(toChartBar);
+          const earlier = batch.candles
+            .map(toChartBar)
+            .filter(bar => bar.timeMs < oldest);
+          if (earlier.length === 0) {
+            exhausted = true;
+            return;
+          }
+          const visible = port.serialize().visibleRange;
+          const merged = new Map<number, ChartBar>();
+          for (const bar of [...earlier, ...barsRef.current]) {
+            merged.set(bar.timeMs, bar);
+          }
+          barsRef.current = [...merged.values()].sort(
+            (a, b) => a.timeMs - b.timeMs
+          );
+          shownRef.current = barsRef.current;
+          setBarCount(barsRef.current.length);
+          port.setBars(barsRef.current);
+          if (visible) port.setVisibleRange(visible);
+        })
+        .catch(() => {
+          if (alive) retryAfterMs = Date.now() + 5_000;
+        })
+        .finally(() => {
+          loadingEarlier = false;
+        });
+    };
+    loadEarlierRef.current = loadEarlier;
+    setLastBar(null);
+    let batchState: FeedState = 'CONNECTING';
+    let liveState: FeedState | null = null;
+    /** Fetches one snapshot at a time, preserving any newer socket bars. */
+    const load = (): void => {
+      if (loadingHistory || !alive) return;
+      loadingHistory = true;
+      void runtime.clients.market
+        .getCandles({
+          instrumentId,
+          timeframe,
+          limit: HISTORY_BARS,
+          signal: historyController.signal,
+        })
+        .then(batch => {
+          if (!alive) return;
+          // Preserve socket updates received while history was loading.
+          const merged = new Map(
+            batch.candles.map(candle => {
+              const bar = toChartBar(candle);
+              return [bar.timeMs, bar] as const;
+            })
+          );
+          for (const bar of barsRef.current) {
+            merged.set(bar.timeMs, bar);
+          }
+          const bars = [...merged.values()].sort((a, b) => a.timeMs - b.timeMs);
           barsRef.current = bars;
           const shown = replayVisibleBars(bars, replayRef.current);
           shownRef.current = shown;
@@ -375,20 +463,24 @@ export function ChartPane({
           batchState = batch.feed_state;
           setStatus({
             phase: bars.length ? 'ready' : 'empty',
-            feedState: batch.feed_state,
+            feedState: liveState ?? batch.feed_state,
             error: null,
             lastUpdateMs: Date.now(),
           });
         })
         .catch((error: unknown) => {
           if (!alive) return;
-          setStatus({
-            phase: 'error',
-            feedState: 'UNAVAILABLE',
+          setStatus(previous => ({
+            ...previous,
+            phase: barsRef.current.length ? 'ready' : 'error',
+            feedState: liveState ?? 'UNAVAILABLE',
             error: error instanceof Error ? error.message : 'Request failed',
-            lastUpdateMs: null,
-          });
+          }));
+        })
+        .finally(() => {
+          loadingHistory = false;
         });
+    };
     void load();
     const unsubscribe = runtime.clients.marketStream.subscribe(
       [
@@ -396,10 +488,11 @@ export function ChartPane({
           channel: 'candles',
           instrument_id: instrumentId,
           timeframe,
-          feed_mode: chartRef.current.feed_mode,
+          feed_mode: feedMode,
         },
       ],
       envelope => {
+        if (!alive) return;
         if (envelope.type === 'snapshot_required') {
           void load();
           return;
@@ -414,6 +507,7 @@ export function ChartPane({
         ) {
           return;
         }
+        liveState = candle.feed_state;
         const bar = toChartBar(candle);
         const bars = barsRef.current;
         const last = bars.at(-1);
@@ -451,10 +545,12 @@ export function ChartPane({
     );
     return () => {
       alive = false;
+      historyController.abort();
+      loadEarlierRef.current = null;
       unsubscribe();
       offStatus();
     };
-  }, [port, instrumentId, timeframe, runtime, chartId]);
+  }, [port, instrumentId, timeframe, feedMode, runtime, chartId, loadAttempt]);
 
   // Staleness clock (also drives the bar countdown and market status).
   useEffect(() => {
@@ -705,6 +801,7 @@ export function ChartPane({
     // range is still the saved one (within 1 s at both ends).
     let rangeTimer: ReturnType<typeof setTimeout> | null = null;
     const offRange = port.on('visibleRangeChange', range => {
+      if (range) loadEarlierRef.current?.(range.fromMs);
       if (rangeTimer) clearTimeout(rangeTimer);
       rangeTimer = setTimeout(() => {
         if (!range) return;
@@ -1086,11 +1183,25 @@ export function ChartPane({
           <div className="j-empty">
             <strong>Candles didn’t load</strong>
             <p>{status.error}</p>
-            <p>
-              The chart stays empty instead of showing synthetic prices. Check
-              the market engine connection, then reload.
-            </p>
+            <p>Check the market engine connection, then retry.</p>
+            <button
+              className="j-btn"
+              onClick={() => void setLoadAttempt(n => n + 1)}
+            >
+              Retry candles
+            </button>
           </div>
+        </div>
+      )}
+      {status.phase === 'ready' && status.error && (
+        <div className="pane__stale j-notice j-notice--danger" role="alert">
+          History request failed: {status.error}{' '}
+          <button
+            className="j-btn"
+            onClick={() => void setLoadAttempt(n => n + 1)}
+          >
+            Retry candles
+          </button>
         </div>
       )}
       {effectiveState === 'STALE' && status.phase === 'ready' && (

@@ -58,6 +58,7 @@ def _live(
     adapter = factory.build_adapters(
         [venue],
         clock,
+        crypto_source="native",
         client=httpx.AsyncClient(timeout=30),
         alpaca_config=config,
     )[venue]

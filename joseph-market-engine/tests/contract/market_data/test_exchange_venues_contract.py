@@ -174,6 +174,7 @@ def _adapter(
     return factory.build_adapters(
         [venue],
         clock,
+        crypto_source="native",
         client=httpx.AsyncClient(),
         connect=_connector(frames or [], opened),
         alpaca_config=keys,

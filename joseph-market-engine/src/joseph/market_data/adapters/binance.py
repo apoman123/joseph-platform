@@ -50,7 +50,19 @@ from joseph.market_data.domain import trades as trades_lib
 
 REST_URL = "https://fapi.binance.com"
 WS_URL = "wss://fstream.binance.com/market/ws"
-_TF = (*timeframes.SECONDS, *timeframes.MINUTE_AND_ABOVE)
+_TF = (
+    *timeframes.SECONDS,
+    *(
+        tf
+        for tf in timeframes.MINUTE_AND_ABOVE
+        if tf
+        not in (
+            timeframes.Timeframe.M10,
+            timeframes.Timeframe.M45,
+            timeframes.Timeframe.H8,
+        )
+    ),
+)
 _DEPTH_LIMITS = (5, 10, 20, 50, 100, 500, 1000)
 """Depth sizes ``/fapi/v1/depth`` accepts."""
 _MAX_KLINES = 1500

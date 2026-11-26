@@ -1,6 +1,7 @@
 .DS_Store
 *.log
 .env
+coverage.xml
 deploy/.env
 # Broker secret files (IBKR password, Shioaji keys, CA).
 deploy/secrets/

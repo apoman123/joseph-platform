@@ -24,6 +24,7 @@ import {startMainDetach} from '../composition/detach';
 import {composeFeatures} from '../composition/features';
 import {createRuntime, type TerminalRuntime} from '../composition/runtime';
 import {ChartGrid} from './chart-grid';
+import {ChartTabs} from './chart-tabs';
 import {CommandPalette, StatusBar, Toasts} from './chrome';
 import {DetachedBanner} from './detached';
 import {DrawingToolbar} from './drawing-toolbar';
@@ -141,6 +142,7 @@ export function TerminalApp(): ReactElement {
         <div className="terminal__body">
           <DrawingToolbar />
           <main className="terminal__charts" aria-label="Charts">
+            <ChartTabs />
             <DetachedBanner />
             <ChartGrid />
           </main>

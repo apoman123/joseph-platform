@@ -6,7 +6,6 @@
 from __future__ import annotations
 
 import functools
-from collections.abc import Callable
 from collections.abc import Iterable
 
 import httpx
@@ -16,12 +15,14 @@ from joseph.domain import instruments
 from joseph.market_data.adapters import alpaca
 from joseph.market_data.adapters import binance
 from joseph.market_data.adapters import bitget
+from joseph.market_data.adapters import ccxt
+from joseph.market_data.adapters import fred
+from joseph.market_data.adapters import fugle
 from joseph.market_data.adapters import http
 from joseph.market_data.adapters import hyperliquid
 from joseph.market_data.adapters import lighter
 from joseph.market_data.adapters import mexc
 from joseph.market_data.adapters import mock
-from joseph.market_data.adapters import sinopac
 from joseph.market_data.adapters import tpex
 from joseph.market_data.adapters import treasury
 from joseph.market_data.adapters import twse
@@ -75,9 +76,13 @@ _ALPACA_RATE = (3.0, 10)
 """Alpaca's free plan allows 200 requests per minute (shared by venues)."""
 _SYMDIR_RATE = (1.0, 2)
 """www.nasdaqtrader.com symbol directory files (US instrument lists)."""
+_FUGLE_RATE = (1.0, 1)
+"""Fugle free tier allows 60 stock REST requests per minute, shared here."""
+_FRED_RATE = (1.0, 1)
+"""Conservative pace for free FRED observations."""
 
 
-def build_adapters(
+def build_adapters(  # noqa: PLR0912 - explicit venue dispatch remains legible
     venues: Iterable[instruments.Venue],
     clock: clock_lib.Clock,
     *,
@@ -86,11 +91,10 @@ def build_adapters(
     connect: ws.ConnectFn = ws.default_connect,
     alpaca_config: alpaca.AlpacaConfig | None = None,
     mexc_ws_format: mexc.WsFormat = mexc.WsFormat.PROTOBUF,
-    sinopac_config: sinopac.SinopacConfig | None = None,
-    sinopac_factory: Callable[[], sinopac.SjDataFactory] = (
-        sinopac.ShioajiDataFactory
-    ),
+    fugle_api_key: str | None = None,
+    fred_api_key: str | None = None,
     bar_archive: bar_archive_lib.BarArchive | None = None,
+    crypto_source: str = "ccxt",
 ) -> dict[instruments.Venue, ports.MarketDataPort]:
     """Constructs one adapter per requested venue.
 
@@ -104,12 +108,12 @@ def build_adapters(
             ``nyse`` and ``cboe`` (unconfigured when omitted: the venues
             list instruments but data requests ask for keys).
         mexc_ws_format: Push format of the MEXC futures WebSocket.
-        sinopac_config: Shioaji settings for ``twse``/``tpex`` market data
-            (``JOSEPH_TW_DATA_SOURCE=sinopac``); ``None`` keeps the
-            official sources only.
-        sinopac_factory: Creates the Shioaji SDK factory (tests inject a
-            fake).
+        fugle_api_key: Fugle free-tier market-data key; ``None`` uses only
+            the official TWSE/TPEx sources.
+        fred_api_key: Optional FRED key for distinct daily rate series.
         bar_archive: Durable store of the TWSE/TPEx recorded minutes.
+        crypto_source: ``ccxt`` for the active free REST feed (default), or
+            ``native`` for legacy adapter contract tests.
 
     Returns:
         Adapter per venue, in the requested order.
@@ -187,26 +191,42 @@ def build_adapters(
         )
 
     @functools.cache
-    def shared_sinopac() -> sinopac.SinopacSource | None:
-        """Returns the Shioaji source shared by ``twse`` and ``tpex``.
-
-        The SDK is checked when the source is first built.
+    def shared_fugle_limiter() -> http.RateLimiter:
+        """Returns the Fugle token bucket shared by Taiwan venues.
 
         Returns:
-            Source, or ``None`` when not configured.
+            Limiter paced at the free-tier REST allowance.
         """
-        if sinopac_config is None:
+        return http.RateLimiter(*_FUGLE_RATE)
+
+    def fugle_source(venue: instruments.Venue) -> fugle.FugleSource | None:
+        """Creates Fugle data access for one Taiwan venue when configured.
+
+        Args:
+            venue: TWSE or TPEx venue.
+
+        Returns:
+            Fugle source, or ``None`` when no key is configured.
+        """
+        if fugle_api_key is None:
             return None
-        source = sinopac.SinopacSource(
-            sinopac_config, clock, factory=sinopac_factory
+        return fugle.FugleSource(
+            fugle_api_key,
+            venue_http(
+                venue,
+                fugle.REST_URL,
+                name="fugle",
+                limiter=shared_fugle_limiter(),
+            ),
+            clock,
         )
-        source.check_sdk()
-        return source
 
     adapters: dict[instruments.Venue, ports.MarketDataPort] = {}
     for venue in venues:
         if venue is instruments.Venue.MOCK:
             adapters[venue] = mock.MockAdapter(clock)
+        elif venue in ccxt.EXCHANGES and crypto_source == "ccxt":
+            adapters[venue] = ccxt.CcxtAdapter(venue, clock)
         elif venue is instruments.Venue.BINANCE:
             adapters[venue] = binance.BinanceAdapter(
                 venue_http(venue, binance.REST_URL),
@@ -255,7 +275,7 @@ def build_adapters(
                 ),
                 clock,
                 EXCHANGE_VERIFIED_AT_MS,
-                sinopac=shared_sinopac(),
+                fugle=fugle_source(venue),
                 bar_archive=bar_archive,
             )
         elif venue is instruments.Venue.TPEX:
@@ -271,7 +291,7 @@ def build_adapters(
                 ),
                 clock,
                 TPEX_VERIFIED_AT_MS,
-                sinopac=shared_sinopac(),
+                fugle=fugle_source(venue),
                 bar_archive=bar_archive,
             )
         elif venue in alpaca.VENUES:
@@ -279,9 +299,17 @@ def build_adapters(
                 venue, shared_alpaca(), clock
             )
         elif venue is instruments.Venue.TREASURY:
+            fred_source = None
+            if fred_api_key:
+                fred_source = fred.FredSource(
+                    fred_api_key,
+                    venue_http(venue, fred.REST_URL, _FRED_RATE, "fred"),
+                    clock,
+                )
             adapters[venue] = treasury.TreasuryAdapter(
                 venue_http(venue, treasury.REST_URL),
                 clock,
                 EXCHANGE_VERIFIED_AT_MS,
+                fred=fred_source,
             )
     return adapters

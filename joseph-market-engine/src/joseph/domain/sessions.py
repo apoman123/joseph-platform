@@ -1053,6 +1053,42 @@ _BY_ID: dict[CalendarId, BarCalendar] = {
 }
 
 
+def lookback_start(
+    calendar: BarCalendar,
+    timeframe: Timeframe,
+    end_ms: int,
+    limit: int,
+) -> int:
+    """Bounds an inferred history lookback to the exchange calendar.
+
+    Args:
+        calendar: Instrument calendar, including its coverage boundary.
+        timeframe: Requested bar resolution.
+        end_ms: Exclusive range end in UTC epoch milliseconds.
+        limit: Positive maximum number of bars to request.
+
+    Returns:
+        Inclusive UTC bar start, clamped to the first supported exchange
+        session when fewer than limit bars exist in the calendar.
+
+    Raises:
+        ValueError: If end_ms precedes the calendar, the limit is not
+            positive, or a continuous calendar cannot represent the range.
+    """
+    if limit <= 0:
+        raise ValueError("lookback limit must be positive")
+    last_start = calendar.floor(timeframe, end_ms - 1)
+    try:
+        return calendar.shift(timeframe, last_start, -(limit - 1))
+    except ValueError:
+        if not isinstance(calendar, ExchangeCalendar):
+            raise
+        first = datetime.datetime.combine(
+            calendar.first_day, calendar.open_time, tzinfo=calendar.tz
+        )
+        return calendar.ceil(timeframe, int(first.timestamp() * 1000))
+
+
 def get(calendar_id: CalendarId | str) -> BarCalendar:
     """Returns a calendar by id.
 

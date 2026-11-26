@@ -7,7 +7,7 @@ For operators: starting Joseph, settings, monitoring, maintenance, incidents and
 | Service | Port | Secrets |
 |---|---|---|
 | `joseph-terminal` | 3000 | session token only (layouts stay in the browser) |
-| `joseph-market-engine` | 8000 | notification tokens, Alpaca and SinoPac data keys |
+| `joseph-market-engine` | 8000 | notification tokens, Alpaca, Fugle and optional FRED data keys |
 | `joseph-execution-engine` | 8100 | encrypted venue credentials, vault key, broker secrets |
 
 Engines store state in SQLite (`./var/*.db`) or PostgreSQL (`postgresql+psycopg://…`, install `psycopg`). Run one execution worker per database until row leases exist.
@@ -33,7 +33,7 @@ The market engine always loads its nine built-in indicators: SMA, EMA, VWAP, reg
 
 ### Local
 
-`make setup && make dev`: market :8000, execution :8100 (paper, LIVE off), terminal :3000, dev tokens.
+`make setup && make dev`: market :8000, execution :8100 (paper, LIVE off), terminal :3000, dev tokens. Market-data sources and trading adapters are selected separately; see [market data scope](MARKET_DATA_SCOPE.md).
 
 ### Containers
 
@@ -41,7 +41,7 @@ The market engine always loads its nine built-in indicators: SMA, EMA, VWAP, reg
 2. Put secret files in `deploy/secrets/`, mounted at `/run/joseph-secrets` for the `*_FILE` variables.
 3. Run `make compose-up`.
 
-CI deploys the same `deploy/docker-compose.yml` ([CI/CD](CI_CD.md#servers)). It enables every venue, turns the global LIVE gate on and passes the [settings](#settings) not marked †; add others to its `environment:`. Compose-only: `JOSEPH_{MARKET,EXECUTION}_DATABASE_URL`, build args `MARKET_UV_EXTRAS=--extra sinopac` (SinoPac data), `EXECUTION_UV_EXTRAS="--extra ibkr --extra sinopac"` (broker SDKs), `MARKET_PLUGIN_REQUIREMENTS` and `MARKET_IMAGE_LICENSES` with the build secret `PLUGIN_GIT_TOKEN` ([plugins](#indicator-plugins)), `PUBLIC_*` terminal URLs, image and port variables, and `IBKR_*` ([BROKERS](BROKERS.md#interactive-brokers)).
+CI deploys the same `deploy/docker-compose.yml` ([CI/CD](CI_CD.md#servers)). It enables every venue, turns the global LIVE gate on and passes the [settings](#settings) not marked †; add others to its `environment:`. Compose-only: `JOSEPH_{MARKET,EXECUTION}_DATABASE_URL`, build args `EXECUTION_UV_EXTRAS="--extra ibkr --extra sinopac"` (broker SDKs), `MARKET_PLUGIN_REQUIREMENTS` and `MARKET_IMAGE_LICENSES` with the build secret `PLUGIN_GIT_TOKEN` ([plugins](#indicator-plugins)), `PUBLIC_*` terminal URLs, image and port variables, and `IBKR_*` ([BROKERS](BROKERS.md#interactive-brokers)).
 
 ### Production checklist
 
@@ -53,8 +53,8 @@ CI deploys the same `deploy/docker-compose.yml` ([CI/CD](CI_CD.md#servers)). It 
 
 Crypto, TWSE/TPEx official data and Treasury yields need no keys.
 
-- **US stocks and ETFs:** a free Alpaca market-data key (`JOSEPH_ALPACA_KEY_ID`, `JOSEPH_ALPACA_SECRET_KEY`); without it US data calls fail with "configure Alpaca keys". `JOSEPH_ALPACA_FEED`: `iex` (default; free, real time, IEX volume only), `delayed_sip` (free, all volume, ≥15 min late) or `sip` (paid). Only consolidated feeds carry the closing print.
-- **Taiwan, optional SinoPac Shioaji data:** `JOSEPH_TW_DATA_SOURCE=sinopac`, `JOSEPH_SINOPAC_API_KEY_FILE`, `JOSEPH_SINOPAC_SECRET_KEY_FILE` (no CA; the trading key files work) and `MARKET_UV_EXTRAS=--extra sinopac`. Test outside trading hours: `JOSEPH_SINOPAC_DATA_TESTS=1 uv run --extra sinopac pytest tests/network/test_live_sinopac.py -m sinopac_data` (in `joseph-market-engine/`).
+- **US stocks and ETFs:** a free Alpaca market-data key (`JOSEPH_ALPACA_KEY_ID`, `JOSEPH_ALPACA_SECRET_KEY`); without it US data calls fail with "configure Alpaca keys". Only the free `iex` feed is selectable. It covers IEX trades, not consolidated volume or the official closing print.
+- **Taiwan stocks and ETFs:** official TWSE/TPEx data is the default and only selectable market-data source. SinoPac's trading adapter remains available in the execution engine.
 
 ## Settings
 
@@ -73,7 +73,7 @@ Crypto, TWSE/TPEx official data and Treasury yields need no keys.
 
 | Variable | Default | Notes |
 |---|---|---|
-| `JOSEPH_ENABLED_VENUES` | `binance,hyperliquid,lighter,bitget,mexc,twse,tpex,nasdaq,nyse,cboe,treasury,mock` | Disabled venues return `NOT_FOUND` |
+| `JOSEPH_ENABLED_VENUES` | `binance,hyperliquid,lighter,bitget,mexc,twse,tpex,nasdaq,nyse,cboe,treasury` | Disabled venues return `NOT_FOUND`; `mock` is used only in DEMO mode |
 | `JOSEPH_DEMO_ONLY` | `false` | Only `mock` |
 | `JOSEPH_EXECUTION_URL` | `http://localhost:8100` | Signal forwarding; compose: `http://execution:8100` |
 | `JOSEPH_REPLAY_DIR`† | unset | JSONL candles for the replay adapter |
@@ -88,13 +88,11 @@ Crypto, TWSE/TPEx official data and Treasury yields need no keys.
 | `JOSEPH_FORWARD_SIGNALS`†, `JOSEPH_ALERT_INTERVAL_S`† | `true`, `2` (≥0.5) | Forward PAPER/SHADOW/AUTO_LIVE entries; alert outbox pass |
 | `JOSEPH_TELEGRAM_BOT_TOKEN`, `JOSEPH_LINE_CHANNEL_TOKEN`, `JOSEPH_WEBHOOK_SECRET`, `JOSEPH_SMTP_HOST`, `_PORT`† (`587`), `_FROM`, `_USERNAME`, `_PASSWORD` | unset | Notification channels |
 | `JOSEPH_ALPACA_KEY_ID`, `JOSEPH_ALPACA_SECRET_KEY` | unset | [US data](#market-data-setup) |
-| `JOSEPH_ALPACA_FEED` | `iex` | `iex`, `delayed_sip` or `sip`; closing prints cost ≤20 requests per fetch, ≤60/min |
+| `JOSEPH_ALPACA_FEED` | `iex` | Free IEX only |
 | `JOSEPH_ALPACA_SECONDS_HISTORY_MS`† | `1800000` | US seconds-bar history |
-| `JOSEPH_TW_DATA_SOURCE` | `twse` | `sinopac`: Shioaji data with official fallback |
-| `JOSEPH_SINOPAC_API_KEY[_FILE]`, `JOSEPH_SINOPAC_SECRET_KEY[_FILE]` | unset | Shioaji data login (no CA); compose: `_FILE` only |
-| `JOSEPH_SINOPAC_MAX_SYMBOLS`† | `60` (1–100) | Codes streamed at once (2 of 200 subscriptions each) |
-| `JOSEPH_SINOPAC_INTRADAY_TICKS_CALLS`†, `_INTRADAY_KBARS_CALLS`† | `8` (≤10), `200` (≤270) | Daily trading-hours query budget |
-| `JOSEPH_SINOPAC_SECONDS_HISTORY_DAYS`† | `5` (≤30) | Sessions of tick history |
+| `JOSEPH_TW_DATA_SOURCE` | `twse` | `twse` official data or `fugle` free-tier per-symbol Taiwan data; SinoPac trading is configured separately |
+| `JOSEPH_FUGLE_API_KEY[_FILE]` | unset | Required for `JOSEPH_TW_DATA_SOURCE=fugle`; the free plan is limited to Taiwan stocks/ETFs, 60 REST calls/minute and 5 WebSocket subscriptions (this adapter polls REST) |
+| `JOSEPH_FRED_API_KEY[_FILE]` | unset | Enables separate daily `treasury:rate:FRED_*` series; official Treasury daily yields need no key |
 | `JOSEPH_TRADE_RECORDING`, `JOSEPH_TRADE_BAR_RETENTION_DAYS` | `true`, `30` (≥1) | Record public trades; retention |
 | `JOSEPH_TRADE_RECORD_INSTRUMENTS`†, `_MAX_INSTRUMENTS`† | none, `16` | Always recorded; concurrent cap |
 | `JOSEPH_TRADE_BACKFILL_MAX_CALLS`† | `20` | REST calls per backfill |
@@ -135,7 +133,6 @@ Crypto, TWSE/TPEx official data and Treasury yields need no keys.
 
 - `GET /health` on each engine; `GET /metrics` (Prometheus; execution needs the service token). Watch `joseph_feed_lag_ms`, `joseph_feed_reconnects`, `joseph_candle_revisions_total`, `joseph_http_requests_total{status=5xx}`, `joseph_order_unknown_total`, `joseph_risk_block_total`, `joseph_reconcile_lag_ms`.
 - The terminal's *Data health* tab shows per-venue transport, lag, reconnects and gaps. Unrecorded time is a gap, never invented bars; data sources per venue are in the [market engine README](../joseph-market-engine/README.md#venues).
-- SinoPac data failures (quota, outage, login) fall back to official data and show `POLL` / `DEGRADED` with the reason.
 
 ## Routine tasks
 

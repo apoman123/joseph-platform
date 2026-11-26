@@ -17,12 +17,29 @@ from fastapi import testclient
 
 from joseph import bootstrap
 from joseph.domain import clock as clock_lib
+from joseph.domain import instruments
+from joseph.market_data.adapters import factory
+from joseph.market_data.app import ports
 from joseph.platform import config
 
 _CAPTURE_MS = 1_795_277_530_000
 """Capture time of the venue fixtures; clocks start here so data is fresh."""
 _TOKEN = "it-token-tenant-01"
 _TOKEN_B = "it-token-tenant-02"
+
+
+def _legacy_venues(
+    settings: config.Settings,
+) -> tuple[instruments.Venue, ...]:
+    """Returns every old venue for captured-fixture tests.
+
+    Args:
+        settings: Test settings.
+
+    Returns:
+        Configured venues, including removed data-feed variants.
+    """
+    return settings.enabled_venues
 
 
 def _settings(**overrides: Any) -> config.Settings:
@@ -86,24 +103,48 @@ def demo_client(
 def venue_client(
     crypto_routes: Callable[[respx.Router], None],
     exchange_routes: Callable[[respx.Router], None],
+    monkeypatch: pytest.MonkeyPatch,
 ) -> Iterator[tuple[testclient.TestClient, respx.Router]]:
-    """Serves an app with every venue backed by captured fixtures.
+    """Serves legacy native adapters against captured exchange fixtures.
 
     Args:
         crypto_routes: Installer of the crypto venue routes.
         exchange_routes: Installer of the exchange and rate venue routes.
+        monkeypatch: Scoped patch helper for the legacy test fixture.
 
     Yields:
         Test client and the respx router (to inject failures).
     """
+    original_build = factory.build_adapters
+
+    def legacy_build(
+        *args: Any, **kwargs: Any
+    ) -> dict[instruments.Venue, ports.MarketDataPort]:
+        """Builds native adapters for the captured-fixture test only.
+
+        Args:
+            *args: Positional adapter factory arguments.
+            **kwargs: Keyword adapter factory arguments.
+
+        Returns:
+            Legacy venue adapters for existing fixture coverage.
+        """
+        kwargs["crypto_source"] = "native"
+        return original_build(*args, **kwargs)
+
     with respx.mock(assert_all_called=False) as router:
         crypto_routes(router)
         exchange_routes(router)
-        container = bootstrap.build_container(
-            _settings(demo_only=False),
-            clock=clock_lib.ManualClock(_CAPTURE_MS),
-            http_client=httpx.AsyncClient(),
-        )
+        with monkeypatch.context() as patcher:
+            patcher.setattr(
+                config.Settings, "active_venues", property(_legacy_venues)
+            )
+            patcher.setattr(factory, "build_adapters", legacy_build)
+            container = bootstrap.build_container(
+                _settings(demo_only=False),
+                clock=clock_lib.ManualClock(_CAPTURE_MS),
+                http_client=httpx.AsyncClient(),
+            )
         app = bootstrap.create_application(container)
         with testclient.TestClient(app) as client:
             yield client, router

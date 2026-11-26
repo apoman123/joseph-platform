@@ -67,6 +67,9 @@ _KLINE_TF = tuple(
     if tf
     not in (
         timeframes.Timeframe.H6,
+        timeframes.Timeframe.M10,
+        timeframes.Timeframe.M45,
+        timeframes.Timeframe.H8,
         timeframes.Timeframe.W1,
         timeframes.Timeframe.MN1,
     )

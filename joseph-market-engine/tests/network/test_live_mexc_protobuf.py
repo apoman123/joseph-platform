@@ -121,6 +121,7 @@ async def test_live_adapter_streams_in_each_format(
     adapter = factory.build_adapters(
         [instruments.Venue.MEXC],
         clock,
+        crypto_source="native",
         client=httpx.AsyncClient(timeout=20),
         mexc_ws_format=ws_format,
     )[instruments.Venue.MEXC]

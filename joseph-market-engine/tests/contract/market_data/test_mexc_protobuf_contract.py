@@ -179,6 +179,7 @@ def _adapter(
     return factory.build_adapters(
         [instruments.Venue.MEXC],
         clock,
+        crypto_source="native",
         client=httpx.AsyncClient(),
         connect=connector,
         mexc_ws_format=ws_format,

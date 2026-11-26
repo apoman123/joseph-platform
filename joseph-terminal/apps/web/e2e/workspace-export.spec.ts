@@ -52,9 +52,11 @@ test('exports drawings with the workspace and imports them back', async ({
   page,
 }) => {
   await openTerminal(page);
-  await page.getByTestId('tool-trendline').click();
+  await page.getByTestId('tool-group-lines').click();
+  await page.getByTestId('tool-option-trendline').click();
   await dragOnChart(page, [0.3, 0.6], [0.6, 0.35]);
-  await page.getByTestId('tool-rectangle').click();
+  await page.getByTestId('tool-group-shapes').click();
+  await page.getByTestId('tool-option-rectangle').click();
   await dragOnChart(page, [0.65, 0.3], [0.8, 0.45]);
   await expect.poll(() => savedTools(page)).toEqual(['trendline', 'rectangle']);
 

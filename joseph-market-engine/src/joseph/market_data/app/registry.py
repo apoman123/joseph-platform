@@ -47,6 +47,57 @@ class InstrumentRegistry:
         """
         self._adapters = dict(adapters)
         self.errors: dict[instruments.Venue, str] = {}
+        self._loads: dict[
+            instruments.Venue, asyncio.Task[list[instruments.Instrument]]
+        ] = {}
+        self._warmup: asyncio.Task[list[instruments.Instrument]] | None = None
+
+    def start_warmup(self) -> None:
+        """Starts provider metadata loading in the background.
+
+        Returns:
+            None; stores the background task for shutdown and shared requests.
+        """
+        if self._warmup is None:
+            self._warmup = asyncio.create_task(self.all_instruments())
+
+    async def close(self) -> None:
+        """Cancels outstanding metadata requests before adapters close.
+
+        Returns:
+            None; awaits cancellation of warmup and provider tasks.
+        """
+        tasks = [*self._loads.values()]
+        if self._warmup is not None:
+            tasks.append(self._warmup)
+        for task in tasks:
+            task.cancel()
+        await asyncio.gather(*tasks, return_exceptions=True)
+        self._loads.clear()
+
+    async def _load(
+        self, venue: instruments.Venue
+    ) -> list[instruments.Instrument]:
+        """Shares an in-progress metadata download between simultaneous callers.
+
+        Args:
+            venue: Enabled provider venue.
+
+        Returns:
+            Loaded instruments from the adapter's metadata cache.
+
+        Raises:
+            domain_errors.JosephError: If the provider request fails.
+        """
+        task = self._loads.get(venue)
+        if task is None:
+            task = asyncio.create_task(self._adapters[venue].list_instruments())
+            self._loads[venue] = task
+        try:
+            return await asyncio.shield(task)
+        finally:
+            if task.done() and self._loads.get(venue) is task:
+                del self._loads[venue]
 
     @property
     def venues(self) -> tuple[instruments.Venue, ...]:
@@ -79,7 +130,7 @@ class InstrumentRegistry:
                     f"venue {target.value} is not enabled"
                 )
         results = await asyncio.gather(
-            *(self._adapters[t].list_instruments() for t in targets),
+            *(self._load(t) for t in targets),
             return_exceptions=True,
         )
         rows: list[instruments.Instrument] = []

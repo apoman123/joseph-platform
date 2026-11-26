@@ -278,3 +278,39 @@ async def test_concurrent_queries_are_consistent() -> None:
         )
     )
     assert len({tuple(b.candles) for b in batches}) == 1
+
+
+async def test_registry_warmup_shares_inflight_metadata(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Opening the selector during warmup shares one provider request.
+
+    Args:
+        monkeypatch: Scoped patch helper for the delayed listing request.
+    """
+    adapter = mock.MockAdapter(clock_lib.ManualClock(_NOW))
+    entered = asyncio.Event()
+    release = asyncio.Event()
+    calls: list[bool] = []
+
+    async def listing() -> list[instruments.Instrument]:
+        """Waits for a deterministic metadata response.
+
+        Returns:
+            An empty fixture listing.
+        """
+        calls.append(True)
+        entered.set()
+        await release.wait()
+        return []
+
+    monkeypatch.setattr(adapter, "list_instruments", listing)
+    catalog = registry.InstrumentRegistry({instruments.Venue.MOCK: adapter})
+    catalog.start_warmup()
+    await entered.wait()
+    search = asyncio.create_task(catalog.search("BTC"))
+    await asyncio.sleep(0)
+    release.set()
+    assert await search == []
+    assert len(calls) == 1
+    await catalog.close()

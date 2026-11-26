@@ -13,6 +13,7 @@
  */
 
 import {
+  type Candle,
   EXCHANGE_HOURS,
   type Instrument,
   instrumentCalendarId,
@@ -151,7 +152,7 @@ export function marketInfoFeature(): WebFeature {
         });
         useEffect(() => {
           let alive = true;
-          const {venue, venueMarketId} = parseInstrumentId(
+          const {venue, venueMarketId, marketType} = parseInstrumentId(
             selection.instrumentId
           );
           setData({snapshot: null, instrument: null, error: null});
@@ -173,7 +174,12 @@ export function marketInfoFeature(): WebFeature {
               .getSnapshot(selection.instrumentId)
               .then(
                 snapshot =>
-                  alive && void setData(d => ({...d, snapshot, error: null}))
+                  alive &&
+                  void setData(d =>
+                    d.snapshot && snapshot.as_of_ms < d.snapshot.as_of_ms
+                      ? d
+                      : {...d, snapshot, error: null}
+                  )
               )
               .catch(
                 (error: unknown) =>
@@ -185,10 +191,50 @@ export function marketInfoFeature(): WebFeature {
                   }))
               );
           void load();
+          const unsubscribe =
+            marketType === 'rate'
+              ? () => undefined
+              : ctx.clients.marketStream.subscribe(
+                  [
+                    {
+                      channel: 'candles',
+                      instrument_id: selection.instrumentId,
+                      timeframe: '1m',
+                      feed_mode: 'AUTO',
+                    },
+                  ],
+                  envelope => {
+                    if (!alive || envelope.type !== 'candle.updated') return;
+                    const candle = envelope.payload as unknown as Candle;
+                    if (candle.instrument_id !== selection.instrumentId) return;
+                    setData(current => {
+                      const snapshot = current.snapshot;
+                      if (
+                        !snapshot ||
+                        candle.received_at_ms < snapshot.as_of_ms
+                      ) {
+                        return current;
+                      }
+                      return {
+                        ...current,
+                        snapshot: {
+                          ...snapshot,
+                          last: candle.close,
+                          as_of_ms: candle.received_at_ms,
+                          feed_state: candle.feed_state,
+                          source: candle.source,
+                          data_age_ms: 0,
+                          stale: false,
+                        },
+                      };
+                    });
+                  }
+                );
           const timer = setInterval(() => void load(), REFRESH_MS);
           return () => {
             alive = false;
             clearInterval(timer);
+            unsubscribe();
           };
         }, [selection.instrumentId]);
         const {snapshot, instrument, error} = data;

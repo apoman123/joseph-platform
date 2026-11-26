@@ -29,7 +29,9 @@ bounds inclusive, at most 1000 per page with ``idLessThan`` paging, windows
 of at most 7 days within the last 90 days; ``size`` is in base coin. A
 request whose ``startTime`` and ``endTime`` fall in the same second returns
 no rows at all (verified 2026-11-23), so short windows are widened before
-clipping.
+clipping. ``endTime`` is rounded down to a second by the venue; it must
+round up the exclusive range end to avoid losing that second's trades
+(verified 2026-11-26).
 """
 
 from __future__ import annotations
@@ -770,15 +772,18 @@ class BitgetAdapter(base.BaseVenueAdapter):
         oldest = self._clock.now_ms() - _FILLS_HISTORY_MS
         if end_ms <= oldest:
             return trades_lib.TradeCoverage((), end_ms, end_ms)
-        start = max(start_ms, oldest, end_ms - _FILLS_WINDOW_MS)
+        # The venue truncates endTime to seconds. Sending end_ms - 1 drops
+        # the entire final second; round up and clip the extra rows below.
+        request_end = -(-end_ms // 1000) * 1000
+        start = max(start_ms, oldest, request_end - _FILLS_WINDOW_MS)
         params: dict[str, Any] = {
             "symbol": instrument.venue_market_id,
             "productType": PRODUCT,
             # Bounds inside one second return nothing at all (verified
             # 2026-11-23), so short windows are widened to two seconds and
             # clipped back to [start, end) by the coverage below.
-            "startTime": min(start, end_ms - _MIN_FILLS_WINDOW_MS),
-            "endTime": end_ms - 1,
+            "startTime": min(start, request_end - _MIN_FILLS_WINDOW_MS),
+            "endTime": request_end,
             "limit": _MAX_FILLS,
         }
         collected: list[market.Trade] = []

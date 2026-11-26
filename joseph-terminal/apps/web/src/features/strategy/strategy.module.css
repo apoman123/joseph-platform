@@ -56,7 +56,19 @@
 .row2 {
   display: grid;
   gap: var(--space-2);
-  grid-template-columns: 1fr 1fr;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+}
+
+.row2 > * {
+  min-width: 0;
+}
+
+.row2 :global(.j-segmented) {
+  width: 100%;
+}
+
+.row2 :global(.j-segmented) > button {
+  flex: 1;
 }
 
 .checks {

@@ -54,6 +54,7 @@ from joseph.domain import quality
 from joseph.domain import sessions
 from joseph.domain import timeframes
 from joseph.market_data.adapters import base
+from joseph.market_data.adapters import fred as fred_lib
 from joseph.market_data.adapters import http
 from joseph.market_data.domain import capabilities
 from joseph.market_data.domain import session_bars
@@ -375,6 +376,8 @@ class TreasuryAdapter(base.BaseVenueAdapter):
         http_client: http.VenueHttp,
         clock: clock_lib.Clock,
         verified_at_ms: int | None = None,
+        *,
+        fred: fred_lib.FredSource | None = None,
     ) -> None:
         """Initializes the adapter.
 
@@ -382,9 +385,11 @@ class TreasuryAdapter(base.BaseVenueAdapter):
             http_client: HTTP client for ``REST_URL``.
             clock: Time source.
             verified_at_ms: When capabilities were last verified live.
+            fred: Optional FRED daily-observation source.
         """
         super().__init__(http_client, clock)
         self._verified_at_ms = verified_at_ms
+        self._fred = fred
         self._years: dict[tuple[str, int], _Year] = {}
         self._year_locks: dict[tuple[str, int], asyncio.Lock] = {}
 
@@ -394,7 +399,7 @@ class TreasuryAdapter(base.BaseVenueAdapter):
         Returns:
             Capabilities.
         """
-        return capabilities.VenueCapabilities(
+        caps = capabilities.VenueCapabilities(
             venue=self.VENUE,
             display_name="US Treasury yield curves",
             market_types=(instruments.MarketType.RATE,),
@@ -433,6 +438,17 @@ class TreasuryAdapter(base.BaseVenueAdapter):
             docs_url=DOCS_URL,
             verified_at_ms=self._verified_at_ms,
         )
+        if self._fred is None:
+            return caps
+        return dataclasses.replace(
+            caps,
+            notes=(
+                *caps.notes,
+                "FRED_DGS*, FRED_T10Y*, FRED_DFII10 and FRED_T10YIE are "
+                "separate daily observations from the free FRED API. "
+                "They do not provide real-time or intraday yields.",
+            ),
+        )
 
     def instrument_id(self, venue_market_id: str) -> instruments.InstrumentId:
         """Builds the canonical id of a series.
@@ -456,7 +472,10 @@ class TreasuryAdapter(base.BaseVenueAdapter):
             Instruments and empty metadata.
         """
         now = self._clock.now_ms()
-        return [parse_instrument(tenor, now) for tenor in TENORS], {}
+        listed = [parse_instrument(tenor, now) for tenor in TENORS]
+        if self._fred is not None:
+            listed.extend(self._fred.list_instruments())
+        return listed, {}
 
     def _stale(self, curve: str, year: int, entry: _Year, now_ms: int) -> bool:
         """Decides whether a cached year must be re-read.
@@ -616,6 +635,10 @@ class TreasuryAdapter(base.BaseVenueAdapter):
             errors.NotFoundError: For an unknown series.
         """
         self._require_timeframe(timeframe)
+        if self._fred is not None and fred_lib.series_id(instrument):
+            return await self._fred.fetch_candles(
+                instrument, timeframe, start_ms, end_ms, limit
+            )
         tenor = self._tenor(instrument)
         if end_ms <= start_ms:
             return []
@@ -687,6 +710,8 @@ class TreasuryAdapter(base.BaseVenueAdapter):
             errors.MissingDataError: Without a value published in the last
                 two years.
         """
+        if self._fred is not None and fred_lib.series_id(instrument):
+            return await self._fred.fetch_snapshot(instrument)
         tenor = self._tenor(instrument)
         bar = await self._latest(tenor)
         if bar is None:
@@ -704,7 +729,27 @@ class TreasuryAdapter(base.BaseVenueAdapter):
             bar = await self._latest(tenor)
             if bar is not None:
                 rows.append(self._snapshot(tenor, bar))
+        if self._fred is not None:
+            for instrument in self._fred.list_instruments():
+                try:
+                    rows.append(
+                        await self._fred.fetch_snapshot(
+                            instrument.key.instrument_id
+                        )
+                    )
+                except errors.MissingDataError:
+                    continue
         return rows
+
+    async def close(self) -> None:
+        """Closes Treasury and optional FRED HTTP clients.
+
+        Returns:
+            None after both clients close.
+        """
+        if self._fred is not None:
+            await self._fred.close()
+        await super().close()
 
     async def fetch_order_book(  # noqa: DOC201 - always raises UnsupportedError; never returns
         self, instrument: instruments.InstrumentId, depth: int

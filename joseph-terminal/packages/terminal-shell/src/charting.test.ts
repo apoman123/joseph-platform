@@ -349,7 +349,7 @@ describe('custom timeframe input', () => {
   });
 
   it.each([
-    ['10m', /not offered/],
+    ['7m', /not offered/],
     ['45s', /not offered/],
     ['2M', /not offered/],
     ['', /Type a resolution/],

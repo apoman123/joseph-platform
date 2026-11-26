@@ -43,7 +43,7 @@ export function paneToggleTestId(pluginId: string, paneId: string): string {
  * @param props Chart and plugin descriptor.
  * @return Row element.
  */
-function PluginRow({
+export function PluginRow({
   chart,
   info,
 }: {
@@ -119,10 +119,16 @@ function PluginRow({
 
 /**
  * Renders the Layers menu body for a chart.
- * @param props Chart whose layers are edited.
+ * @param props Chart whose layers are edited; showPlugins hides catalogue rows when false.
  * @return Menu element.
  */
-export function LayersMenu({chart}: {chart: ChartState}): ReactElement {
+export function LayersMenu({
+  chart,
+  showPlugins = true,
+}: {
+  chart: ChartState;
+  showPlugins?: boolean;
+}): ReactElement {
   const runtime = useRuntime();
   const plugins = useIndicatorPlugins();
   const dataWindow = useStore(runtime.dataWindow);
@@ -131,18 +137,21 @@ export function LayersMenu({chart}: {chart: ChartState}): ReactElement {
     void runtime.commands.execute(id).catch(() => undefined);
   return (
     <div className="layers-menu">
-      <p className="layers-menu__note">
-        Indicators are computed by the Joseph engine and drawn as reported.
-      </p>
-      {plugins === null ? (
-        <p className="layers-menu__note" role="status">
-          Loading indicators…
+      {showPlugins && (
+        <p className="layers-menu__note">
+          Indicators are computed by the Joseph engine and drawn as reported.
         </p>
-      ) : (
-        layerPlugins(plugins).map(info => (
-          <PluginRow key={info.plugin_id} chart={chart} info={info} />
-        ))
       )}
+      {showPlugins &&
+        (plugins === null ? (
+          <p className="layers-menu__note" role="status">
+            Loading indicators…
+          </p>
+        ) : (
+          layerPlugins(plugins).map(info => (
+            <PluginRow key={info.plugin_id} chart={chart} info={info} />
+          ))
+        ))}
       <div className="j-menu__sep" />
       <label className="j-check layers-menu__item">
         <input

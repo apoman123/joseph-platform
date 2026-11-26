@@ -108,7 +108,7 @@ export function indicatorsFeature(runtime: TerminalRuntime): WebFeature {
   return {
     manifest: shellManifest(
       'indicators',
-      'Indicator layers',
+      'Indicators',
       'Renders backend-computed indicator zones, levels and events. Never computes signals in the browser.',
       {
         uiSlots: ['chart-overlay'],

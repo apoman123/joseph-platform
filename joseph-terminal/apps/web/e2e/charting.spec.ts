@@ -12,7 +12,7 @@
  * templates, alert triage and resizable docks.
  */
 
-import {expect, test, type Page} from '@playwright/test';
+import {expect, test, type Locator, type Page} from '@playwright/test';
 import {openPanel} from './trading-helpers';
 import {
   BTC_DRAWINGS_KEY,
@@ -36,14 +36,12 @@ async function canvasCount(page: Page): Promise<number> {
 }
 
 /**
- * Opens the Layers menu and waits for its dialog.
+ * Opens the Indicators menu and waits for its dialog.
  * @param page Page.
  */
 async function openLayers(page: Page): Promise<void> {
   await page.getByTestId('indicators-menu').click();
-  await expect(
-    page.getByRole('dialog', {name: 'Indicator layers'})
-  ).toBeVisible();
+  await expect(page.getByRole('dialog', {name: 'Indicators'})).toBeVisible();
 }
 
 test('shows volume, Delta % and study panes and the data window', async ({
@@ -79,6 +77,42 @@ test('shows volume, Delta % and study panes and the data window', async ({
   // Let the canvases repaint before the screenshot.
   await page.waitForTimeout(400);
   await page.screenshot({path: `${SHOTS}/12-panes-studies-data-window.png`});
+});
+
+test('zooms prices when scrolling over the right price scale', async ({
+  page,
+}) => {
+  await openTerminal(page);
+  const chart = firstCanvas(page);
+  const chartBox = await chart.boundingBox();
+  if (!chartBox) throw new Error('chart is not visible');
+  let axis: Locator | null = null;
+  const canvases = chart.locator('canvas');
+  for (let index = 0; index < (await canvases.count()); index += 1) {
+    const candidate = canvases.nth(index);
+    const box = await candidate.boundingBox();
+    if (
+      box &&
+      box.width < 150 &&
+      box.height > 100 &&
+      box.x + box.width >= chartBox.x + chartBox.width - 2
+    ) {
+      axis = candidate;
+      break;
+    }
+  }
+  if (!axis) throw new Error('right price scale canvas is not visible');
+  const axisBox = await axis.boundingBox();
+  if (!axisBox) throw new Error('right price scale canvas has no bounds');
+  await page.mouse.move(
+    axisBox.x + axisBox.width / 2,
+    axisBox.y + axisBox.height / 2
+  );
+  const before = await axis.screenshot();
+  await page.mouse.wheel(0, -400);
+  await expect
+    .poll(async () => (await axis.screenshot()).equals(before))
+    .toBe(false);
 });
 
 test('edits indicator inputs, kinds and the pane from the settings dialog', async ({

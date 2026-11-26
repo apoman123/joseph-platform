@@ -2163,12 +2163,15 @@
           "1m",
           "3m",
           "5m",
+          "10m",
           "15m",
           "30m",
+          "45m",
           "1h",
           "2h",
           "4h",
           "6h",
+          "8h",
           "12h",
           "1d",
           "1w",
@@ -2579,7 +2582,7 @@
     },
     "/v1/aois": {
       "get": {
-        "description": "Returns areas of interest (AOIs) and recent events.\n\nArgs:\n    instrument_id: Canonical instrument id.\n    tf: Timeframe value, such as ``1h``.\n    plugin_set: Query ``set``: comma-separated plugin ids; all\n        usable plugins when absent.\n    at_ms: Point in time, UTC epoch milliseconds; the latest closed\n        bar when absent.\n    settings: JSON object mapping plugin ids to setting overrides.\n\nReturns:\n    Contract ``AoiList``.\n\nRaises:\n    errors.ValidationFailedError: If a parameter or a setting\n        override is invalid (422).\n    errors.MissingDataError: If no closed candle is available (422).",
+        "description": "Returns areas of interest (AOIs) and recent events.\n\nArgs:\n    instrument_id: Canonical instrument id.\n    tf: Timeframe value, such as ``1h``.\n    plugin_set: Query ``set``: comma-separated plugin ids; all\n        plugins compatible with this chart and their default\n        settings when absent.\n    at_ms: Point in time, UTC epoch milliseconds; the latest closed\n        bar when absent.\n    settings: JSON object mapping plugin ids to setting overrides.\n\nReturns:\n    Contract ``AoiList``.\n\nRaises:\n    errors.ValidationFailedError: If a parameter or a setting\n        override is invalid (422).\n    errors.MissingDataError: If no closed candle is available (422).",
         "operationId": "get_aois_v1_aois_get",
         "parameters": [
           {
@@ -2985,7 +2988,7 @@
     },
     "/v1/indicators/snapshot": {
       "get": {
-        "description": "Returns indicator snapshots as of a point in time.\n\nArgs:\n    instrument_id: Canonical instrument id.\n    tf: Timeframe value, such as ``1h``.\n    plugin_set: Query ``set``: comma-separated plugin ids; all\n        usable plugins when absent.\n    at_ms: Point in time, UTC epoch milliseconds; the latest closed\n        bar when absent.\n    settings: JSON object mapping plugin ids to setting overrides.\n\nReturns:\n    Contract ``IndicatorSnapshotList``.\n\nRaises:\n    errors.ValidationFailedError: If a parameter or a setting\n        override is invalid (422).\n    errors.MissingDataError: If no closed candle is available (422).",
+        "description": "Returns indicator snapshots as of a point in time.\n\nArgs:\n    instrument_id: Canonical instrument id.\n    tf: Timeframe value, such as ``1h``.\n    plugin_set: Query ``set``: comma-separated plugin ids; all\n        plugins compatible with this chart and their default\n        settings when absent.\n    at_ms: Point in time, UTC epoch milliseconds; the latest closed\n        bar when absent.\n    settings: JSON object mapping plugin ids to setting overrides.\n\nReturns:\n    Contract ``IndicatorSnapshotList``.\n\nRaises:\n    errors.ValidationFailedError: If a parameter or a setting\n        override is invalid (422).\n    errors.MissingDataError: If no closed candle is available (422).",
         "operationId": "get_snapshots_v1_indicators_snapshot_get",
         "parameters": [
           {

@@ -206,6 +206,7 @@ async def test_recorded_taker_volume_follows_the_venue_side_field(
     adapter = factory.build_adapters(
         [venue],
         clock,
+        crypto_source="native",
         client=httpx.AsyncClient(),
         connect=_connect(frames),
     )[venue]
@@ -262,7 +263,7 @@ async def test_trade_coverage_states_what_it_covers(
     clock = clock_lib.ManualClock(1_795_349_300_000)
     del capture_clock
     adapter = factory.build_adapters(
-        [venue], clock, client=httpx.AsyncClient()
+        [venue], clock, crypto_source="native", client=httpx.AsyncClient()
     )[venue]
     assert isinstance(adapter, base.BaseVenueAdapter)
     instrument = instruments.InstrumentId.parse(_BTC[venue])
@@ -291,7 +292,10 @@ async def test_venues_without_trade_history_refuse_coverage(
 ) -> None:
     """Hyperliquid and MEXC publish no time-range trade history."""
     adapter = factory.build_adapters(
-        [venue], capture_clock, client=httpx.AsyncClient()
+        [venue],
+        capture_clock,
+        crypto_source="native",
+        client=httpx.AsyncClient(),
     )[venue]
     assert isinstance(adapter, base.BaseVenueAdapter)
     instrument = instruments.InstrumentId.parse(_BTC[venue])
@@ -305,7 +309,10 @@ def test_trade_events_need_a_native_trade_stream(
 ) -> None:
     """Adapters without a wired trade stream refuse trade events."""
     adapter = factory.build_adapters(
-        [instruments.Venue.LIGHTER], capture_clock, client=httpx.AsyncClient()
+        [instruments.Venue.LIGHTER],
+        capture_clock,
+        crypto_source="native",
+        client=httpx.AsyncClient(),
     )[instruments.Venue.LIGHTER]
     assert isinstance(adapter, base.BaseVenueAdapter)
     caps = adapter.capabilities()
@@ -332,6 +339,7 @@ async def test_primed_trade_events_start_coverage_at_the_prime_point(
     adapter = factory.build_adapters(
         [instruments.Venue.BITGET],
         clock,
+        crypto_source="native",
         client=httpx.AsyncClient(),
         connect=_connect(capture["frames"]),
     )[instruments.Venue.BITGET]
@@ -352,7 +360,10 @@ async def test_bitget_widens_trade_windows_within_one_second(
     """Bitget returns nothing for bounds within one second, so it asks wider."""
     clock = clock_lib.ManualClock(1_795_349_300_000)
     adapter = factory.build_adapters(
-        [instruments.Venue.BITGET], clock, client=httpx.AsyncClient()
+        [instruments.Venue.BITGET],
+        clock,
+        crypto_source="native",
+        client=httpx.AsyncClient(),
     )[instruments.Venue.BITGET]
     assert isinstance(adapter, base.BaseVenueAdapter)
     instrument = instruments.InstrumentId.parse(_BTC[instruments.Venue.BITGET])
@@ -365,5 +376,74 @@ async def test_bitget_widens_trade_windows_within_one_second(
         if call.request.url.path.endswith("/fills-history")
     )
     assert int(request.url.params["startTime"]) == now - 2_000
-    assert int(request.url.params["endTime"]) == now - 1
+    assert int(request.url.params["endTime"]) == now
     assert (coverage.from_ms, coverage.to_ms) == (now - 500, now)
+
+
+@pytest.mark.parametrize("end_offset", [1_000, 1_500])
+async def test_bitget_preserves_trades_in_the_final_second(
+    end_offset: int,
+) -> None:
+    """Keeps final-second fills when the venue truncates request endTime.
+
+    Args:
+        end_offset: Exclusive end in milliseconds after a whole second.
+
+    Returns:
+        None. Extra rows returned by widening are clipped from coverage.
+    """
+    start = 1_795_349_300_000
+    end = start + end_offset
+    rows = [
+        {
+            "tradeId": "1",
+            "price": "100",
+            "size": "1",
+            "side": "Buy",
+            "ts": str(end - 2),
+        },
+        {
+            "tradeId": "2",
+            "price": "101",
+            "size": "1",
+            "side": "Sell",
+            "ts": str(end),
+        },
+    ]
+
+    def respond(request: httpx.Request) -> httpx.Response:
+        """Serves fixture metadata and models Bitget's second precision.
+
+        Args:
+            request: Metadata or public trade-history request.
+
+        Returns:
+            HTTP response containing metadata or matching public fills.
+        """
+        if request.url.path.endswith("/contracts"):
+            return httpx.Response(
+                200,
+                json=json.loads(
+                    (_FIXTURES / "bitget/contracts.json").read_text()
+                ),
+            )
+        query_end = int(request.url.params["endTime"]) // 1000 * 1000
+        selected = [row for row in rows if int(row["ts"]) < query_end]
+        return httpx.Response(200, json={"code": "00000", "data": selected})
+
+    adapter = factory.build_adapters(
+        [instruments.Venue.BITGET],
+        clock_lib.ManualClock(end + 60_000),
+        crypto_source="native",
+        client=httpx.AsyncClient(transport=httpx.MockTransport(respond)),
+    )[instruments.Venue.BITGET]
+    assert isinstance(adapter, base.BaseVenueAdapter)
+    try:
+        instrument = instruments.InstrumentId.parse(
+            _BTC[instruments.Venue.BITGET]
+        )
+        coverage = await adapter.fetch_trade_coverage(instrument, start, end)
+        assert [trade.trade_id for trade in coverage.trades] == ["1"]
+        assert (coverage.from_ms, coverage.to_ms) == (start, end)
+    finally:
+        await adapter.close()

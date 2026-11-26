@@ -65,8 +65,6 @@ const ROOT = path.join(path.dirname(fileURLToPath(import.meta.url)), '../..');
 /** @type {import('next').NextConfig} */
 const nextConfig = {
   reactStrictMode: true,
-  // Linting runs as its own CI step (`pnpm lint`) with the Google-style config.
-  eslint: {ignoreDuringBuilds: true},
   poweredByHeader: false,
   // Container images set NEXT_OUTPUT=standalone for a minimal Node server.
   output: process.env.NEXT_OUTPUT === 'standalone' ? 'standalone' : undefined,

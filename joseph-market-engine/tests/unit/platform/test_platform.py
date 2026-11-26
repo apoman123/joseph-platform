@@ -104,6 +104,15 @@ def test_demo_only_restricts_to_mock() -> None:
     assert settings.active_venues == (instruments.Venue.MOCK,)
 
 
+def test_live_data_feeds_exclude_mock() -> None:
+    """Live defaults and legacy venue lists exclude synthetic market data."""
+    assert (
+        instruments.Venue.MOCK not in config.Settings.from_env({}).active_venues
+    )
+    legacy = config.Settings.from_env({"JOSEPH_ENABLED_VENUES": "binance,mock"})
+    assert legacy.active_venues == (instruments.Venue.BINANCE,)
+
+
 def test_settings_repr_redacts_secrets() -> None:
     """Tokens never appear in representations."""
     settings = config.Settings(
@@ -304,3 +313,62 @@ def test_manual_clock_never_goes_backwards() -> None:
     """The manual clock rejects negative steps."""
     with pytest.raises(ValueError):
         clock_lib.ManualClock(5).advance(-1)
+
+
+def test_data_feed_file_loads_keys_with_environment_precedence(
+    tmp_path: pathlib.Path,
+) -> None:
+    """Local data-feed files work without importing execution credentials.
+
+    Args:
+        tmp_path: Temporary directory holding a synthetic dotenv file.
+    """
+    env_file = tmp_path / "market.env"
+    env_file.write_text(
+        'JOSEPH_ALPACA_KEY_ID="file-key"\n'
+        "JOSEPH_ALPACA_SECRET_KEY='file-secret'\n"
+        "JOSEPH_ALPACA_FEED=iex\n"
+        "JOSEPH_SERVICE_TOKEN=execution-only-secret\n"
+        "JOSEPH_LIVE_TRADING_ENABLED=true\n",
+        encoding="utf-8",
+    )
+    source = {"JOSEPH_MARKET_ENV_FILE": str(env_file)}
+    loaded = config.Settings.from_env(source)
+    assert loaded.alpaca_key_id == "file-key"
+    assert loaded.alpaca_secret_key == "file-secret"
+    assert instruments.Venue.NASDAQ in loaded.active_venues
+    assert loaded.service_token is None
+    assert "JOSEPH_LIVE_TRADING_ENABLED" not in config.data_feed_environment(
+        source
+    )
+    assert "file-secret" not in repr(loaded)
+    overridden = config.Settings.from_env(
+        {**source, "JOSEPH_ALPACA_KEY_ID": "shell-key"}
+    )
+    assert overridden.alpaca_key_id == "shell-key"
+    assert overridden.alpaca_secret_key == "file-secret"
+    assert source == {"JOSEPH_MARKET_ENV_FILE": str(env_file)}
+
+
+def test_data_feed_file_preserves_literal_secret_and_rejects_missing_file(
+    tmp_path: pathlib.Path,
+) -> None:
+    """Do not interpolate secret values or silently ignore an unreadable file.
+
+    Args:
+        tmp_path: Temporary directory holding a synthetic dotenv file.
+    """
+    env_file = tmp_path / "market.env"
+    env_file.write_text(
+        "JOSEPH_ALPACA_KEY_ID=key\n"
+        "JOSEPH_ALPACA_SECRET_KEY='literal-${TOKEN}'\n",
+        encoding="utf-8",
+    )
+    settings = config.Settings.from_env(
+        {"JOSEPH_MARKET_ENV_FILE": str(env_file)}
+    )
+    assert settings.alpaca_secret_key == "literal-${TOKEN}"
+    with pytest.raises(ValueError, match="JOSEPH_MARKET_ENV_FILE"):
+        config.Settings.from_env(
+            {"JOSEPH_MARKET_ENV_FILE": str(tmp_path / "missing.env")}
+        )

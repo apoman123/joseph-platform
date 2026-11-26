@@ -93,6 +93,8 @@ export interface HttpClientOptions {
   getToken?: () => string | null;
   /** Fetch implementation (injectable for tests). */
   fetchImpl?: typeof fetch;
+  /** GET response deadline in positive milliseconds (default 30,000). */
+  readTimeoutMs?: number;
 }
 
 /** Query parameter values accepted by `request`; arrays go comma-separated. */
@@ -107,12 +109,17 @@ export class HttpTransport {
 
   /**
    * Creates a transport.
-   * @param options Base URL, token provider and fetch implementation.
+   * @param options Base URL, token provider, fetch and optional read deadline.
+   * @throws RangeError If the read deadline is not finite and positive.
    */
   constructor(private readonly options: HttpClientOptions) {
     this.baseUrl = options.baseUrl.replace(/\/$/, '');
     // A detached `fetch` throws "Illegal invocation" in browsers.
     this.fetchImpl = options.fetchImpl ?? fetch.bind(globalThis);
+    const deadline = options.readTimeoutMs ?? 30_000;
+    if (!Number.isFinite(deadline) || deadline <= 0) {
+      throw new RangeError('readTimeoutMs must be finite and positive');
+    }
   }
 
   /**
@@ -122,18 +129,21 @@ export class HttpTransport {
    * @param query Optional query parameters (undefined values are skipped).
    * @param body Optional JSON body.
    * @param headers Optional extra headers.
+   * @param signal Optional cancellation signal, including during body reads.
    * @return Parsed response body, typed by the caller and not validated;
    *     `{}` for an empty body.
    * @throws `ApiError` for a non-2xx response. The promise also rejects
    *     with the `fetch` error when the request fails, and with a
-   *     `SyntaxError` when the body is not JSON.
+   *     `SyntaxError` when the body is not JSON. GET requests reject on the
+   *     read deadline; cancellation rejects with the signal's reason.
    */
   async request<T>(
     method: 'GET' | 'POST' | 'PUT' | 'DELETE',
     path: string,
     query?: Record<string, QueryValue | undefined>,
     body?: unknown,
-    headers?: Record<string, string>
+    headers?: Record<string, string>,
+    signal?: AbortSignal
   ): Promise<T> {
     const url = new URL(`${this.baseUrl}${path}`);
     for (const [key, value] of Object.entries(query ?? {})) {
@@ -144,28 +154,55 @@ export class HttpTransport {
       );
     }
     const token = this.options.getToken?.() ?? null;
-    const response = await this.fetchImpl(url.toString(), {
-      method,
-      cache: 'no-store',
-      headers: {
-        Accept: 'application/json',
-        ...(body === undefined ? {} : {'Content-Type': 'application/json'}),
-        ...(token ? {Authorization: `Bearer ${token}`} : {}),
-        ...headers,
-      },
-      body: body === undefined ? undefined : JSON.stringify(body),
-    });
-    const text = await response.text();
-    const parsed: unknown = text ? JSON.parse(text) : {};
-    if (!response.ok) {
-      throw new ApiError(
-        response.status,
-        toErrorResponse(parsed, response.status)
-      );
+    const controller = new AbortController();
+    const cancel = () => void controller.abort(signal?.reason);
+    if (signal?.aborted) cancel();
+    else signal?.addEventListener('abort', cancel, {once: true});
+    // Mutations have no automatic deadline or retry: a timed-out trade may
+    // already have executed and must be reconciled by its caller.
+    const timer =
+      method === 'GET'
+        ? setTimeout(
+            () =>
+              void controller.abort(
+                new Error(
+                  `GET ${path} timed out. Check the market engine connection and retry.`
+                )
+              ),
+            this.options.readTimeoutMs ?? 30_000
+          )
+        : null;
+    try {
+      const response = await this.fetchImpl(url.toString(), {
+        method,
+        signal: controller.signal,
+        cache: 'no-store',
+        headers: {
+          Accept: 'application/json',
+          ...(body === undefined ? {} : {'Content-Type': 'application/json'}),
+          ...(token ? {Authorization: `Bearer ${token}`} : {}),
+          ...headers,
+        },
+        body: body === undefined ? undefined : JSON.stringify(body),
+      });
+      const text = await response.text();
+      const parsed: unknown = text ? JSON.parse(text) : {};
+      if (!response.ok) {
+        throw new ApiError(
+          response.status,
+          toErrorResponse(parsed, response.status)
+        );
+      }
+      // The engines answer with the contract type of the route; the caller
+      // names it, and the body is not validated here.
+      return parsed as T;
+    } catch (error: unknown) {
+      if (controller.signal.aborted) throw controller.signal.reason;
+      throw error;
+    } finally {
+      if (timer !== null) clearTimeout(timer);
+      signal?.removeEventListener('abort', cancel);
     }
-    // The engines answer with the contract type of the route; the caller
-    // names it, and the body is not validated here.
-    return parsed as T;
   }
 }
 
@@ -249,17 +286,25 @@ export class HttpMarketDataClient implements MarketDataClient {
 
   /**
    * Fetches candles (`GET /v1/candles`).
-   * @param query Series and range.
+   * @param query Series, range and optional cancellation signal.
    * @return Candle batch.
+   * @throws Error If the request fails, is cancelled or exceeds its deadline.
    */
   getCandles(query: CandleQuery): Promise<CandleBatch> {
-    return this.http.request('GET', '/v1/candles', {
-      instrument_id: query.instrumentId,
-      tf: query.timeframe,
-      from_ms: query.fromMs,
-      to_ms: query.toMs,
-      limit: query.limit,
-    });
+    return this.http.request(
+      'GET',
+      '/v1/candles',
+      {
+        instrument_id: query.instrumentId,
+        tf: query.timeframe,
+        from_ms: query.fromMs,
+        to_ms: query.toMs,
+        limit: query.limit,
+      },
+      undefined,
+      undefined,
+      query.signal
+    );
   }
 
   /**

@@ -8,10 +8,10 @@ Joseph is a self-hosted platform for charting, researching and trading crypto pe
 
 | Market | Venues | Market data | Trading |
 |---|---|---|---|
-| Crypto perpetuals | Binance USDⓈ-M, Bitget USDT-M, Hyperliquid, Lighter, MEXC futures | Each venue's public API; no key | Paper and shadow; LIVE through each venue's own adapter |
-| Taiwan stocks and ETFs | TWSE, TPEx (mainboard) | Official exchange data, free, no key; optional SinoPac Shioaji data (SinoPac API key) | Paper and shadow; LIVE through SinoPac Shioaji. Cathay is wired in but refuses every order (no public API) |
+| Crypto perpetuals | Binance USDⓈ-M, Bitget USDT-M, Hyperliquid, Lighter, MEXC futures | Free CCXT Pro WebSocket + REST history; no key | Paper and shadow; LIVE through each venue's own adapter |
+| Taiwan stocks and ETFs | TWSE, TPEx (mainboard) | Fugle free-tier per-symbol data with a key | Paper and shadow; LIVE through SinoPac Shioaji. Cathay is wired in but refuses every order (no public API) |
 | US stocks and ETFs | Nasdaq, NYSE, Cboe BZX | Alpaca market data; needs a free Alpaca key (IEX real time by default) | Paper and shadow; LIVE through Interactive Brokers (IB Gateway). Alpaca is data only |
-| US Treasury yields | Par and real yield curves | Treasury.gov; free, no key | Data only |
+| US Treasury yields | Par and real yield curves; separate FRED rate series | Treasury.gov without a key; FRED with a free key | Data only |
 | DEMO | `mock` | Synthetic, clearly labelled | Paper |
 
 Futures and options are not supported.
@@ -54,6 +54,45 @@ make dev     # market :8000, execution :8100 (paper; LIVE off), terminal http://
 
 `make dev` uses development tokens; `make help` lists every target.
 
+### Market-data keys
+
+Set these on the **market engine**, not in the browser. Both `make dev` and
+Docker Compose read data-feed settings from `deploy/.env`, copied from
+`deploy/.env.example`. Exported environment variables take precedence.
+Restart the market engine after changing keys. For another file, run
+`make dev-market MARKET_ENV_FILE=/absolute/path/to/market.env`. Direct uvicorn
+launches can set `JOSEPH_MARKET_ENV_FILE` to that path. Only market-data
+settings are imported from this file by the market engine.
+A missing optional key leaves only that source
+unavailable. Trading API keys and broker credentials belong to the separate
+execution engine ([broker setup](docs/BROKERS.md)).
+
+| Data feed | Required settings | What is available without a key | Free-plan scope in this implementation |
+|---|---|---|---|
+| CCXT (Binance, Bitget, Hyperliquid, Lighter, MEXC) | None for public data | Public perpetual candles, quotes and books through CCXT REST | Free CCXT Pro subscribes to exchange WebSockets; REST provides history and visible polling fallback. Includes exchange-listed RWA perpetuals; history and resolutions vary |
+| Alpaca IEX, for Nasdaq/NYSE/Cboe listings | `JOSEPH_ALPACA_KEY_ID` and `JOSEPH_ALPACA_SECRET_KEY` from [Alpaca](https://docs.alpaca.markets/us/docs/about-market-data-api); `JOSEPH_ALPACA_FEED=iex` | US data feed remains disabled | IEX only; consolidated SIP is not enabled |
+| Fugle Taiwan stocks/ETFs | `JOSEPH_TW_DATA_SOURCE=fugle` and `JOSEPH_FUGLE_API_KEY` from [Fugle](https://developer.fugle.tw/pricing) | Taiwan data feed is disabled until the key is set | Per-symbol REST quotes and candles; 1m history since 2023-05-23, daily since 2010; 60 REST calls/minute paced by the engine. Free futures/options and Fugle bulk snapshots are unavailable |
+| U.S. Treasury official | No key | Daily par and real yield curves | No intraday bond or yield quote |
+| FRED | `JOSEPH_FRED_API_KEY` from [FRED](https://fred.stlouisfed.org/docs/api/api_key.html) | Official Treasury daily series remain available | Separate daily `treasury:rate:FRED_*` yield and spread IDs; weekly/monthly bars aggregate daily observations |
+
+For example, to use Fugle and FRED in Compose, edit `deploy/.env`:
+
+```dotenv
+JOSEPH_TW_DATA_SOURCE=fugle
+JOSEPH_FUGLE_API_KEY=your-fugle-market-data-key
+JOSEPH_FRED_API_KEY=your-fred-api-key
+JOSEPH_ALPACA_KEY_ID=your-alpaca-key-id
+JOSEPH_ALPACA_SECRET_KEY=your-alpaca-secret-key
+```
+
+Fugle's free plan allows five WebSocket subscriptions, but this adapter uses
+paced REST requests and does not claim a native Fugle stream. FRED and the
+official Treasury feed are daily sources, so minute/hour yield candles remain
+unavailable. The Dashboard groups the five crypto markets under one CCXT
+provider. An idle on-demand REST source shows `IDLE`; it becomes `POLL` only
+after REST data is received, or `LIVE` after WebSocket events arrive. See [market-data scope](docs/MARKET_DATA_SCOPE.md) for
+timeframe and provenance details.
+
 **Indicators.** The market engine ships nine built-in indicators (moving averages, VWAP, regression channel, Bollinger Bands, RSI, ATR, volume delta, pivot points). Other indicators come from plugin packages, installed with `make plugins PLUGIN_REQUIREMENTS="..."` and discovered at startup ([indicator plugins](docs/OPERATIONS.md#indicator-plugins)).
 
 **Containers.** Build and start the whole stack:
@@ -63,12 +102,13 @@ cp deploy/.env.example deploy/.env   # replace every change-me value
 make compose-up                      # build and start the stack
 ```
 
-`deploy/docker-compose.yml` enables every venue and turns the global LIVE gate on; accounts still trade live only after verification and arming. Optional SDKs and plugins are build args in `deploy/.env`: `MARKET_UV_EXTRAS=--extra sinopac` (SinoPac data), `EXECUTION_UV_EXTRAS="--extra ibkr --extra sinopac"` (brokers) and `MARKET_PLUGIN_REQUIREMENTS` (indicator plugin packages; empty: built-ins only).
+`deploy/docker-compose.yml` enables the selected real market-data venues and turns the global LIVE gate on; accounts still trade live only after verification and arming. The synthetic `mock` venue is used only with `JOSEPH_DEMO_ONLY=true`. Broker SDKs and indicator plugins are build args in `deploy/.env`: `EXECUTION_UV_EXTRAS="--extra ibkr --extra sinopac"` (brokers) and `MARKET_PLUGIN_REQUIREMENTS` (indicator plugin packages; empty: built-ins only).
 
 ## Configuration and operations
 
 - [Operations runbook](docs/OPERATIONS.md): start-up and production secrets, [every setting](docs/OPERATIONS.md#settings) of both engines, monitoring, incidents, [LIVE enablement](docs/OPERATIONS.md#live-enablement) and [maintenance](docs/OPERATIONS.md#maintenance) (dated tasks such as MEXC retiring its JSON stream on 2026-12-01).
 - [Brokers and venues](docs/BROKERS.md): Interactive Brokers, SinoPac and Cathay setup, securities order rules, and live prerequisites per broker and venue.
+- [Market data scope](docs/MARKET_DATA_SCOPE.md): implemented free-first feeds, their limits, and the separation from trading destinations.
 - [CI/CD](docs/CI_CD.md): pipelines, container images (with optional indicator plugins), environments and releases.
 
 ## Testing
@@ -80,7 +120,9 @@ make compose-up                      # build and start the stack
 | `make test-network` | Opt-in: live public venue APIs |
 | `make test-sandbox` | Opt-in: testnet order round trips; needs `JOSEPH_SANDBOX_<VENUE>_*` keys |
 
-CI runs every offline tier on each push and pull request. Counts, coverage and evidence: [test report](docs/reports/TEST_REPORT.md).
+CI runs every offline tier on each push and pull request. Counts, coverage
+and evidence: [latest regression verification](docs/reports/REGRESSION_2026_11_26.md)
+and [baseline test report](docs/reports/TEST_REPORT.md).
 
 ## Known limitations
 
@@ -89,9 +131,8 @@ These come from venues, data plans or law; code cannot remove them.
 | Limitation | Why | Workaround |
 |---|---|---|
 | Stock delta is *classified* (Lee-Ready or quote rule), never *true* | Stock exchanges publish no aggressor side | Labelled `classified` everywhere |
-| Alpaca free plan: real time is IEX only (a few % of US volume); 30 streamed symbols | Consolidated real-time data (SIP) is a paid plan, about $99/month | `delayed_sip` (all volume, ≥15 min late) or a paid plan |
-| US intraday bars include the official closing print only on `sip` / `delayed_sip` | IEX carries no closing cross | Use a consolidated feed |
-| TWSE/TPEx official data: coarse 1m bars, no seconds bars, intraday history only since recording began, unadjusted daily prices | Free intraday data is MIS snapshots that the exchange caches for 4–120 s | `JOSEPH_TW_DATA_SOURCE=sinopac` (Shioaji quotas; board lots only) |
+| Alpaca free plan: real time is IEX only; 30 streamed symbols | IEX is one exchange, so volume and closing prints differ from the consolidated market | Keep IEX provenance visible and treat missing data as unavailable |
+| TWSE/TPEx official data: coarse 1m bars, no seconds bars, intraday history only since recording began, unadjusted daily prices | Free intraday data is MIS snapshots that the exchange caches for 4–120 s | Use official daily history for older dates |
 | MEXC and Hyperliquid: seconds bars and true delta only since recording began | Neither publishes trade history; Hyperliquid's S3 archive is requester-pays | An AWS account could read Hyperliquid's archive (not implemented) |
 | The newest archive day arrives late | Binance publishes about 07:30 UTC the next day, Lighter about 7 h after the UTC day, Bitget about a day later in UTC+8 days | Recorded trades fill the gap while the engine runs |
 | Live trading is unproven against real venues and brokers | Tests use mocked venues and fake broker clients; real orders need real keys and accounts | Testnets, IBKR paper and SinoPac simulation first |

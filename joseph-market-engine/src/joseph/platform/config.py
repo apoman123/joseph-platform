@@ -6,8 +6,8 @@
 All settings come from ``JOSEPH_*`` environment variables so the same build
 runs in development, CI and production; ``Settings`` lists each variable
 with its default and unit. Secrets never appear in ``Settings.__repr__``,
-which masks the tokens and keys it shows and leaves the others out. The
-SinoPac keys may also come from secret files (``NAME_FILE``, see
+which masks the tokens and keys it shows and leaves the others out. API
+keys may also come from secret files (``NAME_FILE``, see
 ``secret_value``) and are registered for log redaction.
 """
 
@@ -18,12 +18,66 @@ import os
 import pathlib
 from collections.abc import Mapping
 
+import dotenv
+
 from joseph.domain import identity
 from joseph.domain import instruments
 from joseph.platform import redaction
 
 _DEFAULT_CORS = "http://localhost:3000,http://127.0.0.1:3000"
-_ALL_VENUES = ",".join(venue.value for venue in instruments.Venue)
+_DEFAULT_VENUES = tuple(
+    venue for venue in instruments.Venue if venue is not instruments.Venue.MOCK
+)
+_DEFAULT_VENUE_NAMES = ",".join(venue.value for venue in _DEFAULT_VENUES)
+_DATA_FEED_ENV_NAMES = frozenset(
+    {
+        "JOSEPH_ENABLED_VENUES",
+        "JOSEPH_DEMO_ONLY",
+        "JOSEPH_ALPACA_KEY_ID",
+        "JOSEPH_ALPACA_SECRET_KEY",
+        "JOSEPH_ALPACA_FEED",
+        "JOSEPH_ALPACA_SECONDS_HISTORY_MS",
+        "JOSEPH_TW_DATA_SOURCE",
+        "JOSEPH_FUGLE_API_KEY",
+        "JOSEPH_FRED_API_KEY",
+    }
+)
+
+
+def data_feed_environment(source: Mapping[str, str]) -> Mapping[str, str]:
+    """Loads selected data-feed settings from an optional dotenv file.
+
+    Args:
+        source: Environment variables. JOSEPH_MARKET_ENV_FILE optionally
+            names a UTF-8 dotenv file. Explicit environment entries win,
+            including empty values. Variable interpolation is disabled.
+
+    Returns:
+        Merged settings without changing the process environment. Only
+        data-feed settings and their secret-file paths are loaded, so
+        execution credentials cannot enter market settings from this file.
+
+    Raises:
+        ValueError: If the explicitly configured file cannot be read.
+    """
+    filename = source.get("JOSEPH_MARKET_ENV_FILE", "").strip()
+    if not filename:
+        return source
+    try:
+        with pathlib.Path(filename).open(encoding="utf-8") as stream:
+            values = dotenv.dotenv_values(stream=stream, interpolate=False)
+    except (OSError, UnicodeError) as exc:
+        raise ValueError("JOSEPH_MARKET_ENV_FILE is not readable") from exc
+    selected = {
+        key: value
+        for key, value in values.items()
+        if value is not None
+        and (
+            key in _DATA_FEED_ENV_NAMES
+            or key.removesuffix("_FILE") in _DATA_FEED_ENV_NAMES
+        )
+    }
+    return {**selected, **source}
 
 
 @dataclasses.dataclass(frozen=True, slots=True)
@@ -133,7 +187,7 @@ def secret_value(source: Mapping[str, str], name: str) -> str | None:
     return value
 
 
-TW_DATA_SOURCES = ("twse", "sinopac")
+TW_DATA_SOURCES = ("twse", "fugle")
 """Values of ``JOSEPH_TW_DATA_SOURCE``."""
 
 
@@ -156,14 +210,14 @@ def _tw_data_source(value: str) -> str:
         value: Raw value.
 
     Returns:
-        ``twse`` or ``sinopac``.
+        ``twse`` or ``fugle``.
 
     Raises:
         ValueError: For another value.
     """
     choice = value.strip().lower() or "twse"
     if choice not in TW_DATA_SOURCES:
-        raise ValueError("JOSEPH_TW_DATA_SOURCE must be twse or sinopac")
+        raise ValueError("JOSEPH_TW_DATA_SOURCE must be twse or fugle")
     return choice
 
 
@@ -188,7 +242,7 @@ def _bounded(
     return min(high, max(low, int(source.get(name, str(default)))))
 
 
-_ALPACA_FEEDS = frozenset({"iex", "sip", "delayed_sip"})
+_ALPACA_FEEDS = frozenset({"iex"})
 
 
 def _alpaca_feed(value: str) -> str:
@@ -198,14 +252,14 @@ def _alpaca_feed(value: str) -> str:
         value: Raw value.
 
     Returns:
-        ``iex``, ``sip`` or ``delayed_sip``.
+        ``iex``.
 
     Raises:
         ValueError: For another value.
     """
     feed = value.strip().lower() or "iex"
     if feed not in _ALPACA_FEEDS:
-        raise ValueError("JOSEPH_ALPACA_FEED must be iex, sip or delayed_sip")
+        raise ValueError("JOSEPH_ALPACA_FEED must be iex")
     return feed
 
 
@@ -257,7 +311,8 @@ class Settings:
         database_url: SQLAlchemy URL for durable state,
             ``JOSEPH_DATABASE_URL``. Default ``sqlite:///./var/market.db``.
         enabled_venues: Venues whose adapters are constructed,
-            ``JOSEPH_ENABLED_VENUES`` (contract venue ids, any case).
+            ``JOSEPH_ENABLED_VENUES`` (contract venue ids, any case). The
+            synthetic ``mock`` venue is reserved for ``demo_only``.
             Default every venue.
         demo_only: When true only the mock venue is enabled,
             ``JOSEPH_DEMO_ONLY``. Default false.
@@ -324,9 +379,8 @@ class Settings:
             ``JOSEPH_ALPACA_KEY_ID``. Default none.
         alpaca_secret_key: Alpaca API secret (secret),
             ``JOSEPH_ALPACA_SECRET_KEY``. Default none.
-        alpaca_feed: Alpaca stock feed, ``iex``, ``sip`` or
-            ``delayed_sip`` (any case), ``JOSEPH_ALPACA_FEED``. Default
-            ``iex``.
+        alpaca_feed: Alpaca stock feed, ``iex`` only,
+            ``JOSEPH_ALPACA_FEED``. Default ``iex``.
         alpaca_seconds_history_ms: Longest seconds-bar history built on
             demand from Alpaca trades and quotes, in milliseconds,
             ``JOSEPH_ALPACA_SECONDS_HISTORY_MS``. Default 1800000 (30
@@ -366,31 +420,16 @@ class Settings:
             the AWS Public Blockchain Data trade archive (remote range
             reads, verified against 1d candles, nothing cached on disk),
             ``JOSEPH_LIGHTER_ARCHIVE``. Default true.
-        tw_data_source: Market data of TWSE and TPEx, ``twse`` (the
-            exchanges' official sources) or ``sinopac`` (SinoPac Shioaji
-            bars, ticks and books, falling back to the official sources),
-            any case, ``JOSEPH_TW_DATA_SOURCE``. Default ``twse``.
-        sinopac_api_key: Shioaji API key (secret),
-            ``JOSEPH_SINOPAC_API_KEY`` or the file named by
-            ``JOSEPH_SINOPAC_API_KEY_FILE``. Default none.
-        sinopac_secret_key: Shioaji secret key (secret),
-            ``JOSEPH_SINOPAC_SECRET_KEY`` or the file named by
-            ``JOSEPH_SINOPAC_SECRET_KEY_FILE``. Default none.
-        sinopac_max_symbols: Codes streamed from Shioaji at once (each
-            uses a tick and a bid/ask subscription; Shioaji allows 200),
-            ``JOSEPH_SINOPAC_MAX_SYMBOLS``. Default 60, clamped to 1..100.
-        sinopac_intraday_ticks_calls: Tick-history queries spent per day
-            during trading hours (Shioaji allows 10),
-            ``JOSEPH_SINOPAC_INTRADAY_TICKS_CALLS``. Default 8, clamped to
-            0..10.
-        sinopac_intraday_kbars_calls: Kbar queries spent per day during
-            trading hours (Shioaji allows 270),
-            ``JOSEPH_SINOPAC_INTRADAY_KBARS_CALLS``. Default 200, clamped
-            to 0..270.
-        sinopac_seconds_history_days: Trading sessions of tick history read
-            for seconds bars and trades, counting back from the newest,
-            ``JOSEPH_SINOPAC_SECONDS_HISTORY_DAYS``. Default 5, clamped to
-            0..30.
+        tw_data_source: Taiwan source selection. The active market engine
+            enables only ``fugle`` with a configured key; ``twse`` is a
+            legacy setting that leaves Taiwan data disabled. Default
+            ``fugle``.
+        fugle_api_key: Fugle market-data API key (secret),
+            ``JOSEPH_FUGLE_API_KEY`` or its ``_FILE`` path. Required when
+            ``tw_data_source`` is ``fugle``.
+        fred_api_key: Optional FRED API key (secret),
+            ``JOSEPH_FRED_API_KEY`` or its ``_FILE`` path. Enables distinct
+            daily FRED rate instruments when present.
     """
 
     dev_tokens: tuple[DevToken, ...] = ()
@@ -398,7 +437,7 @@ class Settings:
     execution_url: str = "http://localhost:8100"
     cors_origins: tuple[str, ...] = tuple(_DEFAULT_CORS.split(","))
     database_url: str = "sqlite:///./var/market.db"
-    enabled_venues: tuple[instruments.Venue, ...] = tuple(instruments.Venue)
+    enabled_venues: tuple[instruments.Venue, ...] = _DEFAULT_VENUES
     demo_only: bool = False
     replay_dir: str | None = None
     http_timeout_s: float = 10.0
@@ -440,13 +479,9 @@ class Settings:
     bitget_archive_dir: str = "./var/bitget-archive"
     mexc_ws_format: str = "protobuf"
     lighter_archive: bool = True
-    tw_data_source: str = "twse"
-    sinopac_api_key: str | None = None
-    sinopac_secret_key: str | None = None
-    sinopac_max_symbols: int = 60
-    sinopac_intraday_ticks_calls: int = 8
-    sinopac_intraday_kbars_calls: int = 200
-    sinopac_seconds_history_days: int = 5
+    tw_data_source: str = "fugle"
+    fugle_api_key: str | None = None
+    fred_api_key: str | None = None
 
     def __repr__(self) -> str:
         """Returns a representation with secrets redacted."""
@@ -460,24 +495,47 @@ class Settings:
             f"demo_only={self.demo_only!r}, "
             f"indicator_plugin_packages={self.indicator_plugin_packages!r}, "
             f"tw_data_source={self.tw_data_source!r}, "
-            f"sinopac_api_key={"'***'" if self.sinopac_api_key else None}, "
-            f"sinopac_secret_key="
-            f"{"'***'" if self.sinopac_secret_key else None})"
+            f"fugle_api_key={"'***'" if self.fugle_api_key else None}, "
+            f"fred_api_key={"'***'" if self.fred_api_key else None})"
         )
 
     @property
     def active_venues(self) -> tuple[instruments.Venue, ...]:
-        """The venues to construct: only the mock venue when ``demo_only``."""
+        """The configured data venues with unavailable key feeds removed.
+
+        Returns:
+            Market-data venues to construct. US and Taiwan venues require
+            their respective free-plan keys; legacy ``mock`` and TWSE/TPEx
+            official-source entries are ignored outside demo mode.
+        """
         if self.demo_only:
             return (instruments.Venue.MOCK,)
-        return self.enabled_venues
+        return tuple(
+            venue
+            for venue in self.enabled_venues
+            if venue is not instruments.Venue.MOCK
+            and (
+                venue not in (instruments.Venue.TWSE, instruments.Venue.TPEX)
+                or (self.tw_data_source == "fugle" and bool(self.fugle_api_key))
+            )
+            and (
+                venue
+                not in (
+                    instruments.Venue.NASDAQ,
+                    instruments.Venue.NYSE,
+                    instruments.Venue.CBOE,
+                )
+                or bool(self.alpaca_key_id and self.alpaca_secret_key)
+            )
+        )
 
     @classmethod
     def from_env(cls, env: Mapping[str, str] | None = None) -> Settings:
-        """Builds settings from environment variables.
+        """Builds settings from the environment and optional data-feed file.
 
         Args:
-            env: Mapping to read; defaults to ``os.environ``.
+            env: Mapping to read; defaults to ``os.environ``. An optional
+                JOSEPH_MARKET_ENV_FILE supplies data-feed defaults only.
 
         Returns:
             Parsed settings.
@@ -485,14 +543,14 @@ class Settings:
         Raises:
             ValueError: If a value is malformed: an unknown venue or
                 choice, a number that does not parse, a bad dev token
-                entry or an unreadable secret file.
+                entry or an unreadable secret or market environment file.
         """
-        source = os.environ if env is None else env
+        source = data_feed_environment(os.environ if env is None else env)
         venues = tuple(
             instruments.Venue(name.strip().lower())
-            for name in source.get("JOSEPH_ENABLED_VENUES", _ALL_VENUES).split(
-                ","
-            )
+            for name in source.get(
+                "JOSEPH_ENABLED_VENUES", _DEFAULT_VENUE_NAMES
+            ).split(",")
             if name.strip()
         )
         return cls(
@@ -558,8 +616,8 @@ class Settings:
             smtp_from=source.get("JOSEPH_SMTP_FROM") or None,
             smtp_username=source.get("JOSEPH_SMTP_USERNAME") or None,
             smtp_password=source.get("JOSEPH_SMTP_PASSWORD") or None,
-            alpaca_key_id=source.get("JOSEPH_ALPACA_KEY_ID") or None,
-            alpaca_secret_key=source.get("JOSEPH_ALPACA_SECRET_KEY") or None,
+            alpaca_key_id=secret_value(source, "JOSEPH_ALPACA_KEY_ID"),
+            alpaca_secret_key=secret_value(source, "JOSEPH_ALPACA_SECRET_KEY"),
             alpaca_feed=_alpaca_feed(source.get("JOSEPH_ALPACA_FEED", "iex")),
             alpaca_seconds_history_ms=int(
                 source.get("JOSEPH_ALPACA_SECONDS_HISTORY_MS", "1800000")
@@ -596,22 +654,8 @@ class Settings:
             ),
             lighter_archive=_bool(source.get("JOSEPH_LIGHTER_ARCHIVE"), True),
             tw_data_source=_tw_data_source(
-                source.get("JOSEPH_TW_DATA_SOURCE", "twse")
+                source.get("JOSEPH_TW_DATA_SOURCE", "fugle")
             ),
-            sinopac_api_key=secret_value(source, "JOSEPH_SINOPAC_API_KEY"),
-            sinopac_secret_key=secret_value(
-                source, "JOSEPH_SINOPAC_SECRET_KEY"
-            ),
-            sinopac_max_symbols=_bounded(
-                source, "JOSEPH_SINOPAC_MAX_SYMBOLS", 60, 1, 100
-            ),
-            sinopac_intraday_ticks_calls=_bounded(
-                source, "JOSEPH_SINOPAC_INTRADAY_TICKS_CALLS", 8, 0, 10
-            ),
-            sinopac_intraday_kbars_calls=_bounded(
-                source, "JOSEPH_SINOPAC_INTRADAY_KBARS_CALLS", 200, 0, 270
-            ),
-            sinopac_seconds_history_days=_bounded(
-                source, "JOSEPH_SINOPAC_SECONDS_HISTORY_DAYS", 5, 0, 30
-            ),
+            fugle_api_key=secret_value(source, "JOSEPH_FUGLE_API_KEY"),
+            fred_api_key=secret_value(source, "JOSEPH_FRED_API_KEY"),
         )

@@ -76,14 +76,16 @@ def test_settings_carry_alpaca_options_without_leaking_them() -> None:
         {
             "JOSEPH_ALPACA_KEY_ID": "AKID123",
             "JOSEPH_ALPACA_SECRET_KEY": "s3cret",
-            "JOSEPH_ALPACA_FEED": "sip",
+            "JOSEPH_ALPACA_FEED": "iex",
         }
     )
     assert settings.alpaca_key_id == "AKID123"
-    assert settings.alpaca_feed == "sip"
+    assert settings.alpaca_feed == "iex"
     assert "s3cret" not in repr(settings)
     with pytest.raises(ValueError, match="JOSEPH_ALPACA_FEED"):
         config.Settings.from_env({"JOSEPH_ALPACA_FEED": "nope"})
+    with pytest.raises(ValueError, match="JOSEPH_ALPACA_FEED"):
+        config.Settings.from_env({"JOSEPH_ALPACA_FEED": "sip"})
 
 
 def test_timestamps_parse_nanoseconds_and_offsets() -> None:
@@ -610,6 +612,7 @@ def _nasdaq(
     adapter = factory.build_adapters(
         [instruments.Venue.NASDAQ],
         clock,
+        crypto_source="native",
         client=httpx.AsyncClient(),
         connect=_connector(scripts or [[*_FRAMES]], []),
         alpaca_config=cfg,
@@ -621,7 +624,7 @@ def _nasdaq(
 async def test_daily_and_weekly_streams_follow_daily_bars(
     alpaca_api: respx.Router,
 ) -> None:
-    """Seeded days update from dailyBars; weeks aggregate them."""
+    """Seeded days update on trades before dailyBars; weeks aggregate them."""
     del alpaca_api
     clock = clock_lib.ManualClock(_NOW)
     tracker = health.FeedHealthTracker(
@@ -632,7 +635,8 @@ async def test_daily_and_weekly_streams_follow_daily_bars(
     )
     seen = [await asyncio.wait_for(anext(stream), 5) for _ in range(2)]
     await stream.aclose()  # type: ignore[attr-defined]  # stream_candles is typed AsyncIterator; its generator has aclose()
-    assert seen[0].source == "alpaca.rest" and seen[1].source == "alpaca.ws"
+    assert seen[0].source == "alpaca.rest"
+    assert seen[1].source == "alpaca.trades.ws"
     assert tracker.last_message_ms == _NOW
     assert not seen[1].is_final
     weeks = _nasdaq(clock).stream_candles(_AAPL, timeframes.Timeframe.W1)
@@ -1243,3 +1247,35 @@ async def test_seconds_stream_covers_only_what_frames_prove(
     ticked = await asyncio.wait_for(anext(stream), 5)
     await stream.aclose()  # type: ignore[attr-defined]  # stream_candle_coverage is typed AsyncIterator; its generator has aclose()
     assert ticked.candles and ticked.covered == ()
+
+
+def test_trade_previews_update_close_before_the_minute_bar() -> None:
+    """Live trades update unfinished prices with sale-condition rules."""
+    payload = {
+        "i": 1,
+        "x": "V",
+        "p": 201,
+        "s": 10,
+        "c": ["@"],
+        "z": "C",
+        "t": alpaca.rfc3339(_NOW),
+    }
+    first = alpaca.trade_preview(
+        payload, _AAPL, timeframes.Timeframe.M1, None, _NOW
+    )
+    assert first is not None and first.close == 201 and not first.is_final
+    next_payload = {**payload, "i": 2, "p": 202, "t": alpaca.rfc3339(_NOW + 1)}
+    second = alpaca.trade_preview(
+        next_payload, _AAPL, timeframes.Timeframe.M1, first, _NOW + 1
+    )
+    assert second is not None and second.close == 202
+    assert second.source == "alpaca.trades.ws"
+    oddlot = alpaca.trade_preview(
+        {**next_payload, "p": 999, "c": ["I"]},
+        _AAPL,
+        timeframes.Timeframe.M1,
+        second,
+        _NOW + 2,
+    )
+    assert oddlot is not None and oddlot.close == 202
+    assert oddlot.base_volume == 30

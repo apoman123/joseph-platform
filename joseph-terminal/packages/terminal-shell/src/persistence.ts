@@ -33,7 +33,7 @@ import {
   type WorkspaceExport,
   type WorkspaceExportDrawings,
 } from '@joseph/contracts';
-import {LAYOUT_PANES, MAX_CHARTS, createChartState} from './workspace';
+import {LAYOUT_PANES, createChartState} from './workspace';
 
 /**
  * Storage port: a subset of `KeyValueStorage` in `@joseph/feature-registry`,
@@ -55,7 +55,7 @@ export interface WorkspaceStorage {
 }
 
 /**
- * Maximum size of a workspace document in storage and share links, measured
+ * Maximum size of a workspace document in share links, measured
  * as JSON text length (UTF-16 code units, not bytes).
  */
 export const MAX_WORKSPACE_BYTES = 64 * 1024;
@@ -155,7 +155,7 @@ export function migrateWorkspaceV0(
 
 /**
  * Checks the structure of a v1 workspace candidate: schema version, id,
- * layout, 1 to 8 charts with ids, valid instrument ids and layer lists, and
+ * layout, a nonempty chart list with ids, valid instrument ids and layer lists, and
  * the sync options. Other fields are not checked.
  * @param value Candidate, usually parsed JSON.
  * @return Error message for the user, or null when the checks pass.
@@ -168,12 +168,8 @@ export function validateWorkspace(value: unknown): string | null {
     return 'Missing workspace id';
   }
   if (!doc.layout || !(doc.layout in LAYOUT_PANES)) return 'Unknown layout';
-  if (
-    !Array.isArray(doc.charts) ||
-    doc.charts.length < 1 ||
-    doc.charts.length > MAX_CHARTS
-  ) {
-    return 'A workspace needs 1 to 8 charts';
+  if (!Array.isArray(doc.charts) || doc.charts.length < 1) {
+    return 'A workspace needs at least one chart';
   }
   for (const chart of doc.charts) {
     if (!chart || typeof chart.chart_id !== 'string') {
@@ -197,11 +193,14 @@ export function validateWorkspace(value: unknown): string | null {
  * object without `schema_version`).
  * @param value Parsed JSON.
  * @param nowMs Current time (UTC epoch ms) for migrations.
+ * @param maxBytes Optional text limit in UTF-16 units; defaults to the share
+ *     link limit. Local storage uses its own browser quota.
  * @return Parse result with an actionable error.
  */
 function readWorkspaceValue(
   value: unknown,
-  nowMs: number
+  nowMs: number,
+  maxBytes = MAX_WORKSPACE_BYTES
 ): WorkspaceParseResult {
   let raw = value;
   let migrated = false;
@@ -212,7 +211,7 @@ function readWorkspaceValue(
   const error = validateWorkspace(raw);
   if (error) return {ok: false, error};
   const workspace = raw as WorkspaceDocument;
-  if (JSON.stringify(workspace).length > MAX_WORKSPACE_BYTES) {
+  if (JSON.stringify(workspace).length > maxBytes) {
     return {ok: false, error: 'The workspace layout is larger than 64 KB'};
   }
   // A dangling active chart id is repaired rather than rejected: the rest of
@@ -224,7 +223,7 @@ function readWorkspaceValue(
 }
 
 /**
- * Parses untrusted workspace JSON (stored document or share link),
+ * Parses size-bounded workspace JSON for share links and legacy callers,
  * migrating legacy versions. Export files with drawings go through
  * `parseWorkspaceFile`.
  * @param text JSON text, at most `MAX_WORKSPACE_BYTES` long.
@@ -272,7 +271,7 @@ export function parseWorkspaceFile(
     return {ok: false, error: 'Workspace must be an object'};
   }
   if (!('format' in raw)) {
-    const plain = readWorkspaceValue(raw, nowMs);
+    const plain = readWorkspaceValue(raw, nowMs, MAX_WORKSPACE_FILE_BYTES);
     if (!plain.ok) return plain;
     return {
       ...plain,
@@ -294,7 +293,11 @@ export function parseWorkspaceFile(
   if (version !== WORKSPACE_EXPORT_VERSION) {
     return {ok: false, error: 'Unsupported workspace export version'};
   }
-  const workspace = readWorkspaceValue(file.workspace, nowMs);
+  const workspace = readWorkspaceValue(
+    file.workspace,
+    nowMs,
+    MAX_WORKSPACE_FILE_BYTES
+  );
   if (!workspace.ok) return workspace;
   const drawings = file.drawings ?? [];
   if (!Array.isArray(drawings)) {
@@ -455,8 +458,16 @@ export class WorkspaceRepository {
   load(workspaceId: string, nowMs: number): WorkspaceDocument | null {
     const raw = this.storage.getItem(`joseph.workspace.v1.${workspaceId}`);
     if (!raw) return null;
-    const result = parseWorkspace(raw, nowMs);
-    return result.ok ? result.workspace : null;
+    try {
+      const result = readWorkspaceValue(
+        JSON.parse(raw),
+        nowMs,
+        Number.POSITIVE_INFINITY
+      );
+      return result.ok ? result.workspace : null;
+    } catch {
+      return null;
+    }
   }
 
   /**

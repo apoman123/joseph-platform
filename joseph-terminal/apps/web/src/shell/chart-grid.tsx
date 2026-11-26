@@ -233,6 +233,9 @@ export function ChartGrid(): ReactElement {
     <div
       ref={gridRef}
       className={`chart-grid chart-grid--${workspace.layout}`}
+      id="chart-tab-panel"
+      role="tabpanel"
+      aria-labelledby={`chart-tab-${workspace.active_chart_id}`}
       data-testid="chart-grid"
       data-layout={workspace.layout}
       style={{

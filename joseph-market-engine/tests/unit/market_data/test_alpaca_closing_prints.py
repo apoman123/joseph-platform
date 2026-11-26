@@ -265,6 +265,7 @@ def _adapter(
     adapter = factory.build_adapters(
         [venue],
         clock,
+        crypto_source="native",
         client=httpx.AsyncClient(),
         connect=connect,
         alpaca_config=cfg,

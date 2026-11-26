@@ -67,6 +67,8 @@ export interface StreamClientOptions {
    * nothing for more than two intervals is closed and reconnected.
    */
   heartbeatMs?: number;
+  /** Opening handshake deadline in milliseconds (default 10,000). */
+  connectTimeoutMs?: number;
   /** Random source in [0, 1) for jitter. */
   random?: () => number;
 }
@@ -92,9 +94,21 @@ interface Subscription {
  * @return Channel key.
  */
 export function channelKey(spec: ChannelSpec): string {
-  return [spec.channel, spec.instrument_id, spec.timeframe, spec.account_id]
-    .filter((part): part is string => Boolean(part))
-    .join(':');
+  const parts = [
+    spec.channel,
+    spec.instrument_id,
+    spec.timeframe,
+    spec.account_id,
+  ];
+  // The server gives AUTO the unsuffixed key and isolates explicit modes.
+  if (
+    spec.channel === 'candles' &&
+    spec.feed_mode &&
+    spec.feed_mode !== 'AUTO'
+  ) {
+    parts.push(spec.feed_mode);
+  }
+  return parts.filter((part): part is string => Boolean(part)).join(':');
 }
 
 /** Resumable WebSocket stream client. */
@@ -110,6 +124,7 @@ export class WebSocketStreamClient implements StreamClient {
   private lastMessageAt = 0;
   private reconnectTimer: ReturnType<typeof setTimeout> | null = null;
   private heartbeatTimer: ReturnType<typeof setInterval> | null = null;
+  private connectTimer: ReturnType<typeof setTimeout> | null = null;
   private closed = false;
 
   /**
@@ -181,6 +196,7 @@ export class WebSocketStreamClient implements StreamClient {
     if (this.reconnectTimer) clearTimeout(this.reconnectTimer);
     this.reconnectTimer = null;
     this.stopHeartbeat();
+    this.stopConnectTimer();
     const socket = this.socket;
     this.socket = null;
     if (socket) {
@@ -215,7 +231,21 @@ export class WebSocketStreamClient implements StreamClient {
       return;
     }
     this.socket = socket;
+    this.connectTimer = setTimeout(() => {
+      if (this.socket !== socket) return;
+      // A stalled handshake never starts the heartbeat. Detach this socket
+      // and retry without waiting for its close event to arrive.
+      this.socket = null;
+      this.stopConnectTimer();
+      socket.onopen = null;
+      socket.onmessage = null;
+      socket.onclose = null;
+      socket.onerror = null;
+      socket.close(4000, 'connection timeout');
+      this.scheduleReconnect();
+    }, this.options.connectTimeoutMs ?? 10_000);
     socket.onopen = () => {
+      this.stopConnectTimer();
       // Resume from the last sequence seen: the server replays from there, or
       // sends `snapshot_required` when that is beyond its retention window.
       this.attempt = 0;
@@ -242,6 +272,7 @@ export class WebSocketStreamClient implements StreamClient {
       // A socket that was replaced or shut down must not touch the state.
       if (this.socket !== socket) return;
       this.socket = null;
+      this.stopConnectTimer();
       this.stopHeartbeat();
       if (!this.closed && this.subscriptions.size > 0) {
         this.scheduleReconnect();
@@ -249,6 +280,12 @@ export class WebSocketStreamClient implements StreamClient {
         this.setStatus('CLOSED');
       }
     };
+  }
+
+  /** Clears the pending opening deadline after connection or shutdown. */
+  private stopConnectTimer(): void {
+    if (this.connectTimer !== null) clearTimeout(this.connectTimer);
+    this.connectTimer = null;
   }
 
   /** Schedules a reconnect with jittered exponential backoff. */
@@ -380,6 +417,8 @@ function matches(envelope: StreamEnvelope, keys: ReadonlySet<string>): boolean {
   }
   if (!envelope.channel) return true;
   if (keys.has(envelope.channel)) return true;
+  // Candle keys identify a complete series and mode, not a channel prefix.
+  if (envelope.channel.startsWith('candles:')) return false;
   // Account- or tenant-wide channels (e.g. `orders`) match by prefix.
   return [...keys].some(
     key =>

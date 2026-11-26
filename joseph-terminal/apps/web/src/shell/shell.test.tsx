@@ -134,11 +134,13 @@ describe('DrawingToolbar', () => {
       </RuntimeProvider>
     );
     expect(screen.getAllByRole('button').length).toBeGreaterThan(12);
-    fireEvent.click(screen.getByTestId('tool-trendline'));
+    fireEvent.click(screen.getByTestId('tool-group-lines'));
+    expect(screen.getByRole('menu', {name: 'Lines tools'})).toBeVisible();
+    fireEvent.click(screen.getByTestId('tool-option-trendline'));
     await waitFor(
       () => void expect(runtime.drawing.activeTool.get()).toBe('trendline')
     );
-    expect(screen.getByTestId('tool-trendline')).toHaveAttribute(
+    expect(screen.getByTestId('tool-group-lines')).toHaveAttribute(
       'aria-pressed',
       'true'
     );

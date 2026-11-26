@@ -146,7 +146,8 @@ def build_router(
             instrument_id: Canonical instrument id.
             tf: Timeframe value, such as ``1h``.
             plugin_set: Query ``set``: comma-separated plugin ids; all
-                usable plugins when absent.
+                plugins compatible with this chart and their default
+                settings when absent.
             at_ms: Point in time, UTC epoch milliseconds; the latest closed
                 bar when absent.
             settings: JSON object mapping plugin ids to setting overrides.
@@ -219,7 +220,8 @@ def build_router(
             instrument_id: Canonical instrument id.
             tf: Timeframe value, such as ``1h``.
             plugin_set: Query ``set``: comma-separated plugin ids; all
-                usable plugins when absent.
+                plugins compatible with this chart and their default
+                settings when absent.
             at_ms: Point in time, UTC epoch milliseconds; the latest closed
                 bar when absent.
             settings: JSON object mapping plugin ids to setting overrides.

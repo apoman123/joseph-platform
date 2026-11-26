@@ -11,6 +11,8 @@ TERM_DIR := joseph-terminal
 # override them on the command line, e.g. `make dev DEV_TOKEN=...`.
 DEV_TOKEN ?= dev-local-token
 SERVICE_TOKEN ?= dev-service-token
+# Market-data settings only; execution credentials stay in the execution service.
+MARKET_ENV_FILE ?= $(if $(wildcard deploy/.env),$(abspath deploy/.env),)
 
 .PHONY: help setup dev dev-market dev-execution dev-web lint typecheck \
         test test-python test-terminal test-system test-e2e test-network \
@@ -26,10 +28,11 @@ setup: ## Install every dependency (locked versions)
 	cd system-tests && uv sync --frozen
 	cd $(TERM_DIR) && pnpm install --frozen-lockfile
 
-dev-market: ## Run the market engine on :8000 (all venues; DEMO venue included)
+dev-market: ## Run the market engine on :8000 (selected real data feeds)
 	cd $(ME) && mkdir -p var && \
 	JOSEPH_DEV_TOKENS=$(DEV_TOKEN):tenant-01:user-01 \
 	JOSEPH_SERVICE_TOKEN=$(SERVICE_TOKEN) \
+	JOSEPH_MARKET_ENV_FILE="$(MARKET_ENV_FILE)" \
 	uv run uvicorn joseph.bootstrap:create_application --factory --port 8000
 
 dev-execution: ## Run the execution engine on :8100 (paper trading; LIVE off)

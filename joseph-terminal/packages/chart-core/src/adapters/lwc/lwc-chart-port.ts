@@ -410,6 +410,28 @@ export class LwcChartPort implements ChartPort {
     this.cleanups.push(
       () => void chart.timeScale().unsubscribeVisibleLogicalRangeChange(onRange)
     );
+    this.listen('wheel', event => {
+      if (!(event instanceof WheelEvent)) return;
+      const rect = container.getBoundingClientRect();
+      const axisWidth = chart.priceScale('right').width();
+      // The axis canvas can report zero width before its next layout pass.
+      // Keep a right-edge hit area so the wheel still reaches price zoom.
+      if (event.clientX < rect.right - Math.max(axisWidth, 72)) return;
+      const scale = chart.priceScale('right');
+      const range = scale.getVisibleRange() ?? this.dataPriceRange();
+      if (!range) return;
+      event.preventDefault();
+      event.stopPropagation();
+      const factor = Math.exp(
+        Math.max(-500, Math.min(500, event.deltaY)) * 0.001
+      );
+      const midpoint = (range.from + range.to) / 2;
+      const halfWidth = ((range.to - range.from) * factor) / 2;
+      scale.setVisibleRange({
+        from: midpoint - halfWidth,
+        to: midpoint + halfWidth,
+      });
+    });
     this.listen(
       'pointerdown',
       event => void this.handlePointer('pointerDown', event)
@@ -1457,6 +1479,27 @@ export class LwcChartPort implements ChartPort {
     const from = this.index.toTime(range.from);
     const to = this.index.toTime(range.to);
     return from === null || to === null ? null : {fromMs: from, toMs: to};
+  }
+
+  /**
+   * Finds a usable price range while the chart has not calculated its scale.
+   * @return Numeric low and high of loaded bars, or null before data arrives.
+   */
+  private dataPriceRange(): {from: number; to: number} | null {
+    if (this.bars.length === 0) return null;
+    let low = Number.POSITIVE_INFINITY;
+    let high = Number.NEGATIVE_INFINITY;
+    for (const bar of this.bars) {
+      low = Math.min(low, bar.low);
+      high = Math.max(high, bar.high);
+    }
+    if (!Number.isFinite(low) || !Number.isFinite(high)) return null;
+    const padding = Math.max(
+      (high - low) * 0.05,
+      Math.abs(high) * 0.001,
+      0.001
+    );
+    return {from: low - padding, to: high + padding};
   }
 
   /**

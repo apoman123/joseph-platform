@@ -5,6 +5,7 @@
 
 from __future__ import annotations
 
+import datetime
 import decimal
 import json
 import pathlib
@@ -74,6 +75,47 @@ def test_health_and_metrics(demo_client: testclient.TestClient) -> None:
     metrics = demo_client.get("/metrics")
     assert metrics.headers["content-type"].startswith("text/plain")
     assert "joseph_http_requests_total" in metrics.text
+
+
+def test_stock_monthly_default_window_returns_available_history(
+    demo_client: testclient.TestClient, contract_validate: Validate
+) -> None:
+    """Returns stock months instead of rejecting a pre-1990 lookback.
+
+    Args:
+        demo_client: Running market API with the backend mock venue.
+        contract_validate: Shared JSON Schema validator.
+
+    Returns:
+        None. Validates the HTTP response and its historical boundary.
+    """
+    response = demo_client.get(
+        "/v1/candles",
+        params={"instrument_id": "mock:stock:ACME", "tf": "1M", "limit": 500},
+    )
+    assert response.status_code == 200, response.text
+    body = response.json()
+    contract_validate("market.schema.json", "CandleBatch", body)
+    assert 0 < len(body["candles"]) < 500
+    first_start = datetime.datetime.fromtimestamp(
+        body["candles"][0]["start_ms"] / 1000, datetime.UTC
+    )
+    assert first_start.isoformat() == "1990-01-02T14:30:00+00:00"
+    assert body["feed_state"] == "DEMO"
+    indicator = demo_client.get(
+        "/v1/indicators/series",
+        params={
+            "instrument_id": "mock:stock:ACME",
+            "tf": "1M",
+            "plugin": "ema",
+            "from_ms": body["candles"][0]["start_ms"],
+        },
+    )
+    assert indicator.status_code == 200, indicator.text
+    contract_validate(
+        "indicators.schema.json", "IndicatorSeries", indicator.json()
+    )
+    assert indicator.json()["points"]
 
 
 def test_demo_endpoints_are_contract_valid(
@@ -244,7 +286,6 @@ def test_all_venues_served_from_captured_fixtures(
         "nyse",
         "cboe",
         "treasury",
-        "mock",
     }
     for instrument in (
         "binance:perp:BTCUSDT",
@@ -283,7 +324,6 @@ def test_search_never_merges_same_symbol_across_venues(
         "lighter:perp:BTC",
         "bitget:perp:BTCUSDT",
         "mexc:perp:BTC_USDT",
-        "mock:perp:BTCUSD",
     ):
         assert expected in ids
     assert len(ids) == len(set(ids))
@@ -669,11 +709,18 @@ def test_venue_capabilities_expose_trade_built_timeframes(
     assert caps["binance"]["market_data"]["taker_volume"] is True
     assert caps["bitget"]["market_data"]["taker_volume"] is False
     assert "1M" in caps["binance"]["timeframes"]
-    assert caps["binance"]["aggregated_timeframes"] == []
+    assert caps["binance"]["aggregated_timeframes"] == ["10m", "45m", "8h"]
     for venue in ("hyperliquid", "lighter"):
         assert "1M" in caps[venue]["timeframes"], venue
         assert "1M" in caps[venue]["aggregated_timeframes"], venue
-    assert caps["hyperliquid"]["aggregated_timeframes"] == ["6h", "1w", "1M"]
+    assert caps["hyperliquid"]["aggregated_timeframes"] == [
+        "10m",
+        "45m",
+        "6h",
+        "8h",
+        "1w",
+        "1M",
+    ]
     for venue in ("bitget", "mexc", "hyperliquid", "lighter"):
         assert caps[venue]["market_data"]["trade_delta"] is True, venue
     assert caps["binance"]["market_data"]["trade_delta"] is False

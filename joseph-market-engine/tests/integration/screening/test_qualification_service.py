@@ -40,6 +40,7 @@ def _service(
     adapters = factory.build_adapters(
         venues,
         clock,
+        crypto_source="native",
         client=httpx.AsyncClient(),
         alpaca_config=alpaca.AlpacaConfig(key_id="test", secret_key="test"),
     )
@@ -120,7 +121,10 @@ async def test_unreachable_venue_is_skipped_in_global_report(
     )
     clock = capture_clock
     adapters = factory.build_adapters(
-        [instruments.Venue.BITGET], clock, client=httpx.AsyncClient()
+        [instruments.Venue.BITGET],
+        clock,
+        crypto_source="native",
+        client=httpx.AsyncClient(),
     )
     adapters[instruments.Venue.MOCK] = mock.MockAdapter(clock)
     svc = service.QualificationService(adapters, clock)

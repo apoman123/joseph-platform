@@ -68,7 +68,10 @@ def _adapter(venue: instruments.Venue) -> ports.MarketDataPort:
         The adapter, without derived bars or recorded delta.
     """
     return factory.build_adapters(
-        [venue], clock_lib.SystemClock(), client=httpx.AsyncClient(timeout=30)
+        [venue],
+        clock_lib.SystemClock(),
+        crypto_source="native",
+        client=httpx.AsyncClient(timeout=30),
     )[venue]
 
 

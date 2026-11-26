@@ -97,6 +97,7 @@ from joseph.domain import quality
 from joseph.domain import sessions
 from joseph.domain import timeframes
 from joseph.market_data.adapters import base
+from joseph.market_data.adapters import fugle as fugle_lib
 from joseph.market_data.adapters import http
 from joseph.market_data.adapters import sinopac as sinopac_lib
 from joseph.market_data.app import bar_archive as bar_archive_lib
@@ -1279,6 +1280,7 @@ class TaiwanExchangeAdapter(base.BaseVenueAdapter):
         sleep: Sleep = asyncio.sleep,
         poll_interval_s: float = POLL_INTERVAL_S,
         sinopac: sinopac_lib.SinopacSource | None = None,
+        fugle: fugle_lib.FugleSource | None = None,
         bar_archive: bar_archive_lib.BarArchive | None = None,
     ) -> None:
         """Initializes the adapter.
@@ -1293,6 +1295,7 @@ class TaiwanExchangeAdapter(base.BaseVenueAdapter):
             poll_interval_s: Minimum seconds between recorder passes.
             sinopac: Shared Shioaji source (``JOSEPH_TW_DATA_SOURCE=
                 sinopac``), or ``None`` for the official sources only.
+            fugle: Free-tier Fugle source for per-symbol candles and quotes.
             bar_archive: Durable store of recorded one-minute bars and
                 their coverage (``None`` keeps them in memory only).
         """
@@ -1310,6 +1313,7 @@ class TaiwanExchangeAdapter(base.BaseVenueAdapter):
         self._calendar_day: datetime.date | None = None
         self.listing: dict[str, ListingMeta] = {}
         self._sinopac = sinopac
+        self._fugle = fugle
         if sinopac is not None:
             sinopac.acquire()
         self._archive = bar_archive
@@ -1846,6 +1850,10 @@ class TaiwanExchangeAdapter(base.BaseVenueAdapter):
         """
         self._require_timeframe(timeframe)
         await self._require(instrument)
+        if self._fugle is not None:
+            return await self._fugle.fetch_candle_coverage(
+                instrument, timeframe, start_ms, end_ms, limit
+            )
         if end_ms <= start_ms:
             return candle_rules.CandleCoverage((), (), complete=True)
         if timeframe.is_seconds:
@@ -1917,7 +1925,7 @@ class TaiwanExchangeAdapter(base.BaseVenueAdapter):
         """
         source = self._sinopac
         if source is None:
-            return caps
+            return self._with_fugle(caps)
         if not source.enabled:
             return dataclasses.replace(
                 caps,
@@ -1948,6 +1956,43 @@ class TaiwanExchangeAdapter(base.BaseVenueAdapter):
                 *notes,
                 source.status_note(),
             ),
+        )
+
+    def _with_fugle(
+        self, caps: capabilities.VenueCapabilities
+    ) -> capabilities.VenueCapabilities:
+        """Declare Fugle candle and quote access when it is configured.
+
+        Args:
+            caps: Official venue capabilities used for listings and bulk data.
+
+        Returns:
+            Per-symbol Fugle capabilities, or official capabilities when
+            Fugle is not configured.
+        """
+        if self._fugle is None:
+            return caps
+        return dataclasses.replace(
+            caps,
+            display_name=f"{caps.display_name} (Fugle free tier)",
+            aggregated_timeframes=tuple(
+                tf
+                for tf in caps.timeframes
+                if tf not in (timeframes.Timeframe.M1, timeframes.Timeframe.D1)
+            ),
+            notes=(
+                "Fugle per-symbol 1m history begins 2023-05-23 and daily "
+                "history begins in 2010; longer bars are aggregated on "
+                "the XTAI session calendar. Today's minute candles and "
+                "quotes use Fugle REST polling, not a WebSocket stream.",
+                "Fugle's 13:30 closing auction is folded into the final "
+                "session minute. Bulk screening snapshots and order books "
+                "remain separately sourced from the exchanges.",
+            ),
+            docs_url=fugle_lib.DOCS_URL,
+            verified_at_ms=None,
+            requires_credentials=True,
+            credentials_configured=True,
         )
 
     def _fallback(self, err: errors.JosephError) -> None:
@@ -3105,6 +3150,9 @@ class TaiwanExchangeAdapter(base.BaseVenueAdapter):
         Raises:
             errors.MissingDataError: When MIS has no record of the code.
         """
+        await self._require(instrument)
+        if self._fugle is not None:
+            return await self._fugle.fetch_snapshot(instrument)
         feed = await self._live_feed(instrument, subscribe=False)
         if feed is not None and self._sinopac is not None:
             live = self._sinopac.live_snapshot(feed)
@@ -3207,6 +3255,8 @@ class TaiwanExchangeAdapter(base.BaseVenueAdapter):
         self.persist_recordings(self._clock.now_ms(), force=True)
         if self._sinopac is not None:
             await self._sinopac.close()
+        if self._fugle is not None:
+            await self._fugle.close()
         await self._http.close()
         await self._www.close()
         await self._mis_http.close()

@@ -139,7 +139,7 @@
         "layout": {"$ref": "#/$defs/LayoutId"},
         "sync": {"$ref": "#/$defs/SyncOptions"},
         "active_chart_id": {"type": "string"},
-        "charts": {"type": "array", "minItems": 1, "maxItems": 8, "items": {"$ref": "#/$defs/ChartState"}},
+        "charts": {"type": "array", "minItems": 1, "items": {"$ref": "#/$defs/ChartState"}, "description": "Saved chart tabs without a fixed count limit; layout controls visible panes."},
         "favorites": {
           "type": "object",
           "additionalProperties": false,

@@ -53,6 +53,9 @@ describe('fixed-length bars', () => {
     expect(floorToTimeframe('15s', t)).toBe(Date.UTC(2026, 10, 22, 14, 3, 45));
     expect(floorToTimeframe('30s', t)).toBe(Date.UTC(2026, 10, 22, 14, 3, 30));
     expect(floorToTimeframe('5m', t)).toBe(Date.UTC(2026, 10, 22, 14, 0));
+    expect(floorToTimeframe('10m', t)).toBe(Date.UTC(2026, 10, 22, 14, 0));
+    expect(floorToTimeframe('45m', t)).toBe(Date.UTC(2026, 10, 22, 13, 30));
+    expect(floorToTimeframe('8h', t)).toBe(Date.UTC(2026, 10, 22, 8));
     expect(timeframeEnd('5s', Date.UTC(2026, 10, 22, 14, 3, 45))).toBe(
       Date.UTC(2026, 10, 22, 14, 3, 50)
     );

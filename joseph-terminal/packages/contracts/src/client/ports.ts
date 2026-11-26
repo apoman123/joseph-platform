@@ -80,6 +80,8 @@ export interface InstrumentQuery {
 
 /** Query for historical candles. */
 export interface CandleQuery {
+  /** Optional signal that cancels obsolete history reads and their body. */
+  signal?: AbortSignal;
   /** Canonical instrument id. */
   instrumentId: string;
   /** Bar resolution. */

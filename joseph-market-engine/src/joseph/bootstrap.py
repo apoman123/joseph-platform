@@ -62,7 +62,6 @@ from joseph.market_data.adapters import factory
 from joseph.market_data.adapters import lighter_archive
 from joseph.market_data.adapters import mexc
 from joseph.market_data.adapters import replay as replay_lib
-from joseph.market_data.adapters import sinopac
 from joseph.market_data.adapters import trade_archive_sql
 from joseph.market_data.adapters import ws
 from joseph.market_data.app import candle_store
@@ -186,12 +185,14 @@ class Container:
     async def astart(self) -> None:
         """Starts the background workers.
 
-        Starts the trade recorder, the alert outbox worker and, when
+        Starts provider metadata warmup, the trade recorder, the alert
+        outbox worker and, when
         ``pipeline_enabled`` is set, the live signal pipeline. Each creates
         asyncio tasks, so this runs inside the app's event loop (the
         FastAPI lifespan). Feed sessions are not started here: the feed
         router opens them on demand (``FeedRouter.acquire``).
         """
+        self.registry.start_warmup()
         if self.recorder is not None:
             self.recorder.start()
         stack = self.signal_stack
@@ -216,6 +217,7 @@ class Container:
             await stack.outbox_worker.stop()
             await stack.http_client.aclose()
         await self.router.close()
+        await self.registry.close()
         if self.recorder is not None:
             await self.recorder.stop()
         for adapter in self.adapters.values():
@@ -245,8 +247,13 @@ def build_container(
 
     Returns:
         Container.
+
+    Raises:
+        ValueError: If the Taiwan source setting is unsupported.
     """
     settings = settings or config.Settings.from_env()
+    if settings.tw_data_source not in config.TW_DATA_SOURCES:
+        raise ValueError("JOSEPH_TW_DATA_SOURCE must be twse or fugle")
     clock = clock or clock_lib.SystemClock()
     metrics = metrics_lib.standard_registry()
     engine = db.create_engine(settings.database_url)
@@ -260,6 +267,7 @@ def build_container(
     raw_adapters = factory.build_adapters(
         settings.active_venues,
         clock,
+        crypto_source="ccxt",
         timeout_s=settings.http_timeout_s,
         client=http_client,
         connect=connect,
@@ -270,7 +278,12 @@ def build_container(
             seconds_history_ms=settings.alpaca_seconds_history_ms,
         ),
         mexc_ws_format=mexc.WsFormat(settings.mexc_ws_format),
-        sinopac_config=sinopac_config(settings),
+        fugle_api_key=(
+            settings.fugle_api_key
+            if settings.tw_data_source == "fugle"
+            else None
+        ),
+        fred_api_key=settings.fred_api_key,
         bar_archive=(
             bar_archive_sql.SqlBarArchive(archive_engine or engine)
             if exchange & set(settings.active_venues)
@@ -408,28 +421,6 @@ def build_container(
         container.closers.append(trending.close)
     container.signal_stack = build_signal_stack(container)
     return container
-
-
-def sinopac_config(settings: config.Settings) -> sinopac.SinopacConfig | None:
-    """Builds the Shioaji market-data settings of TWSE and TPEx.
-
-    Args:
-        settings: Settings.
-
-    Returns:
-        Settings when ``JOSEPH_TW_DATA_SOURCE=sinopac`` (without credentials
-        the source stays disabled and says so), else ``None``.
-    """
-    if settings.tw_data_source != "sinopac":
-        return None
-    return sinopac.SinopacConfig(
-        api_key=settings.sinopac_api_key,
-        secret_key=settings.sinopac_secret_key,
-        max_symbols=settings.sinopac_max_symbols,
-        intraday_ticks_calls=settings.sinopac_intraday_ticks_calls,
-        intraday_kbars_calls=settings.sinopac_intraday_kbars_calls,
-        seconds_history_days=settings.sinopac_seconds_history_days,
-    )
 
 
 def _trade_recorder(

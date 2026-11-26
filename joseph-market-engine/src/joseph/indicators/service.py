@@ -14,6 +14,11 @@ Windows are counted in bars of the instrument's session calendar
 (``sessions.for_instrument``), so on an exchange "400 bars back" skips nights,
 weekends and holidays.
 
+Lower-timeframe fetches are bounded by ``QueryConfig.max_intrabar_bars``
+so a monthly chart cannot download decades of hourly or minute data.
+Older estimates keep their explicit missing-coverage values; chart bars
+and true buy-volume delta remain available across the requested window.
+
 Anchored studies (a plugin whose settings include ``anchor_ms``, with
 ``anchor = "time"`` when it also has an ``anchor`` setting, i.e.
 ``anchored_vwap`` and the anchored ``regression_channel``) are computed from
@@ -94,6 +99,9 @@ class QueryConfig:
             bar to now; an older anchor is refused.
         anchored_cache_points: Points kept across all cached anchored runs
             (least recently used runs are dropped; 0 disables the cache).
+        max_intrabar_bars: Positive maximum lower-timeframe candles fetched
+            per required stream (10,000 by default). Older estimates lack
+            intrabar coverage rather than fabricating values.
     """
 
     lookback_bars: int = 400
@@ -106,6 +114,7 @@ class QueryConfig:
     )
     max_anchored_bars: int = 50_000
     anchored_cache_points: int = 200_000
+    max_intrabar_bars: int = 10_000
 
 
 @dataclasses.dataclass(frozen=True, slots=True)
@@ -260,11 +269,17 @@ class IndicatorQueryService:
             clock: Time source for "latest" queries.
             config: Tuning (defaults when omitted).
             tick_sizes: Optional instrument tick-size port.
+
+        Raises:
+            ValueError: If the configured intrabar candle budget is not
+                positive.
         """
         self._source = candle_source
         self._registry = registry
         self._clock = clock
         self._config = QueryConfig() if config is None else config
+        if self._config.max_intrabar_bars <= 0:
+            raise ValueError("max_intrabar_bars must be positive")
         self._ticks = tick_sizes
         self._runs: collections.OrderedDict[tuple[str, ...], _SeriesRun] = (
             collections.OrderedDict()
@@ -292,7 +307,8 @@ class IndicatorQueryService:
         Args:
             instrument_id: Exact venue instrument.
             timeframe: Series timeframe.
-            plugin_ids: Plugins to include (all usable when omitted).
+            plugin_ids: Plugins to include (chart-compatible defaults when
+                omitted).
             at_ms: Point in time; latest closed bar when omitted.
             settings: Optional per-plugin setting overrides.
 
@@ -330,7 +346,8 @@ class IndicatorQueryService:
         Args:
             instrument_id: Exact venue instrument.
             timeframe: Series timeframe.
-            plugin_ids: Plugins to include (all usable when omitted).
+            plugin_ids: Plugins to include (chart-compatible defaults when
+                omitted).
             at_ms: Point in time; latest closed bar when omitted.
             settings: Optional per-plugin setting overrides.
 
@@ -486,21 +503,27 @@ class IndicatorQueryService:
         Args:
             instrument_id: Exact venue instrument.
             timeframe: Series timeframe.
-            plugin_ids: Requested plugins (all usable when empty).
+            plugin_ids: Requested plugins. When absent, use registered
+                plugins compatible with the chart timeframe and their
+                default settings; explicitly configured invalid settings
+                still fail validation.
             end_ms: Evaluation time.
             settings: Per-request overrides layered over the configured ones.
             lookback_bars: Chart bars to compute (configured default when
                 omitted); widened to an anchored study's anchor bar.
             intrabar_bars: Chart bars for which intrabars are fetched
                 (configured default when omitted); series use the whole
-                window so every point has its lower-timeframe data.
+                window up to the lower-timeframe candle budget. Older
+                points retain their explicit missing-coverage values.
 
         Returns:
             The plan.
 
         Raises:
-            ValidationFailedError: If no plugin is requested/usable, or an
-                anchor lies beyond ``max_anchored_bars``.
+            ValidationFailedError: If no plugin is requested, explicit
+                settings are invalid, or an anchor lies beyond
+                ``max_anchored_bars``.
+            UnsupportedError: If no default plugin supports the chart.
         """
         ids = tuple(plugin_ids) if plugin_ids else self._registry.ids()
         if not ids:
@@ -516,6 +539,35 @@ class IndicatorQueryService:
         }
         tick = await ticks_lib.resolve(self._ticks, instrument_id)
         merged = ticks_lib.with_tick_size(self._registry, ids, merged, tick)
+        if plugin_ids is None:
+            usable: list[str] = []
+            for plugin_id in ids:
+                candidate = engine_lib.EngineConfig(
+                    signal_timeframe=timeframe,
+                    plugins={
+                        plugin_id: engine_lib.PluginSpec(
+                            timeframes=(timeframe,),
+                            settings=merged[plugin_id],
+                        )
+                    },
+                )
+                try:
+                    engine_lib.IndicatorEngine(
+                        self._registry, candidate, instrument_id
+                    )
+                except errors.ValidationFailedError:
+                    if (settings and plugin_id in settings) or (
+                        plugin_id in self._config.settings
+                    ):
+                        raise
+                    continue
+                usable.append(plugin_id)
+            ids = tuple(usable)
+            if not ids:
+                raise errors.UnsupportedError(
+                    f"no default indicator supports {timeframe.value} for "
+                    f"{instrument_id}"
+                )
         config = engine_lib.EngineConfig(
             signal_timeframe=timeframe,
             plugins={
@@ -538,22 +590,35 @@ class IndicatorQueryService:
             if anchored is not None:
                 lookback = max(lookback, anchored)
             current = calendar.floor(timeframe, end_ms)
-            chart_start = calendar.shift(timeframe, current, -lookback)
+            period_end = calendar.end_of(timeframe, current)
+            chart_start = sessions.lookback_start(
+                calendar, timeframe, period_end, lookback + 1
+            )
             windows: dict[timeframes.Timeframe, int] = {}
             for tf in engine.required_timeframes:
                 if tf is timeframe:
                     windows[tf] = chart_start
                 elif tf.duration_ms < timeframe.duration_ms:
-                    windows[tf] = calendar.shift(
+                    requested_start = sessions.lookback_start(
+                        calendar,
                         timeframe,
-                        current,
-                        -(intrabar_bars or self._config.intrabar_lookback_bars),
+                        period_end,
+                        (intrabar_bars or self._config.intrabar_lookback_bars)
+                        + 1,
+                    )
+                    windows[tf] = _intrabar_window_start(
+                        calendar,
+                        tf,
+                        requested_start,
+                        end_ms,
+                        self._config.max_intrabar_bars,
                     )
                 else:
-                    windows[tf] = calendar.shift(
+                    windows[tf] = sessions.lookback_start(
+                        calendar,
                         tf,
-                        calendar.floor(tf, chart_start),
-                        -self._config.aux_lookback_bars,
+                        calendar.end_of(tf, calendar.floor(tf, chart_start)),
+                        self._config.aux_lookback_bars + 1,
                     )
         return _Plan(
             engine=engine,
@@ -780,6 +845,38 @@ class IndicatorQueryService:
                 "the anchor closer or use a higher timeframe."
             )
         return bars
+
+
+def _intrabar_window_start(
+    calendar: sessions.BarCalendar,
+    timeframe: timeframes.Timeframe,
+    requested_start: int,
+    end_ms: int,
+    max_bars: int,
+) -> int:
+    """Keeps the newest lower-timeframe candles within a bounded budget.
+
+    Args:
+        calendar: Instrument session calendar.
+        timeframe: Required lower timeframe.
+        requested_start: Requested inclusive UTC start in milliseconds.
+        end_ms: Exclusive computation time in UTC milliseconds.
+        max_bars: Positive maximum count of closed lower-timeframe candles.
+
+    Returns:
+        Inclusive UTC start, or end_ms when no closed candle exists.
+
+    Raises:
+        ValueError: If calendar arithmetic cannot represent the window.
+    """
+    if calendar.bars_between(timeframe, requested_start, end_ms) <= max_bars:
+        return requested_start
+    last = calendar.last_closed_start(timeframe, end_ms)
+    if last is None:
+        return end_ms
+    return max(
+        requested_start, calendar.shift(timeframe, last, -(max_bars - 1))
+    )
 
 
 def anchor_time_ms(

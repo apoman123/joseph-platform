@@ -7,7 +7,7 @@
 /**
  * @fileoverview Workspace document model and pure reducer.
  *
- * Up to eight chart states are kept; the layout decides how many are shown,
+ * Chart tabs have no fixed count limit; the layout shows up to eight panes,
  * so shrinking a layout never discards a chart's settings. Instrument,
  * timeframe and viewport changes propagate to linked charts when the
  * corresponding sync option is on (charts with a link group sync only
@@ -35,8 +35,8 @@ export const LAYOUT_PANES: Readonly<Record<LayoutId, number>> = {
   '8': 8,
 };
 
-/** Maximum charts stored in a workspace. */
-export const MAX_CHARTS = 8;
+/** Maximum chart panes visible at once; saved tabs have no count limit. */
+export const MAX_VISIBLE_CHARTS = 8;
 
 /**
  * Indicator layers of a new chart, with their initial visibility: the
@@ -231,6 +231,20 @@ export function createDefaultWorkspace(
 export type WorkspaceAction =
   | {type: 'setLayout'; layout: LayoutId}
   | {type: 'setActiveChart'; chartId: string}
+  | {
+      /** Creates and selects an independent saved chart tab. */
+      type: 'addChart';
+      /** Unique chart identifier within this workspace. */
+      chartId: string;
+      /** Optional canonical instrument; defaults to the active chart's symbol. */
+      instrumentId?: InstrumentId;
+    }
+  | {
+      /** Removes a chart tab while preserving at least one chart. */
+      type: 'closeChart';
+      /** Identifier of the saved chart to remove. */
+      chartId: string;
+    }
   | {type: 'setInstrument'; chartId: string; instrumentId: InstrumentId}
   | {type: 'setTimeframe'; chartId: string; timeframe: Timeframe}
   | {type: 'setChartType'; chartId: string; chartType: ChartType}
@@ -326,7 +340,7 @@ export function linkedChartIds(
   const ids = new Set([chartId]);
   if (!synced) return ids;
   const source = doc.charts.find(chart => chart.chart_id === chartId);
-  const visible = doc.charts.slice(0, LAYOUT_PANES[doc.layout]);
+  const visible = visibleCharts(doc);
   for (const chart of visible) {
     const group = source?.link_group ?? null;
     if (group === null || chart.link_group === group) ids.add(chart.chart_id);
@@ -351,13 +365,13 @@ function mapCharts(
   );
 }
 
-/** Chart list type of the generated contract (1..8 tuple union). */
+/** Nonempty chart list type of the generated contract. */
 export type WorkspaceCharts = WorkspaceDocument['charts'];
 
 /**
- * Narrows a chart array to the contract's 1..8 tuple type. The length is
+ * Narrows a chart array to the contract's nonempty list type. The length is
  * not checked.
- * @param charts Charts; the caller guarantees 1 to 8 items.
+ * @param charts Charts; the caller guarantees at least one item.
  * @return The same array, typed as the contract's chart list.
  */
 export function asCharts(charts: ChartState[]): WorkspaceCharts {
@@ -407,8 +421,49 @@ function reduce(
   switch (action.type) {
     case 'replace':
       return action.workspace;
+    case 'addChart': {
+      if (doc.charts.some(chart => chart.chart_id === action.chartId)) {
+        return doc;
+      }
+      const source = activeChart(doc);
+      const chart = createChartState(
+        action.chartId,
+        action.instrumentId ?? source.instrument_id,
+        source.timeframe
+      );
+      return {
+        ...doc,
+        charts: asCharts([...doc.charts, chart]),
+        active_chart_id: chart.chart_id,
+      };
+    }
+    case 'closeChart': {
+      if (doc.charts.length === 1) return doc;
+      const index = doc.charts.findIndex(
+        chart => chart.chart_id === action.chartId
+      );
+      if (index < 0) return doc;
+      const charts = doc.charts.filter(
+        chart => chart.chart_id !== action.chartId
+      );
+      const fallback = charts[Math.min(index, charts.length - 1)];
+      return {
+        ...doc,
+        charts: asCharts(charts),
+        active_chart_id:
+          doc.active_chart_id === action.chartId
+            ? (fallback?.chart_id ?? doc.active_chart_id)
+            : doc.active_chart_id,
+      };
+    }
     case 'setLayout': {
-      const needed = LAYOUT_PANES[action.layout];
+      const count = LAYOUT_PANES[action.layout];
+      const activeIndex = Math.max(
+        0,
+        doc.charts.findIndex(chart => chart.chart_id === doc.active_chart_id)
+      );
+      const first = Math.floor(activeIndex / count) * count;
+      const needed = first + count;
       const charts = [...doc.charts];
       const template =
         charts.find(chart => chart.chart_id === doc.active_chart_id) ??
@@ -429,7 +484,9 @@ function reduce(
           visible_range: null,
         });
       }
-      const visibleIds = charts.slice(0, needed).map(chart => chart.chart_id);
+      const visibleIds = charts
+        .slice(first, needed)
+        .map(chart => chart.chart_id);
       const active = visibleIds.includes(doc.active_chart_id)
         ? doc.active_chart_id
         : (visibleIds[0] ?? doc.active_chart_id);
@@ -623,13 +680,20 @@ function reduce(
 }
 
 /**
- * Returns the charts visible in the current layout: the first
- * `LAYOUT_PANES[layout]` charts.
+ * Returns the page of chart tabs containing the active chart.
+ * Single-chart layouts mount only the selected tab; split layouts mount
+ * at most their configured pane count.
  * @param doc Workspace.
  * @return Visible charts in pane order.
  */
 export function visibleCharts(doc: WorkspaceDocument): ChartState[] {
-  return doc.charts.slice(0, LAYOUT_PANES[doc.layout]);
+  const count = LAYOUT_PANES[doc.layout];
+  const index = Math.max(
+    0,
+    doc.charts.findIndex(chart => chart.chart_id === doc.active_chart_id)
+  );
+  const start = Math.floor(index / count) * count;
+  return doc.charts.slice(start, start + count);
 }
 
 /**
@@ -637,7 +701,7 @@ export function visibleCharts(doc: WorkspaceDocument): ChartState[] {
  * @param doc Workspace.
  * @return Active chart, or the first chart when `active_chart_id` is stale.
  * @throws `Error` when the workspace has no charts, which a valid document
- *     never has (the contract requires 1 to 8).
+ *     never has (the contract requires at least one).
  */
 export function activeChart(doc: WorkspaceDocument): ChartState {
   const chart =

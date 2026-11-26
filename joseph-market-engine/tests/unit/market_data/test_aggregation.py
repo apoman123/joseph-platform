@@ -151,14 +151,24 @@ def test_aggregated_1m_equals_binance_native_1m_on_fixture() -> None:
     [
         (
             hyperliquid._KLINE_TF,
-            {_TF.H6: _TF.H2, _TF.W1: _TF.D1, _TF.MN1: _TF.D1},
+            {
+                _TF.M10: _TF.M5,
+                _TF.M45: _TF.M15,
+                _TF.H6: _TF.H2,
+                _TF.H8: _TF.H4,
+                _TF.W1: _TF.D1,
+                _TF.MN1: _TF.D1,
+            },
         ),
         (
             lighter._KLINE_TF,
             {
                 _TF.M3: _TF.M1,
+                _TF.M10: _TF.M5,
+                _TF.M45: _TF.M15,
                 _TF.H2: _TF.H1,
                 _TF.H6: _TF.H1,
+                _TF.H8: _TF.H4,
                 _TF.W1: _TF.D1,
                 _TF.MN1: _TF.D1,
             },
@@ -167,8 +177,11 @@ def test_aggregated_1m_equals_binance_native_1m_on_fixture() -> None:
             tuple(mexc._INTERVAL),
             {
                 _TF.M3: _TF.M1,
+                _TF.M10: _TF.M5,
+                _TF.M45: _TF.M15,
                 _TF.H2: _TF.H1,
                 _TF.H6: _TF.H1,
+                _TF.H8: _TF.H4,
                 _TF.H12: _TF.H4,
             },
         ),

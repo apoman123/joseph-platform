@@ -5,6 +5,8 @@ playwright-report
 test-results
 pnpm-lock.yaml
 packages/contracts/src/generated
+# Next.js rewrites this declaration during builds and development.
+apps/web/next-env.d.ts
 
 # Contract documents (JSON Schemas, OpenAPI and AsyncAPI) and fixtures are
 # shared with the engines and keep their own layout.

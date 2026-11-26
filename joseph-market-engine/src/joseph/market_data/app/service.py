@@ -294,7 +294,7 @@ class MarketDataService:
         return adapter
 
     async def _call[T](self, venue: instruments.Venue, call: Awaitable[T]) -> T:
-        """Awaits a venue call, recording REST health.
+        """Awaits a venue call and records truthful REST feed health.
 
         Args:
             venue: Venue.
@@ -315,13 +315,19 @@ class MarketDataService:
             if isinstance(err, errors.VenueUnavailableError):
                 tracker.record_error(self._clock.now_ms(), err.message)
             raise
+        ccxt_feed = (
+            self._adapters[venue].capabilities().display_name.startswith("CCXT")
+        )
+        state = quality.FeedState.LIVE
+        if ccxt_feed:
+            state = quality.FeedState.POLL
+        if venue is instruments.Venue.MOCK:
+            state = quality.FeedState.DEMO
         tracker.set_transport(
             quality.Transport.MOCK
             if venue is instruments.Venue.MOCK
             else quality.Transport.REST_POLL,
-            quality.FeedState.DEMO
-            if venue is instruments.Venue.MOCK
-            else quality.FeedState.LIVE,
+            state,
         )
         tracker.record_message(self._clock.now_ms())
         return result
@@ -534,7 +540,8 @@ class MarketDataService:
             instrument_id: Canonical instrument id or its string.
             timeframe: Resolution or its contract string.
             from_ms: Inclusive start, epoch milliseconds; defaults to
-                ``limit`` bars back.
+                ``limit`` bars back, bounded by the calendar's first
+                supported session.
             to_ms: Exclusive end, epoch milliseconds; defaults to just after
                 the live bar.
             limit: Maximum bars (default 500, max 5000); the newest are
@@ -568,9 +575,7 @@ class MarketDataService:
             if from_ms is not None:
                 start = from_ms
             else:
-                start = calendar.shift(
-                    tf, calendar.floor(tf, end - 1), -(bars - 1)
-                )
+                start = sessions.lookback_start(calendar, tf, end, bars)
         if end <= start:
             raise errors.ValidationFailedError("to_ms must be after from_ms")
         if feed_mode is quality.FeedMode.REPLAY:
@@ -636,7 +641,7 @@ class MarketDataService:
 
         Returns:
             ``(feed_state, source)``; the source names the transport, e.g.
-            ``binance.ws``, ``binance.poll`` or ``binance.trades``.
+            ``binance.ws``, ``binance.poll`` or ``ccxt.binance.rest``.
         """
         if instrument.venue is instruments.Venue.MOCK:
             return quality.FeedState.DEMO, "mock"
@@ -660,7 +665,11 @@ class MarketDataService:
                     quality.FeedState.LIVE,
                     venue if venue.endswith(".trades") else f"{venue}.ws",
                 )
-        return quality.FeedState.LIVE, f"{venue}.rest"
+        return (
+            (quality.FeedState.POLL, f"ccxt.{venue}.rest")
+            if caps.display_name.startswith("CCXT")
+            else (quality.FeedState.LIVE, f"{venue}.rest")
+        )
 
     async def get_snapshot(
         self, instrument_id: instruments.InstrumentId | str

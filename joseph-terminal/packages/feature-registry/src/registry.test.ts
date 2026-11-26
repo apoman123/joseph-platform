@@ -119,6 +119,18 @@ function leakyFeature(
 }
 
 describe('FeatureRegistry', () => {
+  it('does not register a synchronous feature twice during overlapping activation', async () => {
+    const {host, commands} = makeHost();
+    const registry = new FeatureRegistry(host, {contractVersion: 1});
+    registry.register(leakyFeature('once'));
+    await Promise.all([registry.activateAll(), registry.activateAll()]);
+    expect(
+      commands.list().filter(command => command.id === 'once.run')
+    ).toHaveLength(1);
+    registry.deactivateAll();
+    expect(commands.list()).toHaveLength(0);
+  });
+
   it('rejects duplicate ids and manifests without a removal plan', () => {
     const {host} = makeHost();
     const registry = new FeatureRegistry(host, {contractVersion: 1});

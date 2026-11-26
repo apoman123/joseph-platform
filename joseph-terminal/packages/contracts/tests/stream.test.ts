@@ -109,6 +109,57 @@ describe('WebSocketStreamClient', () => {
 
   it('builds canonical channel keys', () => {
     expect(channelKey(spec)).toBe('candles:mock:perp:BTCUSD:5m');
+    expect(channelKey({...spec, feed_mode: 'AUTO'})).toBe(channelKey(spec));
+    expect(channelKey({...spec, feed_mode: 'NATIVE_WS'})).toBe(
+      `${channelKey(spec)}:NATIVE_WS`
+    );
+  });
+
+  it('retries a socket whose opening handshake never completes', () => {
+    const statuses: string[] = [];
+    client.onStatus(status => statuses.push(status));
+    client.subscribe([spec], () => undefined);
+    const first = sockets[0];
+    vi.advanceTimersByTime(10_000);
+    expect(first?.readyState).toBe(3);
+    expect(statuses.at(-1)).toBe('RECONNECTING');
+    vi.advanceTimersByTime(100);
+    expect(sockets).toHaveLength(2);
+    sockets[1]?.open();
+    expect(statuses.at(-1)).toBe('OPEN');
+    vi.advanceTimersByTime(100);
+    expect(sockets).toHaveLength(2);
+  });
+
+  it('cancels the opening deadline when unsubscribed', () => {
+    const unsubscribe = client.subscribe([spec], () => undefined);
+    unsubscribe();
+    vi.advanceTimersByTime(20_000);
+    expect(sockets).toHaveLength(1);
+    expect(vi.getTimerCount()).toBe(0);
+  });
+
+  it('keeps explicit feed modes separate during routing and unsubscribe', () => {
+    const auto = vi.fn();
+    const native = vi.fn();
+    const nativeSpec = {...spec, feed_mode: 'NATIVE_WS' as const};
+    const removeNative = client.subscribe([nativeSpec], native);
+    client.subscribe([spec], auto);
+    sockets[0]?.open();
+    expect(JSON.parse(sockets[0]?.sent[0] ?? '{}').channels).toHaveLength(2);
+    sockets[0]?.deliver(
+      envelope(1, {channel: `${channelKey(spec)}:NATIVE_WS`})
+    );
+    expect(native).toHaveBeenCalledTimes(1);
+    expect(auto).not.toHaveBeenCalled();
+    sockets[0]?.deliver(envelope(2));
+    expect(auto).toHaveBeenCalledTimes(1);
+    expect(native).toHaveBeenCalledTimes(1);
+    removeNative();
+    expect(JSON.parse(sockets[0]?.sent.at(-1) ?? '{}')).toMatchObject({
+      action: 'unsubscribe',
+      channels: [nativeSpec],
+    });
   });
 
   it('subscribes on open and routes by channel', () => {

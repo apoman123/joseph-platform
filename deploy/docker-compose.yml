@@ -23,7 +23,7 @@ services:
       # Optional token for plugin requirements on a private git host.
       secrets: [plugin_git_token]
       args:
-        # "--extra sinopac" for SinoPac Shioaji data (JOSEPH_TW_DATA_SOURCE).
+      # Market-data extras; the free-first stack uses none.
         UV_EXTRAS: ${MARKET_UV_EXTRAS:-}
         # Indicator plugin packages (pip requirements); empty: built-ins.
         PLUGIN_REQUIREMENTS: ${MARKET_PLUGIN_REQUIREMENTS:-}
@@ -32,7 +32,7 @@ services:
     environment:
       <<: *engine-env
       JOSEPH_EXECUTION_URL: http://execution:8100
-      JOSEPH_ENABLED_VENUES: ${JOSEPH_ENABLED_VENUES:-binance,hyperliquid,lighter,bitget,mexc,twse,tpex,nasdaq,nyse,cboe,treasury,mock}
+      JOSEPH_ENABLED_VENUES: ${JOSEPH_ENABLED_VENUES:-binance,hyperliquid,lighter,bitget,mexc,twse,tpex,nasdaq,nyse,cboe,treasury}
       JOSEPH_DEMO_ONLY: ${JOSEPH_DEMO_ONLY:-false}
       JOSEPH_DATABASE_URL: ${JOSEPH_MARKET_DATABASE_URL:-sqlite:////app/var/market.db}
       # Indicator plugins: entry points to load ("*", "none" or names),
@@ -44,11 +44,10 @@ services:
       JOSEPH_ALPACA_KEY_ID: ${JOSEPH_ALPACA_KEY_ID:-}
       JOSEPH_ALPACA_SECRET_KEY: ${JOSEPH_ALPACA_SECRET_KEY:-}
       JOSEPH_ALPACA_FEED: ${JOSEPH_ALPACA_FEED:-iex}
-      # Taiwan intraday: twse (official, keyless) or sinopac (Shioaji).
-      JOSEPH_TW_DATA_SOURCE: ${JOSEPH_TW_DATA_SOURCE:-twse}
-      # Paths under /run/joseph-secrets (the JOSEPH_SECRETS_DIR mount).
-      JOSEPH_SINOPAC_API_KEY_FILE: ${JOSEPH_SINOPAC_API_KEY_FILE:-}
-      JOSEPH_SINOPAC_SECRET_KEY_FILE: ${JOSEPH_SINOPAC_SECRET_KEY_FILE:-}
+      # Taiwan market data: free-tier Fugle when a key is configured.
+      JOSEPH_TW_DATA_SOURCE: ${JOSEPH_TW_DATA_SOURCE:-fugle}
+      JOSEPH_FUGLE_API_KEY: ${JOSEPH_FUGLE_API_KEY:-}
+      JOSEPH_FRED_API_KEY: ${JOSEPH_FRED_API_KEY:-}
       JOSEPH_MEXC_WS_FORMAT: ${JOSEPH_MEXC_WS_FORMAT:-protobuf}
       JOSEPH_TRADE_RECORDING: ${JOSEPH_TRADE_RECORDING:-true}
       JOSEPH_TRADE_BAR_RETENTION_DAYS: ${JOSEPH_TRADE_BAR_RETENTION_DAYS:-30}

@@ -32,7 +32,6 @@ import {
   Grid2x2,
   History,
   LayoutTemplate,
-  Layers,
   LayoutGrid,
   Moon,
   Rows2,
@@ -41,7 +40,7 @@ import {
 } from 'lucide-react';
 import {CompareMenu} from './compare-menu';
 import {InstrumentSelector} from './instrument-selector';
-import {LayersMenu} from './layers-menu';
+import {IndicatorsButton} from './indicator-library';
 import {Popover} from './popover';
 import {ProvenanceBadge} from './provenance';
 import {useStore} from './react-bindings';
@@ -177,18 +176,7 @@ export function TopBar(): ReactElement {
           </option>
         ))}
       </select>
-      <Popover
-        ariaLabel="Indicator layers"
-        testId="indicators-menu"
-        label={
-          <>
-            <Layers size={16} aria-hidden="true" />
-            <span>Layers</span>
-          </>
-        }
-      >
-        {() => <LayersMenu chart={chart} />}
-      </Popover>
+      <IndicatorsButton chart={chart} />
       <Popover
         ariaLabel="Chart layout"
         testId="layout-menu"

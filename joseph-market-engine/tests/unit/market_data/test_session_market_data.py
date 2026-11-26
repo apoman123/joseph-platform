@@ -503,6 +503,30 @@ async def test_times_before_the_calendar_are_validation_errors() -> None:
         await svc.get_batch(ACME, TF.H1, to_ms=1_000, limit=5)
 
 
+@pytest.mark.parametrize(
+    ("timeframe", "end"),
+    [(TF.MN1, _ny(2026, 11, 30, 12)), (TF.D1, _ny(1990, 1, 5, 12))],
+)
+async def test_default_history_stops_at_calendar_start(
+    timeframe: timeframes.Timeframe, end: int
+) -> None:
+    """Serves available history when a 500-bar lookback predates XNYS.
+
+    Args:
+        timeframe: Monthly or daily resolution under test.
+        end: Exclusive query end in UTC epoch milliseconds.
+
+    Returns:
+        None. Checks real calendar arithmetic and generated session bars.
+    """
+    svc = _service(end)
+    batch = await svc.get_batch(ACME, timeframe, to_ms=end, limit=500)
+    assert 0 < len(batch.candles) < 500
+    assert batch.candles[0].start_ms == _ny(1990, 1, 2, 9, 30)
+    assert batch.candles[-1].start_ms < end
+    assert batch.complete
+
+
 def test_calendar_sessions_list_and_limits() -> None:
     """Sessions are listed per calendar with a 400-day window cap."""
     week = service_lib.calendar_sessions(

@@ -20,13 +20,14 @@ import {
   MAX_EXPORT_COLLECTIONS,
   MAX_WORKSPACE_FILE_BYTES,
   WORKSPACE_EXPORT_FORMAT,
+  WorkspaceRepository,
   createWorkspaceExport,
   exportWorkspace,
   exportWorkspaceFile,
   parseWorkspace,
   parseWorkspaceFile,
 } from './persistence';
-import {createDefaultWorkspace} from './workspace';
+import {createDefaultWorkspace, workspaceReducer} from './workspace';
 
 const SCHEMA_DIR = join(__dirname, '..', '..', 'contracts', 'schemas');
 
@@ -147,7 +148,7 @@ describe('workspace export files', () => {
     const text = exportWorkspaceFile(BASE, heavy, 1);
     expect(text.length).toBeGreaterThan(64 * 1024);
     expect(parseWorkspaceFile(text, 1).ok).toBe(true);
-    // The document parser (storage, share links) keeps its 64 KB limit.
+    // Share-link parsing keeps its 64 KB limit.
     expect(parseWorkspace(text, 1).ok).toBe(false);
   });
 
@@ -171,7 +172,7 @@ describe('workspace export files', () => {
           ...createWorkspaceExport(BASE, [], 1),
           workspace: {...BASE, charts: []},
         }),
-        /1 to 8 charts/,
+        /at least one chart/,
       ],
       [
         JSON.stringify({...createWorkspaceExport(BASE, [], 1), drawings: {}}),
@@ -186,13 +187,6 @@ describe('workspace export files', () => {
           ),
         }),
         /more than 500 instruments/,
-      ],
-      [
-        JSON.stringify({
-          ...createWorkspaceExport(BASE, [], 1),
-          workspace: {...BASE, panels: {big: 'x'.repeat(70_000)}},
-        }),
-        /layout is larger than 64 KB/,
       ],
       [JSON.stringify({...BASE, schema_version: 2}), /Unsupported workspace/],
     ];
@@ -215,4 +209,25 @@ describe('workspace export files', () => {
       MAX_EXPORT_COLLECTIONS
     );
   });
+});
+
+it('restores many local tabs even when their layout exceeds the share-link size', () => {
+  let doc = BASE;
+  for (let index = 0; index < 200; index += 1) {
+    doc = workspaceReducer(
+      doc,
+      {type: 'addChart', chartId: `tab-${index}`},
+      index
+    );
+  }
+  expect(JSON.stringify(doc).length).toBeGreaterThan(64 * 1024);
+  const memory = new Map<string, string>();
+  const repo = new WorkspaceRepository({
+    getItem: key => memory.get(key) ?? null,
+    setItem: (key, value) => void memory.set(key, value),
+  });
+  repo.save(doc);
+  expect(repo.load(doc.workspace_id, 1000)?.charts).toHaveLength(201);
+  const imported = parseWorkspaceFile(exportWorkspaceFile(doc, [], 1000), 1000);
+  expect(imported.ok && imported.workspace.charts.length).toBe(201);
 });

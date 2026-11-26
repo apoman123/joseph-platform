@@ -14,8 +14,7 @@ RUN apt-get update \
  && rm -rf /var/lib/apt/lists/* \
  && install -m 700 -d /root/.ssh \
  && echo 'github.com ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIOMqqnkVzrm0SdG6UOoqKLsabgH5C9okWi0dh2l9GKJl' > /root/.ssh/known_hosts
-# Optional extras, e.g. UV_EXTRAS="--extra sinopac" for SinoPac Shioaji
-# market data (JOSEPH_TW_DATA_SOURCE=sinopac); none by default.
+# Optional market-data extras; the free-first build uses none.
 ARG UV_EXTRAS=""
 WORKDIR /app
 COPY pyproject.toml uv.lock README.md LICENSE ./

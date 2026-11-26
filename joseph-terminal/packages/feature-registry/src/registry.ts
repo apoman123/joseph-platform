@@ -358,7 +358,10 @@ export class FeatureRegistry<TView> {
     const tracked: Disposer[] = [];
     const ctx = this.scopedContext(feature, tracked);
     try {
-      const disposer = await feature.activate(ctx);
+      // Synchronous features must become active before another activation
+      // pass can run (for example during React Strict Mode effect replay).
+      const result = feature.activate(ctx);
+      const disposer = result instanceof Promise ? await result : result;
       if (typeof disposer !== 'function') {
         throw new Error(`Feature ${id} did not return a disposer`);
       }

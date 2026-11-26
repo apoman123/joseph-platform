@@ -8,9 +8,10 @@ Usage, from the ``joseph-market-engine`` directory::
     uv run python scripts/probe_venues.py [--json]
 
 For each crypto venue it lists instruments, the BTC contract metadata, the
-latest candles, snapshot, open interest, funding, top-of-book spread and the
-latency of the first native WebSocket candle. Only public endpoints are
-called; nothing is traded.
+latest candles, snapshot, available open interest and funding, top-of-book
+spread and the latency of the first native WebSocket candle. Unsupported
+optional metrics are reported separately from feed connectivity failures.
+Only public endpoints are called; nothing is traded.
 
 Output is one JSON object per venue per line, or with ``--json`` a single
 indented JSON array. The exit status is 1 when any venue failed.
@@ -91,16 +92,24 @@ async def _probe(venue: instruments.Venue) -> dict[str, object]:
                 snapshot.turnover_24h_quote
             ),
         }
-        open_interest = await adapter.fetch_open_interest(instrument)
-        result["open_interest_usd"] = decimals.format_decimal(
-            open_interest.notional_usd.quantize(decimals.ONE)
-        )
-        funding = await adapter.fetch_funding(instrument)
-        result["funding"] = {
-            "rate": decimals.format_decimal(funding.rate),
-            "interval_h": funding.interval_hours,
-            "kind": funding.kind.value,
-        }
+        try:
+            open_interest = await adapter.fetch_open_interest(instrument)
+        except errors.UnsupportedError as err:
+            result["open_interest_unavailable"] = err.message
+        else:
+            result["open_interest_usd"] = decimals.format_decimal(
+                open_interest.notional_usd.quantize(decimals.ONE)
+            )
+        try:
+            funding = await adapter.fetch_funding(instrument)
+        except errors.UnsupportedError as err:
+            result["funding_unavailable"] = err.message
+        else:
+            result["funding"] = {
+                "rate": decimals.format_decimal(funding.rate),
+                "interval_h": funding.interval_hours,
+                "kind": funding.kind.value,
+            }
         book = await adapter.fetch_order_book(instrument, 20)
         if book.best_bid is not None and book.best_ask is not None:
             mid = (book.best_bid + book.best_ask) / 2

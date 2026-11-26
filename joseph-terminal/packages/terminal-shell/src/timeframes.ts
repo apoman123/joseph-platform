@@ -131,8 +131,11 @@ export interface TimeframeGroup {
 /** Timeframe menu groups (every contract timeframe appears once). */
 export const TIMEFRAME_GROUPS: readonly TimeframeGroup[] = [
   {label: 'Seconds', timeframes: ['1s', '5s', '15s', '30s']},
-  {label: 'Minutes', timeframes: ['1m', '3m', '5m', '15m', '30m']},
-  {label: 'Hours', timeframes: ['1h', '2h', '4h', '6h', '12h']},
+  {
+    label: 'Minutes',
+    timeframes: ['1m', '3m', '5m', '10m', '15m', '30m', '45m'],
+  },
+  {label: 'Hours', timeframes: ['1h', '2h', '4h', '6h', '8h', '12h']},
   {label: 'Days', timeframes: ['1d', '1w', '1M']},
 ];
 

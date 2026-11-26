@@ -17,7 +17,7 @@ DEMO instruments: `mock:perp:BTCUSD`, `ETHUSD`, `SOLUSD`; `mock:stock:ACME` (NYS
 
 | Area | Contents |
 |---|---|
-| Top bar | Instrument, timeframes, style, scale, *Layers*, *Layout*, compare, templates, replay, screenshot, data badge, order mode, theme, ⌘K |
+| Top bar | Instrument, timeframes, style, scale, *Indicators*, *Layout*, compare, templates, replay, screenshot, data badge, order mode, theme, ⌘K |
 | Left toolbar | Drawing tools, undo/redo, magnet, lock all, hide all |
 | Centre | 1, 2, 4 or 8 charts |
 | Side panel | Market, Watchlist, Screener, Strategy, Objects, Order ticket |
@@ -25,6 +25,34 @@ DEMO instruments: `mock:perp:BTCUSD`, `ETHUSD`, `SOLUSD`; `mock:stock:ACME` (NYS
 | Status bar | Venue feed health, UTC clock, chart attribution, licences |
 
 Pane headers show instrument, timeframe, bar-close countdown, market status, link group (*Link A–D*: linked charts follow each other), feed menu (*Auto feed*, *WebSocket*, *REST polling*), OHLC and data badge. Panels collapse; drag edges and chart gaps to resize.
+
+### Chart tabs
+
+The tab strip above the charts keeps one saved chart per market tab. Click
+**+** to add a tab, then choose its market with the top-bar instrument picker.
+Each tab retains its own symbol, timeframe, chart style, indicators and viewport.
+Use the close button to remove a tab; the final tab stays open. Arrow keys,
+Home and End select tabs, and Delete closes the focused tab.
+
+There is no fixed saved-tab count. Tabs scroll horizontally and restore after
+reload, subject to browser storage and memory capacity. Single-chart mode mounts
+only the selected tab. Split layouts show a page of up to eight saved charts
+containing the active tab, so inactive pages do not keep chart subscriptions open.
+
+### Indicator library
+
+Click **Indicators** to open the searchable library:
+
+- **Default indicators** lists the built-in chart studies.
+- **My scripts** lists custom indicator plugins installed on the market engine.
+- **My collection** lists indicators saved with the star button. The collection
+  is saved with the workspace and shared by its chart tabs.
+
+Select an indicator to show or hide it on the current chart. Its settings button
+opens the existing input, color and pane controls. Use the search field to match
+names or descriptions. Escape or the close button dismisses the library and
+returns focus to the toolbar. Chart options such as Volume, Session breaks and
+Data window remain available at the bottom of the dialog.
 
 ### Data badges
 
@@ -42,7 +70,7 @@ Magenta marks are yours (drawings, draft orders, rule cards); green and red show
 ## Charts
 
 - **Instrument:** click the symbol. Tabs: *All*, *Crypto*, *Taiwan stocks*, *US stocks*, *Bonds & rates*. Search by symbol (`BTC`, `2330`) or name (`台積電`). Each result is one venue's contract: `binance:perp:BTCUSDT` and `hyperliquid:perp:BTC` differ. *Delayed 15 min*: the deployment gets delayed data. *No API key*: the data source (Alpaca for US stocks) is not configured, so charts stay empty.
-- **Style and scale:** candles, bars, line, area, Heikin Ashi (display only, never used for signals); linear, logarithmic, percent.
+- **Style and scale:** candles, bars, line, area, Heikin Ashi (display only, never used for signals); linear, logarithmic, percent. Hover over the right price scale and scroll to zoom prices vertically.
 - **Compare** up to 3 instruments on a left percentage axis.
 - **Bar replay:** click *Bar replay*, then a bar (or *Start 100 bars back*); step or play at 1–10 bars/s. Later bars are hidden, zones are as of the cursor bar and trading from that chart is off. *Back to live* ends it.
 - **Screenshot:** PNG with instrument, venue, timeframe, data badge and UTC time.
@@ -52,8 +80,8 @@ Magenta marks are yours (drawings, draft orders, rule cards); green and red show
 | Group | Timeframes |
 |---|---|
 | Seconds | `1s` `5s` `15s` `30s` |
-| Minutes | `1m` `3m` `5m` `15m` `30m` |
-| Hours | `1h` `2h` `4h` `6h` `12h` |
+| Minutes | `1m` `3m` `5m` `10m` `15m` `30m` `45m` |
+| Hours | `1h` `2h` `4h` `6h` `8h` `12h` |
 | Days | `1d` `1w` `1M` (calendar month from the 1st, 00:00 UTC) |
 
 ★ pins a favourite. *Type a resolution*: a bare number is minutes (`15`), `S` seconds (`5S`), uppercase `M` months; unserved resolutions are refused, never approximated. Timeframes a venue lacks are dimmed with the reason; seconds marked *trades* are built from public trades, so their history is short (see [Delta](#delta)).
@@ -69,8 +97,8 @@ Magenta marks are yours (drawings, draft orders, rule cards); green and red show
 - **Bars** start at the open and the last ends at the close; nights, weekends and holidays take no space. Times are exchange time (`ET`, `TPE`); crypto stays UTC.
 - **Status badge:** *Open · closes 16:00 ET*, *Closed · opens Mon 09:30 ET*, *Holiday*, early-close notices.
 - **Prices** follow the tick ladder (Taiwan stocks e.g. `48.55` below 50, `585` from 500; Taiwan ETFs 0.01 below 50, else 0.05; US 0.01). **Volume:** Taiwan in **張** (1,000 shares) in the data window and Market panel, shares on the volume pane.
-- **US closes:** on consolidated data (`sip`, `delayed_sip`) the last minute bar includes the official closing print.
-- **Taiwan data:** official data gives coarse 1m bars, no seconds, and intraday history only since the engine started recording. Optional SinoPac data adds exact 1m bars back to 2020-03-02, seconds bars and 5-level books; if it fails, official data takes over.
+- **US closes:** the free Alpaca IEX feed excludes the consolidated closing print.
+- **Taiwan data:** official data gives coarse 1m bars, no seconds, and intraday history only since the engine started recording. With a Fugle free-tier key, per-symbol 1m history begins 2023-05-23 and live charts poll Fugle REST; official lists, bulk screening snapshots and MIS books stay separate. Official daily history is available for older dates.
 - **Yields** are percent line charts without volume, Delta pane or ticket; trade a bond ETF.
 
 ## Drawing tools
@@ -92,7 +120,7 @@ Magenta marks are yours (drawings, draft orders, rule cards); green and red show
 
 ## Indicators
 
-Indicators are computed by the market engine. *Layers* lists the indicator plugins the engine serves, in its order: the built-ins first, then any plugin packages the operator installed, each drawn the way its plugin describes.
+Indicators are computed by the market engine. *Indicators* lists the indicator plugins the engine serves, in its order: the built-ins first, then any plugin packages the operator installed, each drawn the way its plugin describes.
 
 | Built-in | Draws | Shown by default |
 |---|---|---|
@@ -209,6 +237,8 @@ Nothing in the browser enables live trading. The engine checks every order again
 
 | Message | What to do |
 |---|---|
+| *Candles didn’t load* / *GET /v1/candles timed out* | Reads stop after 30 seconds. Check the market engine connection and select **Retry candles**. Switching tabs, symbols, timeframes, or feed modes cancels obsolete chart reads. |
+| *Connecting* | WebSocket opening attempts retry after 10 seconds. Check the market engine URL and connection. For stocks, check the market status badge: closed sessions have no new regular-session prices, but historical candles should still load. |
 | *Venue … is not enabled* | Pick another venue or ask the operator |
 | *No API key*, *Trading is not connected* | Ask the operator |
 | *Price is too far from the mark* | Prices must be within the account's band (default 10%) |

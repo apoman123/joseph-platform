@@ -54,7 +54,7 @@ def _settings(tmp_path: pathlib.Path, **overrides: Any) -> config.Settings:
 async def test_container_records_trades_and_wraps_real_venues(
     tmp_path: pathlib.Path,
 ) -> None:
-    """Real venues get derived bars and archives; zero capacity records none."""
+    """CCXT venues get derived bars without native trade recording."""
     container = bootstrap.build_container(
         _settings(
             tmp_path,
@@ -69,19 +69,14 @@ async def test_container_records_trades_and_wraps_real_venues(
         container.adapters[instruments.Venue.HYPERLIQUID],
         derived_bars.DerivedBarsAdapter,
     )
-    assert not isinstance(
-        container.adapters[instruments.Venue.MOCK],
-        derived_bars.DerivedBarsAdapter,
-    )
-    assert recorder.delta_venues == frozenset(
-        {instruments.Venue.HYPERLIQUID, instruments.Venue.BITGET}
-    )
+    assert instruments.Venue.MOCK not in container.adapters
+    assert recorder.delta_venues == frozenset()
     for venue, site in (
         (instruments.Venue.BINANCE, "data.binance.vision"),
         (instruments.Venue.BITGET, "bitget.com/data-download"),
     ):
         notes = container.adapters[venue].capabilities().notes
-        assert any(site in note for note in notes), venue
+        assert not any(site in note for note in notes), venue
     caps = container.adapters[instruments.Venue.HYPERLIQUID].capabilities()
     assert timeframes.Timeframe.MN1 in caps.aggregated_timeframes
     await container.astart()
@@ -135,7 +130,7 @@ def test_recording_can_be_disabled(tmp_path: pathlib.Path) -> None:
 async def test_lighter_archive_follows_its_setting(
     tmp_path: pathlib.Path, enabled: bool
 ) -> None:
-    """``JOSEPH_LIGHTER_ARCHIVE`` adds or omits the Lighter day archive."""
+    """The retired Lighter archive setting does not alter CCXT data."""
     container = bootstrap.build_container(
         _settings(
             tmp_path,
@@ -146,5 +141,5 @@ async def test_lighter_archive_follows_its_setting(
     )
     assert container.recorder is not None
     notes = container.adapters[instruments.Venue.LIGHTER].capabilities().notes
-    assert any("aws-public-blockchain" in note for note in notes) is enabled
+    assert not any("aws-public-blockchain" in note for note in notes)
     await container.aclose()

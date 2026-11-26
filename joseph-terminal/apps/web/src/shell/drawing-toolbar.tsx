@@ -8,8 +8,8 @@
  * @fileoverview Left vertical drawing toolbar built from the tool registry.
  *
  * Every control is a labelled button; armed tools and toggles report their
- * state through `aria-pressed`. A group with several tools has a chevron
- * (`aria-haspopup="menu"`, `aria-expanded`) that opens a `role="menu"` of
+ * state through `aria-pressed`. Pressing a group icon with several tools
+ * (`aria-haspopup="menu"`, `aria-expanded`) opens a `role="menu"` of
  * `menuitemradio` entries; Escape or a press outside closes it. Tooltips
  * name a tool's hotkey when it has one.
  */
@@ -17,7 +17,6 @@
 'use client';
 import type {ToolGroup, ToolPlugin} from '@joseph/drawing-core';
 import {
-  ChevronRight,
   Eye,
   EyeOff,
   Lock,
@@ -101,13 +100,14 @@ interface FlyoutProps {
   tools: readonly ToolPlugin[];
   /** Armed tool id, or null for the pointer. */
   activeTool: string | null;
+  /** Tool displayed on the group button. */
+  selectedTool: ToolPlugin;
   /** Arms a tool. */
   onPick: (tool: ToolPlugin) => void;
 }
 
 /**
- * Renders the chevron button that opens a group's tool list beside the
- * toolbar.
+ * Renders the group icon that opens its tool list beside the toolbar.
  * @param props Props.
  * @return Flyout trigger and panel.
  */
@@ -115,6 +115,7 @@ function GroupFlyout({
   group,
   tools,
   activeTool,
+  selectedTool,
   onPick,
 }: FlyoutProps): ReactElement {
   const [position, setPosition] = useState<{left: number; top: number} | null>(
@@ -148,8 +149,10 @@ function GroupFlyout({
       <button
         ref={trigger}
         type="button"
-        className="drawbar__more"
-        aria-label={`More ${GROUP_NAMES[group].toLowerCase()} tools`}
+        className="drawbar__btn"
+        aria-label={`${GROUP_NAMES[group]} drawing tools`}
+        title={`Choose ${GROUP_NAMES[group].toLowerCase()} drawing tool`}
+        aria-pressed={activeTool === selectedTool.manifest.id}
         aria-haspopup="menu"
         aria-expanded={position !== null}
         data-testid={`tool-group-${group}`}
@@ -162,7 +165,7 @@ function GroupFlyout({
           );
         }}
       >
-        <ChevronRight size={10} aria-hidden="true" />
+        <Icon name={selectedTool.manifest.icon} />
       </button>
       {position && (
         <div
@@ -269,26 +272,28 @@ export function DrawingToolbar(): ReactElement {
           <div key={group} className="drawbar__group">
             <span className="drawbar__sep" aria-hidden="true" />
             <div className="drawbar__slot">
-              <button
-                type="button"
-                className="drawbar__btn"
-                aria-label={tool.manifest.displayName}
-                title={
-                  tool.manifest.hotkey
-                    ? `${tool.manifest.displayName} (${hotkeyHint(tool.manifest.hotkey)})`
-                    : tool.manifest.displayName
-                }
-                aria-pressed={activeTool === tool.manifest.id}
-                data-testid={`tool-${tool.manifest.id}`}
-                onClick={() => void pick(tool)}
-              >
-                <Icon name={tool.manifest.icon} />
-              </button>
-              {members.length > 1 && (
+              {members.length === 1 ? (
+                <button
+                  type="button"
+                  className="drawbar__btn"
+                  aria-label={tool.manifest.displayName}
+                  title={
+                    tool.manifest.hotkey
+                      ? `${tool.manifest.displayName} (${hotkeyHint(tool.manifest.hotkey)})`
+                      : tool.manifest.displayName
+                  }
+                  aria-pressed={activeTool === tool.manifest.id}
+                  data-testid={`tool-${tool.manifest.id}`}
+                  onClick={() => void pick(tool)}
+                >
+                  <Icon name={tool.manifest.icon} />
+                </button>
+              ) : (
                 <GroupFlyout
                   group={group}
                   tools={members}
                   activeTool={activeTool}
+                  selectedTool={tool}
                   onPick={pick}
                 />
               )}
