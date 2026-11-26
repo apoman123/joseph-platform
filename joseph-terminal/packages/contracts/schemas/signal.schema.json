@@ -357,7 +357,7 @@
     },
     "AlertSubscription": {
       "title": "AlertSubscription",
-      "description": "Where and when a tenant receives signal notifications. Secrets (bot tokens) are server configuration, never part of a subscription.",
+      "description": "Where and when a tenant receives signal notifications. Channel credentials stay on the server. Browser registrations are write-only and omitted from responses.",
       "type": "object",
       "additionalProperties": false,
       "required": [
@@ -389,7 +389,7 @@
           "type": "string",
           "minLength": 1,
           "maxLength": 512,
-          "description": "Telegram chat id, LINE user id, e-mail address or https webhook URL."
+          "description": "Telegram chat id, WhatsApp E.164 phone number, Web Push device identifier, LINE user id, e-mail address or HTTPS webhook URL."
         },
         "kinds": {
           "type": "array",

@@ -1989,7 +1989,7 @@ export interface QuietHours {
   bypass_severities?: Severity[];
 }
 /**
- * Where and when a tenant receives signal notifications. Secrets (bot tokens) are server configuration, never part of a subscription.
+ * Where and when a tenant receives signal notifications. Channel credentials stay on the server. Browser registrations are write-only and omitted from responses.
  *
  * This interface was referenced by `JosephContracts`'s JSON-Schema
  * via the `definition` "AlertSubscription".
@@ -1998,7 +1998,7 @@ export interface AlertSubscription {
   subscription_id: string;
   channel: 'TELEGRAM' | 'LINE' | 'EMAIL' | 'WEBHOOK' | 'WHATSAPP' | 'WEB_PUSH';
   /**
-   * Telegram chat id, LINE user id, e-mail address or https webhook URL.
+   * Telegram chat id, WhatsApp E.164 phone number, Web Push device identifier, LINE user id, e-mail address or HTTPS webhook URL.
    */
   target: string;
   /**
