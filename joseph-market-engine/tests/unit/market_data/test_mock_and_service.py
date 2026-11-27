@@ -65,6 +65,23 @@ async def test_mock_candles_are_deterministic() -> None:
     assert all(c.feed_state is quality.FeedState.DEMO for c in first)
 
 
+async def test_mock_history_allows_concurrent_api_work() -> None:
+    """Yields during large history generation before completing the batch.
+
+    Returns:
+        None after checking cooperative scheduling and the complete bar count.
+    """
+    adapter = mock.MockAdapter(clock_lib.ManualClock(_NOW))
+    task = asyncio.create_task(
+        adapter.fetch_candles(
+            _BTC, timeframes.Timeframe.M1, _NOW - 400 * 60_000, _NOW
+        )
+    )
+    await asyncio.sleep(0)
+    assert not task.done()
+    assert len(await task) == 400
+
+
 async def test_mock_in_progress_bar_is_not_final() -> None:
     """Only bars that have ended are final."""
     clock = clock_lib.ManualClock(_NOW + 90_000)

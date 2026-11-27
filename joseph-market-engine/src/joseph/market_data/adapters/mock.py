@@ -852,7 +852,10 @@ class MockAdapter:
         end_ms: int,
         limit: int | None = None,
     ) -> list[market.Candle]:
-        """Generates candles for the range.
+        """Generates candles while allowing concurrent API requests to run.
+
+        Long session-history previews must not monopolize the event loop while
+        users search instruments or open another chart.
 
         Args:
             instrument: Mock instrument.
@@ -890,6 +893,8 @@ class MockAdapter:
             candle = self.bar(instrument, timeframe, cursor, now)
             if candle is not None:
                 rows.append(candle)
+            if len(rows) % 16 == 0:
+                await asyncio.sleep(0)
             cursor = calendar.shift(timeframe, cursor, 1)
         return rows
 
