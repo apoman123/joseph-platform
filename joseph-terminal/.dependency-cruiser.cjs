@@ -16,6 +16,14 @@
 module.exports = {
   forbidden: [
     {
+      name: 'upstream-snapshot-is-reference-only',
+      severity: 'error',
+      comment:
+        'Runtime modules use the reviewed adapter and installed drawing core; the pinned upstream source archive is never executed or served.',
+      from: {path: '^(apps/web/src|packages/[^/]+/src)/'},
+      to: {path: '^third_party/tradex/'},
+    },
+    {
       name: 'no-circular',
       severity: 'error',
       comment:

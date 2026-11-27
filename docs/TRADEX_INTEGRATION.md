@@ -128,3 +128,19 @@ rejects Pine runtimes in production dependencies.
 
 Historical Taiwan price adjustment, intraday limits and cache behavior are
 documented in [Market data scope](MARKET_DATA_SCOPE.md#corporate-action-price-basis).
+
+## Security analysis boundary
+
+The immutable `third_party/tradex` snapshot is an unserved source reference. Its
+Python server, setup helpers, browser pages and prebuilt alternative engines are
+not imported by Joseph, mounted as static files, or copied into the isolated
+script runner. Runtime drawing behavior comes through the reviewed Joseph
+adapter and installed drawing-core dependency; provider behavior runs through
+the market engine's ports.
+
+CodeQL analyzes Joseph's active adapters, application and engines. It excludes
+only that pinned reference tree, whose original server/setup/browser flows
+otherwise produce findings unrelated to Joseph's deployed attack surface.
+The dependency boundary check forbids runtime imports from the reference tree.
+Secret scanning, source checksum validation and license checks still include
+the snapshot; no active application directory is exempted.

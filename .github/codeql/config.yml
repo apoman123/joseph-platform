@@ -1,0 +1,7 @@
+# Analyze deployed Joseph code. The byte-preserved TradeX snapshot is an
+# unserved reference archive, not a Python module or browser asset of the app.
+# Its checksums, licenses and secrets remain checked by dedicated CI steps.
+name: Joseph application sources
+
+paths-ignore:
+  - joseph-terminal/third_party/tradex/**
