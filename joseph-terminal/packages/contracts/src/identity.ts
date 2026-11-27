@@ -21,7 +21,7 @@ import type {
  * the venue and market type lists are the contract enums.
  */
 const INSTRUMENT_ID_PATTERN =
-  /^(binance|hyperliquid|lighter|bitget|mexc|twse|tpex|nasdaq|nyse|cboe|treasury|mock):(perp|spot|future|stock|etf|rate):([A-Za-z0-9._/-]{1,64})$/;
+  /^(bybit|okx|coinbase|kraken|deriv|binance|hyperliquid|lighter|bitget|mexc|twse|tpex|nasdaq|nyse|cboe|treasury|mock):(perp|spot|future|stock|etf|rate):([A-Za-z0-9._/-]{1,64})$/;
 
 /** Parsed parts of a canonical instrument id. */
 export interface InstrumentIdParts {
@@ -71,6 +71,11 @@ export function isInstrumentId(id: string): boolean {
 
 /** All supported venues in display order. */
 export const VENUES: readonly Venue[] = [
+  'bybit',
+  'okx',
+  'coinbase',
+  'kraken',
+  'deriv',
   'binance',
   'hyperliquid',
   'lighter',
@@ -87,6 +92,11 @@ export const VENUES: readonly Venue[] = [
 
 /** Human-readable venue names. */
 export const VENUE_NAMES: Readonly<Record<Venue, string>> = {
+  bybit: 'Bybit',
+  okx: 'OKX',
+  coinbase: 'Coinbase Exchange',
+  kraken: 'Kraken',
+  deriv: 'Deriv reference prices',
   binance: 'Binance USDⓈ-M',
   hyperliquid: 'Hyperliquid',
   lighter: 'Lighter',

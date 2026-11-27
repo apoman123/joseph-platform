@@ -12,6 +12,7 @@ and never merges them. A venue that cannot be reached is reported in
 from __future__ import annotations
 
 import asyncio
+import time
 from collections.abc import Mapping
 
 from joseph.domain import errors as domain_errors
@@ -51,15 +52,36 @@ class InstrumentRegistry:
             instruments.Venue, asyncio.Task[list[instruments.Instrument]]
         ] = {}
         self._warmup: asyncio.Task[list[instruments.Instrument]] | None = None
+        self._available: dict[
+            instruments.Venue, list[instruments.Instrument]
+        ] = {}
+        self._warmup_started = 0.0
+        self._maintenance: asyncio.Task[None] | None = None
 
     def start_warmup(self) -> None:
-        """Starts provider metadata loading in the background.
+        """Starts background metadata loading and recovery.
 
         Returns:
             None; stores the background task for shutdown and shared requests.
         """
-        if self._warmup is None:
+        if self._warmup is None or (
+            self._warmup.done()
+            and time.monotonic() - self._warmup_started >= 60
+        ):
             self._warmup = asyncio.create_task(self.all_instruments())
+            self._warmup_started = time.monotonic()
+        if self._maintenance is None:
+            self._maintenance = asyncio.create_task(self._maintain())
+
+    async def _maintain(self) -> None:
+        """Retries failed providers and refreshes expired cached metadata.
+
+        Returns:
+            None; runs until cancelled by close(), with no startup blocking.
+        """
+        while True:
+            await asyncio.sleep(60)
+            self.start_warmup()
 
     async def close(self) -> None:
         """Cancels outstanding metadata requests before adapters close.
@@ -70,10 +92,38 @@ class InstrumentRegistry:
         tasks = [*self._loads.values()]
         if self._warmup is not None:
             tasks.append(self._warmup)
+        if self._maintenance is not None:
+            self._maintenance.cancel()
+            await asyncio.gather(self._maintenance, return_exceptions=True)
+            self._maintenance = None
         for task in tasks:
             task.cancel()
         await asyncio.gather(*tasks, return_exceptions=True)
         self._loads.clear()
+
+    async def _load_source(
+        self, venue: instruments.Venue
+    ) -> list[instruments.Instrument]:
+        """Bounds a single source's complete metadata request sequence.
+
+        Args:
+            venue: Configured public or credential-backed source venue.
+
+        Returns:
+            Canonical listed instruments received within twenty seconds.
+
+        Raises:
+            domain_errors.VenueUnavailableError: If metadata loading times out.
+            domain_errors.JosephError: For provider or transport failures.
+        """
+        try:
+            async with asyncio.timeout(20):
+                return await self._adapters[venue].list_instruments()
+        except TimeoutError as exc:
+            raise domain_errors.VenueUnavailableError(
+                f"{venue.value} instrument discovery timed out; "
+                "retrying in background"
+            ) from exc
 
     async def _load(
         self, venue: instruments.Venue
@@ -91,10 +141,16 @@ class InstrumentRegistry:
         """
         task = self._loads.get(venue)
         if task is None:
-            task = asyncio.create_task(self._adapters[venue].list_instruments())
+            task = asyncio.create_task(self._load_source(venue))
             self._loads[venue] = task
         try:
-            return await asyncio.shield(task)
+            result = await asyncio.shield(task)
+            self._available[venue] = result
+            self.errors.pop(venue, None)
+            return result
+        except domain_errors.JosephError as exc:
+            self.errors[venue] = exc.message
+            raise
         finally:
             if task.done() and self._loads.get(venue) is task:
                 del self._loads[venue]
@@ -172,6 +228,8 @@ class InstrumentRegistry:
         venue: instruments.Venue | None = None,
         market_type: instruments.MarketType | None = None,
         limit: int = 200,
+        *,
+        interactive: bool = False,
     ) -> list[instruments.Instrument]:
         """Searches by base asset, native id, display symbol or name.
 
@@ -181,6 +239,9 @@ class InstrumentRegistry:
             venue: Optional venue filter.
             market_type: Optional market-type filter.
             limit: Maximum results.
+            interactive: If true for an unfiltered venue search, return ready
+                metadata within one second while other sources load in the
+                background. Authoritative universe scans leave this false.
 
         Returns:
             Exact-venue instruments, best matches first: an exact base or
@@ -195,7 +256,16 @@ class InstrumentRegistry:
         needle = (query or "").strip().upper()
         venue_rank = {v: i for i, v in enumerate(self._adapters)}
         matches = []
-        for row in await self.all_instruments(venue):
+        if interactive and venue is None:
+            self.start_warmup()
+            if self._warmup is not None and not self._warmup.done():
+                await asyncio.wait({self._warmup}, timeout=1.0)
+            rows = []
+            for available in self._available.values():
+                rows.extend(available)
+        else:
+            rows = await self.all_instruments(venue)
+        for row in rows:
             if market_type is not None and (
                 row.instrument_id.market_type is not market_type
             ):

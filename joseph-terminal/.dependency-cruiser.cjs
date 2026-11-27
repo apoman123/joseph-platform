@@ -36,7 +36,7 @@ module.exports = {
       severity: 'error',
       comment:
         'Every import must resolve; undeclared dependencies break isolated installs.',
-      from: {pathNot: 'next-env\\.d\\.ts$'},
+      from: {pathNot: 'next-env\\.d\\.[cm]?ts$'},
       to: {couldNotResolve: true},
     },
     {
@@ -82,7 +82,7 @@ module.exports = {
         'Browser code must not import Node built-ins (fs, crypto, child_process, ...).',
       from: {
         path: '^(packages/[^/]+/src|apps/web/src)/',
-        pathNot: '(\\.test\\.tsx?$|/testing/|\\.d\\.ts$)',
+        pathNot: '(\\.test\\.tsx?$|/testing/|\\.d\\.[cm]?ts$)',
       },
       to: {dependencyTypes: ['core']},
     },
@@ -119,7 +119,7 @@ module.exports = {
       from: {
         orphan: true,
         path: '^packages/[^/]+/src/',
-        pathNot: '(\\.test\\.tsx?$|\\.d\\.ts$|/index\\.ts$)',
+        pathNot: '(\\.test\\.tsx?$|\\.d\\.[cm]?ts$|/index\\.ts$)',
       },
       to: {},
     },

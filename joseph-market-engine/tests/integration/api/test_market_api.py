@@ -14,6 +14,7 @@ from typing import Any
 from typing import TypeAlias
 
 import httpx
+import httpx2
 import pytest
 import respx
 from fastapi import testclient
@@ -44,7 +45,7 @@ def _fixture_rows(venue: str, name: str) -> list[dict[str, Any]]:
     return rows
 
 
-def _error(response: httpx.Response, status: int, code: str) -> None:
+def _error(response: httpx2.Response, status: int, code: str) -> None:
     """Asserts a contract error response with a matching trace id.
 
     Args:
@@ -123,7 +124,7 @@ def test_demo_endpoints_are_contract_valid(
 ) -> None:
     """Every DEMO response conforms to its JSON Schema."""
     btc = "mock:perp:BTCUSD"
-    checks = [
+    checks: list[tuple[str, dict[str, str | int], str, str]] = [
         ("/v1/venues", {}, "market.schema.json", "VenueStatusList"),
         (
             "/v1/instruments",
@@ -244,7 +245,7 @@ def test_validation_and_not_found_errors(
         "VALIDATION_FAILED",
     )
     _error(
-        demo_client.get("/v1/instruments", params={"venue": "kraken"}),
+        demo_client.get("/v1/instruments", params={"venue": "unknown-source"}),
         422,
         "VALIDATION_FAILED",
     )

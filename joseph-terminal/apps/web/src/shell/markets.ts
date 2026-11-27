@@ -12,7 +12,7 @@
  * yields and bond ETFs (asset class `BOND`) are "Bonds & rates" even when
  * an ETF trades on Nasdaq; other securities go by their session calendar
  * (XTAI → Taiwan stocks: TWSE and TPEx; XNYS → US stocks); everything else
- * is crypto.
+ * is crypto. RWA sources have their own asset tab.
  */
 
 import {
@@ -25,7 +25,7 @@ import {
 } from '@joseph/contracts';
 
 /** Asset-class group of the picker. */
-export type MarketGroup = 'crypto' | 'tw' | 'us' | 'bonds';
+export type MarketGroup = 'crypto' | 'rwa' | 'tw' | 'us' | 'bonds';
 
 /** Picker tabs in display order (`all` first). */
 export const MARKET_GROUPS: ReadonlyArray<{
@@ -34,6 +34,7 @@ export const MARKET_GROUPS: ReadonlyArray<{
 }> = [
   {id: 'all', label: 'All'},
   {id: 'crypto', label: 'Crypto'},
+  {id: 'rwa', label: 'FX, commodities & RWA'},
   {id: 'tw', label: 'Taiwan stocks'},
   {id: 'us', label: 'US stocks'},
   {id: 'bonds', label: 'Bonds & rates'},
@@ -42,6 +43,7 @@ export const MARKET_GROUPS: ReadonlyArray<{
 /** Group labels by id. */
 export const MARKET_GROUP_LABELS: Readonly<Record<MarketGroup, string>> = {
   crypto: 'Crypto',
+  rwa: 'FX, commodities & RWA',
   tw: 'Taiwan stocks',
   us: 'US stocks',
   bonds: 'Bonds & rates',
@@ -49,7 +51,29 @@ export const MARKET_GROUP_LABELS: Readonly<Record<MarketGroup, string>> = {
 
 /** Venues listed per group (the engine may serve only some of them). */
 export const GROUP_VENUES: Readonly<Record<MarketGroup, readonly string[]>> = {
-  crypto: ['binance', 'hyperliquid', 'lighter', 'bitget', 'mexc'],
+  crypto: [
+    'binance',
+    'bybit',
+    'okx',
+    'coinbase',
+    'kraken',
+    'deriv',
+    'hyperliquid',
+    'lighter',
+    'bitget',
+    'mexc',
+  ],
+  rwa: [
+    'deriv',
+    'binance',
+    'bybit',
+    'okx',
+    'coinbase',
+    'kraken',
+    'hyperliquid',
+    'bitget',
+    'mexc',
+  ],
   tw: ['twse', 'tpex'],
   us: ['nasdaq', 'nyse', 'cboe'],
   bonds: ['treasury', 'nasdaq', 'nyse', 'cboe', 'twse', 'tpex'],
@@ -64,6 +88,7 @@ export function marketGroupOf(
   instrument: Pick<Instrument, 'instrument_id' | 'asset_class' | 'calendar'>
 ): MarketGroup {
   if (instrument.asset_class === 'BOND') return 'bonds';
+  if (instrument.asset_class === 'RWA') return 'rwa';
   const calendar = instrumentCalendarId(instrument.instrument_id, instrument);
   if (calendar === 'XTAI') return 'tw';
   if (calendar === 'XNYS') return 'us';

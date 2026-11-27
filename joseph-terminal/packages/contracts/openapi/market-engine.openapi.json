@@ -7,7 +7,7 @@
         "properties": {
           "instruments": {
             "items": {
-              "pattern": "^(binance|hyperliquid|lighter|bitget|mexc|twse|tpex|nasdaq|nyse|cboe|treasury|mock):(perp|spot|future|stock|etf|rate):[A-Za-z0-9._/-]{1,64}$",
+              "pattern": "^(bybit|okx|coinbase|kraken|deriv|binance|hyperliquid|lighter|bitget|mexc|twse|tpex|nasdaq|nyse|cboe|treasury|mock):(perp|spot|future|stock|etf|rate):[A-Za-z0-9._/-]{1,64}$",
               "type": "string"
             },
             "title": "Instruments",
@@ -28,6 +28,166 @@
           "mode"
         ],
         "title": "ActivateBody",
+        "type": "object"
+      },
+      "AlertJob": {
+        "additionalProperties": false,
+        "description": "Persistent Python alert evaluation state and visible diagnostics.\n\nAttributes:\n    job_id: Opaque tenant-owned alert identifier.\n    created_at_ms: Creation time in UTC epoch milliseconds.\n    last_processed_ms: Latest successfully evaluated bar close/checkpoint.\n    last_error: Visible missing-data, provider or user-code failure, if any.\n    last_checked_ms: Last evaluation attempt in UTC epoch milliseconds.\n    emitted: Number of distinct conditions recorded for this job.",
+        "properties": {
+          "created_at_ms": {
+            "title": "Created At Ms",
+            "type": "integer"
+          },
+          "emitted": {
+            "default": 0,
+            "title": "Emitted",
+            "type": "integer"
+          },
+          "enabled": {
+            "default": false,
+            "title": "Enabled",
+            "type": "boolean"
+          },
+          "history_bars": {
+            "default": 500,
+            "maximum": 2000.0,
+            "minimum": 2.0,
+            "title": "History Bars",
+            "type": "integer"
+          },
+          "inputs": {
+            "additionalProperties": {
+              "$ref": "#/components/schemas/JsonValue"
+            },
+            "title": "Inputs",
+            "type": "object"
+          },
+          "instrument_id": {
+            "pattern": "^(bybit|okx|coinbase|kraken|deriv|binance|hyperliquid|lighter|bitget|mexc|twse|tpex|nasdaq|nyse|cboe|treasury|mock):(perp|spot|future|stock|etf|rate):[A-Za-z0-9._/-]{1,64}$",
+            "title": "Instrument Id",
+            "type": "string"
+          },
+          "job_id": {
+            "title": "Job Id",
+            "type": "string"
+          },
+          "last_checked_ms": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Last Checked Ms"
+          },
+          "last_error": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Last Error"
+          },
+          "last_processed_ms": {
+            "title": "Last Processed Ms",
+            "type": "integer"
+          },
+          "script_id": {
+            "pattern": "^[a-z][a-z0-9-]{0,62}$",
+            "title": "Script Id",
+            "type": "string"
+          },
+          "subscription_ids": {
+            "items": {
+              "type": "string"
+            },
+            "maxItems": 50,
+            "title": "Subscription Ids",
+            "type": "array"
+          },
+          "tf": {
+            "$ref": "#/components/schemas/Timeframe"
+          },
+          "version": {
+            "minimum": 1.0,
+            "title": "Version",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "script_id",
+          "version",
+          "instrument_id",
+          "tf",
+          "job_id",
+          "created_at_ms",
+          "last_processed_ms"
+        ],
+        "title": "AlertJob",
+        "type": "object"
+      },
+      "AlertJobInput": {
+        "additionalProperties": false,
+        "description": "Explicitly enables a pinned Python condition on future closed bars.\n\nAttributes:\n    script_id: Owned alert, indicator or strategy script publishing\n        conditions.\n    version: Positive immutable version, pinned rather than following edits.\n    instrument_id: Canonical instrument whose new closed bars are evaluated.\n    tf: Source resolution, one second through one calendar month.\n    inputs: JSON values overriding the pinned version's defaults.\n    subscription_ids: Explicit owned notification destinations; UI is\n        implicit.\n    enabled: Whether evaluation and external notification routing are\n        active.\n    history_bars: Context depth, two through two thousand closed bars.",
+        "properties": {
+          "enabled": {
+            "default": false,
+            "title": "Enabled",
+            "type": "boolean"
+          },
+          "history_bars": {
+            "default": 500,
+            "maximum": 2000.0,
+            "minimum": 2.0,
+            "title": "History Bars",
+            "type": "integer"
+          },
+          "inputs": {
+            "additionalProperties": {
+              "$ref": "#/components/schemas/JsonValue"
+            },
+            "title": "Inputs",
+            "type": "object"
+          },
+          "instrument_id": {
+            "pattern": "^(bybit|okx|coinbase|kraken|deriv|binance|hyperliquid|lighter|bitget|mexc|twse|tpex|nasdaq|nyse|cboe|treasury|mock):(perp|spot|future|stock|etf|rate):[A-Za-z0-9._/-]{1,64}$",
+            "title": "Instrument Id",
+            "type": "string"
+          },
+          "script_id": {
+            "pattern": "^[a-z][a-z0-9-]{0,62}$",
+            "title": "Script Id",
+            "type": "string"
+          },
+          "subscription_ids": {
+            "items": {
+              "type": "string"
+            },
+            "maxItems": 50,
+            "title": "Subscription Ids",
+            "type": "array"
+          },
+          "tf": {
+            "$ref": "#/components/schemas/Timeframe"
+          },
+          "version": {
+            "minimum": 1.0,
+            "title": "Version",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "script_id",
+          "version",
+          "instrument_id",
+          "tf"
+        ],
+        "title": "AlertJobInput",
         "type": "object"
       },
       "AllNode": {
@@ -492,7 +652,7 @@
             "type": "integer"
           },
           "instrument_id": {
-            "pattern": "^(binance|hyperliquid|lighter|bitget|mexc|twse|tpex|nasdaq|nyse|cboe|treasury|mock):(perp|spot|future|stock|etf|rate):[A-Za-z0-9._/-]{1,64}$",
+            "pattern": "^(bybit|okx|coinbase|kraken|deriv|binance|hyperliquid|lighter|bitget|mexc|twse|tpex|nasdaq|nyse|cboe|treasury|mock):(perp|spot|future|stock|etf|rate):[A-Za-z0-9._/-]{1,64}$",
             "title": "Instrument Id",
             "type": "string"
           },
@@ -586,6 +746,72 @@
           "field"
         ],
         "title": "CandleOperand",
+        "type": "object"
+      },
+      "CompanyMetadata": {
+        "additionalProperties": false,
+        "description": "Explicit optional metadata for feeds without company fundamentals.\n\nAttributes:\n    instrument_id: Canonical stock or ETF identifier.\n    sector: Optional user-provided industry/sector label, maximum 120 chars.\n    market_cap: Optional positive market capitalization in its quote\n        currency,\n        encoded as a decimal string, never inferred from price or volume.\n    as_of_ms: User-declared observation time in UTC epoch milliseconds.",
+        "properties": {
+          "as_of_ms": {
+            "minimum": 0.0,
+            "title": "As Of Ms",
+            "type": "integer"
+          },
+          "instrument_id": {
+            "maxLength": 180,
+            "title": "Instrument Id",
+            "type": "string"
+          },
+          "market_cap": {
+            "anyOf": [
+              {
+                "maxLength": 64,
+                "pattern": "^[0-9]+(?:\\.[0-9]+)?$",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Market Cap"
+          },
+          "sector": {
+            "anyOf": [
+              {
+                "maxLength": 120,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Sector"
+          }
+        },
+        "required": [
+          "instrument_id",
+          "as_of_ms"
+        ],
+        "title": "CompanyMetadata",
+        "type": "object"
+      },
+      "CompanyMetadataBatch": {
+        "additionalProperties": false,
+        "description": "An explicit batch of user-owned heatmap fundamentals.\n\nAttributes:\n    records: At most five thousand canonical, dated company records.",
+        "properties": {
+          "records": {
+            "items": {
+              "$ref": "#/components/schemas/CompanyMetadata"
+            },
+            "maxItems": 5000,
+            "title": "Records",
+            "type": "array"
+          }
+        },
+        "required": [
+          "records"
+        ],
+        "title": "CompanyMetadataBatch",
         "type": "object"
       },
       "CompareNode": {
@@ -693,6 +919,77 @@
           "right"
         ],
         "title": "CompareNode",
+        "type": "object"
+      },
+      "ConnectionGrant": {
+        "description": "A newly issued connection credential shown once.\n\nA newly issued connection credential shown once to its authenticated owner.\n\nAttributes:\n    connection_id: Opaque revocation identifier.\n    url: Public MCP endpoint URL to configure in the client.\n    token: Secret resource-bound bearer credential, returned only at\n        creation.\n    scopes: Explicit read/write/trade permissions.\n    expires_at: Expiration as UTC epoch seconds.",
+        "properties": {
+          "connection_id": {
+            "title": "Connection Id",
+            "type": "string"
+          },
+          "expires_at": {
+            "title": "Expires At",
+            "type": "integer"
+          },
+          "scopes": {
+            "items": {
+              "type": "string"
+            },
+            "title": "Scopes",
+            "type": "array"
+          },
+          "token": {
+            "title": "Token",
+            "type": "string"
+          },
+          "url": {
+            "title": "Url",
+            "type": "string"
+          }
+        },
+        "required": [
+          "connection_id",
+          "url",
+          "token",
+          "scopes",
+          "expires_at"
+        ],
+        "title": "ConnectionGrant",
+        "type": "object"
+      },
+      "ConnectionInput": {
+        "additionalProperties": false,
+        "description": "An explicit user-created MCP automation permission grant.\n\nAttributes:\n    name: Human-readable connection name, maximum one hundred twenty chars.\n    write: Allow changes to private user data and notification destinations.\n    trade: Allow trading operations in addition to all existing broker\n        gates.\n    lifetime_s: Lifetime in seconds, one minute through thirty days.",
+        "properties": {
+          "lifetime_s": {
+            "default": 86400,
+            "maximum": 2592000.0,
+            "minimum": 60.0,
+            "title": "Lifetime S",
+            "type": "integer"
+          },
+          "name": {
+            "maxLength": 120,
+            "minLength": 1,
+            "title": "Name",
+            "type": "string"
+          },
+          "trade": {
+            "default": false,
+            "title": "Trade",
+            "type": "boolean"
+          },
+          "write": {
+            "default": false,
+            "title": "Write",
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "name"
+        ],
+        "title": "ConnectionInput",
         "type": "object"
       },
       "ConstOperand": {
@@ -971,6 +1268,233 @@
         "title": "HTTPValidationError",
         "type": "object"
       },
+      "HeatmapSnapshot": {
+        "description": "Real stock heatmap data and explicit market/coverage limits.\n\nAttributes:\n    tiles: Selected stocks, including unavailable/neutral tiles.\n    universe_count: Actual eligible stocks before the requested result\n        limit.\n    quote_count: Number with a returned source quote.\n    generated_at_ms: Response generation time, UTC epoch milliseconds.\n    region: US or Taiwan universe; quote currencies are never mixed by size.\n    currency: USD or TWD quote currency of the selected stock region.\n    available_metrics: Metrics actually present in at least one selected\n        tile.\n    missing_metadata: Whether sector or market-cap information is\n        incomplete.\n    source_errors: Provider metadata failures limiting the selected\n        universe.",
+        "properties": {
+          "available_metrics": {
+            "items": {
+              "type": "string"
+            },
+            "title": "Available Metrics",
+            "type": "array"
+          },
+          "currency": {
+            "title": "Currency",
+            "type": "string"
+          },
+          "generated_at_ms": {
+            "title": "Generated At Ms",
+            "type": "integer"
+          },
+          "missing_metadata": {
+            "title": "Missing Metadata",
+            "type": "boolean"
+          },
+          "quote_count": {
+            "title": "Quote Count",
+            "type": "integer"
+          },
+          "region": {
+            "enum": [
+              "us",
+              "taiwan"
+            ],
+            "title": "Region",
+            "type": "string"
+          },
+          "source_errors": {
+            "additionalProperties": {
+              "type": "string"
+            },
+            "title": "Source Errors",
+            "type": "object"
+          },
+          "tiles": {
+            "items": {
+              "$ref": "#/components/schemas/HeatmapTile"
+            },
+            "title": "Tiles",
+            "type": "array"
+          },
+          "universe_count": {
+            "title": "Universe Count",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "tiles",
+          "universe_count",
+          "quote_count",
+          "generated_at_ms",
+          "region",
+          "currency",
+          "available_metrics",
+          "missing_metadata"
+        ],
+        "title": "HeatmapSnapshot",
+        "type": "object"
+      },
+      "HeatmapTile": {
+        "description": "One stock tile whose missing metrics remain unavailable.\n\nAttributes:\n    instrument_id: Exact venue-scoped stock or ETF identifier.\n    symbol: Provider display symbol.\n    name: Provider company/security name when available.\n    exchange: Actual listing exchange or canonical venue.\n    last: Latest source price as a decimal string, or None.\n    change_pct: Source daily price change in percent, or None.\n    volume: Source daily base volume as a decimal string, or None.\n    turnover: Source daily quote turnover, or None.\n    market_cap: Explicit optional company metadata, never a volume proxy.\n    sector: Explicit optional company sector, otherwise unclassified.\n    metadata_as_of_ms: Date of user-supplied fundamentals, or None.\n    feed_state: Actual quote provenance state; unavailable without a quote.\n    source: Actual provider label; never promoted to a broader market feed.\n    as_of_ms: Actual quote observation time, or None without a quote.\n    error: Provider/missing-data explanation, or None for an available\n        quote.",
+        "properties": {
+          "as_of_ms": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "As Of Ms"
+          },
+          "change_pct": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Change Pct"
+          },
+          "error": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Error"
+          },
+          "exchange": {
+            "title": "Exchange",
+            "type": "string"
+          },
+          "feed_state": {
+            "title": "Feed State",
+            "type": "string"
+          },
+          "instrument_id": {
+            "title": "Instrument Id",
+            "type": "string"
+          },
+          "last": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Last"
+          },
+          "market_cap": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Market Cap"
+          },
+          "metadata_as_of_ms": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Metadata As Of Ms"
+          },
+          "name": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Name"
+          },
+          "sector": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Sector"
+          },
+          "source": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Source"
+          },
+          "symbol": {
+            "title": "Symbol",
+            "type": "string"
+          },
+          "turnover": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Turnover"
+          },
+          "volume": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Volume"
+          }
+        },
+        "required": [
+          "instrument_id",
+          "symbol",
+          "name",
+          "exchange",
+          "last",
+          "change_pct",
+          "volume",
+          "turnover",
+          "market_cap",
+          "sector",
+          "metadata_as_of_ms",
+          "feed_state",
+          "source",
+          "as_of_ms",
+          "error"
+        ],
+        "title": "HeatmapTile",
+        "type": "object"
+      },
       "InRangeNode": {
         "additionalProperties": false,
         "description": "Operand inside ``[low, high]`` (or open interval when exclusive).\n\nAttributes:\n    op: Discriminator ``IN_RANGE``.\n    id: Stable editor id.\n    label: Optional display label.\n    value: Tested operand.\n    low: Lower bound operand.\n    high: Upper bound operand.\n    inclusive: Whether bounds are inclusive.",
@@ -1234,6 +1758,29 @@
         "title": "IndicatorOperand",
         "type": "object"
       },
+      "JsonValue": {},
+      "LibraryRef": {
+        "additionalProperties": false,
+        "description": "Pins one reusable library to an immutable tenant-owned version.\n\nAttributes:\n    script_id: Tenant-local library slug.\n    version: Positive immutable version number; never resolves latest.",
+        "properties": {
+          "script_id": {
+            "pattern": "^[a-z][a-z0-9-]{0,62}$",
+            "title": "Script Id",
+            "type": "string"
+          },
+          "version": {
+            "minimum": 1.0,
+            "title": "Version",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "script_id",
+          "version"
+        ],
+        "title": "LibraryRef",
+        "type": "object"
+      },
       "LocalTimeWindow": {
         "additionalProperties": false,
         "description": "Local-time window ``[start, end)``; ``end <= start`` wraps midnight.\n\nAttributes:\n    start: Inclusive start ``HH:MM``.\n    end: Exclusive end ``HH:MM``.",
@@ -1283,6 +1830,19 @@
         ],
         "title": "MarketOperand",
         "type": "object"
+      },
+      "MarketType": {
+        "description": "Product type at a venue (contract ``MarketType``).\n\n``stock`` and ``etf`` are exchange-listed cash securities; ``rate`` is a\npublished, non-tradable rate series such as a Treasury par yield.",
+        "enum": [
+          "perp",
+          "spot",
+          "future",
+          "stock",
+          "etf",
+          "rate"
+        ],
+        "title": "MarketType",
+        "type": "string"
       },
       "NotNode": {
         "additionalProperties": false,
@@ -1435,7 +1995,8 @@
                 "AOI_INVALIDATED",
                 "SETUP_EXPIRED",
                 "QUALIFICATION_CHANGED",
-                "POSITION_EXITED"
+                "POSITION_EXITED",
+                "CUSTOM_ALERT"
               ],
               "type": "string"
             },
@@ -1574,6 +2135,71 @@
           "child"
         ],
         "title": "PersistForNode",
+        "type": "object"
+      },
+      "PlotPoint": {
+        "additionalProperties": false,
+        "description": "One script-produced scalar at a closed bar.\n\nAttributes:\n    time_ms: Bar start in UTC epoch milliseconds.\n    value: Finite numeric output, or None during warm-up.\n    color: Optional literal per-bar hex color for conditional plot coloring.",
+        "properties": {
+          "color": {
+            "anyOf": [
+              {
+                "pattern": "^#(?:[0-9a-fA-F]{3}|[0-9a-fA-F]{6}|[0-9a-fA-F]{8})$",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Color"
+          },
+          "time_ms": {
+            "title": "Time Ms",
+            "type": "integer"
+          },
+          "value": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Value"
+          }
+        },
+        "required": [
+          "time_ms",
+          "value"
+        ],
+        "title": "PlotPoint",
+        "type": "object"
+      },
+      "PlotSeries": {
+        "additionalProperties": false,
+        "description": "Named output series displayed by the terminal.\n\nAttributes:\n    name: Public series name, one to sixty-four characters.\n    points: At most two thousand chronological closed-bar values.",
+        "properties": {
+          "name": {
+            "maxLength": 64,
+            "minLength": 1,
+            "title": "Name",
+            "type": "string"
+          },
+          "points": {
+            "items": {
+              "$ref": "#/components/schemas/PlotPoint"
+            },
+            "maxItems": 2000,
+            "title": "Points",
+            "type": "array"
+          }
+        },
+        "required": [
+          "name",
+          "points"
+        ],
+        "title": "PlotSeries",
         "type": "object"
       },
       "RevalidateBody": {
@@ -1762,6 +2388,719 @@
         "title": "RiskRewardNode",
         "type": "object"
       },
+      "ScanInput": {
+        "additionalProperties": false,
+        "description": "Selects a real market universe for an isolated Python filter job.\n\nAttributes:\n    version: Optional immutable filter version; defaults to the latest.\n    venue: Exchange/market venue to scan, or all enabled venues.\n    market_type: Optional instrument market category, such as stock or perp.\n    query: Optional symbol/name search within that market.\n    max_symbols: Explicit maximum instruments, one through ten thousand.\n    history_bars: Closed bars per instrument; zero uses snapshots only.\n    tf: Resolution used when historical bars are requested.\n    inputs: JSON values overriding the pinned filter's defaults.",
+        "properties": {
+          "history_bars": {
+            "default": 0,
+            "maximum": 500.0,
+            "minimum": 0.0,
+            "title": "History Bars",
+            "type": "integer"
+          },
+          "inputs": {
+            "additionalProperties": {
+              "$ref": "#/components/schemas/JsonValue"
+            },
+            "title": "Inputs",
+            "type": "object"
+          },
+          "market_type": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/MarketType"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "max_symbols": {
+            "default": 100,
+            "maximum": 10000.0,
+            "minimum": 1.0,
+            "title": "Max Symbols",
+            "type": "integer"
+          },
+          "query": {
+            "default": "",
+            "maxLength": 120,
+            "title": "Query",
+            "type": "string"
+          },
+          "tf": {
+            "$ref": "#/components/schemas/Timeframe",
+            "default": "1d"
+          },
+          "venue": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/Venue"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "version": {
+            "anyOf": [
+              {
+                "minimum": 1.0,
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Version"
+          }
+        },
+        "title": "ScanInput",
+        "type": "object"
+      },
+      "ScanJob": {
+        "additionalProperties": false,
+        "description": "Progress and reproducible results for an asynchronous market scan.\n\nAttributes:\n    job_id: Opaque tenant-owned scan identifier.\n    script_id: Filter script slug.\n    version: Immutable filter version pinned at submission.\n    status: Pending, running, complete, failed or cancelled job state.\n    created_at_ms: Submission time, UTC epoch milliseconds.\n    total: Number of eligible instruments selected by the explicit scan\n        bound.\n    scanned: Instruments evaluated or reported unavailable so far.\n    matches: Matching instrument records with real source snapshots.\n    errors: Per-instrument missing-data or user-code errors.\n    error: Job-level error, otherwise None.\n    source_hash: Immutable source/dependency configuration hash.\n    universe_count: Total eligible market instruments before max_symbols.",
+        "properties": {
+          "created_at_ms": {
+            "title": "Created At Ms",
+            "type": "integer"
+          },
+          "error": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Error"
+          },
+          "errors": {
+            "items": {
+              "additionalProperties": {
+                "type": "string"
+              },
+              "type": "object"
+            },
+            "title": "Errors",
+            "type": "array"
+          },
+          "job_id": {
+            "title": "Job Id",
+            "type": "string"
+          },
+          "matches": {
+            "items": {
+              "additionalProperties": {
+                "$ref": "#/components/schemas/JsonValue"
+              },
+              "type": "object"
+            },
+            "title": "Matches",
+            "type": "array"
+          },
+          "scanned": {
+            "default": 0,
+            "title": "Scanned",
+            "type": "integer"
+          },
+          "script_id": {
+            "title": "Script Id",
+            "type": "string"
+          },
+          "source_hash": {
+            "title": "Source Hash",
+            "type": "string"
+          },
+          "status": {
+            "enum": [
+              "pending",
+              "running",
+              "complete",
+              "failed",
+              "cancelled"
+            ],
+            "title": "Status",
+            "type": "string"
+          },
+          "total": {
+            "default": 0,
+            "title": "Total",
+            "type": "integer"
+          },
+          "universe_count": {
+            "default": 0,
+            "title": "Universe Count",
+            "type": "integer"
+          },
+          "version": {
+            "title": "Version",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "job_id",
+          "script_id",
+          "version",
+          "status",
+          "created_at_ms",
+          "source_hash"
+        ],
+        "title": "ScanJob",
+        "type": "object"
+      },
+      "ScriptAlertEvent": {
+        "additionalProperties": false,
+        "description": "One user-authored alert condition matched on a source bar.\n\nAttributes:\n    name: Stable condition name used for per-bar delivery deduplication.\n    message: Plain-text message, at most five hundred characters.\n    time_ms: Source bar start, UTC epoch milliseconds.\n    severity: Notification priority used by delivery filters and quiet\n        hours.",
+        "properties": {
+          "message": {
+            "maxLength": 500,
+            "minLength": 1,
+            "title": "Message",
+            "type": "string"
+          },
+          "name": {
+            "maxLength": 64,
+            "minLength": 1,
+            "title": "Name",
+            "type": "string"
+          },
+          "severity": {
+            "default": "INFO",
+            "enum": [
+              "INFO",
+              "WARNING",
+              "ENTRY",
+              "CRITICAL"
+            ],
+            "title": "Severity",
+            "type": "string"
+          },
+          "time_ms": {
+            "title": "Time Ms",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "name",
+          "message",
+          "time_ms"
+        ],
+        "title": "ScriptAlertEvent",
+        "type": "object"
+      },
+      "ScriptInput": {
+        "additionalProperties": false,
+        "description": "Creates an immutable script version with explicit type and dependencies.\n\nAttributes:\n    script_id: Stable tenant-local slug; must match the path on updates.\n    kind: One of the five script roles; immutable after creation.\n    name: Display title, one to one hundred twenty characters.\n    source: UTF-8 Python source, at most sixty-four KiB.\n    overlay: Whether indicator/strategy plots share the main price pane.\n    defaults: Default JSON input values overridden by an individual run.\n    libraries: Python import aliases mapped to pinned library versions.\n    expected_version: Optimistic lock for edits; required for a new version.\n    requests: Up to four declared cross-symbol/timeframe source aliases.",
+        "properties": {
+          "defaults": {
+            "additionalProperties": {
+              "$ref": "#/components/schemas/JsonValue"
+            },
+            "title": "Defaults",
+            "type": "object"
+          },
+          "expected_version": {
+            "anyOf": [
+              {
+                "minimum": 1.0,
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Expected Version"
+          },
+          "kind": {
+            "enum": [
+              "indicator",
+              "strategy",
+              "library",
+              "filter",
+              "alert"
+            ],
+            "title": "Kind",
+            "type": "string"
+          },
+          "libraries": {
+            "additionalProperties": {
+              "$ref": "#/components/schemas/LibraryRef"
+            },
+            "title": "Libraries",
+            "type": "object"
+          },
+          "name": {
+            "maxLength": 120,
+            "minLength": 1,
+            "title": "Name",
+            "type": "string"
+          },
+          "overlay": {
+            "default": true,
+            "title": "Overlay",
+            "type": "boolean"
+          },
+          "requests": {
+            "additionalProperties": {
+              "$ref": "#/components/schemas/SeriesRequest"
+            },
+            "maxProperties": 4,
+            "title": "Requests",
+            "type": "object"
+          },
+          "script_id": {
+            "pattern": "^[a-z][a-z0-9-]{0,62}$",
+            "title": "Script Id",
+            "type": "string"
+          },
+          "source": {
+            "maxLength": 65536,
+            "minLength": 1,
+            "title": "Source",
+            "type": "string"
+          }
+        },
+        "required": [
+          "script_id",
+          "kind",
+          "name",
+          "source"
+        ],
+        "title": "ScriptInput",
+        "type": "object"
+      },
+      "ScriptList": {
+        "description": "An owned script catalog and its execution availability.\n\nAttributes:\n    scripts: Latest visible scripts or requested immutable version history.\n    runtime_enabled: Whether an isolated runtime has been enabled by\n        operator.\n    next_offset: Next bounded catalog window, or None at the end.",
+        "properties": {
+          "next_offset": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Next Offset"
+          },
+          "runtime_enabled": {
+            "title": "Runtime Enabled",
+            "type": "boolean"
+          },
+          "scripts": {
+            "items": {
+              "$ref": "#/components/schemas/ScriptVersion"
+            },
+            "title": "Scripts",
+            "type": "array"
+          }
+        },
+        "required": [
+          "scripts",
+          "runtime_enabled"
+        ],
+        "title": "ScriptList",
+        "type": "object"
+      },
+      "ScriptResult": {
+        "additionalProperties": false,
+        "description": "Reproducible plots and optional simulated strategy performance.\n\nAttributes:\n    script_id: Tenant-owned script slug.\n    version: Immutable script version evaluated.\n    kind: Indicator, strategy, filter or alert; libraries are import-only.\n    source_hash: Content hash including default inputs and dependency pins.\n    instrument_id: Canonical source instrument identifier.\n    tf: Source bar resolution.\n    bars_count: Number of source bars evaluated, including provisional bars\n        only when explicitly requested for an indicator.\n    feed_state: Source provenance; DEMO data remains explicitly marked.\n    data_source: Upstream provider provenance label.\n    complete: Whether the requested history has no closed-bar gaps.\n    overlay: Whether plots share the main price pane.\n    plots: At most sixty-four scalar output series.\n    fills: Simulated next-bar-open fills; empty for indicators.\n    equity_curve: Marked simulated quote equity; empty for indicators.\n    metrics: Finite numeric simulation statistics, including fees and\n        unfilled final-bar intents; no performance is fabricated.\n    matched: Boolean decision for a filter, otherwise None.\n    alerts: Previewed alert events; delivery requires an enabled alert job.\n    visuals: Bounded declarative drawings, fills, coloring and tables.\n    bar_closes: Confirmed source bar starts mapped to actual evaluated\n        closes;\n        alert checkpoints never consult a later, different market window.\n    plot_styles: Per-series input/style settings used by the renderer.\n    bar_visuals: Per-bar colors, symbols and custom OHLC series, separately\n        bounded from persistent drawing objects.",
+        "properties": {
+          "alerts": {
+            "items": {
+              "$ref": "#/components/schemas/ScriptAlertEvent"
+            },
+            "maxItems": 2000,
+            "title": "Alerts",
+            "type": "array"
+          },
+          "bar_closes": {
+            "additionalProperties": {
+              "type": "integer"
+            },
+            "title": "Bar Closes",
+            "type": "object"
+          },
+          "bar_visuals": {
+            "items": {
+              "$ref": "#/components/schemas/ScriptVisual"
+            },
+            "maxItems": 16000,
+            "title": "Bar Visuals",
+            "type": "array"
+          },
+          "bars_count": {
+            "title": "Bars Count",
+            "type": "integer"
+          },
+          "complete": {
+            "title": "Complete",
+            "type": "boolean"
+          },
+          "data_source": {
+            "title": "Data Source",
+            "type": "string"
+          },
+          "equity_curve": {
+            "items": {
+              "$ref": "#/components/schemas/PlotPoint"
+            },
+            "maxItems": 2000,
+            "title": "Equity Curve",
+            "type": "array"
+          },
+          "feed_state": {
+            "title": "Feed State",
+            "type": "string"
+          },
+          "fills": {
+            "items": {
+              "$ref": "#/components/schemas/SimulatedFill"
+            },
+            "maxItems": 4000,
+            "title": "Fills",
+            "type": "array"
+          },
+          "instrument_id": {
+            "title": "Instrument Id",
+            "type": "string"
+          },
+          "kind": {
+            "enum": [
+              "indicator",
+              "strategy",
+              "filter",
+              "alert"
+            ],
+            "title": "Kind",
+            "type": "string"
+          },
+          "matched": {
+            "anyOf": [
+              {
+                "type": "boolean"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Matched"
+          },
+          "metrics": {
+            "additionalProperties": {
+              "type": "number"
+            },
+            "title": "Metrics",
+            "type": "object"
+          },
+          "overlay": {
+            "title": "Overlay",
+            "type": "boolean"
+          },
+          "plot_styles": {
+            "additionalProperties": {
+              "additionalProperties": {
+                "$ref": "#/components/schemas/JsonValue"
+              },
+              "type": "object"
+            },
+            "title": "Plot Styles",
+            "type": "object"
+          },
+          "plots": {
+            "items": {
+              "$ref": "#/components/schemas/PlotSeries"
+            },
+            "maxItems": 64,
+            "title": "Plots",
+            "type": "array"
+          },
+          "script_id": {
+            "title": "Script Id",
+            "type": "string"
+          },
+          "source_hash": {
+            "title": "Source Hash",
+            "type": "string"
+          },
+          "tf": {
+            "title": "Tf",
+            "type": "string"
+          },
+          "version": {
+            "title": "Version",
+            "type": "integer"
+          },
+          "visuals": {
+            "items": {
+              "$ref": "#/components/schemas/ScriptVisual"
+            },
+            "maxItems": 500,
+            "title": "Visuals",
+            "type": "array"
+          }
+        },
+        "required": [
+          "script_id",
+          "version",
+          "kind",
+          "source_hash",
+          "instrument_id",
+          "tf",
+          "bars_count",
+          "feed_state",
+          "data_source",
+          "complete",
+          "overlay",
+          "plots",
+          "fills",
+          "equity_curve",
+          "metrics"
+        ],
+        "title": "ScriptResult",
+        "type": "object"
+      },
+      "ScriptRun": {
+        "additionalProperties": false,
+        "description": "Requests a reproducible run using closed, real backend candles.\n\nAttributes:\n    version: Pinned script version, or latest when omitted.\n    instrument_id: Canonical venue:market:symbol identifier.\n    tf: Supported chart timeframe, one second through one calendar month.\n    limit: Maximum closed bars, from two through two thousand.\n    from_ms: Optional inclusive UTC epoch millisecond lower boundary.\n    to_ms: Optional exclusive UTC epoch millisecond visibility boundary.\n    include_open: Evaluate the provisional last bar for indicators only;\n        alerts and simulated orders always require closed bars.\n    inputs: JSON input values overriding the version's defaults.\n    initial_equity: Positive initial simulated cash in quote units.\n    commission_bps: Commission in basis points per simulated fill.\n    slippage_bps: Adverse simulated slippage in basis points per fill.",
+        "properties": {
+          "commission_bps": {
+            "default": 0.0,
+            "maximum": 1000.0,
+            "minimum": 0.0,
+            "title": "Commission Bps",
+            "type": "number"
+          },
+          "from_ms": {
+            "anyOf": [
+              {
+                "minimum": 0.0,
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "From Ms"
+          },
+          "include_open": {
+            "default": false,
+            "title": "Include Open",
+            "type": "boolean"
+          },
+          "initial_equity": {
+            "default": 10000.0,
+            "exclusiveMinimum": 0.0,
+            "maximum": 1000000000000.0,
+            "title": "Initial Equity",
+            "type": "number"
+          },
+          "inputs": {
+            "additionalProperties": {
+              "$ref": "#/components/schemas/JsonValue"
+            },
+            "title": "Inputs",
+            "type": "object"
+          },
+          "instrument_id": {
+            "pattern": "^(bybit|okx|coinbase|kraken|deriv|binance|hyperliquid|lighter|bitget|mexc|twse|tpex|nasdaq|nyse|cboe|treasury|mock):(perp|spot|future|stock|etf|rate):[A-Za-z0-9._/-]{1,64}$",
+            "title": "Instrument Id",
+            "type": "string"
+          },
+          "limit": {
+            "default": 500,
+            "maximum": 2000.0,
+            "minimum": 2.0,
+            "title": "Limit",
+            "type": "integer"
+          },
+          "slippage_bps": {
+            "default": 0.0,
+            "maximum": 1000.0,
+            "minimum": 0.0,
+            "title": "Slippage Bps",
+            "type": "number"
+          },
+          "tf": {
+            "$ref": "#/components/schemas/Timeframe"
+          },
+          "to_ms": {
+            "anyOf": [
+              {
+                "minimum": 0.0,
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "To Ms"
+          },
+          "version": {
+            "anyOf": [
+              {
+                "minimum": 1.0,
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Version"
+          }
+        },
+        "required": [
+          "instrument_id",
+          "tf"
+        ],
+        "title": "ScriptRun",
+        "type": "object"
+      },
+      "ScriptVersion": {
+        "additionalProperties": false,
+        "description": "A tenant-visible immutable, content-addressed script version.\n\nAttributes:\n    version: Positive monotonically increasing version number.\n    source_hash: SHA-256 of the source and dependency/input configuration.\n    created_at_ms: Creation time in UTC epoch milliseconds.",
+        "properties": {
+          "created_at_ms": {
+            "title": "Created At Ms",
+            "type": "integer"
+          },
+          "defaults": {
+            "additionalProperties": {
+              "$ref": "#/components/schemas/JsonValue"
+            },
+            "title": "Defaults",
+            "type": "object"
+          },
+          "expected_version": {
+            "anyOf": [
+              {
+                "minimum": 1.0,
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Expected Version"
+          },
+          "kind": {
+            "enum": [
+              "indicator",
+              "strategy",
+              "library",
+              "filter",
+              "alert"
+            ],
+            "title": "Kind",
+            "type": "string"
+          },
+          "libraries": {
+            "additionalProperties": {
+              "$ref": "#/components/schemas/LibraryRef"
+            },
+            "title": "Libraries",
+            "type": "object"
+          },
+          "name": {
+            "maxLength": 120,
+            "minLength": 1,
+            "title": "Name",
+            "type": "string"
+          },
+          "overlay": {
+            "default": true,
+            "title": "Overlay",
+            "type": "boolean"
+          },
+          "requests": {
+            "additionalProperties": {
+              "$ref": "#/components/schemas/SeriesRequest"
+            },
+            "maxProperties": 4,
+            "title": "Requests",
+            "type": "object"
+          },
+          "script_id": {
+            "pattern": "^[a-z][a-z0-9-]{0,62}$",
+            "title": "Script Id",
+            "type": "string"
+          },
+          "source": {
+            "maxLength": 65536,
+            "minLength": 1,
+            "title": "Source",
+            "type": "string"
+          },
+          "source_hash": {
+            "title": "Source Hash",
+            "type": "string"
+          },
+          "version": {
+            "title": "Version",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "script_id",
+          "kind",
+          "name",
+          "source",
+          "version",
+          "source_hash",
+          "created_at_ms"
+        ],
+        "title": "ScriptVersion",
+        "type": "object"
+      },
+      "ScriptVisual": {
+        "additionalProperties": false,
+        "description": "A bounded declarative drawing; never executable browser code.\n\nAttributes:\n    id: Stable visual id unique within this script instance.\n    kind: Plot/drawing category interpreted by the chart renderer.\n    data: JSON coordinates, text and presentation; renderers read only\n        documented fields and never inject HTML, CSS URLs or JavaScript.",
+        "properties": {
+          "data": {
+            "additionalProperties": {
+              "$ref": "#/components/schemas/JsonValue"
+            },
+            "title": "Data",
+            "type": "object"
+          },
+          "id": {
+            "maxLength": 100,
+            "minLength": 1,
+            "title": "Id",
+            "type": "string"
+          },
+          "kind": {
+            "enum": [
+              "line",
+              "polyline",
+              "box",
+              "label",
+              "table",
+              "fill",
+              "hline",
+              "linefill",
+              "barcolor",
+              "bgcolor",
+              "shape",
+              "candle",
+              "bar"
+            ],
+            "title": "Kind",
+            "type": "string"
+          }
+        },
+        "required": [
+          "id",
+          "kind",
+          "data"
+        ],
+        "title": "ScriptVisual",
+        "type": "object"
+      },
       "SequenceNode": {
         "additionalProperties": false,
         "description": "Ordered events on distinct bars ending on the evaluated bar.\n\nAttributes:\n    op: Discriminator ``SEQUENCE``.\n    id: Stable editor id.\n    label: Optional display label.\n    within_bars: Window length in bars, including the evaluated bar.\n    steps: 2-8 ordered event references.",
@@ -1819,6 +3158,39 @@
         "title": "SequenceNode",
         "type": "object"
       },
+      "SeriesRequest": {
+        "additionalProperties": false,
+        "description": "Declares another symbol/resolution before isolated indicator execution.\n\nAttributes:\n    instrument_id: Optional canonical symbol; defaults to the chart symbol.\n    tf: Requested resolution, with confirmed-bar visibility enforced by\n        host.\n    limit: Maximum closed source bars, one through five hundred.",
+        "properties": {
+          "instrument_id": {
+            "anyOf": [
+              {
+                "pattern": "^(bybit|okx|coinbase|kraken|deriv|binance|hyperliquid|lighter|bitget|mexc|twse|tpex|nasdaq|nyse|cboe|treasury|mock):(perp|spot|future|stock|etf|rate):[A-Za-z0-9._/-]{1,64}$",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Instrument Id"
+          },
+          "limit": {
+            "default": 500,
+            "maximum": 500.0,
+            "minimum": 1.0,
+            "title": "Limit",
+            "type": "integer"
+          },
+          "tf": {
+            "$ref": "#/components/schemas/Timeframe"
+          }
+        },
+        "required": [
+          "tf"
+        ],
+        "title": "SeriesRequest",
+        "type": "object"
+      },
       "SetupPolicy": {
         "additionalProperties": false,
         "description": "Setup lifetime policy.\n\nAttributes:\n    expire_after_bars: Bars after which an unfired setup expires.",
@@ -1832,6 +3204,58 @@
           }
         },
         "title": "SetupPolicy",
+        "type": "object"
+      },
+      "SimulatedFill": {
+        "additionalProperties": false,
+        "description": "An isolated strategy simulation fill, never an executable broker order.\n\nAttributes:\n    time_ms: Fill bar start in UTC epoch milliseconds.\n    side: Buy or sell after converting the signed position target.\n    quantity: Positive base-asset quantity filled.\n    price: Fill price including adverse slippage, in quote/base units.\n    fee: Nonnegative commission in quote units.\n    effect: Entry, exit or reversal for unambiguous chart trade markers.",
+        "properties": {
+          "effect": {
+            "default": "entry",
+            "enum": [
+              "entry",
+              "exit",
+              "reversal"
+            ],
+            "title": "Effect",
+            "type": "string"
+          },
+          "fee": {
+            "minimum": 0.0,
+            "title": "Fee",
+            "type": "number"
+          },
+          "price": {
+            "exclusiveMinimum": 0.0,
+            "title": "Price",
+            "type": "number"
+          },
+          "quantity": {
+            "exclusiveMinimum": 0.0,
+            "title": "Quantity",
+            "type": "number"
+          },
+          "side": {
+            "enum": [
+              "buy",
+              "sell"
+            ],
+            "title": "Side",
+            "type": "string"
+          },
+          "time_ms": {
+            "title": "Time Ms",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "time_ms",
+          "side",
+          "quantity",
+          "price",
+          "fee"
+        ],
+        "title": "SimulatedFill",
         "type": "object"
       },
       "StateNode": {
@@ -2080,6 +3504,50 @@
         "title": "StrategyDefinition",
         "type": "object"
       },
+      "TerminalAction": {
+        "additionalProperties": false,
+        "description": "One explicit operation on a connected, user-enabled browser.\n\nAttributes:\n    operation: Registered command, validated workspace replacement, drawing\n        edit, replay, theme, export or screenshot operation.\n    command_id: Exact registered command id, required for command\n        operations.\n    arguments: JSON arguments for the selected operation, never source code.",
+        "properties": {
+          "arguments": {
+            "additionalProperties": {
+              "$ref": "#/components/schemas/JsonValue"
+            },
+            "title": "Arguments",
+            "type": "object"
+          },
+          "command_id": {
+            "anyOf": [
+              {
+                "maxLength": 160,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Command Id"
+          },
+          "operation": {
+            "enum": [
+              "command",
+              "workspace",
+              "drawing",
+              "replay",
+              "theme",
+              "export",
+              "screenshot",
+              "template"
+            ],
+            "title": "Operation",
+            "type": "string"
+          }
+        },
+        "required": [
+          "operation"
+        ],
+        "title": "TerminalAction",
+        "type": "object"
+      },
       "TimeWindowNode": {
         "additionalProperties": false,
         "description": "Evaluated bar starts inside a local-time window.\n\nAttributes:\n    op: Discriminator ``TIME_WINDOW``.\n    id: Stable editor id.\n    label: Optional display label.\n    time_zone: IANA time zone of the windows.\n    windows: Accepted windows.\n    weekdays: Accepted ISO local weekdays (1 = Monday); every day when\n        omitted.",
@@ -2188,7 +3656,7 @@
         "properties": {
           "blacklist": {
             "items": {
-              "pattern": "^(binance|hyperliquid|lighter|bitget|mexc|twse|tpex|nasdaq|nyse|cboe|treasury|mock):(perp|spot|future|stock|etf|rate):[A-Za-z0-9._/-]{1,64}$",
+              "pattern": "^(bybit|okx|coinbase|kraken|deriv|binance|hyperliquid|lighter|bitget|mexc|twse|tpex|nasdaq|nyse|cboe|treasury|mock):(perp|spot|future|stock|etf|rate):[A-Za-z0-9._/-]{1,64}$",
               "type": "string"
             },
             "title": "Blacklist",
@@ -2218,7 +3686,7 @@
           },
           "whitelist": {
             "items": {
-              "pattern": "^(binance|hyperliquid|lighter|bitget|mexc|twse|tpex|nasdaq|nyse|cboe|treasury|mock):(perp|spot|future|stock|etf|rate):[A-Za-z0-9._/-]{1,64}$",
+              "pattern": "^(bybit|okx|coinbase|kraken|deriv|binance|hyperliquid|lighter|bitget|mexc|twse|tpex|nasdaq|nyse|cboe|treasury|mock):(perp|spot|future|stock|etf|rate):[A-Za-z0-9._/-]{1,64}$",
               "type": "string"
             },
             "title": "Whitelist",
@@ -2309,6 +3777,11 @@
         "description": "Supported venues (contract ``Venue``). ``MOCK`` is DEMO-only.",
         "enum": [
           "binance",
+          "bybit",
+          "okx",
+          "coinbase",
+          "kraken",
+          "deriv",
           "hyperliquid",
           "lighter",
           "bitget",
@@ -2992,6 +4465,148 @@
         ]
       }
     },
+    "/v1/heatmap": {
+      "get": {
+        "description": "Loads actual quotes and preserves unavailable stocks.\n\nLoads actual quotes and preserves unavailable stocks as neutral tiles.\n\nArgs:\n    principal: Authenticated owner of optional company information.\n    region: US or Taiwan listings, default US.\n    venue: Optional configured exchange filter.\n    query: Optional symbol or company-name search.\n    limit: Explicit maximum stocks, one through five thousand.\n\nReturns:\n    Actual quotes, market coverage, provenance and available metrics.",
+        "operationId": "snapshot_v1_heatmap_get",
+        "parameters": [
+          {
+            "in": "query",
+            "name": "region",
+            "required": false,
+            "schema": {
+              "default": "us",
+              "enum": [
+                "us",
+                "taiwan"
+              ],
+              "title": "Region",
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "venue",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "$ref": "#/components/schemas/Venue"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Venue"
+            }
+          },
+          {
+            "in": "query",
+            "name": "query",
+            "required": false,
+            "schema": {
+              "default": "",
+              "maxLength": 120,
+              "title": "Query",
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "limit",
+            "required": false,
+            "schema": {
+              "default": 1000,
+              "maximum": 5000,
+              "minimum": 1,
+              "title": "Limit",
+              "type": "integer"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HeatmapSnapshot"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Snapshot",
+        "tags": [
+          "stock-heatmap"
+        ]
+      }
+    },
+    "/v1/heatmap/metadata": {
+      "get": {
+        "description": "Lists the owner's explicitly supplied, dated company fundamentals.\n\nArgs:\n    principal: Authenticated tenant owner.\n\nReturns:\n    Company sectors/capitalizations with their original observation\n    dates.",
+        "operationId": "metadata_v1_heatmap_metadata_get",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/CompanyMetadataBatch"
+                }
+              }
+            },
+            "description": "Successful Response"
+          }
+        },
+        "summary": "Metadata",
+        "tags": [
+          "stock-heatmap"
+        ]
+      },
+      "put": {
+        "description": "Stores owned optional fundamentals separately.\n\nStores owned optional fundamentals separately from provider quote data.\n\nArgs:\n    body: Explicit dated stock/ETF sectors and capitalization records.\n    principal: Authenticated author.\n\nReturns:\n    Empty response after atomic persistence of supplied records.",
+        "operationId": "put_metadata_v1_heatmap_metadata_put",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/CompanyMetadataBatch"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "204": {
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Put Metadata",
+        "tags": [
+          "stock-heatmap"
+        ]
+      }
+    },
     "/v1/indicators/plugins": {
       "get": {
         "description": "Lists usable indicator plugins in registration order.\n\nThe built-ins come first, then the plugins of installed plugin\npackages; each entry carries the kinds, events and values the\nplugin publishes and its display hints.\n\nReturns:\n    Contract ``IndicatorPluginList``.",
@@ -3011,6 +4626,53 @@
           }
         },
         "summary": "List Plugins",
+        "tags": [
+          "indicators"
+        ]
+      }
+    },
+    "/v1/indicators/plugins/{plugin_id}/source": {
+      "get": {
+        "description": "Returns source only for built-ins explicitly shipped as public code.\n\nArgs:\n    plugin_id: Registered built-in plugin identifier.\n\nReturns:\n    Python module source and its public availability label.\n\nRaises:\n    errors.NotFoundError: If the plugin is absent.\n    errors.UnsupportedError: If external/protected source is\n        unavailable.",
+        "operationId": "get_source_v1_indicators_plugins__plugin_id__source_get",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "plugin_id",
+            "required": true,
+            "schema": {
+              "title": "Plugin Id",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "additionalProperties": {
+                    "type": "string"
+                  },
+                  "title": "Response Get Source V1 Indicators Plugins  Plugin Id  Source Get",
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Get Source",
         "tags": [
           "indicators"
         ]
@@ -3488,6 +5150,839 @@
         "summary": "Snapshot",
         "tags": [
           "market"
+        ]
+      }
+    },
+    "/v1/mcp/connections": {
+      "get": {
+        "description": "Lists owned connection metadata without returning existing secrets.\n\nArgs:\n    principal: Authenticated application user.\n\nReturns:\n    Owned grants and the public MCP endpoint URL.",
+        "operationId": "list_connections_v1_mcp_connections_get",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "additionalProperties": true,
+                  "title": "Response List Connections V1 Mcp Connections Get",
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Successful Response"
+          }
+        },
+        "summary": "List Connections",
+        "tags": [
+          "mcp-connections"
+        ]
+      },
+      "post": {
+        "description": "Issues a resource-bound MCP credential.\n\nIssues a resource-bound MCP credential with explicitly selected powers.\n\nArgs:\n    body: Connection name, lifetime and write/trade permission choices.\n    principal: Authenticated application user creating this grant.\n\nReturns:\n    Secret token shown once, endpoint URL, scopes and expiration.\n\nRaises:\n    errors.ForbiddenError: If the owner cannot grant mutation access.\n    errors.ValidationFailedError: If trading is granted without writes.",
+        "operationId": "create_connection_v1_mcp_connections_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ConnectionInput"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "201": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ConnectionGrant"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Create Connection",
+        "tags": [
+          "mcp-connections"
+        ]
+      }
+    },
+    "/v1/mcp/connections/{connection_id}": {
+      "delete": {
+        "description": "Revokes an owned automation credential on subsequent MCP requests.\n\nArgs:\n    connection_id: Opaque grant identifier.\n    principal: Authenticated owner using the application token.\n\nReturns:\n    Empty HTTP 204 response after revocation.\n\nRaises:\n    errors.NotFoundError: If absent or owned by a different user/tenant.",
+        "operationId": "revoke_connection_v1_mcp_connections__connection_id__delete",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "connection_id",
+            "required": true,
+            "schema": {
+              "title": "Connection Id",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "204": {
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Revoke Connection",
+        "tags": [
+          "mcp-connections"
+        ]
+      }
+    },
+    "/v1/script-alerts": {
+      "get": {
+        "description": "Lists owned Python conditions, checkpoints and visible errors.\n\nArgs:\n    principal: Authenticated tenant owner.\n\nReturns:\n    Persistent alert jobs, including disabled conditions.",
+        "operationId": "list_alerts_v1_script_alerts_get",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "items": {
+                    "$ref": "#/components/schemas/AlertJob"
+                  },
+                  "title": "Response List Alerts V1 Script Alerts Get",
+                  "type": "array"
+                }
+              }
+            },
+            "description": "Successful Response"
+          }
+        },
+        "summary": "List Alerts",
+        "tags": [
+          "python-jobs"
+        ]
+      },
+      "post": {
+        "description": "Creates a pinned condition, disabled by default.\n\nArgs:\n    body: Explicit source, symbol, inputs and selected destinations.\n    principal: Authenticated author.\n\nReturns:\n    Persistent job evaluating only future closed bars when enabled.",
+        "operationId": "create_alert_v1_script_alerts_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/AlertJobInput"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "201": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AlertJob"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Create Alert",
+        "tags": [
+          "python-jobs"
+        ]
+      }
+    },
+    "/v1/script-alerts/{job_id}": {
+      "delete": {
+        "description": "Stops and removes an owned condition while preserving signal history.\n\nArgs:\n    job_id: Owned condition identifier.\n    principal: Authenticated author.\n\nReturns:\n    Empty response after removal.",
+        "operationId": "delete_alert_v1_script_alerts__job_id__delete",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "job_id",
+            "required": true,
+            "schema": {
+              "title": "Job Id",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "204": {
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Delete Alert",
+        "tags": [
+          "python-jobs"
+        ]
+      },
+      "put": {
+        "description": "Replaces a condition or toggles its enabled state.\n\nReplaces a condition or toggles its enabled state with a new checkpoint.\n\nArgs:\n    job_id: Owned persistent alert identifier.\n    body: Complete new condition configuration.\n    principal: Authenticated author.\n\nReturns:\n    Saved state with historical notifications suppressed.",
+        "operationId": "update_alert_v1_script_alerts__job_id__put",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "job_id",
+            "required": true,
+            "schema": {
+              "title": "Job Id",
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/AlertJobInput"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AlertJob"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Update Alert",
+        "tags": [
+          "python-jobs"
+        ]
+      }
+    },
+    "/v1/script-scans/{job_id}": {
+      "get": {
+        "description": "Reads an owned scan's progress, matches and per-symbol errors.\n\nArgs:\n    job_id: Opaque owned scan identifier.\n    principal: Authenticated tenant owner.\n\nReturns:\n    Current persisted scan state.\n\nRaises:\n    errors.NotFoundError: If the owned scan identifier is absent.",
+        "operationId": "progress_v1_script_scans__job_id__get",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "job_id",
+            "required": true,
+            "schema": {
+              "title": "Job Id",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ScanJob"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Progress",
+        "tags": [
+          "python-jobs"
+        ]
+      }
+    },
+    "/v1/script-scans/{job_id}/cancel": {
+      "post": {
+        "description": "Cancels a scan while retaining all completed decisions.\n\nArgs:\n    job_id: Owned active scan identifier.\n    principal: Authenticated author.\n\nReturns:\n    Terminal or newly cancelled scan state.",
+        "operationId": "cancel_v1_script_scans__job_id__cancel_post",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "job_id",
+            "required": true,
+            "schema": {
+              "title": "Job Id",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ScanJob"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Cancel",
+        "tags": [
+          "python-jobs"
+        ]
+      }
+    },
+    "/v1/scripts": {
+      "get": {
+        "description": "Lists the authenticated tenant's visible Python scripts.\n\nArgs:\n    principal: Authenticated tenant owner.\n    limit: Maximum sources, one through one hundred.\n    offset: Nonnegative catalog offset.\n\nReturns:\n    Private catalog and execution availability.",
+        "operationId": "list_scripts_v1_scripts_get",
+        "parameters": [
+          {
+            "in": "query",
+            "name": "limit",
+            "required": false,
+            "schema": {
+              "default": 100,
+              "maximum": 100,
+              "minimum": 1,
+              "title": "Limit",
+              "type": "integer"
+            }
+          },
+          {
+            "in": "query",
+            "name": "offset",
+            "required": false,
+            "schema": {
+              "default": 0,
+              "minimum": 0,
+              "title": "Offset",
+              "type": "integer"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ScriptList"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "List Scripts",
+        "tags": [
+          "python-scripts"
+        ]
+      },
+      "post": {
+        "description": "Creates a private Python script at immutable version one.\n\nArgs:\n    body: Declared script kind, source, inputs and pinned imports.\n    principal: Authenticated author with strategy:write permission.\n\nReturns:\n    Newly saved immutable version.\n\nRaises:\n    errors.JosephError: On invalid source, dependencies, access or slug\n        conflict.",
+        "operationId": "create_script_v1_scripts_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ScriptInput"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "201": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ScriptVersion"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Create Script",
+        "tags": [
+          "python-scripts"
+        ]
+      }
+    },
+    "/v1/scripts/validate": {
+      "post": {
+        "description": "Validates source structure and imports without running user code.\n\nArgs:\n    body: Script source, declaration and owned dependency pins.\n    principal: Authenticated tenant owner.\n\nReturns:\n    Validity, kind and executed false; invalid input returns HTTP 422.\n\nRaises:\n    errors.JosephError: If source or an owned pinned import is invalid.",
+        "operationId": "validate_script_v1_scripts_validate_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ScriptInput"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "additionalProperties": true,
+                  "title": "Response Validate Script V1 Scripts Validate Post",
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Validate Script",
+        "tags": [
+          "python-scripts"
+        ]
+      }
+    },
+    "/v1/scripts/{script_id}": {
+      "delete": {
+        "description": "Archives an owned script while preserving immutable library imports.\n\nArgs:\n    script_id: Tenant-local script slug.\n    principal: Authenticated author with strategy:write permission.\n\nReturns:\n    Empty HTTP 204 response after hiding the script's latest head.\n\nRaises:\n    errors.ForbiddenError: If the caller cannot author scripts.\n    errors.NotFoundError: If the owned visible script is absent.",
+        "operationId": "archive_script_v1_scripts__script_id__delete",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "script_id",
+            "required": true,
+            "schema": {
+              "title": "Script Id",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "204": {
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Archive Script",
+        "tags": [
+          "python-scripts"
+        ]
+      },
+      "get": {
+        "description": "Reads the latest visible version of an owned Python script.\n\nArgs:\n    script_id: Tenant-local script slug.\n    principal: Authenticated tenant owner.\n\nReturns:\n    Immutable version including source and pinned dependency metadata.\n\nRaises:\n    errors.NotFoundError: If absent, archived or owned by another\n        tenant.",
+        "operationId": "get_script_v1_scripts__script_id__get",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "script_id",
+            "required": true,
+            "schema": {
+              "title": "Script Id",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ScriptVersion"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Get Script",
+        "tags": [
+          "python-scripts"
+        ]
+      }
+    },
+    "/v1/scripts/{script_id}/run": {
+      "post": {
+        "description": "Calculates plots or simulates a strategy without placing real orders.\n\nArgs:\n    script_id: Tenant-local indicator or strategy slug.\n    body: Version, closed-bar range, inputs and simulation costs.\n    principal: Authenticated tenant owner.\n\nReturns:\n    Validated plots, provenance and optional simulation\n    fills/performance.\n\nRaises:\n    errors.JosephError: For absent data, invalid source/output, disabled\n        runtime, resource limits or standalone library execution.",
+        "operationId": "run_script_v1_scripts__script_id__run_post",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "script_id",
+            "required": true,
+            "schema": {
+              "title": "Script Id",
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ScriptRun"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ScriptResult"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Run Script",
+        "tags": [
+          "python-scripts"
+        ]
+      }
+    },
+    "/v1/scripts/{script_id}/scan": {
+      "post": {
+        "description": "Submits a bounded real-market filter scan without blocking HTTP.\n\nArgs:\n    script_id: Owned Filter script slug.\n    body: Market universe and execution bounds.\n    principal: Authenticated author.\n\nReturns:\n    Pending job and immutable source provenance.",
+        "operationId": "scan_v1_scripts__script_id__scan_post",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "script_id",
+            "required": true,
+            "schema": {
+              "title": "Script Id",
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ScanInput"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "202": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ScanJob"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Scan",
+        "tags": [
+          "python-jobs"
+        ]
+      }
+    },
+    "/v1/scripts/{script_id}/versions": {
+      "get": {
+        "description": "Lists immutable version history for an owned script.\n\nArgs:\n    script_id: Tenant-local script slug.\n    principal: Authenticated tenant owner.\n    limit: Maximum immutable versions, one through one hundred.\n    offset: Nonnegative version-history offset.\n\nReturns:\n    Descending version history; empty for an absent script.",
+        "operationId": "list_versions_v1_scripts__script_id__versions_get",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "script_id",
+            "required": true,
+            "schema": {
+              "title": "Script Id",
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "limit",
+            "required": false,
+            "schema": {
+              "default": 100,
+              "maximum": 100,
+              "minimum": 1,
+              "title": "Limit",
+              "type": "integer"
+            }
+          },
+          {
+            "in": "query",
+            "name": "offset",
+            "required": false,
+            "schema": {
+              "default": 0,
+              "minimum": 0,
+              "title": "Offset",
+              "type": "integer"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ScriptList"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "List Versions",
+        "tags": [
+          "python-scripts"
+        ]
+      },
+      "post": {
+        "description": "Appends a version only when its expected edit version still matches.\n\nArgs:\n    script_id: Slug matching the request body.\n    body: New source and explicit expected_version lock.\n    principal: Authenticated author with strategy:write permission.\n\nReturns:\n    Newly persisted immutable version without changing existing pins.\n\nRaises:\n    errors.JosephError: On path mismatch, stale edit, invalid source or\n        access.",
+        "operationId": "save_version_v1_scripts__script_id__versions_post",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "script_id",
+            "required": true,
+            "schema": {
+              "title": "Script Id",
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ScriptInput"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "201": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ScriptVersion"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Save Version",
+        "tags": [
+          "python-scripts"
+        ]
+      }
+    },
+    "/v1/scripts/{script_id}/versions/{version}": {
+      "get": {
+        "description": "Reads a pinned private version, including retained archived imports.\n\nArgs:\n    script_id: Tenant-local script slug.\n    version: Positive immutable version number.\n    principal: Authenticated tenant owner.\n\nReturns:\n    Exact source version and content hash for reproducibility.\n\nRaises:\n    errors.NotFoundError: If the owned immutable version is absent.",
+        "operationId": "get_version_v1_scripts__script_id__versions__version__get",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "script_id",
+            "required": true,
+            "schema": {
+              "title": "Script Id",
+              "type": "string"
+            }
+          },
+          {
+            "in": "path",
+            "name": "version",
+            "required": true,
+            "schema": {
+              "minimum": 1,
+              "title": "Version",
+              "type": "integer"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ScriptVersion"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Get Version",
+        "tags": [
+          "python-scripts"
         ]
       }
     },
@@ -4051,6 +6546,132 @@
         "summary": "Create Version",
         "tags": [
           "strategies"
+        ]
+      }
+    },
+    "/v1/terminal/sessions": {
+      "get": {
+        "description": "Lists only browser sessions this user explicitly enabled.\n\nArgs:\n    principal: Authenticated caller.\n\nReturns:\n    User-owned browser identities and explicit capability/state\n    snapshots.",
+        "operationId": "sessions_v1_terminal_sessions_get",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "additionalProperties": true,
+                  "title": "Response Sessions V1 Terminal Sessions Get",
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Successful Response"
+          }
+        },
+        "summary": "Sessions",
+        "tags": [
+          "terminal-control"
+        ]
+      }
+    },
+    "/v1/terminal/sessions/{session_id}": {
+      "get": {
+        "description": "Reads the latest explicitly published state of an owned browser.\n\nArgs:\n    session_id: Opaque browser identity.\n    principal: Authenticated owner.\n\nReturns:\n    Workspace, drawings and registered capabilities without credentials.",
+        "operationId": "state_v1_terminal_sessions__session_id__get",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "session_id",
+            "required": true,
+            "schema": {
+              "title": "Session Id",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "additionalProperties": true,
+                  "title": "Response State V1 Terminal Sessions  Session Id  Get",
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "State",
+        "tags": [
+          "terminal-control"
+        ]
+      }
+    },
+    "/v1/terminal/sessions/{session_id}/actions": {
+      "post": {
+        "description": "Requests one explicit browser action.\n\nRequests one explicit browser action with bounded acknowledgment time.\n\nArgs:\n    session_id: User-selected connected browser identity.\n    body: Allowlisted operation and JSON arguments.\n    principal: Authenticated owner with mutation permission.\n\nReturns:\n    Completion/error reported by the browser; mutations are never\n    retried.",
+        "operationId": "action_v1_terminal_sessions__session_id__actions_post",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "session_id",
+            "required": true,
+            "schema": {
+              "title": "Session Id",
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/TerminalAction"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "additionalProperties": {
+                    "$ref": "#/components/schemas/JsonValue"
+                  },
+                  "title": "Response Action V1 Terminal Sessions  Session Id  Actions Post",
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Action",
+        "tags": [
+          "terminal-control"
         ]
       }
     },

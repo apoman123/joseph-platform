@@ -2086,3 +2086,13 @@ kbd {
     margin-left: 0;
   }
 }
+
+/* Source tools and their favorite toggles remain separate menu controls. */
+.drawbar__favorite-row {
+  align-items: center;
+  display: flex;
+}
+
+.drawbar__favorite-row > .drawbar__option {
+  flex: 1;
+}

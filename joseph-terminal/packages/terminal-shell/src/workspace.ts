@@ -238,6 +238,8 @@ export type WorkspaceAction =
       chartId: string;
       /** Optional canonical instrument; defaults to the active chart's symbol. */
       instrumentId?: InstrumentId;
+      /** Tab content; existing callers create candlestick charts. */
+      viewType?: 'candles' | 'stock_heatmap';
     }
   | {
       /** Removes a chart tab while preserving at least one chart. */
@@ -256,6 +258,12 @@ export type WorkspaceAction =
       chartId: string;
       pluginId: string;
       visible: boolean;
+    }
+  | {
+      /** Removes an indicator and clears its settings, unlike hiding it. */
+      type: 'removeIndicatorLayer';
+      chartId: string;
+      pluginId: string;
     }
   | {
       type: 'setIndicatorLayerConfig';
@@ -431,6 +439,7 @@ function reduce(
         action.instrumentId ?? source.instrument_id,
         source.timeframe
       );
+      if (action.viewType) chart.view_type = action.viewType;
       return {
         ...doc,
         charts: asCharts([...doc.charts, chart]),
@@ -578,15 +587,34 @@ function reduce(
           const layers = exists
             ? chart.indicator_layers.map(layer =>
                 layer.plugin_id === action.pluginId
-                  ? {...layer, visible: action.visible}
+                  ? layer.removed && action.visible
+                    ? {plugin_id: layer.plugin_id, visible: true, present: true}
+                    : {...layer, visible: action.visible, present: true}
                   : layer
               )
             : [
                 ...chart.indicator_layers,
-                {plugin_id: action.pluginId, visible: action.visible},
+                {
+                  plugin_id: action.pluginId,
+                  visible: action.visible,
+                  present: true,
+                },
               ];
           return {...chart, indicator_layers: layers};
         }),
+      };
+    case 'removeIndicatorLayer':
+      return {
+        ...doc,
+        charts: mapCharts(doc, new Set([action.chartId]), chart => ({
+          ...chart,
+          indicator_layers: [
+            ...chart.indicator_layers.filter(
+              layer => layer.plugin_id !== action.pluginId
+            ),
+            {plugin_id: action.pluginId, visible: false, removed: true},
+          ],
+        })),
       };
     case 'setIndicatorLayerConfig':
       return {

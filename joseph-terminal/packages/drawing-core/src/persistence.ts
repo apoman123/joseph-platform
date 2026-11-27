@@ -184,7 +184,7 @@ export function isImportableDrawing(
     COLOR_PATTERN.test(style.color) &&
     Number.isInteger(style.line_width) &&
     Number(style.line_width) >= 1 &&
-    Number(style.line_width) <= 8 &&
+    Number(style.line_width) <= 50 &&
     typeof style.line_style === 'string' &&
     LINE_STYLES.has(style.line_style) &&
     (timeframe === undefined ||

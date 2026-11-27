@@ -25,6 +25,17 @@ _OUT = (
     / "execution-engine.openapi.json"
 )
 
+_MCP = (
+    pathlib.Path(__file__).resolve().parents[2]
+    / "joseph-market-engine"
+    / "src"
+    / "joseph"
+    / "mcp"
+    / "contracts"
+    / "execution.json"
+)
+"""Execution capability snapshot bundled with the automatic MCP endpoint."""
+
 
 def main() -> int:
     """Writes or checks the OpenAPI document.
@@ -42,11 +53,15 @@ def main() -> int:
     app = bootstrap.build_app(bootstrap.build_container(settings))
     text = json.dumps(app.openapi(), indent=2, sort_keys=True) + "\n"
     if "--check" in sys.argv:
-        if not _OUT.exists() or _OUT.read_text(encoding="utf-8") != text:
+        if any(
+            not path.exists() or path.read_text(encoding="utf-8") != text
+            for path in (_OUT, _MCP)
+        ):
             print("execution-engine OpenAPI is out of date")  # noqa: T201 - command-line output of the script.
             return 1
         return 0
-    _OUT.write_text(text, encoding="utf-8")
+    for path in (_OUT, _MCP):
+        path.write_text(text, encoding="utf-8")
     print(f"wrote {_OUT}")  # noqa: T201 - command-line output of the script.
     return 0
 

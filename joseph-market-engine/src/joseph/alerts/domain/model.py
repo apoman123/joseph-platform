@@ -418,6 +418,15 @@ def format_text(payload: Mapping[str, object]) -> str:
             "Joseph test alert\nYour notification connection is working. "
             "No trade was placed."
         )
+    if kind == "CUSTOM_ALERT":
+        return (
+            f"Python alert: {payload.get('instrument_id')} "
+            f"{payload.get('timeframe')}\n"
+            f"{payload.get('message', '')}\n"
+            f"Script {payload.get('strategy_version_id')} | "
+            f"Data {payload.get('data_source')} | "
+            f"Bar close {payload.get('bar_close_ms')}"
+        )[:4000]
     close_ms = payload.get("bar_close_ms")
     when = ""
     if isinstance(close_ms, int):

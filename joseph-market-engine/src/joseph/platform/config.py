@@ -27,7 +27,16 @@ from joseph.platform import redaction
 
 _DEFAULT_CORS = "http://localhost:3000,http://127.0.0.1:3000"
 _DEFAULT_VENUES = tuple(
-    venue for venue in instruments.Venue if venue is not instruments.Venue.MOCK
+    venue
+    for venue in instruments.Venue
+    if venue
+    not in {
+        instruments.Venue.MOCK,
+        instruments.Venue.HYPERLIQUID,
+        instruments.Venue.LIGHTER,
+        instruments.Venue.BITGET,
+        instruments.Venue.MEXC,
+    }
 )
 _DEFAULT_VENUE_NAMES = ",".join(venue.value for venue in _DEFAULT_VENUES)
 _DATA_FEED_ENV_NAMES = frozenset(
@@ -40,6 +49,7 @@ _DATA_FEED_ENV_NAMES = frozenset(
         "JOSEPH_ALPACA_SECONDS_HISTORY_MS",
         "JOSEPH_TW_DATA_SOURCE",
         "JOSEPH_FUGLE_API_KEY",
+        "JOSEPH_FUGLE_ADJUSTED_DAILY",
         "JOSEPH_FRED_API_KEY",
     }
 )
@@ -61,6 +71,11 @@ _ALERT_ENV_NAMES = frozenset(
         "JOSEPH_WEB_PUSH_PRIVATE_KEY",
         "JOSEPH_WEB_PUSH_PUBLIC_KEY",
         "JOSEPH_WEB_PUSH_CONTACT",
+        "JOSEPH_SCRIPT_RUNTIME",
+        "JOSEPH_SCRIPT_RUNNER_IMAGE",
+        "JOSEPH_SCRIPT_TIMEOUT_S",
+        "JOSEPH_MCP_PUBLIC_URL",
+        "JOSEPH_MCP_SIGNING_KEY",
     }
 )
 
@@ -389,6 +404,16 @@ class Settings:
             ``JOSEPH_INDICATOR_PLUGINS_REQUIRED``. Default none.
         telegram_bot_token: Telegram bot token (secret),
             ``JOSEPH_TELEGRAM_BOT_TOKEN``. Default none (channel off).
+        script_runtime: User Python execution mode, disabled or docker;
+            JOSEPH_SCRIPT_RUNTIME, default disabled.
+        script_runner_image: Operator-owned isolated runtime image;
+            JOSEPH_SCRIPT_RUNNER_IMAGE, default joseph-python-runner:1.
+        script_timeout_s: Per-container wall-clock limit, one to thirty seconds;
+            JOSEPH_SCRIPT_TIMEOUT_S, default ten seconds.
+        mcp_public_url: Canonical audience and public MCP URL,
+            JOSEPH_MCP_PUBLIC_URL, default http://localhost:8000/mcp.
+        mcp_signing_key: Optional operator-managed secret signing key;
+            JOSEPH_MCP_SIGNING_KEY, otherwise generated and persisted privately.
         whatsapp_access_token: Secret Meta Business token; default none.
             Environment variable JOSEPH_WHATSAPP_ACCESS_TOKEN.
         whatsapp_phone_number_id: Numeric business sender id; default none.
@@ -466,6 +491,9 @@ class Settings:
             enables only ``fugle`` with a configured key; ``twse`` is a
             legacy setting that leaves Taiwan data disabled. Default
             ``fugle``.
+        fugle_adjusted_daily: Normalize daily Fugle history;
+            ``JOSEPH_FUGLE_ADJUSTED_DAILY`` defaults to true.
+            Intraday prices stay raw.
         fugle_api_key: Fugle market-data API key (secret),
             ``JOSEPH_FUGLE_API_KEY`` or its ``_FILE`` path. Required when
             ``tw_data_source`` is ``fugle``.
@@ -498,6 +526,11 @@ class Settings:
     indicator_plugins_disabled: tuple[str, ...] = ()
     indicator_plugins_required: tuple[str, ...] = ()
     telegram_bot_token: str | None = None
+    script_runtime: str = "disabled"
+    script_runner_image: str = "joseph-python-runner:1"
+    script_timeout_s: float = 10.0
+    mcp_public_url: str = "http://localhost:8000/mcp"
+    mcp_signing_key: str | None = None
     whatsapp_access_token: str | None = None
     whatsapp_phone_number_id: str | None = None
     whatsapp_template: str | None = None
@@ -531,6 +564,7 @@ class Settings:
     lighter_archive: bool = True
     tw_data_source: str = "fugle"
     fugle_api_key: str | None = None
+    fugle_adjusted_daily: bool = True
     fred_api_key: str | None = None
 
     def __repr__(self) -> str:
@@ -601,6 +635,9 @@ class Settings:
         phone_id = source.get("JOSEPH_WHATSAPP_PHONE_NUMBER_ID") or None
         version = source.get("JOSEPH_WHATSAPP_API_VERSION", "v27.0")
         template = source.get("JOSEPH_WHATSAPP_TEMPLATE") or None
+        script_runtime = source.get("JOSEPH_SCRIPT_RUNTIME", "disabled")
+        if script_runtime not in {"disabled", "docker"}:
+            raise ValueError("JOSEPH_SCRIPT_RUNTIME must be disabled or docker")
         if (phone_id and not phone_id.isascii()) or (
             phone_id and not phone_id.isdigit()
         ):
@@ -676,6 +713,15 @@ class Settings:
             telegram_bot_token=secret_value(
                 source, "JOSEPH_TELEGRAM_BOT_TOKEN"
             ),
+            script_runtime=script_runtime,
+            script_runner_image=source.get(
+                "JOSEPH_SCRIPT_RUNNER_IMAGE", "joseph-python-runner:1"
+            ),
+            script_timeout_s=float(source.get("JOSEPH_SCRIPT_TIMEOUT_S", "10")),
+            mcp_public_url=source.get(
+                "JOSEPH_MCP_PUBLIC_URL", "http://localhost:8000/mcp"
+            ),
+            mcp_signing_key=secret_value(source, "JOSEPH_MCP_SIGNING_KEY"),
             whatsapp_access_token=secret_value(
                 source, "JOSEPH_WHATSAPP_ACCESS_TOKEN"
             ),
@@ -739,5 +785,8 @@ class Settings:
                 source.get("JOSEPH_TW_DATA_SOURCE", "fugle")
             ),
             fugle_api_key=secret_value(source, "JOSEPH_FUGLE_API_KEY"),
+            fugle_adjusted_daily=_bool(
+                source.get("JOSEPH_FUGLE_ADJUSTED_DAILY"), True
+            ),
             fred_api_key=secret_value(source, "JOSEPH_FRED_API_KEY"),
         )

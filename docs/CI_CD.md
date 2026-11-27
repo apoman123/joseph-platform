@@ -7,7 +7,7 @@ How the GitHub Actions pipeline of the public repository tests, publishes and de
 | Workflow | Trigger | What it does |
 |---|---|---|
 | `ci-cd.yml` | every push, `v*` tags, pull requests, manual | All test tiers; then, on `main` and `v*` tags, images and deploys |
-| `security.yml` | push to `main`, pull requests, weekly, manual | CodeQL, gitleaks (full history), dependency review on pull requests (blocks high severity and GPL/AGPL), npm and Python audits |
+| `security.yml` | push to `main`, pull requests, weekly, manual | CodeQL, gitleaks (full history), dependency review on pull requests (blocks high severity and GPL; AGPL is accepted for the integrated application), npm and Python audits |
 | `nightly.yml` | daily, manual | Live public-venue network tests and connectivity probe |
 | `redeploy.yml` | manual | Deploy a published image tag (rollback) |
 
@@ -66,7 +66,7 @@ Only the `images` job installs plugin packages; every test job uses the built-in
 |---|---|---|
 | `MARKET_PLUGIN_REQUIREMENTS` | Actions variable | Space-separated pip requirements on one line, installed without their dependencies (list them all), e.g. `git+https://github.com/<owner>/<repo>.git@<commit>#subdirectory=<dir>`. Pin to commits: Dependabot does not update them |
 | `PLUGIN_GIT_TOKEN` | Actions secret | Only for private GitHub repositories: a fine-grained token, *Only select repositories* → the plugin repositories, **Contents: Read-only** (Metadata is added automatically), with an expiry (e.g. 90 days) |
-| `MARKET_IMAGE_LICENSES` | Actions variable | Optional SPDX expression for the market image's licence label when plugins add licences; default `MIT` |
+| `MARKET_IMAGE_LICENSES` | Actions variable | Optional additional SPDX expression when plugins add licences; combined with the integrated market application's `AGPL-3.0-only` baseline. Defaults to `MIT` for original components. |
 
 - **Store** them from your checkout: `gh variable set MARKET_PLUGIN_REQUIREMENTS`, `gh secret set PLUGIN_GIT_TOKEN` (each prompts for the value). Not as environment settings: the `images` job has no `environment:`.
 - **Use:** the job passes the variable as the build arg `PLUGIN_REQUIREMENTS` and the token, when set, as the BuildKit secret `plugin_git_token`. Inside one `RUN` the token rewrites `https://github.com/` URLs; it never reaches a layer, the build cache or a git config file. The build fails if `python -m joseph.indicators.discovery --check` reports a plugin that does not load.

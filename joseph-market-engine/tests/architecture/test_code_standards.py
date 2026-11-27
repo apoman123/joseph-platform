@@ -563,7 +563,8 @@ def _check_licence(source: _Source) -> Iterator[_Finding]:
     header_ok = (
         len(lines) >= 2
         and _LICENCE_COPYRIGHT.fullmatch(lines[0]) is not None
-        and lines[1] == _LICENCE_SPDX
+        and lines[1]
+        in (_LICENCE_SPDX, "# SPDX-License-Identifier: AGPL-3.0-only")
         and (len(lines) == 2 or not lines[2].strip())
     )
     if not header_ok:
@@ -571,7 +572,7 @@ def _check_licence(source: _Source) -> Iterator[_Finding]:
             1,
             "GPY010",
             "licence header missing: start with '# Copyright <year> "
-            "apoman123', '# SPDX-License-Identifier: MIT' and a blank line",
+            "apoman123', an MIT or AGPL-3.0-only SPDX header and a blank line",
         )
 
 

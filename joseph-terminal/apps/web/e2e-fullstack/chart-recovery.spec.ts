@@ -10,6 +10,7 @@
  */
 
 import {expect, test, type Page} from '@playwright/test';
+import type {CandleBatch} from '@joseph/contracts';
 import {API} from '../playwright.fullstack.config';
 import {pickTimeframe} from '../e2e/support';
 
@@ -24,6 +25,60 @@ async function selectInstrument(page: Page, symbol: string): Promise<void> {
   await page.getByRole('textbox', {name: 'Search instruments'}).fill(symbol);
   await page.getByTestId(`instrument-option-mock:perp:${symbol}`).click();
 }
+
+test('an open chart automatically reloads revised adjusted history without retaining old prices', async ({
+  page,
+}) => {
+  await page.clock.install();
+  await page.routeWebSocket(
+    `${API.NEXT_PUBLIC_MARKET_WS_URL}/v1/stream/market*`,
+    () => undefined
+  );
+  let batches = 0;
+  await page.route('**/v1/candles?**', async route => {
+    const response = await route.fetch();
+    const url = new URL(route.request().url());
+    if (
+      !response.ok() ||
+      url.searchParams.get('instrument_id') !== 'mock:perp:BTCUSD'
+    ) {
+      await route.fulfill({response});
+      return;
+    }
+    const batch = (await response.json()) as CandleBatch;
+    batches += 1;
+    const price = batches === 1 ? '188.65' : '47.16';
+    await route.fulfill({
+      response,
+      json: {
+        ...batch,
+        price_adjustment: 'ALL',
+        price_adjustment_epoch_ms: batches === 1 ? 0 : 900_000,
+        price_adjustment_refresh_after_ms:
+          batches === 1 ? Date.now() + 1000 : Date.now() + 3_600_000,
+        candles: batch.candles.map(candle => ({
+          ...candle,
+          open: price,
+          high: price,
+          low: price,
+          close: price,
+        })),
+      },
+    });
+  });
+  await page.goto('/');
+  await page.locator('.terminal[data-ready="true"]').waitFor();
+  await selectInstrument(page, 'BTCUSD');
+  const pane = page.getByTestId('chart-pane-chart-1');
+  await expect(pane.getByTestId('price-adjustment')).toHaveText(
+    'Adjusted · splits & dividends'
+  );
+  await expect(pane.locator('.pane__ohlc')).toContainText('188.65');
+  await page.clock.runFor(30_000);
+  await expect.poll(() => batches).toBeGreaterThan(1);
+  await expect(pane.locator('.pane__ohlc')).toContainText('47.16');
+  await expect(pane.locator('.pane__ohlc')).not.toContainText('188.65');
+});
 
 test('monthly stock history loads when 500 bars predate the exchange calendar', async ({
   page,
@@ -137,6 +192,7 @@ test('backend tabs retain independent indicators and subscribe to changed feed m
   await library.getByRole('button', {name: 'Collect RSI'}).click();
   await page.keyboard.press('Escape');
   await page.getByRole('button', {name: 'Add chart tab'}).click();
+  await page.getByRole('button', {name: 'Candlestick chart'}).click();
   await selectInstrument(page, 'ETHUSD');
   await pickTimeframe(page, '1h');
   const tabs = page.getByRole('tablist', {name: 'Chart tabs'});

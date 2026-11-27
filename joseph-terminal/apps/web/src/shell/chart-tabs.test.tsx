@@ -36,6 +36,7 @@ describe('saved chart tabs', () => {
     );
     for (let index = 0; index < 20; index += 1) {
       fireEvent.click(screen.getByRole('button', {name: 'Add chart tab'}));
+      fireEvent.click(screen.getByRole('button', {name: 'Candlestick chart'}));
     }
     expect(screen.getAllByRole('tab')).toHaveLength(21);
     const chartId = activeChart(runtime.workspace.get()).chart_id;
@@ -74,6 +75,7 @@ describe('saved chart tabs', () => {
     );
     expect(screen.getByRole('button', {name: /Close BTCUSD/})).toBeDisabled();
     fireEvent.click(screen.getByRole('button', {name: 'Add chart tab'}));
+    fireEvent.click(screen.getByRole('button', {name: 'Candlestick chart'}));
     const selected = screen.getByRole('tab', {selected: true});
     fireEvent.keyDown(selected, {key: 'ArrowLeft'});
     expect(activeChart(runtime.workspace.get()).chart_id).toBe('chart-1');

@@ -107,6 +107,7 @@ def build_router(
                 instruments.MarketType, market_type, "market_type"
             ),
             limit=limit,
+            interactive=True,
         )
         return {
             "instruments": [row.to_contract() for row in rows],

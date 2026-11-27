@@ -1958,6 +1958,22 @@ class TaiwanExchangeAdapter(base.BaseVenueAdapter):
             ),
         )
 
+    def price_adjustment(
+        self,
+        timeframe: timeframes.Timeframe,
+    ) -> market.PriceAdjustment:
+        """Reports the configured Taiwan source's historical price basis.
+
+        Args:
+            timeframe: Native or derived stock/ETF candle interval.
+
+        Returns:
+            Fugle's configured daily policy, otherwise native RAW prices.
+        """
+        if self._fugle is not None:
+            return self._fugle.price_adjustment(timeframe)
+        return market.PriceAdjustment.RAW
+
     def _with_fugle(
         self, caps: capabilities.VenueCapabilities
     ) -> capabilities.VenueCapabilities:
@@ -1985,6 +2001,10 @@ class TaiwanExchangeAdapter(base.BaseVenueAdapter):
                 "history begins in 2010; longer bars are aggregated on "
                 "the XTAI session calendar. Today's minute candles and "
                 "quotes use Fugle REST polling, not a WebSocket stream.",
+                "Daily and longer history uses the configured corporate-action "
+                "adjustment policy; intraday prices stay raw. "
+                "Volume and turnover "
+                "remain reported values.",
                 "Fugle's 13:30 closing auction is folded into the final "
                 "session minute. Bulk screening snapshots and order books "
                 "remain separately sourced from the exchanges.",

@@ -91,6 +91,23 @@ class CandleStore:
         self._lock = threading.Lock()
         self.revisions = 0
 
+    def invalidate(
+        self,
+        instrument: instruments.InstrumentId,
+        timeframe: timeframes.Timeframe,
+    ) -> None:
+        """Drops a series and its coverage before refreshing adjusted history.
+
+        Args:
+            instrument: Exact source instrument whose price basis may change.
+            timeframe: Resolution to invalidate; other series remain cached.
+
+        Returns:
+            None; removes only the in-memory bars and coverage under the lock.
+        """
+        with self._lock:
+            self._series.pop((instrument, timeframe), None)
+
     def upsert(self, candle: market.Candle) -> candle_rules.MergeResult:
         """Merges one candle.
 

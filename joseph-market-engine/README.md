@@ -31,19 +31,27 @@ Indicator plugin packages install into this environment with `make plugins` from
 
 ## Venues
 
-`GET /v1/venues` lists the enabled market-data venues. In normal operation,
-the five crypto venues use the free `ccxt` async REST adapter. Their bars and
-snapshots carry `POLL` provenance, and each venue advertises only the OHLCV
-resolutions and methods exposed by its CCXT exchange class. Free CCXT Pro
-provides public WebSocket candle subscriptions, with trade-driven candle
-updates for Lighter. Active charts show LIVE after exchange events arrive;
-REST fallback remains POLL. Exchange-labelled RWA and equity perpetuals are
-retained, including namespace-safe Hyperliquid HIP-3 IDs. Alpaca IEX and Fugle venues are
-only constructed after their free-plan keys are configured; the Treasury
-daily feed works without a key, with optional FRED series when its key is set.
-The Dashboard groups the five crypto venues under one CCXT provider.
+`GET /v1/venues` lists configured data sources and their actual transport health.
+Native public sources follow the reviewed TradeX implementation: Binance, Bybit and
+Deriv have WebSocket subscriptions; OKX, Coinbase Exchange and Kraken use explicit
+REST polling. Source metadata loads independently in the background, refreshes on
+expiry and retries failures. An unfiltered interactive symbol search returns ready
+sources within one second instead of waiting for a blocked exchange. An authoritative
+filter scan still awaits its requested universe.
 
-### Legacy native crypto adapters (not selected by the running market engine)
+Alpaca IEX and Fugle require their free-plan API keys. Treasury daily data needs no
+key, and FRED adds separate series when its optional key is configured. These feeds
+remain available. The existing execution engine and its five crypto trading adapters
+are unchanged. CCXT is retained only as an explicit adapter-factory compatibility
+choice; it is not selected by the running application.
+
+Taiwan daily and longer candles default to Fugle corporate-action adjusted
+OHLC (`JOSEPH_FUGLE_ADJUSTED_DAILY=true`); intraday and actual quotes stay raw.
+The chart labels the price basis. See [adjustment limits](../docs/MARKET_DATA_SCOPE.md#corporate-action-price-basis).
+
+Default native feeds and key setup: [integration guide](../docs/TRADEX_INTEGRATION.md).
+
+### Other native adapters retained for explicit configurations and regression tests
 
 | Venue | Klines | `1M` | Taker volume | Trade history (REST) | Public archive |
 |---|---|---|---|---|---|

@@ -1,0 +1,20 @@
+/*
+ * Copyright 2026 Joseph Terminal contributors
+ * SPDX-License-Identifier: MIT
+ */
+
+/* Floating favorite commands share workspace preferences across chart tabs. */
+.bar {
+  align-items: center;
+  background: var(--hull);
+  border: 1px solid var(--fathom);
+  border-radius: var(--radius-control);
+  box-shadow: var(--shadow-float);
+  display: flex;
+  max-height: 70vh;
+  max-width: 80vw;
+  overflow: auto;
+  padding: var(--space-1);
+  position: fixed;
+  z-index: 40;
+}

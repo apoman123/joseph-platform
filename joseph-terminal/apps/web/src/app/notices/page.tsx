@@ -6,7 +6,7 @@
 
 /**
  * @fileoverview Third-party notices page (Apache-2.0 attribution for
- * Lightweight Charts and the terminal's MIT license).
+ * Lightweight Charts, TradeX and the integrated AGPL license).
  */
 
 import type {ReactElement} from 'react';
@@ -21,8 +21,9 @@ export default function NoticesPage(): ReactElement {
     <main className="static-page">
       <h1>Licenses and notices</h1>
       <p>
-        Joseph Terminal is open-source software released under the MIT License.
-        It is not affiliated with or endorsed by TradingView or any exchange.
+        Joseph Terminal is open-source software released under the AGPL-3.0-only
+        License. It is not affiliated with or endorsed by TradingView or any
+        exchange.
       </p>
       <h2>TradingView Lightweight Charts™</h2>
       <p>
@@ -33,10 +34,24 @@ export default function NoticesPage(): ReactElement {
         </a>
       </p>
       <p>
-        Every drawing tool, indicator layer, layout and trading interaction in
-        this terminal is original code built on the public Lightweight Charts
-        API. No TradingView Advanced Charts or Trading Platform code or assets
-        are included.
+        Drawing geometry uses lightweight-charts-drawing (MIT). No TradingView
+        Advanced Charts or Trading Platform code or assets are included.
+      </p>
+      <h2>TradeX integration</h2>
+      <p>
+        Based on TradeX by Saifullah Shafin -{' '}
+        <a href="https://github.com/saifullahshafin/open-source-tradingview">
+          https://github.com/saifullahshafin/open-source-tradingview
+        </a>
+      </p>
+      <p>
+        Modified from TradeX. Joseph retains its own architecture and Python
+        script runtime.
+      </p>
+      <p>
+        <a href="https://github.com/apoman123/joseph-platform">
+          Corresponding source and build instructions (AGPL)
+        </a>
       </p>
       <h2>Other components</h2>
       <p>

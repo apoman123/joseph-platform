@@ -165,7 +165,13 @@
           "$ref": "common.schema.json#/$defs/InstrumentId"
         },
         "direction": {
-          "$ref": "common.schema.json#/$defs/Direction"
+          "enum": [
+            "LONG",
+            "SHORT",
+            "NONE"
+          ],
+          "type": "string",
+          "description": "NONE denotes a directionless Python alert."
         },
         "timeframe": {
           "$ref": "common.schema.json#/$defs/Timeframe"

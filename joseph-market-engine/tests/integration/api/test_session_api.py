@@ -12,7 +12,7 @@ from collections.abc import Callable
 from typing import Any
 from typing import TypeAlias
 
-import httpx
+import httpx2
 from fastapi import testclient
 
 from joseph.domain import sessions
@@ -39,7 +39,7 @@ def _ny(year: int, month: int, day: int, hour: int = 0) -> int:
     return int(moment.timestamp() * 1000)
 
 
-def _error(response: httpx.Response, status: int, code: str) -> None:
+def _error(response: httpx2.Response, status: int, code: str) -> None:
     """Asserts a contract error response.
 
     Args:

@@ -39,6 +39,7 @@ const MODULE_CLASS = `(?:[a-z][a-zA-Z0-9]*|${GLOBAL_CLASS})`;
 const config = {
   plugins: ['stylelint-order', licenseHeaderPlugin],
   ignoreFiles: [
+    'third_party/**',
     '**/node_modules/**',
     '**/.next/**',
     '**/.next-e2e/**',

@@ -656,7 +656,18 @@ export class LwcChartPort implements ChartPort {
     const chart = this.chart;
     if (!chart) return;
     const precision = study.spec.precision ?? 2;
+    const range = study.spec.range;
     const common = {
+      ...(range
+        ? {
+            autoscaleInfoProvider: () => ({
+              priceRange: {
+                minValue: range.min,
+                maxValue: range.max,
+              },
+            }),
+          }
+        : {}),
       priceFormat: {
         type: 'price' as const,
         precision,
@@ -669,7 +680,11 @@ export class LwcChartPort implements ChartPort {
       study.spec.style === 'line'
         ? chart.addSeries(
             LineSeries,
-            {...common, color: this.theme.text, lineWidth: 2},
+            {
+              ...common,
+              color: study.spec.canvas ? 'transparent' : this.theme.text,
+              lineWidth: 2,
+            },
             pane
           )
         : chart.addSeries(HistogramSeries, {...common}, pane);
@@ -687,9 +702,23 @@ export class LwcChartPort implements ChartPort {
         title: level.label,
       });
     }
-    const primitive = new HostPrimitive(
-      ctx => void this.paintPaneTitle(ctx, study.spec.title, study.spec.caption)
-    );
+    const primitive = new HostPrimitive(ctx => {
+      const transform = this.transform();
+      if (transform && study.spec.canvas) {
+        ctx.save();
+        try {
+          study.spec.canvas.draw(ctx, {
+            ...transform,
+            height: chart.paneSize(pane).height,
+            priceToY: value => series.priceToCoordinate(value),
+            yToPrice: y => series.coordinateToPrice(y),
+          });
+        } finally {
+          ctx.restore();
+        }
+      }
+      this.paintPaneTitle(ctx, study.spec.title, study.spec.caption);
+    });
     series.attachPrimitive(primitive);
     study.series = series;
     study.primitive = primitive;
@@ -792,6 +821,7 @@ export class LwcChartPort implements ChartPort {
       existing &&
       existing.series &&
       existing.style === spec.style &&
+      JSON.stringify(existing.spec.range) === JSON.stringify(spec.range) &&
       JSON.stringify(existing.spec.levels ?? []) ===
         JSON.stringify(spec.levels ?? [])
     ) {
@@ -1164,6 +1194,9 @@ export class LwcChartPort implements ChartPort {
   /** Requests a repaint. */
   invalidate(): void {
     this.primitive?.update();
+    for (const study of this.studies.values()) {
+      study.primitive?.update();
+    }
   }
 
   /**
@@ -1210,6 +1243,8 @@ export class LwcChartPort implements ChartPort {
     return {
       width,
       height,
+      isLog: () =>
+        series.priceScale().options().mode === PriceScaleMode.Logarithmic,
       timeToX: timeMs => {
         const logical = index.toLogical(timeMs);
         if (logical === null) return null;

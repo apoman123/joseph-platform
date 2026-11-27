@@ -20,12 +20,15 @@ import {readFileSync, readdirSync, writeFileSync, mkdirSync} from 'node:fs';
 import {dirname, join} from 'node:path';
 import {fileURLToPath} from 'node:url';
 import {compile} from 'json-schema-to-typescript';
+import Ajv2020 from 'ajv/dist/2020.js';
+import standaloneCode from 'ajv/dist/standalone/index.js';
 
 import {SCRIPT_HEADER} from '../../../scripts/lint/license-header.mjs';
 
 const PACKAGE_DIR = join(dirname(fileURLToPath(import.meta.url)), '..');
 const SCHEMA_DIR = join(PACKAGE_DIR, 'schemas');
 const OUTPUT = join(PACKAGE_DIR, 'src', 'generated', 'contracts.ts');
+const VALIDATORS = join(PACKAGE_DIR, 'src', 'generated', 'validators.cjs');
 // The same licence header every hand-written file carries. The generated
 // file is exempt from lint, hence the blanket `eslint-disable`.
 const BANNER = `${SCRIPT_HEADER}
@@ -129,9 +132,34 @@ async function main() {
     )
     .replace(/export interface JosephContracts \{\}\n/, '');
   const check = process.argv.includes('--check');
+  const validator = new Ajv2020({
+    strict: false,
+    allErrors: false,
+    code: {source: true},
+  });
+  for (const name of ['common', 'indicators', 'workspace']) {
+    validator.addSchema(
+      JSON.parse(readFileSync(join(SCHEMA_DIR, `${name}.schema.json`), 'utf8'))
+    );
+  }
+  const workspaceId = JSON.parse(
+    readFileSync(join(SCHEMA_DIR, 'workspace.schema.json'), 'utf8')
+  ).$id;
+  validator.addSchema({
+    $id: 'workspace-validation',
+    $ref: `${workspaceId}#/$defs/WorkspaceDocument`,
+  });
+  validator.addSchema({
+    $id: 'drawing-validation',
+    $ref: `${workspaceId}#/$defs/DrawingDocument`,
+  });
+  const validationSource = `${BANNER}\n${standaloneCode(validator, {workspaceValid: 'workspace-validation', drawingValid: 'drawing-validation'})}\n`;
   if (check) {
     const current = readFileSync(OUTPUT, 'utf8');
-    if (current !== source) {
+    if (
+      current !== source ||
+      readFileSync(VALIDATORS, 'utf8') !== validationSource
+    ) {
       console.error(
         'Generated contracts are out of date. Run `pnpm contracts:gen`.'
       );
@@ -142,6 +170,7 @@ async function main() {
   }
   mkdirSync(dirname(OUTPUT), {recursive: true});
   writeFileSync(OUTPUT, source);
+  writeFileSync(VALIDATORS, validationSource);
   console.log(`Wrote ${OUTPUT}`);
 }
 

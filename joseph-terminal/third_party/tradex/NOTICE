@@ -1,0 +1,34 @@
+TradeX
+Copyright (C) 2026 Saifullah Shafin
+https://github.com/saifullahshafin/open-source-tradingview
+
+TradeX is free software: you can redistribute it and/or modify it under the terms of the GNU Affero General
+Public License, version 3 only (AGPL-3.0-only), as published by the Free Software Foundation. See LICENSE.
+
+Third-party parts (PineTS, Vela-pinets, Vela, Lightweight Charts, KLineChart and others) are copyright their
+own authors and keep their own licences. See THIRD_PARTY_NOTICES.md and licenses/. The additional terms below
+do NOT apply to those parts.
+
+
+ADDITIONAL TERMS UNDER SECTION 7 OF THE AGPL-3.0
+================================================
+These terms apply only to the material in this repository that Saifullah Shafin holds the copyright on
+("TradeX material"). They are permitted by sections 7(b), 7(c) and 7(e) of the licence.
+
+1. Attribution (sections 7(b) and 7(c); item c is under 7(c)).
+   Anyone who conveys TradeX material, or a work that contains it, modified or not, must:
+   a) keep this NOTICE file and every copyright line in the source files;
+   b) where the work shows Appropriate Legal Notices in its user interface (for example a "Source", "About"
+      or "Licence" link or panel), include in them, visible to the user:
+
+          Based on TradeX by Saifullah Shafin - https://github.com/saifullahshafin/open-source-tradingview
+
+   c) mark a modified version as modified (for example "modified from TradeX"), so it is not presented as
+      the original.
+
+2. No trademark rights (section 7(e)).
+   This licence grants no right to use the name "TradeX", the TradeX X logo, the TradeX icons or any other
+   TradeX trade name, trademark or service mark, except to give the attribution required above. Rules for
+   the name and logo: TRADEMARK.md.
+
+Questions: open an issue on the repository above.

@@ -34,8 +34,11 @@ test('draws P3 shapes and an XABCD pattern with ratio labels', async ({
 }) => {
   await openTerminal(page);
   await armTool(page, 'shapes', 'ellipse');
-  await dragOnChart(page, [0.3, 0.3], [0.42, 0.5]);
-  await expect.poll(() => savedTools(page)).toEqual(['ellipse']);
+  // The native tool uses the axis endpoints and a third radius handle.
+  await clickChart(page, 0.3, 0.3);
+  await clickChart(page, 0.42, 0.3);
+  await clickChart(page, 0.36, 0.5);
+  await expect.poll(() => savedTools(page)).toEqual(['reference.ellipse']);
 
   await armTool(page, 'patterns', 'xabcd-pattern');
   for (const [x, y] of [
@@ -49,19 +52,21 @@ test('draws P3 shapes and an XABCD pattern with ratio labels', async ({
   }
   await expect
     .poll(() => savedTools(page))
-    .toEqual(['ellipse', 'xabcd-pattern']);
+    .toEqual(['reference.ellipse', 'reference.xabcd-pattern']);
 
   await openPanel(page, 'Objects');
   await expect(objectDetail(page, 'xabcd-pattern')).toHaveText(
     /^AB\/XA \d\.\d{3}, BC\/AB \d\.\d{3}, CD\/BC \d\.\d{3}, AD\/XA \d\.\d{3}$/
   );
   await expect(
-    page.getByTestId('object-ellipse').getByText('Ellipse', {exact: true})
+    page
+      .getByTestId('object-reference.ellipse')
+      .getByText('Ellipse', {exact: true})
   ).toBeVisible();
   await page.screenshot({path: `${SHOTS}/25-extended-drawings.png`});
 
   // Lock prevents deletion; undo removes the pattern again.
-  const row = page.getByTestId('object-xabcd-pattern');
+  const row = page.getByTestId('object-reference.xabcd-pattern');
   await row.getByRole('button', {name: 'Lock XABCD pattern'}).click();
   await expect(
     row.getByRole('button', {name: 'Delete XABCD pattern'})
@@ -71,7 +76,7 @@ test('draws P3 shapes and an XABCD pattern with ratio labels', async ({
   await page.keyboard.press('Control+z');
   await page.keyboard.press('Control+z');
   await page.keyboard.press('Control+z');
-  await expect.poll(() => savedTools(page)).toEqual(['ellipse']);
+  await expect.poll(() => savedTools(page)).toEqual(['reference.ellipse']);
 });
 
 test('draws an anchored VWAP and a regression channel from engine series', async ({

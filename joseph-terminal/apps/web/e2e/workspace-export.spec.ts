@@ -53,12 +53,14 @@ test('exports drawings with the workspace and imports them back', async ({
 }) => {
   await openTerminal(page);
   await page.getByTestId('tool-group-lines').click();
-  await page.getByTestId('tool-option-trendline').click();
+  await page.getByTestId('tool-option-reference.trend-line').click();
   await dragOnChart(page, [0.3, 0.6], [0.6, 0.35]);
   await page.getByTestId('tool-group-shapes').click();
-  await page.getByTestId('tool-option-rectangle').click();
+  await page.getByTestId('tool-option-reference.rectangle').click();
   await dragOnChart(page, [0.65, 0.3], [0.8, 0.45]);
-  await expect.poll(() => savedTools(page)).toEqual(['trendline', 'rectangle']);
+  await expect
+    .poll(() => savedTools(page))
+    .toEqual(['reference.trend-line', 'reference.rectangle']);
 
   // Drawings on another instrument (not on screen) are exported too, and a
   // drawing of a tool this build doesn't have is kept, never dropped.
@@ -107,7 +109,7 @@ test('exports drawings with the workspace and imports them back', async ({
       c.drawings.map(d => d.tool_id),
     ])
   ).toEqual([
-    ['mock:perp:BTCUSD', ['trendline', 'rectangle']],
+    ['mock:perp:BTCUSD', ['reference.trend-line', 'reference.rectangle']],
     ['mock:perp:ETHUSD', ['trendline', 'removed-tool']],
   ]);
 
@@ -130,7 +132,9 @@ test('exports drawings with the workspace and imports them back', async ({
   ).toBeVisible();
   // The open BTC chart shows the restored drawings without a reload.
   await expect(list.getByRole('listitem')).toHaveCount(2);
-  await expect.poll(() => savedTools(page)).toEqual(['trendline', 'rectangle']);
+  await expect
+    .poll(() => savedTools(page))
+    .toEqual(['reference.trend-line', 'reference.rectangle']);
   await expect
     .poll(() => savedTools(page, ETH_DRAWINGS_KEY))
     .toEqual(['trendline', 'removed-tool']);
@@ -141,5 +145,7 @@ test('exports drawings with the workspace and imports them back', async ({
   // Restored drawings are saved, so they survive a reload.
   await page.reload();
   await expect(page.locator('.terminal[data-ready="true"]')).toBeVisible();
-  await expect.poll(() => savedTools(page)).toEqual(['trendline', 'rectangle']);
+  await expect
+    .poll(() => savedTools(page))
+    .toEqual(['reference.trend-line', 'reference.rectangle']);
 });

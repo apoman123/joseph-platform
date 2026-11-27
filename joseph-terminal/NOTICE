@@ -9,6 +9,13 @@ This product includes software developed by TradingView, Inc.:
   https://github.com/tradingview/lightweight-charts/blob/master/LICENSE
 
 Joseph Terminal is not affiliated with or endorsed by TradingView, Inc. No
-TradingView Advanced Charts or Trading Platform code or assets are included;
-all drawing tools, indicator layers, layouts and trading interactions are
-original code built on the public Lightweight Charts API.
+TradingView Advanced Charts or Trading Platform code or assets are included.
+
+Integrated application: AGPL-3.0-only. Original Joseph MIT notices remain valid for
+those files; see licenses/MIT-joseph-original.txt.
+
+Based on TradeX by Saifullah Shafin - https://github.com/saifullahshafin/open-source-tradingview
+Modified from TradeX; Joseph is not an official TradeX release. See the preserved
+third_party/tradex/NOTICE, LICENSE, TRADEMARK.md and THIRD_PARTY_NOTICES.md.
+
+Drawing geometry: lightweight-charts-drawing 0.6.2, MIT, copyright its contributors.

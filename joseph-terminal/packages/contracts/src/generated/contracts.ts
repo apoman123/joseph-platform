@@ -39,6 +39,11 @@ export type TimestampMs = number;
  * via the `definition` "Venue".
  */
 export type Venue =
+  | 'bybit'
+  | 'okx'
+  | 'coinbase'
+  | 'kraken'
+  | 'deriv'
   | 'binance'
   | 'hyperliquid'
   | 'lighter'
@@ -209,6 +214,13 @@ export type ErrorCode =
   | 'CONFLICT'
   | 'RATE_LIMITED'
   | 'INTERNAL';
+/**
+ * Corporate-action normalization of historical OHLC: RAW, stock SPLIT normalization, or provider ALL actions. Actual quotes, orders and reported volume stay native.
+ *
+ * This interface was referenced by `JosephContracts`'s JSON-Schema
+ * via the `definition` "PriceAdjustment".
+ */
+export type PriceAdjustment = 'RAW' | 'SPLIT' | 'ALL';
 /**
  * This interface was referenced by `JosephContracts`'s JSON-Schema
  * via the `definition` "OrderSide".
@@ -428,6 +440,184 @@ export type FundingKind = 'PREDICTED' | 'SETTLED';
  * via the `definition` "Transport".
  */
 export type Transport = 'NATIVE_WS' | 'REST_POLL' | 'REPLAY' | 'MOCK' | 'NONE';
+export type CreatedAtMs = number;
+export type Emitted = number;
+export type Enabled = boolean;
+export type HistoryBars = number;
+/**
+ * This interface was referenced by `JosephContracts`'s JSON-Schema
+ * via the `definition` "JsonValue".
+ */
+export type JsonValue = unknown;
+export type InstrumentId1 = string;
+export type JobId = string;
+export type LastCheckedMs = number | null;
+export type LastError = string | null;
+export type LastProcessedMs = number;
+export type ScriptId = string;
+/**
+ * @maxItems 50
+ */
+export type SubscriptionIds = string[];
+export type Version = number;
+export type Enabled1 = boolean;
+export type HistoryBars1 = number;
+export type InstrumentId2 = string;
+export type ScriptId1 = string;
+/**
+ * @maxItems 50
+ */
+export type SubscriptionIds1 = string[];
+export type Version1 = number;
+export type AsOfMs = number;
+export type InstrumentId3 = string;
+export type MarketCap = string | null;
+export type Sector = string | null;
+/**
+ * @maxItems 5000
+ */
+export type Records = CompanyMetadata[];
+export type AvailableMetrics = string[];
+export type Currency = string;
+export type GeneratedAtMs = number;
+export type MissingMetadata = boolean;
+export type QuoteCount = number;
+export type Region = 'us' | 'taiwan';
+export type AsOfMs1 = number | null;
+export type ChangePct = string | null;
+export type Error = string | null;
+export type Exchange = string;
+export type FeedState1 = string;
+export type InstrumentId4 = string;
+export type Last = string | null;
+export type MarketCap1 = string | null;
+export type MetadataAsOfMs = number | null;
+export type Name = string | null;
+export type Sector1 = string | null;
+export type Source = string | null;
+export type Symbol = string;
+export type Turnover = string | null;
+export type Volume = string | null;
+export type Tiles = HeatmapTile[];
+export type UniverseCount = number;
+export type ScriptId2 = string;
+export type Version2 = number;
+export type Color = string | null;
+export type TimeMs = number;
+export type Value = number | null;
+export type Name1 = string;
+/**
+ * @maxItems 2000
+ */
+export type Points = PlotPoint[];
+export type HistoryBars2 = number;
+export type MaxSymbols = number;
+export type Query = string;
+export type Version3 = number | null;
+export type CreatedAtMs1 = number;
+export type Error1 = string | null;
+export type Errors = {
+  [k: string]: string | undefined;
+}[];
+export type JobId1 = string;
+export type Matches = {
+  [k: string]: JsonValue | undefined;
+}[];
+export type Scanned = number;
+export type ScriptId3 = string;
+export type SourceHash = string;
+export type Status =
+  'pending' | 'running' | 'complete' | 'failed' | 'cancelled';
+export type Total = number;
+export type UniverseCount1 = number;
+export type Version4 = number;
+export type Message = string;
+export type Name2 = string;
+export type Severity = 'INFO' | 'WARNING' | 'ENTRY' | 'CRITICAL';
+export type TimeMs1 = number;
+export type ExpectedVersion = number | null;
+export type Kind = 'indicator' | 'strategy' | 'library' | 'filter' | 'alert';
+export type Name3 = string;
+export type Overlay = boolean;
+export type InstrumentId5 = string | null;
+export type Limit = number;
+export type ScriptId4 = string;
+export type Source1 = string;
+/**
+ * @maxItems 2000
+ */
+export type Alerts = ScriptAlertEvent[];
+export type Id = string;
+export type Kind1 =
+  | 'line'
+  | 'polyline'
+  | 'box'
+  | 'label'
+  | 'table'
+  | 'fill'
+  | 'hline'
+  | 'linefill'
+  | 'barcolor'
+  | 'bgcolor'
+  | 'shape'
+  | 'candle'
+  | 'bar';
+/**
+ * @maxItems 16000
+ */
+export type BarVisuals = ScriptVisual[];
+export type BarsCount = number;
+export type Complete = boolean;
+export type DataSource = string;
+/**
+ * @maxItems 2000
+ */
+export type EquityCurve = PlotPoint[];
+export type FeedState2 = string;
+export type Effect = 'entry' | 'exit' | 'reversal';
+export type Fee = number;
+export type Price = number;
+export type Quantity = number;
+export type Side = 'buy' | 'sell';
+export type TimeMs2 = number;
+/**
+ * @maxItems 4000
+ */
+export type Fills = SimulatedFill[];
+export type InstrumentId6 = string;
+export type Kind2 = 'indicator' | 'strategy' | 'filter' | 'alert';
+export type Matched = boolean | null;
+export type Overlay1 = boolean;
+/**
+ * @maxItems 64
+ */
+export type Plots = PlotSeries[];
+export type ScriptId5 = string;
+export type SourceHash1 = string;
+export type Tf = string;
+export type Version5 = number;
+/**
+ * @maxItems 500
+ */
+export type Visuals = ScriptVisual[];
+export type CommissionBps = number;
+export type FromMs = number | null;
+export type IncludeOpen = boolean;
+export type InitialEquity = number;
+export type InstrumentId7 = string;
+export type Limit1 = number;
+export type SlippageBps = number;
+export type ToMs = number | null;
+export type Version6 = number | null;
+export type CreatedAtMs2 = number;
+export type ExpectedVersion1 = number | null;
+export type Kind3 = 'indicator' | 'strategy' | 'library' | 'filter' | 'alert';
+export type Name4 = string;
+export type Overlay2 = boolean;
+export type ScriptId6 = string;
+export type Source2 = string;
+export type SourceHash2 = string;
+export type Version7 = number;
 /**
  * This interface was referenced by `JosephContracts`'s JSON-Schema
  * via the `definition` "QualificationStatus".
@@ -480,7 +670,7 @@ export type SetupState =
  * This interface was referenced by `JosephContracts`'s JSON-Schema
  * via the `definition` "Severity".
  */
-export type Severity = 'INFO' | 'WARNING' | 'ENTRY' | 'CRITICAL';
+export type Severity1 = 'INFO' | 'WARNING' | 'ENTRY' | 'CRITICAL';
 /**
  * This interface was referenced by `JosephContracts`'s JSON-Schema
  * via the `definition` "SignalKind".
@@ -493,7 +683,8 @@ export type SignalKind =
   | 'AOI_INVALIDATED'
   | 'SETUP_EXPIRED'
   | 'QUALIFICATION_CHANGED'
-  | 'POSITION_EXITED';
+  | 'POSITION_EXITED'
+  | 'CUSTOM_ALERT';
 /**
  * Discriminated union on `op`.
  *
@@ -1636,6 +1827,9 @@ export interface CandleBatch {
   as_of_ms: TimestampMs;
   complete: boolean;
   gaps: TimeGap[];
+  price_adjustment?: PriceAdjustment;
+  price_adjustment_epoch_ms?: TimestampMs;
+  price_adjustment_refresh_after_ms?: TimestampMs;
 }
 /**
  * This interface was referenced by `JosephContracts`'s JSON-Schema
@@ -1823,6 +2017,542 @@ export interface VenueStatusList {
   as_of_ms: TimestampMs;
 }
 /**
+ * Persistent Python alert evaluation state and visible diagnostics.
+ *
+ * Attributes:
+ *     job_id: Opaque tenant-owned alert identifier.
+ *     created_at_ms: Creation time in UTC epoch milliseconds.
+ *     last_processed_ms: Latest successfully evaluated bar close/checkpoint.
+ *     last_error: Visible missing-data, provider or user-code failure, if any.
+ *     last_checked_ms: Last evaluation attempt in UTC epoch milliseconds.
+ *     emitted: Number of distinct conditions recorded for this job.
+ *
+ * This interface was referenced by `JosephContracts`'s JSON-Schema
+ * via the `definition` "AlertJob".
+ */
+export interface AlertJob {
+  created_at_ms: CreatedAtMs;
+  emitted?: Emitted;
+  enabled?: Enabled;
+  history_bars?: HistoryBars;
+  inputs?: Inputs;
+  instrument_id: InstrumentId1;
+  job_id: JobId;
+  last_checked_ms?: LastCheckedMs;
+  last_error?: LastError;
+  last_processed_ms: LastProcessedMs;
+  script_id: ScriptId;
+  subscription_ids?: SubscriptionIds;
+  tf: Timeframe;
+  version: Version;
+}
+export interface Inputs {
+  [k: string]: JsonValue | undefined;
+}
+/**
+ * Explicitly enables a pinned Python condition on future closed bars.
+ *
+ * Attributes:
+ *     script_id: Owned alert, indicator or strategy script publishing
+ *         conditions.
+ *     version: Positive immutable version, pinned rather than following edits.
+ *     instrument_id: Canonical instrument whose new closed bars are evaluated.
+ *     tf: Source resolution, one second through one calendar month.
+ *     inputs: JSON values overriding the pinned version's defaults.
+ *     subscription_ids: Explicit owned notification destinations; UI is
+ *         implicit.
+ *     enabled: Whether evaluation and external notification routing are
+ *         active.
+ *     history_bars: Context depth, two through two thousand closed bars.
+ *
+ * This interface was referenced by `JosephContracts`'s JSON-Schema
+ * via the `definition` "AlertJobInput".
+ */
+export interface AlertJobInput {
+  enabled?: Enabled1;
+  history_bars?: HistoryBars1;
+  inputs?: Inputs1;
+  instrument_id: InstrumentId2;
+  script_id: ScriptId1;
+  subscription_ids?: SubscriptionIds1;
+  tf: Timeframe;
+  version: Version1;
+}
+export interface Inputs1 {
+  [k: string]: JsonValue | undefined;
+}
+/**
+ * Explicit optional metadata for feeds without company fundamentals.
+ *
+ * Attributes:
+ *     instrument_id: Canonical stock or ETF identifier.
+ *     sector: Optional user-provided industry/sector label, maximum 120 chars.
+ *     market_cap: Optional positive market capitalization in its quote
+ *         currency,
+ *         encoded as a decimal string, never inferred from price or volume.
+ *     as_of_ms: User-declared observation time in UTC epoch milliseconds.
+ *
+ * This interface was referenced by `JosephContracts`'s JSON-Schema
+ * via the `definition` "CompanyMetadata".
+ */
+export interface CompanyMetadata {
+  as_of_ms: AsOfMs;
+  instrument_id: InstrumentId3;
+  market_cap?: MarketCap;
+  sector?: Sector;
+}
+/**
+ * An explicit batch of user-owned heatmap fundamentals.
+ *
+ * Attributes:
+ *     records: At most five thousand canonical, dated company records.
+ *
+ * This interface was referenced by `JosephContracts`'s JSON-Schema
+ * via the `definition` "CompanyMetadataBatch".
+ */
+export interface CompanyMetadataBatch {
+  records: Records;
+}
+/**
+ * Real stock heatmap data and explicit market/coverage limits.
+ *
+ * Attributes:
+ *     tiles: Selected stocks, including unavailable/neutral tiles.
+ *     universe_count: Actual eligible stocks before the requested result
+ *         limit.
+ *     quote_count: Number with a returned source quote.
+ *     generated_at_ms: Response generation time, UTC epoch milliseconds.
+ *     region: US or Taiwan universe; quote currencies are never mixed by size.
+ *     currency: USD or TWD quote currency of the selected stock region.
+ *     available_metrics: Metrics actually present in at least one selected
+ *         tile.
+ *     missing_metadata: Whether sector or market-cap information is
+ *         incomplete.
+ *     source_errors: Provider metadata failures limiting the selected
+ *         universe.
+ *
+ * This interface was referenced by `JosephContracts`'s JSON-Schema
+ * via the `definition` "HeatmapSnapshot".
+ */
+export interface HeatmapSnapshot {
+  available_metrics: AvailableMetrics;
+  currency: Currency;
+  generated_at_ms: GeneratedAtMs;
+  missing_metadata: MissingMetadata;
+  quote_count: QuoteCount;
+  region: Region;
+  source_errors?: SourceErrors;
+  tiles: Tiles;
+  universe_count: UniverseCount;
+}
+export interface SourceErrors {
+  [k: string]: string | undefined;
+}
+/**
+ * One stock tile whose missing metrics remain unavailable.
+ *
+ * Attributes:
+ *     instrument_id: Exact venue-scoped stock or ETF identifier.
+ *     symbol: Provider display symbol.
+ *     name: Provider company/security name when available.
+ *     exchange: Actual listing exchange or canonical venue.
+ *     last: Latest source price as a decimal string, or None.
+ *     change_pct: Source daily price change in percent, or None.
+ *     volume: Source daily base volume as a decimal string, or None.
+ *     turnover: Source daily quote turnover, or None.
+ *     market_cap: Explicit optional company metadata, never a volume proxy.
+ *     sector: Explicit optional company sector, otherwise unclassified.
+ *     metadata_as_of_ms: Date of user-supplied fundamentals, or None.
+ *     feed_state: Actual quote provenance state; unavailable without a quote.
+ *     source: Actual provider label; never promoted to a broader market feed.
+ *     as_of_ms: Actual quote observation time, or None without a quote.
+ *     error: Provider/missing-data explanation, or None for an available
+ *         quote.
+ *
+ * This interface was referenced by `JosephContracts`'s JSON-Schema
+ * via the `definition` "HeatmapTile".
+ */
+export interface HeatmapTile {
+  as_of_ms: AsOfMs1;
+  change_pct: ChangePct;
+  error: Error;
+  exchange: Exchange;
+  feed_state: FeedState1;
+  instrument_id: InstrumentId4;
+  last: Last;
+  market_cap: MarketCap1;
+  metadata_as_of_ms: MetadataAsOfMs;
+  name: Name;
+  sector: Sector1;
+  source: Source;
+  symbol: Symbol;
+  turnover: Turnover;
+  volume: Volume;
+}
+/**
+ * Pins one reusable library to an immutable tenant-owned version.
+ *
+ * Attributes:
+ *     script_id: Tenant-local library slug.
+ *     version: Positive immutable version number; never resolves latest.
+ *
+ * This interface was referenced by `JosephContracts`'s JSON-Schema
+ * via the `definition` "LibraryRef".
+ */
+export interface LibraryRef {
+  script_id: ScriptId2;
+  version: Version2;
+}
+/**
+ * One script-produced scalar at a closed bar.
+ *
+ * Attributes:
+ *     time_ms: Bar start in UTC epoch milliseconds.
+ *     value: Finite numeric output, or None during warm-up.
+ *     color: Optional literal per-bar hex color for conditional plot coloring.
+ *
+ * This interface was referenced by `JosephContracts`'s JSON-Schema
+ * via the `definition` "PlotPoint".
+ */
+export interface PlotPoint {
+  color?: Color;
+  time_ms: TimeMs;
+  value: Value;
+}
+/**
+ * Named output series displayed by the terminal.
+ *
+ * Attributes:
+ *     name: Public series name, one to sixty-four characters.
+ *     points: At most two thousand chronological closed-bar values.
+ *
+ * This interface was referenced by `JosephContracts`'s JSON-Schema
+ * via the `definition` "PlotSeries".
+ */
+export interface PlotSeries {
+  name: Name1;
+  points: Points;
+}
+/**
+ * Selects a real market universe for an isolated Python filter job.
+ *
+ * Attributes:
+ *     version: Optional immutable filter version; defaults to the latest.
+ *     venue: Exchange/market venue to scan, or all enabled venues.
+ *     market_type: Optional instrument market category, such as stock or perp.
+ *     query: Optional symbol/name search within that market.
+ *     max_symbols: Explicit maximum instruments, one through ten thousand.
+ *     history_bars: Closed bars per instrument; zero uses snapshots only.
+ *     tf: Resolution used when historical bars are requested.
+ *     inputs: JSON values overriding the pinned filter's defaults.
+ *
+ * This interface was referenced by `JosephContracts`'s JSON-Schema
+ * via the `definition` "ScanInput".
+ */
+export interface ScanInput {
+  history_bars?: HistoryBars2;
+  inputs?: Inputs2;
+  market_type?: MarketType | null;
+  max_symbols?: MaxSymbols;
+  query?: Query;
+  tf?: Timeframe;
+  venue?: Venue | null;
+  version?: Version3;
+}
+export interface Inputs2 {
+  [k: string]: JsonValue | undefined;
+}
+/**
+ * Progress and reproducible results for an asynchronous market scan.
+ *
+ * Attributes:
+ *     job_id: Opaque tenant-owned scan identifier.
+ *     script_id: Filter script slug.
+ *     version: Immutable filter version pinned at submission.
+ *     status: Pending, running, complete, failed or cancelled job state.
+ *     created_at_ms: Submission time, UTC epoch milliseconds.
+ *     total: Number of eligible instruments selected by the explicit scan
+ *         bound.
+ *     scanned: Instruments evaluated or reported unavailable so far.
+ *     matches: Matching instrument records with real source snapshots.
+ *     errors: Per-instrument missing-data or user-code errors.
+ *     error: Job-level error, otherwise None.
+ *     source_hash: Immutable source/dependency configuration hash.
+ *     universe_count: Total eligible market instruments before max_symbols.
+ *
+ * This interface was referenced by `JosephContracts`'s JSON-Schema
+ * via the `definition` "ScanJob".
+ */
+export interface ScanJob {
+  created_at_ms: CreatedAtMs1;
+  error?: Error1;
+  errors?: Errors;
+  job_id: JobId1;
+  matches?: Matches;
+  scanned?: Scanned;
+  script_id: ScriptId3;
+  source_hash: SourceHash;
+  status: Status;
+  total?: Total;
+  universe_count?: UniverseCount1;
+  version: Version4;
+}
+/**
+ * One user-authored alert condition matched on a source bar.
+ *
+ * Attributes:
+ *     name: Stable condition name used for per-bar delivery deduplication.
+ *     message: Plain-text message, at most five hundred characters.
+ *     time_ms: Source bar start, UTC epoch milliseconds.
+ *     severity: Notification priority used by delivery filters and quiet
+ *         hours.
+ *
+ * This interface was referenced by `JosephContracts`'s JSON-Schema
+ * via the `definition` "ScriptAlertEvent".
+ */
+export interface ScriptAlertEvent {
+  message: Message;
+  name: Name2;
+  severity?: Severity;
+  time_ms: TimeMs1;
+}
+/**
+ * Creates an immutable script version with explicit type and dependencies.
+ *
+ * Attributes:
+ *     script_id: Stable tenant-local slug; must match the path on updates.
+ *     kind: One of the five script roles; immutable after creation.
+ *     name: Display title, one to one hundred twenty characters.
+ *     source: UTF-8 Python source, at most sixty-four KiB.
+ *     overlay: Whether indicator/strategy plots share the main price pane.
+ *     defaults: Default JSON input values overridden by an individual run.
+ *     libraries: Python import aliases mapped to pinned library versions.
+ *     expected_version: Optimistic lock for edits; required for a new version.
+ *     requests: Up to four declared cross-symbol/timeframe source aliases.
+ *
+ * This interface was referenced by `JosephContracts`'s JSON-Schema
+ * via the `definition` "ScriptInput".
+ */
+export interface ScriptInput {
+  defaults?: Defaults;
+  expected_version?: ExpectedVersion;
+  kind: Kind;
+  libraries?: Libraries;
+  name: Name3;
+  overlay?: Overlay;
+  requests?: Requests;
+  script_id: ScriptId4;
+  source: Source1;
+}
+export interface Defaults {
+  [k: string]: JsonValue | undefined;
+}
+export interface Libraries {
+  [k: string]: LibraryRef | undefined;
+}
+export interface Requests {
+  [k: string]: SeriesRequest | undefined;
+}
+/**
+ * Declares another symbol/resolution before isolated indicator execution.
+ *
+ * Attributes:
+ *     instrument_id: Optional canonical symbol; defaults to the chart symbol.
+ *     tf: Requested resolution, with confirmed-bar visibility enforced by
+ *         host.
+ *     limit: Maximum closed source bars, one through five hundred.
+ *
+ * This interface was referenced by `JosephContracts`'s JSON-Schema
+ * via the `definition` "SeriesRequest".
+ */
+export interface SeriesRequest {
+  instrument_id?: InstrumentId5;
+  limit?: Limit;
+  tf: Timeframe;
+}
+/**
+ * Reproducible plots and optional simulated strategy performance.
+ *
+ * Attributes:
+ *     script_id: Tenant-owned script slug.
+ *     version: Immutable script version evaluated.
+ *     kind: Indicator, strategy, filter or alert; libraries are import-only.
+ *     source_hash: Content hash including default inputs and dependency pins.
+ *     instrument_id: Canonical source instrument identifier.
+ *     tf: Source bar resolution.
+ *     bars_count: Number of source bars evaluated, including provisional bars
+ *         only when explicitly requested for an indicator.
+ *     feed_state: Source provenance; DEMO data remains explicitly marked.
+ *     data_source: Upstream provider provenance label.
+ *     complete: Whether the requested history has no closed-bar gaps.
+ *     overlay: Whether plots share the main price pane.
+ *     plots: At most sixty-four scalar output series.
+ *     fills: Simulated next-bar-open fills; empty for indicators.
+ *     equity_curve: Marked simulated quote equity; empty for indicators.
+ *     metrics: Finite numeric simulation statistics, including fees and
+ *         unfilled final-bar intents; no performance is fabricated.
+ *     matched: Boolean decision for a filter, otherwise None.
+ *     alerts: Previewed alert events; delivery requires an enabled alert job.
+ *     visuals: Bounded declarative drawings, fills, coloring and tables.
+ *     bar_closes: Confirmed source bar starts mapped to actual evaluated
+ *         closes;
+ *         alert checkpoints never consult a later, different market window.
+ *     plot_styles: Per-series input/style settings used by the renderer.
+ *     bar_visuals: Per-bar colors, symbols and custom OHLC series, separately
+ *         bounded from persistent drawing objects.
+ *
+ * This interface was referenced by `JosephContracts`'s JSON-Schema
+ * via the `definition` "ScriptResult".
+ */
+export interface ScriptResult {
+  alerts?: Alerts;
+  bar_closes?: BarCloses;
+  bar_visuals?: BarVisuals;
+  bars_count: BarsCount;
+  complete: Complete;
+  data_source: DataSource;
+  equity_curve: EquityCurve;
+  feed_state: FeedState2;
+  fills: Fills;
+  instrument_id: InstrumentId6;
+  kind: Kind2;
+  matched?: Matched;
+  metrics: Metrics;
+  overlay: Overlay1;
+  plot_styles?: PlotStyles;
+  plots: Plots;
+  script_id: ScriptId5;
+  source_hash: SourceHash1;
+  tf: Tf;
+  version: Version5;
+  visuals?: Visuals;
+}
+export interface BarCloses {
+  [k: string]: number | undefined;
+}
+/**
+ * A bounded declarative drawing; never executable browser code.
+ *
+ * Attributes:
+ *     id: Stable visual id unique within this script instance.
+ *     kind: Plot/drawing category interpreted by the chart renderer.
+ *     data: JSON coordinates, text and presentation; renderers read only
+ *         documented fields and never inject HTML, CSS URLs or JavaScript.
+ *
+ * This interface was referenced by `JosephContracts`'s JSON-Schema
+ * via the `definition` "ScriptVisual".
+ */
+export interface ScriptVisual {
+  data: Data;
+  id: Id;
+  kind: Kind1;
+}
+export interface Data {
+  [k: string]: JsonValue | undefined;
+}
+/**
+ * An isolated strategy simulation fill, never an executable broker order.
+ *
+ * Attributes:
+ *     time_ms: Fill bar start in UTC epoch milliseconds.
+ *     side: Buy or sell after converting the signed position target.
+ *     quantity: Positive base-asset quantity filled.
+ *     price: Fill price including adverse slippage, in quote/base units.
+ *     fee: Nonnegative commission in quote units.
+ *     effect: Entry, exit or reversal for unambiguous chart trade markers.
+ *
+ * This interface was referenced by `JosephContracts`'s JSON-Schema
+ * via the `definition` "SimulatedFill".
+ */
+export interface SimulatedFill {
+  effect?: Effect;
+  fee: Fee;
+  price: Price;
+  quantity: Quantity;
+  side: Side;
+  time_ms: TimeMs2;
+}
+export interface Metrics {
+  [k: string]: number | undefined;
+}
+export interface PlotStyles {
+  [k: string]:
+    | {
+        [k: string]: JsonValue | undefined;
+      }
+    | undefined;
+}
+/**
+ * Requests a reproducible run using closed, real backend candles.
+ *
+ * Attributes:
+ *     version: Pinned script version, or latest when omitted.
+ *     instrument_id: Canonical venue:market:symbol identifier.
+ *     tf: Supported chart timeframe, one second through one calendar month.
+ *     limit: Maximum closed bars, from two through two thousand.
+ *     from_ms: Optional inclusive UTC epoch millisecond lower boundary.
+ *     to_ms: Optional exclusive UTC epoch millisecond visibility boundary.
+ *     include_open: Evaluate the provisional last bar for indicators only;
+ *         alerts and simulated orders always require closed bars.
+ *     inputs: JSON input values overriding the version's defaults.
+ *     initial_equity: Positive initial simulated cash in quote units.
+ *     commission_bps: Commission in basis points per simulated fill.
+ *     slippage_bps: Adverse simulated slippage in basis points per fill.
+ *
+ * This interface was referenced by `JosephContracts`'s JSON-Schema
+ * via the `definition` "ScriptRun".
+ */
+export interface ScriptRun {
+  commission_bps?: CommissionBps;
+  from_ms?: FromMs;
+  include_open?: IncludeOpen;
+  initial_equity?: InitialEquity;
+  inputs?: Inputs3;
+  instrument_id: InstrumentId7;
+  limit?: Limit1;
+  slippage_bps?: SlippageBps;
+  tf: Timeframe;
+  to_ms?: ToMs;
+  version?: Version6;
+}
+export interface Inputs3 {
+  [k: string]: JsonValue | undefined;
+}
+/**
+ * A tenant-visible immutable, content-addressed script version.
+ *
+ * Attributes:
+ *     version: Positive monotonically increasing version number.
+ *     source_hash: SHA-256 of the source and dependency/input configuration.
+ *     created_at_ms: Creation time in UTC epoch milliseconds.
+ *
+ * This interface was referenced by `JosephContracts`'s JSON-Schema
+ * via the `definition` "ScriptVersion".
+ */
+export interface ScriptVersion {
+  created_at_ms: CreatedAtMs2;
+  defaults?: Defaults1;
+  expected_version?: ExpectedVersion1;
+  kind: Kind3;
+  libraries?: Libraries1;
+  name: Name4;
+  overlay?: Overlay2;
+  requests?: Requests1;
+  script_id: ScriptId6;
+  source: Source2;
+  source_hash: SourceHash2;
+  version: Version7;
+}
+export interface Defaults1 {
+  [k: string]: JsonValue | undefined;
+}
+export interface Libraries1 {
+  [k: string]: LibraryRef | undefined;
+}
+export interface Requests1 {
+  [k: string]: SeriesRequest | undefined;
+}
+/**
  * One hard gate with the observed value, threshold and outcome. passed=null means the value was missing or stale.
  *
  * This interface was referenced by `JosephContracts`'s JSON-Schema
@@ -1924,11 +2654,14 @@ export interface Signal {
   strategy_version_id: string;
   setup_id?: string | null;
   instrument_id: InstrumentId;
-  direction: Direction;
+  /**
+   * NONE denotes a directionless Python alert.
+   */
+  direction: 'LONG' | 'SHORT' | 'NONE';
   timeframe: Timeframe;
   kind: SignalKind;
   setup_state: SetupState;
-  severity: Severity;
+  severity: Severity1;
   bar_start_ms: TimestampMs;
   bar_close_ms: TimestampMs;
   evaluated_at_ms: TimestampMs;
@@ -1986,7 +2719,7 @@ export interface QuietHours {
    * IANA time zone, e.g. Asia/Taipei.
    */
   tz: string;
-  bypass_severities?: Severity[];
+  bypass_severities?: Severity1[];
 }
 /**
  * Where and when a tenant receives signal notifications. Channel credentials stay on the server. Browser registrations are write-only and omitted from responses.
@@ -2005,7 +2738,7 @@ export interface AlertSubscription {
    * Empty means every kind.
    */
   kinds: SignalKind[];
-  min_severity: Severity;
+  min_severity: Severity1;
   /**
    * Empty means every strategy.
    */
@@ -2986,6 +3719,9 @@ export interface DrawingAnchor {
  */
 export interface DrawingStyle {
   color: string;
+  /**
+   * Stroke width in CSS pixels (1..50), including broad highlighter strokes.
+   */
   line_width: number;
   line_style: 'solid' | 'dashed' | 'dotted';
   fill_color?: string | null;
@@ -3057,6 +3793,14 @@ export interface IndicatorLayerState {
    * Indicator inputs validated by the backend against the plugin's input_schema.
    */
   settings?: {};
+  /**
+   * True when explicitly removed; hidden layers retain their settings.
+   */
+  removed?: boolean;
+  /**
+   * Retains the legend row when a user hides an added study.
+   */
+  present?: boolean;
 }
 /**
  * This interface was referenced by `JosephContracts`'s JSON-Schema
@@ -3090,6 +3834,10 @@ export interface ChartState {
     from_ms: TimestampMs;
     to_ms: TimestampMs;
   } | null;
+  /**
+   * Tab content; omitted means candles for existing workspaces.
+   */
+  view_type?: 'candles' | 'stock_heatmap';
 }
 /**
  * This interface was referenced by `JosephContracts`'s JSON-Schema

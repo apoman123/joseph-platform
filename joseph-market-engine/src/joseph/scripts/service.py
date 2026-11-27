@@ -1,0 +1,343 @@
+# Copyright 2026 apoman123
+# SPDX-License-Identifier: MIT
+
+"""Authoring, library pin resolution.
+
+Authoring, library pin resolution and closed-candle Python script execution.
+"""
+
+from __future__ import annotations
+
+from collections.abc import Mapping
+from typing import Any
+
+import pydantic
+
+from joseph.domain import errors
+from joseph.domain import identity
+from joseph.domain import instruments
+from joseph.market_data.app import service as market_service
+from joseph.scripts import accounting
+from joseph.scripts import models
+from joseph.scripts import repository
+from joseph.scripts import runner
+
+
+def require_write(principal: identity.Principal) -> None:
+    """Applies the same authoring permission policy.
+
+    Applies the same authoring permission policy as existing strategy versions.
+
+    Args:
+        principal: Authenticated caller, optionally carrying explicit scopes.
+
+    Returns:
+        None if unscoped development identity or strategy:write is granted.
+
+    Raises:
+        errors.ForbiddenError: If explicit scopes do not permit authoring.
+    """
+    if principal.scopes and not principal.has_scope("strategy:write"):
+        raise errors.ForbiddenError("strategy:write scope required")
+
+
+class ScriptService:
+    """Coordinates private script versions and an isolated simulation runtime.
+
+    Attributes:
+        repository: Tenant-scoped immutable source repository.
+        runner: Network-isolated user-code executor.
+        market_data: Authoritative backend candle service, including provenance.
+    """
+
+    def __init__(
+        self,
+        store: repository.ScriptRepository,
+        runtime: runner.DockerRunner,
+        market_data: market_service.MarketDataService,
+    ) -> None:
+        """Connects authoring, data and execution.
+
+        Connects authoring, data and execution without giving scripts
+        credentials.
+
+        Args:
+            store: Tenant-isolated immutable script source store.
+            runtime: Explicitly configured isolated runtime.
+            market_data: Backend data source used to fetch real closed bars.
+        """
+        self.repository = store
+        self.runner = runtime
+        self.market_data = market_data
+
+    def bundle(
+        self,
+        tenant_id: str,
+        script: models.ScriptInput,
+        *,
+        seen: frozenset[tuple[str, int]] = frozenset(),
+        budget: list[int] | None = None,
+    ) -> dict[str, Any]:
+        """Resolves a pinned library graph.
+
+        Resolves a pinned library graph without executing source on the server.
+
+        Args:
+            tenant_id: Authenticated owner of every referenced library.
+            script: Script source with alias-to-immutable-version dependencies.
+            seen: Ancestor identities for depth/cycle checks, initially empty.
+            budget: Optional shared graph node/byte counters, initially empty.
+
+        Returns:
+            Private recursively resolved source bundle for the runner only.
+
+        Raises:
+            errors.ValidationFailedError: For cycles, excessive depth or imports
+                of an indicator/strategy instead of a library.
+            errors.NotFoundError: If an owned dependency version is absent.
+        """
+        if budget is None:
+            budget = [0, 0]
+        budget[0] += 1
+        budget[1] += len(script.source.encode())
+        if budget[0] > 64 or budget[1] > 1_000_000:
+            raise errors.ValidationFailedError(
+                "resolved library graph exceeds its source budget"
+            )
+        if len(seen) >= 16:
+            raise errors.ValidationFailedError(
+                "library import depth exceeds sixteen"
+            )
+        libraries = {}
+        for alias, reference in script.libraries.items():
+            key = (reference.script_id, reference.version)
+            if key in seen or reference.script_id == script.script_id:
+                raise errors.ValidationFailedError(
+                    "circular library dependency"
+                )
+            library = self.repository.get(
+                tenant_id, reference.script_id, reference.version
+            )
+            if library.kind != "library":
+                raise errors.ValidationFailedError(
+                    "only library scripts can be imported"
+                )
+            libraries[alias] = self.bundle(
+                tenant_id, library, seen=seen | {key}, budget=budget
+            )
+        data = script.model_dump(exclude={"expected_version"})
+        data["libraries"] = libraries
+        return data
+
+    def validate(
+        self, principal: identity.Principal, script: models.ScriptInput
+    ) -> dict[str, object]:
+        """Checks Python structure and owned pinned dependencies.
+
+        Checks Python structure and owned pinned dependencies without execution.
+
+        Args:
+            principal: Authenticated tenant owner.
+            script: Source and declaration to validate.
+
+        Returns:
+            Validity, declared kind and explicit non-execution status.
+
+        Raises:
+            errors.ValidationFailedError: If source or its dependency graph
+                fails.
+            errors.NotFoundError: If a pinned tenant-owned library is absent.
+        """
+        models.validate_source(script)
+        self.bundle(principal.tenant_id, script)
+        return {"valid": True, "kind": script.kind, "executed": False}
+
+    def save(
+        self,
+        principal: identity.Principal,
+        script: models.ScriptInput,
+        *,
+        create: bool,
+    ) -> models.ScriptVersion:
+        """Validates and atomically saves an immutable version.
+
+        Validates and atomically saves an immutable version for an authorized
+        user.
+
+        Args:
+            principal: Authenticated caller with authoring permission.
+            script: Source, kind, dependency pins and optimistic edit version.
+            create: True for a new script, False for an existing version update.
+
+        Returns:
+            Newly saved version with content provenance.
+
+        Raises:
+            errors.ForbiddenError: If authoring permission is absent.
+            errors.ValidationFailedError: If source/dependencies/kind are
+                invalid.
+            errors.NotFoundError: If the script or a pinned library is absent.
+            errors.ConflictError: If an edit is stale or the slug already
+                exists.
+        """
+        require_write(principal)
+        self.validate(principal, script)
+        return self.repository.save(principal.tenant_id, script, create=create)
+
+    async def run(
+        self,
+        principal: identity.Principal,
+        script_id: str,
+        request: models.ScriptRun,
+    ) -> models.ScriptResult:
+        """Runs an indicator or simulates a strategy.
+
+        Runs an indicator or simulates a strategy using only closed source bars.
+
+        Args:
+            principal: Authenticated tenant owner.
+            script_id: Owned script slug.
+            request: Version, instrument, resolution, inputs and simulation
+                costs.
+
+        Returns:
+            Validated plot series, provenance and optional simulated
+            performance.
+
+        Raises:
+            errors.NotFoundError: If an owned version or instrument is absent.
+            errors.UnsupportedError: If a library is run standalone or runtime
+                off.
+            errors.MissingDataError: If no closed source candles are available.
+            errors.ValidationFailedError: On invalid data, user-code failure or
+                resource limits; malformed worker output is never trusted.
+        """
+        script = self.repository.get(
+            principal.tenant_id, script_id, request.version
+        )
+        if script.kind == "library":
+            raise errors.UnsupportedError(
+                "libraries export reusable code; run an importing "
+                "indicator or strategy"
+            )
+        if not self.runner.enabled:
+            raise errors.UnsupportedError(
+                "enable JOSEPH_SCRIPT_RUNTIME=docker and build the "
+                "runner image; see README"
+            )
+        if request.include_open and script.kind != "indicator":
+            raise errors.ValidationFailedError(
+                "provisional bars are supported only for indicators"
+            )
+        batch = await self.market_data.get_batch(
+            request.instrument_id,
+            request.tf,
+            from_ms=request.from_ms,
+            to_ms=request.to_ms,
+            limit=request.limit,
+        )
+        bars = [
+            {
+                "time_ms": bar.start_ms,
+                "end_ms": bar.end_ms,
+                "is_final": bar.is_final,
+                "open": float(bar.open),
+                "high": float(bar.high),
+                "low": float(bar.low),
+                "close": float(bar.close),
+                "volume": float(bar.base_volume),
+            }
+            for bar in batch.candles
+            if (bar.is_final or request.include_open)
+            and (request.to_ms is None or bar.end_ms <= request.to_ms)
+        ]
+        if not bars:
+            raise errors.MissingDataError(
+                "no closed candles are available for this script run"
+            )
+        bundle = self.bundle(principal.tenant_id, script)
+        instrument = await self.market_data.registry.get(
+            instruments.InstrumentId.parse(request.instrument_id)
+        )
+        bundle["instrument"] = instrument.to_contract()
+        if script.kind == "filter":
+            snapshot = await self.market_data.get_snapshot(
+                instrument.instrument_id
+            )
+            bundle["snapshot"] = snapshot.to_contract(
+                self.market_data.now_ms(), 60000
+            )
+        additional = {}
+        for alias, declared in script.requests.items():
+            extra = await self.market_data.get_batch(
+                declared.instrument_id or request.instrument_id,
+                declared.tf,
+                to_ms=int(bars[-1]["end_ms"]),
+                limit=declared.limit,
+            )
+            additional[alias] = [
+                {
+                    "time_ms": bar.start_ms,
+                    "end_ms": bar.end_ms,
+                    "open": float(bar.open),
+                    "high": float(bar.high),
+                    "low": float(bar.low),
+                    "close": float(bar.close),
+                    "volume": float(bar.base_volume),
+                }
+                for bar in extra.candles
+                if bar.is_final
+            ]
+        bundle.update(
+            {
+                "bars": bars,
+                "instrument_id": request.instrument_id,
+                "timeframe": request.tf.value,
+                "extra_series": additional,
+                "inputs": {**script.defaults, **request.inputs},
+                "initial_equity": request.initial_equity,
+                "commission_bps": request.commission_bps,
+                "slippage_bps": request.slippage_bps,
+            }
+        )
+        result = await self.runner.run(bundle)
+        if script.kind != "strategy" and result.get("fills"):
+            raise errors.ValidationFailedError(
+                "only strategies can publish simulated fills"
+            )
+        starts = {bar["time_ms"] for bar in bars}
+        if any(
+            event.get("time_ms") not in starts
+            for event in result.get("alerts", [])
+        ) or any(
+            fill.get("time_ms") not in starts
+            for fill in result.get("fills", [])
+        ):
+            raise errors.ValidationFailedError(
+                "script events must reference actual evaluated source bars"
+            )
+        metadata: Mapping[str, object] = {
+            "script_id": script.script_id,
+            "version": script.version,
+            "kind": script.kind,
+            "source_hash": script.source_hash,
+            "instrument_id": request.instrument_id,
+            "tf": request.tf.value,
+            "bars_count": len(bars),
+            "bar_closes": {
+                str(int(bar["time_ms"])): int(bar["end_ms"])
+                for bar in bars
+                if bar["is_final"]
+            },
+            "feed_state": batch.feed_state.value,
+            "data_source": batch.source,
+            "complete": batch.complete,
+            "overlay": script.overlay,
+        }
+        try:
+            output = models.ScriptResult.model_validate({**result, **metadata})
+            return accounting.reconcile(output, bars, request)
+        except pydantic.ValidationError:
+            raise errors.ValidationFailedError(
+                "script output does not match the plot/simulation contract"
+            ) from None

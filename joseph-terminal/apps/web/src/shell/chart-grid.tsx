@@ -37,6 +37,8 @@ import {useRuntime} from './runtime-context';
 import {SlotInline} from './slot-host';
 import {formatNumber} from './format';
 import {Splitter} from './splitter';
+import {StockHeatmap} from './stock-heatmap';
+import {DrawingFavorites} from './drawing-favorites';
 
 /** Workspace panel key holding chart-grid track sizes per layout. */
 export const GRID_PANEL_KEY = 'shell.grid';
@@ -138,6 +140,9 @@ function ChartSlot({
     return (
       <DetachedPlaceholder pane={detached.pane} status={detached.status} />
     );
+  }
+  if (chart.view_type === 'stock_heatmap') {
+    return <StockHeatmap chart={chart} active={active} runtime={runtime} />;
   }
   return (
     <ChartPane
@@ -243,6 +248,7 @@ export function ChartGrid(): ReactElement {
         gridTemplateRows: tracksToTemplate(sizes.rows),
       }}
     >
+      <DrawingFavorites />
       {boundaries(sizes.cols).map((at, index) => (
         <Splitter
           key={`col-${index}`}

@@ -1,0 +1,140 @@
+/*
+ * Copyright 2026 Joseph Terminal contributors
+ * SPDX-License-Identifier: MIT
+ */
+
+/* Shared managed-script dialogs, legends, editor and heatmap surfaces. */
+.backdrop {
+  align-items: center;
+  background: rgb(0 0 0 / 55%);
+  display: flex;
+  inset: 0;
+  justify-content: center;
+  position: fixed;
+  z-index: 120;
+}
+
+.dialog {
+  background: var(--hull);
+  border: 1px solid var(--fathom);
+  border-radius: var(--radius-dialog);
+  max-height: 85vh;
+  max-width: 94vw;
+  overflow: auto;
+  padding: var(--space-4);
+  width: 760px;
+}
+
+.header,
+.toolbar,
+.row {
+  align-items: center;
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-2);
+}
+
+.header {
+  justify-content: space-between;
+}
+
+.source {
+  background: var(--abyss);
+  color: var(--chalk);
+  font-family: monospace;
+  font-size: var(--text-sm);
+  line-height: 1.5;
+  min-height: 240px;
+  padding: var(--space-3);
+  tab-size: 4;
+  white-space: pre;
+  width: 100%;
+}
+
+.legend {
+  align-items: flex-start;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  grid-row: 3;
+  left: 10px;
+  max-height: 35%;
+  max-width: calc(100% - 85px);
+  overflow: auto;
+  pointer-events: none;
+  position: absolute;
+  top: 26px;
+  z-index: 5;
+}
+
+.legendRow {
+  align-items: center;
+  background: var(--chart-bg);
+  border-radius: var(--radius-control);
+  display: flex;
+  font-size: var(--text-xs);
+  gap: var(--space-1);
+  min-height: 24px;
+  padding-left: var(--space-1);
+  pointer-events: auto;
+}
+
+/* Armed drawing gestures reach the canvas even beneath indicator names. */
+.legend[data-drawing-active='true'] .legendRow {
+  pointer-events: none;
+}
+
+.hidden {
+  opacity: 0.55;
+}
+
+.editor {
+  display: grid;
+  gap: var(--space-2);
+  height: 100%;
+  min-height: 0;
+  overflow: auto;
+  padding: var(--space-3);
+}
+
+.fields {
+  display: grid;
+  gap: var(--space-2);
+  grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
+}
+
+.field {
+  display: grid;
+  gap: var(--space-1);
+}
+
+.heatmap {
+  display: grid;
+  gap: var(--space-2);
+  grid-template-rows: auto auto minmax(0, 1fr) auto;
+  height: 100%;
+  min-height: 0;
+  padding: var(--space-3);
+}
+
+.map {
+  background: var(--abyss);
+  height: 100%;
+  min-height: 220px;
+  width: 100%;
+}
+
+.map text {
+  fill: white;
+  pointer-events: none;
+}
+
+.map [role='button'] {
+  cursor: pointer;
+  outline-offset: -3px;
+}
+
+.notice {
+  color: var(--haze);
+  font-size: var(--text-xs);
+}

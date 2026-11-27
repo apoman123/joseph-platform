@@ -21,6 +21,11 @@ class Venue(enum.StrEnum):
     """
 
     BINANCE = "binance"
+    BYBIT = "bybit"
+    OKX = "okx"
+    COINBASE = "coinbase"
+    KRAKEN = "kraken"
+    DERIV = "deriv"
     HYPERLIQUID = "hyperliquid"
     LIGHTER = "lighter"
     BITGET = "bitget"

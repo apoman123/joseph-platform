@@ -20,6 +20,7 @@ import {loadIndicatorPlugins} from './indicator-plugins';
 import {LayersMenu, PluginRow} from './layers-menu';
 import {useStore} from './react-bindings';
 import {useRuntime} from './runtime-context';
+import {attachPython, editPython, pythonState} from './python-state';
 
 /** Built-ins shipped with the engine; additional installed plugins are personal. */
 const BUILT_INS = new Set([
@@ -108,6 +109,16 @@ function IndicatorLibrary({
 }): ReactElement {
   const runtime = useRuntime();
   const workspace = useStore(runtime.workspace);
+  const python = pythonState(runtime);
+  const owned = useStore(python.catalog);
+  useEffect(() => {
+    if (!runtime.config.demo) {
+      void python.client.list().then(
+        value => void python.catalog.set(value),
+        failure => void runtime.notifier.notify(String(failure), 'error')
+      );
+    }
+  }, [runtime, python]);
   const chart =
     workspace.charts.find(item => item.chart_id === requestedChart.chart_id) ??
     requestedChart;
@@ -161,6 +172,16 @@ function IndicatorLibrary({
       .toLowerCase()
       .includes(query.trim().toLowerCase());
   });
+  const managed = (owned?.scripts ?? []).filter(
+    script =>
+      ['indicator', 'strategy', 'alert'].includes(script.kind) &&
+      category !== 'default' &&
+      (category !== 'collection' ||
+        favorites.includes(`python:${script.script_id}`)) &&
+      `${script.name} ${script.script_id}`
+        .toLowerCase()
+        .includes(query.trim().toLowerCase())
+  );
   const selectCategory = (next: Category) => {
     setCategory(next);
     setQuery('');
@@ -297,7 +318,7 @@ function IndicatorLibrary({
               <p className="j-empty" role="status">
                 Loading indicators…
               </p>
-            ) : matches.length === 0 ? (
+            ) : matches.length === 0 && managed.length === 0 ? (
               <div className="j-empty">
                 <h3>
                   {query
@@ -349,6 +370,97 @@ function IndicatorLibrary({
                   </div>
                 </div>
               ))
+            )}
+            {managed.map(script => (
+              <div
+                key={`python:${script.script_id}`}
+                className="indicator-library__entry"
+              >
+                <button
+                  type="button"
+                  className="j-btn j-btn--ghost j-btn--icon"
+                  aria-label={`Collect ${script.name}`}
+                  aria-pressed={favorites.includes(
+                    `python:${script.script_id}`
+                  )}
+                  onClick={() =>
+                    void runtime.dispatch({
+                      type: 'setPanel',
+                      featureId: INDICATOR_COLLECTION_KEY,
+                      state: favorites.includes(`python:${script.script_id}`)
+                        ? favorites.filter(
+                            id => id !== `python:${script.script_id}`
+                          )
+                        : [...favorites, `python:${script.script_id}`],
+                    })
+                  }
+                >
+                  <Star size={16} aria-hidden="true" />
+                </button>
+                <div className="indicator-library__study">
+                  <strong>{script.name}</strong>
+                  <p>
+                    {script.kind} · Python · v{script.version}
+                  </p>
+                  <button
+                    type="button"
+                    className="j-btn"
+                    disabled={!owned?.runtime_enabled}
+                    onClick={() => void attachPython(runtime, chart, script)}
+                  >
+                    Add {script.name}
+                  </button>
+                  <button
+                    type="button"
+                    className="j-btn"
+                    onClick={() => {
+                      void editPython(
+                        runtime,
+                        script.script_id,
+                        script.version
+                      ).then(
+                        onClose,
+                        failure =>
+                          void runtime.notifier.notify(String(failure), 'error')
+                      );
+                    }}
+                  >
+                    Edit source
+                  </button>
+                </div>
+              </div>
+            ))}
+            {category !== 'default' && owned?.next_offset != null && (
+              <button
+                className="j-btn"
+                onClick={() =>
+                  void python.client.list(owned.next_offset ?? 0).then(
+                    next =>
+                      void python.catalog.set({
+                        ...next,
+                        scripts: [...owned.scripts, ...next.scripts],
+                      }),
+                    failure =>
+                      void runtime.notifier.notify(String(failure), 'error')
+                  )
+                }
+              >
+                Load more scripts
+              </button>
+            )}
+            {category === 'scripts' && (
+              <button
+                type="button"
+                className="j-btn"
+                onClick={() => {
+                  void runtime.commands
+                    .execute('python.editor')
+                    .catch(() => undefined);
+                  onClose();
+                }}
+              >
+                Open Python editor
+              </button>
             )}
           </section>
         </div>

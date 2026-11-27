@@ -155,8 +155,10 @@ def test_unconfigured_key_feeds_are_not_started() -> None:
     assert instruments.Venue.TREASURY in settings.active_venues
 
 
-async def test_running_market_engine_uses_ccxt_for_all_crypto_venues() -> None:
-    """The composition root exposes one CCXT-backed adapter per exchange."""
+async def test_running_market_engine_defaults_to_native_crypto_sources() -> (
+    None
+):
+    """The composition root uses native feeds with canonical identities."""
     settings = config.Settings(
         database_url="sqlite://",
         enabled_venues=tuple(ccxt.EXCHANGES),
@@ -168,30 +170,30 @@ async def test_running_market_engine_uses_ccxt_for_all_crypto_venues() -> None:
         assert set(container.adapters) == set(ccxt.EXCHANGES)
         assert all(
             isinstance(adapter, derived_bars.DerivedBarsAdapter)
-            and isinstance(adapter.inner, ccxt.CcxtAdapter)
+            and not isinstance(adapter.inner, ccxt.CcxtAdapter)
             for adapter in container.adapters.values()
         )
         instrument = instruments.InstrumentId.parse("binance:perp:BTCUSDT")
         state, source = container.market_data._provenance(
             instrument, timeframes.Timeframe.M1
         )
-        assert state is quality.FeedState.POLL
-        assert source.startswith("ccxt.")
+        assert state is quality.FeedState.LIVE
+        assert source.startswith("binance.")
         await container.market_data._call(
             instruments.Venue.BINANCE, asyncio.sleep(0, result=None)
         )
         assert (
             container.router.rest_tracker(instruments.Venue.BINANCE).feed_state
-            is quality.FeedState.POLL
+            is quality.FeedState.LIVE
         )
     finally:
         await container.aclose()
 
 
-async def test_factory_defaults_to_ccxt_for_crypto() -> None:
-    """New callers cannot accidentally select retired native data feeds."""
+async def test_factory_keeps_ccxt_as_an_explicit_compatibility_choice() -> None:
+    """Explicit compatibility callers can still select CCXT."""
     adapters = factory.build_adapters(
-        tuple(ccxt.EXCHANGES), clock.ManualClock(0)
+        tuple(ccxt.EXCHANGES), clock.ManualClock(0), crypto_source="ccxt"
     )
     try:
         assert all(

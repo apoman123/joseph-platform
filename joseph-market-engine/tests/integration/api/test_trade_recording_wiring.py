@@ -54,7 +54,7 @@ def _settings(tmp_path: pathlib.Path, **overrides: Any) -> config.Settings:
 async def test_container_records_trades_and_wraps_real_venues(
     tmp_path: pathlib.Path,
 ) -> None:
-    """CCXT venues get derived bars without native trade recording."""
+    """Native feeds expose derived bars and native trade recording."""
     container = bootstrap.build_container(
         _settings(
             tmp_path,
@@ -70,13 +70,15 @@ async def test_container_records_trades_and_wraps_real_venues(
         derived_bars.DerivedBarsAdapter,
     )
     assert instruments.Venue.MOCK not in container.adapters
-    assert recorder.delta_venues == frozenset()
+    assert recorder.delta_venues == frozenset(
+        {instruments.Venue.HYPERLIQUID, instruments.Venue.BITGET}
+    )
     for venue, site in (
         (instruments.Venue.BINANCE, "data.binance.vision"),
         (instruments.Venue.BITGET, "bitget.com/data-download"),
     ):
         notes = container.adapters[venue].capabilities().notes
-        assert not any(site in note for note in notes), venue
+        assert any(site in note for note in notes), venue
     caps = container.adapters[instruments.Venue.HYPERLIQUID].capabilities()
     assert timeframes.Timeframe.MN1 in caps.aggregated_timeframes
     await container.astart()
@@ -130,7 +132,7 @@ def test_recording_can_be_disabled(tmp_path: pathlib.Path) -> None:
 async def test_lighter_archive_follows_its_setting(
     tmp_path: pathlib.Path, enabled: bool
 ) -> None:
-    """The retired Lighter archive setting does not alter CCXT data."""
+    """The optional native Lighter archive follows its configuration."""
     container = bootstrap.build_container(
         _settings(
             tmp_path,
@@ -141,5 +143,5 @@ async def test_lighter_archive_follows_its_setting(
     )
     assert container.recorder is not None
     notes = container.adapters[instruments.Venue.LIGHTER].capabilities().notes
-    assert not any("aws-public-blockchain" in note for note in notes)
+    assert any("aws-public-blockchain" in note for note in notes) is enabled
     await container.aclose()

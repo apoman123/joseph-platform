@@ -504,7 +504,11 @@ describe('drawing editing UI', () => {
       'studies',
       'annotation',
     ]);
-    expect(groups[1]?.tools.map(t => t.manifest.id)).toEqual([
+    expect(
+      groups[1]?.tools
+        .filter(t => !t.manifest.id.startsWith('reference.'))
+        .map(t => t.manifest.id)
+    ).toEqual([
       'rectangle',
       'zone-box',
       'polyline',
@@ -515,10 +519,11 @@ describe('drawing editing UI', () => {
       'arc',
       'curve',
     ]);
-    expect(groups[7]?.tools.map(t => t.manifest.id)).toEqual([
-      'anchored-vwap',
-      'regression-channel',
-    ]);
+    expect(
+      groups[7]?.tools
+        .filter(t => !t.manifest.id.startsWith('reference.'))
+        .map(t => t.manifest.id)
+    ).toEqual(['anchored-vwap', 'regression-channel']);
     expect(savedDockSize('5000', 'side')).toBe(720);
     expect(savedDockSize('abc', 'bottom')).toBeNull();
   });

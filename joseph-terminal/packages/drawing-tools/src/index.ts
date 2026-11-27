@@ -136,3 +136,9 @@ export const FIRST_PARTY_TOOLS: readonly ToolPlugin[] = [
   arrowTool,
   brushTool,
 ];
+
+export {
+  REFERENCE_TOOLS,
+  REFERENCE_PREFIX,
+  isReferenceDocument,
+} from './reference';

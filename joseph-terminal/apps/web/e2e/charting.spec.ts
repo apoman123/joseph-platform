@@ -196,16 +196,16 @@ test('draws polyline, brush and zone box, styles them and manages the object lis
 }) => {
   await openTerminal(page);
   await page.getByTestId('tool-group-shapes').click();
-  await page.getByTestId('tool-option-polyline').click();
+  await page.getByTestId('tool-option-reference.polyline').click();
   await clickChart(page, 0.2, 0.5);
   await clickChart(page, 0.3, 0.3);
   // A second click on the last vertex finishes the polyline.
   await clickChart(page, 0.4, 0.45);
   await clickChart(page, 0.4, 0.45);
-  await expect.poll(() => savedTools(page)).toEqual(['polyline']);
+  await expect.poll(() => savedTools(page)).toEqual(['reference.polyline']);
 
   await page.getByTestId('tool-group-annotation').click();
-  await page.getByTestId('tool-option-brush').click();
+  await page.getByTestId('tool-option-reference.brush').click();
   const box = await firstCanvas(page).boundingBox();
   if (!box) throw new Error('no chart');
   await page.mouse.move(box.x + box.width * 0.5, box.y + box.height * 0.5);
@@ -219,7 +219,9 @@ test('draws polyline, brush and zone box, styles them and manages the object lis
     );
   }
   await page.mouse.up();
-  await expect.poll(() => savedTools(page)).toEqual(['polyline', 'brush']);
+  await expect
+    .poll(() => savedTools(page))
+    .toEqual(['reference.polyline', 'reference.brush']);
 
   await page.getByTestId('tool-group-shapes').click();
   await page.getByTestId('tool-option-zone-box').click();
@@ -231,7 +233,7 @@ test('draws polyline, brush and zone box, styles them and manages the object lis
   await page.mouse.up();
   await expect
     .poll(() => savedTools(page))
-    .toEqual(['polyline', 'brush', 'zone-box']);
+    .toEqual(['reference.polyline', 'reference.brush', 'zone-box']);
 
   const style = page.getByTestId('drawing-style-bar');
   await expect(style).toBeVisible();
@@ -257,14 +259,16 @@ test('draws polyline, brush and zone box, styles them and manages the object lis
   const list = page.getByRole('list', {name: 'Drawings, top first'});
   await expect(list.getByRole('listitem')).toHaveCount(3);
   await list
-    .getByTestId('object-brush')
+    .getByTestId('object-reference.brush')
     .getByRole('button', {name: 'Lock Brush'})
     .click();
   await expect(
-    list.getByTestId('object-brush').getByRole('button', {name: 'Delete Brush'})
+    list
+      .getByTestId('object-reference.brush')
+      .getByRole('button', {name: 'Delete Brush'})
   ).toBeDisabled();
   await list
-    .getByTestId('object-polyline')
+    .getByTestId('object-reference.polyline')
     .getByRole('button', {name: 'Hide Polyline'})
     .click();
   await page.screenshot({path: `${SHOTS}/17-object-list.png`});
@@ -272,11 +276,13 @@ test('draws polyline, brush and zone box, styles them and manages the object lis
     .getByTestId('object-zone-box')
     .getByRole('button', {name: 'Delete Zone box'})
     .click();
-  await expect.poll(() => savedTools(page)).toEqual(['polyline', 'brush']);
+  await expect
+    .poll(() => savedTools(page))
+    .toEqual(['reference.polyline', 'reference.brush']);
   await page.keyboard.press('Control+z');
   await expect
     .poll(() => savedTools(page))
-    .toEqual(['polyline', 'brush', 'zone-box']);
+    .toEqual(['reference.polyline', 'reference.brush', 'zone-box']);
 });
 
 test('downloads a screenshot and applies a saved chart template', async ({

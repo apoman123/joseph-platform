@@ -201,7 +201,7 @@ describe('drawing import', () => {
             style: {color: 'red', line_width: 1, line_style: 'solid'},
           }),
           doc('width', {
-            style: {color: '#ffffff', line_width: 9, line_style: 'solid'},
+            style: {color: '#ffffff', line_width: 51, line_style: 'solid'},
           }),
           doc('dash', {
             style: {

@@ -10,7 +10,7 @@
  */
 
 import type {ToolPlugin} from '@joseph/drawing-core';
-import {FIRST_PARTY_TOOLS} from '@joseph/drawing-tools';
+import {FIRST_PARTY_TOOLS, REFERENCE_TOOLS} from '@joseph/drawing-tools';
 import {createElement} from 'react';
 import type {TerminalRuntime} from '../../composition/runtime';
 import type {WebFeature} from '../../shell/react-bindings';
@@ -183,5 +183,7 @@ export function toolFeature(
  * @return Features, in the tools' registry order.
  */
 export function toolFeatures(runtime: TerminalRuntime): WebFeature[] {
-  return FIRST_PARTY_TOOLS.map(tool => toolFeature(runtime, tool));
+  return [...FIRST_PARTY_TOOLS, ...REFERENCE_TOOLS].map(tool =>
+    toolFeature(runtime, tool)
+  );
 }

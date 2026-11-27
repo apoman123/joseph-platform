@@ -1760,6 +1760,21 @@ class AlpacaAdapter(base.BaseVenueAdapter):
         """The Alpaca configuration shared through the source."""
         return self._source.config
 
+    def price_adjustment(
+        self,
+        timeframe: timeframes.Timeframe,
+    ) -> market.PriceAdjustment:
+        """Reports the split normalization requested from Alpaca history.
+
+        Args:
+            timeframe: Native or derived stock/ETF candle interval.
+
+        Returns:
+            SPLIT; actual current quotes and orders are not transformed.
+        """
+        del timeframe
+        return market.PriceAdjustment.SPLIT
+
     def capabilities(self) -> capabilities.VenueCapabilities:
         """Returns capabilities (data needs a configured key).
 
@@ -2453,6 +2468,36 @@ class AlpacaAdapter(base.BaseVenueAdapter):
                     out.append(
                         self._snapshot(by_symbol[symbol].instrument_id, row)
                     )
+        return out
+
+    async def fetch_snapshot_batch(
+        self, instruments_: Sequence[instruments.InstrumentId]
+    ) -> list[market.MarketSnapshot]:
+        """Fetches selected stock quotes in batches of 200.
+
+        Args:
+            instruments_: Explicit canonical listings requested by the user.
+
+        Returns:
+            Only snapshots actually returned by Alpaca; missing symbols omitted.
+
+        Raises:
+            errors.JosephError: If credentials or provider requests fail.
+        """
+        self._source.require_keys(self.VENUE)
+        out: list[market.MarketSnapshot] = []
+        by_symbol = {
+            instrument.venue_market_id: instrument
+            for instrument in instruments_
+        }
+        symbols = list(by_symbol)
+        for index in range(0, len(symbols), 200):
+            rows = await self._snapshots(symbols[index : index + 200])
+            out.extend(
+                self._snapshot(by_symbol[symbol], row)
+                for symbol, row in rows.items()
+                if symbol in by_symbol and row
+            )
         return out
 
     async def fetch_order_book(  # noqa: DOC201 - always raises UnsupportedError; never returns

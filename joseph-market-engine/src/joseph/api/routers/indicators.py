@@ -9,6 +9,7 @@ to the contract ``ErrorResponse``.
 
 from __future__ import annotations
 
+import inspect
 import json
 from collections.abc import Mapping
 
@@ -131,6 +132,31 @@ def build_router(
             Contract ``IndicatorPluginList``.
         """
         return registry.list_infos()
+
+    @router.get("/v1/indicators/plugins/{plugin_id}/source")
+    def get_source(plugin_id: str) -> dict[str, str]:
+        """Returns source only for built-ins explicitly shipped as public code.
+
+        Args:
+            plugin_id: Registered built-in plugin identifier.
+
+        Returns:
+            Python module source and its public availability label.
+
+        Raises:
+            errors.NotFoundError: If the plugin is absent.
+            errors.UnsupportedError: If external/protected source is
+                unavailable.
+        """
+        plugin = registry.get(plugin_id)
+        module = inspect.getmodule(type(plugin))
+        if module is None or not module.__name__.startswith(
+            "joseph.indicators.builtin."
+        ):
+            raise errors.UnsupportedError(
+                "source is unavailable for this external plugin"
+            )
+        return {"source": inspect.getsource(module), "availability": "public"}
 
     @router.get("/v1/indicators/snapshot")
     async def get_snapshots(

@@ -79,17 +79,27 @@
       "description": "One rung of a price-dependent tick ladder: prices at or above min_price move in tick_size steps.",
       "type": "object",
       "additionalProperties": false,
-      "required": ["min_price", "tick_size"],
+      "required": [
+        "min_price",
+        "tick_size"
+      ],
       "properties": {
-        "min_price": {"$ref": "common.schema.json#/$defs/NonNegativeDecimalString"},
-        "tick_size": {"$ref": "common.schema.json#/$defs/NonNegativeDecimalString"}
+        "min_price": {
+          "$ref": "common.schema.json#/$defs/NonNegativeDecimalString"
+        },
+        "tick_size": {
+          "$ref": "common.schema.json#/$defs/NonNegativeDecimalString"
+        }
       }
     },
     "BuyVolumeMethod": {
       "title": "BuyVolumeMethod",
       "description": "Origin of a bar's buy volume. `taker`: the venue's aggressor flag (true delta). `classified`: trades classified against the prevailing quote (Lee-Ready / quote rule) on markets that publish no aggressor side, such as stock exchanges.",
       "type": "string",
-      "enum": ["taker", "classified"]
+      "enum": [
+        "taker",
+        "classified"
+      ]
     },
     "Instrument": {
       "title": "Instrument",
@@ -190,29 +200,54 @@
         },
         "listing_exchange": {
           "description": "Exchange that lists a security, e.g. `Nasdaq`, `NYSE Arca`, `Cboe BZX`, `TWSE`, `TPEx`; null for crypto.",
-          "type": ["string", "null"]
+          "type": [
+            "string",
+            "null"
+          ]
         },
         "tick_ladder": {
           "description": "Price-dependent ticks (TWSE, TPEx). Empty when tick_size applies at every price.",
           "type": "array",
-          "items": {"$ref": "#/$defs/TickStep"}
+          "items": {
+            "$ref": "#/$defs/TickStep"
+          }
         },
         "price_limit_pct": {
           "description": "Daily price limit from the reference price in percent (TWSE and TPEx 10); null when unlimited.",
-          "oneOf": [{"$ref": "common.schema.json#/$defs/NonNegativeDecimalString"}, {"type": "null"}]
+          "oneOf": [
+            {
+              "$ref": "common.schema.json#/$defs/NonNegativeDecimalString"
+            },
+            {
+              "type": "null"
+            }
+          ]
         },
         "board_lot": {
           "description": "Shares per board lot (TWSE and TPEx 1000); null when orders are in single units.",
-          "oneOf": [{"$ref": "common.schema.json#/$defs/NonNegativeDecimalString"}, {"type": "null"}]
+          "oneOf": [
+            {
+              "$ref": "common.schema.json#/$defs/NonNegativeDecimalString"
+            },
+            {
+              "type": "null"
+            }
+          ]
         },
         "name": {
           "description": "Issuer or series name in English, e.g. `Taiwan Semiconductor Manufacturing` or `US 10-Year Treasury par yield`; null when the venue publishes none (crypto).",
-          "type": ["string", "null"],
+          "type": [
+            "string",
+            "null"
+          ],
           "maxLength": 200
         },
         "local_name": {
-          "description": "Name in the listing market's language, e.g. `台積電` on TWSE, `環球晶` on TPEx; null when none.",
-          "type": ["string", "null"],
+          "description": "Name in the listing market's language, e.g. `\u53f0\u7a4d\u96fb` on TWSE, `\u74b0\u7403\u6676` on TPEx; null when none.",
+          "type": [
+            "string",
+            "null"
+          ],
           "maxLength": 200
         }
       }
@@ -222,12 +257,28 @@
       "description": "Trading sessions of a calendar overlapping [from_ms, to_ms). Empty for 24x7 markets, which never close.",
       "type": "object",
       "additionalProperties": false,
-      "required": ["calendar", "sessions", "from_ms", "to_ms"],
+      "required": [
+        "calendar",
+        "sessions",
+        "from_ms",
+        "to_ms"
+      ],
       "properties": {
-        "calendar": {"$ref": "common.schema.json#/$defs/CalendarId"},
-        "sessions": {"type": "array", "items": {"$ref": "common.schema.json#/$defs/TradingSession"}},
-        "from_ms": {"$ref": "common.schema.json#/$defs/TimestampMs"},
-        "to_ms": {"$ref": "common.schema.json#/$defs/TimestampMs"}
+        "calendar": {
+          "$ref": "common.schema.json#/$defs/CalendarId"
+        },
+        "sessions": {
+          "type": "array",
+          "items": {
+            "$ref": "common.schema.json#/$defs/TradingSession"
+          }
+        },
+        "from_ms": {
+          "$ref": "common.schema.json#/$defs/TimestampMs"
+        },
+        "to_ms": {
+          "$ref": "common.schema.json#/$defs/TimestampMs"
+        }
       }
     },
     "InstrumentList": {
@@ -329,7 +380,14 @@
         },
         "taker_buy_method": {
           "description": "How taker_buy_base_volume was obtained; null when it is null.",
-          "oneOf": [{"$ref": "#/$defs/BuyVolumeMethod"}, {"type": "null"}]
+          "oneOf": [
+            {
+              "$ref": "#/$defs/BuyVolumeMethod"
+            },
+            {
+              "type": "null"
+            }
+          ]
         },
         "is_final": {
           "type": "boolean"
@@ -426,6 +484,17 @@
           "items": {
             "$ref": "#/$defs/TimeGap"
           }
+        },
+        "price_adjustment": {
+          "$ref": "common.schema.json#/$defs/PriceAdjustment"
+        },
+        "price_adjustment_epoch_ms": {
+          "$ref": "common.schema.json#/$defs/TimestampMs",
+          "description": "Server normalization cache epoch (fifteen-minute UTC bucket), for avoiding mixed historical bases. This is not a provider historical data vintage."
+        },
+        "price_adjustment_refresh_after_ms": {
+          "$ref": "common.schema.json#/$defs/TimestampMs",
+          "description": "UTC millisecond deadline when adjusted history should be refreshed to incorporate later provider corporate-action revisions."
         }
       }
     },
@@ -984,7 +1053,9 @@
         "aggregated_timeframes": {
           "description": "Subset of timeframes the engine aggregates from a shorter native timeframe that tiles it exactly (e.g. 1M from 1d where the venue publishes no monthly bars).",
           "type": "array",
-          "items": {"$ref": "common.schema.json#/$defs/Timeframe"}
+          "items": {
+            "$ref": "common.schema.json#/$defs/Timeframe"
+          }
         },
         "calendar": {
           "description": "Session calendar of the venue's instruments.",
@@ -992,7 +1063,10 @@
         },
         "data_delay_ms": {
           "description": "Delay of the data this deployment is entitled to (e.g. 900000 on a free consolidated feed); null when real time.",
-          "type": ["integer", "null"],
+          "type": [
+            "integer",
+            "null"
+          ],
           "minimum": 0
         },
         "requires_credentials": {

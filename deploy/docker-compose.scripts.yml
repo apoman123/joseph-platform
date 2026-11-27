@@ -1,0 +1,15 @@
+# Optional isolated Python execution. Build the trusted runner first:
+#   make script-runner
+# Set DOCKER_GID to the daemon socket's numeric group, then add this overlay
+# to the normal compose command. Access to this socket is privileged; use a
+# dedicated/rootless daemon for code from untrusted authors. No socket,
+# credentials or host directories are mounted into user script containers.
+services:
+  market:
+    environment:
+      JOSEPH_SCRIPT_RUNTIME: docker
+      JOSEPH_SCRIPT_RUNNER_IMAGE: ${JOSEPH_SCRIPT_RUNNER_IMAGE:-joseph-python-runner:1}
+      JOSEPH_SCRIPT_TIMEOUT_S: ${JOSEPH_SCRIPT_TIMEOUT_S:-10}
+    group_add: ["${DOCKER_GID:?set DOCKER_GID to the daemon socket group}"]
+    volumes:
+      - ${JOSEPH_DOCKER_SOCKET:-/var/run/docker.sock}:/var/run/docker.sock

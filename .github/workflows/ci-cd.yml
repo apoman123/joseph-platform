@@ -133,13 +133,18 @@ jobs:
           uv run pytest -q -p no:cacheprovider tests/architecture/test_code_standards.py
       - name: mypy --strict
         run: uv run mypy
+      - name: Build isolated Python runner
+        if: matrix.project == 'joseph-market-engine'
+        run: docker build -f script-runner/Dockerfile -t joseph-python-runner:1 .
       - name: Unit, integration, contract, architecture, property, security, chaos
+        env:
+          JOSEPH_SCRIPT_TESTS: '1'
         run: uv run pytest --cov --cov-report=term --cov-report=xml
       - name: OpenAPI document is up to date
         run: uv run python scripts/export_openapi.py --check
       - name: Dependency licenses and vulnerabilities
         run: |
-          uv run pip-licenses --fail-on="GPL;AGPL" --partial-match
+          uv run pip-licenses --fail-on="GPL;AGPL" --partial-match --ignore-packages joseph-market-engine
           uv export --frozen --no-dev --no-hashes --no-emit-project \
             -o /tmp/requirements.txt
           uvx pip-audit -r /tmp/requirements.txt --no-deps --disable-pip
@@ -202,7 +207,11 @@ jobs:
           (cd joseph-market-engine && uv sync --frozen)
           (cd joseph-execution-engine && uv sync --frozen)
           (cd joseph-terminal && pnpm install --frozen-lockfile)
+      - name: Build isolated Python runner for browser integration
+        run: docker build -f joseph-market-engine/script-runner/Dockerfile -t joseph-python-runner:1 joseph-market-engine
       - working-directory: joseph-terminal
+        env:
+          JOSEPH_SCRIPT_TESTS: '1'
         run: |
           pnpm --filter @joseph/web exec playwright install --with-deps chromium
           pnpm test:e2e:fullstack
@@ -268,9 +277,9 @@ jobs:
             type=semver,pattern={{version}}
             type=semver,pattern={{major}}.{{minor}}
           # A market image with plugin packages takes the SPDX expression
-          # in MARKET_IMAGE_LICENSES; every other image is MIT.
+          # in MARKET_IMAGE_LICENSES in addition to its AGPL integration.
           labels: |
-            org.opencontainers.image.licenses=${{ matrix.image == 'joseph-market-engine' && vars.MARKET_IMAGE_LICENSES || 'MIT' }}
+            org.opencontainers.image.licenses=${{ matrix.image == 'joseph-market-engine' && format('AGPL-3.0-only AND ({0})', vars.MARKET_IMAGE_LICENSES || 'MIT') || matrix.image == 'joseph-terminal' && 'AGPL-3.0-only' || 'MIT' }}
       - id: build
         uses: docker/build-push-action@c3c9e263c25d99ce0380d002d59b67737d91b0dc # v7.4.0
         with:

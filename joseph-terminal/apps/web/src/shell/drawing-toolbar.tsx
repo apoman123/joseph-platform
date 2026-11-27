@@ -23,13 +23,16 @@ import {
   LockOpen,
   Magnet,
   MousePointer2,
+  LayoutGrid,
   Redo2,
   Undo2,
+  Star,
 } from 'lucide-react';
 import {useEffect, useRef, useState, type ReactElement} from 'react';
 import {Icon} from './icons';
 import {useStore} from './react-bindings';
 import {useRuntime} from './runtime-context';
+import {DRAWING_FAVORITES, favoriteDrawings} from './drawing-favorites';
 
 /**
  * Subscribes the component to the tool registry.
@@ -62,7 +65,7 @@ const GROUP_NAMES: Readonly<Record<ToolGroup, string>> = {
 const GROUP_STORAGE_KEY = 'joseph.drawbar.groups';
 
 /**
- * Groups consecutive tools of the same group, keeping registration order.
+ * Groups tools by their category, preserving first registration order.
  * @param tools Registered tools.
  * @return Groups with their tools.
  */
@@ -71,8 +74,8 @@ export function groupTools(
 ): Array<{group: ToolGroup; tools: ToolPlugin[]}> {
   const groups: Array<{group: ToolGroup; tools: ToolPlugin[]}> = [];
   for (const tool of tools) {
-    const last = groups.at(-1);
-    if (last && last.group === tool.manifest.group) last.tools.push(tool);
+    const existing = groups.find(entry => entry.group === tool.manifest.group);
+    if (existing) existing.tools.push(tool);
     else groups.push({group: tool.manifest.group, tools: [tool]});
   }
   return groups;
@@ -102,6 +105,10 @@ interface FlyoutProps {
   activeTool: string | null;
   /** Tool displayed on the group button. */
   selectedTool: ToolPlugin;
+  /** User-selected stable favorite tool IDs. */
+  favorites: readonly string[];
+  /** Toggles a favorite without arming the tool or closing the menu. */
+  onFavorite: (toolId: string) => void;
   /** Arms a tool. */
   onPick: (tool: ToolPlugin) => void;
 }
@@ -116,6 +123,8 @@ function GroupFlyout({
   tools,
   activeTool,
   selectedTool,
+  favorites,
+  onFavorite,
   onPick,
 }: FlyoutProps): ReactElement {
   const [position, setPosition] = useState<{left: number; top: number} | null>(
@@ -176,24 +185,47 @@ function GroupFlyout({
           style={{left: position.left, top: position.top}}
         >
           {tools.map(tool => (
-            <button
+            <div
               key={tool.manifest.id}
-              type="button"
-              role="menuitemradio"
-              aria-checked={activeTool === tool.manifest.id}
-              className="j-menu__item drawbar__option"
-              data-testid={`tool-option-${tool.manifest.id}`}
-              onClick={() => {
-                onPick(tool);
-                setPosition(null);
-              }}
+              role="none"
+              className="drawbar__favorite-row"
             >
-              <Icon name={tool.manifest.icon} size={16} />
-              <span>{tool.manifest.displayName}</span>
-              {tool.manifest.hotkey && (
-                <kbd>{hotkeyHint(tool.manifest.hotkey)}</kbd>
-              )}
-            </button>
+              <button
+                type="button"
+                role="menuitemradio"
+                aria-checked={activeTool === tool.manifest.id}
+                className="j-menu__item drawbar__option"
+                data-testid={`tool-option-${tool.manifest.id}`}
+                onClick={() => {
+                  onPick(tool);
+                  setPosition(null);
+                }}
+              >
+                <Icon name={tool.manifest.icon} size={16} />
+                <span>{tool.manifest.displayName}</span>
+                {tool.manifest.hotkey && (
+                  <kbd>{hotkeyHint(tool.manifest.hotkey)}</kbd>
+                )}
+              </button>
+              <button
+                type="button"
+                role="menuitemcheckbox"
+                aria-label={`Favorite ${tool.manifest.displayName}`}
+                aria-checked={favorites.includes(tool.manifest.id)}
+                className="j-btn j-btn--ghost j-btn--icon"
+                onClick={() => void onFavorite(tool.manifest.id)}
+              >
+                <Star
+                  size={15}
+                  aria-hidden="true"
+                  fill={
+                    favorites.includes(tool.manifest.id)
+                      ? 'currentColor'
+                      : 'none'
+                  }
+                />
+              </button>
+            </div>
           ))}
         </div>
       )}
@@ -207,11 +239,38 @@ function GroupFlyout({
  */
 export function DrawingToolbar(): ReactElement {
   const runtime = useRuntime();
-  const tools = useTools();
+  const registered = useTools();
+  const tools = registered.some(tool =>
+    tool.manifest.id.startsWith('reference.')
+  )
+    ? registered.filter(
+        tool =>
+          tool.manifest.id.startsWith('reference.') ||
+          tool.manifest.id === 'zone-box' ||
+          tool.seriesRequest !== undefined
+      )
+    : registered;
   const activeTool = useStore(runtime.drawing.activeTool);
   const magnet = useStore(runtime.drawing.magnet);
   useStore(runtime.drawing.revision);
   const selection = useStore(runtime.selection);
+  const workspace = useStore(runtime.workspace);
+  const favorites = favoriteDrawings(
+    (workspace.panels as Record<string, unknown> | undefined)?.[
+      DRAWING_FAVORITES
+    ]
+  );
+  const toggleFavorite = (id: string) =>
+    void runtime.dispatch({
+      type: 'setPanel',
+      featureId: DRAWING_FAVORITES,
+      state: {
+        ...favorites,
+        tools: favorites.tools.includes(id)
+          ? favorites.tools.filter(tool => tool !== id)
+          : [...favorites.tools, id],
+      },
+    });
   const store = runtime.drawing.stores.get(selection.chartId);
   const drawings = store?.get().drawings ?? [];
   const allLocked = drawings.length > 0 && drawings.every(d => d.locked);
@@ -249,6 +308,18 @@ export function DrawingToolbar(): ReactElement {
     runtime.storage.setItem(GROUP_STORAGE_KEY, JSON.stringify(next));
     run(`drawing.tool.${tool.manifest.id}`);
   };
+  if (
+    workspace.charts.find(chart => chart.chart_id === selection.chartId)
+      ?.view_type === 'stock_heatmap'
+  ) {
+    return (
+      <nav className="drawbar" aria-label="Heatmap controls">
+        <span title="Select a stock tile to open its candle chart">
+          <LayoutGrid size={18} aria-hidden="true" />
+        </span>
+      </nav>
+    );
+  }
   return (
     <nav className="drawbar" aria-label="Drawing tools">
       <button
@@ -261,46 +332,74 @@ export function DrawingToolbar(): ReactElement {
       >
         <MousePointer2 size={18} aria-hidden="true" />
       </button>
-      {groupTools(tools).map(({group, tools: members}) => {
-        const armed = members.find(t => t.manifest.id === activeTool);
-        const tool =
-          armed ??
-          members.find(t => t.manifest.id === chosen[group]) ??
-          members[0];
-        if (!tool) return null;
-        return (
-          <div key={group} className="drawbar__group">
-            <span className="drawbar__sep" aria-hidden="true" />
-            <div className="drawbar__slot">
-              {members.length === 1 ? (
-                <button
-                  type="button"
-                  className="drawbar__btn"
-                  aria-label={tool.manifest.displayName}
-                  title={
-                    tool.manifest.hotkey
-                      ? `${tool.manifest.displayName} (${hotkeyHint(tool.manifest.hotkey)})`
-                      : tool.manifest.displayName
-                  }
-                  aria-pressed={activeTool === tool.manifest.id}
-                  data-testid={`tool-${tool.manifest.id}`}
-                  onClick={() => void pick(tool)}
-                >
-                  <Icon name={tool.manifest.icon} />
-                </button>
-              ) : (
-                <GroupFlyout
-                  group={group}
-                  tools={members}
-                  activeTool={activeTool}
-                  selectedTool={tool}
-                  onPick={pick}
-                />
-              )}
+      {groupTools(tools)
+        .sort(
+          (a, b) =>
+            [
+              'lines',
+              'fibonacci',
+              'gann',
+              'patterns',
+              'shapes',
+              'annotation',
+              'trading',
+              'measure',
+              'studies',
+            ].indexOf(a.group) -
+            [
+              'lines',
+              'fibonacci',
+              'gann',
+              'patterns',
+              'shapes',
+              'annotation',
+              'trading',
+              'measure',
+              'studies',
+            ].indexOf(b.group)
+        )
+        .map(({group, tools: members}) => {
+          const armed = members.find(t => t.manifest.id === activeTool);
+          const tool =
+            armed ??
+            members.find(t => t.manifest.id === chosen[group]) ??
+            members[0];
+          if (!tool) return null;
+          return (
+            <div key={group} className="drawbar__group">
+              <span className="drawbar__sep" aria-hidden="true" />
+              <div className="drawbar__slot">
+                {members.length === 1 ? (
+                  <button
+                    type="button"
+                    className="drawbar__btn"
+                    aria-label={tool.manifest.displayName}
+                    title={
+                      tool.manifest.hotkey
+                        ? `${tool.manifest.displayName} (${hotkeyHint(tool.manifest.hotkey)})`
+                        : tool.manifest.displayName
+                    }
+                    aria-pressed={activeTool === tool.manifest.id}
+                    data-testid={`tool-${tool.manifest.id}`}
+                    onClick={() => void pick(tool)}
+                  >
+                    <Icon name={tool.manifest.icon} />
+                  </button>
+                ) : (
+                  <GroupFlyout
+                    group={group}
+                    tools={members}
+                    activeTool={activeTool}
+                    selectedTool={tool}
+                    favorites={favorites.tools}
+                    onFavorite={toggleFavorite}
+                    onPick={pick}
+                  />
+                )}
+              </div>
             </div>
-          </div>
-        );
-      })}
+          );
+        })}
       <span className="drawbar__sep" aria-hidden="true" />
       <button
         type="button"

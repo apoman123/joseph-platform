@@ -1003,7 +1003,8 @@
         "AOI_INVALIDATED",
         "SETUP_EXPIRED",
         "QUALIFICATION_CHANGED",
-        "POSITION_EXITED"
+        "POSITION_EXITED",
+        "CUSTOM_ALERT"
       ]
     },
     "NotificationPolicy": {

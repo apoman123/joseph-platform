@@ -36,10 +36,12 @@ import {
   Lock,
   LockOpen,
   Trash2,
+  Settings,
 } from 'lucide-react';
 import {useEffect, useState, type ReactElement} from 'react';
 import {useStore} from './react-bindings';
 import {useRuntime} from './runtime-context';
+import {ReferenceSettings} from './reference-settings';
 
 /** Preset swatches (course magenta first; user-authored marks). */
 export const SWATCHES: readonly string[] = [
@@ -85,6 +87,8 @@ export function DrawingStyleBar({chartId}: StyleBarProps): ReactElement | null {
       ? store?.find(selection.drawingId)
       : undefined;
   const [text, setText] = useState(doc?.text ?? '');
+  const [settings, setSettings] = useState(false);
+  useEffect(() => void setSettings(false), [doc?.drawing_id]);
   useEffect(() => void setText(doc?.text ?? ''), [doc?.drawing_id, doc?.text]);
   if (!store || !doc) return null;
   const tool = runtime.tools.get(doc.tool_id);
@@ -125,6 +129,26 @@ export function DrawingStyleBar({chartId}: StyleBarProps): ReactElement | null {
       data-testid="drawing-style-bar"
       onPointerDown={event => void event.stopPropagation()}
     >
+      {settings && (
+        <ReferenceSettings
+          key={doc.drawing_id}
+          doc={doc}
+          store={store}
+          onClose={() => void setSettings(false)}
+          onChange={bump}
+        />
+      )}
+      {doc.tool_id.startsWith('reference.') && (
+        <button
+          className="j-btn j-btn--ghost j-btn--icon j-btn--sm"
+          aria-label="Drawing settings"
+          title="Drawing settings"
+          disabled={locked}
+          onClick={() => void setSettings(true)}
+        >
+          <Settings size={14} aria-hidden="true" />
+        </button>
+      )}
       <span className="style-bar__name">
         {tool?.manifest.displayName ?? 'Unsupported drawing'}
       </span>
@@ -169,7 +193,7 @@ export function DrawingStyleBar({chartId}: StyleBarProps): ReactElement | null {
             void restyle({line_width: Number(event.target.value)})
           }
         >
-          {[1, 2, 3, 4].map(width => (
+          {[1, 2, 3, 4, 6, 8, 12, 20, 32, 50].map(width => (
             <option key={width} value={width}>
               {width}px
             </option>
@@ -275,7 +299,10 @@ export function DrawingStyleBar({chartId}: StyleBarProps): ReactElement | null {
           Extend left
         </label>
       )}
-      {TEXT_TOOLS.has(doc.tool_id) && (
+      {(TEXT_TOOLS.has(doc.tool_id) ||
+        /^reference\.(text|note|pin|comment|price-note|signpost|callout|font-icon|price-label)$/.test(
+          doc.tool_id
+        )) && (
         <input
           className="j-input style-bar__text"
           aria-label="Drawing text"

@@ -1,0 +1,11 @@
+Joseph Platform — integrated application under AGPL-3.0-only.
+Original Joseph MIT notices remain attached to their individual files.
+Original license: licenses/MIT-joseph-original.txt.
+
+Based on TradeX by Saifullah Shafin - https://github.com/saifullahshafin/open-source-tradingview
+Modified from TradeX. Upstream copyright, license, additional terms and component
+notices are preserved in joseph-terminal/third_party/tradex/.
+Joseph is not an official TradeX release and does not use its name or logo as branding.
+
+Terminal component attribution: joseph-terminal/NOTICE and
+joseph-terminal/docs/THIRD_PARTY_NOTICES.md.

@@ -479,6 +479,20 @@ class BaseVenueAdapter:
         """The venue served by this adapter."""
         return self.VENUE
 
+    def price_adjustment(
+        self, timeframe: timeframes.Timeframe
+    ) -> market.PriceAdjustment:
+        """Reports raw historical prices unless a source overrides the policy.
+
+        Args:
+            timeframe: Requested chart or analysis resolution.
+
+        Returns:
+            RAW; source-specific corporate actions are never guessed.
+        """
+        del timeframe
+        return market.PriceAdjustment.RAW
+
     def capabilities(self) -> capabilities.VenueCapabilities:
         """Returns capabilities (overridden by each venue).
 
@@ -558,7 +572,7 @@ class BaseVenueAdapter:
         if not self._instruments:
             await self.list_instruments()
         found = self._instruments.get(instrument.venue_market_id)
-        if found is None:
+        if found is None or found.instrument_id != instrument:
             raise errors.NotFoundError(f"unknown instrument {instrument}")
         return found
 
@@ -589,6 +603,60 @@ class BaseVenueAdapter:
                 f"{self.VENUE.value} does not provide UTC-aligned "
                 f"{timeframe.value} candles"
             )
+
+    async def fetch_order_book(
+        self, instrument: instruments.InstrumentId, depth: int
+    ) -> market.OrderBook:
+        """Rejects order-book reads for price-only adapters.
+
+        Args:
+            instrument: Canonical source instrument.
+            depth: Requested levels per side; unused without a book source.
+
+        Returns:
+            Never returns an invented order book.
+
+        Raises:
+            errors.UnsupportedError: Unless the adapter overrides this method.
+        """
+        del instrument, depth
+        raise errors.UnsupportedError(f"{self.venue.value} has no order book")
+
+    async def fetch_open_interest(
+        self, instrument: instruments.InstrumentId
+    ) -> market.OpenInterest:
+        """Rejects open-interest reads for adapters without derivatives data.
+
+        Args:
+            instrument: Canonical source instrument.
+
+        Returns:
+            Never returns an invented derivative position count.
+
+        Raises:
+            errors.UnsupportedError: Unless the adapter overrides this method.
+        """
+        del instrument
+        raise errors.UnsupportedError(
+            f"{self.venue.value} has no open interest"
+        )
+
+    async def fetch_funding(
+        self, instrument: instruments.InstrumentId
+    ) -> market.Funding:
+        """Rejects funding reads for adapters without perpetual funding data.
+
+        Args:
+            instrument: Canonical source instrument.
+
+        Returns:
+            Never returns an invented perpetual funding rate.
+
+        Raises:
+            errors.UnsupportedError: Unless the adapter overrides this method.
+        """
+        del instrument
+        raise errors.UnsupportedError(f"{self.venue.value} has no funding rate")
 
     async def fetch_snapshots(self) -> list[market.MarketSnapshot]:
         """Fetches every instrument's snapshot (unsupported unless overridden).

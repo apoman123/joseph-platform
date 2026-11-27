@@ -2,13 +2,13 @@
 
 Joseph is a self-hosted platform for charting, researching and trading crypto perpetuals, Taiwan and US stocks and ETFs, with US Treasury yields as reference data. It has three parts: a browser charting terminal, a market engine (data, screening, indicator plugins, strategies, alerts, backtests) and an execution engine (risk gateway, order management, paper, shadow and live trading, audit, kill switch).
 
-> **Risk disclaimer.** Joseph is research software, provided as is under the MIT licence with no warranty. Live trading can lose money. The LIVE adapters are tested only against mocked venues and fake broker clients, never with real orders. Nothing in this repository is financial advice.
+> **Risk disclaimer.** Joseph is research software, provided as is under the AGPL-3.0-only licence with no warranty. Live trading can lose money. The LIVE adapters are tested only against mocked venues and fake broker clients, never with real orders. Nothing in this repository is financial advice.
 
 ## Markets and venues
 
 | Market | Venues | Market data | Trading |
 |---|---|---|---|
-| Crypto perpetuals | Binance USDⓈ-M, Bitget USDT-M, Hyperliquid, Lighter, MEXC futures | Free CCXT Pro WebSocket + REST history; no key | Paper and shadow; LIVE through each venue's own adapter |
+| Crypto and reference markets | Binance, Bybit, OKX, Coinbase, Kraken, Deriv | Native public APIs; Binance/Bybit/Deriv WebSockets and explicit REST polling for the other three; no key | Existing Binance, Bitget, Hyperliquid, Lighter and MEXC trading adapters remain separate; new data sources do not enable trading |
 | Taiwan stocks and ETFs | TWSE, TPEx (mainboard) | Fugle free-tier per-symbol data with a key | Paper and shadow; LIVE through SinoPac Shioaji. Cathay is wired in but refuses every order (no public API) |
 | US stocks and ETFs | Nasdaq, NYSE, Cboe BZX | Alpaca market data; needs a free Alpaca key (IEX real time by default) | Paper and shadow; LIVE through Interactive Brokers (IB Gateway). Alpaca is data only |
 | US Treasury yields | Par and real yield curves; separate FRED rate series | Treasury.gov without a key; FRED with a free key | Data only |
@@ -70,7 +70,9 @@ execution engine ([broker setup](docs/BROKERS.md)).
 
 | Data feed | Required settings | What is available without a key | Free-plan scope in this implementation |
 |---|---|---|---|
-| CCXT (Binance, Bitget, Hyperliquid, Lighter, MEXC) | None for public data | Public perpetual candles, quotes and books through CCXT REST | Free CCXT Pro subscribes to exchange WebSockets; REST provides history and visible polling fallback. Includes exchange-listed RWA perpetuals; history and resolutions vary |
+| Binance and Bybit native APIs | None for public data | Native exchange candles and real-time candle WebSockets | Binance USDⓈ-M; Bybit spot, linear/inverse perpetuals and dated futures. Exact source and quote identities remain separate |
+| OKX, Coinbase Exchange and Kraken | None for public data | Native spot history and tickers | REST polling, as in the upstream plugins. Kraken limits native OHLC to its newest 720 candles. Coinbase 30m/4h and additional supported resolutions aggregate in Python |
+| Deriv public reference feed | None | FX, commodity, index and crypto reference quotes | Reusable bounded WebSocket requests for history and native OHLC subscriptions. No exchange volume is invented; PAXG and gold spot are distinct instruments |
 | Alpaca IEX, for Nasdaq/NYSE/Cboe listings | `JOSEPH_ALPACA_KEY_ID` and `JOSEPH_ALPACA_SECRET_KEY` from [Alpaca](https://docs.alpaca.markets/us/docs/about-market-data-api); `JOSEPH_ALPACA_FEED=iex` | US data feed remains disabled | IEX only; consolidated SIP is not enabled |
 | Fugle Taiwan stocks/ETFs | `JOSEPH_TW_DATA_SOURCE=fugle` and `JOSEPH_FUGLE_API_KEY` from [Fugle](https://developer.fugle.tw/pricing) | Taiwan data feed is disabled until the key is set | Per-symbol REST quotes and candles; 1m history since 2023-05-23, daily since 2010; 60 REST calls/minute paced by the engine. Free futures/options and Fugle bulk snapshots are unavailable |
 | U.S. Treasury official | No key | Daily par and real yield curves | No intraday bond or yield quote |
@@ -89,8 +91,8 @@ JOSEPH_ALPACA_SECRET_KEY=your-alpaca-secret-key
 Fugle's free plan allows five WebSocket subscriptions, but this adapter uses
 paced REST requests and does not claim a native Fugle stream. FRED and the
 official Treasury feed are daily sources, so minute/hour yield candles remain
-unavailable. The Dashboard groups the five crypto markets under one CCXT
-provider. An idle on-demand REST source shows `IDLE`; it becomes `POLL` only
+unavailable. The Dashboard lists the actual native data providers separately;
+CCXT is no longer required or selected by the running market engine. An idle on-demand REST source shows `IDLE`; it becomes `POLL` only
 after REST data is received, or `LIVE` after WebSocket events arrive. See [market-data scope](docs/MARKET_DATA_SCOPE.md) for
 timeframe and provenance details.
 
@@ -156,8 +158,8 @@ These come from venues, data plans or law; code cannot remove them.
 
 ## Licence
 
-- **MIT** ([LICENSE](LICENSE)), copied into both engines and their images.
-- **Terminal:** `joseph-terminal/` keeps its own MIT [LICENSE](joseph-terminal/LICENSE) and [NOTICE](joseph-terminal/NOTICE) so it can become a separate repository. Charts use TradingView's Lightweight Charts (Apache-2.0); Joseph is not affiliated with TradingView.
+- **Integrated application: AGPL-3.0-only** ([LICENSE](LICENSE)); original MIT file notices are retained.
+- **Terminal:** `joseph-terminal/` keeps its own AGPL [LICENSE](joseph-terminal/LICENSE) and [NOTICE](joseph-terminal/NOTICE) so it can become a separate repository. Charts use TradingView's Lightweight Charts (Apache-2.0); Joseph is not affiliated with TradingView.
 - **Plugin packages:** indicator plugin packages you install are not covered by this licence; check their terms before using or redistributing an image that contains one.
 
 Third-party components and obligations: [licensing report](docs/reports/LICENSING_REPORT.md).
@@ -217,6 +219,28 @@ Apple mobile devices.
 notification policy. Include `TELEGRAM`, `WHATSAPP` and/or `WEB_PUSH` in the
 strategy definition's `notification.channels`, then save/activate that version.
 Existing strategies retain their current channel policy. Push follows the same
-quiet hours, severity, signal-kind and strategy filters as other channels. These
-are strategy-signal alerts; standalone price and drawing alerts remain separate
-roadmap items in the [TradingView comparison](docs/reports/TRADINGVIEW_GAPS_2026_11_26.md).
+quiet hours, severity, signal-kind and strategy filters as other channels. Python price/indicator conditions are also available through the five-kind
+script editor described below. Native drawing-attached alert controls remain
+a separate roadmap item.
+
+### Python scripts, stock heatmaps, and MCP
+
+The terminal now has five Python script kinds: **indicator, strategy, library,
+filter, and alert**, each requiring its own abstract base class. The Python
+editor supports immutable versions, library pins, visual studies, simulations,
+market scans, and future-bar alerts. Build `make script-runner` and set
+`JOSEPH_SCRIPT_RUNTIME=docker` to execute sources in isolated containers.
+
+New tabs can contain candlestick charts or stock heatmaps. Active indicators
+have name/settings/source/hide/remove controls in the chart's upper-left corner.
+Heatmap fundamentals remain explicitly unavailable unless dated metadata is
+provided; current feed coverage is preserved.
+
+The market server automatically starts MCP at `/mcp`. Open the **MCP** terminal
+panel to create a scoped bearer grant and optionally enable browser control.
+Set `JOSEPH_MCP_PUBLIC_URL` for deployments. See
+[Python scripts and MCP](docs/PYTHON_SCRIPTS_AND_MCP.md) for setup, all context
+methods, notification routing, heatmap metadata, permissions, and test commands.
+
+See [TradeX integration](docs/TRADEX_INTEGRATION.md) for the pinned upstream
+revision, Python-only script policy, drawing bridge and provider migration.

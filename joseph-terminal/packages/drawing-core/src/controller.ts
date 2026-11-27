@@ -468,6 +468,24 @@ export class DrawingController {
     this.store.update(
       edit.id,
       () => {
+        const geometry = this.tools.get(edit.original.tool_id)?.edit?.(
+          edit.original,
+          {
+            handleIndex: edit.handleIndex,
+            start: edit.pressPoint,
+            current: event,
+            constrain: event.shiftKey,
+          },
+          {
+            transform: this.surface.transform(),
+            bars: this.options.bars(),
+            durationMs: this.options.durationMs(),
+            tickSize: this.options.tickSize(),
+          }
+        );
+        if (geometry) {
+          return {...edit.original, ...geometry, updated_at_ms: now};
+        }
         if (edit.handleIndex === null) {
           const deltaPrice = Decimal.parse(anchor.price)
             .sub(Decimal.parse(edit.origin.price))
@@ -576,7 +594,14 @@ export class DrawingController {
       nowMs: this.options.now(),
       newId: this.options.newId,
     });
-    this.store.execute(createCommand(doc));
+    const geometry = tool.place?.(anchors, {
+      transform: this.surface.transform(),
+      bars: this.options.bars(),
+      durationMs: this.options.durationMs(),
+      tickSize: this.options.tickSize(),
+    });
+    if (tool.place && !geometry) return;
+    this.store.execute(createCommand({...doc, ...geometry}));
     this.select(doc.drawing_id);
     if (!this.options.stickyTools?.()) this.setTool(null);
   }
@@ -648,6 +673,8 @@ export class DrawingController {
     transform: PixelTransform
   ): void {
     const base: Omit<RenderState, 'selected' | 'preview'> = {
+      bars: this.options.bars(),
+      invalidate: () => void this.surface.invalidate(),
       palette: this.options.palette(),
       tickSize: this.options.tickSize(),
       durationMs: this.options.durationMs(),

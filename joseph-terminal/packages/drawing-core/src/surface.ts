@@ -26,6 +26,8 @@ export type Disposer = () => void;
 
 /** Pixel/data transforms valid for the current frame only. */
 export interface PixelTransform {
+  /** Returns whether the current price axis uses logarithmic coordinates. */
+  isLog?(): boolean;
   /**
    * Converts a time to an x coordinate.
    * @param timeMs Any time in epoch ms UTC (bar start or between bars,
@@ -139,6 +141,8 @@ export interface DrawingSurface {
 
 /** Bar prices used for magnet snapping (numbers, quote units). */
 export interface SnapBar {
+  /** Optional actual base volume; absent means unreported, not estimated. */
+  volume?: number;
   /** Bar start in epoch ms UTC. */
   timeMs: number;
   /** Open price. */

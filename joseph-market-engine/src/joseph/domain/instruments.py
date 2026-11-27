@@ -22,6 +22,11 @@ class Venue(enum.StrEnum):
     """Supported venues (contract ``Venue``). ``MOCK`` is DEMO-only."""
 
     BINANCE = "binance"
+    BYBIT = "bybit"
+    OKX = "okx"
+    COINBASE = "coinbase"
+    KRAKEN = "kraken"
+    DERIV = "deriv"
     HYPERLIQUID = "hyperliquid"
     LIGHTER = "lighter"
     BITGET = "bitget"
@@ -75,7 +80,7 @@ class AssetClass(enum.StrEnum):
 
 
 _ID_PATTERN = re.compile(
-    r"^(binance|hyperliquid|lighter|bitget|mexc|twse|tpex|nasdaq|nyse|cboe"
+    r"^(bybit|okx|coinbase|kraken|deriv|binance|hyperliquid|lighter|bitget|mexc|twse|tpex|nasdaq|nyse|cboe"
     r"|treasury|mock):(perp|spot|future|stock|etf|rate)"
     r":([A-Za-z0-9._/-]{1,64})$"
 )

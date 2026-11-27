@@ -17,6 +17,7 @@ test('opens more than eight market tabs and restores independent charts', async 
   const tabs = page.getByRole('tablist', {name: 'Chart tabs'});
   for (let index = 0; index < 9; index += 1) {
     await page.getByRole('button', {name: 'Add chart tab'}).click();
+    await page.getByRole('button', {name: 'Candlestick chart'}).click();
   }
   await expect(tabs.getByRole('tab')).toHaveCount(10);
   await expect(page.locator('.chart-grid > .chart-grid__cell')).toHaveCount(1);

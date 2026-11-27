@@ -24,6 +24,7 @@ from collections.abc import AsyncIterator
 from collections.abc import Sequence
 from typing import Protocol
 from typing import TypeGuard
+from typing import runtime_checkable
 
 from joseph.domain import instruments
 from joseph.domain import market
@@ -31,6 +32,48 @@ from joseph.domain import timeframes
 from joseph.market_data.domain import candles as candle_rules
 from joseph.market_data.domain import capabilities
 from joseph.market_data.domain import health
+
+
+@runtime_checkable
+class SnapshotBatchPort(Protocol):
+    """Optional provider support for efficient selected-symbol snapshots."""
+
+    async def fetch_snapshot_batch(
+        self, instruments_: Sequence[instruments.InstrumentId]
+    ) -> list[market.MarketSnapshot]:
+        """Fetches real snapshots for explicitly selected canonical instruments.
+
+        Args:
+            instruments_: Selected instruments, never an unbounded market sweep.
+
+        Returns:
+            Available snapshots; omitted symbols remain explicitly missing.
+
+        Raises:
+            errors.UnsupportedError: If selected-symbol bulk queries are
+                unsupported.
+            errors.JosephError: If the provider rejects or cannot serve the
+                query.
+        """
+        ...
+
+
+@runtime_checkable
+class PriceAdjustmentPort(Protocol):
+    """Declares a source's stable historical price policy for one server run."""
+
+    def price_adjustment(
+        self, timeframe: timeframes.Timeframe
+    ) -> market.PriceAdjustment:
+        """Reports normalization without changing the raw quote/order path.
+
+        Args:
+            timeframe: Requested chart or analysis resolution.
+
+        Returns:
+            Historical price policy, fixed by backend source configuration.
+        """
+        ...
 
 
 class MarketDataPort(Protocol):

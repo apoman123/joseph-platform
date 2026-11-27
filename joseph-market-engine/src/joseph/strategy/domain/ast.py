@@ -28,7 +28,7 @@ from joseph.domain import timeframes
 
 _DECIMAL_PATTERN = re.compile(r"^-?(0|[1-9][0-9]*)(\.[0-9]+)?$")
 _INSTRUMENT_PATTERN = (
-    r"^(binance|hyperliquid|lighter|bitget|mexc|twse|tpex|nasdaq|nyse|cboe"
+    r"^(bybit|okx|coinbase|kraken|deriv|binance|hyperliquid|lighter|bitget|mexc|twse|tpex|nasdaq|nyse|cboe"
     r"|treasury|mock):(perp|spot|future|stock|etf|rate)"
     r":[A-Za-z0-9._/-]{1,64}$"
 )
@@ -743,6 +743,7 @@ SignalKindName: TypeAlias = Literal[
     "SETUP_EXPIRED",
     "QUALIFICATION_CHANGED",
     "POSITION_EXITED",
+    "CUSTOM_ALERT",
 ]
 """Contract ``SignalKind`` values."""
 

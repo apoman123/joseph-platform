@@ -34,6 +34,7 @@ import {
   type FeedMode,
   type FeedState,
   type Instrument,
+  type PriceAdjustment,
   type StreamStatus,
 } from '@joseph/contracts';
 import {
@@ -58,6 +59,7 @@ import {
   seriesAsOf,
 } from '@joseph/drawing-core';
 import {ids} from './ids';
+import {IndicatorLegend, usePythonStudies} from './python-studies';
 import {
   useCallback,
   useEffect,
@@ -188,6 +190,8 @@ export function ChartPane({
     lastUpdateMs: null,
   });
   const [instrument, setInstrument] = useState<Instrument | null>(null);
+  const [priceAdjustment, setPriceAdjustment] =
+    useState<PriceAdjustment | null>(null);
   const [hover, setHover] = useState<ChartBar | null>(null);
   const [lastBar, setLastBar] = useState<ChartBar | null>(null);
   const [now, setNow] = useState(() => Date.now());
@@ -342,6 +346,10 @@ export function ChartPane({
     let loadingEarlier = false;
     let exhausted = false;
     let retryAfterMs = 0;
+    let priceBasis: string | null = null;
+    let basisRefreshAfter: number | undefined;
+    const snapshotUpdates = new Map<number, ChartBar>();
+    setPriceAdjustment(null);
     setStatus({
       phase: 'loading',
       feedState: 'CONNECTING',
@@ -378,6 +386,12 @@ export function ChartPane({
         })
         .then(batch => {
           if (!alive) return;
+          const incomingBasis = `${batch.price_adjustment ?? 'unknown'}:${batch.price_adjustment_epoch_ms ?? ''}`;
+          if (priceBasis !== incomingBasis) {
+            // Corporate actions can rebase every previously loaded page.
+            setLoadAttempt(attempt => attempt + 1);
+            return;
+          }
           const earlier = batch.candles
             .map(toChartBar)
             .filter(bar => bar.timeMs < oldest);
@@ -413,6 +427,7 @@ export function ChartPane({
     const load = (): void => {
       if (loadingHistory || !alive) return;
       loadingHistory = true;
+      snapshotUpdates.clear();
       void runtime.clients.market
         .getCandles({
           instrumentId,
@@ -422,16 +437,20 @@ export function ChartPane({
         })
         .then(batch => {
           if (!alive) return;
-          // Preserve socket updates received while history was loading.
-          const merged = new Map(
-            batch.candles.map(candle => {
-              const bar = toChartBar(candle);
-              return [bar.timeMs, bar] as const;
-            })
-          );
-          for (const bar of barsRef.current) {
+          const incomingBasis = `${batch.price_adjustment ?? 'unknown'}:${batch.price_adjustment_epoch_ms ?? ''}`;
+          // Older pages survive refreshes only while their price basis agrees.
+          const cached = priceBasis === incomingBasis ? barsRef.current : [];
+          const merged = new Map(cached.map(bar => [bar.timeMs, bar]));
+          for (const candle of batch.candles) {
+            const bar = toChartBar(candle);
             merged.set(bar.timeMs, bar);
           }
+          for (const bar of snapshotUpdates.values()) {
+            merged.set(bar.timeMs, bar);
+          }
+          priceBasis = incomingBasis;
+          basisRefreshAfter = batch.price_adjustment_refresh_after_ms;
+          setPriceAdjustment(batch.price_adjustment ?? null);
           const bars = [...merged.values()].sort((a, b) => a.timeMs - b.timeMs);
           barsRef.current = bars;
           const shown = replayVisibleBars(bars, replayRef.current);
@@ -509,6 +528,7 @@ export function ChartPane({
         }
         liveState = candle.feed_state;
         const bar = toChartBar(candle);
+        if (loadingHistory) snapshotUpdates.set(bar.timeMs, bar);
         const bars = barsRef.current;
         const last = bars.at(-1);
         if (last && bar.timeMs < last.timeMs) return;
@@ -543,8 +563,15 @@ export function ChartPane({
         }
       }
     );
+    // Adjusted history may change after the next corporate-action session.
+    const basisTimer = setInterval(() => {
+      if (basisRefreshAfter !== undefined && Date.now() >= basisRefreshAfter) {
+        load();
+      }
+    }, 30_000);
     return () => {
       alive = false;
+      clearInterval(basisTimer);
       historyController.abort();
       loadEarlierRef.current = null;
       unsubscribe();
@@ -617,7 +644,7 @@ export function ChartPane({
       instrumentId: () => instrumentId,
       timeframe: () => timeframe,
       tickSize: () => tickSizeRef.current,
-      bars: () => barsRef.current,
+      bars: () => shownRef.current,
       durationMs: () => TIMEFRAME_MS[timeframe],
       calendar: () => calendarRef.current,
       magnet: () => runtime.drawing.magnet.get(),
@@ -901,6 +928,12 @@ export function ChartPane({
     []
   );
   const delta = useDeltaPane(port, chart, runtime, atMs);
+  const pythonErrors = usePythonStudies(
+    port,
+    chart,
+    runtime,
+    shownRef.current.filter(bar => bar.final).at(-1)?.timeMs ?? null
+  );
   useStudyPanes(port, chart, runtime, atMs);
   useStudyLines(port, chart, runtime, atMs);
   const compare = useCompare(port, chart, runtime, symbolOf);
@@ -948,6 +981,25 @@ export function ChartPane({
             {instrument?.display_symbol ?? venueMarketId}
           </strong>
           <span className="pane__chip">{VENUE_NAMES[venue]}</span>
+          {priceAdjustment && (
+            <span
+              className="pane__chip"
+              data-testid="price-adjustment"
+              title={
+                priceAdjustment === 'ALL'
+                  ? 'Provider-adjusted historical OHLC for splits, dividends and other corporate actions. Volume stays as reported. History can change after later actions; this is not point-in-time data.'
+                  : priceAdjustment === 'SPLIT'
+                    ? 'Historical OHLC adjusted for stock splits by the provider.'
+                    : 'Unadjusted prices. Corporate actions may create visible price gaps.'
+              }
+            >
+              {priceAdjustment === 'ALL'
+                ? 'Adjusted · splits & dividends'
+                : priceAdjustment === 'SPLIT'
+                  ? 'Split adjusted'
+                  : 'Raw prices'}
+            </span>
+          )}
           {instrument?.listing_exchange && (
             <span
               className="pane__chip"
@@ -1105,6 +1157,7 @@ export function ChartPane({
         data-testid="chart-canvas"
         data-replay={replay?.phase ?? 'off'}
       />
+      <IndicatorLegend chart={chart} errors={pythonErrors} />
       {dataWindow && status.phase === 'ready' && (
         <ChartDataWindow
           runtime={runtime}

@@ -29,6 +29,7 @@ SEVERITY_BY_KIND: Mapping[str, str] = {
     "SETUP_EXPIRED": "INFO",
     "QUALIFICATION_CHANGED": "INFO",
     "POSITION_EXITED": "INFO",
+    "CUSTOM_ALERT": "INFO",
 }
 """Contract severity of each signal kind."""
 

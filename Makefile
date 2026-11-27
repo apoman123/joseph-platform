@@ -17,7 +17,7 @@ MARKET_ENV_FILE ?= $(if $(wildcard deploy/.env),$(abspath deploy/.env),)
 .PHONY: help setup dev dev-market dev-execution dev-web lint typecheck \
         test test-python test-terminal test-system test-e2e test-network \
         test-sandbox \
-        contracts openapi ci plugins images compose-up compose-down clean
+        contracts openapi ci plugins script-runner images compose-up compose-down clean
 
 help: ## Show targets
 	@grep -E '^[a-z-]+:.*## ' $(MAKEFILE_LIST) | awk -F':.*## ' '{printf "  %-16s %s\n", $$1, $$2}'
@@ -132,6 +132,9 @@ MARKET_BUILD_ARGS = \
 	$(if $(PLUGIN_GIT_TOKEN),--secret id=plugin_git_token$(comma)env=PLUGIN_GIT_TOKEN) \
 	$(if $(and $(PLUGIN_REQUIREMENTS),$(SSH_AUTH_SOCK)),--ssh default) \
 	$(if $(IMAGE_LICENSES),--build-arg IMAGE_LICENSES='$(IMAGE_LICENSES)')
+
+script-runner: ## Build the isolated Python script executor (requires Docker)
+	docker build -f $(ME)/script-runner/Dockerfile -t joseph-python-runner:1 $(ME)
 
 images: ## Build the three production container images (PLUGIN_REQUIREMENTS for the market image)
 	docker build $(strip $(MARKET_BUILD_ARGS) -t joseph-market-engine:local $(ME))

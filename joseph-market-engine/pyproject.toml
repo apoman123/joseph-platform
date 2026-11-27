@@ -4,7 +4,7 @@ version = "0.6.0"
 description = "Joseph market engine: venue market data, qualification filter, indicator plugins, strategy AST evaluation, signals, alerts and backtests."
 readme = "README.md"
 requires-python = ">=3.12"
-license = { text = "MIT" }
+license = { text = "AGPL-3.0-only" }
 dependencies = [
   "fastapi>=0.115,<1",
   "uvicorn[standard]>=0.32,<1",
@@ -26,6 +26,8 @@ dependencies = [
   "requests>=2.32.5,<3",
   "cryptography>=49,<51",
   "py-vapid>=1.9,<2",
+  "mcp>=2,<3",
+  "docker>=7,<9",
 ]
 
 [dependency-groups]
@@ -51,7 +53,7 @@ requires = ["hatchling>=1.25"]
 build-backend = "hatchling.build"
 
 [tool.hatch.build.targets.wheel]
-packages = ["src/joseph"]
+packages = ["src/joseph", "src/joseph_script"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
@@ -135,6 +137,10 @@ ignore_missing_imports = true
 
 [[tool.mypy.overrides]]
 module = ["pywebpush", "py_vapid"]
+ignore_missing_imports = true
+
+[[tool.mypy.overrides]]
+module = ["docker", "docker.*"]
 ignore_missing_imports = true
 
 [[tool.mypy.overrides]]

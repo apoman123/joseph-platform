@@ -1,0 +1,2 @@
+# Preserve the reviewed upstream snapshot byte for byte, including whitespace.
+joseph-terminal/third_party/tradex/** -whitespace

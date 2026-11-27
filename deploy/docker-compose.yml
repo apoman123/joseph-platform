@@ -32,7 +32,10 @@ services:
     environment:
       <<: *engine-env
       JOSEPH_EXECUTION_URL: http://execution:8100
-      JOSEPH_ENABLED_VENUES: ${JOSEPH_ENABLED_VENUES:-binance,hyperliquid,lighter,bitget,mexc,twse,tpex,nasdaq,nyse,cboe,treasury}
+      JOSEPH_MCP_PUBLIC_URL: ${JOSEPH_MCP_PUBLIC_URL:-http://localhost:8000/mcp}
+      JOSEPH_MCP_SIGNING_KEY: ${JOSEPH_MCP_SIGNING_KEY:-}
+      JOSEPH_MCP_SIGNING_KEY_FILE: ${JOSEPH_MCP_SIGNING_KEY_FILE:-}
+      JOSEPH_ENABLED_VENUES: ${JOSEPH_ENABLED_VENUES:-binance,bybit,okx,coinbase,kraken,deriv,twse,tpex,nasdaq,nyse,cboe,treasury}
       JOSEPH_DEMO_ONLY: ${JOSEPH_DEMO_ONLY:-false}
       JOSEPH_DATABASE_URL: ${JOSEPH_MARKET_DATABASE_URL:-sqlite:////app/var/market.db}
       # Indicator plugins: entry points to load ("*", "none" or names),
@@ -46,6 +49,7 @@ services:
       JOSEPH_ALPACA_FEED: ${JOSEPH_ALPACA_FEED:-iex}
       # Taiwan market data: free-tier Fugle when a key is configured.
       JOSEPH_TW_DATA_SOURCE: ${JOSEPH_TW_DATA_SOURCE:-fugle}
+      JOSEPH_FUGLE_ADJUSTED_DAILY: ${JOSEPH_FUGLE_ADJUSTED_DAILY:-true}
       JOSEPH_FUGLE_API_KEY: ${JOSEPH_FUGLE_API_KEY:-}
       JOSEPH_FRED_API_KEY: ${JOSEPH_FRED_API_KEY:-}
       JOSEPH_MEXC_WS_FORMAT: ${JOSEPH_MEXC_WS_FORMAT:-protobuf}

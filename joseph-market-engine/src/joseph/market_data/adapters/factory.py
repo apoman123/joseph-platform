@@ -16,6 +16,7 @@ from joseph.market_data.adapters import alpaca
 from joseph.market_data.adapters import binance
 from joseph.market_data.adapters import bitget
 from joseph.market_data.adapters import ccxt
+from joseph.market_data.adapters import deriv
 from joseph.market_data.adapters import fred
 from joseph.market_data.adapters import fugle
 from joseph.market_data.adapters import http
@@ -23,6 +24,7 @@ from joseph.market_data.adapters import hyperliquid
 from joseph.market_data.adapters import lighter
 from joseph.market_data.adapters import mexc
 from joseph.market_data.adapters import mock
+from joseph.market_data.adapters import public_sources
 from joseph.market_data.adapters import tpex
 from joseph.market_data.adapters import treasury
 from joseph.market_data.adapters import twse
@@ -92,9 +94,10 @@ def build_adapters(  # noqa: PLR0912 - explicit venue dispatch remains legible
     alpaca_config: alpaca.AlpacaConfig | None = None,
     mexc_ws_format: mexc.WsFormat = mexc.WsFormat.PROTOBUF,
     fugle_api_key: str | None = None,
+    fugle_adjusted_daily: bool = True,
     fred_api_key: str | None = None,
     bar_archive: bar_archive_lib.BarArchive | None = None,
-    crypto_source: str = "ccxt",
+    crypto_source: str = "native",
 ) -> dict[instruments.Venue, ports.MarketDataPort]:
     """Constructs one adapter per requested venue.
 
@@ -110,10 +113,11 @@ def build_adapters(  # noqa: PLR0912 - explicit venue dispatch remains legible
         mexc_ws_format: Push format of the MEXC futures WebSocket.
         fugle_api_key: Fugle free-tier market-data key; ``None`` uses only
             the official TWSE/TPEx sources.
+        fugle_adjusted_daily: Normalize daily Fugle OHLC for corporate actions.
         fred_api_key: Optional FRED key for distinct daily rate series.
         bar_archive: Durable store of the TWSE/TPEx recorded minutes.
-        crypto_source: ``ccxt`` for the active free REST feed (default), or
-            ``native`` for legacy adapter contract tests.
+        crypto_source: ``native`` for exchange APIs and public WebSockets
+            (default); ``ccxt`` retains the optional compatibility adapter.
 
     Returns:
         Adapter per venue, in the requested order.
@@ -219,12 +223,22 @@ def build_adapters(  # noqa: PLR0912 - explicit venue dispatch remains legible
                 limiter=shared_fugle_limiter(),
             ),
             clock,
+            adjusted_daily=fugle_adjusted_daily,
         )
 
     adapters: dict[instruments.Venue, ports.MarketDataPort] = {}
     for venue in venues:
         if venue is instruments.Venue.MOCK:
             adapters[venue] = mock.MockAdapter(clock)
+        elif venue is instruments.Venue.DERIV:
+            adapters[venue] = deriv.DerivAdapter(clock, connect)
+        elif venue in public_sources.URLS:
+            adapters[venue] = public_sources.PublicSourceAdapter(
+                venue,
+                venue_http(venue, public_sources.URLS[venue], (3.0, 5)),
+                clock,
+                connect,
+            )
         elif venue in ccxt.EXCHANGES and crypto_source == "ccxt":
             adapters[venue] = ccxt.CcxtAdapter(venue, clock)
         elif venue is instruments.Venue.BINANCE:

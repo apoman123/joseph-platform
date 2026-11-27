@@ -19,17 +19,17 @@
   color-scheme: dark;
 
   /* Surfaces */
-  --abyss: #0c1820;
-  --hull: #122431;
-  --swell: #1a3141;
-  --swell-strong: #213b4e;
-  --fathom: #2a4558;
-  --fathom-soft: #1f3646;
+  --abyss: #0a0a0b;
+  --hull: #131416;
+  --swell: #1c1e21;
+  --swell-strong: #24272b;
+  --fathom: #363a40;
+  --fathom-soft: #2a2d31;
 
   /* Text */
-  --chalk: #e4edf1;
-  --haze: #8fa5b3;
-  --haze-dim: #7f96a5;
+  --chalk: #e8ecee;
+  --haze: #b4bcbf;
+  --haze-dim: #a0a8af;
 
   /* Roles */
   --bid: #3cc79a;
@@ -45,10 +45,10 @@
   --focus-ring: #e66fd2;
 
   /* Chart canvas */
-  --chart-bg: #0e1c25;
-  --chart-grid: #172b38;
-  --chart-text: #8fa5b3;
-  --chart-crosshair: #5d7686;
+  --chart-bg: #0a0a0b;
+  --chart-grid: #1c1e21;
+  --chart-text: #b4bcbf;
+  --chart-crosshair: #797e86;
 
   /* Typography. `--font-archivo` is set by next/font in the root layout;
      the width tokens are values of Archivo's `wdth` variation axis. */

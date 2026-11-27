@@ -9,8 +9,9 @@
 'use client';
 import {parseInstrumentId, VENUE_NAMES} from '@joseph/contracts';
 import {Plus, X} from 'lucide-react';
-import {useEffect, useRef, type ReactElement} from 'react';
+import {useEffect, useRef, useState, type ReactElement} from 'react';
 import {ids} from './ids';
+import {ScriptDialog} from './script-dialog';
 import {useStore} from './react-bindings';
 import {useRuntime} from './runtime-context';
 
@@ -21,12 +22,16 @@ import {useRuntime} from './runtime-context';
 export function ChartTabs(): ReactElement {
   const runtime = useRuntime();
   const workspace = useStore(runtime.workspace);
+  const [adding, setAdding] = useState(false);
   const active = useRef<HTMLButtonElement>(null);
   const tabs = workspace.charts.map(chart => {
     const instrument = parseInstrumentId(chart.instrument_id);
     return {
       chart,
-      label: `${instrument.venueMarketId} · ${chart.timeframe}`,
+      label:
+        chart.view_type === 'stock_heatmap'
+          ? 'Stock heatmap'
+          : `${instrument.venueMarketId} · ${chart.timeframe}`,
       venue: VENUE_NAMES[instrument.venue],
     };
   });
@@ -126,16 +131,35 @@ export function ChartTabs(): ReactElement {
         type="button"
         className="j-btn j-btn--ghost j-btn--icon chart-tabs__add"
         aria-label="Add chart tab"
-        title="Add chart tab — choose its market with the symbol picker"
-        onClick={() =>
-          void runtime.dispatch({
-            type: 'addChart',
-            chartId: `chart-${ids.next()}`,
-          })
-        }
+        title="Choose a candlestick chart or stock heatmap"
+        aria-haspopup="dialog"
+        aria-expanded={adding}
+        onClick={() => void setAdding(true)}
       >
         <Plus size={16} aria-hidden="true" />
       </button>
+      {adding && (
+        <ScriptDialog title="New tab" onClose={() => void setAdding(false)}>
+          <p>Choose what to explore.</p>
+          {(['candles', 'stock_heatmap'] as const).map(viewType => (
+            <button
+              key={viewType}
+              type="button"
+              className="j-btn"
+              onClick={() => {
+                runtime.dispatch({
+                  type: 'addChart',
+                  chartId: `chart-${ids.next()}`,
+                  viewType,
+                });
+                setAdding(false);
+              }}
+            >
+              {viewType === 'candles' ? 'Candlestick chart' : 'Stock heatmap'}
+            </button>
+          ))}
+        </ScriptDialog>
+      )}
     </div>
   );
 }

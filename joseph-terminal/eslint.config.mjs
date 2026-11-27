@@ -258,6 +258,7 @@ export default tseslint.config(
   {
     ignores: [
       '**/node_modules/**',
+      'third_party/**',
       '**/.next/**',
       '**/.next-e2e/**',
       '**/coverage/**',

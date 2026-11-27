@@ -42,7 +42,10 @@ from joseph.api import app as api_app
 from joseph.api import deps
 from joseph.api.routers import alerts as alerts_router
 from joseph.api.routers import backtests as backtests_router
+from joseph.api.routers import heatmap as heatmap_router
 from joseph.api.routers import indicators as indicators_router
+from joseph.api.routers import script_jobs as script_jobs_router
+from joseph.api.routers import scripts as scripts_router
 from joseph.api.routers import signals as signals_router
 from joseph.api.routers import strategies as strategies_router
 from joseph.backtest import runner as backtest_runner
@@ -68,12 +71,16 @@ from joseph.market_data.adapters import ws
 from joseph.market_data.app import candle_store
 from joseph.market_data.app import derived_bars
 from joseph.market_data.app import feed_router
+from joseph.market_data.app import heatmap as heatmap_service
 from joseph.market_data.app import ports
 from joseph.market_data.app import registry
 from joseph.market_data.app import service as market_service
 from joseph.market_data.app import trade_recorder
+from joseph.market_data.app import universe as market_universe
 from joseph.market_data.domain import candles as candle_rules
 from joseph.market_data.domain import health
+from joseph.mcp import application as mcp_application
+from joseph.mcp import terminal as terminal_control
 from joseph.pipeline import frames as pipeline_frames
 from joseph.pipeline import live as pipeline_live
 from joseph.pipeline import market_context
@@ -88,6 +95,10 @@ from joseph.platform import redaction
 from joseph.platform import streaming
 from joseph.screening.adapters import coingecko
 from joseph.screening.app import service as screening_service
+from joseph.scripts import jobs as script_jobs
+from joseph.scripts import repository as script_repository
+from joseph.scripts import runner as script_runner
+from joseph.scripts import service as script_service
 from joseph.signals.adapters import sql as signals_sql
 from joseph.signals.app import service as signal_service
 from joseph.strategy.adapters import sql as strategy_sql
@@ -159,6 +170,9 @@ class Container:
             the database engine; a hook may return an awaitable, which is
             awaited.
         recorder: Optional public-trade recorder.
+        starters: Background producer startup hooks, after the delivery worker.
+        stoppers: Producer shutdown hooks, before delivery and data sources
+            stop.
     """
 
     settings: config.Settings
@@ -182,6 +196,10 @@ class Container:
         default_factory=list
     )
     recorder: trade_recorder.TradeRecorder | None = None
+    starters: list[Callable[[], None]] = dataclasses.field(default_factory=list)
+    stoppers: list[Callable[[], object]] = dataclasses.field(
+        default_factory=list
+    )
 
     async def astart(self) -> None:
         """Starts the background workers.
@@ -202,6 +220,8 @@ class Container:
         stack.outbox_worker.start(self.settings.alert_interval_s)
         if self.settings.pipeline_enabled:
             stack.pipeline.start()
+        for starter in self.starters:
+            starter()
 
     async def aclose(self) -> None:
         """Stops workers and feeds and closes network resources.
@@ -212,6 +232,10 @@ class Container:
         trade recorder before the adapters they read from, and the database
         engine last.
         """
+        for stopper in self.stoppers:
+            result = stopper()
+            if hasattr(result, "__await__"):
+                await result
         stack = self.signal_stack
         if stack is not None:
             await stack.pipeline.stop()
@@ -268,7 +292,7 @@ def build_container(
     raw_adapters = factory.build_adapters(
         settings.active_venues,
         clock,
-        crypto_source="ccxt",
+        crypto_source="native",
         timeout_s=settings.http_timeout_s,
         client=http_client,
         connect=connect,
@@ -284,6 +308,7 @@ def build_container(
             if settings.tw_data_source == "fugle"
             else None
         ),
+        fugle_adjusted_daily=settings.fugle_adjusted_daily,
         fred_api_key=settings.fred_api_key,
         bar_archive=(
             bar_archive_sql.SqlBarArchive(archive_engine or engine)
@@ -777,6 +802,52 @@ def create_application(
     redaction.configure_logging()
     built = container or build_container()
     routers = list(extra_routers)
+    scripts = script_service.ScriptService(
+        script_repository.ScriptRepository(built.engine),
+        script_runner.DockerRunner(
+            enabled=built.settings.script_runtime == "docker",
+            image=built.settings.script_runner_image,
+            timeout_s=built.settings.script_timeout_s,
+        ),
+        built.market_data,
+    )
+    routers.append(scripts_router.build_router(scripts, deps.get_principal))
+    universe = market_universe.UniverseService(built.market_data)
+    routers.append(
+        heatmap_router.build_router(
+            heatmap_service.HeatmapService(universe, built.engine),
+            deps.get_principal,
+        )
+    )
     if built.signal_stack is not None:
+        jobs = script_jobs.ScriptJobs(
+            scripts,
+            universe,
+            built.engine,
+            history=built.signal_stack.signals,
+            subscriptions=alerts_sql.SqlSubscriptionRepository(built.engine),
+            outbox=alerts_sql.SqlOutbox(built.engine),
+        )
+        built.starters.append(jobs.start)
+        built.stoppers.append(jobs.stop)
+        routers.append(
+            script_jobs_router.build_router(jobs, deps.get_principal)
+        )
         routers = signal_routers(built.signal_stack) + routers
-    return api_app.create_app(built, routers)
+    terminal = terminal_control.TerminalHub(
+        built.authenticator, built.settings.cors_origins
+    )
+    routers.append(terminal_control.build_router(terminal, deps.get_principal))
+    app = api_app.create_app(built, routers)
+    app.state.python_scripts = scripts
+    app.state.terminal_hub = terminal
+    if built.signal_stack is not None:
+        app.state.script_jobs = jobs
+    mcp_application.install(
+        app,
+        engine=built.engine,
+        settings=built.settings,
+        get_principal=deps.get_principal,
+        closers=built.closers,
+    )
+    return app

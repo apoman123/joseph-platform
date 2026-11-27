@@ -93,6 +93,9 @@ export default defineConfig({
       env: {
         ...ENGINE_ENV,
         ...PUSH_KEYS,
+        JOSEPH_MCP_PUBLIC_URL: `http://127.0.0.1:${MARKET}/mcp`,
+        JOSEPH_SCRIPT_RUNTIME:
+          process.env.JOSEPH_SCRIPT_TESTS === '1' ? 'docker' : 'disabled',
         JOSEPH_DEMO_ONLY: 'true',
         JOSEPH_DATABASE_URL: 'sqlite://',
         JOSEPH_EXECUTION_URL: `http://127.0.0.1:${EXECUTION}`,

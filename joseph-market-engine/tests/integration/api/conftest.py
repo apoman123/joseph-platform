@@ -39,7 +39,13 @@ def _legacy_venues(
     Returns:
         Configured venues, including removed data-feed variants.
     """
-    return settings.enabled_venues
+    del settings
+    return tuple(
+        venue
+        for venue in instruments.Venue
+        if venue.value
+        not in {"bybit", "okx", "coinbase", "kraken", "deriv", "mock"}
+    )
 
 
 def _settings(**overrides: Any) -> config.Settings:

@@ -1,0 +1,42 @@
+# secrets
+.env
+*.env
+!.env.example
+*.pem
+*.key
+id_rsa*
+id_ed25519*
+
+# runtime
+hub/logs/
+hub/.cache/
+bridge/.bridge_offset
+__pycache__/
+*.pyc
+.venv/
+venv/
+# made by the installer (setup/): user data, private Python + caches, portable MetaTrader 5, launcher
+/data/
+hub/user_data/
+hub/pine_cache/
+hub/arm_symbols_cache.json
+hub/arm_nodata.json
+/private/
+/runtime/
+/mt5/
+/TradeX.cmd
+/tradex.sh
+
+# build
+build/node_modules/
+
+# editors / OS
+.vscode/
+.idea/
+.DS_Store
+Thumbs.db
+*.bak*
+
+# web beta build output (scripts/build_web.py)
+/web_dist/
+/.vercel/

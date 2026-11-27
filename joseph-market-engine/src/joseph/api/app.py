@@ -87,8 +87,14 @@ def create_app(
             Control while the app serves requests.
         """
         await container.astart()
-        yield
-        await container.aclose()
+        try:
+            async with contextlib.AsyncExitStack() as stack:
+                mcp_lifespan = getattr(app.state, "mcp_lifespan", None)
+                if mcp_lifespan is not None:
+                    await stack.enter_async_context(mcp_lifespan())
+                yield
+        finally:
+            await container.aclose()
 
     app = fastapi.FastAPI(
         title="Joseph Market Engine",
@@ -107,8 +113,17 @@ def create_app(
         allow_origins=list(container.settings.cors_origins),
         allow_credentials=False,
         allow_methods=["GET", "POST", "PUT", "DELETE"],
-        allow_headers=["Authorization", "Content-Type", "Idempotency-Key"],
-        expose_headers=["X-Trace-Id"],
+        allow_headers=[
+            "Authorization",
+            "Content-Type",
+            "Idempotency-Key",
+            "Mcp-Method",
+            "Mcp-Name",
+            "Mcp-Protocol-Version",
+            "Mcp-Session-Id",
+            "Last-Event-ID",
+        ],
+        expose_headers=["X-Trace-Id", "Mcp-Session-Id"],
     )
     requests_total = container.metrics.counter(
         "joseph_http_requests_total", "HTTP requests served."

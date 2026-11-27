@@ -53,7 +53,19 @@ def _service(
     [
         v
         for v in instruments.Venue
-        if v is not instruments.Venue.MOCK and v not in instruments.RATE_VENUES
+        if v
+        in (
+            instruments.Venue.BINANCE,
+            instruments.Venue.HYPERLIQUID,
+            instruments.Venue.LIGHTER,
+            instruments.Venue.BITGET,
+            instruments.Venue.MEXC,
+            instruments.Venue.TWSE,
+            instruments.Venue.TPEX,
+            instruments.Venue.NASDAQ,
+            instruments.Venue.NYSE,
+            instruments.Venue.CBOE,
+        )
     ],
     ids=lambda v: v.value,
 )

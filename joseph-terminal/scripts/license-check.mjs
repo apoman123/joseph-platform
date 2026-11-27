@@ -23,9 +23,10 @@ import {fileURLToPath} from 'node:url';
 /** The joseph-terminal directory, the parent of this script's folder. */
 const ROOT = join(fileURLToPath(new URL('.', import.meta.url)), '..');
 
-/** SPDX identifiers accepted without review. */
+/** Reviewed SPDX identifiers for the AGPL integrated application. */
 const ALLOWED = new Set([
   'MIT',
+  'AGPL-3.0-only',
   'ISC',
   'Apache-2.0',
   'BSD-2-Clause',
@@ -83,6 +84,11 @@ let count = 0;
 for (const [license, packages] of Object.entries(byLicense)) {
   for (const pkg of packages) {
     count += 1;
+    if (pkg.name === 'pinets' || pkg.name === '@luxalgo/vela-pinets') {
+      problems.push(
+        `${pkg.name}: Joseph uses Python scripts; Pine runtimes must not ship`
+      );
+    }
     const exception = EXCEPTIONS.find(e => pkg.name.startsWith(e.prefix));
     if (exception && !allowed(license)) {
       console.log(`Exception: ${pkg.name} (${license}): ${exception.reason}`);
@@ -94,6 +100,20 @@ for (const [license, packages] of Object.entries(byLicense)) {
       );
     }
   }
+}
+
+const aggregateLicense = readFileSync(join(ROOT, 'LICENSE'), 'utf8');
+if (!aggregateLicense.includes('GNU AFFERO GENERAL PUBLIC LICENSE')) {
+  problems.push(
+    'The TradeX integration requires the approved AGPL-3.0 license'
+  );
+}
+if (
+  !readFileSync(join(ROOT, 'NOTICE'), 'utf8').includes(
+    'Based on TradeX by Saifullah Shafin'
+  )
+) {
+  problems.push('NOTICE must preserve the upstream TradeX attribution');
 }
 
 const notices = join(ROOT, 'docs', 'THIRD_PARTY_NOTICES.md');

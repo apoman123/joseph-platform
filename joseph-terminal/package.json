@@ -3,7 +3,7 @@
   "version": "0.5.0",
   "private": true,
   "description": "Joseph Terminal: open-source multi-venue charting and trading terminal (public repository).",
-  "license": "MIT",
+  "license": "AGPL-3.0-only",
   "packageManager": "pnpm@10.34.9",
   "engines": {
     "node": ">=20.19"
@@ -24,9 +24,10 @@
     "contracts:check": "node packages/contracts/scripts/generate-types.mjs --check",
     "arch:check": "depcruise --config .dependency-cruiser.cjs apps packages",
     "secrets:scan": "node scripts/secret-scan.mjs",
-    "licenses:check": "node scripts/license-check.mjs",
+    "licenses:check": "pnpm upstream:check && node scripts/license-check.mjs",
     "ci": "pnpm contracts:check && pnpm lint && pnpm typecheck && pnpm test && pnpm arch:check && pnpm secrets:scan && pnpm licenses:check && pnpm build",
-    "test:e2e:fullstack": "pnpm --filter @joseph/web test:e2e:fullstack"
+    "test:e2e:fullstack": "pnpm --filter @joseph/web test:e2e:fullstack",
+    "upstream:check": "node scripts/upstream-check.mjs"
   },
   "devDependencies": {
     "@axe-core/playwright": "4.14.0",

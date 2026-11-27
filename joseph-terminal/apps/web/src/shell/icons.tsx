@@ -11,6 +11,9 @@
 import type {ReactElement} from 'react';
 import {
   Activity,
+  Crosshair,
+  Image as ImageIcon,
+  Star,
   AlignJustify,
   Anchor,
   ArrowDownRight,
@@ -63,6 +66,9 @@ import {
 /** Icons by the ids that tool manifests use. */
 const ICONS: Readonly<Record<string, LucideIcon>> = {
   'activity': Activity,
+  'crosshair': Crosshair,
+  'image': ImageIcon,
+  'star': Star,
   'align-justify': AlignJustify,
   'anchor': Anchor,
   'arrow-down-right': ArrowDownRight,

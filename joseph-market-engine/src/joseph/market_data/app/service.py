@@ -49,6 +49,9 @@ from joseph.market_data.domain import candles as candle_rules
 from joseph.market_data.domain import capabilities
 from joseph.market_data.domain import health
 
+ADJUSTMENT_REFRESH_MS = 900_000
+"""Fifteen-minute bound on cached corporate-action normalized history."""
+
 DEFAULT_LIMIT = 500
 """Bars a batch returns when the caller gives no limit."""
 MAX_LIMIT = 5_000
@@ -72,6 +75,8 @@ class CandleBatchResult:
         feed_state: Provenance of the batch.
         source: Origin label, e.g. ``binance.ws`` or ``binance.poll``.
         as_of_ms: Query time, epoch milliseconds.
+        price_adjustment: Corporate-action normalization of historical OHLC;
+            None when a legacy replay has no reliable price-basis metadata.
         gaps: Missing closed-bar ranges as half-open ``(from_ms, to_ms)``
             pairs.
     """
@@ -83,6 +88,7 @@ class CandleBatchResult:
     source: str
     as_of_ms: int
     gaps: tuple[tuple[int, int], ...]
+    price_adjustment: market.PriceAdjustment | None = None
 
     @property
     def complete(self) -> bool:
@@ -95,7 +101,7 @@ class CandleBatchResult:
         Returns:
             JSON-compatible dict.
         """
-        return {
+        result: dict[str, object] = {
             "schema_version": 1,
             "instrument_id": str(self.instrument_id),
             "timeframe": self.timeframe.value,
@@ -106,6 +112,18 @@ class CandleBatchResult:
             "complete": self.complete,
             "gaps": [{"from_ms": a, "to_ms": b} for a, b in self.gaps],
         }
+        if self.price_adjustment is not None:
+            result["price_adjustment"] = self.price_adjustment.value
+            if self.price_adjustment is not market.PriceAdjustment.RAW:
+                result["price_adjustment_epoch_ms"] = (
+                    self.as_of_ms
+                    // ADJUSTMENT_REFRESH_MS
+                    * ADJUSTMENT_REFRESH_MS
+                )
+                result["price_adjustment_refresh_after_ms"] = (
+                    self.as_of_ms // ADJUSTMENT_REFRESH_MS + 1
+                ) * ADJUSTMENT_REFRESH_MS
+        return result
 
 
 def as_instrument_id(
@@ -259,6 +277,9 @@ class MarketDataService:
         self.stale_after_ms = stale_after_ms
         self._max_refresh_bars = max_refresh_bars
         self._recorded = recorded
+        self._adjustment_epochs: dict[
+            tuple[instruments.InstrumentId, timeframes.Timeframe], int
+        ] = {}
         self._snapshots: dict[
             instruments.InstrumentId, tuple[int, market.MarketSnapshot]
         ] = {}
@@ -439,6 +460,17 @@ class MarketDataService:
             max_bars: Bars after which no further round is started.
         """
         now = self._clock.now_ms()
+        adapter = self.adapter(instrument.venue)
+        if (
+            isinstance(adapter, ports.PriceAdjustmentPort)
+            and adapter.price_adjustment(timeframe)
+            is not market.PriceAdjustment.RAW
+        ):
+            key = (instrument, timeframe)
+            epoch = now // ADJUSTMENT_REFRESH_MS
+            if self._adjustment_epochs.get(key) != epoch:
+                self._store.invalidate(instrument, timeframe)
+                self._adjustment_epochs[key] = epoch
         calendar = sessions.for_instrument(instrument)
         current, last_closed = closed_through(calendar, timeframe, now)
         closed_end = min(end_ms, current)
@@ -578,6 +610,7 @@ class MarketDataService:
                 start = sessions.lookback_start(calendar, tf, end, bars)
         if end <= start:
             raise errors.ValidationFailedError("to_ms must be after from_ms")
+        price_adjustment: market.PriceAdjustment | None = None
         if feed_mode is quality.FeedMode.REPLAY:
             if self._replay is None:
                 raise errors.MissingDataError("no replay source configured")
@@ -586,7 +619,10 @@ class MarketDataService:
             )
             state, source = quality.FeedState.REPLAY, "replay"
         else:
-            self.adapter(instrument.venue)
+            adapter = self.adapter(instrument.venue)
+            price_adjustment = market.PriceAdjustment.RAW
+            if isinstance(adapter, ports.PriceAdjustmentPort):
+                price_adjustment = adapter.price_adjustment(tf)
             await self._refresh(instrument, tf, start, end, bars)
             rows = self._enrich(
                 self._store.range(instrument, tf, start, end)[-bars:]
@@ -611,6 +647,7 @@ class MarketDataService:
             instrument_id=instrument,
             timeframe=tf,
             candles=tuple(rows),
+            price_adjustment=price_adjustment,
             feed_state=state,
             source=source,
             as_of_ms=now,
@@ -698,6 +735,47 @@ class MarketDataService:
         self._snapshots[instrument] = (now, snapshot)
         return snapshot
 
+    async def get_snapshot_batch(
+        self, instrument_ids: Sequence[instruments.InstrumentId]
+    ) -> list[market.MarketSnapshot]:
+        """Fetches selected snapshots efficiently when their source supports it.
+
+        Args:
+            instrument_ids: One venue's canonical instruments, at most two
+                hundred.
+
+        Returns:
+            Provider-returned snapshots, also populating the normal quote cache.
+
+        Raises:
+            errors.ValidationFailedError: If empty, oversized or mixed-venue.
+            errors.UnsupportedError: If selected-symbol bulk snapshots are
+                unsupported.
+            errors.JosephError: If the configured provider rejects the query.
+        """
+        if (
+            not instrument_ids
+            or len(instrument_ids) > 200
+            or len({item.venue for item in instrument_ids}) != 1
+        ):
+            raise errors.ValidationFailedError(
+                "snapshot batches need one venue and one through two "
+                "hundred instruments"
+            )
+        venue = instrument_ids[0].venue
+        adapter = self.adapter(venue)
+        if not isinstance(adapter, ports.SnapshotBatchPort):
+            raise errors.UnsupportedError(
+                "provider has no selected-symbol bulk quotes"
+            )
+        snapshots = await self._call(
+            venue, adapter.fetch_snapshot_batch(instrument_ids)
+        )
+        now = self._clock.now_ms()
+        for snapshot in snapshots:
+            self._snapshots[snapshot.instrument_id] = (now, snapshot)
+        return snapshots
+
     async def get_order_book(
         self, instrument_id: instruments.InstrumentId | str, depth: int = 50
     ) -> market.OrderBook:
@@ -746,15 +824,28 @@ class MarketDataService:
     def venue_status(
         self,
     ) -> list[tuple[capabilities.VenueCapabilities, health.FeedHealth]]:
-        """Returns capabilities and health of every enabled venue.
+        """Returns capabilities and observed connection/discovery health.
+
+        Failed discovery is visible before a chart subscribes. A discovery
+        failure never overrides an already functioning price connection, and
+        a successful symbol list alone never claims a live price connection.
 
         Returns:
             ``(capabilities, health)`` pairs in venue configuration order.
         """
-        return [
-            (adapter.capabilities(), self._router.venue_health(venue))
-            for venue, adapter in self._adapters.items()
-        ]
+        statuses = []
+        for venue, adapter in self._adapters.items():
+            observed = self._router.venue_health(venue)
+            failure = self.registry.errors.get(venue)
+            if failure and observed.transport is quality.Transport.NONE:
+                observed = dataclasses.replace(
+                    observed,
+                    state=quality.HealthState.UNAVAILABLE,
+                    feed_state=quality.FeedState.UNAVAILABLE,
+                    last_error=failure,
+                )
+            statuses.append((adapter.capabilities(), observed))
+        return statuses
 
 
 @contextlib.contextmanager

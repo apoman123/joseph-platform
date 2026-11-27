@@ -8,148 +8,453 @@
       "title": "DrawingAnchor",
       "type": "object",
       "additionalProperties": false,
-      "required": ["time_ms", "price"],
+      "required": [
+        "time_ms",
+        "price"
+      ],
       "properties": {
-        "time_ms": {"$ref": "common.schema.json#/$defs/TimestampMs"},
-        "price": {"$ref": "common.schema.json#/$defs/DecimalString"}
+        "time_ms": {
+          "$ref": "common.schema.json#/$defs/TimestampMs"
+        },
+        "price": {
+          "$ref": "common.schema.json#/$defs/DecimalString"
+        }
       }
     },
     "DrawingStyle": {
       "title": "DrawingStyle",
       "type": "object",
       "additionalProperties": false,
-      "required": ["color", "line_width", "line_style"],
+      "required": [
+        "color",
+        "line_width",
+        "line_style"
+      ],
       "properties": {
-        "color": {"type": "string", "pattern": "^#[0-9a-fA-F]{6}([0-9a-fA-F]{2})?$"},
-        "line_width": {"type": "integer", "minimum": 1, "maximum": 8},
-        "line_style": {"type": "string", "enum": ["solid", "dashed", "dotted"]},
-        "fill_color": {"type": ["string", "null"], "pattern": "^#[0-9a-fA-F]{6}([0-9a-fA-F]{2})?$"},
-        "text_color": {"type": ["string", "null"]},
-        "font_size": {"type": "integer", "minimum": 8, "maximum": 48},
-        "extend_left": {"type": "boolean"},
-        "extend_right": {"type": "boolean"},
-        "show_labels": {"type": "boolean"}
+        "color": {
+          "type": "string",
+          "pattern": "^#[0-9a-fA-F]{6}([0-9a-fA-F]{2})?$"
+        },
+        "line_width": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 50,
+          "description": "Stroke width in CSS pixels (1..50), including broad highlighter strokes."
+        },
+        "line_style": {
+          "type": "string",
+          "enum": [
+            "solid",
+            "dashed",
+            "dotted"
+          ]
+        },
+        "fill_color": {
+          "type": [
+            "string",
+            "null"
+          ],
+          "pattern": "^#[0-9a-fA-F]{6}([0-9a-fA-F]{2})?$"
+        },
+        "text_color": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "font_size": {
+          "type": "integer",
+          "minimum": 8,
+          "maximum": 48
+        },
+        "extend_left": {
+          "type": "boolean"
+        },
+        "extend_right": {
+          "type": "boolean"
+        },
+        "show_labels": {
+          "type": "boolean"
+        }
       }
     },
     "DrawingDocument": {
       "title": "DrawingDocument",
       "type": "object",
       "additionalProperties": false,
-      "required": ["schema_version", "drawing_id", "tool_id", "tool_version", "instrument_id", "anchors", "style", "locked", "visible", "z_index", "created_at_ms", "updated_at_ms"],
+      "required": [
+        "schema_version",
+        "drawing_id",
+        "tool_id",
+        "tool_version",
+        "instrument_id",
+        "anchors",
+        "style",
+        "locked",
+        "visible",
+        "z_index",
+        "created_at_ms",
+        "updated_at_ms"
+      ],
       "properties": {
-        "schema_version": {"const": 1},
-        "drawing_id": {"type": "string"},
-        "tool_id": {"type": "string", "description": "Plugin id, e.g. `trendline`, `fib-retracement`."},
-        "tool_version": {"type": "integer", "minimum": 1},
-        "instrument_id": {"$ref": "common.schema.json#/$defs/InstrumentId"},
-        "timeframe": {"oneOf": [{"$ref": "common.schema.json#/$defs/Timeframe"}, {"type": "null"}], "description": "null = visible on every timeframe."},
-        "anchors": {"type": "array", "maxItems": 64, "items": {"$ref": "#/$defs/DrawingAnchor"}},
-        "style": {"$ref": "#/$defs/DrawingStyle"},
-        "text": {"type": ["string", "null"], "maxLength": 2000},
-        "props": {"type": "object", "description": "Tool-specific settings, e.g. fib levels or position quantity."},
-        "locked": {"type": "boolean"},
-        "visible": {"type": "boolean"},
-        "z_index": {"type": "integer"},
-        "created_at_ms": {"$ref": "common.schema.json#/$defs/TimestampMs"},
-        "updated_at_ms": {"$ref": "common.schema.json#/$defs/TimestampMs"}
+        "schema_version": {
+          "const": 1
+        },
+        "drawing_id": {
+          "type": "string"
+        },
+        "tool_id": {
+          "type": "string",
+          "description": "Plugin id, e.g. `trendline`, `fib-retracement`."
+        },
+        "tool_version": {
+          "type": "integer",
+          "minimum": 1
+        },
+        "instrument_id": {
+          "$ref": "common.schema.json#/$defs/InstrumentId"
+        },
+        "timeframe": {
+          "oneOf": [
+            {
+              "$ref": "common.schema.json#/$defs/Timeframe"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "description": "null = visible on every timeframe."
+        },
+        "anchors": {
+          "type": "array",
+          "maxItems": 64,
+          "items": {
+            "$ref": "#/$defs/DrawingAnchor"
+          }
+        },
+        "style": {
+          "$ref": "#/$defs/DrawingStyle"
+        },
+        "text": {
+          "type": [
+            "string",
+            "null"
+          ],
+          "maxLength": 2000
+        },
+        "props": {
+          "type": "object",
+          "description": "Tool-specific settings, e.g. fib levels or position quantity."
+        },
+        "locked": {
+          "type": "boolean"
+        },
+        "visible": {
+          "type": "boolean"
+        },
+        "z_index": {
+          "type": "integer"
+        },
+        "created_at_ms": {
+          "$ref": "common.schema.json#/$defs/TimestampMs"
+        },
+        "updated_at_ms": {
+          "$ref": "common.schema.json#/$defs/TimestampMs"
+        }
       }
     },
     "DrawingCollection": {
       "title": "DrawingCollection",
       "type": "object",
       "additionalProperties": false,
-      "required": ["schema_version", "workspace_id", "instrument_id", "drawings"],
+      "required": [
+        "schema_version",
+        "workspace_id",
+        "instrument_id",
+        "drawings"
+      ],
       "properties": {
-        "schema_version": {"const": 1},
-        "workspace_id": {"type": "string"},
-        "instrument_id": {"$ref": "common.schema.json#/$defs/InstrumentId"},
-        "drawings": {"type": "array", "items": {"$ref": "#/$defs/DrawingDocument"}}
+        "schema_version": {
+          "const": 1
+        },
+        "workspace_id": {
+          "type": "string"
+        },
+        "instrument_id": {
+          "$ref": "common.schema.json#/$defs/InstrumentId"
+        },
+        "drawings": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/DrawingDocument"
+          }
+        }
       }
     },
-    "ChartType": {"title": "ChartType", "type": "string", "enum": ["candles", "bars", "line", "area", "heikin_ashi"]},
-    "PriceScaleMode": {"title": "PriceScaleMode", "type": "string", "enum": ["linear", "log", "percent"]},
+    "ChartType": {
+      "title": "ChartType",
+      "type": "string",
+      "enum": [
+        "candles",
+        "bars",
+        "line",
+        "area",
+        "heikin_ashi"
+      ]
+    },
+    "PriceScaleMode": {
+      "title": "PriceScaleMode",
+      "type": "string",
+      "enum": [
+        "linear",
+        "log",
+        "percent"
+      ]
+    },
     "IndicatorLayerState": {
       "title": "IndicatorLayerState",
       "type": "object",
       "additionalProperties": false,
-      "required": ["plugin_id", "visible"],
+      "required": [
+        "plugin_id",
+        "visible"
+      ],
       "properties": {
-        "plugin_id": {"type": "string"},
-        "visible": {"type": "boolean"},
-        "kinds": {"type": "array", "items": {"$ref": "indicators.schema.json#/$defs/AoiKind"}, "description": "AOI kinds shown; all kinds when omitted."},
-        "style": {"type": "object", "description": "Presentation only: per-kind colors, event markers, sub-pane visibility."},
-        "settings": {"type": "object", "description": "Indicator inputs validated by the backend against the plugin's input_schema."}
+        "plugin_id": {
+          "type": "string"
+        },
+        "visible": {
+          "type": "boolean"
+        },
+        "kinds": {
+          "type": "array",
+          "items": {
+            "$ref": "indicators.schema.json#/$defs/AoiKind"
+          },
+          "description": "AOI kinds shown; all kinds when omitted."
+        },
+        "style": {
+          "type": "object",
+          "description": "Presentation only: per-kind colors, event markers, sub-pane visibility."
+        },
+        "settings": {
+          "type": "object",
+          "description": "Indicator inputs validated by the backend against the plugin's input_schema."
+        },
+        "removed": {
+          "type": "boolean",
+          "description": "True when explicitly removed; hidden layers retain their settings."
+        },
+        "present": {
+          "type": "boolean",
+          "description": "Retains the legend row when a user hides an added study."
+        }
       }
     },
     "ChartState": {
       "title": "ChartState",
       "type": "object",
       "additionalProperties": false,
-      "required": ["chart_id", "instrument_id", "timeframe", "chart_type", "price_scale", "show_volume", "indicator_layers", "feed_mode"],
+      "required": [
+        "chart_id",
+        "instrument_id",
+        "timeframe",
+        "chart_type",
+        "price_scale",
+        "show_volume",
+        "indicator_layers",
+        "feed_mode"
+      ],
       "properties": {
-        "chart_id": {"type": "string"},
-        "instrument_id": {"$ref": "common.schema.json#/$defs/InstrumentId"},
-        "timeframe": {"$ref": "common.schema.json#/$defs/Timeframe"},
-        "chart_type": {"$ref": "#/$defs/ChartType"},
-        "price_scale": {"$ref": "#/$defs/PriceScaleMode"},
-        "show_volume": {"type": "boolean"},
-        "indicator_layers": {"type": "array", "items": {"$ref": "#/$defs/IndicatorLayerState"}},
-        "link_group": {"type": ["string", "null"], "enum": ["A", "B", "C", "D", null]},
-        "feed_mode": {"$ref": "common.schema.json#/$defs/FeedMode"},
-        "compare": {"type": "array", "maxItems": 3, "uniqueItems": true, "items": {"$ref": "common.schema.json#/$defs/InstrumentId"}, "description": "Instruments overlaid on a separate percentage axis."},
-        "session_separators": {"type": "boolean", "description": "Draw UTC session boundaries."},
+        "chart_id": {
+          "type": "string"
+        },
+        "instrument_id": {
+          "$ref": "common.schema.json#/$defs/InstrumentId"
+        },
+        "timeframe": {
+          "$ref": "common.schema.json#/$defs/Timeframe"
+        },
+        "chart_type": {
+          "$ref": "#/$defs/ChartType"
+        },
+        "price_scale": {
+          "$ref": "#/$defs/PriceScaleMode"
+        },
+        "show_volume": {
+          "type": "boolean"
+        },
+        "indicator_layers": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/IndicatorLayerState"
+          }
+        },
+        "link_group": {
+          "type": [
+            "string",
+            "null"
+          ],
+          "enum": [
+            "A",
+            "B",
+            "C",
+            "D",
+            null
+          ]
+        },
+        "feed_mode": {
+          "$ref": "common.schema.json#/$defs/FeedMode"
+        },
+        "compare": {
+          "type": "array",
+          "maxItems": 3,
+          "uniqueItems": true,
+          "items": {
+            "$ref": "common.schema.json#/$defs/InstrumentId"
+          },
+          "description": "Instruments overlaid on a separate percentage axis."
+        },
+        "session_separators": {
+          "type": "boolean",
+          "description": "Draw UTC session boundaries."
+        },
         "visible_range": {
           "oneOf": [
             {
               "type": "object",
               "additionalProperties": false,
-              "required": ["from_ms", "to_ms"],
+              "required": [
+                "from_ms",
+                "to_ms"
+              ],
               "properties": {
-                "from_ms": {"$ref": "common.schema.json#/$defs/TimestampMs"},
-                "to_ms": {"$ref": "common.schema.json#/$defs/TimestampMs"}
+                "from_ms": {
+                  "$ref": "common.schema.json#/$defs/TimestampMs"
+                },
+                "to_ms": {
+                  "$ref": "common.schema.json#/$defs/TimestampMs"
+                }
               }
             },
-            {"type": "null"}
+            {
+              "type": "null"
+            }
           ]
+        },
+        "view_type": {
+          "enum": [
+            "candles",
+            "stock_heatmap"
+          ],
+          "type": "string",
+          "description": "Tab content; omitted means candles for existing workspaces."
         }
       }
     },
-    "LayoutId": {"title": "LayoutId", "type": "string", "enum": ["1", "2h", "2v", "4", "8"]},
+    "LayoutId": {
+      "title": "LayoutId",
+      "type": "string",
+      "enum": [
+        "1",
+        "2h",
+        "2v",
+        "4",
+        "8"
+      ]
+    },
     "SyncOptions": {
       "title": "SyncOptions",
       "type": "object",
       "additionalProperties": false,
-      "required": ["crosshair", "instrument", "timeframe", "viewport"],
+      "required": [
+        "crosshair",
+        "instrument",
+        "timeframe",
+        "viewport"
+      ],
       "properties": {
-        "crosshair": {"type": "boolean"},
-        "instrument": {"type": "boolean"},
-        "timeframe": {"type": "boolean"},
-        "viewport": {"type": "boolean"}
+        "crosshair": {
+          "type": "boolean"
+        },
+        "instrument": {
+          "type": "boolean"
+        },
+        "timeframe": {
+          "type": "boolean"
+        },
+        "viewport": {
+          "type": "boolean"
+        }
       }
     },
     "WorkspaceDocument": {
       "title": "WorkspaceDocument",
       "type": "object",
       "additionalProperties": false,
-      "required": ["schema_version", "workspace_id", "name", "layout", "sync", "active_chart_id", "charts", "updated_at_ms"],
+      "required": [
+        "schema_version",
+        "workspace_id",
+        "name",
+        "layout",
+        "sync",
+        "active_chart_id",
+        "charts",
+        "updated_at_ms"
+      ],
       "properties": {
-        "schema_version": {"const": 1},
-        "workspace_id": {"type": "string"},
-        "name": {"type": "string", "maxLength": 120},
-        "layout": {"$ref": "#/$defs/LayoutId"},
-        "sync": {"$ref": "#/$defs/SyncOptions"},
-        "active_chart_id": {"type": "string"},
-        "charts": {"type": "array", "minItems": 1, "items": {"$ref": "#/$defs/ChartState"}, "description": "Saved chart tabs without a fixed count limit; layout controls visible panes."},
+        "schema_version": {
+          "const": 1
+        },
+        "workspace_id": {
+          "type": "string"
+        },
+        "name": {
+          "type": "string",
+          "maxLength": 120
+        },
+        "layout": {
+          "$ref": "#/$defs/LayoutId"
+        },
+        "sync": {
+          "$ref": "#/$defs/SyncOptions"
+        },
+        "active_chart_id": {
+          "type": "string"
+        },
+        "charts": {
+          "type": "array",
+          "minItems": 1,
+          "items": {
+            "$ref": "#/$defs/ChartState"
+          },
+          "description": "Saved chart tabs without a fixed count limit; layout controls visible panes."
+        },
         "favorites": {
           "type": "object",
           "additionalProperties": false,
           "properties": {
-            "timeframes": {"type": "array", "items": {"$ref": "common.schema.json#/$defs/Timeframe"}},
-            "instruments": {"type": "array", "items": {"$ref": "common.schema.json#/$defs/InstrumentId"}}
+            "timeframes": {
+              "type": "array",
+              "items": {
+                "$ref": "common.schema.json#/$defs/Timeframe"
+              }
+            },
+            "instruments": {
+              "type": "array",
+              "items": {
+                "$ref": "common.schema.json#/$defs/InstrumentId"
+              }
+            }
           }
         },
-        "panels": {"type": "object", "description": "Opaque per-feature panel state keyed by feature id."},
-        "updated_at_ms": {"$ref": "common.schema.json#/$defs/TimestampMs"}
+        "panels": {
+          "type": "object",
+          "description": "Opaque per-feature panel state keyed by feature id."
+        },
+        "updated_at_ms": {
+          "$ref": "common.schema.json#/$defs/TimestampMs"
+        }
       }
     },
     "WorkspaceExportDrawings": {
@@ -157,14 +462,27 @@
       "description": "Drawings of one exact instrument inside a workspace export.",
       "type": "object",
       "additionalProperties": false,
-      "required": ["instrument_id", "drawings"],
+      "required": [
+        "instrument_id",
+        "drawings"
+      ],
       "properties": {
-        "instrument_id": {"$ref": "common.schema.json#/$defs/InstrumentId"},
-        "drawings": {"type": "array", "maxItems": 2000, "items": {"$ref": "#/$defs/DrawingDocument"}},
+        "instrument_id": {
+          "$ref": "common.schema.json#/$defs/InstrumentId"
+        },
+        "drawings": {
+          "type": "array",
+          "maxItems": 2000,
+          "items": {
+            "$ref": "#/$defs/DrawingDocument"
+          }
+        },
         "opaque": {
           "type": "array",
           "maxItems": 500,
-          "items": {"type": "object"},
+          "items": {
+            "type": "object"
+          },
           "description": "Stored drawing payloads this build cannot read (for example a newer drawing schema). Exported and restored verbatim, never deleted (ADR 0007)."
         }
       }
@@ -174,13 +492,33 @@
       "description": "Workspace export file, format version 2: the workspace document (schema v1, unchanged) plus the drawings of its instruments. Import also accepts a plain v1 WorkspaceDocument (export format 1, no drawings) and the V4 starter shape (format 0), migrated step by step; drawings of unknown tools are kept.",
       "type": "object",
       "additionalProperties": false,
-      "required": ["format", "schema_version", "exported_at_ms", "workspace", "drawings"],
+      "required": [
+        "format",
+        "schema_version",
+        "exported_at_ms",
+        "workspace",
+        "drawings"
+      ],
       "properties": {
-        "format": {"const": "joseph.workspace-export"},
-        "schema_version": {"const": 2},
-        "exported_at_ms": {"$ref": "common.schema.json#/$defs/TimestampMs"},
-        "workspace": {"$ref": "#/$defs/WorkspaceDocument"},
-        "drawings": {"type": "array", "maxItems": 500, "items": {"$ref": "#/$defs/WorkspaceExportDrawings"}}
+        "format": {
+          "const": "joseph.workspace-export"
+        },
+        "schema_version": {
+          "const": 2
+        },
+        "exported_at_ms": {
+          "$ref": "common.schema.json#/$defs/TimestampMs"
+        },
+        "workspace": {
+          "$ref": "#/$defs/WorkspaceDocument"
+        },
+        "drawings": {
+          "type": "array",
+          "maxItems": 500,
+          "items": {
+            "$ref": "#/$defs/WorkspaceExportDrawings"
+          }
+        }
       }
     }
   }

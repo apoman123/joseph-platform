@@ -193,6 +193,8 @@ export type ChartEventName = keyof ChartEventMap;
 
 /** Pixel/data transforms valid for the current frame. */
 export interface CoordinateTransform {
+  /** Returns whether price coordinates use a logarithmic scale. */
+  isLog?(): boolean;
   /**
    * Converts a time to an x coordinate.
    * @param timeMs UTC ms (bar start or arbitrary time).
@@ -291,6 +293,10 @@ export interface StudyPaneSpec {
   precision?: number;
   /** Provenance caption such as `as of 12:05 UTC (live)`. */
   caption?: string;
+  /** Optional declarative canvas renderer sharing this study's time/value axes. */
+  canvas?: CanvasLayer;
+  /** Finite value bounds including every custom plot/drawing in this pane. */
+  range?: {min: number; max: number};
 }
 
 /**

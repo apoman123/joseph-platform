@@ -26,6 +26,20 @@ The quantization uses the current decimal context, which rounds half-even.
 """
 
 
+class PriceAdjustment(enum.StrEnum):
+    """Documents the corporate-action normalization of historical OHLC.
+
+    Snapshot quotes, order prices and reported trading volume are not altered.
+    """
+
+    RAW = "RAW"
+    """Native historical prices without corporate-action normalization."""
+    SPLIT = "SPLIT"
+    """Historical prices normalized for stock splits."""
+    ALL = "ALL"
+    """Provider-adjusted prices for splits, dividends and capital changes."""
+
+
 class BuyVolumeMethod(enum.StrEnum):
     """Origin of a bar's buy volume (contract ``BuyVolumeMethod``)."""
 

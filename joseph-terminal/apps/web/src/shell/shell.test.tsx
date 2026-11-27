@@ -22,6 +22,7 @@ import {composeFeatures} from '../composition/features';
 import {createRuntime, type TerminalRuntime} from '../composition/runtime';
 import {CommandPalette, StatusBar, Toasts} from './chrome';
 import {DrawingToolbar} from './drawing-toolbar';
+import {DrawingFavorites, DRAWING_FAVORITES} from './drawing-favorites';
 import {ProvenanceBadge, ProvenanceRibbon, provenanceLabel} from './provenance';
 import type {WebFeature} from './react-bindings';
 import {RuntimeProvider} from './runtime-context';
@@ -136,15 +137,86 @@ describe('DrawingToolbar', () => {
     expect(screen.getAllByRole('button').length).toBeGreaterThan(12);
     fireEvent.click(screen.getByTestId('tool-group-lines'));
     expect(screen.getByRole('menu', {name: 'Lines tools'})).toBeVisible();
-    fireEvent.click(screen.getByTestId('tool-option-trendline'));
+    fireEvent.click(screen.getByTestId('tool-option-reference.trend-line'));
     await waitFor(
-      () => void expect(runtime.drawing.activeTool.get()).toBe('trendline')
+      () =>
+        void expect(runtime.drawing.activeTool.get()).toBe(
+          'reference.trend-line'
+        )
     );
     expect(screen.getByTestId('tool-group-lines')).toHaveAttribute(
       'aria-pressed',
       'true'
     );
     expect(screen.getByTestId('undo')).toBeDisabled();
+  });
+});
+
+describe('favorite drawing tools', () => {
+  it('favorites a menu tool and persists movement and orientation in the workspace', async () => {
+    const runtime = await demoRuntime();
+    render(
+      <RuntimeProvider runtime={runtime}>
+        <DrawingToolbar />
+        <DrawingFavorites />
+      </RuntimeProvider>
+    );
+    fireEvent.click(screen.getByTestId('tool-group-lines'));
+    fireEvent.click(
+      screen.getByRole('menuitemcheckbox', {
+        name: 'Favorite Trend line',
+      })
+    );
+    const favorites = await screen.findByRole('toolbar', {
+      name: 'Favorite drawing tools',
+    });
+    fireEvent.click(
+      within(favorites).getByRole('button', {
+        name: 'Draw Trend line',
+      })
+    );
+    await waitFor(
+      () =>
+        void expect(runtime.drawing.activeTool.get()).toBe(
+          'reference.trend-line'
+        )
+    );
+    fireEvent.click(
+      within(favorites).getByRole('button', {
+        name: 'Vertical favorite drawing tools',
+      })
+    );
+    await waitFor(
+      () =>
+        void expect(favorites).toHaveAttribute('aria-orientation', 'vertical')
+    );
+    fireEvent.keyDown(
+      within(favorites).getByRole('button', {
+        name: 'Move favorite drawing tools',
+      }),
+      {key: 'ArrowRight'}
+    );
+    await waitFor(
+      () =>
+        void expect(
+          (
+            runtime.workspace.get().panels as
+              Record<string, unknown> | undefined
+          )?.[DRAWING_FAVORITES]
+        ).toMatchObject({
+          tools: ['reference.trend-line'],
+          vertical: true,
+          left: 84,
+        })
+    );
+    const canonical = JSON.parse(JSON.stringify(runtime.workspace.get())) as {
+      panels: Record<string, unknown>;
+    };
+    expect(canonical.panels[DRAWING_FAVORITES]).toMatchObject({
+      tools: ['reference.trend-line'],
+      vertical: true,
+      left: 84,
+    });
   });
 });
 

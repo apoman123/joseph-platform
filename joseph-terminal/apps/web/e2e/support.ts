@@ -157,7 +157,12 @@ export async function armTool(
   toolId: string
 ): Promise<void> {
   await page.getByTestId(`tool-group-${group}`).click();
-  await page.getByTestId(`tool-option-${toolId}`).click();
+  const selected = ['zone-box', 'anchored-vwap', 'regression-channel'].includes(
+    toolId
+  )
+    ? toolId
+    : `reference.${toolId}`;
+  await page.getByTestId(`tool-option-${selected}`).click();
 }
 
 /**
@@ -179,7 +184,9 @@ export async function showDataWindow(page: Page): Promise<void> {
 export function objectDetail(page: Page, toolId: string): Locator {
   return page
     .getByRole('list', {name: 'Drawings, top first'})
-    .getByTestId(`object-${toolId}`)
+    .getByTestId(
+      `object-${['anchored-vwap', 'regression-channel', 'zone-box'].includes(toolId) ? toolId : `reference.${toolId}`}`
+    )
     .getByTestId('object-detail');
 }
 

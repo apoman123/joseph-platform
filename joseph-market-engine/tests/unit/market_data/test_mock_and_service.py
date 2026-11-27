@@ -171,6 +171,73 @@ async def test_service_batch_reports_demo_provenance_and_no_gaps() -> None:
     assert batch.complete
 
 
+async def test_adjusted_history_rebases_indicator_cache_automatically(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Refreshes adjusted bars for both chart batches and indicator reads.
+
+    Args:
+        monkeypatch: Fixture that restores the adapter's instrumented methods.
+
+    Returns:
+        None after checking automatic rebasing and the batch price basis.
+    """
+    clock = clock_lib.ManualClock(_NOW)
+    svc, adapter = _service(clock)
+    original = adapter.fetch_candles
+    calls: list[int] = []
+
+    async def fetch(
+        instrument: instruments.InstrumentId,
+        timeframe: timeframes.Timeframe,
+        start_ms: int,
+        end_ms: int,
+        limit: int | None = None,
+    ) -> list[market.Candle]:
+        """Counts source refreshes while retaining deterministic OHLC.
+
+        Args:
+            instrument: Mock canonical identity.
+            timeframe: Tested one-minute resolution.
+            start_ms: Inclusive historical window start, UTC milliseconds.
+            end_ms: Exclusive historical window end, UTC milliseconds.
+            limit: Optional maximum number of returned bars.
+
+        Returns:
+            Deterministic bars from the underlying mock adapter.
+        """
+        calls.append(clock.now_ms())
+        return await original(instrument, timeframe, start_ms, end_ms, limit)
+
+    monkeypatch.setattr(adapter, "fetch_candles", fetch)
+    monkeypatch.setattr(
+        adapter,
+        "price_adjustment",
+        lambda _: market.PriceAdjustment.ALL,
+        raising=False,
+    )
+    start, end = _NOW - 600_000, _NOW - 300_000
+    first = await svc.get_candles(_BTC, "1m", start, end)
+    assert first
+    count = len(calls)
+    assert await svc.get_candles(_BTC, "1m", start, end) == first
+    assert len(calls) == count
+    clock.advance(service.ADJUSTMENT_REFRESH_MS)
+    refreshed = await svc.get_candles(_BTC, "1m", start, end)
+    assert [bar.close for bar in refreshed] == [bar.close for bar in first]
+    assert refreshed[0].received_at_ms > first[0].received_at_ms
+    assert len(calls) > count
+    batch = await svc.get_batch(_BTC, "1m", from_ms=start, to_ms=end)
+    contract = batch.to_contract()
+    assert contract["price_adjustment"] == "ALL"
+    assert (
+        contract["price_adjustment_epoch_ms"]
+        == clock.now_ms()
+        // service.ADJUSTMENT_REFRESH_MS
+        * service.ADJUSTMENT_REFRESH_MS
+    )
+
+
 async def test_service_validates_inputs() -> None:
     """Bad ids, timeframes, limits and ranges are validation errors."""
     svc, _ = _service(clock_lib.ManualClock(_NOW))

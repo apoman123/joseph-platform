@@ -25,3 +25,42 @@ regexes = [
   # Alpaca pagination token in a documented-shape fixture (base64 of a cursor).
   '''^QUFQTHxNfDIwMjYtMTEtMjBUMTQ6MzI6MDAuMDAwMDAwMDAwWg==$''',
 ]
+
+[[rules]]
+id = "generic-api-key"
+
+  [[rules.allowlists]]
+  description = "Pinned source SHA-256 checksums, validated by upstream:check"
+  condition = "AND"
+  paths = ['''^joseph\-terminal/third_party/tradex/UPSTREAM\.json$''']
+  regexes = ['''^[0-9a-f]{64}$''']
+
+  [[rules.allowlists]]
+  description = "IANA timezone identifiers in unchanged upstream chart bundle"
+  condition = "AND"
+  paths = ['''^joseph\-terminal/third_party/tradex/hub/vendor/klinecharts\-pro\.umd\.js$''']
+  regexes = ['''^(America/Chicago|Australia/Sydney)$''']
+
+  [[rules.allowlists]]
+  description = "Public instrument symbol keys in unchanged upstream metadata"
+  condition = "AND"
+  paths = ['''^joseph\-terminal/third_party/tradex/hub/web/data/instruments\.json$''']
+  regexes = ['''^(CSOPSKHYNIX2LUSD|BROCCOLI714USD)$''']
+
+[[rules]]
+id = "coinbase-access-token"
+
+  [[rules.allowlists]]
+  description = "Pinned source SHA-256 checksums, validated by upstream:check"
+  condition = "AND"
+  paths = ['''^joseph\-terminal/third_party/tradex/UPSTREAM\.json$''']
+  regexes = ['''^[0-9a-f]{64}$''']
+
+[[rules]]
+id = "jwt"
+
+  [[rules.allowlists]]
+  description = "Published upstream Supabase anon browser key; inert reference, never used by Joseph"
+  condition = "AND"
+  paths = ['''^joseph\-terminal/third_party/tradex/hub/web/auth_config\.json$''']
+  regexes = ['''^eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9\.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InZkYW1maXZoZm9yZ3dzemR6YXl6Iiwicm9sZSI6ImFub24iLCJpYXQiOjE3OTU1NDUxMzcsImV4cCI6MjExMTEyMTEzN30\.QUq9q\-Uetmpeq9kgc9lP2gwzJpZLczjaHtgx81myztE$''']

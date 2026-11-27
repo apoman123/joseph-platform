@@ -25,6 +25,11 @@ import styles from './primitives.module.css';
 
 /** Short venue codes for dense rows (`UST`: US Treasury). */
 const VENUE_CODES: Readonly<Record<Venue, string>> = {
+  bybit: 'BYB',
+  okx: 'OKX',
+  coinbase: 'CB',
+  kraken: 'KRK',
+  deriv: 'DER',
   binance: 'BIN',
   hyperliquid: 'HL',
   lighter: 'LTR',

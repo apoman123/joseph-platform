@@ -40,7 +40,7 @@ PositiveStr: TypeAlias = Annotated[
 InstrumentIdStr: TypeAlias = Annotated[
     str,
     pydantic.StringConstraints(
-        pattern=r"^(binance|hyperliquid|lighter|bitget|mexc|twse|tpex|nasdaq"
+        pattern=r"^(bybit|okx|coinbase|kraken|deriv|binance|hyperliquid|lighter|bitget|mexc|twse|tpex|nasdaq"
         r"|nyse|cboe|treasury|mock):(perp|spot|future|stock|etf|rate)"
         r":[A-Za-z0-9._/-]{1,64}$"
     ),

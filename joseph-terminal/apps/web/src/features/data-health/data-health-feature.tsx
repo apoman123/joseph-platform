@@ -40,7 +40,7 @@ function badgeFor(status: VenueStatus): string {
   ) {
     return 'j-badge--stale';
   }
-  const state = status.health.feed_state;
+  const state = visibleFeedState(status);
   if (state === 'DEMO') return 'j-badge--demo';
   if (state === 'LIVE') return 'j-badge--live';
   if (state === 'POLL') return 'j-badge--poll';
@@ -68,7 +68,10 @@ export function feedSourceFor(status: VenueStatus): string {
   ) {
     return status.capabilities.display_name.startsWith('CCXT')
       ? 'CCXT'
-      : 'Unknown data feed';
+      : `${venue === 'binance' ? 'Binance' : status.capabilities.display_name} public API`;
+  }
+  if (['bybit', 'okx', 'coinbase', 'kraken', 'deriv'].includes(venue)) {
+    return status.capabilities.display_name;
   }
   if (venue === 'nasdaq' || venue === 'nyse' || venue === 'cboe') {
     return 'Alpaca IEX';
@@ -146,6 +149,12 @@ export function visibleFeedState(status: VenueStatus): string {
   ) {
     return 'IDLE';
   }
+  if (
+    status.health.feed_state === 'LIVE' &&
+    status.health.transport === 'REST_POLL'
+  ) {
+    return 'POLL';
+  }
   return status.health.feed_state;
 }
 
@@ -156,6 +165,10 @@ export function visibleFeedState(status: VenueStatus): string {
  */
 function coverageFor(name: string): string {
   if (name === 'CCXT') return 'Crypto and RWA perpetuals · 5 exchanges';
+  if (name.startsWith('Deriv')) {
+    return 'FX, commodities, indices and crypto reference quotes';
+  }
+  if (name.includes('public API')) return 'Exchange markets · public source';
   if (name === 'Fugle') return 'Taiwan stocks and ETFs';
   if (name === 'Alpaca IEX') return 'US stocks and ETFs';
   if (name.startsWith('U.S. Treasury')) return 'US Treasury rates';

@@ -62,6 +62,11 @@ const NAMED_VENUES: ReadonlySet<Venue> = new Set<Venue>([
 
 /** Short venue badges on result rows. */
 const VENUE_BADGES: Readonly<Record<Venue, string>> = {
+  bybit: 'BYB',
+  okx: 'OKX',
+  coinbase: 'CB',
+  kraken: 'KRK',
+  deriv: 'DER',
   binance: 'BIN',
   hyperliquid: 'HL',
   lighter: 'LTR',
@@ -349,25 +354,37 @@ function InstrumentSearch({
   useEffect(() => {
     let alive = true;
     const timer = setTimeout(() => {
-      Promise.all(
-        searched.map(v =>
-          runtime.clients.market.listInstruments({
-            venue: v,
+      const ready = new Map<Venue | undefined, readonly Instrument[]>();
+      const failures: string[] = [];
+      let completed = 0;
+      for (const source of searched) {
+        void runtime.clients.market
+          .listInstruments({
+            venue: source,
             q: query.trim() || undefined,
             limit: 200,
           })
-        )
-      )
-        .then(lists => {
-          if (!alive) return;
-          setHits(lists.flatMap(list => list.instruments));
-          setError(null);
-        })
-        .catch(
-          (e: unknown) =>
-            alive &&
-            void setError(e instanceof Error ? e.message : 'Search failed')
-        );
+          .then(
+            list => {
+              if (!alive) return;
+              ready.set(source, list.instruments);
+              setHits([...ready.values()].flat());
+              setError(null);
+            },
+            (error: unknown) => {
+              failures.push(
+                error instanceof Error ? error.message : 'Source search failed'
+              );
+            }
+          )
+          .finally(() => {
+            completed += 1;
+            if (alive && completed === searched.length && ready.size === 0) {
+              setHits([]);
+              setError(failures.join('; ') || 'No source answered');
+            }
+          });
+      }
     }, 150);
     return () => {
       alive = false;
@@ -391,16 +408,18 @@ function InstrumentSearch({
   );
   useEffect(() => {
     let alive = true;
-    void Promise.allSettled(named.map(v => venueDirectory(runtime, v))).then(
-      results => {
-        if (!alive) return;
-        setListings(
-          results.flatMap(result =>
-            result.status === 'fulfilled' ? [...result.value] : []
-          )
-        );
-      }
-    );
+    const ready = new Map<Venue, readonly Instrument[]>();
+    setListings([]);
+    for (const source of named) {
+      void venueDirectory(runtime, source).then(
+        list => {
+          if (!alive) return;
+          ready.set(source, list);
+          setListings([...ready.values()].flat());
+        },
+        () => undefined
+      );
+    }
     return () => {
       alive = false;
     };

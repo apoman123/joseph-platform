@@ -110,10 +110,16 @@ class FugleSource:
         api_key: Fugle market-data API key; never written to logs.
         http: Rate-limited client for Fugle REST.
         clock: Clock used to mark unfinished candles and receipt times.
+        adjusted_daily: Whether daily and longer historical OHLC are adjusted.
     """
 
     def __init__(
-        self, api_key: str, http: http.VenueHttp, clock: clock_lib.Clock
+        self,
+        api_key: str,
+        http: http.VenueHttp,
+        clock: clock_lib.Clock,
+        *,
+        adjusted_daily: bool = True,
     ) -> None:
         """Store authenticated client dependencies without making a request.
 
@@ -121,6 +127,8 @@ class FugleSource:
             api_key: Nonempty Fugle API key.
             http: Rate-limited Fugle REST client.
             clock: Time source.
+            adjusted_daily: Normalize daily history for corporate actions.
+                Intraday prices and quoted prices remain native.
 
         Raises:
             ValueError: If the API key is empty.
@@ -130,6 +138,23 @@ class FugleSource:
         self.api_key = api_key
         self.http = http
         self.clock = clock
+        self.adjusted_daily = adjusted_daily
+
+    def price_adjustment(
+        self,
+        timeframe: timeframes.Timeframe,
+    ) -> market.PriceAdjustment:
+        """Reports adjusted daily history and raw intraday/quote prices.
+
+        Args:
+            timeframe: Requested candle interval, including derived resolutions.
+
+        Returns:
+            ALL for adjusted daily and longer history; RAW for intraday bars.
+        """
+        if self.adjusted_daily and timeframe.duration_ms >= _D1.duration_ms:
+            return market.PriceAdjustment.ALL
+        return market.PriceAdjustment.RAW
 
     @property
     def _headers(self) -> dict[str, str]:
@@ -273,7 +298,9 @@ class FugleSource:
                             (bar.end_ms for bar in parsed if bar.is_final),
                             default=0,
                         ),
-                        source=SOURCE,
+                        source=f"{SOURCE}.adjusted"
+                        if self.adjusted_daily
+                        else SOURCE,
                     )
                 bars.extend(parsed)
                 if parsed:
@@ -290,10 +317,13 @@ class FugleSource:
                     "to": day.isoformat(),
                     "timeframe": "1" if source_tf is _M1 else "D",
                     "sort": "asc",
-                    "adjusted": "false",
+                    "adjusted": "true"
+                    if source_tf is _D1 and self.adjusted_daily
+                    else "false",
                 },
             )
             if body is not None:
+                self._check_adjustment(body, source_tf)
                 parsed = self._bars(body, instrument, source_tf)
                 bars.extend(parsed)
                 if parsed:
@@ -303,6 +333,9 @@ class FugleSource:
         complete = day < first_day
         ordered = candle_rules.sort_unique(bars)
         if timeframe is not source_tf:
+            aggregate_source = SOURCE
+            if self.price_adjustment(timeframe) is market.PriceAdjustment.ALL:
+                aggregate_source = f"{SOURCE}.adjusted"
             ordered = session_bars.aggregate(
                 ordered,
                 timeframe,
@@ -310,11 +343,36 @@ class FugleSource:
                 covered_to_ms=max(
                     (bar.end_ms for bar in ordered if bar.is_final), default=0
                 ),
-                source=SOURCE,
+                source=aggregate_source,
             )
         return base.candle_coverage(
             ordered, start_ms, end_ms, limit, covered, complete=complete
         )
+
+    def _check_adjustment(
+        self, body: Mapping[str, Any], timeframe: timeframes.Timeframe
+    ) -> None:
+        """Reject an ignored corporate-action adjustment request.
+
+        Args:
+            body: Historical response object containing provider confirmation.
+            timeframe: Native minute or daily resolution requested from Fugle.
+
+        Returns:
+            None when the response agrees with the configured price basis.
+
+        Raises:
+            errors.VenueUnavailableError: If adjusted daily data is unconfirmed.
+        """
+        if (
+            timeframe is _D1
+            and self.adjusted_daily
+            and body.get("adjusted") is not True
+        ):
+            raise errors.VenueUnavailableError(
+                "Fugle did not confirm adjusted history; "
+                "refusing to mix price bases"
+            )
 
     def _bars(
         self,
@@ -382,7 +440,9 @@ class FugleSource:
                 base_volume=volume
                 + (previous.base_volume if auction and previous else 0),
                 now_ms=now,
-                source=SOURCE,
+                source=f"{SOURCE}.adjusted"
+                if timeframe is _D1 and body.get("adjusted") is True
+                else SOURCE,
                 is_final=(start + 120_000 < now) if timeframe is _M1 else True,
             )
             by_start[start] = candle

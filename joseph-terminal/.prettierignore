@@ -20,3 +20,6 @@ packages/contracts/fixtures
 packages/contracts/tsconfig.json
 packages/feature-registry/tsconfig.json
 packages/strategy-builder/tsconfig.json
+
+# Preserved, checksummed upstream source, retaining its own formatting.
+third_party

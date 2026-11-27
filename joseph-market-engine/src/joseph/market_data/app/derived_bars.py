@@ -146,6 +146,22 @@ class DerivedBarsAdapter:
             caps.venue in self._recorder.delta_venues
         )
 
+    def price_adjustment(
+        self,
+        timeframe: timeframes.Timeframe,
+    ) -> market.PriceAdjustment:
+        """Preserves a source's price policy for aggregated chart intervals.
+
+        Args:
+            timeframe: Requested native or derived candle interval.
+
+        Returns:
+            Inner source policy, or RAW for sources without normalization.
+        """
+        if isinstance(self.inner, ports.PriceAdjustmentPort):
+            return self.inner.price_adjustment(timeframe)
+        return market.PriceAdjustment.RAW
+
     def capabilities(self) -> capabilities_lib.VenueCapabilities:
         """Returns the venue's capabilities plus what the engine derives.
 
@@ -437,6 +453,29 @@ class DerivedBarsAdapter:
             Snapshots; per-symbol-only data may be ``None``.
         """
         return await self.inner.fetch_snapshots()
+
+    async def fetch_snapshot_batch(
+        self, instruments_: Sequence[instruments.InstrumentId]
+    ) -> list[market.MarketSnapshot]:
+        """Delegates optional selected-symbol bulk quotes.
+
+        Delegates optional selected-symbol bulk quotes without changing prices.
+
+        Args:
+            instruments_: Explicit canonical instruments requested by a scanner.
+
+        Returns:
+            Available source snapshots without filling missing provider values.
+
+        Raises:
+            errors.UnsupportedError: If the wrapped provider has no bulk
+                endpoint.
+        """
+        if not isinstance(self.inner, ports.SnapshotBatchPort):
+            raise errors.UnsupportedError(
+                "provider has no selected-symbol snapshot endpoint"
+            )
+        return await self.inner.fetch_snapshot_batch(instruments_)
 
     async def fetch_order_book(
         self, instrument: instruments.InstrumentId, depth: int

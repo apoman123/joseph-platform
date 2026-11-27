@@ -22,7 +22,7 @@ import {
 } from '@joseph/contracts';
 import {handleAt, type Point, type Rect} from './geometry';
 import type {DrawingSeriesRequest, DrawingSeriesState} from './series';
-import type {PixelTransform} from './surface';
+import type {PixelTransform, SnapBar} from './surface';
 
 /**
  * Toolbar groups. `studies` holds engine-backed tools (anchored VWAP,
@@ -94,6 +94,10 @@ export interface ToolPalette {
 
 /** Render state for one drawing. */
 export interface RenderState {
+  /** Actual bars available to this render, bounded by the replay cursor. */
+  bars?: readonly SnapBar[];
+  /** Requests a repaint after an asynchronous image or glyph loads. */
+  invalidate?: () => void;
   /** Selected by the user. */
   selected: boolean;
   /** Being created (preview). */
@@ -174,10 +178,61 @@ export interface HitResult {
   handleIndex?: number;
 }
 
+/** Data and transforms supplied to renderer-neutral placement/edit adapters. */
+export interface ToolGeometryContext {
+  /** Current plot transform; absent before the chart has a price scale. */
+  transform: PixelTransform | null;
+  /** Actual bars, restricted to the replay cursor when replaying. */
+  bars: readonly SnapBar[];
+  /** Nominal bar duration in milliseconds for off-data placement. */
+  durationMs: number;
+  /** Optional instrument price increment as an exact decimal string. */
+  tickSize: string | null;
+}
+
+/** Editable drawing fields returned by a placement or drag adapter. */
+export type ToolGeometryPatch = Partial<
+  Pick<DrawingDocument, 'anchors' | 'props' | 'style' | 'text'>
+>;
+
+/** One drag expressed in canonical data and current plot pixels. */
+export interface ToolDrag {
+  /** Handle index, or null for dragging the drawing body. */
+  handleIndex: number | null;
+  /** Initial pointer in plot pixels. */
+  start: Point;
+  /** Current pointer in plot pixels. */
+  current: Point;
+  /** Whether Shift constrains the geometry. */
+  constrain: boolean;
+}
+
 /** A drawing tool plugin. Tools must not import each other. */
 export interface ToolPlugin {
   /** Static description: id, version, toolbar entry and anchor count. */
   readonly manifest: ToolManifest;
+  /**
+   * Completes source-specific placement, including derived points/settings.
+   * @param anchors User-placed anchors in milliseconds and decimal prices.
+   * @param context Actual bars and current coordinate transforms.
+   * @return Canonical editable fields, or null when placement cannot finish.
+   */
+  place?(
+    anchors: DrawingAnchor[],
+    context: ToolGeometryContext
+  ): ToolGeometryPatch | null;
+  /**
+   * Applies source-specific body or handle drag rules without mutating input.
+   * @param doc Original document captured at gesture start.
+   * @param drag Original/current plot pixels and handle selection.
+   * @param context Current plot transforms and actual bars.
+   * @return Changed canonical fields, or null when no edit can be applied.
+   */
+  edit?(
+    doc: DrawingDocument,
+    drag: ToolDrag,
+    context: ToolGeometryContext
+  ): ToolGeometryPatch | null;
   /**
    * Returns the default style for new drawings.
    * @param palette Theme palette.

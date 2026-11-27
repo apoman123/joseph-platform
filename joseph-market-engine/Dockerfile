@@ -17,7 +17,7 @@ RUN apt-get update \
 # Optional market-data extras; the free-first build uses none.
 ARG UV_EXTRAS=""
 WORKDIR /app
-COPY pyproject.toml uv.lock README.md LICENSE ./
+COPY pyproject.toml uv.lock README.md LICENSE NOTICE COPYING-MIT ./
 # Dependencies first, without the project, so source changes reuse this
 # layer.
 RUN --mount=type=cache,target=/root/.cache/uv \
@@ -54,7 +54,7 @@ RUN --mount=type=cache,target=/root/.cache/uv \
 FROM python:${PYTHON_VERSION}-slim-bookworm
 # SPDX licence expression of the image; set it when plugin packages add
 # other licences.
-ARG IMAGE_LICENSES=MIT
+ARG IMAGE_LICENSES=AGPL-3.0-only
 LABEL org.opencontainers.image.title="joseph-market-engine" \
       org.opencontainers.image.description="Joseph market data, screening, indicators, strategies, signals and alerts" \
       org.opencontainers.image.licenses="${IMAGE_LICENSES}"
@@ -67,6 +67,7 @@ COPY --from=build --chown=joseph:joseph /app/.venv /app/.venv
 ENV PATH=/app/.venv/bin:$PATH \
     PYTHONUNBUFFERED=1 \
     JOSEPH_DATABASE_URL=sqlite:////app/var/market.db
+COPY --from=build --chown=joseph:joseph /app/LICENSE /app/NOTICE /app/COPYING-MIT ./
 USER joseph
 EXPOSE 8000
 VOLUME ["/app/var"]

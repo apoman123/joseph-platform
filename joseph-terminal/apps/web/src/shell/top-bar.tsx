@@ -114,6 +114,7 @@ export function TopBar(): ReactElement {
   const chart = activeChart(workspace);
   const replaying = replayStates[chart.chart_id] !== undefined;
   const chartId = chart.chart_id;
+  const heatmap = chart.view_type === 'stock_heatmap';
   const run = (id: string) =>
     void runtime.commands.execute(id).catch(() => undefined);
   return (
@@ -124,59 +125,69 @@ export function TopBar(): ReactElement {
         </span>
         <span className="brand__word">Joseph</span>
       </div>
-      <InstrumentSelector
-        instrumentId={chart.instrument_id}
-        onSelect={instrumentId =>
-          void runtime.dispatch({type: 'setInstrument', chartId, instrumentId})
-        }
-      />
-      <TimeframeControl chart={chart} />
-      <span className="topbar__divider" aria-hidden="true" />
-      <label className="sr-only" htmlFor="chart-type">
-        Chart style
-      </label>
-      <select
-        id="chart-type"
-        className="j-select topbar__select"
-        value={chart.chart_type}
-        // The options are exactly `CHART_TYPES`.
-        onChange={e =>
-          void runtime.dispatch({
-            type: 'setChartType',
-            chartId,
-            chartType: e.target.value as ChartType,
-          })
-        }
-      >
-        {CHART_TYPES.map(([value, label]) => (
-          <option key={value} value={value}>
-            {label}
-          </option>
-        ))}
-      </select>
-      <label className="sr-only" htmlFor="price-scale">
-        Price scale
-      </label>
-      <select
-        id="price-scale"
-        className="j-select topbar__select topbar__select--narrow"
-        value={chart.price_scale}
-        // The options are exactly `SCALES`.
-        onChange={e =>
-          void runtime.dispatch({
-            type: 'setPriceScale',
-            chartId,
-            priceScale: e.target.value as PriceScaleMode,
-          })
-        }
-      >
-        {SCALES.map(([value, label]) => (
-          <option key={value} value={value}>
-            {label}
-          </option>
-        ))}
-      </select>
-      <IndicatorsButton chart={chart} />
+      {heatmap ? (
+        <strong>Stock heatmap</strong>
+      ) : (
+        <>
+          <InstrumentSelector
+            instrumentId={chart.instrument_id}
+            onSelect={instrumentId =>
+              void runtime.dispatch({
+                type: 'setInstrument',
+                chartId,
+                instrumentId,
+              })
+            }
+          />
+          <TimeframeControl chart={chart} />
+          <span className="topbar__divider" aria-hidden="true" />
+          <label className="sr-only" htmlFor="chart-type">
+            Chart style
+          </label>
+          <select
+            id="chart-type"
+            className="j-select topbar__select"
+            value={chart.chart_type}
+            // The options are exactly `CHART_TYPES`.
+            onChange={e =>
+              void runtime.dispatch({
+                type: 'setChartType',
+                chartId,
+                chartType: e.target.value as ChartType,
+              })
+            }
+          >
+            {CHART_TYPES.map(([value, label]) => (
+              <option key={value} value={value}>
+                {label}
+              </option>
+            ))}
+          </select>
+          <label className="sr-only" htmlFor="price-scale">
+            Price scale
+          </label>
+          <select
+            id="price-scale"
+            className="j-select topbar__select topbar__select--narrow"
+            value={chart.price_scale}
+            // The options are exactly `SCALES`.
+            onChange={e =>
+              void runtime.dispatch({
+                type: 'setPriceScale',
+                chartId,
+                priceScale: e.target.value as PriceScaleMode,
+              })
+            }
+          >
+            {SCALES.map(([value, label]) => (
+              <option key={value} value={value}>
+                {label}
+              </option>
+            ))}
+          </select>
+          <IndicatorsButton chart={chart} />
+        </>
+      )}
       <Popover
         ariaLabel="Chart layout"
         testId="layout-menu"
@@ -235,47 +246,51 @@ export function TopBar(): ReactElement {
           </div>
         )}
       </Popover>
-      <Popover
-        ariaLabel="Compare symbols"
-        triggerLabel="Compare symbols"
-        testId="compare-menu"
-        className="j-btn j-btn--ghost j-btn--icon"
-        label={<GitCompareArrows size={16} aria-hidden="true" />}
-      >
-        {() => <CompareMenu chart={chart} />}
-      </Popover>
-      <Popover
-        ariaLabel="Chart templates"
-        triggerLabel="Chart templates"
-        testId="templates-menu"
-        label={<LayoutTemplate size={16} aria-hidden="true" />}
-        className="j-btn j-btn--ghost j-btn--icon"
-      >
-        {close => <TemplatesMenu chart={chart} close={close} />}
-      </Popover>
-      <button
-        type="button"
-        className="j-btn j-btn--ghost j-btn--icon"
-        aria-label="Bar replay"
-        aria-pressed={replaying}
-        title="Bar replay (Alt + Shift + R)"
-        data-testid="replay-toggle"
-        onClick={() => void run('chart.replay.toggle')}
-      >
-        <History size={16} aria-hidden="true" />
-      </button>
-      <button
-        type="button"
-        className="j-btn j-btn--ghost j-btn--icon"
-        aria-label="Download chart screenshot"
-        title="Screenshot (Alt + Shift + S)"
-        data-testid="screenshot"
-        onClick={() => void run('chart.screenshot')}
-      >
-        <Camera size={16} aria-hidden="true" />
-      </button>
+      {!heatmap && (
+        <>
+          <Popover
+            ariaLabel="Compare symbols"
+            triggerLabel="Compare symbols"
+            testId="compare-menu"
+            className="j-btn j-btn--ghost j-btn--icon"
+            label={<GitCompareArrows size={16} aria-hidden="true" />}
+          >
+            {() => <CompareMenu chart={chart} />}
+          </Popover>
+          <Popover
+            ariaLabel="Chart templates"
+            triggerLabel="Chart templates"
+            testId="templates-menu"
+            label={<LayoutTemplate size={16} aria-hidden="true" />}
+            className="j-btn j-btn--ghost j-btn--icon"
+          >
+            {close => <TemplatesMenu chart={chart} close={close} />}
+          </Popover>
+          <button
+            type="button"
+            className="j-btn j-btn--ghost j-btn--icon"
+            aria-label="Bar replay"
+            aria-pressed={replaying}
+            title="Bar replay (Alt + Shift + R)"
+            data-testid="replay-toggle"
+            onClick={() => void run('chart.replay.toggle')}
+          >
+            <History size={16} aria-hidden="true" />
+          </button>
+          <button
+            type="button"
+            className="j-btn j-btn--ghost j-btn--icon"
+            aria-label="Download chart screenshot"
+            title="Screenshot (Alt + Shift + S)"
+            data-testid="screenshot"
+            onClick={() => void run('chart.screenshot')}
+          >
+            <Camera size={16} aria-hidden="true" />
+          </button>
+        </>
+      )}
       <div className="topbar__spacer" />
-      <SlotInline slot="toolbar" />
+      {!heatmap && <SlotInline slot="toolbar" />}
       {/* With every chart detached, provenance shows in the pop-outs. */}
       {Object.keys(feedStates).length > 0 && (
         <ProvenanceBadge state={worstFeedState(feedStates)} />

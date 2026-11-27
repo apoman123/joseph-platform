@@ -179,6 +179,7 @@ const FILTERS: ReadonlyArray<{
       'SETUP_EXPIRED',
       'QUALIFICATION_CHANGED',
       'POSITION_EXITED',
+      'CUSTOM_ALERT',
     ],
   },
 ];
@@ -193,6 +194,7 @@ const KIND_LABELS: Readonly<Record<SignalKind, string>> = {
   SETUP_EXPIRED: 'Setup expired',
   QUALIFICATION_CHANGED: 'Qualification changed',
   POSITION_EXITED: 'Position exited',
+  CUSTOM_ALERT: 'Python alert',
 };
 
 /** Badge class per signal kind. */
@@ -457,7 +459,13 @@ export function AlertsPanel({
                         <InstrumentLabel instrumentId={signal.instrument_id} />
                       </td>
                       <td>
-                        <SideText side={signal.direction} />
+                        <SideText
+                          side={
+                            signal.direction === 'NONE'
+                              ? 'flat'
+                              : signal.direction
+                          }
+                        />
                       </td>
                       <td>{signal.timeframe}</td>
                       <td className="j-num">{signal.rr ?? '—'}</td>

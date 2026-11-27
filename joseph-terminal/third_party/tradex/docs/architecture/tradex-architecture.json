@@ -1,0 +1,291 @@
+{
+  "schema_version": 1,
+  "diagram_type": "architecture",
+  "meta": {
+    "title": "TradeX — the open-source TradingView",
+    "output": "diagrams/architecture-tradex-open-source-2026-11-24/tradex-architecture.html",
+    "quality_profile": "showcase",
+    "locale": "en"
+  },
+  "components": [
+    {
+      "id": "github",
+      "type": "cloud",
+      "label": "GitHub repo",
+      "sublabel": "main branch = newest TradeX",
+      "pos": [
+        250,
+        40
+      ],
+      "size": [
+        180,
+        64
+      ]
+    },
+    {
+      "id": "installer",
+      "type": "backend",
+      "label": "One-line installer",
+      "sublabel": "setup/install.ps1 · install.sh",
+      "pos": [
+        560,
+        40
+      ],
+      "size": [
+        210,
+        64
+      ],
+      "tag": "re-run = update"
+    },
+    {
+      "id": "browser",
+      "type": "external",
+      "label": "You",
+      "sublabel": "any web browser",
+      "pos": [
+        40,
+        300
+      ],
+      "size": [
+        140,
+        64
+      ]
+    },
+    {
+      "id": "app",
+      "type": "frontend",
+      "label": "Chart app",
+      "sublabel": "hub.html + vela.html",
+      "pos": [
+        250,
+        300
+      ],
+      "size": [
+        170,
+        64
+      ],
+      "tag": "Pine indicators"
+    },
+    {
+      "id": "server",
+      "type": "backend",
+      "label": "TradeX server",
+      "sublabel": "hub/server.py · Python",
+      "pos": [
+        560,
+        270
+      ],
+      "size": [
+        210,
+        124
+      ],
+      "tag": "127.0.0.1 only"
+    },
+    {
+      "id": "localmt5",
+      "type": "external",
+      "label": "MetaTrader 5 on this PC",
+      "sublabel": "own login or auto demo",
+      "pos": [
+        360,
+        520
+      ],
+      "size": [
+        190,
+        64
+      ]
+    },
+    {
+      "id": "data",
+      "type": "database",
+      "label": "Your data",
+      "sublabel": "data/ layouts · sources · .env",
+      "pos": [
+        590,
+        520
+      ],
+      "size": [
+        180,
+        64
+      ]
+    },
+    {
+      "id": "private",
+      "type": "security",
+      "label": "private/ extensions",
+      "sublabel": "optional · never uploaded",
+      "pos": [
+        810,
+        520
+      ],
+      "size": [
+        170,
+        64
+      ]
+    },
+    {
+      "id": "exchanges",
+      "type": "external",
+      "label": "Built-in exchanges",
+      "sublabel": "Binance · Bybit · Deriv",
+      "pos": [
+        1040,
+        170
+      ],
+      "size": [
+        180,
+        64
+      ],
+      "tag": "no login"
+    },
+    {
+      "id": "plugins",
+      "type": "external",
+      "label": "Plugin exchanges",
+      "sublabel": "Coinbase · Kraken · OKX",
+      "pos": [
+        1040,
+        300
+      ],
+      "size": [
+        180,
+        64
+      ],
+      "tag": "hub/feeds/"
+    },
+    {
+      "id": "remotemt5",
+      "type": "external",
+      "label": "Remote MT5 on your VPS",
+      "sublabel": "bridge/mt5_bridge.py + MT5",
+      "pos": [
+        1040,
+        430
+      ],
+      "size": [
+        180,
+        64
+      ],
+      "tag": "optional"
+    }
+  ],
+  "boundaries": [
+    {
+      "kind": "region",
+      "label": "Your computer",
+      "wraps": [
+        "browser",
+        "app",
+        "server",
+        "localmt5",
+        "data",
+        "private"
+      ]
+    }
+  ],
+  "connections": [
+    {
+      "id": "download",
+      "from": "github",
+      "to": "installer",
+      "label": "downloads zip"
+    },
+    {
+      "id": "install",
+      "from": "installer",
+      "to": "server",
+      "label": "installs + launcher",
+      "fromSide": "bottom",
+      "toSide": "top"
+    },
+    {
+      "id": "open",
+      "from": "browser",
+      "to": "app",
+      "label": "opens",
+      "variant": "emphasis"
+    },
+    {
+      "id": "app-server",
+      "from": "app",
+      "to": "server",
+      "label": "HTTP + WebSocket",
+      "variant": "emphasis"
+    },
+    {
+      "id": "feed-exchanges",
+      "from": "server",
+      "to": "exchanges",
+      "label": "candles + live"
+    },
+    {
+      "id": "feed-plugins",
+      "from": "server",
+      "to": "plugins",
+      "label": "plugin feeds"
+    },
+    {
+      "id": "feed-remote",
+      "from": "server",
+      "to": "remotemt5",
+      "label": "SSH tunnel",
+      "variant": "security"
+    },
+    {
+      "id": "feed-local",
+      "from": "server",
+      "to": "localmt5",
+      "label": "MetaTrader5 pkg",
+      "variant": "dashed",
+      "fromSide": "bottom",
+      "toSide": "top"
+    },
+    {
+      "id": "save",
+      "from": "server",
+      "to": "data",
+      "label": "saves",
+      "fromSide": "bottom",
+      "toSide": "top"
+    },
+    {
+      "id": "load-private",
+      "from": "server",
+      "to": "private",
+      "label": "loads if present",
+      "variant": "dashed",
+      "fromSide": "bottom",
+      "toSide": "top"
+    }
+  ],
+  "cards": [
+    {
+      "dot": "cyan",
+      "title": "Install and update",
+      "items": [
+        "One command downloads the newest TradeX from GitHub and sets up Python, packages and chart sources",
+        "MetaTrader 5: use your own account, or TradeX opens a free demo for you",
+        "Running it again updates the app files and keeps data/, .env and private/",
+        "Setup switches on only the exchanges that answer from your network"
+      ]
+    },
+    {
+      "dot": "emerald",
+      "title": "Charts",
+      "items": [
+        "Server and WebSocket listen on 127.0.0.1 only",
+        "Built-in feeds plus plugin feeds in hub/feeds/, one file per exchange",
+        "MetaTrader 5 locally or on your VPS is optional, set in .env"
+      ]
+    },
+    {
+      "dot": "rose",
+      "title": "Private by design",
+      "items": [
+        ".env and private/ are git-ignored and skipped by the installer",
+        "private/ adds your own routes and page scripts only when the folder exists",
+        "Without private/ you get plain TradeX"
+      ]
+    }
+  ]
+}

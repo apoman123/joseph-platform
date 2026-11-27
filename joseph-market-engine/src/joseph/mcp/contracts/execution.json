@@ -1,0 +1,2071 @@
+{
+  "components": {
+    "schemas": {
+      "AccountLiveConsentBody": {
+        "additionalProperties": false,
+        "description": "Contract ``AccountLiveConsentRequest`` (account LIVE arming).\n\nThe step-up code has the same shape as AUTO_LIVE deployment consent;\nthe service enforces the acknowledgement and the configured maximum\nduration (and audits refusals).",
+        "properties": {
+          "acknowledge_risk": {
+            "title": "Acknowledge Risk",
+            "type": "boolean"
+          },
+          "duration_ms": {
+            "anyOf": [
+              {
+                "exclusiveMinimum": 0.0,
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Duration Ms"
+          },
+          "step_up_code": {
+            "maxLength": 8,
+            "minLength": 6,
+            "title": "Step Up Code",
+            "type": "string"
+          }
+        },
+        "required": [
+          "step_up_code",
+          "acknowledge_risk"
+        ],
+        "title": "AccountLiveConsentBody",
+        "type": "object"
+      },
+      "AmendBody": {
+        "additionalProperties": false,
+        "description": "Contract ``AmendRequest``.",
+        "properties": {
+          "expected_version": {
+            "anyOf": [
+              {
+                "minimum": 0.0,
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Expected Version"
+          },
+          "limit_price": {
+            "anyOf": [
+              {
+                "maxLength": 64,
+                "pattern": "^-?(0|[1-9][0-9]*)(\\.[0-9]+)?$",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Limit Price"
+          },
+          "quantity_base": {
+            "anyOf": [
+              {
+                "maxLength": 64,
+                "pattern": "^(0|[1-9][0-9]*)(\\.[0-9]+)?$",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Quantity Base"
+          },
+          "trigger_price": {
+            "anyOf": [
+              {
+                "maxLength": 64,
+                "pattern": "^-?(0|[1-9][0-9]*)(\\.[0-9]+)?$",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Trigger Price"
+          }
+        },
+        "title": "AmendBody",
+        "type": "object"
+      },
+      "BracketBody": {
+        "additionalProperties": false,
+        "description": "Bracket.",
+        "properties": {
+          "stop_loss": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/StopLossBody"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "take_profit": {
+            "items": {
+              "$ref": "#/components/schemas/TakeProfitBody"
+            },
+            "maxItems": 4,
+            "title": "Take Profit",
+            "type": "array"
+          }
+        },
+        "title": "BracketBody",
+        "type": "object"
+      },
+      "CloseBody": {
+        "additionalProperties": false,
+        "description": "Contract ``ClosePositionRequest``.",
+        "properties": {
+          "fraction": {
+            "maxLength": 64,
+            "pattern": "^(0|[1-9][0-9]*)(\\.[0-9]+)?$",
+            "title": "Fraction",
+            "type": "string"
+          },
+          "limit_price": {
+            "anyOf": [
+              {
+                "maxLength": 64,
+                "pattern": "^-?(0|[1-9][0-9]*)(\\.[0-9]+)?$",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Limit Price"
+          },
+          "order_type": {
+            "enum": [
+              "market",
+              "limit"
+            ],
+            "title": "Order Type",
+            "type": "string"
+          },
+          "preview_token": {
+            "anyOf": [
+              {
+                "maxLength": 256,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Preview Token"
+          }
+        },
+        "required": [
+          "fraction",
+          "order_type"
+        ],
+        "title": "CloseBody",
+        "type": "object"
+      },
+      "ConnectBody": {
+        "additionalProperties": false,
+        "description": "Venue connection request (credentials are never echoed).",
+        "properties": {
+          "credentials": {
+            "additionalProperties": {
+              "type": "string"
+            },
+            "title": "Credentials",
+            "type": "object"
+          },
+          "label": {
+            "default": "",
+            "maxLength": 120,
+            "title": "Label",
+            "type": "string"
+          },
+          "venue": {
+            "enum": [
+              "binance",
+              "hyperliquid",
+              "lighter",
+              "bitget",
+              "mexc",
+              "ibkr",
+              "sinopac",
+              "cathay"
+            ],
+            "title": "Venue",
+            "type": "string"
+          },
+          "withdrawal_permission_disabled": {
+            "title": "Withdrawal Permission Disabled",
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "venue",
+          "credentials",
+          "withdrawal_permission_disabled"
+        ],
+        "title": "ConnectBody",
+        "type": "object"
+      },
+      "DeploymentBody": {
+        "additionalProperties": false,
+        "description": "Contract ``DeploymentRequest``.",
+        "properties": {
+          "account_id": {
+            "title": "Account Id",
+            "type": "string"
+          },
+          "limits": {
+            "$ref": "#/components/schemas/DeploymentLimitsBody"
+          },
+          "mode": {
+            "enum": [
+              "PAPER",
+              "SHADOW",
+              "AUTO_LIVE"
+            ],
+            "title": "Mode",
+            "type": "string"
+          },
+          "sizing": {
+            "$ref": "#/components/schemas/SizingBody"
+          },
+          "strategy_version_id": {
+            "maxLength": 128,
+            "minLength": 3,
+            "title": "Strategy Version Id",
+            "type": "string"
+          }
+        },
+        "required": [
+          "strategy_version_id",
+          "account_id",
+          "mode",
+          "limits",
+          "sizing"
+        ],
+        "title": "DeploymentBody",
+        "type": "object"
+      },
+      "DeploymentLimitsBody": {
+        "additionalProperties": false,
+        "description": "Contract ``DeploymentLimits``.",
+        "properties": {
+          "allowed_instruments": {
+            "items": {
+              "pattern": "^(bybit|okx|coinbase|kraken|deriv|binance|hyperliquid|lighter|bitget|mexc|twse|tpex|nasdaq|nyse|cboe|treasury|mock):(perp|spot|future|stock|etf|rate):[A-Za-z0-9._/-]{1,64}$",
+              "type": "string"
+            },
+            "title": "Allowed Instruments",
+            "type": "array"
+          },
+          "max_daily_loss": {
+            "maxLength": 64,
+            "pattern": "^(0|[1-9][0-9]*)(\\.[0-9]+)?$",
+            "title": "Max Daily Loss",
+            "type": "string"
+          },
+          "max_leverage": {
+            "maxLength": 64,
+            "pattern": "^(0|[1-9][0-9]*)(\\.[0-9]+)?$",
+            "title": "Max Leverage",
+            "type": "string"
+          },
+          "max_notional": {
+            "maxLength": 64,
+            "pattern": "^(0|[1-9][0-9]*)(\\.[0-9]+)?$",
+            "title": "Max Notional",
+            "type": "string"
+          },
+          "max_open_positions": {
+            "minimum": 0.0,
+            "title": "Max Open Positions",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "max_notional",
+          "max_open_positions",
+          "max_daily_loss",
+          "allowed_instruments",
+          "max_leverage"
+        ],
+        "title": "DeploymentLimitsBody",
+        "type": "object"
+      },
+      "HTTPValidationError": {
+        "properties": {
+          "detail": {
+            "items": {
+              "$ref": "#/components/schemas/ValidationError"
+            },
+            "title": "Detail",
+            "type": "array"
+          }
+        },
+        "title": "HTTPValidationError",
+        "type": "object"
+      },
+      "IntentBody": {
+        "additionalProperties": false,
+        "description": "Contract ``OrderIntentRequest`` (user-submitted sources only).",
+        "properties": {
+          "account_id": {
+            "maxLength": 128,
+            "minLength": 1,
+            "title": "Account Id",
+            "type": "string"
+          },
+          "bracket": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/BracketBody"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "expires_at_ms": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Expires At Ms"
+          },
+          "instrument_id": {
+            "pattern": "^(bybit|okx|coinbase|kraken|deriv|binance|hyperliquid|lighter|bitget|mexc|twse|tpex|nasdaq|nyse|cboe|treasury|mock):(perp|spot|future|stock|etf|rate):[A-Za-z0-9._/-]{1,64}$",
+            "title": "Instrument Id",
+            "type": "string"
+          },
+          "leverage": {
+            "anyOf": [
+              {
+                "maxLength": 64,
+                "pattern": "^(0|[1-9][0-9]*)(\\.[0-9]+)?$",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Leverage"
+          },
+          "limit_price": {
+            "anyOf": [
+              {
+                "maxLength": 64,
+                "pattern": "^-?(0|[1-9][0-9]*)(\\.[0-9]+)?$",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Limit Price"
+          },
+          "margin_mode": {
+            "default": "isolated",
+            "enum": [
+              "isolated",
+              "cross"
+            ],
+            "title": "Margin Mode",
+            "type": "string"
+          },
+          "mode": {
+            "enum": [
+              "PAPER",
+              "SHADOW",
+              "LIVE"
+            ],
+            "title": "Mode",
+            "type": "string"
+          },
+          "order_type": {
+            "enum": [
+              "market",
+              "limit",
+              "stop_market",
+              "stop_limit"
+            ],
+            "title": "Order Type",
+            "type": "string"
+          },
+          "outside_rth": {
+            "default": false,
+            "title": "Outside Rth",
+            "type": "boolean"
+          },
+          "position_effect": {
+            "enum": [
+              "open",
+              "close",
+              "reduce"
+            ],
+            "title": "Position Effect",
+            "type": "string"
+          },
+          "preview_token": {
+            "anyOf": [
+              {
+                "maxLength": 256,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Preview Token"
+          },
+          "quantity_base": {
+            "maxLength": 64,
+            "pattern": "^(0|[1-9][0-9]*)(\\.[0-9]+)?$",
+            "title": "Quantity Base",
+            "type": "string"
+          },
+          "reduce_only": {
+            "title": "Reduce Only",
+            "type": "boolean"
+          },
+          "side": {
+            "enum": [
+              "buy",
+              "sell"
+            ],
+            "title": "Side",
+            "type": "string"
+          },
+          "signal_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Signal Id"
+          },
+          "source": {
+            "enum": [
+              "MANUAL_TICKET",
+              "CHART",
+              "QUICK_TRADE"
+            ],
+            "title": "Source",
+            "type": "string"
+          },
+          "strategy_version_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Strategy Version Id"
+          },
+          "time_in_force": {
+            "enum": [
+              "GTC",
+              "IOC",
+              "FOK",
+              "POST_ONLY",
+              "DAY"
+            ],
+            "title": "Time In Force",
+            "type": "string"
+          },
+          "trigger_basis": {
+            "anyOf": [
+              {
+                "enum": [
+                  "mark",
+                  "last"
+                ],
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Trigger Basis"
+          },
+          "trigger_price": {
+            "anyOf": [
+              {
+                "maxLength": 64,
+                "pattern": "^-?(0|[1-9][0-9]*)(\\.[0-9]+)?$",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Trigger Price"
+          }
+        },
+        "required": [
+          "account_id",
+          "instrument_id",
+          "side",
+          "position_effect",
+          "order_type",
+          "quantity_base",
+          "time_in_force",
+          "reduce_only",
+          "mode",
+          "source"
+        ],
+        "title": "IntentBody",
+        "type": "object"
+      },
+      "KillSwitchBody": {
+        "additionalProperties": false,
+        "description": "Contract ``KillSwitchRequest``.",
+        "properties": {
+          "cancel_open_orders": {
+            "title": "Cancel Open Orders",
+            "type": "boolean"
+          },
+          "engage": {
+            "title": "Engage",
+            "type": "boolean"
+          },
+          "flatten_positions": {
+            "title": "Flatten Positions",
+            "type": "boolean"
+          },
+          "reason": {
+            "maxLength": 500,
+            "minLength": 1,
+            "title": "Reason",
+            "type": "string"
+          },
+          "scope": {
+            "enum": [
+              "GLOBAL",
+              "ACCOUNT",
+              "STRATEGY"
+            ],
+            "title": "Scope",
+            "type": "string"
+          },
+          "target_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Target Id"
+          }
+        },
+        "required": [
+          "scope",
+          "engage",
+          "cancel_open_orders",
+          "flatten_positions",
+          "reason"
+        ],
+        "title": "KillSwitchBody",
+        "type": "object"
+      },
+      "LimitsBody": {
+        "additionalProperties": false,
+        "description": "Risk limit update.",
+        "properties": {
+          "account_id": {
+            "title": "Account Id",
+            "type": "string"
+          },
+          "limits": {
+            "additionalProperties": {
+              "type": "string"
+            },
+            "title": "Limits",
+            "type": "object"
+          }
+        },
+        "required": [
+          "account_id",
+          "limits"
+        ],
+        "title": "LimitsBody",
+        "type": "object"
+      },
+      "LiveConsentBody": {
+        "additionalProperties": false,
+        "description": "AUTO_LIVE consent request.",
+        "properties": {
+          "acknowledge_risk": {
+            "title": "Acknowledge Risk",
+            "type": "boolean"
+          },
+          "duration_ms": {
+            "default": 86400000,
+            "exclusiveMinimum": 0.0,
+            "title": "Duration Ms",
+            "type": "integer"
+          },
+          "step_up_code": {
+            "maxLength": 8,
+            "minLength": 6,
+            "title": "Step Up Code",
+            "type": "string"
+          }
+        },
+        "required": [
+          "step_up_code",
+          "acknowledge_risk"
+        ],
+        "title": "LiveConsentBody",
+        "type": "object"
+      },
+      "SizingBody": {
+        "additionalProperties": false,
+        "description": "Contract ``SizingModel``.",
+        "properties": {
+          "fixed_qty": {
+            "anyOf": [
+              {
+                "maxLength": 64,
+                "pattern": "^(0|[1-9][0-9]*)(\\.[0-9]+)?$",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Fixed Qty"
+          },
+          "model": {
+            "enum": [
+              "RISK_PCT",
+              "FIXED_QTY"
+            ],
+            "title": "Model",
+            "type": "string"
+          },
+          "risk_pct": {
+            "anyOf": [
+              {
+                "maxLength": 64,
+                "pattern": "^(0|[1-9][0-9]*)(\\.[0-9]+)?$",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Risk Pct"
+          }
+        },
+        "required": [
+          "model"
+        ],
+        "title": "SizingBody",
+        "type": "object"
+      },
+      "StopLossBody": {
+        "additionalProperties": false,
+        "description": "Stop-loss leg.",
+        "properties": {
+          "basis": {
+            "default": "mark",
+            "enum": [
+              "mark",
+              "last"
+            ],
+            "title": "Basis",
+            "type": "string"
+          },
+          "trigger": {
+            "maxLength": 64,
+            "pattern": "^-?(0|[1-9][0-9]*)(\\.[0-9]+)?$",
+            "title": "Trigger",
+            "type": "string"
+          }
+        },
+        "required": [
+          "trigger"
+        ],
+        "title": "StopLossBody",
+        "type": "object"
+      },
+      "TakeProfitBody": {
+        "additionalProperties": false,
+        "description": "Take-profit leg.",
+        "properties": {
+          "fraction": {
+            "default": "1",
+            "maxLength": 64,
+            "pattern": "^(0|[1-9][0-9]*)(\\.[0-9]+)?$",
+            "title": "Fraction",
+            "type": "string"
+          },
+          "trigger": {
+            "maxLength": 64,
+            "pattern": "^-?(0|[1-9][0-9]*)(\\.[0-9]+)?$",
+            "title": "Trigger",
+            "type": "string"
+          }
+        },
+        "required": [
+          "trigger"
+        ],
+        "title": "TakeProfitBody",
+        "type": "object"
+      },
+      "ValidationError": {
+        "properties": {
+          "ctx": {
+            "title": "Context",
+            "type": "object"
+          },
+          "input": {
+            "title": "Input"
+          },
+          "loc": {
+            "items": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "integer"
+                }
+              ]
+            },
+            "title": "Location",
+            "type": "array"
+          },
+          "msg": {
+            "title": "Message",
+            "type": "string"
+          },
+          "type": {
+            "title": "Error Type",
+            "type": "string"
+          }
+        },
+        "required": [
+          "loc",
+          "msg",
+          "type"
+        ],
+        "title": "ValidationError",
+        "type": "object"
+      }
+    }
+  },
+  "info": {
+    "description": "Private trust boundary: risk gateway, OMS, accounts, audit and kill switch. LIVE trading is disabled by default.",
+    "title": "Joseph Execution Engine",
+    "version": "0.5.0"
+  },
+  "openapi": "3.1.0",
+  "paths": {
+    "/health": {
+      "get": {
+        "description": "Reports liveness and safety gates (no tenant data).\n\nArgs:\n    request: Request.\n\nReturns:\n    Health document.",
+        "operationId": "health_health_get",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "additionalProperties": true,
+                  "title": "Response Health Health Get",
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Successful Response"
+          }
+        },
+        "summary": "Health",
+        "tags": [
+          "system"
+        ]
+      }
+    },
+    "/internal/v1/signals": {
+      "post": {
+        "description": "Receives a strategy signal from the market engine.\n\nArgs:\n    request: Request (body is a contract ``Signal``).\n\nReturns:\n    Per-deployment results.",
+        "operationId": "ingest_signal_internal_v1_signals_post",
+        "responses": {
+          "202": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "additionalProperties": true,
+                  "title": "Response Ingest Signal Internal V1 Signals Post",
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Successful Response"
+          }
+        },
+        "summary": "Ingest Signal",
+        "tags": [
+          "deployments"
+        ]
+      }
+    },
+    "/metrics": {
+      "get": {
+        "description": "Exposes Prometheus metrics (service token required).\n\nArgs:\n    request: Request.\n\nReturns:\n    Prometheus text.",
+        "operationId": "metrics_metrics_get",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          }
+        },
+        "summary": "Metrics",
+        "tags": [
+          "system"
+        ]
+      }
+    },
+    "/v1/accounts": {
+      "get": {
+        "description": "Lists accounts.\n\nArgs:\n    request: Request.\n    principal: Caller.\n\nReturns:\n    Contract ``AccountList``.",
+        "operationId": "list_accounts_v1_accounts_get",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "additionalProperties": true,
+                  "title": "Response List Accounts V1 Accounts Get",
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Successful Response"
+          }
+        },
+        "summary": "List Accounts",
+        "tags": [
+          "accounts"
+        ]
+      }
+    },
+    "/v1/accounts/connect/start": {
+      "post": {
+        "description": "Stores encrypted credentials for a venue account.\n\nArgs:\n    body: Connection request.\n    request: Request.\n    principal: Caller.\n\nReturns:\n    Contract ``AccountSummary``.",
+        "operationId": "connect_v1_accounts_connect_start_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ConnectBody"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "201": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Connect",
+        "tags": [
+          "accounts"
+        ]
+      }
+    },
+    "/v1/accounts/{account_id}/capabilities": {
+      "get": {
+        "description": "Returns negotiated capabilities.\n\nArgs:\n    account_id: Account.\n    request: Request.\n    principal: Caller.\n\nReturns:\n    Contract ``TradingCapabilities``.",
+        "operationId": "capabilities_v1_accounts__account_id__capabilities_get",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "account_id",
+            "required": true,
+            "schema": {
+              "title": "Account Id",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "additionalProperties": true,
+                  "title": "Response Capabilities V1 Accounts  Account Id  Capabilities Get",
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Capabilities",
+        "tags": [
+          "accounts"
+        ]
+      }
+    },
+    "/v1/accounts/{account_id}/live-consent": {
+      "delete": {
+        "description": "Disarms manual LIVE orders on an account.\n\nArgs:\n    account_id: Account.\n    request: Request.\n    principal: Caller.\n\nReturns:\n    Contract ``AccountSummary``.",
+        "operationId": "revoke_live_consent_v1_accounts__account_id__live_consent_delete",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "account_id",
+            "required": true,
+            "schema": {
+              "title": "Account Id",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "additionalProperties": true,
+                  "title": "Response Revoke Live Consent V1 Accounts  Account Id  Live Consent Delete",
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Revoke Live Consent",
+        "tags": [
+          "accounts"
+        ]
+      },
+      "post": {
+        "description": "Arms manual LIVE orders on an account (step-up required).\n\nArgs:\n    account_id: Verified venue or broker account.\n    body: Contract ``AccountLiveConsentRequest``.\n    request: Request.\n    principal: Caller.\n\nReturns:\n    Contract ``AccountSummary`` with ``live_armed_until_ms``.",
+        "operationId": "grant_live_consent_v1_accounts__account_id__live_consent_post",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "account_id",
+            "required": true,
+            "schema": {
+              "title": "Account Id",
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/AccountLiveConsentBody"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "additionalProperties": true,
+                  "title": "Response Grant Live Consent V1 Accounts  Account Id  Live Consent Post",
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Grant Live Consent",
+        "tags": [
+          "accounts"
+        ]
+      }
+    },
+    "/v1/accounts/{account_id}/revoke": {
+      "post": {
+        "description": "Revokes credentials.\n\nArgs:\n    account_id: Account.\n    request: Request.\n    principal: Caller.\n\nReturns:\n    Contract ``AccountSummary``.",
+        "operationId": "revoke_v1_accounts__account_id__revoke_post",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "account_id",
+            "required": true,
+            "schema": {
+              "title": "Account Id",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "additionalProperties": true,
+                  "title": "Response Revoke V1 Accounts  Account Id  Revoke Post",
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Revoke",
+        "tags": [
+          "accounts"
+        ]
+      }
+    },
+    "/v1/accounts/{account_id}/summary": {
+      "get": {
+        "description": "Returns an account summary.\n\nArgs:\n    account_id: Account.\n    request: Request.\n    principal: Caller.\n\nReturns:\n    Contract ``AccountSummary``.",
+        "operationId": "summary_v1_accounts__account_id__summary_get",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "account_id",
+            "required": true,
+            "schema": {
+              "title": "Account Id",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "additionalProperties": true,
+                  "title": "Response Summary V1 Accounts  Account Id  Summary Get",
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Summary",
+        "tags": [
+          "accounts"
+        ]
+      }
+    },
+    "/v1/accounts/{account_id}/verify": {
+      "post": {
+        "description": "Verifies a connection.\n\nArgs:\n    account_id: Account.\n    request: Request.\n    principal: Caller.\n\nReturns:\n    Contract ``AccountSummary``.",
+        "operationId": "verify_v1_accounts__account_id__verify_post",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "account_id",
+            "required": true,
+            "schema": {
+              "title": "Account Id",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "additionalProperties": true,
+                  "title": "Response Verify V1 Accounts  Account Id  Verify Post",
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Verify",
+        "tags": [
+          "accounts"
+        ]
+      }
+    },
+    "/v1/audit/events": {
+      "get": {
+        "description": "Lists audit events and verifies the tenant chain.\n\nArgs:\n    request: Request.\n    principal: Caller.\n    account_id: Account filter.\n    limit: Maximum rows.\n\nReturns:\n    Contract ``AuditEventList``.",
+        "operationId": "audit_events_v1_audit_events_get",
+        "parameters": [
+          {
+            "in": "query",
+            "name": "account_id",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Account Id"
+            }
+          },
+          {
+            "in": "query",
+            "name": "limit",
+            "required": false,
+            "schema": {
+              "default": 200,
+              "maximum": 1000,
+              "minimum": 1,
+              "title": "Limit",
+              "type": "integer"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "additionalProperties": true,
+                  "title": "Response Audit Events V1 Audit Events Get",
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Audit Events",
+        "tags": [
+          "risk"
+        ]
+      }
+    },
+    "/v1/deployments": {
+      "get": {
+        "description": "Lists deployments.\n\nArgs:\n    request: Request.\n    principal: Caller.\n\nReturns:\n    Contract ``DeploymentList``.",
+        "operationId": "list_deployments_v1_deployments_get",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "additionalProperties": true,
+                  "title": "Response List Deployments V1 Deployments Get",
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Successful Response"
+          }
+        },
+        "summary": "List Deployments",
+        "tags": [
+          "deployments"
+        ]
+      },
+      "post": {
+        "description": "Creates a deployment.\n\nArgs:\n    body: Request.\n    request: Request.\n    principal: Caller.\n\nReturns:\n    Contract ``Deployment``.",
+        "operationId": "create_v1_deployments_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/DeploymentBody"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "201": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Create",
+        "tags": [
+          "deployments"
+        ]
+      }
+    },
+    "/v1/deployments/{deployment_id}/disable": {
+      "post": {
+        "description": "Disables a deployment.\n\nArgs:\n    deployment_id: Deployment.\n    request: Request.\n    principal: Caller.\n\nReturns:\n    Contract ``Deployment``.",
+        "operationId": "disable_v1_deployments__deployment_id__disable_post",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "deployment_id",
+            "required": true,
+            "schema": {
+              "title": "Deployment Id",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "additionalProperties": true,
+                  "title": "Response Disable V1 Deployments  Deployment Id  Disable Post",
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Disable",
+        "tags": [
+          "deployments"
+        ]
+      }
+    },
+    "/v1/deployments/{deployment_id}/live-consent": {
+      "post": {
+        "description": "Grants scoped AUTO_LIVE consent (step-up required).\n\nArgs:\n    deployment_id: Deployment.\n    body: Consent request.\n    request: Request.\n    principal: Caller.\n\nReturns:\n    Contract ``Deployment``.",
+        "operationId": "live_consent_v1_deployments__deployment_id__live_consent_post",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "deployment_id",
+            "required": true,
+            "schema": {
+              "title": "Deployment Id",
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/LiveConsentBody"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "additionalProperties": true,
+                  "title": "Response Live Consent V1 Deployments  Deployment Id  Live Consent Post",
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Live Consent",
+        "tags": [
+          "deployments"
+        ]
+      }
+    },
+    "/v1/fills": {
+      "get": {
+        "description": "Lists fills.\n\nArgs:\n    request: Request.\n    principal: Caller.\n    account_id: Account filter.\n\nReturns:\n    Contract ``FillList``.",
+        "operationId": "list_fills_v1_fills_get",
+        "parameters": [
+          {
+            "in": "query",
+            "name": "account_id",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Account Id"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "additionalProperties": true,
+                  "title": "Response List Fills V1 Fills Get",
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "List Fills",
+        "tags": [
+          "orders"
+        ]
+      }
+    },
+    "/v1/orders": {
+      "get": {
+        "description": "Lists orders.\n\nArgs:\n    request: Request.\n    principal: Caller.\n    account_id: Account filter.\n    state: Comma-separated states.\n\nReturns:\n    Contract ``OrderList``.",
+        "operationId": "list_orders_v1_orders_get",
+        "parameters": [
+          {
+            "in": "query",
+            "name": "account_id",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Account Id"
+            }
+          },
+          {
+            "in": "query",
+            "name": "state",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "State"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "additionalProperties": true,
+                  "title": "Response List Orders V1 Orders Get",
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "List Orders",
+        "tags": [
+          "orders"
+        ]
+      }
+    },
+    "/v1/orders/intents": {
+      "post": {
+        "description": "Submits an order intent.\n\nArgs:\n    body: Intent.\n    request: Request.\n    principal: Caller.\n    idempotency_key: Header.\n\nReturns:\n    ``SubmitIntentResponse`` (201, or 200 when replayed).",
+        "operationId": "submit_v1_orders_intents_post",
+        "parameters": [
+          {
+            "in": "header",
+            "name": "Idempotency-Key",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Idempotency-Key"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/IntentBody"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "201": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Submit",
+        "tags": [
+          "orders"
+        ]
+      }
+    },
+    "/v1/orders/preview": {
+      "post": {
+        "description": "Previews an order with every risk check.\n\nArgs:\n    body: Draft intent.\n    request: Request.\n    principal: Caller.\n\nReturns:\n    Contract ``OrderPreview``.",
+        "operationId": "preview_v1_orders_preview_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/IntentBody"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "additionalProperties": true,
+                  "title": "Response Preview V1 Orders Preview Post",
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Preview",
+        "tags": [
+          "orders"
+        ]
+      }
+    },
+    "/v1/orders/{order_id}/amend": {
+      "post": {
+        "description": "Amends a working order.\n\nArgs:\n    order_id: Order.\n    body: Amendment.\n    request: Request.\n    principal: Caller.\n\nReturns:\n    Contract ``Order``.",
+        "operationId": "amend_v1_orders__order_id__amend_post",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "order_id",
+            "required": true,
+            "schema": {
+              "title": "Order Id",
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/AmendBody"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "additionalProperties": true,
+                  "title": "Response Amend V1 Orders  Order Id  Amend Post",
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Amend",
+        "tags": [
+          "orders"
+        ]
+      }
+    },
+    "/v1/orders/{order_id}/cancel": {
+      "post": {
+        "description": "Requests cancellation.\n\nArgs:\n    order_id: Order.\n    request: Request.\n    principal: Caller.\n\nReturns:\n    Contract ``Order``.",
+        "operationId": "cancel_v1_orders__order_id__cancel_post",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "order_id",
+            "required": true,
+            "schema": {
+              "title": "Order Id",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "additionalProperties": true,
+                  "title": "Response Cancel V1 Orders  Order Id  Cancel Post",
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Cancel",
+        "tags": [
+          "orders"
+        ]
+      }
+    },
+    "/v1/positions": {
+      "get": {
+        "description": "Lists positions.\n\nArgs:\n    request: Request.\n    principal: Caller.\n    account_id: Account filter.\n\nReturns:\n    Contract ``PositionList``.",
+        "operationId": "list_positions_v1_positions_get",
+        "parameters": [
+          {
+            "in": "query",
+            "name": "account_id",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Account Id"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "additionalProperties": true,
+                  "title": "Response List Positions V1 Positions Get",
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "List Positions",
+        "tags": [
+          "orders"
+        ]
+      }
+    },
+    "/v1/positions/{position_id}/close": {
+      "post": {
+        "description": "Closes (part of) a position with a reduce-only order.\n\nArgs:\n    position_id: Position.\n    body: Close body.\n    request: Request.\n    principal: Caller.\n    idempotency_key: Header.\n\nReturns:\n    ``SubmitIntentResponse``.",
+        "operationId": "close_v1_positions__position_id__close_post",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "position_id",
+            "required": true,
+            "schema": {
+              "title": "Position Id",
+              "type": "string"
+            }
+          },
+          {
+            "in": "header",
+            "name": "Idempotency-Key",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Idempotency-Key"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/CloseBody"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "201": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Close",
+        "tags": [
+          "orders"
+        ]
+      }
+    },
+    "/v1/positions/{position_id}/close-preview": {
+      "post": {
+        "description": "Previews a reduce-only close.\n\nArgs:\n    position_id: Position.\n    body: Close body.\n    request: Request.\n    principal: Caller.\n\nReturns:\n    Contract ``OrderPreview``.",
+        "operationId": "close_preview_v1_positions__position_id__close_preview_post",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "position_id",
+            "required": true,
+            "schema": {
+              "title": "Position Id",
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/CloseBody"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "additionalProperties": true,
+                  "title": "Response Close Preview V1 Positions  Position Id  Close Preview Post",
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Close Preview",
+        "tags": [
+          "orders"
+        ]
+      }
+    },
+    "/v1/risk/kill-switch": {
+      "get": {
+        "description": "Lists kill switches.\n\nArgs:\n    request: Request.\n    principal: Caller.\n\nReturns:\n    Contract ``KillSwitchList``.",
+        "operationId": "list_switches_v1_risk_kill_switch_get",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "additionalProperties": true,
+                  "title": "Response List Switches V1 Risk Kill Switch Get",
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Successful Response"
+          }
+        },
+        "summary": "List Switches",
+        "tags": [
+          "risk"
+        ]
+      },
+      "post": {
+        "description": "Engages or releases a kill switch.\n\nArgs:\n    body: Request.\n    request: Request.\n    principal: Caller.\n\nReturns:\n    Contract ``KillSwitchState``.",
+        "operationId": "set_switch_v1_risk_kill_switch_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/KillSwitchBody"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "additionalProperties": true,
+                  "title": "Response Set Switch V1 Risk Kill Switch Post",
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Set Switch",
+        "tags": [
+          "risk"
+        ]
+      }
+    },
+    "/v1/risk/limits": {
+      "get": {
+        "description": "Returns effective limits and platform hard caps.\n\nArgs:\n    account_id: Account.\n    request: Request.\n    principal: Caller.\n\nReturns:\n    Limits document.",
+        "operationId": "get_limits_v1_risk_limits_get",
+        "parameters": [
+          {
+            "in": "query",
+            "name": "account_id",
+            "required": true,
+            "schema": {
+              "title": "Account Id",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "additionalProperties": true,
+                  "title": "Response Get Limits V1 Risk Limits Get",
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Get Limits",
+        "tags": [
+          "risk"
+        ]
+      },
+      "put": {
+        "description": "Stores user limits (clamped to platform hard caps).\n\nArgs:\n    body: Limits.\n    request: Request.\n    principal: Caller.\n\nReturns:\n    Limits document.",
+        "operationId": "put_limits_v1_risk_limits_put",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/LimitsBody"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "additionalProperties": true,
+                  "title": "Response Put Limits V1 Risk Limits Put",
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Put Limits",
+        "tags": [
+          "risk"
+        ]
+      }
+    }
+  }
+}

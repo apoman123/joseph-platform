@@ -60,4 +60,4 @@ Code follows Google's TypeScript, JavaScript and HTML/CSS style guides (ESLint, 
 
 ## License
 
-MIT ([LICENSE](LICENSE)). Third-party notices: [NOTICE](NOTICE) and [docs/THIRD_PARTY_NOTICES.md](docs/THIRD_PARTY_NOTICES.md); the Lightweight Charts attribution also shows in the status bar and on `/notices`.
+AGPL-3.0-only ([LICENSE](LICENSE)). Third-party notices: [NOTICE](NOTICE) and [docs/THIRD_PARTY_NOTICES.md](docs/THIRD_PARTY_NOTICES.md); the Lightweight Charts attribution also shows in the status bar and on `/notices`.

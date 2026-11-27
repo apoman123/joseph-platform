@@ -32,6 +32,8 @@ import {TRADING_FEATURE} from '../features/trading';
 import {WATCHLIST_FEATURE} from '../features/watchlist';
 import type {WebFeature} from '../shell/react-bindings';
 import type {TerminalRuntime} from './runtime';
+import {pythonFeature} from '../shell/python-editor';
+import {mcpFeature} from '../shell/mcp-control';
 
 /**
  * Returns the shell-owned features: workspace, theme, palette, chart tools,
@@ -51,6 +53,8 @@ export function shellFeatures(runtime: TerminalRuntime): WebFeature[] {
     indicatorsFeature(runtime),
     marketInfoFeature(),
     dataHealthFeature(),
+    pythonFeature(runtime),
+    mcpFeature(runtime),
   ];
 }
 

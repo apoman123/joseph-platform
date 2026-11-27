@@ -31,7 +31,7 @@ RUN pnpm --filter @joseph/web build
 FROM node:${NODE_VERSION}-bookworm-slim
 LABEL org.opencontainers.image.title="joseph-terminal" \
       org.opencontainers.image.description="Joseph Terminal (Next.js)" \
-      org.opencontainers.image.licenses="MIT"
+      org.opencontainers.image.licenses="AGPL-3.0-only"
 # The standalone server binds to $HOSTNAME, which Docker sets to the
 # container id: 0.0.0.0 makes it listen on every interface.
 ENV NODE_ENV=production NEXT_TELEMETRY_DISABLED=1 HOSTNAME=0.0.0.0 PORT=3000
@@ -41,6 +41,8 @@ COPY --from=build --chown=node:node /repo/apps/web/.next/standalone ./
 COPY --from=build --chown=node:node /repo/apps/web/.next/static ./apps/web/.next/static
 COPY --from=build --chown=node:node /repo/apps/web/public ./apps/web/public
 COPY --from=build --chown=node:node /repo/LICENSE /repo/NOTICE ./
+COPY --from=build --chown=node:node /repo/licenses ./licenses
+COPY --from=build --chown=node:node /repo/third_party/tradex ./third_party/tradex
 # The node image's built-in non-root user.
 USER node
 EXPOSE 3000
