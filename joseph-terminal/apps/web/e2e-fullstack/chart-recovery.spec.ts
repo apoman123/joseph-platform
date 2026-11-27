@@ -47,7 +47,8 @@ test('an open chart automatically reloads revised adjusted history without retai
     }
     const batch = (await response.json()) as CandleBatch;
     batches += 1;
-    const price = batches === 1 ? '188.65' : '47.16';
+    // Prices honor the mock BTC instrument's 0.1 tick on every render.
+    const price = batches === 1 ? '188.8' : '47.2';
     await route.fulfill({
       response,
       json: {
@@ -73,11 +74,11 @@ test('an open chart automatically reloads revised adjusted history without retai
   await expect(pane.getByTestId('price-adjustment')).toHaveText(
     'Adjusted · splits & dividends'
   );
-  await expect(pane.locator('.pane__ohlc')).toContainText('188.65');
+  await expect(pane.locator('.pane__ohlc')).toContainText('188.8');
   await page.clock.runFor(30_000);
   await expect.poll(() => batches).toBeGreaterThan(1);
-  await expect(pane.locator('.pane__ohlc')).toContainText('47.16');
-  await expect(pane.locator('.pane__ohlc')).not.toContainText('188.65');
+  await expect(pane.locator('.pane__ohlc')).toContainText('47.2');
+  await expect(pane.locator('.pane__ohlc')).not.toContainText('188.8');
 });
 
 test('monthly stock history loads when 500 bars predate the exchange calendar', async ({
