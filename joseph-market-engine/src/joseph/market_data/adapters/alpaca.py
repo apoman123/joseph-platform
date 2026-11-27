@@ -1764,15 +1764,17 @@ class AlpacaAdapter(base.BaseVenueAdapter):
         self,
         timeframe: timeframes.Timeframe,
     ) -> market.PriceAdjustment:
-        """Reports the split normalization requested from Alpaca history.
+        """Reports split-adjusted bars and unadjusted trade-built seconds.
 
         Args:
             timeframe: Native or derived stock/ETF candle interval.
 
         Returns:
-            SPLIT; actual current quotes and orders are not transformed.
+            RAW for seconds assembled from actual trades; SPLIT for REST bars
+            and their aggregates. Current quotes and orders are not transformed.
         """
-        del timeframe
+        if timeframe.is_seconds:
+            return market.PriceAdjustment.RAW
         return market.PriceAdjustment.SPLIT
 
     def capabilities(self) -> capabilities.VenueCapabilities:

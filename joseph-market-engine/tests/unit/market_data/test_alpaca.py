@@ -1126,6 +1126,12 @@ async def test_seconds_history_reads_the_closing_print(
     window = (_US_CLOSE - 2_000, _US_CLOSE)
     done = await adapter.fetch_candle_coverage(_AAPL, s1, *window)
     last = done.candles[-1]
+    # Trade-derived seconds must not claim the adjustment of REST bar history.
+    assert adapter.price_adjustment(s1) is market.PriceAdjustment.RAW
+    assert (
+        adapter.price_adjustment(timeframes.Timeframe.M1)
+        is market.PriceAdjustment.SPLIT
+    )
     assert last.start_ms == _US_CLOSE - 1_000 and last.is_final
     assert last.close == _D("230.4") and last.base_volume == _D(500)
     assert done.covered == (window,)

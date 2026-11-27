@@ -111,7 +111,8 @@ Taiwan daily, weekly and monthly historical OHLC use Fugle's confirmed
 caused by events such as 0050's June 18, 2025 one-to-four split. Fugle also
 adjusts for dividends and other capital changes; its figures can therefore
 differ from a chart that adjusts only for splits. Reported volume and turnover
-remain unchanged. Alpaca history retains its existing split adjustment.
+remain unchanged. Alpaca REST bars retain their existing split adjustment;
+seconds assembled from actual trades retain raw prices and are labeled raw.
 
 Set `JOSEPH_FUGLE_ADJUSTED_DAILY=false` and restart the market engine to request
 raw Taiwan daily history. Fugle does not offer adjusted minute candles: minute
