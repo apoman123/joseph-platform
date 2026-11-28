@@ -125,6 +125,30 @@ them. Regular-session charts ignore out-of-session trades and observe Alpaca's
 sale-condition rules. Free IEX is one exchange, so quiet symbols and closed
 market sessions can have no new trades even with a connected WebSocket.
 
+A chart's first candle request starts together with the chart library, and
+indicator-series and AOI requests wait up to 3 seconds while candles are
+loading, so studies never queue ahead of the chart's own history (in the
+browser and, through background priority, at the venue rate limits). The
+terminal keeps the last twelve displayed series in memory: returning to one
+draws it at once and revalidates it with a fresh batch.
+
+The engine shares one venue fetch among identical concurrent history requests;
+a client that disconnects does not cancel it for the others, and the result
+still lands in the cache for its retry. A series whose newest bar was fetched
+less than a twelfth of a bar ago (1 to 10 seconds) and has not closed since, or
+that a live session keeps current, is served from the cache without another
+venue request. Venue requests of studies, scans and strategies take a
+rate-limit token only while no chart request waits for one. Alpaca reads the
+pages of a long minute range concurrently within its rate limit.
+
+TWSE and TPEx publish daily history one month per request, paced at one
+request per 2 seconds. A daily chart request reads at most four uncached months
+(about 6 seconds; weekly and monthly charts ten months, about 18 seconds) and
+returns the newest bars it has; scrolling back (load older) reads the next
+months, so history fills in progressively instead of a cold 500-bar daily
+chart taking about 48 seconds. Months already read are reused, and concurrent
+reads of one month share a request.
+
 Chart history requests stop after 30 seconds and offer **Retry candles**.
 Changing a chart's symbol, timeframe, or feed mode cancels its obsolete history
 reads; older-history paging waits until the initial snapshot finishes.
@@ -175,16 +199,31 @@ Taiwan historical resolutions. Set it to `false` and restart the market engine
 only when explicitly requesting raw historical prices with their action gaps.
 
 `CandleBatch.price_adjustment` identifies `RAW`, `SPLIT` or `ALL`; adjusted
-batches also declare a fifteen-minute UTC cache epoch and refresh deadline. The chart discards incompatible
-history pages when the basis changes, and the engine invalidates adjusted
-cache entries each fifteen-minute epoch for both chart and indicator consumers. Provider
-history uses the latest known corporate actions and can be revised; it is not
-point-in-time data and does not reconstruct historically known adjustments for
-backtests. No split factors are inferred from apparent price jumps.
+batches also declare a price-basis epoch (`price_adjustment_epoch_ms`) and a
+refresh deadline (`price_adjustment_refresh_after_ms`, the next fifteen-minute
+UTC boundary). Once per fifteen-minute epoch, on the first request for an
+instrument, the engine re-reads the provider's recent daily factors (paired
+raw/split daily bars for Alpaca, raw/adjusted daily closes for Fugle: one
+request pair covering the last 30 days) and compares them with the previous
+reading. A new split, dividend or provider correction changes the factor of
+every session before its ex-date, so it shows in those recent sessions; only
+then are the instrument's adjusted cached series dropped and the basis epoch
+advanced. Unchanged factors keep the cached history and the epoch, so charts
+and indicators no longer reload all adjusted history four times an hour. If
+the factors cannot be read, the cache is dropped as before. The first use of an
+instrument reads its baseline in the background, without delaying the chart.
+Sources without this check (none of the adjusted ones today) keep the old
+per-epoch invalidation. The chart discards incompatible history pages when the
+basis epoch changes. Provider history uses the latest known corporate actions
+and can be revised; it is not point-in-time data and does not reconstruct
+historically known adjustments for backtests. No split factors are inferred
+from apparent price jumps.
 
-Open adjusted charts refresh automatically after the server-provided deadline.
-Changing the adjustment epoch replaces earlier pages rather than splicing
-newly normalized prices into old history. Ordinary session gaps remain; missing
+Open adjusted charts revalidate automatically after the server-provided
+deadline; with an unchanged basis this is a cached read. Changing the basis
+epoch replaces earlier pages rather than splicing newly normalized prices into
+old history. Factor loads that cross an epoch boundary are retried within the
+new epoch instead of failing the history request. Ordinary session gaps remain; missing
 closed bars use the existing bounded source-repair path. An unconfirmed provider
 adjustment fails visibly. Genuine market jumps and missing observations are
 retained; apparent discontinuities alone never trigger smoothing.

@@ -7,16 +7,18 @@
 /** @fileoverview Real Python studies, heatmap tabs and automatic MCP control. */
 
 import {expect, test} from '@playwright/test';
-import {API} from '../playwright.fullstack.config';
+import {API, TOKEN} from '../playwright.fullstack.config';
 
 /** Ordinary test-user authentication; never an external notification recipient. */
-const AUTH = {Authorization: 'Bearer fullstack-token'};
+const AUTH = {Authorization: `Bearer ${TOKEN}`};
+/** Market-engine origin the web build talks to. */
+const MARKET = API.NEXT_PUBLIC_MARKET_API_URL;
 
 test('new heatmap tab loads the engine catalogue and snapshot honestly', async ({
   page,
   request,
 }) => {
-  const api = await request.get(`${API}/v1/heatmap`, {
+  const api = await request.get(`${MARKET}/v1/heatmap`, {
     headers: AUTH,
     params: {type: 'crypto'},
   });
@@ -41,7 +43,12 @@ test('new heatmap tab loads the engine catalogue and snapshot honestly', async (
       .getByRole('group', {name: /tiles$/})
       .getByRole('button', {name: /,/})
       .first()
-      .or(heatmap.getByText(/No symbol|No symbols|unavailable|error/i).first())
+      .or(
+        heatmap
+          .getByRole('status')
+          .filter({hasText: /No symbols?|unavailable|error/i})
+          .first()
+      )
   ).toBeVisible({timeout: 30_000});
   await page.reload();
   await expect(

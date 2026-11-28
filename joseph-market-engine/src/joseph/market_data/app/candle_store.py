@@ -108,6 +108,20 @@ class CandleStore:
         with self._lock:
             self._series.pop((instrument, timeframe), None)
 
+    def series_timeframes(
+        self, instrument: instruments.InstrumentId
+    ) -> list[timeframes.Timeframe]:
+        """Lists the timeframes the store holds a series of for an instrument.
+
+        Args:
+            instrument: Instrument whose series are listed.
+
+        Returns:
+            Timeframes with a series (bars or coverage), in no fixed order.
+        """
+        with self._lock:
+            return [tf for inst, tf in self._series if inst == instrument]
+
     def upsert(self, candle: market.Candle) -> candle_rules.MergeResult:
         """Merges one candle.
 

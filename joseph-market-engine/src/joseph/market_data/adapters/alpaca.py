@@ -61,12 +61,14 @@ feed carries no closing cross for these listings and reads nothing.
 from __future__ import annotations
 
 import asyncio
+import bisect
 import collections
 import contextlib
 import dataclasses
 import datetime
 import decimal
 import enum
+import itertools
 import json
 import logging
 import os
@@ -123,8 +125,9 @@ _INTRADAY = tuple(
 )
 _TF = (*timeframes.SECONDS, *timeframes.MINUTE_AND_ABOVE)
 _PAGE_LIMIT = 10_000
+_PLAIN_STAMP_LEN = len("2026-11-20T14:30:00Z")
 MAX_PAGES = 20
-"""REST pages per call (newest data is kept when the cap truncates)."""
+"""REST pages per call (the oldest data is kept when the cap truncates)."""
 _BAR_SETTLE_MS = 60_000
 """Age after its end at which a minute bar is final.
 
@@ -297,6 +300,12 @@ def rfc3339_ms(text: str) -> int:
     Raises:
         ValueError: For malformed text.
     """
+    if len(text) == _PLAIN_STAMP_LEN and text[-1] == "Z" and text[10] == "T":
+        # Fast path for bar stamps such as ``2026-11-20T14:30:00Z``.
+        with contextlib.suppress(ValueError):
+            moment = datetime.datetime.fromisoformat(text)
+            if moment.tzinfo is not None:
+                return int(moment.timestamp()) * 1000
     match = re.match(
         r"^(\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2})(\.(\d+))?(Z|[+-]\d{2}:\d{2})$",
         text.strip(),
@@ -1323,7 +1332,7 @@ class AlpacaSource:  # noqa: DOC302 - Document constructor mutation.
         self._normalizer = price_adjustments.DailyPriceNormalizer(clock)
         self._users = 0
 
-    async def _daily_price_factors(
+    async def daily_price_factors(
         self, instrument: instruments.InstrumentId, start_ms: int, end_ms: int
     ) -> Mapping[int, decimal.Decimal]:
         """Reads matching raw and split-adjusted daily bars from the same feed.
@@ -1397,7 +1406,7 @@ class AlpacaSource:  # noqa: DOC302 - Document constructor mutation.
             Returns:
                 Confirmed daily split ratios.
             """
-            return await self._daily_price_factors(
+            return await self.daily_price_factors(
                 bars[0].instrument_id, start, end
             )
 
@@ -1434,7 +1443,7 @@ class AlpacaSource:  # noqa: DOC302 - Document constructor mutation.
             Returns:
                 Confirmed daily split ratios.
             """
-            return await self._daily_price_factors(instrument, start, end)
+            return await self.daily_price_factors(instrument, start, end)
 
         starts = {
             sessions.XNYS.floor(_D1, close - 1)
@@ -1530,7 +1539,11 @@ class AlpacaSource:  # noqa: DOC302 - Document constructor mutation.
             raise
 
     async def pages(
-        self, path: str, params: dict[str, Any], key: str
+        self,
+        path: str,
+        params: dict[str, Any],
+        key: str,
+        max_pages: int | None = None,
     ) -> tuple[list[Mapping[str, Any]], bool]:
         """Follows ``next_page_token`` up to ``MAX_PAGES``.
 
@@ -1538,15 +1551,16 @@ class AlpacaSource:  # noqa: DOC302 - Document constructor mutation.
             path: Path.
             params: Query parameters.
             key: Result array (``bars``, ``trades``, ``quotes``).
+            max_pages: Page cap (``MAX_PAGES`` when omitted).
 
         Returns:
             Rows of every page read (oldest first with ``sort=asc``) and
-            whether the last page was reached (False when ``MAX_PAGES``
+            whether the last page was reached (False when the page cap
             cut the range short).
         """
         rows: list[Mapping[str, Any]] = []
         token: str | None = None
-        for _ in range(MAX_PAGES):
+        for _ in range(MAX_PAGES if max_pages is None else max_pages):
             query = dict(params)
             if token:
                 query["page_token"] = token
@@ -1556,6 +1570,73 @@ class AlpacaSource:  # noqa: DOC302 - Document constructor mutation.
             if not token:
                 return rows, True
         return rows, False
+
+    async def concurrent_pages(
+        self,
+        path: str,
+        params: dict[str, Any],
+        key: str,
+        start_ms: int,
+        stop_ms: int,
+    ) -> tuple[list[Mapping[str, Any]], bool]:
+        """Reads ``[start_ms, stop_ms)`` like ``pages``, later pages at once.
+
+        The first page is read as usual. When more follow, the time it
+        spanned sizes the rest: the remainder is split at minute boundaries
+        into ranges of about one page each, which are read concurrently
+        (within the rate limit) instead of one ``next_page_token`` after
+        another. Rows have one timestamp per bar, so the ranges hold exactly
+        the bars of the whole range. At most ``MAX_PAGES`` pages are read
+        in total; as with ``pages`` the oldest rows are kept when the cap
+        cuts the range short.
+
+        Args:
+            path: Path.
+            params: Query parameters without ``start``/``end``.
+            key: Result array (``bars``).
+            start_ms: Inclusive start, epoch milliseconds.
+            stop_ms: Exclusive end, epoch milliseconds.
+
+        Returns:
+            Rows oldest first and whether every page was read.
+        """
+        payload = await self.get(
+            path,
+            {**params, "start": rfc3339(start_ms), "end": rfc3339(stop_ms - 1)},
+        )
+        rows: list[Mapping[str, Any]] = list(payload.get(key) or [])
+        if not payload.get("next_page_token") or not rows:
+            return rows, not payload.get("next_page_token")
+        resume = rfc3339_ms(str(rows[-1]["t"])) + 1
+        # Ranges of about 4/5 of the first page's span, each allowed two
+        # pages, so uneven density rarely truncates one; a longer remainder
+        # is left to the caller's next round (``complete`` is then False).
+        width = max(60_000, (resume - start_ms) * 4 // 5 // 60_000 * 60_000)
+        budget = MAX_PAGES - 1
+        count = min(budget // 2, -(-(stop_ms - resume) // width))
+        bounds = [resume + i * width for i in range(count)]
+        bounds = [b - b % 60_000 if i else b for i, b in enumerate(bounds)]
+        last = min(stop_ms, resume + count * width)
+        last = last if last == stop_ms else last - last % 60_000
+        bounds.append(last)
+        per_range = max(1, budget // count) if count else 1
+        results = await asyncio.gather(
+            *(
+                self.pages(
+                    path,
+                    {**params, "start": rfc3339(low), "end": rfc3339(high - 1)},
+                    key,
+                    per_range,
+                )
+                for low, high in itertools.pairwise(bounds)
+                if low < high
+            )
+        )
+        for chunk, complete in results:
+            rows.extend(chunk)
+            if not complete:
+                return rows, False
+        return rows, last == stop_ms
 
     async def paged(
         self, path: str, params: dict[str, Any], key: str
@@ -1580,9 +1661,10 @@ class AlpacaSource:  # noqa: DOC302 - Document constructor mutation.
 
         Each uncached session costs one request for the trades of its
         closing window (``[close, close + 60 s)``, up to 10,000 trades,
-        oldest first). Sessions are served newest first while
-        ``max_requests`` and the shared per-minute budget allow; a failed
-        request stops the reading (the session stays unknown).
+        oldest first). Sessions are chosen newest first while
+        ``max_requests`` and the shared per-minute budget allow, and their
+        windows are read concurrently (within the rate limit); a failed
+        request leaves its session unknown.
 
         Args:
             symbol: Alpaca symbol.
@@ -1594,48 +1676,62 @@ class AlpacaSource:  # noqa: DOC302 - Document constructor mutation.
             closes left unread are absent.
         """
         known: dict[int, tuple[us_trade_bars.TapeTrade, ...]] = {}
-        sent = 0
+        wanted: list[int] = []
         for close in sorted(set(closes), reverse=True):
             cached = self._closing.get((symbol, close))
             if cached is not None:
                 known[close] = cached
+            elif len(wanted) < max_requests and self.closing_budget.take():
+                wanted.append(close)
+        read = await asyncio.gather(
+            *(self._closing_window(symbol, close) for close in wanted)
+        )
+        for close, prints in zip(wanted, read, strict=True):
+            if prints is None:
                 continue
-            if sent >= max_requests or not self.closing_budget.take():
-                continue
-            sent += 1
-            try:
-                payload = await self.get(
-                    f"/v2/stocks/{symbol}/trades",
-                    {
-                        "feed": self.config.rest_feed,
-                        "limit": _PAGE_LIMIT,
-                        "sort": "asc",
-                        "start": rfc3339(close),
-                        "end": rfc3339(
-                            close + us_trade_bars.CLOSING_WINDOW_MS - 1
-                        ),
-                    },
-                )
-            except errors.JosephError as err:
-                _LOG.warning(
-                    "alpaca closing prints of %s unavailable: %s",
-                    symbol,
-                    err.message,
-                )
-                max_requests = sent
-                continue
-            # ``u`` marks a trade update (canceled or corrected print).
-            trades = [
-                parse_trade(row, market.AggressorSide.UNKNOWN)
-                for row in payload.get("trades") or ()
-                if not row.get("u")
-            ]
-            prints = us_trade_bars.closing_prints(trades, close)
             if len(self._closing) >= _CLOSING_CACHE_SESSIONS:
                 del self._closing[next(iter(self._closing))]
             self._closing[(symbol, close)] = prints
             known[close] = prints
         return known
+
+    async def _closing_window(
+        self, symbol: str, close: int
+    ) -> tuple[us_trade_bars.TapeTrade, ...] | None:
+        """Reads one session's closing prints.
+
+        Args:
+            symbol: Alpaca symbol.
+            close: Session close, epoch milliseconds.
+
+        Returns:
+            The closing prints, or None when the request failed.
+        """
+        try:
+            payload = await self.get(
+                f"/v2/stocks/{symbol}/trades",
+                {
+                    "feed": self.config.rest_feed,
+                    "limit": _PAGE_LIMIT,
+                    "sort": "asc",
+                    "start": rfc3339(close),
+                    "end": rfc3339(close + us_trade_bars.CLOSING_WINDOW_MS - 1),
+                },
+            )
+        except errors.JosephError as err:
+            _LOG.warning(
+                "alpaca closing prints of %s unavailable: %s",
+                symbol,
+                err.message,
+            )
+            return None
+        # ``u`` marks a trade update (canceled or corrected print).
+        trades = [
+            parse_trade(row, market.AggressorSide.UNKNOWN)
+            for row in payload.get("trades") or ()
+            if not row.get("u")
+        ]
+        return us_trade_bars.closing_prints(trades, close)
 
     async def close(self) -> None:
         """Closes shared resources once every adapter closed."""
@@ -1988,6 +2084,29 @@ class AlpacaAdapter(base.BaseVenueAdapter):
         del timeframe  # All supported intervals use the same price basis.
         return market.PriceAdjustment.SPLIT
 
+    async def price_basis(
+        self,
+        instrument: instruments.InstrumentId,
+        start_ms: int,
+        end_ms: int,
+    ) -> Mapping[int, decimal.Decimal]:
+        """Reads the current split factors from paired raw/split daily bars.
+
+        Args:
+            instrument: Exact Alpaca stock or ETF identity.
+            start_ms: Inclusive UTC start, epoch milliseconds.
+            end_ms: Exclusive UTC end, epoch milliseconds.
+
+        Returns:
+            Session start mapped to the split factor of that session.
+        """
+        await self._ready(instrument)
+        if end_ms <= start_ms:
+            return {}
+        return await self._source.daily_price_factors(
+            instrument, start_ms, end_ms
+        )
+
     async def adjust_historical_prices(
         self, bars: Sequence[market.Candle]
     ) -> list[market.Candle]:
@@ -2237,22 +2356,37 @@ class AlpacaAdapter(base.BaseVenueAdapter):
         stop = min(end_ms, now - self.config.delay_ms)
         if stop <= start_ms:
             return _Fetched([], start_ms, complete=True)
-        rows, complete = await self._source.pages(
+        rows, complete = await self._source.concurrent_pages(
             f"/v2/stocks/{instrument.venue_market_id}/bars",
             {
                 "timeframe": "1Min",
-                "start": rfc3339(start_ms),
-                "end": rfc3339(stop - 1),
                 "adjustment": "split",
                 "feed": self.config.rest_feed,
                 "limit": _PAGE_LIMIT,
                 "sort": "asc",
             },
             "bars",
+            start_ms,
+            stop,
         )
         settled = self._settled_before()
         out = []
+        # Extended-hours rows (about 60% of them) are skipped by a bisect
+        # over the range's session spans before the full conversion.
+        try:
+            spans = [
+                (s.open_ms, s.close_ms)
+                for s in sessions.XNYS.sessions(start_ms - 86_400_000, stop)
+            ]
+        except ValueError:
+            spans = []
+        opens = [low for low, _ in spans]
         for row in rows:
+            if spans:
+                stamp = rfc3339_ms(str(row["t"]))
+                at = bisect.bisect_right(opens, stamp) - 1
+                if at < 0 or stamp >= spans[at][1]:
+                    continue
             bar = minute_bar(
                 row,
                 instrument,

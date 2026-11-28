@@ -32,6 +32,8 @@ from joseph.domain import timeframes
 REFRESH_MS = 900_000
 """UTC cache epoch, in milliseconds, shared with chart-history invalidation."""
 _MAX_FACTORS = 8192
+_EPOCH_ATTEMPTS = 4
+"""Evidence loads one call may make while epochs keep ending under it."""
 _D1 = timeframes.Timeframe.D1
 FactorLoader: TypeAlias = Callable[
     [int, int], Awaitable[Mapping[int, decimal.Decimal]]
@@ -39,7 +41,7 @@ FactorLoader: TypeAlias = Callable[
 """Loads confirmed daily factors for an inclusive/exclusive UTC date range."""
 
 
-def _today_start(calendar: sessions.BarCalendar, now_ms: int) -> int:
+def today_start(calendar: sessions.BarCalendar, now_ms: int) -> int:
     """Find midnight of today's exchange date, including before the open.
 
     Args:
@@ -184,7 +186,7 @@ class DailyPriceNormalizer:  # noqa: DOC302 - Document constructor mutation.
         calendar = sessions.for_instrument(instrument)
         starts = {calendar.floor(_D1, bar.start_ms) for bar in bars}
         selected = await self.ratios(instrument, starts, load)
-        current = _today_start(calendar, self._clock.now_ms())
+        current = today_start(calendar, self._clock.now_ms())
         result = []
         for bar in bars:
             factor = selected.get(
@@ -230,31 +232,33 @@ class DailyPriceNormalizer:  # noqa: DOC302 - Document constructor mutation.
             prices use unity, without making an extra data request.
 
         Raises:
-            errors.VenueUnavailableError: If any past-session factor is missing,
-                invalid or became obsolete during a cache-epoch transition.
+            errors.VenueUnavailableError: If any past-session factor is missing
+                or invalid, or epochs kept ending during every evidence load.
         """
         calendar = sessions.for_instrument(instrument)
-        current = _today_start(calendar, self._clock.now_ms())
+        current = today_start(calendar, self._clock.now_ms())
         needed = {start for start in starts if start < current}
         lock = self._locks.setdefault(instrument, asyncio.Lock())
         async with lock:
-            epoch = self._clock.now_ms() // REFRESH_MS
-            if self._epoch != epoch:
-                self._factors.clear()
-                self._epoch = epoch
-            missing = {
-                start
-                for start in needed
-                if (instrument, start) not in self._factors
-            }
-            if missing:
+            # An epoch that ends while evidence loads starts the cache over
+            # with the evidence just read and loads what it still lacks, so
+            # one call never mixes factors of two epochs and never fails
+            # merely because it crossed the boundary.
+            for _ in range(_EPOCH_ATTEMPTS):
+                epoch = self._clock.now_ms() // REFRESH_MS
+                if self._epoch != epoch:
+                    self._factors.clear()
+                    self._epoch = epoch
+                missing = {
+                    start
+                    for start in needed
+                    if (instrument, start) not in self._factors
+                }
+                if not missing:
+                    break
                 factors = await load(
                     min(missing), calendar.end_of(_D1, max(missing))
                 )
-                if self._clock.now_ms() // REFRESH_MS != epoch:
-                    raise errors.VenueUnavailableError(
-                        "Adjustment epoch changed; retry history"
-                    )
                 if any(
                     start not in factors
                     or not factors[start].is_finite()
@@ -264,8 +268,15 @@ class DailyPriceNormalizer:  # noqa: DOC302 - Document constructor mutation.
                     raise errors.VenueUnavailableError(
                         "Missing confirmed daily adjustment factor"
                     )
+                if self._clock.now_ms() // REFRESH_MS != epoch:
+                    self._factors.clear()
+                    self._epoch = self._clock.now_ms() // REFRESH_MS
                 for start, factor in factors.items():
                     self._factors[instrument, start] = factor
+            else:
+                raise errors.VenueUnavailableError(
+                    "Adjustment evidence kept expiring; retry history"
+                )
             selected = {
                 start: self._factors[instrument, start] for start in needed
             }

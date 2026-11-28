@@ -91,12 +91,11 @@ function useSize(): [
     if (!node) return;
     const measure = () => {
       const rect = node.getBoundingClientRect();
-      setSize(prev =>
-        Math.abs(prev.w - rect.width) < 0.5 &&
-        Math.abs(prev.h - rect.height) < 0.5
-          ? prev
-          : {w: Math.floor(rect.width), h: Math.floor(rect.height)}
-      );
+      const w = Math.floor(rect.width);
+      const h = Math.floor(rect.height);
+      // Compare the stored (floored) size so fractional layout widths
+      // cannot trigger a new state object on every measurement.
+      setSize(prev => (prev.w === w && prev.h === h ? prev : {w, h}));
     };
     measure();
     if (typeof ResizeObserver !== 'undefined') {
@@ -141,6 +140,15 @@ export function Heatmap({
   const [mapRef, size] = useSize();
   const section = useRef<HTMLElement>(null);
   const tilesRef = useRef<HTMLDivElement>(null);
+  // A stable ref callback: an inline one would detach and re-measure on
+  // every render.
+  const attachMap = useCallback(
+    (node: HTMLDivElement | null) => {
+      mapRef(node);
+      tilesRef.current = node;
+    },
+    [mapRef]
+  );
   const [hover, setHover] = useState<Hover | null>(null);
   const [menu, setMenu] = useState<Hover | null>(null);
   const [hiddenState, setHiddenState] = useState<{
@@ -648,10 +656,7 @@ export function Heatmap({
       </div>
       <div className={styles.mapWrap}>
         <div
-          ref={node => {
-            mapRef(node);
-            tilesRef.current = node;
-          }}
+          ref={attachMap}
           className={styles.map}
           role="group"
           aria-label={`${snapshot?.dataset_label ?? 'Heatmap'} tiles`}
