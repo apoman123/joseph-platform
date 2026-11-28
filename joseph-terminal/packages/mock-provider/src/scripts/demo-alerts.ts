@@ -94,7 +94,7 @@ const CONDITIONS: Readonly<Record<string, Condition>> = {
       inputs,
       ['crossing-up', 'crossing-down'],
       (direction, i) =>
-        `${symbol} crossed ${direction} ${show(level)}: close ${show(bars[i]!.close)}`
+        `${symbol} crossed ${direction} ${show(level)}: close ${show(bars[i]?.close ?? NaN)}`
     );
   },
   'builtin:channel': (bars, inputs, symbol) => {
@@ -113,7 +113,7 @@ const CONDITIONS: Readonly<Record<string, Condition>> = {
     const events: DemoAlertEvent[] = [];
     bars.forEach((bar, index) => {
       const inside = lower <= bar.close && bar.close <= upper;
-      const before = index > 0 ? bars[index - 1]! : null;
+      const before = bars[index - 1] ?? null;
       const wasInside =
         before === null ? null : lower <= before.close && before.close <= upper;
       const changed = wasInside !== null && wasInside !== inside;
@@ -144,11 +144,13 @@ const CONDITIONS: Readonly<Record<string, Condition>> = {
         const alpha = 2 / (length + 1);
         ema.set(
           length,
-          last === undefined ? bar.close : alpha * bar.close + (1 - alpha) * last
+          last === undefined
+            ? bar.close
+            : alpha * bar.close + (1 - alpha) * last
         );
       }
       const value = (length: number) => {
-        if (kind !== 'SMA') return ema.get(length)!;
+        if (kind !== 'SMA') return ema.get(length) ?? bar.close;
         if (index + 1 < length) return null;
         const window = bars.slice(index + 1 - length, index + 1);
         return window.reduce((a, b) => a + b.close, 0) / length;
@@ -162,7 +164,7 @@ const CONDITIONS: Readonly<Record<string, Condition>> = {
       inputs,
       ['ma-cross-up', 'ma-cross-down'],
       (direction, i) =>
-        `${symbol} ${kind} ${fast}/${slow} crossed ${direction} at close ${show(bars[i]!.close)}`
+        `${symbol} ${kind} ${fast}/${slow} crossed ${direction} at close ${show(bars[i]?.close ?? NaN)}`
     );
   },
   'builtin:rsi-level': (bars, inputs, symbol) => {
@@ -218,7 +220,7 @@ const CONDITIONS: Readonly<Record<string, Condition>> = {
     const threshold = Number(inputs.threshold_pct);
     const events: DemoAlertEvent[] = [];
     bars.forEach((bar, index) => {
-      const base = index >= n ? bars[index - n]!.close : 0;
+      const base = index >= n ? (bars[index - n]?.close ?? 0) : 0;
       if (base <= 0) return;
       const change = ((bar.close - base) / base) * 100;
       if (inputs.direction !== 'down' && change >= threshold) {

@@ -72,7 +72,7 @@ function effectiveInputs(
 ): Record<string, JsonValue> {
   const merged: Record<string, JsonValue> = {};
   for (const [name, spec] of Object.entries(entry.inputs)) {
-    merged[name] = spec.default as JsonValue;
+    merged[name] = spec.default;
   }
   for (const [name, value] of Object.entries(inputs)) {
     const spec = entry.inputs[name];
@@ -80,7 +80,7 @@ function effectiveInputs(
     if (spec.options && !spec.options.includes(value)) {
       throw new Error(`${name} must be one of ${spec.options.join(', ')}`);
     }
-    merged[name] = value as JsonValue;
+    merged[name] = value;
   }
   return merged;
 }
@@ -144,7 +144,8 @@ export class DemoScriptsClient implements ScriptsClient {
         inputs: effectiveInputs(entry, condition.inputs),
       };
     });
-    const first = pins[0]!;
+    const [first] = pins;
+    if (!first) throw new Error('add at least one filter');
     const job: ScanJob = {
       job_id: `demo-scan-${++this.sequence}`,
       script_id: first.script_id,
@@ -209,6 +210,12 @@ export class DemoScriptsClient implements ScriptsClient {
     job.universe_count = rows.length;
     rows = rows.slice(0, body.max_symbols ?? 100);
     job.total = rows.length;
+    const matches: NonNullable<ScanJob['matches']> = [];
+    const unavailable: NonNullable<ScanJob['unavailable']> = [];
+    const errors: NonNullable<ScanJob['errors']> = [];
+    job.matches = matches;
+    job.unavailable = unavailable;
+    job.errors = errors;
     const needsBook = pins.some(pin =>
       (entryOf(pin.script_id)?.metrics ?? []).includes('order_book')
     );
@@ -217,7 +224,7 @@ export class DemoScriptsClient implements ScriptsClient {
       const id = row.instrument_id;
       const snapshot = snapshots.get(id);
       if (!snapshot) {
-        job.unavailable!.push({instrument_id: id, error: 'quote unavailable'});
+        unavailable.push({instrument_id: id, error: 'quote unavailable'});
         job.scanned = (job.scanned ?? 0) + 1;
         continue;
       }
@@ -251,7 +258,7 @@ export class DemoScriptsClient implements ScriptsClient {
         } catch (err) {
           const message = err instanceof Error ? err.message : String(err);
           if (!(err instanceof DemoUnavailable)) {
-            job.errors!.push({
+            errors.push({
               instrument_id: id,
               error: `${pin.title}: ${message}`,
             });
@@ -263,12 +270,12 @@ export class DemoScriptsClient implements ScriptsClient {
         }
       }
       if (state === 'match') {
-        job.matches!.push({
+        matches.push({
           instrument_id: id,
-          snapshot: snapshot as unknown as JsonValue,
+          snapshot: snapshot,
         });
       } else if (state === 'unavailable') {
-        job.unavailable!.push({instrument_id: id, error: reasons.join('; ')});
+        unavailable.push({instrument_id: id, error: reasons.join('; ')});
       }
       job.scanned = (job.scanned ?? 0) + 1;
     }
@@ -397,8 +404,8 @@ export class DemoScriptsClient implements ScriptsClient {
           job.instrument_id
         );
         for (const event of events) {
-          const candle = candles[event.index]!;
-          if (candle.end_ms <= job.last_processed_ms) continue;
+          const candle = candles[event.index];
+          if (!candle || candle.end_ms <= job.last_processed_ms) continue;
           const key = `demo|${job.job_id}|0:${entry.source_hash}|${event.name}|${candle.start_ms}`;
           if (this.log.has(key)) continue;
           this.log.set(key, {

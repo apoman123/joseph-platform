@@ -76,6 +76,19 @@ function compare(value: number, inputs: Inputs): boolean {
 }
 
 /**
+ * Reads a bar counted from the end.
+ * @param bars Bars, oldest first.
+ * @param back 1 for the latest bar, 2 for the one before.
+ * @return The bar.
+ * @throws DemoUnavailable When absent.
+ */
+function fromEnd(bars: readonly DemoBar[], back: number): DemoBar {
+  const bar = bars[bars.length - back];
+  if (!bar) throw new DemoUnavailable('not enough closed bars');
+  return bar;
+}
+
+/**
  * Requires enough closed bars.
  * @param ctx Filter context.
  * @param needed Minimum bars.
@@ -280,7 +293,10 @@ function liquidity(ctx: DemoFilterContext, inputs: Inputs): boolean {
     const buy = walk(book.asks, limits.notional);
     const sell = walk(book.bids, limits.notional);
     if (buy !== null && sell !== null) {
-      slippage = Math.max(((buy - mid) / mid) * 100, ((mid - sell) / mid) * 100);
+      slippage = Math.max(
+        ((buy - mid) / mid) * 100,
+        ((mid - sell) / mid) * 100
+      );
     }
   }
   gate(
@@ -323,7 +339,10 @@ function average(closes: readonly number[], length: number, kind: unknown) {
   const alpha = 2 / (length + 1);
   return closes
     .slice(1)
-    .reduce((value, close) => alpha * close + (1 - alpha) * value, closes[0]!);
+    .reduce(
+      (value, close) => alpha * close + (1 - alpha) * value,
+      closes[0] ?? 0
+    );
 }
 
 /** DEMO filters by catalog id. */
@@ -331,33 +350,29 @@ const FILTERS: Readonly<
   Record<string, (ctx: DemoFilterContext, inputs: Inputs) => boolean>
 > = {
   'builtin:liquidity-qualification': liquidity,
-  'builtin:price': (ctx, inputs) =>
-    compare(latestPrice(ctx.snapshot), inputs),
+  'builtin:price': (ctx, inputs) => compare(latestPrice(ctx.snapshot), inputs),
   'builtin:change': (ctx, inputs) =>
     compare(required(ctx.snapshot.change_24h_pct, '24h change'), inputs),
   'builtin:volume': (ctx, inputs) =>
     compare(required(ctx.snapshot.volume_24h_base, '24h volume'), inputs),
   'builtin:turnover': (ctx, inputs) =>
-    compare(
-      required(ctx.snapshot.turnover_24h_quote, '24h turnover'),
-      inputs
-    ),
+    compare(required(ctx.snapshot.turnover_24h_quote, '24h turnover'), inputs),
   'builtin:relative-volume': (ctx, inputs) => {
     const length = Number(inputs.length);
     const bars = closed(ctx, length + 1);
     const avg =
       bars.slice(-length - 1, -1).reduce((a, b) => a + b.volume, 0) / length;
     if (avg <= 0) throw new DemoUnavailable('average volume is zero');
-    return compare(bars[bars.length - 1]!.volume / avg, inputs);
+    return compare(fromEnd(bars, 1).volume / avg, inputs);
   },
   'builtin:gap': (ctx, inputs) => {
     const bars = closed(ctx, 2);
-    const previous = bars[bars.length - 2]!.close;
+    const previous = fromEnd(bars, 2).close;
     if (previous <= 0) {
       throw new DemoUnavailable('previous close is not positive');
     }
     return compare(
-      ((bars[bars.length - 1]!.open - previous) / previous) * 100,
+      ((fromEnd(bars, 1).open - previous) / previous) * 100,
       inputs
     );
   },
@@ -386,7 +401,7 @@ const FILTERS: Readonly<
   'builtin:new-high-low': (ctx, inputs) => {
     const length = Number(inputs.length);
     const window = closed(ctx, length).slice(-length);
-    const last = window[window.length - 1]!;
+    const last = fromEnd(window, 1);
     return inputs.extreme === 'low'
       ? last.low <= Math.min(...window.map(b => b.low))
       : last.high >= Math.max(...window.map(b => b.high));

@@ -5,8 +5,8 @@
  */
 
 /**
- * @fileoverview Screener feature: backend qualification results with every
- * gate's observed value, threshold and outcome.
+ * @fileoverview Screener feature: market scans of built-in and owned
+ * filter scripts combined with AND, run on the market engine.
  */
 
 import {createElement} from 'react';
@@ -30,7 +30,7 @@ export const SCREENER_FEATURE: WebFeature = {
     owner: 'terminal-trading',
     displayName: 'Screener',
     description:
-      'Qualified, rejected and missing-data perpetuals per exact venue with gate details.',
+      'Market screener: built-in and owned filter scripts combined with AND, scanned on real snapshots and closed bars.',
     uiSlots: ['side-panel'],
     requiredCapabilities: ['market'],
     permissions: ['market:read'],
@@ -38,7 +38,7 @@ export const SCREENER_FEATURE: WebFeature = {
     contractVersion: 1,
     removal: {
       notes:
-        'Stateless view over backend qualification results; removal deletes no data.',
+        'Scans run on the market engine; removal deletes only saved screener presets.',
     },
   },
   activate(ctx) {
