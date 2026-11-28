@@ -200,38 +200,45 @@ def test_acme_snapshot_has_no_funding_or_open_interest(
     assert mock["market_data"]["classified_delta"] is True
 
 
+def _delta_method(market: httpx.Client, instrument: str, tf: str) -> list[str]:
+    """Runs the volume delta built-in and reads its method table.
+
+    Args:
+        market: Market engine client.
+        instrument: Instrument id.
+        tf: Timeframe.
+
+    Returns:
+        The table's method and coverage cells.
+    """
+    response = market.post(
+        "/v1/scripts/builtin:volume_delta/run",
+        json={
+            "instrument_id": instrument,
+            "tf": tf,
+            "to_ms": FLOW_AT,
+            "limit": 50,
+        },
+    )
+    assert response.status_code == 200, response.text
+    (table,) = [
+        visual
+        for visual in response.json()["visuals"]
+        if visual["kind"] == "table"
+    ]
+    return [row[1] for row in table["data"]["rows"]]
+
+
 def test_volume_delta_on_acme_is_trade_classification(
-    market: httpx.Client, validate: _Validate
+    market: httpx.Client,
 ) -> None:
     """ACME volume delta uses trade classification; the perp, taker volume."""
     for tf in ("5m", "1h"):
-        body = market.get(
-            "/v1/indicators/snapshot",
-            params={
-                "instrument_id": ACME,
-                "tf": tf,
-                "set": "volume_delta",
-                "at_ms": FLOW_AT,
-            },
-        ).json()
-        validate("indicators.schema.json", "IndicatorSnapshotList", body)
-        (snapshot,) = body["snapshots"]
-        assert snapshot["plugin_id"] == "volume_delta"
-        assert snapshot["method"] == "trade_classification"
-        assert snapshot["values"]["method"] == "trade_classification"
-        assert snapshot["values"]["coverage_pct"] == "100"
-    perp = market.get(
-        "/v1/indicators/snapshot",
-        params={
-            "instrument_id": MOCK_BTC,
-            "tf": "5m",
-            "set": "volume_delta",
-            "at_ms": FLOW_AT,
-        },
-    ).json()
-    validate("indicators.schema.json", "IndicatorSnapshotList", perp)
-    assert perp["snapshots"][0]["method"] == "trade"
-    assert perp["snapshots"][0]["values"]["method"] == "taker_volume"
+        assert _delta_method(market, ACME, tf) == ["Classified trades", "100%"]
+    assert _delta_method(market, MOCK_BTC, "5m") == [
+        "Taker buy volume",
+        "100%",
+    ]
 
 
 def test_acme_is_screened_with_listed_security_thresholds(

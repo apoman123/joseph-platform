@@ -29,7 +29,6 @@ import {
   DemoUserStream,
   demoLastPrice,
 } from '@joseph/mock-provider';
-import {toValidationResult} from '@joseph/strategy-builder';
 import type {TerminalConfig} from './env';
 
 /** Clients plus the capability names they provide. */
@@ -120,9 +119,7 @@ export function buildClients(config: TerminalConfig): ClientBundle {
       markPrice: demoMark,
       liveRehearsal: demoLiveRehearsalRequested(),
     });
-    const strategy = new DemoStrategyClient({
-      validate: definition => toValidationResult(definition),
-    });
+    const strategy = new DemoStrategyClient();
     return {
       clients: {
         market,

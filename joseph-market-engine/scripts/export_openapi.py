@@ -18,7 +18,8 @@ Without arguments the OpenAPI and built-in catalog are written to
   every built-in indicator's output on fixed bars, which the DEMO study
   evaluator must reproduce (parity test).
 
-Managed Python/heatmap model schemas are also regenerated in
+Managed Python script, catalog, strategy activation and heatmap model
+schemas are also regenerated in
 ``joseph-terminal/packages/contracts/schemas/python-scripts.schema.json``.
 
 With ``--check`` nothing is written and the exit status is 1 when a
@@ -38,8 +39,9 @@ import pydantic
 
 from joseph import bootstrap
 from joseph.api.routers import scripts as script_routes
-from joseph.market_data.app import heatmap
+from joseph.market_data.app import heatmap_models
 from joseph.platform import config
+from joseph.scripts import activations
 from joseph.scripts import builtin
 from joseph.scripts import catalog
 from joseph.scripts import models as scripts
@@ -82,9 +84,13 @@ def _script_contracts() -> str:
         scripts.AlertJob,
         scripts.ScriptBatchRun,
         scripts.ScriptBatchResult,
+        script_routes.CatalogScript,
         script_routes.CatalogList,
-        heatmap.HeatmapSnapshot,
-        heatmap.CompanyMetadataBatch,
+        activations.StrategyActivationInput,
+        activations.StrategyActivation,
+        activations.StrategyActivationList,
+        heatmap_models.HeatmapSnapshot,
+        heatmap_models.HeatmapCatalog,
     ]
     definitions = {}
     for model in models:
@@ -120,8 +126,8 @@ def _openapi() -> str:
         config.Settings(),
         demo_only=True,
         database_url="sqlite://",
-        pipeline_enabled=False,
-        indicator_plugin_packages="none",
+        strategy_activations_enabled=False,
+        script_plugin_packages="none",
     )
     app = bootstrap.create_application(bootstrap.build_container(settings))
     return json.dumps(app.openapi(), indent=2, sort_keys=True) + "\n"

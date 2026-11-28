@@ -22,8 +22,8 @@ Futures and options are not supported.
 
 | Path | Port | What it is |
 |---|---|---|
-| `joseph-terminal/` | 3000 | Next.js terminal: charts, drawing tools, screener, strategy builder, order tickets. Renders engine outputs; holds only a session token. Own licence; can become a separate repository |
-| `joseph-market-engine/` | 8000 | FastAPI service: market data, screening, indicators (built-ins and plugin packages), strategy evaluation, signals, alerts, backtests. Holds no trading credentials |
+| `joseph-terminal/` | 3000 | Next.js terminal: charts, drawing tools, screener, Python strategy panel, order tickets. Renders engine outputs; holds only a session token. Own licence; can become a separate repository |
+| `joseph-market-engine/` | 8000 | FastAPI service: market data, screening, indicators (built-ins and plugin packages), Python scripts and strategy activations, signals, alerts, backtests. Holds no trading credentials |
 | `joseph-execution-engine/` | 8100 | FastAPI service: accounts and an encrypted credential vault, risk gateway, order management system (OMS), reconciliation, audit log, kill switch. The only holder of trading credentials |
 | `system-tests/` | | Cross-service tests that boot both engines |
 | `deploy/` | | Docker Compose stack for the three services (plus optional IB Gateway) |
@@ -76,6 +76,7 @@ execution engine ([broker setup](docs/BROKERS.md)).
 | Alpaca IEX, for Nasdaq/NYSE/Cboe listings | `JOSEPH_ALPACA_KEY_ID` and `JOSEPH_ALPACA_SECRET_KEY` from [Alpaca](https://docs.alpaca.markets/us/docs/about-market-data-api); `JOSEPH_ALPACA_FEED=iex` | US data feed remains disabled | IEX only; consolidated SIP is not enabled |
 | Fugle Taiwan stocks/ETFs | `JOSEPH_TW_DATA_SOURCE=fugle` and `JOSEPH_FUGLE_API_KEY` from [Fugle](https://developer.fugle.tw/pricing) | Taiwan data feed is disabled until the key is set | Per-symbol REST quotes and candles; 1m history since 2023-05-23, daily since 2010; 60 REST calls/minute paced by the engine. Free futures/options and Fugle bulk snapshots are unavailable |
 | U.S. Treasury official | No key | Daily par and real yield curves | No intraday bond or yield quote |
+| Heatmap sources: Nasdaq.com screener, Wikipedia S&P 500 list, TWSE/TPEx open data, CoinGecko | None | Stock, ETF and crypto heatmaps (sector, market cap, delayed or end-of-day quotes) | Unofficial or keyless public endpoints, cached 60 s to 24 h; Alpaca keys add live US quotes and history-based metrics ([details](docs/HEATMAPS.md)) |
 | FRED | `JOSEPH_FRED_API_KEY` from [FRED](https://fred.stlouisfed.org/docs/api/api_key.html) | Official Treasury daily series remain available | Separate daily `treasury:rate:FRED_*` yield and spread IDs; weekly/monthly bars aggregate daily observations |
 
 For example, to use Fugle and FRED in Compose, edit `deploy/.env`:
@@ -149,7 +150,7 @@ These come from venues, data plans or law; code cannot remove them.
 
 ## Documentation
 
-- **Users:** [User manual](docs/USER_MANUAL.md)
+- **Users:** [User manual](docs/USER_MANUAL.md) · [Heatmaps](docs/HEATMAPS.md)
 - **Operators:** [Operations runbook](docs/OPERATIONS.md) · [Brokers](docs/BROKERS.md) · [CI/CD](docs/CI_CD.md)
 - **Contributors:** [Architecture](docs/architecture/INDEX.md) · [ADRs](docs/adr/) · [Extending](docs/EXTENDING.md) · [Coding standards](docs/standards/CODING_STANDARDS.md) · [Design decisions](docs/DESIGN_DECISIONS.md) · [Feature status](docs/FEATURE_STATUS.md)
 - **Components:** [Market engine](joseph-market-engine/README.md) · [Indicators](joseph-market-engine/src/joseph/indicators/README.md) · [Execution engine](joseph-execution-engine/README.md) · [Terminal](joseph-terminal/README.md)
@@ -215,15 +216,15 @@ service window. No unofficial WhatsApp Web session or personal-account automatio
 is used. See [WebKit's Web Push requirements](https://webkit.org/blog/13878/) for
 Apple mobile devices.
 
-**Strategy routing:** destination registration does not override a strategy's
-notification policy. Include `TELEGRAM`, `WHATSAPP` and/or `WEB_PUSH` in the
-strategy definition's `notification.channels`, then save/activate that version.
-Existing strategies retain their current channel policy. Push follows the same
+**Strategy routing:** destination registration does not override a strategy
+activation's notification policy. Include `TELEGRAM`, `WHATSAPP` and/or
+`WEB_PUSH` in the activation's `channels` when creating it
+(`POST /v1/strategy-activations`). Existing activations retain their channels. Push follows the same
 quiet hours, severity, signal-kind and strategy filters as other channels. Python price/indicator conditions are also available through the five-kind
 script editor described below. Native drawing-attached alert controls remain
 a separate roadmap item.
 
-### Python scripts, stock heatmaps, and MCP
+### Python scripts, heatmaps, and MCP
 
 The terminal now has five Python script kinds: **indicator, strategy, library,
 filter, and alert**, each requiring its own abstract base class. The Python
@@ -231,16 +232,18 @@ editor supports immutable versions, library pins, visual studies, simulations,
 market scans, and future-bar alerts. Build `make script-runner` and set
 `JOSEPH_SCRIPT_RUNTIME=docker` to execute sources in isolated containers.
 
-New tabs can contain candlestick charts or stock heatmaps. Active indicators
+New tabs can contain candlestick charts or heatmaps. Active indicators
 have name/settings/source/hide/remove controls in the chart's upper-left corner.
-Heatmap fundamentals remain explicitly unavailable unless dated metadata is
-provided; current feed coverage is preserved.
+Heatmaps cover stocks (S&P 500, Nasdaq 100, Nasdaq Composite, NYSE, all US
+stocks, TWSE, TPEx), ETFs (US, Taiwan) and crypto coins, sized by market cap,
+volume or turnover and coloured by change or performance; see
+[Heatmaps](docs/HEATMAPS.md).
 
 The market server automatically starts MCP at `/mcp`. Open the **MCP** terminal
 panel to create a scoped bearer grant and optionally enable browser control.
 Set `JOSEPH_MCP_PUBLIC_URL` for deployments. See
 [Python scripts and MCP](docs/PYTHON_SCRIPTS_AND_MCP.md) for setup, all context
-methods, notification routing, heatmap metadata, permissions, and test commands.
+methods, notification routing, permissions, and test commands.
 
 See [TradeX integration](docs/TRADEX_INTEGRATION.md) for the pinned upstream
 revision, Python-only script policy, drawing bridge and provider migration.

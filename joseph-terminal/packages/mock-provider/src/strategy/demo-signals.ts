@@ -66,8 +66,8 @@ function barVolumes(
 }
 
 /**
- * Creates DEMO signals relative to a reference time, one per example
- * strategy template.
+ * Creates DEMO signals relative to a reference time, one per built-in
+ * strategy.
  * @param nowMs Reference time in epoch ms (UTC); the first two signals sit
  *     on the 5m bars that closed 0 and 3 bars before the 5-minute boundary
  *     at or before it, the third on the 15m bar that closed 2 bars before
@@ -92,9 +92,9 @@ export function createDemoSignals(nowMs: number): Signal[] {
       ...base,
       signal_id: 'demo-signal-1',
       dedupe_key:
-        'demo-tenant|pivot-bounce-long:v1|mock:perp:BTCUSD|LONG|setup-1|ENTRY_CONFIRMED',
-      strategy_id: 'pivot-bounce-long',
-      strategy_version_id: 'pivot-bounce-long:v1',
+        'demo-tenant|builtin:pivot-bounce-long:vdemo|mock:perp:BTCUSD|LONG|setup-1|ENTRY_CONFIRMED',
+      strategy_id: 'builtin:pivot-bounce-long',
+      strategy_version_id: 'builtin:pivot-bounce-long:vdemo',
       setup_id: 'setup-1',
       instrument_id: 'mock:perp:BTCUSD',
       direction: 'LONG',
@@ -149,9 +149,9 @@ export function createDemoSignals(nowMs: number): Signal[] {
       ...base,
       signal_id: 'demo-signal-2',
       dedupe_key:
-        'demo-tenant|rsi-reversion-short:v1|mock:perp:ETHUSD|SHORT|setup-7|ENTRY_BLOCKED',
-      strategy_id: 'rsi-reversion-short',
-      strategy_version_id: 'rsi-reversion-short:v1',
+        'demo-tenant|builtin:rsi-reversion-short:vdemo|mock:perp:ETHUSD|SHORT|setup-7|ENTRY_BLOCKED',
+      strategy_id: 'builtin:rsi-reversion-short',
+      strategy_version_id: 'builtin:rsi-reversion-short:vdemo',
       setup_id: 'setup-7',
       instrument_id: 'mock:perp:ETHUSD',
       direction: 'SHORT',
@@ -218,9 +218,9 @@ export function createDemoSignals(nowMs: number): Signal[] {
       ...base,
       signal_id: 'demo-signal-3',
       dedupe_key:
-        'demo-tenant|ema-trend-long:v1|mock:perp:SOLUSD|LONG|setup-3|PRE_SIGNAL',
-      strategy_id: 'ema-trend-long',
-      strategy_version_id: 'ema-trend-long:v1',
+        'demo-tenant|builtin:ema-trend-long:vdemo|mock:perp:SOLUSD|LONG|setup-3|PRE_SIGNAL',
+      strategy_id: 'builtin:ema-trend-long',
+      strategy_version_id: 'builtin:ema-trend-long:vdemo',
       setup_id: 'setup-3',
       instrument_id: 'mock:perp:SOLUSD',
       direction: 'LONG',

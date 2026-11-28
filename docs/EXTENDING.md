@@ -1,6 +1,6 @@
 # Extending Joseph
 
-How contributors add venues, brokers, indicators, strategy rule nodes and terminal features, and change contracts. The module map is in the [architecture index](architecture/INDEX.md).
+How contributors add venues, brokers, indicators, strategies and terminal features, and change contracts. The module map is in the [architecture index](architecture/INDEX.md).
 
 Every extension is a local change: new files, one registration line, tests. CI fails on boundary violations (import-linter, dependency-cruiser). Removing an extension never deletes saved user data.
 
@@ -28,10 +28,10 @@ An indicator is an `IndicatorPlugin` ([ADR 0004](adr/0004-indicator-plugin-sdk.m
    | Class variable | Holds |
    |---|---|
    | `OUTPUT_KINDS`, `OUTPUT_EVENTS` | AOI kinds and event names, `^[A-Z][A-Z0-9_]{0,47}$`. Kinds are unique across installed plugins; `AOI_INVALIDATED` and `AOI_EXPIRED` are reserved |
-   | `OUTPUT_VALUES` | `ValueSpec`s: key, type, unit, description, choices (strings only). Strategies can compare or match only these |
+   | `OUTPUT_VALUES` | `ValueSpec`s: key, type, unit, description, choices (strings only). Consumers read only these |
    | `DISPLAY` | `Display`: layer, default visibility, z-order, event markers, and `KindStyle`, `EventStyle`, `PlotStyle` (price-pane lines or histograms), `PaneStyle` (sub-panes with levels) and `EndReasonStyle` entries |
 
-   Registration validates the metadata. The terminal renders and the strategy builder and compiler offer exactly what is declared; no terminal code is needed.
+   Registration validates the metadata. The terminal renders exactly what is declared; no terminal code is needed.
 3. **Ship** it:
    - **Built-in:** add it to `builtin_plugins()` in `joseph/indicators/builtin/__init__.py` (the order is the registration and Layers order) and keep it pure (import-linter contract `builtin-indicators-pure`). Run `make openapi` to refresh `contracts/openapi/builtin-indicator-plugins.json`, which the terminal's DEMO mirror (`mock-provider`) is tested against.
    - **Plugin package:** a distribution that depends on `joseph-market-engine` (a compatible minor version, e.g. `>=0.6,<0.7`) and declares an entry point whose zero-argument callable returns its plugins in display order:
@@ -42,19 +42,23 @@ An indicator is an `IndicatorPlugin` ([ADR 0004](adr/0004-indicator-plugin-sdk.m
      ```
 
      Install it with `make plugins` ([operations](OPERATIONS.md#indicator-plugins)); `uv run python -m joseph.indicators.discovery --check` in `joseph-market-engine/` lists what loads.
-4. **Test:** hand-derived golden scenarios in `fixtures/indicators/<plugin_id>/` with `joseph.indicators.golden`; batch, streaming and checkpoint-restore runs must agree. `joseph.indicators.testing` provides candle builders and the test plugins `EchoPlugin` and `ZoneEchoPlugin`, and `joseph.strategy.testing` strategy fixtures and frames; plugin packages use them from the installed engine.
+4. **Test:** hand-derived golden scenarios in `fixtures/indicators/<plugin_id>/` with `joseph.indicators.golden`; batch, streaming and checkpoint-restore runs must agree. `joseph.indicators.testing` provides candle builders and the test plugins `EchoPlugin` and `ZoneEchoPlugin`; plugin packages use them from the installed engine.
 
 A changed algorithm needs a new `indicator_version`; `method: trade` outputs never replace `pine_parity` ones.
 
-## Add a strategy rule node
+## Add a strategy (Python)
 
-1. Add it to `RuleNode` in `strategy.schema.json` (`op` discriminator) and regenerate the types.
-2. Market engine: a Pydantic model in `joseph/strategy/domain/ast.py`, validation in `compiler.py`, tri-state semantics and a reason node in `evaluator.py`, and unit tests including UNKNOWN cases.
-3. Terminal: an editor card and its sentence in `packages/strategy-builder`.
+A strategy is a concrete `joseph_script.Strategy` subclass ([ADR 0010](adr/0010-python-strategy-scripts.md)); there is no other strategy format.
 
-Nodes stay generic: they name indicator output by plugin id, AOI kind, event name or value key, which the compiler checks against the installed plugins' metadata, never by a fixed plugin vocabulary.
+1. **Implement** `on_bar(ctx)`: read closed bars, `INPUTS` and declared `REQUESTS`, plot what the rules use and queue orders with `ctx.entry(side, quantity, stop=..., target=..., comment=...)` or `ctx.close(comment)`. Keep state incremental on the instance (one pass per run, O(n)); manage simulated exits through `ctx.position_stop` and `ctx.position_target`.
+2. **Declare** every parameter as a `joseph_script.Input` (bounds, options, groups), including stop and target settings, plus `ID`, `TITLE`, `DESCRIPTION` and `CATEGORY`.
+3. **Ship** it:
+   - **Built-in:** one module in `joseph/scripts/builtin/strategies/` registered in `MODULES["strategies"]` (`joseph/scripts/builtin/__init__.py`). It imports only `joseph_script` and the standard library (helpers such as moving averages are duplicated in the module), so its public source is valid tenant source; `tests/unit/scripts/test_catalog.py` checks this.
+   - **Plugin package:** a distribution that declares an entry point in the `joseph.scripts` group naming the class or a zero-argument factory returning classes; its catalog id is `plugin:<entry point>:<ID>`. `uv run python -m joseph.scripts.catalog --check` lists what loads.
+   - **Tenant script:** saved through `/v1/scripts`; it runs only in the isolated Docker runner.
+4. **Test:** deterministic bars through `worker.run_class` with the declared input defaults; assert orders (bar, stop, target), fills at the next open and exits (see `tests/unit/scripts/test_builtin_strategies.py`).
 
-To remove a node, list it in the compiler's `unsupported_ops`: saved strategies that use it fail validation with an actionable message and are never evaluated without the condition.
+Activations (`/v1/strategy-activations`) and backtests (`/v1/scripts/{id}/run`) need no change for a new strategy.
 
 ## Extend the terminal
 

@@ -30,7 +30,7 @@ def client() -> Iterator[testclient.TestClient]:
         config.Settings(),
         demo_only=True,
         database_url="sqlite://",
-        pipeline_enabled=False,
+        strategy_activations_enabled=False,
         script_runtime="disabled",
         dev_tokens=config.parse_dev_tokens("catalog-a:tenant-a:user-a"),
     )

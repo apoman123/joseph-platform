@@ -5,6 +5,8 @@
 
 from __future__ import annotations
 
+from typing import Any
+
 import pytest
 
 from joseph.domain import errors
@@ -102,3 +104,48 @@ def test_rejects_impossible_fill_ledgers(change: str) -> None:
         request.initial_equity = 1
     with pytest.raises(errors.ValidationFailedError):
         accounting.reconcile(result, BARS, request)
+
+
+def _fill(time_ms: int, side: str, quantity: float, price: float) -> Any:
+    """Builds a fill with a one-unit fee.
+
+    Args:
+        time_ms: Bar start.
+        side: buy or sell.
+        quantity: Base quantity.
+        price: Fill price.
+
+    Returns:
+        Simulated fill.
+    """
+    return models.SimulatedFill.model_validate(
+        {
+            "time_ms": time_ms,
+            "side": side,
+            "quantity": quantity,
+            "price": price,
+            "fee": 1.0,
+        }
+    )
+
+
+def test_round_trips_pair_entries_exits_and_reversals() -> None:
+    """A long closes into profit; a reversal splits into two trades."""
+    trades = accounting.round_trips(
+        [
+            _fill(1, "buy", 2, 100),
+            _fill(2, "sell", 2, 110),
+            _fill(3, "buy", 1, 100),
+            _fill(4, "sell", 2, 90),
+            _fill(5, "buy", 1, 80),
+        ]
+    )
+    assert [t.direction for t in trades] == ["LONG", "LONG", "SHORT"]
+    first, second, third = trades
+    assert first.pnl == pytest.approx(20 - 2)
+    assert first.return_pct == pytest.approx(18 / 200 * 100)
+    assert second.exit_time_ms == 4
+    assert second.pnl == pytest.approx(-10 - 1.5)
+    assert third.entry_time_ms == 4
+    assert third.pnl == pytest.approx(10 - 1.5)
+    assert accounting.round_trips([_fill(1, "sell", 1, 50)])[0].pnl is None

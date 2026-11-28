@@ -19,11 +19,21 @@ import type {
   ScanJob,
   AlertJobInput,
   AlertJob,
+  HeatmapCatalog,
   HeatmapSnapshot,
-  CompanyMetadataBatch,
 } from '../generated/contracts';
 import {HttpTransport, type HttpClientOptions} from './http';
 import type {CatalogKind, StudyClient} from './ports';
+
+/** Heatmap request: family, optional data set and optional tile limit. */
+export interface HeatmapQuery {
+  /** Heatmap family. */
+  type: 'stocks' | 'etfs' | 'crypto';
+  /** Data set id of that family; the engine picks its default when absent. */
+  dataset?: string;
+  /** Maximum tiles; the data set's own size when absent. */
+  limit?: number;
+}
 
 /** A private source catalog with explicit runtime availability. */
 export interface PythonCatalog {
@@ -193,23 +203,16 @@ export class PythonClient implements StudyClient {
   }
 
   /**
-   * Loads a real stock universe with transparent quote and metadata coverage.
-   * @param region US or Taiwan; currencies remain separate.
-   * @param query Optional company or symbol search.
-   * @param limit Maximum selected stock tiles, default one thousand.
+   * Loads one heatmap data set within the engine's short time budget.
+   * @param query Heatmap family, optional data set id and tile limit.
    * @param signal Optional caller cancellation signal.
-   * @return Actual source data and neutral missing-data tiles.
+   * @return Tiles with available metrics, coverage and provenance.
    */
-  heatmap(
-    region: 'us' | 'taiwan',
-    query = '',
-    limit = 1000,
-    signal?: AbortSignal
-  ): Promise<HeatmapSnapshot> {
+  heatmap(query: HeatmapQuery, signal?: AbortSignal): Promise<HeatmapSnapshot> {
     return this.http.request(
       'GET',
       '/v1/heatmap',
-      {region, query, limit},
+      {type: query.type, dataset: query.dataset, limit: query.limit},
       undefined,
       undefined,
       signal
@@ -217,12 +220,19 @@ export class PythonClient implements StudyClient {
   }
 
   /**
-   * Imports optional dated company metadata without adding another data feed.
-   * @param body Explicit stock sectors and capitalizations in quote currency.
-   * @return Resolves after atomic persistence.
+   * Lists every heatmap data set with its availability.
+   * @param signal Optional caller cancellation signal.
+   * @return Data sets in menu order and the default per family.
    */
-  metadata(body: CompanyMetadataBatch): Promise<void> {
-    return this.http.request('PUT', '/v1/heatmap/metadata', undefined, body);
+  heatmapCatalog(signal?: AbortSignal): Promise<HeatmapCatalog> {
+    return this.http.request(
+      'GET',
+      '/v1/heatmap/catalog',
+      undefined,
+      undefined,
+      undefined,
+      signal
+    );
   }
 
   /**

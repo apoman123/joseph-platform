@@ -5,34 +5,25 @@
 
 from __future__ import annotations
 
-import json
-import pathlib
 from collections.abc import Callable
 from typing import TypeAlias
 
 import httpx
 
 MOCK_BTC = "mock:perp:BTCUSD"
-_FIXTURES = (
-    pathlib.Path(__file__).resolve().parents[2]
-    / "joseph-terminal"
-    / "packages"
-    / "contracts"
-    / "fixtures"
-)
 _Validate: TypeAlias = Callable[[str, str, object], None]
-BUILTIN_PLUGINS = (
-    "sma",
-    "ema",
-    "anchored_vwap",
-    "regression_channel",
-    "bollinger_bands",
-    "rsi",
-    "atr",
-    "volume_delta",
-    "pivot_points",
+BUILTIN_INDICATORS = (
+    "builtin:sma",
+    "builtin:ema",
+    "builtin:anchored_vwap",
+    "builtin:regression_channel",
+    "builtin:bollinger_bands",
+    "builtin:rsi",
+    "builtin:atr",
+    "builtin:volume_delta",
+    "builtin:pivot_points",
 )
-"""The built-in indicator plugins, in their fixed registration order."""
+"""The built-in indicator scripts, in their fixed catalog order."""
 
 
 def test_health_and_metrics(market: httpx.Client) -> None:
@@ -109,98 +100,99 @@ def test_unknown_instrument_returns_contract_error(
     validate("common.schema.json", "ErrorResponse", response.json())
 
 
-def test_indicator_plugins_and_snapshots(
+def test_builtin_indicator_catalog_and_default_studies(
     market: httpx.Client, validate: _Validate
 ) -> None:
-    """The built-ins come first, in order; snapshots and AOIs validate."""
-    plugins = market.get("/v1/indicators/plugins").json()
-    validate("indicators.schema.json", "IndicatorPluginList", plugins)
-    ids = tuple(p["plugin_id"] for p in plugins["plugins"])
-    assert ids[: len(BUILTIN_PLUGINS)] == BUILTIN_PLUGINS
-    snaps = market.get(
-        "/v1/indicators/snapshot",
-        params={"instrument_id": MOCK_BTC, "tf": "5m"},
+    """The built-in indicators come first; default studies run in a batch."""
+    catalog = market.get(
+        "/v1/scripts/catalog", params={"kind": "indicator"}
     ).json()
-    validate("indicators.schema.json", "IndicatorSnapshotList", snaps)
-    aois = market.get(
-        "/v1/aois", params={"instrument_id": MOCK_BTC, "tf": "5m"}
-    ).json()
-    validate("indicators.schema.json", "AoiList", aois)
-
-
-def _demo_strategy(strategy_id: str) -> dict[str, object]:
-    """Builds the EMA trend template retargeted to the DEMO venue.
-
-    Args:
-        strategy_id: Strategy id (slug) to use.
-
-    Returns:
-        The fixture's first valid definition on the DEMO venue, in the
-        ``ALERT_ONLY`` execution mode.
-    """
-    body = json.loads(
-        (_FIXTURES / "strategy.fixture.json").read_text(encoding="utf-8")
-    )
-    definition = dict(body["valid"][0])
-    definition["strategy_id"] = strategy_id
-    definition["universe"] = {"qualification": "ANY", "venues": ["mock"]}
-    definition["execution_mode"] = "ALERT_ONLY"
-    return definition
-
-
-def test_strategy_lifecycle_and_backtest(
-    market: httpx.Client, validate: _Validate
-) -> None:
-    """A strategy validates, saves, versions, backtests, activates, pauses."""
-    definition = _demo_strategy("system-ema-trend")
-    result = market.post("/v1/strategies/validate", json=definition).json()
-    validate("strategy.schema.json", "ValidationResult", result)
-    assert result["valid"], result
-    created = market.post("/v1/strategies", json=definition)
-    assert created.status_code in (200, 201), created.text
-    v1 = created.json()
-    validate("strategy.schema.json", "StrategyVersion", v1)
-    assert v1["version"] == 1
-    definition["name"] = "EMA trend (edited)"
-    v2 = market.post(
-        "/v1/strategies/system-ema-trend/versions", json=definition
-    ).json()
-    assert v2["version"] == 2
-    assert v2["definition_hash"] != v1["definition_hash"]
-    candles = market.get(
-        "/v1/candles",
-        params={"instrument_id": MOCK_BTC, "tf": "5m", "limit": 500},
-    ).json()["candles"]
-    report = market.post(
-        "/v1/strategies/system-ema-trend/backtests",
+    validate("python-scripts.schema.json", "CatalogList", catalog)
+    ids = tuple(script["script_id"] for script in catalog["scripts"])
+    assert ids[: len(BUILTIN_INDICATORS)] == BUILTIN_INDICATORS
+    batch = market.post(
+        "/v1/scripts/run-batch",
         json={
-            "version": 2,
             "instrument_id": MOCK_BTC,
-            "from_ms": candles[0]["start_ms"],
-            "to_ms": candles[-1]["end_ms"],
+            "tf": "5m",
+            "limit": 2000,
+            "include_open": True,
+            "runs": [
+                {"script_id": "builtin:ema"},
+                {"script_id": "builtin:volume_delta"},
+                {"script_id": "builtin:pivot_points"},
+            ],
+        },
+    )
+    assert batch.status_code == 200, batch.text
+    body = batch.json()
+    validate("python-scripts.schema.json", "ScriptBatchResult", body)
+    assert all(entry["error"] is None for entry in body["results"]), body
+    pivots = body["results"][2]["result"]
+    assert any(visual["kind"] == "line" for visual in pivots["visuals"])
+
+
+def test_strategy_backtest_and_activation_lifecycle(
+    market: httpx.Client, validate: _Validate
+) -> None:
+    """A built-in strategy backtests, activates, pauses, resumes, deletes."""
+    report = market.post(
+        "/v1/scripts/builtin:ema-trend-long/run",
+        json={
+            "instrument_id": MOCK_BTC,
+            "tf": "5m",
+            "limit": 500,
+            "inputs": {"require_flow": False},
         },
     )
     assert report.status_code == 200, report.text
-    validate("strategy.schema.json", "BacktestReport", report.json())
-    activated = market.post(
-        "/v1/strategies/system-ema-trend/activate",
-        json={"version": 2, "mode": "PAPER"},
-    ).json()
-    assert activated["state"] == "ACTIVE"
-    paused = market.post("/v1/strategies/system-ema-trend/pause", json={})
+    body = report.json()
+    validate("python-scripts.schema.json", "ScriptResult", body)
+    assert body["kind"] == "strategy"
+    assert body["version"] == 0
+    assert "trade_count" in body["metrics"]
+    assert len(body["trades"]) >= body["metrics"]["trade_count"]
+    assert all(o["action"] in {"long", "close"} for o in body["orders"])
+    created = market.post(
+        "/v1/strategy-activations",
+        json={
+            "script_id": "builtin:ema-trend-long",
+            "instrument_ids": [MOCK_BTC],
+            "tf": "5m",
+            "mode": "ALERT_ONLY",
+        },
+    )
+    assert created.status_code == 201, created.text
+    activation = created.json()
+    validate("python-scripts.schema.json", "StrategyActivation", activation)
+    assert activation["state"] == "ACTIVE"
+    activation_id = activation["activation_id"]
+    paused = market.post(f"/v1/strategy-activations/{activation_id}/pause")
     assert paused.json()["state"] == "PAUSED"
+    resumed = market.post(f"/v1/strategy-activations/{activation_id}/resume")
+    assert resumed.json()["state"] == "ACTIVE"
+    deleted = market.delete(f"/v1/strategy-activations/{activation_id}")
+    assert deleted.status_code == 204
 
 
 def test_auto_live_cannot_be_activated_from_market_engine(
-    market: httpx.Client,
+    market: httpx.Client, validate: _Validate
 ) -> None:
-    """AUTO_LIVE activation is refused with a 409 or a 422."""
-    market.post("/v1/strategies", json=_demo_strategy("system-no-live"))
+    """AUTO_LIVE activation is refused with 409 TRADE_MODE_DISABLED."""
     response = market.post(
-        "/v1/strategies/system-no-live/activate",
-        json={"version": 1, "mode": "AUTO_LIVE"},
+        "/v1/strategy-activations",
+        json={
+            "script_id": "builtin:ema-trend-long",
+            "instrument_ids": [MOCK_BTC],
+            "tf": "5m",
+            "mode": "AUTO_LIVE",
+        },
     )
-    assert response.status_code in (409, 422)
+    assert response.status_code == 409, response.text
+    validate("common.schema.json", "ErrorResponse", response.json())
+    assert response.json()["code"] == "TRADE_MODE_DISABLED"
+    activations = market.get("/v1/strategy-activations").json()
+    assert all(a["mode"] != "AUTO_LIVE" for a in activations["activations"])
 
 
 def test_signals_are_tenant_scoped(

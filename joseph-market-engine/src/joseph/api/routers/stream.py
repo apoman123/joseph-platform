@@ -190,7 +190,7 @@ class _Connection:
             raise errors.UnauthenticatedError(
                 "Connect with ?token=<session token> to receive signals."
             )
-        if channel not in ("candles", "aois"):
+        if channel != "candles":
             try:
                 return streaming.channel_key(spec)
             except ValueError as err:
@@ -199,14 +199,6 @@ class _Connection:
             str(spec.get("instrument_id", ""))
         )
         timeframe = market_service.as_timeframe(str(spec.get("timeframe", "")))
-        if channel == "aois":
-            return streaming.channel_key(
-                {
-                    "channel": "aois",
-                    "instrument_id": str(instrument),
-                    "timeframe": timeframe.value,
-                }
-            )
         try:
             mode = quality.FeedMode(str(spec.get("feed_mode") or "AUTO"))
         except ValueError as err:

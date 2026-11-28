@@ -25,12 +25,8 @@ import type {
   AlertDelivery,
   AlertSubscriptionList,
   AccountSummary,
-  ActivateRequest,
   AmendRequest,
-  AoiList,
   AuditEventList,
-  BacktestReport,
-  BacktestRequest,
   CandleBatch,
   ChannelSpec,
   ClosePositionRequest,
@@ -38,9 +34,6 @@ import type {
   DeploymentList,
   DeploymentRequest,
   FillList,
-  IndicatorPluginList,
-  IndicatorSeries,
-  IndicatorSnapshotList,
   InstrumentList,
   KillSwitchList,
   KillSwitchRequest,
@@ -58,14 +51,16 @@ import type {
   QualificationStatus,
   SessionList,
   SignalKind,
+  ScriptResult,
+  ScriptRun,
+  ScriptVersion,
   SignalList,
-  StrategyDefinition,
-  StrategyVersion,
-  StrategyVersionList,
+  StrategyActivation,
+  StrategyActivationInput,
+  StrategyActivationList,
   StreamEnvelope,
   SubmitIntentResponse,
   Timeframe,
-  ValidationResult,
   Venue,
   VenueStatusList,
 } from '../generated/contracts';
@@ -97,37 +92,6 @@ export interface CandleQuery {
   toMs?: number;
   /** Maximum number of bars (server caps apply). */
   limit?: number;
-}
-
-/** Query for indicator snapshots or areas of interest (AOIs) on one series. */
-export interface SeriesQuery {
-  /** Canonical instrument id. */
-  instrumentId: string;
-  /** Series timeframe. */
-  timeframe: Timeframe;
-  /** Optional plugin ids; all plugins when omitted. */
-  plugins?: readonly string[];
-  /** Optional point-in-time (UTC ms); latest when omitted. */
-  atMs?: number;
-  /**
-   * Optional per-plugin input overrides, e.g. `{ema: {length: 50}}`. The
-   * backend validates them against each plugin's input schema.
-   */
-  settings?: Readonly<Record<string, Readonly<Record<string, unknown>>>>;
-}
-
-/** Query for per-bar values of one plugin. */
-export interface IndicatorSeriesQuery {
-  /** Canonical instrument id. */
-  instrumentId: string;
-  /** Series timeframe. */
-  timeframe: Timeframe;
-  /** Plugin id, e.g. `volume_delta`. */
-  pluginId: string;
-  /** Inclusive start (UTC ms); a default window when omitted. */
-  fromMs?: number;
-  /** Optional input overrides for this plugin. */
-  settings?: Readonly<Record<string, unknown>>;
 }
 
 /** Query for the trading sessions of an exchange calendar. */
@@ -199,29 +163,6 @@ export interface MarketDataClient {
     status?: QualificationStatus
   ): Promise<QualificationReport>;
   /**
-   * Lists indicator plugins exposed by the backend.
-   * @return Plugin descriptors.
-   */
-  listIndicatorPlugins(): Promise<IndicatorPluginList>;
-  /**
-   * Fetches indicator snapshots for a series.
-   * @param query Series and plugin filter.
-   * @return Snapshots.
-   */
-  getIndicatorSnapshots(query: SeriesQuery): Promise<IndicatorSnapshotList>;
-  /**
-   * Fetches AOIs for a series.
-   * @param query Series and optional point-in-time.
-   * @return AOI list.
-   */
-  getAois(query: SeriesQuery): Promise<AoiList>;
-  /**
-   * Fetches per-bar published values of one plugin (sub-pane data).
-   * @param query Series, plugin and optional range/settings.
-   * @return Point-in-time values per closed bar.
-   */
-  getIndicatorSeries(query: IndicatorSeriesQuery): Promise<IndicatorSeries>;
-  /**
    * Lists the trading sessions of an exchange calendar overlapping a window
    * (`GET /v1/calendars/{calendar_id}/sessions`). Optional: without it the
    * terminal uses the regular weekday hours of the calendar.
@@ -231,67 +172,102 @@ export interface MarketDataClient {
   getSessions?(query: SessionQuery): Promise<SessionList>;
 }
 
-/** Authenticated strategy authoring, backtests and signal history. */
+/** Where a Strategy script comes from. */
+export type StrategyOrigin = 'builtin' | 'plugin' | 'tenant';
+
+/** A Python Strategy script that can be backtested and activated. */
+export interface StrategyScript {
+  /** `builtin:<id>`, `plugin:<entry>:<id>` or an owned script slug. */
+  script_id: string;
+  /** Built-in, installed plugin or owned (tenant) script. */
+  origin: StrategyOrigin;
+  /** Display title. */
+  title: string;
+  /** Catalog description; empty for owned scripts. */
+  description: string;
+  /** Owned script version, 0 for catalog scripts. */
+  version: number;
+  /**
+   * Declared inputs in display order; owned scripts expose their saved
+   * defaults with no bounds.
+   */
+  inputs: CatalogScript['inputs'];
+  /** Whether the source can be read (built-ins and owned scripts). */
+  source_available: boolean;
+  /** False when the operator disabled a catalog script. */
+  enabled: boolean;
+}
+
+/** Strategy scripts available to the tenant. */
+export interface StrategyScriptList {
+  /** Built-in and plugin strategies first, then owned ones. */
+  scripts: StrategyScript[];
+  /** Whether owned (tenant) source can execute (isolated runner). */
+  runtime_enabled: boolean;
+}
+
+/**
+ * Authenticated Python strategy backtests, live activations, signal history
+ * and notification subscriptions. Activations never enable automatic live
+ * trading: AUTO_LIVE is refused with `TRADE_MODE_DISABLED`.
+ */
 export interface StrategyClient {
   /**
-   * Lists the tenant's strategies (latest version of each).
-   * @return Strategy versions.
+   * Lists built-in, plugin and owned Strategy scripts.
+   * @return Strategies with their declared inputs.
    */
-  listStrategies(): Promise<StrategyVersionList>;
+  listStrategyScripts(): Promise<StrategyScriptList>;
   /**
-   * Lists every version of one strategy.
-   * @param strategyId Strategy slug.
-   * @return Versions, newest first.
+   * Reads the public source of a built-in or owned strategy.
+   * @param scriptId Strategy id.
+   * @return Python source text.
    */
-  getStrategy(strategyId: string): Promise<StrategyVersionList>;
+  getStrategySource(scriptId: string): Promise<string>;
   /**
-   * Validates a definition without storing it.
-   * @param definition Rule AST v2 definition.
-   * @return Validation result.
+   * Copies a strategy's source into a new owned script.
+   * @param scriptId Strategy to copy.
+   * @param newId New owned script slug.
+   * @return The saved owned version 1.
    */
-  validate(definition: StrategyDefinition): Promise<ValidationResult>;
+  copyStrategy(scriptId: string, newId: string): Promise<ScriptVersion>;
   /**
-   * Stores a new strategy as version 1.
-   * @param definition Rule AST v2 definition.
-   * @return Stored immutable version.
+   * Backtests a strategy on closed bars (`POST /v1/scripts/{id}/run`).
+   * @param scriptId Strategy id.
+   * @param request Instrument, timeframe, bars, inputs and costs.
+   * @return Fills, orders, trades, equity and metrics.
    */
-  createStrategy(definition: StrategyDefinition): Promise<StrategyVersion>;
+  backtestStrategy(scriptId: string, request: ScriptRun): Promise<ScriptResult>;
   /**
-   * Stores a new immutable version of an existing strategy.
-   * @param strategyId Strategy slug.
-   * @param definition Edited definition.
-   * @return Stored immutable version.
+   * Lists the tenant's strategy activations.
+   * @return Activations, newest first.
    */
-  createVersion(
-    strategyId: string,
-    definition: StrategyDefinition
-  ): Promise<StrategyVersion>;
+  listActivations(): Promise<StrategyActivationList>;
   /**
-   * Runs a backtest with the production evaluator.
-   * @param strategyId Strategy slug.
-   * @param request Version, instrument and range.
-   * @return Backtest report.
+   * Activates a strategy on future closed bars.
+   * @param request Strategy, instruments, timeframe, inputs, mode, channels.
+   * @return The ACTIVE activation.
    */
-  backtest(
-    strategyId: string,
-    request: BacktestRequest
-  ): Promise<BacktestReport>;
+  createActivation(
+    request: StrategyActivationInput
+  ): Promise<StrategyActivation>;
   /**
-   * Activates a version in ALERT_ONLY, PAPER or SHADOW mode.
-   * @param strategyId Strategy slug.
-   * @param request Version and mode.
-   * @return Updated version.
+   * Pauses an activation.
+   * @param activationId Activation id.
+   * @return The PAUSED activation.
    */
-  activate(
-    strategyId: string,
-    request: ActivateRequest
-  ): Promise<StrategyVersion>;
+  pauseActivation(activationId: string): Promise<StrategyActivation>;
   /**
-   * Pauses the active version.
-   * @param strategyId Strategy slug.
-   * @return Updated version.
+   * Resumes an activation from the next closed bar.
+   * @param activationId Activation id.
+   * @return The ACTIVE activation.
    */
-  pause(strategyId: string): Promise<StrategyVersion>;
+  resumeActivation(activationId: string): Promise<StrategyActivation>;
+  /**
+   * Deletes an activation; its signals stay in the history.
+   * @param activationId Activation id.
+   * @return Completion after deletion.
+   */
+  deleteActivation(activationId: string): Promise<void>;
   /**
    * Lists signal history.
    * @param query Filters.

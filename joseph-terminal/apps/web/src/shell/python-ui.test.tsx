@@ -4,7 +4,7 @@
  * SPDX-License-Identifier: MIT
  */
 
-/** @fileoverview Script legends, heatmap geometry and browser control boundaries. */
+/** @fileoverview Script legends, heatmap tabs and browser control boundaries. */
 
 import {
   createRecordingContext,
@@ -18,7 +18,6 @@ import {createRuntime} from '../composition/runtime';
 import {ChartTabs} from './chart-tabs';
 import {StudyLegend, inputsSummary} from './python-studies';
 import {pythonCanvas, pythonColor} from './python-painter';
-import {heatmapColor, heatmapLayout, StockHeatmap} from './stock-heatmap';
 import {applyTerminalAction, terminalSnapshot} from './mcp-control';
 import {RuntimeProvider} from './runtime-context';
 
@@ -118,67 +117,12 @@ describe('study legend semantics', () => {
     );
     fireEvent.click(screen.getByRole('button', {name: 'Add chart tab'}));
     expect(screen.getAllByRole('tab')).toHaveLength(1);
-    fireEvent.click(screen.getByRole('button', {name: 'Stock heatmap'}));
-    expect(activeChart(runtime.workspace.get()).view_type).toBe(
-      'stock_heatmap'
-    );
+    fireEvent.click(screen.getByRole('button', {name: 'Heatmap'}));
+    expect(activeChart(runtime.workspace.get()).view_type).toBe('heatmap');
     runtime.flush();
     const restored = createRuntime(() => [], DEMO);
-    expect(activeChart(restored.workspace.get()).view_type).toBe(
-      'stock_heatmap'
-    );
+    expect(activeChart(restored.workspace.get()).view_type).toBe('heatmap');
     expect(restored.workspace.get().charts[0]?.view_type).toBeUndefined();
-  });
-});
-
-describe('stock heatmap', () => {
-  it('partitions all weighted stocks without overlaps or area loss', () => {
-    const cells = heatmapLayout(
-      [1, 2, 3, 4, 5, 6, 7].map(item => ({item, weight: item}))
-    );
-    expect(cells).toHaveLength(7);
-    expect(
-      cells.reduce((sum, cell) => sum + cell.width * cell.height, 0)
-    ).toBeCloseTo(600000);
-    for (const cell of cells) {
-      expect((cell.width * cell.height) / 600000).toBeCloseTo(cell.item / 28);
-      expect(cell.x).toBeGreaterThanOrEqual(0);
-      expect(cell.y).toBeGreaterThanOrEqual(0);
-      expect(cell.x + cell.width).toBeLessThanOrEqual(1000.00001);
-      expect(cell.y + cell.height).toBeLessThanOrEqual(600.00001);
-      for (const other of cells.filter(row => row !== cell)) {
-        expect(
-          Math.min(cell.x + cell.width, other.x + other.width) -
-            Math.max(cell.x, other.x) <=
-            0.00001 ||
-            Math.min(cell.y + cell.height, other.y + other.height) -
-              Math.max(cell.y, other.y) <=
-              0.00001
-        ).toBe(true);
-      }
-    }
-    expect(heatmapLayout([])).toEqual([]);
-    expect(heatmapColor(null)).not.toBe(heatmapColor('0'));
-    expect(heatmapColor('NaN')).toBe(heatmapColor(null));
-  });
-
-  it('renders the actual DEMO stock, disables missing fundamentals and opens its chart', async () => {
-    const runtime = createRuntime(() => [], DEMO);
-    const chart = {
-      ...activeChart(runtime.workspace.get()),
-      view_type: 'stock_heatmap' as const,
-    };
-    render(<StockHeatmap chart={chart} active runtime={runtime} />);
-    const tile = await screen.findByRole('button', {name: /Open ACME,/});
-    expect(
-      screen.getByRole('option', {name: /market cap.*unavailable/})
-    ).toBeDisabled();
-    fireEvent.click(tile);
-    expect(activeChart(runtime.workspace.get()).instrument_id).toBe(
-      'mock:stock:ACME'
-    );
-    expect(activeChart(runtime.workspace.get()).view_type).toBe('candles');
-    runtime.flush();
   });
 });
 

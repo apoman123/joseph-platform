@@ -14,7 +14,6 @@
 'use client';
 import {formatUtcDateTime} from '@joseph/chart-trading';
 import type {
-  AoiRecord,
   ReasonNode,
   Severity,
   Signal,
@@ -27,6 +26,7 @@ import {
   SIGNAL_SORTS,
   SNOOZE_MINUTES,
   aoiDistancePct,
+  type AoiZone,
   barQuoteVolumeOf,
   confluenceOf,
   isSnoozed,
@@ -114,22 +114,12 @@ export function useAoiDistances(
       const instruments = [
         ...new Set([...series.values()].map(s => s.instrumentId)),
       ];
-      const [aoiResults, snapshotResults] = await Promise.all([
-        Promise.allSettled(
-          [...series.values()].map(s => ctx.clients.market.getAois(s))
-        ),
-        Promise.allSettled(
-          instruments.map(id => ctx.clients.market.getSnapshot(id))
-        ),
-      ]);
-      const aois = new Map<string, AoiRecord>();
-      for (const result of aoiResults) {
-        if (result.status === 'fulfilled') {
-          for (const aoi of result.value.aois) {
-            aois.set(aoi.aoi_id, aoi);
-          }
-        }
-      }
+      // The engine no longer publishes AOIs (indicators are joseph_script
+      // classes drawing their own levels), so referenced zones stay unknown.
+      const snapshotResults = await Promise.allSettled(
+        instruments.map(id => ctx.clients.market.getSnapshot(id))
+      );
+      const aois = new Map<string, AoiZone>();
       const prices = new Map<string, number>();
       snapshotResults.forEach((result, i) => {
         const id = instruments[i];
@@ -141,7 +131,7 @@ export function useAoiDistances(
       for (const signal of subset) {
         const referenced = signal.aoi_ids
           .map(id => aois.get(id))
-          .filter((aoi): aoi is AoiRecord => aoi !== undefined);
+          .filter((aoi): aoi is AoiZone => aoi !== undefined);
         next[signal.signal_id] = aoiDistancePct(
           prices.get(signal.instrument_id) ?? null,
           referenced

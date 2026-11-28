@@ -31,7 +31,7 @@ def client() -> Iterator[testclient.TestClient]:
         config.Settings(),
         demo_only=True,
         database_url="sqlite://",
-        pipeline_enabled=False,
+        strategy_activations_enabled=False,
         dev_tokens=config.parse_dev_tokens(
             "mcp-test-a:tenant-a:user-a,mcp-test-b:tenant-b:user-b"
         ),

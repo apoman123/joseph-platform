@@ -158,6 +158,31 @@ export function migrateWorkspaceV0(
 }
 
 /**
+ * Renames the legacy `stock_heatmap` tab view type to `heatmap` in place.
+ * The tab's saved settings (`panels["heatmap.<chart id>"]`) keep their key;
+ * the heatmap reads the old `region`/`size` fields defensively.
+ * @param raw Workspace candidate, possibly malformed.
+ * @return Whether any chart was renamed.
+ */
+export function migrateHeatmapViewType(raw: unknown): boolean {
+  if (!raw || typeof raw !== 'object') return false;
+  const charts = (raw as {charts?: unknown}).charts;
+  if (!Array.isArray(charts)) return false;
+  let changed = false;
+  for (const chart of charts as unknown[]) {
+    if (
+      chart &&
+      typeof chart === 'object' &&
+      (chart as {view_type?: unknown}).view_type === 'stock_heatmap'
+    ) {
+      (chart as {view_type: string}).view_type = 'heatmap';
+      changed = true;
+    }
+  }
+  return changed;
+}
+
+/**
  * Checks the structure of a v2 workspace candidate: schema version, id,
  * layout, a nonempty chart list with ids, valid instrument ids and study
  * lists, and the sync options. Other fields are not checked.
@@ -219,6 +244,7 @@ function readWorkspaceValue(
     raw = migrateWorkspaceV1(raw);
     migrated = true;
   }
+  if (migrateHeatmapViewType(raw)) migrated = true;
   const error = validateWorkspace(raw);
   if (error) return {ok: false, error};
   const workspace = raw as WorkspaceDocument;

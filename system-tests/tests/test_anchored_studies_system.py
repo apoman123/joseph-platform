@@ -1,95 +1,123 @@
 # Copyright 2026 apoman123
 # SPDX-License-Identifier: MIT
 
-"""System tests for the anchored-study cap of the market engine.
+"""System tests for anchored built-in studies of the market engine.
 
-The system-test market engine runs with ``JOSEPH_MAX_ANCHORED_BARS`` at
-``conftest.MAX_ANCHORED_BARS`` (2,000, the smallest accepted value), so an
-anchor just beyond it is cheap to request. Snapshots are evaluated at a
-fixed ``at_ms`` on the 24x7 DEMO perpetual, which makes the closed-bar
-count exact.
+The anchored VWAP and regression channel drawings run the built-in
+``joseph_script`` indicators from their anchor bar. A run reads at most
+5,000 bars from ``from_ms`` (the newest are kept), so an anchor further
+back is reported by the script as outside the loaded bars instead of being
+drawn from the wrong bar. Runs end at a fixed ``to_ms`` on the 24x7 DEMO
+perpetual, which makes the bar counts exact.
 """
 
 from __future__ import annotations
 
-import json
 from collections.abc import Callable
+from typing import Any
 from typing import TypeAlias
 
 import httpx
-import pytest
 
 from tests import conftest
 
 MOCK_BTC = "mock:perp:BTCUSD"
 _MINUTE_MS = 60_000
 AT_MS = conftest.ny_ms(2026, 11, 18, 12)
-"""A fixed evaluation time on a 1m bar boundary."""
-CAP = conftest.MAX_ANCHORED_BARS
-PLUGINS: dict[str, dict[str, str]] = {
-    "anchored_vwap": {"anchor": "time"},
-    "regression_channel": {},
-}
-"""Anchored plugins and the settings that make ``anchor_ms`` their anchor."""
+"""A fixed end time on a 1m bar boundary."""
+RUN_LIMIT = 5_000
+"""Most bars one script run reads."""
 
 _Validate: TypeAlias = Callable[[str, str, object], None]
 
 
-def _anchored(
-    market: httpx.Client, plugin: str, bars_back: int, at_ms: int
-) -> httpx.Response:
-    """Requests one study anchored ``bars_back`` 1m bars before ``AT_MS``.
+def _run(
+    market: httpx.Client,
+    script_id: str,
+    bars_back: int,
+    inputs: dict[str, Any],
+) -> dict[str, Any]:
+    """Runs a study anchored ``bars_back`` 1m bars before ``AT_MS``.
 
     Args:
         market: Market engine client.
-        plugin: Anchored plugin id, a key of ``PLUGINS``.
+        script_id: Built-in script id.
         bars_back: Closed bars between the anchor and ``AT_MS``.
-        at_ms: Evaluation time, UTC epoch milliseconds.
+        inputs: Inputs besides ``anchor_ms``.
 
     Returns:
-        Response of ``GET /v1/indicators/snapshot``.
+        The study's batch entry.
     """
-    settings = {**PLUGINS[plugin], "anchor_ms": AT_MS - bars_back * _MINUTE_MS}
-    return market.get(
-        "/v1/indicators/snapshot",
-        params={
+    anchor = AT_MS - bars_back * _MINUTE_MS
+    response = market.post(
+        "/v1/scripts/run-batch",
+        json={
             "instrument_id": MOCK_BTC,
             "tf": "1m",
-            "set": plugin,
-            "at_ms": at_ms,
-            "settings": json.dumps({plugin: settings}),
+            "from_ms": anchor,
+            "to_ms": AT_MS,
+            "limit": RUN_LIMIT,
+            "runs": [
+                {
+                    "script_id": script_id,
+                    "inputs": {**inputs, "anchor_ms": anchor},
+                }
+            ],
         },
     )
+    assert response.status_code == 200, response.text
+    (entry,) = response.json()["results"]
+    return dict(entry)
 
 
-@pytest.mark.parametrize("plugin", sorted(PLUGINS))
-def test_anchor_beyond_the_cap_is_refused_with_its_bar_count(
-    market: httpx.Client, validate: _Validate, plugin: str
+def _tables(result: dict[str, Any]) -> list[str]:
+    """Reads the first cell of every table a result draws.
+
+    Args:
+        result: Script result.
+
+    Returns:
+        Table texts.
+    """
+    return [
+        str(visual["data"]["rows"][0][0])
+        for visual in result["visuals"]
+        if visual["kind"] == "table"
+    ]
+
+
+def test_anchored_vwap_starts_at_its_anchor_bar(
+    market: httpx.Client, validate: _Validate
 ) -> None:
-    """2,500 closed bars back is a 422 that names the count and the cap."""
-    response = _anchored(market, plugin, 2_500, AT_MS + 30_000)
-    assert response.status_code == 422, response.text
-    body = response.json()
-    validate("common.schema.json", "ErrorResponse", body)
-    assert body["code"] == "VALIDATION_FAILED"
-    assert "the anchor is 2500 closed 1m bars back" in body["message"]
-    assert f"at most {CAP} bars" in body["message"]
+    """The VWAP counts bars from the anchor bar through the end.
+
+    Args:
+        market: Market engine client.
+        validate: Contract validator.
+    """
+    entry = _run(market, "builtin:anchored_vwap", 300, {"anchor": "time"})
+    validate("python-scripts.schema.json", "ScriptBatchEntry", entry)
+    result = entry["result"]
+    bars = next(plot for plot in result["plots"] if plot["name"] == "Bars")
+    counted = [point["value"] for point in bars["points"]]
+    assert counted[0] == 1
+    assert counted[-1] == 300
+    assert _tables(result) == []
 
 
-@pytest.mark.parametrize("at_offset_ms", [0, 30_000], ids=["boundary", "mid"])
-def test_cap_counts_every_closed_bar(
-    market: httpx.Client, validate: _Validate, at_offset_ms: int
+def test_anchor_beyond_the_run_limit_is_reported(
+    market: httpx.Client,
 ) -> None:
-    """Exactly the cap is computed; one bar more is refused, at any time."""
-    at_ms = AT_MS + at_offset_ms
-    allowed = _anchored(market, "anchored_vwap", CAP, at_ms)
-    assert allowed.status_code == 200, allowed.text
-    body = allowed.json()
-    validate("indicators.schema.json", "IndicatorSnapshotList", body)
-    (snapshot,) = body["snapshots"]
-    assert snapshot["bar_start_ms"] == AT_MS - _MINUTE_MS
-    assert snapshot["values"]["anchor_in_window"] is True
-    assert snapshot["values"]["bars"] == CAP
-    refused = _anchored(market, "anchored_vwap", CAP + 1, at_ms)
-    assert refused.status_code == 422, refused.text
-    assert f"the anchor is {CAP + 1} closed" in refused.json()["message"]
+    """An anchor before the loaded bars draws nothing and says so.
+
+    Args:
+        market: Market engine client.
+    """
+    for script_id, inputs in (
+        ("builtin:anchored_vwap", {"anchor": "time"}),
+        ("builtin:regression_channel", {}),
+    ):
+        entry = _run(market, script_id, RUN_LIMIT + 10, inputs)
+        result = entry["result"]
+        assert _tables(result) == ["Anchor is outside the loaded bars"]
+        assert not [row for row in result["visuals"] if row["kind"] == "line"]

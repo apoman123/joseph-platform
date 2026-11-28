@@ -46,7 +46,7 @@ def _application(
         config.Settings(),
         demo_only=True,
         database_url="sqlite://",
-        pipeline_enabled=False,
+        strategy_activations_enabled=False,
         script_runtime="docker" if docker else "disabled",
         dev_tokens=config.parse_dev_tokens(
             "scripts-a:tenant-a:user-a,scripts-b:tenant-b:user-b"
@@ -205,50 +205,6 @@ def test_validation_never_executes_source_and_requires_inheritance(
     assert (
         client.post("/v1/scripts", json=_source("library")).status_code == 401
     )
-
-
-def test_heatmap_preserves_actual_coverage_and_private_fundamentals(
-    client: testclient.TestClient,
-) -> None:
-    """Separates real quotes from optional tenant-owned market cap and sectors.
-
-    Args:
-        client: Running real DEMO provider application.
-    """
-    data = client.get("/v1/heatmap", headers=HEADERS).json()
-    assert data["quote_count"] == 1
-    assert data["tiles"][0]["instrument_id"] == "mock:stock:ACME"
-    assert data["tiles"][0]["market_cap"] is None
-    assert "market_cap" not in data["available_metrics"]
-    records = {
-        "records": [
-            {
-                "instrument_id": "mock:stock:ACME",
-                "sector": "User supplied",
-                "market_cap": "1000000",
-                "as_of_ms": 1_795_000_000_000,
-            }
-        ]
-    }
-    assert (
-        client.put(
-            "/v1/heatmap/metadata", headers=HEADERS, json=records
-        ).status_code
-        == 204
-    )
-    owned = client.get("/v1/heatmap", headers=HEADERS).json()
-    assert owned["tiles"][0]["market_cap"] == "1000000"
-    assert owned["tiles"][0]["source"].startswith("mock")
-    assert client.get("/v1/heatmap/metadata", headers=OTHER).json() == {
-        "records": []
-    }
-    assert (
-        client.get(
-            "/v1/heatmap", headers=HEADERS, params={"limit": 0}
-        ).status_code
-        == 422
-    )
-    assert client.get("/v1/indicators/plugins/ema/source").status_code == 200
 
 
 def test_real_library_import_and_fill_bar_provenance(

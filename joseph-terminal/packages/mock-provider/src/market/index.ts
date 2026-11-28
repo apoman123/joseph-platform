@@ -10,11 +10,9 @@
  * failed live data.
  */
 
-export * from './demo-indicators';
+export * from './demo-heatmap';
 export * from './demo-market-client';
-export * from './demo-plugins';
 export * from './demo-scripts';
 export * from './demo-study-client';
 export * from './demo-sessions';
-export * from './demo-studies';
 export * from './prices';

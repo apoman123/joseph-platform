@@ -19,16 +19,16 @@ test('order ticket preview, positions and risk checks', async ({page}) => {
   await page.screenshot({path: 'e2e/screenshots/06-order-preview.png'});
 });
 
-test('strategy builder with the RSI reversion template', async ({page}) => {
+test('strategy panel with the RSI reversion built-in', async ({page}) => {
   await loadTerminal(page);
   await openPanel(page, 'Strategy');
   await page
-    .getByRole('combobox', {name: 'Start from a template'})
-    .selectOption({label: 'RSI reversion (short)'});
+    .getByRole('combobox', {name: 'Strategy script'})
+    .selectOption('builtin:rsi-reversion-short');
   await expect(
-    page.locator('[data-testid^="node-"]').getByText('RSI crosses below 70')
+    page.getByRole('spinbutton', {name: 'RSI crosses below'})
   ).toBeVisible();
-  await page.screenshot({path: 'e2e/screenshots/07-strategy-builder.png'});
+  await page.screenshot({path: 'e2e/screenshots/07-strategy-panel.png'});
 });
 
 test('screener and alerts panels', async ({page}) => {

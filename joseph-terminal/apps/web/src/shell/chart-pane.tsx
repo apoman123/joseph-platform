@@ -91,6 +91,7 @@ import {useVenueCapabilities} from './venue-capabilities';
 import {ProvenanceBadge, ProvenanceRibbon} from './provenance';
 import {useStore} from './react-bindings';
 import {ReplayBar} from './replay-bar';
+import {useStrategyPreview} from './strategy-preview';
 
 /** Bars requested on load. */
 const HISTORY_BARS = 500;
@@ -924,6 +925,7 @@ export function ChartPane({
     shownRef.current.filter(bar => bar.final).at(-1)?.timeMs ?? null,
     atMs
   );
+  useStrategyPreview(port, chart, runtime);
   const studyResults = useStore(pythonState(runtime).results);
   const catalog = useStudyCatalog();
   const compare = useCompare(port, chart, runtime, symbolOf);

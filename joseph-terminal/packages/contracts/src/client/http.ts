@@ -18,22 +18,17 @@ import type {
   AlertDelivery,
   AlertSubscriptionList,
   AccountSummary,
-  ActivateRequest,
   AmendRequest,
-  AoiList,
   AuditEventList,
-  BacktestReport,
-  BacktestRequest,
   CandleBatch,
+  CatalogList,
+  CatalogScript,
   ClosePositionRequest,
   Deployment,
   DeploymentList,
   DeploymentRequest,
   ErrorResponse,
   FillList,
-  IndicatorPluginList,
-  IndicatorSeries,
-  IndicatorSnapshotList,
   InstrumentList,
   KillSwitchList,
   KillSwitchRequest,
@@ -49,25 +44,27 @@ import type {
   QualificationReport,
   QualificationStatus,
   SessionList,
+  ScriptResult,
+  ScriptRun,
+  ScriptVersion,
   SignalList,
-  StrategyDefinition,
-  StrategyVersion,
-  StrategyVersionList,
+  StrategyActivation,
+  StrategyActivationInput,
+  StrategyActivationList,
   SubmitIntentResponse,
-  ValidationResult,
   Venue,
   VenueStatusList,
 } from '../generated/contracts';
 import type {
   CandleQuery,
   ExecutionClient,
-  IndicatorSeriesQuery,
   InstrumentQuery,
   MarketDataClient,
-  SeriesQuery,
   SessionQuery,
   SignalQuery,
   StrategyClient,
+  StrategyScript,
+  StrategyScriptList,
 } from './ports';
 
 /** Error raised for non-2xx responses, carrying the contract error body. */
@@ -208,20 +205,6 @@ export class HttpTransport {
 }
 
 /**
- * Encodes per-plugin setting overrides as a compact JSON query value.
- * @param settings Overrides keyed by plugin id.
- * @return JSON text, or undefined when there are none.
- */
-function encodeSettings(
-  settings:
-    Readonly<Record<string, Readonly<Record<string, unknown>>>> | undefined
-): string | undefined {
-  return settings && Object.keys(settings).length > 0
-    ? JSON.stringify(settings)
-    : undefined;
-}
-
-/**
  * Normalizes any error payload into the contract `ErrorResponse`.
  * @param payload Parsed body.
  * @param status HTTP status.
@@ -348,60 +331,9 @@ export class HttpMarketDataClient implements MarketDataClient {
     });
   }
 
-  /**
-   * Lists indicator plugins (`GET /v1/indicators/plugins`).
-   * @return Plugins.
-   */
-  listIndicatorPlugins(): Promise<IndicatorPluginList> {
-    return this.http.request('GET', '/v1/indicators/plugins');
-  }
 
-  /**
-   * Fetches indicator snapshots (`GET /v1/indicators/snapshot`).
-   * @param query Series, optional plugin ids, point in time and settings.
-   * @return Snapshots.
-   */
-  getIndicatorSnapshots(query: SeriesQuery): Promise<IndicatorSnapshotList> {
-    return this.http.request('GET', '/v1/indicators/snapshot', {
-      instrument_id: query.instrumentId,
-      tf: query.timeframe,
-      set: query.plugins,
-      at_ms: query.atMs,
-      settings: encodeSettings(query.settings),
-    });
-  }
 
-  /**
-   * Fetches AOIs (`GET /v1/aois`).
-   * @param query Series, optional plugin ids, point in time and settings.
-   * @return AOIs.
-   */
-  getAois(query: SeriesQuery): Promise<AoiList> {
-    return this.http.request('GET', '/v1/aois', {
-      instrument_id: query.instrumentId,
-      tf: query.timeframe,
-      set: query.plugins,
-      at_ms: query.atMs,
-      settings: encodeSettings(query.settings),
-    });
-  }
 
-  /**
-   * Fetches per-bar values of one plugin (`GET /v1/indicators/series`).
-   * @param query Series, plugin and optional start and settings.
-   * @return Indicator series.
-   */
-  getIndicatorSeries(query: IndicatorSeriesQuery): Promise<IndicatorSeries> {
-    return this.http.request('GET', '/v1/indicators/series', {
-      instrument_id: query.instrumentId,
-      tf: query.timeframe,
-      plugin: query.pluginId,
-      from_ms: query.fromMs,
-      settings: query.settings
-        ? JSON.stringify({[query.pluginId]: query.settings})
-        : undefined,
-    });
-  }
 
   /**
    * Lists the trading sessions of an exchange calendar
@@ -416,6 +348,48 @@ export class HttpMarketDataClient implements MarketDataClient {
       {from_ms: query.fromMs, to_ms: query.toMs}
     );
   }
+}
+
+/** One page of `GET /v1/scripts`. */
+interface OwnedScriptPage {
+  /** Latest owned versions. */
+  scripts: ScriptVersion[];
+  /** Whether owned source can execute. */
+  runtime_enabled: boolean;
+  /** Next page offset, or null at the end. */
+  next_offset?: number | null;
+}
+
+/**
+ * Describes an owned Strategy script with its saved defaults as inputs.
+ * @param row Latest owned version.
+ * @return Strategy summary without input bounds.
+ */
+function ownedStrategy(row: ScriptVersion): StrategyScript {
+  return {
+    script_id: row.script_id,
+    origin: 'tenant',
+    title: row.name,
+    description: '',
+    version: row.version,
+    inputs: Object.fromEntries(
+      Object.entries(row.defaults ?? {}).map(([name, value]) => [
+        name,
+        {
+          default: value ?? null,
+          title: name,
+          minimum: null,
+          maximum: null,
+          options: null,
+          step: null,
+          group: '',
+          tooltip: '',
+        },
+      ])
+    ),
+    source_available: true,
+    enabled: true,
+  };
 }
 
 /**
@@ -434,113 +408,181 @@ export class HttpStrategyClient implements StrategyClient {
   }
 
   /**
-   * Lists strategies (`GET /v1/strategies`).
-   * @return The latest version of each strategy.
+   * Lists Strategy scripts: the catalog (`GET /v1/scripts/catalog?kind=
+   * strategy`) and the owned scripts (`GET /v1/scripts`, every page).
+   * @return Catalog strategies first, then owned ones.
    */
-  listStrategies(): Promise<StrategyVersionList> {
-    return this.http.request('GET', '/v1/strategies');
-  }
-
-  /**
-   * Lists versions of one strategy (`GET /v1/strategies/{strategy_id}`).
-   * @param strategyId Strategy slug.
-   * @return Versions, newest first.
-   */
-  getStrategy(strategyId: string): Promise<StrategyVersionList> {
-    return this.http.request(
+  async listStrategyScripts(): Promise<StrategyScriptList> {
+    const catalog = await this.http.request<CatalogList>(
       'GET',
-      `/v1/strategies/${encodeURIComponent(strategyId)}`
+      '/v1/scripts/catalog',
+      {kind: 'strategy'}
     );
+    const scripts: StrategyScript[] = catalog.scripts.map(row => ({
+      script_id: row.script_id,
+      origin: row.origin,
+      title: row.title,
+      description: row.description,
+      version: 0,
+      inputs: row.inputs,
+      source_available: row.source_available,
+      enabled: row.enabled,
+    }));
+    let offset: number | null | undefined = 0;
+    let runtime = false;
+    for (let page = 0; page < 10 && typeof offset === 'number'; page++) {
+      const owned: OwnedScriptPage = await this.http.request(
+        'GET',
+        '/v1/scripts',
+        {offset}
+      );
+      runtime = owned.runtime_enabled;
+      for (const row of owned.scripts) {
+        if (row.kind === 'strategy') scripts.push(ownedStrategy(row));
+      }
+      offset = owned.next_offset;
+    }
+    return {scripts, runtime_enabled: runtime};
   }
 
   /**
-   * Validates a definition (`POST /v1/strategies/validate`).
-   * @param definition Rule AST v2 definition.
-   * @return Validation result.
+   * Reads a strategy's source (`GET /v1/scripts/catalog/{id}` for catalog
+   * ids, `GET /v1/scripts/{id}` for owned scripts).
+   * @param scriptId Strategy id.
+   * @return Source text.
+   * @throws `ApiError` (403) for protected plugin source.
    */
-  validate(definition: StrategyDefinition): Promise<ValidationResult> {
+  async getStrategySource(scriptId: string): Promise<string> {
+    const id = encodeURIComponent(scriptId);
+    if (scriptId.includes(':')) {
+      const row = await this.http.request<CatalogScript>(
+        'GET',
+        `/v1/scripts/catalog/${id}`
+      );
+      if (row.source === null || row.source === undefined) {
+        throw new ApiError(403, {
+          code: 'FORBIDDEN',
+          message: 'This plugin strategy does not publish its source.',
+          trace_id: 'client',
+          retryable: false,
+          field_errors: [],
+        });
+      }
+      return row.source;
+    }
+    const row = await this.http.request<ScriptVersion>(
+      'GET',
+      `/v1/scripts/${id}`
+    );
+    return row.source;
+  }
+
+  /**
+   * Copies a strategy into a new owned script (`POST /v1/scripts`), with
+   * the declared input defaults as saved defaults.
+   * @param scriptId Strategy to copy.
+   * @param newId New owned script slug.
+   * @return Saved version 1.
+   */
+  async copyStrategy(scriptId: string, newId: string): Promise<ScriptVersion> {
+    const [source, list] = await Promise.all([
+      this.getStrategySource(scriptId),
+      this.listStrategyScripts(),
+    ]);
+    const original = list.scripts.find(row => row.script_id === scriptId);
+    return this.http.request('POST', '/v1/scripts', undefined, {
+      script_id: newId,
+      kind: 'strategy',
+      name: `${original?.title ?? scriptId} (copy)`.slice(0, 120),
+      source,
+      defaults: Object.fromEntries(
+        Object.entries(original?.inputs ?? {}).map(([name, spec]) => [
+          name,
+          spec?.default ?? null,
+        ])
+      ),
+    });
+  }
+
+  /**
+   * Backtests a strategy (`POST /v1/scripts/{script_id}/run`).
+   * @param scriptId Strategy id.
+   * @param request Instrument, timeframe, bars, inputs and costs.
+   * @return Simulation result.
+   */
+  backtestStrategy(
+    scriptId: string,
+    request: ScriptRun
+  ): Promise<ScriptResult> {
     return this.http.request(
       'POST',
-      '/v1/strategies/validate',
-      undefined,
-      definition
-    );
-  }
-
-  /**
-   * Creates a strategy (`POST /v1/strategies`).
-   * @param definition Rule AST v2 definition.
-   * @return Version 1.
-   */
-  createStrategy(definition: StrategyDefinition): Promise<StrategyVersion> {
-    return this.http.request('POST', '/v1/strategies', undefined, definition);
-  }
-
-  /**
-   * Creates a new version (`POST /v1/strategies/{strategy_id}/versions`).
-   * @param strategyId Strategy slug.
-   * @param definition Edited definition.
-   * @return New version.
-   */
-  createVersion(
-    strategyId: string,
-    definition: StrategyDefinition
-  ): Promise<StrategyVersion> {
-    return this.http.request(
-      'POST',
-      `/v1/strategies/${encodeURIComponent(strategyId)}/versions`,
-      undefined,
-      definition
-    );
-  }
-
-  /**
-   * Runs a backtest (`POST /v1/strategies/{strategy_id}/backtests`).
-   * @param strategyId Strategy slug.
-   * @param request Version, instrument and range.
-   * @return Report.
-   */
-  backtest(
-    strategyId: string,
-    request: BacktestRequest
-  ): Promise<BacktestReport> {
-    return this.http.request(
-      'POST',
-      `/v1/strategies/${encodeURIComponent(strategyId)}/backtests`,
+      `/v1/scripts/${encodeURIComponent(scriptId)}/run`,
       undefined,
       request
     );
   }
 
   /**
-   * Activates a version (`POST /v1/strategies/{strategy_id}/activate`).
-   * @param strategyId Strategy slug.
-   * @param request Version and mode.
-   * @return Updated version.
+   * Lists activations (`GET /v1/strategy-activations`).
+   * @return Activations.
    */
-  activate(
-    strategyId: string,
-    request: ActivateRequest
-  ): Promise<StrategyVersion> {
+  listActivations(): Promise<StrategyActivationList> {
+    return this.http.request('GET', '/v1/strategy-activations');
+  }
+
+  /**
+   * Activates a strategy (`POST /v1/strategy-activations`).
+   * @param request Activation request.
+   * @return The activation.
+   */
+  createActivation(
+    request: StrategyActivationInput
+  ): Promise<StrategyActivation> {
     return this.http.request(
       'POST',
-      `/v1/strategies/${encodeURIComponent(strategyId)}/activate`,
+      '/v1/strategy-activations',
       undefined,
       request
     );
   }
 
   /**
-   * Pauses a strategy (`POST /v1/strategies/{strategy_id}/pause`).
-   * @param strategyId Strategy slug.
-   * @return Updated version.
+   * Pauses an activation (`POST /v1/strategy-activations/{id}/pause`).
+   * @param activationId Activation id.
+   * @return The activation.
    */
-  pause(strategyId: string): Promise<StrategyVersion> {
+  pauseActivation(activationId: string): Promise<StrategyActivation> {
     return this.http.request(
       'POST',
-      `/v1/strategies/${encodeURIComponent(strategyId)}/pause`,
+      `/v1/strategy-activations/${encodeURIComponent(activationId)}/pause`,
       undefined,
       {}
+    );
+  }
+
+  /**
+   * Resumes an activation (`POST /v1/strategy-activations/{id}/resume`).
+   * @param activationId Activation id.
+   * @return The activation.
+   */
+  resumeActivation(activationId: string): Promise<StrategyActivation> {
+    return this.http.request(
+      'POST',
+      `/v1/strategy-activations/${encodeURIComponent(activationId)}/resume`,
+      undefined,
+      {}
+    );
+  }
+
+  /**
+   * Deletes an activation (`DELETE /v1/strategy-activations/{id}`).
+   * @param activationId Activation id.
+   * @return Completion.
+   */
+  async deleteActivation(activationId: string): Promise<void> {
+    await this.http.request(
+      'DELETE',
+      `/v1/strategy-activations/${encodeURIComponent(activationId)}`
     );
   }
 

@@ -20,7 +20,6 @@ from joseph.domain import market
 from joseph.domain import quality
 from joseph.domain import sessions
 from joseph.domain import timeframes
-from joseph.indicators import testing
 from joseph.market_data.adapters import base
 from joseph.market_data.adapters import mock
 from joseph.market_data.adapters import ws
@@ -35,7 +34,78 @@ from joseph.market_data.domain import trades as trades_lib
 TF = timeframes.Timeframe
 NY = zoneinfo.ZoneInfo("America/New_York")
 TPE = zoneinfo.ZoneInfo("Asia/Taipei")
-ACME = testing.STOCK_INSTRUMENT
+ACME = instruments.InstrumentId.parse("mock:stock:ACME")
+
+
+def _bar_starts(
+    tf: timeframes.Timeframe,
+    start_ms: int,
+    count: int,
+    instrument_id: instruments.InstrumentId,
+) -> list[int]:
+    """Returns consecutive bar starts on an instrument's calendar.
+
+    Args:
+        tf: Bar resolution.
+        start_ms: First bar start (a later time counts from the next bar).
+        count: Number of bars.
+        instrument_id: Instrument.
+
+    Returns:
+        Ascending bar starts.
+    """
+    calendar = sessions.for_instrument(instrument_id)
+    starts = []
+    current = calendar.shift(tf, start_ms, 0)
+    for _ in range(count):
+        starts.append(current)
+        current = calendar.shift(tf, current, 1)
+    return starts
+
+
+def _candle(
+    tf: timeframes.Timeframe,
+    start_ms: int,
+    open_: float,
+    high: float,
+    low: float,
+    close: float,
+    *,
+    instrument_id: instruments.InstrumentId,
+) -> market.Candle:
+    """Builds one closed candle with volume 10.
+
+    Args:
+        tf: Bar resolution.
+        start_ms: Aligned bar start.
+        open_: Open price.
+        high: High price.
+        low: Low price.
+        close: Close price.
+        instrument_id: Instrument.
+
+    Returns:
+        The candle.
+    """
+    end_ms = sessions.for_instrument(instrument_id).end_of(tf, start_ms)
+    return market.Candle(
+        instrument_id=instrument_id,
+        timeframe=tf,
+        start_ms=start_ms,
+        end_ms=end_ms,
+        open=decimal.Decimal(str(open_)),
+        high=decimal.Decimal(str(high)),
+        low=decimal.Decimal(str(low)),
+        close=decimal.Decimal(str(close)),
+        base_volume=decimal.Decimal(10),
+        is_final=True,
+        source="test",
+        feed_state=quality.FeedState.LIVE,
+        received_at_ms=end_ms,
+        revision=0,
+    )
+
+
 AAPL = instruments.InstrumentId.parse("nasdaq:stock:AAPL")
 TSMC = instruments.InstrumentId.parse("twse:stock:2330")
 XNYS = sessions.XNYS
@@ -88,7 +158,7 @@ def _hour_starts(first: int, count: int) -> list[int]:
     Returns:
         The starts of ``count`` AAPL session bars from ``first`` on.
     """
-    return testing.bar_starts(TF.H1, first, count, AAPL)
+    return _bar_starts(TF.H1, first, count, AAPL)
 
 
 def _trade(ts: int, price: str, trade_id: str) -> market.Trade:
@@ -154,9 +224,7 @@ def test_store_final_gaps_use_the_instrument_calendar() -> None:
     store = candle_store.CandleStore()
     starts = _hour_starts(_ny(2026, 11, 27, 9, 30), 5)
     for start in starts:
-        store.upsert(
-            testing.make_candle(TF.H1, start, 1, 2, 1, 2, instrument_id=AAPL)
-        )
+        store.upsert(_candle(TF.H1, start, 1, 2, 1, 2, instrument_id=AAPL))
     end = XNYS.end_of(TF.H1, starts[-1])
     assert store.final_gaps(AAPL, TF.H1, starts[0], end) == []
 
@@ -222,9 +290,7 @@ def test_guard_calendar_comes_from_the_streamed_candles() -> None:
     guard = ws._Guard()
     assert guard.calendar(sessions.CONTINUOUS) is sessions.CONTINUOUS
     guard.accept(
-        testing.make_candle(
-            TF.H1, _ny(2026, 11, 27, 9, 30), 1, 1, 1, 1, instrument_id=AAPL
-        )
+        _candle(TF.H1, _ny(2026, 11, 27, 9, 30), 1, 1, 1, 1, instrument_id=AAPL)
     )
     assert guard.calendar(sessions.CONTINUOUS) is XNYS
 

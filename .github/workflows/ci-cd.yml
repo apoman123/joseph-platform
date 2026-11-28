@@ -258,7 +258,7 @@ jobs:
           username: ${{ github.actor }}
           password: ${{ secrets.GITHUB_TOKEN }}
       # Engine images must stay in private packages although the repository
-      # is public: the market image may hold indicator plugin packages under
+      # is public: the market image may hold script plugin packages under
       # their own licences, and either engine SinoPac's SDK. Refuse to
       # publish into a package anyone can pull.
       - name: Engine package is private
@@ -295,7 +295,7 @@ jobs:
           # reaches only `RUN --mount=type=secret`, never an image layer or
           # the build cache. No secret is passed while it is unset.
           secrets: ${{ matrix.image == 'joseph-market-engine' && secrets.PLUGIN_GIT_TOKEN != '' && format('plugin_git_token={0}', secrets.PLUGIN_GIT_TOKEN) || '' }}
-          # PLUGIN_REQUIREMENTS: indicator plugin packages for the market
+          # PLUGIN_REQUIREMENTS: script plugin packages for the market
           # image; empty builds it with the built-ins only. Only the
           # terminal Dockerfile declares the NEXT_PUBLIC_* arguments.
           build-args: |

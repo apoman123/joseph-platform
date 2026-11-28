@@ -768,6 +768,493 @@
       "source_hash": "1232adcf776e2b3b358bab688486ffd08ab11d2fb539f46710d95bf952e70ce1",
       "enabled": true,
       "source": null
+    },
+    {
+      "script_id": "builtin:ema-trend-long",
+      "kind": "strategy",
+      "origin": "builtin",
+      "package": null,
+      "package_version": null,
+      "title": "EMA Trend Long",
+      "short_title": "EMA Trend",
+      "description": "Long when the close crosses above the EMA while the one-hour RSI is above 50 and volume delta is positive; ATR stop, fixed 3R target.",
+      "category": "Trend",
+      "overlay": true,
+      "inputs": {
+        "ema_length": {
+          "default": 20,
+          "title": "EMA length",
+          "minimum": 1.0,
+          "maximum": 500.0,
+          "options": null,
+          "step": 1.0,
+          "group": "",
+          "tooltip": ""
+        },
+        "rsi_length": {
+          "default": 14,
+          "title": "1h RSI length",
+          "minimum": 2.0,
+          "maximum": 100.0,
+          "options": null,
+          "step": 1.0,
+          "group": "",
+          "tooltip": ""
+        },
+        "rsi_threshold": {
+          "default": 50,
+          "title": "1h RSI above",
+          "minimum": 0.0,
+          "maximum": 100.0,
+          "options": null,
+          "step": null,
+          "group": "",
+          "tooltip": ""
+        },
+        "require_flow": {
+          "default": true,
+          "title": "Require positive volume delta",
+          "minimum": null,
+          "maximum": null,
+          "options": null,
+          "step": null,
+          "group": "",
+          "tooltip": "Bars without venue taker buy volume never qualify."
+        },
+        "min_delta_pct": {
+          "default": 0,
+          "title": "Volume delta above (%)",
+          "minimum": -100.0,
+          "maximum": 100.0,
+          "options": null,
+          "step": null,
+          "group": "",
+          "tooltip": ""
+        },
+        "atr_length": {
+          "default": 14,
+          "title": "ATR length",
+          "minimum": 1.0,
+          "maximum": 100.0,
+          "options": null,
+          "step": 1.0,
+          "group": "Risk",
+          "tooltip": ""
+        },
+        "stop_atr": {
+          "default": 1.5,
+          "title": "Stop distance (ATR)",
+          "minimum": 0.1,
+          "maximum": 20.0,
+          "options": null,
+          "step": 0.1,
+          "group": "Risk",
+          "tooltip": ""
+        },
+        "target_r": {
+          "default": 3.0,
+          "title": "Target (R multiple)",
+          "minimum": 0.5,
+          "maximum": 20.0,
+          "options": null,
+          "step": 0.5,
+          "group": "Risk",
+          "tooltip": ""
+        },
+        "min_rr": {
+          "default": 2.0,
+          "title": "Minimum net reward/risk",
+          "minimum": 0.0,
+          "maximum": 20.0,
+          "options": null,
+          "step": 0.1,
+          "group": "Risk",
+          "tooltip": ""
+        },
+        "fee_bps": {
+          "default": 5,
+          "title": "Fee estimate (bps)",
+          "minimum": 0.0,
+          "maximum": 100.0,
+          "options": null,
+          "step": null,
+          "group": "Risk",
+          "tooltip": ""
+        },
+        "cooldown_bars": {
+          "default": 12,
+          "title": "Cooldown (bars)",
+          "minimum": 0.0,
+          "maximum": 500.0,
+          "options": null,
+          "step": 1.0,
+          "group": "",
+          "tooltip": ""
+        },
+        "position_pct": {
+          "default": 90,
+          "title": "Simulated position (% of equity)",
+          "minimum": 1.0,
+          "maximum": 100.0,
+          "options": null,
+          "step": null,
+          "group": "Simulation",
+          "tooltip": ""
+        },
+        "color": {
+          "default": "#2962ff",
+          "title": "EMA color",
+          "minimum": null,
+          "maximum": null,
+          "options": null,
+          "step": null,
+          "group": "Style",
+          "tooltip": ""
+        }
+      },
+      "requests": {
+        "htf": {
+          "tf": "1h",
+          "instrument_id": null,
+          "limit": 500
+        }
+      },
+      "source_available": true,
+      "source_hash": "728ab44d3104ab18480cef2c05e16921517cec70d6347043bbe67d3b8eb00c3c",
+      "enabled": true,
+      "source": null
+    },
+    {
+      "script_id": "builtin:rsi-reversion-short",
+      "kind": "strategy",
+      "origin": "builtin",
+      "package": null,
+      "package_version": null,
+      "title": "RSI Reversion Short",
+      "short_title": "RSI Reversion",
+      "description": "Short when the RSI falls back below 70 within three bars of a close above the upper Bollinger Band; swing-high stop, fixed 2R target.",
+      "category": "Mean reversion",
+      "overlay": true,
+      "inputs": {
+        "rsi_length": {
+          "default": 14,
+          "title": "RSI length",
+          "minimum": 2.0,
+          "maximum": 100.0,
+          "options": null,
+          "step": 1.0,
+          "group": "",
+          "tooltip": ""
+        },
+        "rsi_level": {
+          "default": 70,
+          "title": "RSI crosses below",
+          "minimum": 1.0,
+          "maximum": 99.0,
+          "options": null,
+          "step": null,
+          "group": "",
+          "tooltip": ""
+        },
+        "bb_length": {
+          "default": 20,
+          "title": "Bollinger length",
+          "minimum": 2.0,
+          "maximum": 500.0,
+          "options": null,
+          "step": 1.0,
+          "group": "",
+          "tooltip": ""
+        },
+        "bb_mult": {
+          "default": 2.0,
+          "title": "Bollinger multiplier",
+          "minimum": 0.1,
+          "maximum": 10.0,
+          "options": null,
+          "step": 0.1,
+          "group": "",
+          "tooltip": ""
+        },
+        "within_bars": {
+          "default": 3,
+          "title": "Band close within (bars)",
+          "minimum": 1.0,
+          "maximum": 50.0,
+          "options": null,
+          "step": 1.0,
+          "group": "",
+          "tooltip": ""
+        },
+        "swing_bars": {
+          "default": 10,
+          "title": "Swing lookback (bars)",
+          "minimum": 1.0,
+          "maximum": 200.0,
+          "options": null,
+          "step": null,
+          "group": "Risk",
+          "tooltip": ""
+        },
+        "atr_length": {
+          "default": 14,
+          "title": "ATR length",
+          "minimum": 1.0,
+          "maximum": 100.0,
+          "options": null,
+          "step": 1.0,
+          "group": "Risk",
+          "tooltip": ""
+        },
+        "stop_atr": {
+          "default": 0.5,
+          "title": "Stop buffer (ATR)",
+          "minimum": 0.0,
+          "maximum": 20.0,
+          "options": null,
+          "step": 0.1,
+          "group": "Risk",
+          "tooltip": ""
+        },
+        "target_r": {
+          "default": 2.0,
+          "title": "Target (R multiple)",
+          "minimum": 0.5,
+          "maximum": 20.0,
+          "options": null,
+          "step": 0.5,
+          "group": "Risk",
+          "tooltip": ""
+        },
+        "min_rr": {
+          "default": 1.5,
+          "title": "Minimum net reward/risk",
+          "minimum": 0.0,
+          "maximum": 20.0,
+          "options": null,
+          "step": 0.1,
+          "group": "Risk",
+          "tooltip": ""
+        },
+        "fee_bps": {
+          "default": 0,
+          "title": "Fee estimate (bps)",
+          "minimum": 0.0,
+          "maximum": 100.0,
+          "options": null,
+          "step": null,
+          "group": "Risk",
+          "tooltip": ""
+        },
+        "cooldown_bars": {
+          "default": 12,
+          "title": "Cooldown (bars)",
+          "minimum": 0.0,
+          "maximum": 500.0,
+          "options": null,
+          "step": 1.0,
+          "group": "",
+          "tooltip": ""
+        },
+        "position_pct": {
+          "default": 90,
+          "title": "Simulated position (% of equity)",
+          "minimum": 1.0,
+          "maximum": 100.0,
+          "options": null,
+          "step": null,
+          "group": "Simulation",
+          "tooltip": ""
+        },
+        "color": {
+          "default": "#ff9800",
+          "title": "Band color",
+          "minimum": null,
+          "maximum": null,
+          "options": null,
+          "step": null,
+          "group": "Style",
+          "tooltip": ""
+        }
+      },
+      "requests": {},
+      "source_available": true,
+      "source_hash": "86e504b046d3c83ac4aa5a8573338a555aca06c4ade31bcd83a33434bc8ddde2",
+      "enabled": true,
+      "source": null
+    },
+    {
+      "script_id": "builtin:pivot-bounce-long",
+      "kind": "strategy",
+      "origin": "builtin",
+      "package": null,
+      "package_version": null,
+      "title": "Pivot Bounce Long",
+      "short_title": "Pivot Bounce",
+      "description": "Long on a wick touch of the daily S1 or S2 pivot between 09:30 and 11:30 New York time on weekdays; stop below the level, target the nearest of P and R1.",
+      "category": "Levels",
+      "overlay": true,
+      "inputs": {
+        "supports": {
+          "default": "S1 and S2",
+          "title": "Support levels",
+          "minimum": null,
+          "maximum": null,
+          "options": [
+            "S1",
+            "S2",
+            "S1 and S2"
+          ],
+          "step": null,
+          "group": "",
+          "tooltip": ""
+        },
+        "targets": {
+          "default": "P and R1",
+          "title": "Target levels",
+          "minimum": null,
+          "maximum": null,
+          "options": [
+            "P",
+            "R1",
+            "P and R1"
+          ],
+          "step": null,
+          "group": "",
+          "tooltip": ""
+        },
+        "touch_bars": {
+          "default": 3,
+          "title": "Touch within (bars)",
+          "minimum": 1.0,
+          "maximum": 50.0,
+          "options": null,
+          "step": 1.0,
+          "group": "",
+          "tooltip": ""
+        },
+        "session_start": {
+          "default": "09:30",
+          "title": "Window start (New York)",
+          "minimum": null,
+          "maximum": null,
+          "options": null,
+          "step": null,
+          "group": "",
+          "tooltip": ""
+        },
+        "session_end": {
+          "default": "11:30",
+          "title": "Window end (New York)",
+          "minimum": null,
+          "maximum": null,
+          "options": null,
+          "step": null,
+          "group": "",
+          "tooltip": ""
+        },
+        "weekdays_only": {
+          "default": true,
+          "title": "Weekdays only",
+          "minimum": null,
+          "maximum": null,
+          "options": null,
+          "step": null,
+          "group": "",
+          "tooltip": ""
+        },
+        "require_trade_delta": {
+          "default": true,
+          "title": "Require buy volume data",
+          "minimum": null,
+          "maximum": null,
+          "options": null,
+          "step": null,
+          "group": "",
+          "tooltip": "Bars without venue or trade-classified buy volume never qualify."
+        },
+        "once_per_level": {
+          "default": true,
+          "title": "Trade each level once per day",
+          "minimum": null,
+          "maximum": null,
+          "options": null,
+          "step": null,
+          "group": "",
+          "tooltip": ""
+        },
+        "atr_length": {
+          "default": 14,
+          "title": "ATR length",
+          "minimum": 1.0,
+          "maximum": 100.0,
+          "options": null,
+          "step": 1.0,
+          "group": "Risk",
+          "tooltip": ""
+        },
+        "stop_atr": {
+          "default": 0.2,
+          "title": "Stop buffer (ATR)",
+          "minimum": 0.0,
+          "maximum": 20.0,
+          "options": null,
+          "step": 0.1,
+          "group": "Risk",
+          "tooltip": ""
+        },
+        "min_rr": {
+          "default": 1.5,
+          "title": "Minimum net reward/risk",
+          "minimum": 0.0,
+          "maximum": 20.0,
+          "options": null,
+          "step": 0.1,
+          "group": "Risk",
+          "tooltip": ""
+        },
+        "fee_bps": {
+          "default": 0,
+          "title": "Fee estimate (bps)",
+          "minimum": 0.0,
+          "maximum": 100.0,
+          "options": null,
+          "step": null,
+          "group": "Risk",
+          "tooltip": ""
+        },
+        "cooldown_bars": {
+          "default": 6,
+          "title": "Cooldown (bars)",
+          "minimum": 0.0,
+          "maximum": 500.0,
+          "options": null,
+          "step": 1.0,
+          "group": "",
+          "tooltip": ""
+        },
+        "position_pct": {
+          "default": 90,
+          "title": "Simulated position (% of equity)",
+          "minimum": 1.0,
+          "maximum": 100.0,
+          "options": null,
+          "step": null,
+          "group": "Simulation",
+          "tooltip": ""
+        }
+      },
+      "requests": {
+        "daily": {
+          "tf": "1d",
+          "instrument_id": null,
+          "limit": 60
+        }
+      },
+      "source_available": true,
+      "source_hash": "aae9a61bbbdc3508580359467f0b240806ceee9cdecbe5f11a2f79295b81eb74",
+      "enabled": true,
+      "source": null
     }
   ],
   "failures": []

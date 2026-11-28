@@ -320,6 +320,63 @@ class SimulatedFill(pydantic.BaseModel):
     effect: Literal["entry", "exit", "reversal"] = "entry"
 
 
+class StrategyOrder(pydantic.BaseModel):
+    """A strategy order queued on a closed bar and its simulated outcome.
+
+    Attributes:
+        time_ms: Start of the closed bar on which the order was queued.
+        action: long or short entry target, or close.
+        quantity: Target absolute base quantity; zero for close.
+        reference: Close of the bar the order was queued on, the planned
+            entry of live signals.
+        stop: Protective stop declared with an entry, if any.
+        target: Profit target declared with an entry, if any.
+        comment: Plain-text reason given by the strategy.
+        status: pending (no later bar yet), filled, rejected for
+            insufficient simulated equity, or unchanged (the position
+            already matched).
+        fill_time_ms: Start of the bar whose open filled the order.
+    """
+
+    model_config = pydantic.ConfigDict(extra="forbid", allow_inf_nan=False)
+    time_ms: int
+    action: Literal["long", "short", "close"]
+    quantity: Annotated[float, pydantic.Field(ge=0)]
+    reference: Annotated[float, pydantic.Field(gt=0)]
+    stop: Annotated[float, pydantic.Field(gt=0)] | None = None
+    target: Annotated[float, pydantic.Field(gt=0)] | None = None
+    comment: Annotated[str, pydantic.Field(max_length=120)] = ""
+    status: Literal["pending", "filled", "rejected", "unchanged"]
+    fill_time_ms: int | None = None
+
+
+class StrategyTrade(pydantic.BaseModel):
+    """A simulated round trip reconstructed from verified fills.
+
+    Attributes:
+        direction: LONG or SHORT.
+        entry_time_ms: Start of the bar of the opening fill.
+        exit_time_ms: Start of the bar of the closing fill; None while open.
+        quantity: Largest absolute base quantity held.
+        entry_price: Quantity-weighted average opening price.
+        exit_price: Quantity-weighted average closing price; None while open.
+        fees: Commissions of every fill of the trade.
+        pnl: Realized profit after fees; None while open.
+        return_pct: pnl relative to the opening notional; None while open.
+    """
+
+    model_config = pydantic.ConfigDict(extra="forbid", allow_inf_nan=False)
+    direction: Literal["LONG", "SHORT"]
+    entry_time_ms: int
+    exit_time_ms: int | None = None
+    quantity: Annotated[float, pydantic.Field(gt=0)]
+    entry_price: Annotated[float, pydantic.Field(gt=0)]
+    exit_price: Annotated[float, pydantic.Field(gt=0)] | None = None
+    fees: Annotated[float, pydantic.Field(ge=0)] = 0.0
+    pnl: float | None = None
+    return_pct: float | None = None
+
+
 class ScriptAlertEvent(pydantic.BaseModel):
     """One user-authored alert condition matched on a source bar.
 
@@ -386,6 +443,10 @@ class ScriptResult(pydantic.BaseModel):
         overlay: Whether plots share the main price pane.
         plots: At most sixty-four scalar output series.
         fills: Simulated next-bar-open fills; empty for indicators.
+        orders: Queued strategy orders and their simulated outcomes; empty
+            for other roles.
+        trades: Round trips reconstructed by the host from verified fills.
+        position_size: Signed simulated position after the last bar.
         equity_curve: Marked simulated quote equity; empty for indicators.
         metrics: Finite numeric simulation statistics, including fees and
             unfilled final-bar intents; no performance is fabricated.
@@ -414,6 +475,13 @@ class ScriptResult(pydantic.BaseModel):
     overlay: bool
     plots: Annotated[list[PlotSeries], pydantic.Field(max_length=64)]
     fills: Annotated[list[SimulatedFill], pydantic.Field(max_length=4000)]
+    orders: Annotated[list[StrategyOrder], pydantic.Field(max_length=4000)] = (
+        pydantic.Field(default_factory=list)
+    )
+    trades: Annotated[list[StrategyTrade], pydantic.Field(max_length=4000)] = (
+        pydantic.Field(default_factory=list)
+    )
+    position_size: float = 0.0
     equity_curve: Annotated[list[PlotPoint], pydantic.Field(max_length=5000)]
     metrics: dict[str, Annotated[float, pydantic.Field(allow_inf_nan=False)]]
     matched: bool | None = None

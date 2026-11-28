@@ -1,5 +1,31 @@
 {
   "$defs": {
+    "ActivationInstrumentStatus": {
+      "description": "Evaluation progress of one activated instrument.\n\nAttributes:\n    last_processed_ms: Newest bar close already turned into signals or\n        skipped; bars at or before it are never signalled.\n    last_error: Last evaluation error, None after a clean pass.",
+      "properties": {
+        "last_error": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Last Error"
+        },
+        "last_processed_ms": {
+          "title": "Last Processed Ms",
+          "type": "integer"
+        }
+      },
+      "required": [
+        "last_processed_ms"
+      ],
+      "title": "ActivationInstrumentStatus",
+      "type": "object"
+    },
     "AlertJob": {
       "additionalProperties": false,
       "description": "Persistent Python alert evaluation state and visible diagnostics.\n\nAttributes:\n    job_id: Opaque tenant-owned alert identifier.\n    created_at_ms: Creation time in UTC epoch milliseconds.\n    last_processed_ms: Latest successfully evaluated bar close/checkpoint.\n    last_error: Visible missing-data, provider or user-code failure, if any.\n    last_checked_ms: Last evaluation attempt in UTC epoch milliseconds.\n    emitted: Number of distinct conditions recorded for this job.",
@@ -406,107 +432,320 @@
       "title": "CatalogScript",
       "type": "object"
     },
-    "CompanyMetadata": {
-      "additionalProperties": false,
-      "description": "Explicit optional metadata for feeds without company fundamentals.\n\nAttributes:\n    instrument_id: Canonical stock or ETF identifier.\n    sector: Optional user-provided industry/sector label, maximum 120 chars.\n    market_cap: Optional positive market capitalization in its quote\n        currency,\n        encoded as a decimal string, never inferred from price or volume.\n    as_of_ms: User-declared observation time in UTC epoch milliseconds.",
+    "HeatmapCatalog": {
+      "description": "Every data set and the default per heatmap family.\n\nAttributes:\n    datasets: Data sets in menu order.\n    defaults: Default data set id per heatmap family.",
       "properties": {
-        "as_of_ms": {
-          "minimum": 0,
-          "title": "As Of Ms",
-          "type": "integer"
+        "datasets": {
+          "items": {
+            "$ref": "#/$defs/HeatmapDataset"
+          },
+          "title": "Datasets",
+          "type": "array"
         },
-        "instrument_id": {
-          "maxLength": 180,
-          "title": "Instrument Id",
-          "type": "string"
-        },
-        "market_cap": {
-          "anyOf": [
-            {
-              "maxLength": 64,
-              "pattern": "^[0-9]+(?:\\.[0-9]+)?$",
-              "type": "string"
-            },
-            {
-              "type": "null"
-            }
-          ],
-          "default": null,
-          "title": "Market Cap"
-        },
-        "sector": {
-          "anyOf": [
-            {
-              "maxLength": 120,
-              "type": "string"
-            },
-            {
-              "type": "null"
-            }
-          ],
-          "default": null,
-          "title": "Sector"
+        "defaults": {
+          "additionalProperties": {
+            "type": "string"
+          },
+          "title": "Defaults",
+          "type": "object"
         }
       },
       "required": [
-        "instrument_id",
-        "as_of_ms"
+        "datasets",
+        "defaults"
       ],
-      "title": "CompanyMetadata",
+      "title": "HeatmapCatalog",
       "type": "object"
     },
-    "CompanyMetadataBatch": {
-      "additionalProperties": false,
-      "description": "An explicit batch of user-owned heatmap fundamentals.\n\nAttributes:\n    records: At most five thousand canonical, dated company records.",
+    "HeatmapDataset": {
+      "description": "A selectable data set (an index, a market or a coin universe).\n\nAttributes:\n    id: Stable id, e.g. ``us_sp500`` or ``crypto_all``.\n    type: Heatmap family.\n    label: Human label, e.g. ``S&P 500``.\n    section: Menu section, e.g. ``United States``, ``Taiwan``, ``Crypto``.\n    currency: Quote currency of prices and sizes (``USD`` or ``TWD``).\n    default_limit: Tiles shown by default (the largest first).\n    available: Whether the configured sources can serve it.\n    reason: Why it is unavailable, or None.",
       "properties": {
-        "records": {
-          "items": {
-            "$ref": "#/$defs/CompanyMetadata"
-          },
-          "maxItems": 5000,
-          "title": "Records",
-          "type": "array"
+        "available": {
+          "title": "Available",
+          "type": "boolean"
+        },
+        "currency": {
+          "title": "Currency",
+          "type": "string"
+        },
+        "default_limit": {
+          "title": "Default Limit",
+          "type": "integer"
+        },
+        "id": {
+          "title": "Id",
+          "type": "string"
+        },
+        "label": {
+          "title": "Label",
+          "type": "string"
+        },
+        "reason": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Reason"
+        },
+        "section": {
+          "title": "Section",
+          "type": "string"
+        },
+        "type": {
+          "enum": [
+            "stocks",
+            "etfs",
+            "crypto"
+          ],
+          "title": "Type",
+          "type": "string"
         }
       },
       "required": [
-        "records"
+        "id",
+        "type",
+        "label",
+        "section",
+        "currency",
+        "default_limit",
+        "available"
       ],
-      "title": "CompanyMetadataBatch",
+      "title": "HeatmapDataset",
+      "type": "object"
+    },
+    "HeatmapGrouping": {
+      "description": "A grouping option of the selected data set.\n\nAttributes:\n    id: ``sector``, ``asset_class`` or ``none``.\n    label: Human label, e.g. ``Sector``.\n    available: Whether tiles carry this grouping.\n    reason: Why the grouping is unavailable, or None.",
+      "properties": {
+        "available": {
+          "title": "Available",
+          "type": "boolean"
+        },
+        "id": {
+          "enum": [
+            "sector",
+            "asset_class",
+            "none"
+          ],
+          "title": "Id",
+          "type": "string"
+        },
+        "label": {
+          "title": "Label",
+          "type": "string"
+        },
+        "reason": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Reason"
+        }
+      },
+      "required": [
+        "id",
+        "label",
+        "available"
+      ],
+      "title": "HeatmapGrouping",
+      "type": "object"
+    },
+    "HeatmapMetric": {
+      "description": "One size or colour metric and whether the source supplies it.\n\nAttributes:\n    id: Stable metric id, e.g. ``market_cap`` or ``change_1d``.\n    label: Human label, e.g. ``Change 1D, %``.\n    format: Value format: currency amount, percent, plain number or\n        ratio (relative volume).\n    scale: Colour scale of a colour metric: ``diverging`` (red/grey/green)\n        or ``sequential`` (single-hue intensity); None for size metrics.\n    available: Whether at least the source can supply the metric.\n    reason: Why the metric is unavailable, or None when available.",
+      "properties": {
+        "available": {
+          "title": "Available",
+          "type": "boolean"
+        },
+        "format": {
+          "enum": [
+            "currency",
+            "percent",
+            "number",
+            "ratio"
+          ],
+          "title": "Format",
+          "type": "string"
+        },
+        "id": {
+          "title": "Id",
+          "type": "string"
+        },
+        "label": {
+          "title": "Label",
+          "type": "string"
+        },
+        "reason": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Reason"
+        },
+        "scale": {
+          "anyOf": [
+            {
+              "enum": [
+                "diverging",
+                "sequential"
+              ],
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Scale"
+        }
+      },
+      "required": [
+        "id",
+        "label",
+        "format",
+        "available"
+      ],
+      "title": "HeatmapMetric",
+      "type": "object"
+    },
+    "HeatmapProvenance": {
+      "description": "Where one part of the heatmap comes from.\n\nAttributes:\n    field: What the source supplies, e.g. ``Sector & market cap``.\n    source: Source label, e.g. ``Nasdaq.com screener (unofficial,\n        delayed)``.\n    as_of_ms: When the source data was fetched or observed, UTC epoch\n        milliseconds, or None when it is not loaded yet.\n    note: Optional caveat such as ``derived: shares x last price``.",
+      "properties": {
+        "as_of_ms": {
+          "anyOf": [
+            {
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "As Of Ms"
+        },
+        "field": {
+          "title": "Field",
+          "type": "string"
+        },
+        "note": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Note"
+        },
+        "source": {
+          "title": "Source",
+          "type": "string"
+        }
+      },
+      "required": [
+        "field",
+        "source"
+      ],
+      "title": "HeatmapProvenance",
       "type": "object"
     },
     "HeatmapSnapshot": {
-      "description": "Real stock heatmap data and explicit market/coverage limits.\n\nAttributes:\n    tiles: Selected stocks, including unavailable/neutral tiles.\n    universe_count: Actual eligible stocks before the requested result\n        limit.\n    quote_count: Number with a returned source quote.\n    generated_at_ms: Response generation time, UTC epoch milliseconds.\n    region: US or Taiwan universe; quote currencies are never mixed by size.\n    currency: USD or TWD quote currency of the selected stock region.\n    available_metrics: Metrics actually present in at least one selected\n        tile.\n    missing_metadata: Whether sector or market-cap information is\n        incomplete.\n    source_errors: Provider metadata failures limiting the selected\n        universe.",
+      "description": "A heatmap of one data set with metric availability and provenance.\n\nAttributes:\n    type: Heatmap family.\n    dataset: Data set id.\n    dataset_label: Data set label.\n    currency: Currency of prices and currency-valued metrics.\n    tiles: Tiles, largest default size first.\n    universe_count: Members of the data set before the limit.\n    limit: Requested maximum tiles.\n    priced_count: Tiles with a price.\n    size_metrics: Size-by options with availability.\n    color_metrics: Colour-by options with availability.\n    groupings: Group-by options with availability.\n    default_size: Default size metric id.\n    default_color: Default colour metric id.\n    default_grouping: Default grouping id.\n    provenance: Source of each part of the data.\n    source_errors: Per-source failures limiting the result.\n    pending: True while a slow source is still loading; the client\n        should poll again soon for fuller coverage.\n    generated_at_ms: Response time, UTC epoch milliseconds.\n    demo: True for synthetic DEMO data.",
       "properties": {
-        "available_metrics": {
+        "color_metrics": {
           "items": {
-            "type": "string"
+            "$ref": "#/$defs/HeatmapMetric"
           },
-          "title": "Available Metrics",
+          "title": "Color Metrics",
           "type": "array"
         },
         "currency": {
           "title": "Currency",
           "type": "string"
         },
+        "dataset": {
+          "title": "Dataset",
+          "type": "string"
+        },
+        "dataset_label": {
+          "title": "Dataset Label",
+          "type": "string"
+        },
+        "default_color": {
+          "title": "Default Color",
+          "type": "string"
+        },
+        "default_grouping": {
+          "enum": [
+            "sector",
+            "asset_class",
+            "none"
+          ],
+          "title": "Default Grouping",
+          "type": "string"
+        },
+        "default_size": {
+          "title": "Default Size",
+          "type": "string"
+        },
+        "demo": {
+          "default": false,
+          "title": "Demo",
+          "type": "boolean"
+        },
         "generated_at_ms": {
           "title": "Generated At Ms",
           "type": "integer"
         },
-        "missing_metadata": {
-          "title": "Missing Metadata",
-          "type": "boolean"
+        "groupings": {
+          "items": {
+            "$ref": "#/$defs/HeatmapGrouping"
+          },
+          "title": "Groupings",
+          "type": "array"
         },
-        "quote_count": {
-          "title": "Quote Count",
+        "limit": {
+          "title": "Limit",
           "type": "integer"
         },
-        "region": {
-          "enum": [
-            "us",
-            "taiwan"
-          ],
-          "title": "Region",
-          "type": "string"
+        "pending": {
+          "default": false,
+          "title": "Pending",
+          "type": "boolean"
+        },
+        "priced_count": {
+          "title": "Priced Count",
+          "type": "integer"
+        },
+        "provenance": {
+          "items": {
+            "$ref": "#/$defs/HeatmapProvenance"
+          },
+          "title": "Provenance",
+          "type": "array"
+        },
+        "size_metrics": {
+          "items": {
+            "$ref": "#/$defs/HeatmapMetric"
+          },
+          "title": "Size Metrics",
+          "type": "array"
         },
         "source_errors": {
           "additionalProperties": {
@@ -522,26 +761,43 @@
           "title": "Tiles",
           "type": "array"
         },
+        "type": {
+          "enum": [
+            "stocks",
+            "etfs",
+            "crypto"
+          ],
+          "title": "Type",
+          "type": "string"
+        },
         "universe_count": {
           "title": "Universe Count",
           "type": "integer"
         }
       },
       "required": [
+        "type",
+        "dataset",
+        "dataset_label",
+        "currency",
         "tiles",
         "universe_count",
-        "quote_count",
-        "generated_at_ms",
-        "region",
-        "currency",
-        "available_metrics",
-        "missing_metadata"
+        "limit",
+        "priced_count",
+        "size_metrics",
+        "color_metrics",
+        "groupings",
+        "default_size",
+        "default_color",
+        "default_grouping",
+        "provenance",
+        "generated_at_ms"
       ],
       "title": "HeatmapSnapshot",
       "type": "object"
     },
     "HeatmapTile": {
-      "description": "One stock tile whose missing metrics remain unavailable.\n\nAttributes:\n    instrument_id: Exact venue-scoped stock or ETF identifier.\n    symbol: Provider display symbol.\n    name: Provider company/security name when available.\n    exchange: Actual listing exchange or canonical venue.\n    last: Latest source price as a decimal string, or None.\n    change_pct: Source daily price change in percent, or None.\n    volume: Source daily base volume as a decimal string, or None.\n    turnover: Source daily quote turnover, or None.\n    market_cap: Explicit optional company metadata, never a volume proxy.\n    sector: Explicit optional company sector, otherwise unclassified.\n    metadata_as_of_ms: Date of user-supplied fundamentals, or None.\n    feed_state: Actual quote provenance state; unavailable without a quote.\n    source: Actual provider label; never promoted to a broader market feed.\n    as_of_ms: Actual quote observation time, or None without a quote.\n    error: Provider/missing-data explanation, or None for an available\n        quote.",
+      "description": "One symbol of the map.\n\nAttributes:\n    key: Unique key within the data set (ticker or coin id).\n    symbol: Display ticker.\n    name: Company, fund or coin name, or None.\n    group: Sector (stocks), asset class (ETFs) or None (crypto).\n    industry: Industry within the sector, or None.\n    exchange: Listing exchange, or None.\n    instrument_id: Canonical instrument to chart, or None when no\n        configured venue lists it.\n    chart_unavailable_reason: Why no chart can open, or None.\n    price: Last price as a decimal string, or None.\n    metrics: Available metric values by metric id (decimal strings);\n        a missing key means the value is unavailable for this symbol.\n    as_of_ms: Quote observation or fetch time, or None.\n    error: Per-symbol source problem, or None.",
       "properties": {
         "as_of_ms": {
           "anyOf": [
@@ -552,9 +808,10 @@
               "type": "null"
             }
           ],
+          "default": null,
           "title": "As Of Ms"
         },
-        "change_pct": {
+        "chart_unavailable_reason": {
           "anyOf": [
             {
               "type": "string"
@@ -563,7 +820,8 @@
               "type": "null"
             }
           ],
-          "title": "Change Pct"
+          "default": null,
+          "title": "Chart Unavailable Reason"
         },
         "error": {
           "anyOf": [
@@ -574,52 +832,67 @@
               "type": "null"
             }
           ],
+          "default": null,
           "title": "Error"
         },
         "exchange": {
-          "title": "Exchange",
-          "type": "string"
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Exchange"
         },
-        "feed_state": {
-          "title": "Feed State",
-          "type": "string"
+        "group": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Group"
+        },
+        "industry": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Industry"
         },
         "instrument_id": {
-          "title": "Instrument Id",
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Instrument Id"
+        },
+        "key": {
+          "title": "Key",
           "type": "string"
         },
-        "last": {
-          "anyOf": [
-            {
-              "type": "string"
-            },
-            {
-              "type": "null"
-            }
-          ],
-          "title": "Last"
-        },
-        "market_cap": {
-          "anyOf": [
-            {
-              "type": "string"
-            },
-            {
-              "type": "null"
-            }
-          ],
-          "title": "Market Cap"
-        },
-        "metadata_as_of_ms": {
-          "anyOf": [
-            {
-              "type": "integer"
-            },
-            {
-              "type": "null"
-            }
-          ],
-          "title": "Metadata As Of Ms"
+        "metrics": {
+          "additionalProperties": {
+            "type": "string"
+          },
+          "title": "Metrics",
+          "type": "object"
         },
         "name": {
           "anyOf": [
@@ -630,9 +903,10 @@
               "type": "null"
             }
           ],
+          "default": null,
           "title": "Name"
         },
-        "sector": {
+        "price": {
           "anyOf": [
             {
               "type": "string"
@@ -641,62 +915,17 @@
               "type": "null"
             }
           ],
-          "title": "Sector"
-        },
-        "source": {
-          "anyOf": [
-            {
-              "type": "string"
-            },
-            {
-              "type": "null"
-            }
-          ],
-          "title": "Source"
+          "default": null,
+          "title": "Price"
         },
         "symbol": {
           "title": "Symbol",
           "type": "string"
-        },
-        "turnover": {
-          "anyOf": [
-            {
-              "type": "string"
-            },
-            {
-              "type": "null"
-            }
-          ],
-          "title": "Turnover"
-        },
-        "volume": {
-          "anyOf": [
-            {
-              "type": "string"
-            },
-            {
-              "type": "null"
-            }
-          ],
-          "title": "Volume"
         }
       },
       "required": [
-        "instrument_id",
-        "symbol",
-        "name",
-        "exchange",
-        "last",
-        "change_pct",
-        "volume",
-        "turnover",
-        "market_cap",
-        "sector",
-        "metadata_as_of_ms",
-        "feed_state",
-        "source",
-        "as_of_ms",
-        "error"
+        "key",
+        "symbol"
       ],
       "title": "HeatmapTile",
       "type": "object"
@@ -1296,7 +1525,7 @@
     },
     "ScriptResult": {
       "additionalProperties": false,
-      "description": "Reproducible plots and optional simulated strategy performance.\n\nAttributes:\n    script_id: Tenant-owned script slug.\n    version: Immutable script version evaluated.\n    kind: Indicator, strategy, filter or alert; libraries are import-only.\n    source_hash: Content hash including default inputs and dependency pins.\n    instrument_id: Canonical source instrument identifier.\n    tf: Source bar resolution.\n    bars_count: Number of source bars evaluated, including provisional bars\n        only when explicitly requested for an indicator.\n    feed_state: Source provenance; DEMO data remains explicitly marked.\n    data_source: Upstream provider provenance label.\n    complete: Whether the requested history has no closed-bar gaps.\n    overlay: Whether plots share the main price pane.\n    plots: At most sixty-four scalar output series.\n    fills: Simulated next-bar-open fills; empty for indicators.\n    equity_curve: Marked simulated quote equity; empty for indicators.\n    metrics: Finite numeric simulation statistics, including fees and\n        unfilled final-bar intents; no performance is fabricated.\n    matched: Boolean decision for a filter, otherwise None.\n    alerts: Previewed alert events; delivery requires an enabled alert job.\n    visuals: Bounded declarative drawings, fills, coloring and tables.\n    bar_closes: Confirmed source bar starts mapped to actual evaluated\n        closes;\n        alert checkpoints never consult a later, different market window.\n    plot_styles: Per-series input/style settings used by the renderer.\n    bar_visuals: Per-bar colors, symbols and custom OHLC series, separately\n        bounded from persistent drawing objects.",
+      "description": "Reproducible plots and optional simulated strategy performance.\n\nAttributes:\n    script_id: Tenant-owned script slug.\n    version: Immutable script version evaluated.\n    kind: Indicator, strategy, filter or alert; libraries are import-only.\n    source_hash: Content hash including default inputs and dependency pins.\n    instrument_id: Canonical source instrument identifier.\n    tf: Source bar resolution.\n    bars_count: Number of source bars evaluated, including provisional bars\n        only when explicitly requested for an indicator.\n    feed_state: Source provenance; DEMO data remains explicitly marked.\n    data_source: Upstream provider provenance label.\n    complete: Whether the requested history has no closed-bar gaps.\n    overlay: Whether plots share the main price pane.\n    plots: At most sixty-four scalar output series.\n    fills: Simulated next-bar-open fills; empty for indicators.\n    orders: Queued strategy orders and their simulated outcomes; empty\n        for other roles.\n    trades: Round trips reconstructed by the host from verified fills.\n    position_size: Signed simulated position after the last bar.\n    equity_curve: Marked simulated quote equity; empty for indicators.\n    metrics: Finite numeric simulation statistics, including fees and\n        unfilled final-bar intents; no performance is fabricated.\n    matched: Boolean decision for a filter, otherwise None.\n    alerts: Previewed alert events; delivery requires an enabled alert job.\n    visuals: Bounded declarative drawings, fills, coloring and tables.\n    bar_closes: Confirmed source bar starts mapped to actual evaluated\n        closes;\n        alert checkpoints never consult a later, different market window.\n    plot_styles: Per-series input/style settings used by the renderer.\n    bar_visuals: Per-bar colors, symbols and custom OHLC series, separately\n        bounded from persistent drawing objects.",
       "properties": {
         "alerts": {
           "items": {
@@ -1386,6 +1615,14 @@
           "title": "Metrics",
           "type": "object"
         },
+        "orders": {
+          "items": {
+            "$ref": "#/$defs/StrategyOrder"
+          },
+          "maxItems": 4000,
+          "title": "Orders",
+          "type": "array"
+        },
         "overlay": {
           "title": "Overlay",
           "type": "boolean"
@@ -1408,6 +1645,11 @@
           "title": "Plots",
           "type": "array"
         },
+        "position_size": {
+          "default": 0.0,
+          "title": "Position Size",
+          "type": "number"
+        },
         "script_id": {
           "title": "Script Id",
           "type": "string"
@@ -1419,6 +1661,14 @@
         "tf": {
           "title": "Tf",
           "type": "string"
+        },
+        "trades": {
+          "items": {
+            "$ref": "#/$defs/StrategyTrade"
+          },
+          "maxItems": 4000,
+          "title": "Trades",
+          "type": "array"
         },
         "version": {
           "title": "Version",
@@ -1828,6 +2078,437 @@
         "fee"
       ],
       "title": "SimulatedFill",
+      "type": "object"
+    },
+    "StrategyActivation": {
+      "additionalProperties": false,
+      "description": "A persisted activation and its evaluation state.\n\nAttributes:\n    activation_id: Opaque identifier.\n    version: Pinned tenant version, or 0 for catalog strategies.\n    name: Strategy display title.\n    source_hash: Pinned exact source identity.\n    strategy_version_id: Identity execution deployments bind:\n        ``<script_id>:v<version>`` for tenant versions and\n        ``<catalog id>:v<first 12 hash digits>`` for catalog classes.\n    state: ACTIVE or PAUSED.\n    created_at_ms: Creation time.\n    updated_at_ms: Last configuration or state change.\n    last_checked_ms: Last evaluation pass, None before one.\n    last_error: Activation-wide error (such as a changed built-in or a\n        disabled runtime), None when evaluation works.\n    emitted: Number of new signals recorded.\n    instruments: Progress per instrument id.",
+      "properties": {
+        "activation_id": {
+          "title": "Activation Id",
+          "type": "string"
+        },
+        "channels": {
+          "items": {
+            "type": "string"
+          },
+          "maxItems": 8,
+          "title": "Channels",
+          "type": "array"
+        },
+        "created_at_ms": {
+          "title": "Created At Ms",
+          "type": "integer"
+        },
+        "emitted": {
+          "default": 0,
+          "title": "Emitted",
+          "type": "integer"
+        },
+        "history_bars": {
+          "default": 500,
+          "maximum": 2000,
+          "minimum": 50,
+          "title": "History Bars",
+          "type": "integer"
+        },
+        "inputs": {
+          "additionalProperties": {
+            "$ref": "#/$defs/JsonValue"
+          },
+          "title": "Inputs",
+          "type": "object"
+        },
+        "instrument_ids": {
+          "items": {
+            "pattern": "^(bybit|okx|coinbase|kraken|deriv|binance|hyperliquid|lighter|bitget|mexc|twse|tpex|nasdaq|nyse|cboe|treasury|mock):(perp|spot|future|stock|etf|rate):[A-Za-z0-9._/-]{1,64}$",
+            "type": "string"
+          },
+          "maxItems": 20,
+          "minItems": 1,
+          "title": "Instrument Ids",
+          "type": "array"
+        },
+        "instruments": {
+          "additionalProperties": {
+            "$ref": "#/$defs/ActivationInstrumentStatus"
+          },
+          "title": "Instruments",
+          "type": "object"
+        },
+        "last_checked_ms": {
+          "anyOf": [
+            {
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Last Checked Ms"
+        },
+        "last_error": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Last Error"
+        },
+        "mode": {
+          "default": "ALERT_ONLY",
+          "enum": [
+            "ALERT_ONLY",
+            "PAPER",
+            "SHADOW",
+            "AUTO_LIVE"
+          ],
+          "title": "Mode",
+          "type": "string"
+        },
+        "name": {
+          "title": "Name",
+          "type": "string"
+        },
+        "script_id": {
+          "pattern": "^(?:[a-z][a-z0-9-]{0,62}|builtin:[a-z][a-z0-9_-]{0,63}|plugin:[a-z0-9_.-]{1,64}:[a-z][a-z0-9_-]{0,63})$",
+          "title": "Script Id",
+          "type": "string"
+        },
+        "source_hash": {
+          "title": "Source Hash",
+          "type": "string"
+        },
+        "state": {
+          "enum": [
+            "ACTIVE",
+            "PAUSED"
+          ],
+          "title": "State",
+          "type": "string"
+        },
+        "strategy_version_id": {
+          "title": "Strategy Version Id",
+          "type": "string"
+        },
+        "tf": {
+          "$ref": "common.schema.json#/$defs/Timeframe"
+        },
+        "updated_at_ms": {
+          "title": "Updated At Ms",
+          "type": "integer"
+        },
+        "version": {
+          "default": 0,
+          "title": "Version",
+          "type": "integer"
+        }
+      },
+      "required": [
+        "script_id",
+        "instrument_ids",
+        "tf",
+        "activation_id",
+        "name",
+        "source_hash",
+        "strategy_version_id",
+        "state",
+        "created_at_ms",
+        "updated_at_ms"
+      ],
+      "title": "StrategyActivation",
+      "type": "object"
+    },
+    "StrategyActivationInput": {
+      "additionalProperties": false,
+      "description": "A request to evaluate a Python strategy live on closed bars.\n\nAttributes:\n    script_id: Tenant strategy slug, ``builtin:<id>`` or\n        ``plugin:<entry>:<id>``.\n    version: Tenant version to pin; the latest when None. Ignored for\n        catalog strategies, which pin their installed source hash.\n    instrument_ids: Canonical instruments, one through twenty.\n    tf: Signal timeframe.\n    inputs: Input overrides on top of the declared defaults.\n    mode: ALERT_ONLY, PAPER or SHADOW; AUTO_LIVE is refused with\n        TRADE_MODE_DISABLED.\n    channels: Notification channels (UI and external subscriptions).\n    history_bars: Closed bars evaluated per pass, the strategy's warmup.",
+      "properties": {
+        "channels": {
+          "items": {
+            "type": "string"
+          },
+          "maxItems": 8,
+          "title": "Channels",
+          "type": "array"
+        },
+        "history_bars": {
+          "default": 500,
+          "maximum": 2000,
+          "minimum": 50,
+          "title": "History Bars",
+          "type": "integer"
+        },
+        "inputs": {
+          "additionalProperties": {
+            "$ref": "#/$defs/JsonValue"
+          },
+          "title": "Inputs",
+          "type": "object"
+        },
+        "instrument_ids": {
+          "items": {
+            "pattern": "^(bybit|okx|coinbase|kraken|deriv|binance|hyperliquid|lighter|bitget|mexc|twse|tpex|nasdaq|nyse|cboe|treasury|mock):(perp|spot|future|stock|etf|rate):[A-Za-z0-9._/-]{1,64}$",
+            "type": "string"
+          },
+          "maxItems": 20,
+          "minItems": 1,
+          "title": "Instrument Ids",
+          "type": "array"
+        },
+        "mode": {
+          "default": "ALERT_ONLY",
+          "enum": [
+            "ALERT_ONLY",
+            "PAPER",
+            "SHADOW",
+            "AUTO_LIVE"
+          ],
+          "title": "Mode",
+          "type": "string"
+        },
+        "script_id": {
+          "pattern": "^(?:[a-z][a-z0-9-]{0,62}|builtin:[a-z][a-z0-9_-]{0,63}|plugin:[a-z0-9_.-]{1,64}:[a-z][a-z0-9_-]{0,63})$",
+          "title": "Script Id",
+          "type": "string"
+        },
+        "tf": {
+          "$ref": "common.schema.json#/$defs/Timeframe"
+        },
+        "version": {
+          "anyOf": [
+            {
+              "minimum": 1,
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Version"
+        }
+      },
+      "required": [
+        "script_id",
+        "instrument_ids",
+        "tf"
+      ],
+      "title": "StrategyActivationInput",
+      "type": "object"
+    },
+    "StrategyActivationList": {
+      "description": "Owned activations.\n\nAttributes:\n    activations: Activations, newest first.\n    runtime_enabled: Whether tenant source can execute (Docker runner).\n    forwarding_enabled: Whether PAPER/SHADOW entries reach the execution\n        engine in this deployment.",
+      "properties": {
+        "activations": {
+          "items": {
+            "$ref": "#/$defs/StrategyActivation"
+          },
+          "title": "Activations",
+          "type": "array"
+        },
+        "forwarding_enabled": {
+          "title": "Forwarding Enabled",
+          "type": "boolean"
+        },
+        "runtime_enabled": {
+          "title": "Runtime Enabled",
+          "type": "boolean"
+        }
+      },
+      "required": [
+        "activations",
+        "runtime_enabled",
+        "forwarding_enabled"
+      ],
+      "title": "StrategyActivationList",
+      "type": "object"
+    },
+    "StrategyOrder": {
+      "additionalProperties": false,
+      "description": "A strategy order queued on a closed bar and its simulated outcome.\n\nAttributes:\n    time_ms: Start of the closed bar on which the order was queued.\n    action: long or short entry target, or close.\n    quantity: Target absolute base quantity; zero for close.\n    reference: Close of the bar the order was queued on, the planned\n        entry of live signals.\n    stop: Protective stop declared with an entry, if any.\n    target: Profit target declared with an entry, if any.\n    comment: Plain-text reason given by the strategy.\n    status: pending (no later bar yet), filled, rejected for\n        insufficient simulated equity, or unchanged (the position\n        already matched).\n    fill_time_ms: Start of the bar whose open filled the order.",
+      "properties": {
+        "action": {
+          "enum": [
+            "long",
+            "short",
+            "close"
+          ],
+          "title": "Action",
+          "type": "string"
+        },
+        "comment": {
+          "default": "",
+          "maxLength": 120,
+          "title": "Comment",
+          "type": "string"
+        },
+        "fill_time_ms": {
+          "anyOf": [
+            {
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Fill Time Ms"
+        },
+        "quantity": {
+          "minimum": 0,
+          "title": "Quantity",
+          "type": "number"
+        },
+        "reference": {
+          "exclusiveMinimum": 0,
+          "title": "Reference",
+          "type": "number"
+        },
+        "status": {
+          "enum": [
+            "pending",
+            "filled",
+            "rejected",
+            "unchanged"
+          ],
+          "title": "Status",
+          "type": "string"
+        },
+        "stop": {
+          "anyOf": [
+            {
+              "exclusiveMinimum": 0,
+              "type": "number"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Stop"
+        },
+        "target": {
+          "anyOf": [
+            {
+              "exclusiveMinimum": 0,
+              "type": "number"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Target"
+        },
+        "time_ms": {
+          "title": "Time Ms",
+          "type": "integer"
+        }
+      },
+      "required": [
+        "time_ms",
+        "action",
+        "quantity",
+        "reference",
+        "status"
+      ],
+      "title": "StrategyOrder",
+      "type": "object"
+    },
+    "StrategyTrade": {
+      "additionalProperties": false,
+      "description": "A simulated round trip reconstructed from verified fills.\n\nAttributes:\n    direction: LONG or SHORT.\n    entry_time_ms: Start of the bar of the opening fill.\n    exit_time_ms: Start of the bar of the closing fill; None while open.\n    quantity: Largest absolute base quantity held.\n    entry_price: Quantity-weighted average opening price.\n    exit_price: Quantity-weighted average closing price; None while open.\n    fees: Commissions of every fill of the trade.\n    pnl: Realized profit after fees; None while open.\n    return_pct: pnl relative to the opening notional; None while open.",
+      "properties": {
+        "direction": {
+          "enum": [
+            "LONG",
+            "SHORT"
+          ],
+          "title": "Direction",
+          "type": "string"
+        },
+        "entry_price": {
+          "exclusiveMinimum": 0,
+          "title": "Entry Price",
+          "type": "number"
+        },
+        "entry_time_ms": {
+          "title": "Entry Time Ms",
+          "type": "integer"
+        },
+        "exit_price": {
+          "anyOf": [
+            {
+              "exclusiveMinimum": 0,
+              "type": "number"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Exit Price"
+        },
+        "exit_time_ms": {
+          "anyOf": [
+            {
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Exit Time Ms"
+        },
+        "fees": {
+          "default": 0.0,
+          "minimum": 0,
+          "title": "Fees",
+          "type": "number"
+        },
+        "pnl": {
+          "anyOf": [
+            {
+              "type": "number"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Pnl"
+        },
+        "quantity": {
+          "exclusiveMinimum": 0,
+          "title": "Quantity",
+          "type": "number"
+        },
+        "return_pct": {
+          "anyOf": [
+            {
+              "type": "number"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Return Pct"
+        }
+      },
+      "required": [
+        "direction",
+        "entry_time_ms",
+        "quantity",
+        "entry_price"
+      ],
+      "title": "StrategyTrade",
       "type": "object"
     }
   },

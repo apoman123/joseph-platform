@@ -117,9 +117,6 @@ importers:
       '@joseph/mock-provider':
         specifier: workspace:*
         version: link:../../packages/mock-provider
-      '@joseph/strategy-builder':
-        specifier: workspace:*
-        version: link:../../packages/strategy-builder
       '@joseph/terminal-shell':
         specifier: workspace:*
         version: link:../../packages/terminal-shell
@@ -188,12 +185,6 @@ importers:
         version: link:../contracts
 
   packages/mock-provider:
-    dependencies:
-      '@joseph/contracts':
-        specifier: workspace:*
-        version: link:../contracts
-
-  packages/strategy-builder:
     dependencies:
       '@joseph/contracts':
         specifier: workspace:*

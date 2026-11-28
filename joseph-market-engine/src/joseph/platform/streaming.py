@@ -14,8 +14,8 @@ Tenant-scoped envelopes (signals) are delivered only to subscribers of the
 same tenant.
 
 Channel keys:
-    ``candles:{instrument_id}:{timeframe}``, ``aois:{instrument_id}:{tf}``,
-    ``feed_health``, ``qualification``, ``signals``.
+    ``candles:{instrument_id}:{timeframe}``, ``feed_health``,
+    ``qualification``, ``signals``.
 """
 
 from __future__ import annotations
@@ -55,7 +55,7 @@ def channel_key(spec: Mapping[str, object]) -> str:
         ValueError: If a series channel lacks instrument or timeframe.
     """
     channel = str(spec.get("channel", ""))
-    if channel in ("candles", "aois"):
+    if channel == "candles":
         instrument = spec.get("instrument_id")
         timeframe = spec.get("timeframe")
         if not instrument or not timeframe:

@@ -231,3 +231,38 @@ it('restores many local tabs even when their layout exceeds the share-link size'
   const imported = parseWorkspaceFile(exportWorkspaceFile(doc, [], 1000), 1000);
   expect(imported.ok && imported.workspace.charts.length).toBe(201);
 });
+
+it('migrates saved stock heatmap tabs to the heatmap view type', () => {
+  const doc = workspaceReducer(
+    BASE,
+    {type: 'addChart', chartId: 'heat', viewType: 'heatmap'},
+    1
+  );
+  const legacy = JSON.parse(JSON.stringify(doc)) as {
+    charts: Array<{view_type?: string}>;
+    panels: Record<string, unknown>;
+  };
+  for (const chart of legacy.charts) {
+    if (chart.view_type === 'heatmap') chart.view_type = 'stock_heatmap';
+  }
+  legacy.panels['heatmap.heat'] = {region: 'taiwan', size: 'equal'};
+  const memory = new Map<string, string>([
+    [`joseph.workspace.v1.${doc.workspace_id}`, JSON.stringify(legacy)],
+  ]);
+  const repo = new WorkspaceRepository({
+    getItem: key => memory.get(key) ?? null,
+    setItem: (key, value) => void memory.set(key, value),
+  });
+  const loaded = repo.load(doc.workspace_id, 1000);
+  expect(loaded?.charts.find(c => c.chart_id === 'heat')?.view_type).toBe(
+    'heatmap'
+  );
+  expect(
+    (loaded?.panels as Record<string, unknown> | undefined)?.['heatmap.heat']
+  ).toEqual({region: 'taiwan', size: 'equal'});
+  const shared = parseWorkspace(JSON.stringify(legacy), 1000);
+  expect(shared.ok && shared.migrated).toBe(true);
+  expect(
+    shared.ok && shared.workspace.charts.map(c => c.view_type ?? 'candles')
+  ).toEqual(['candles', 'heatmap']);
+});

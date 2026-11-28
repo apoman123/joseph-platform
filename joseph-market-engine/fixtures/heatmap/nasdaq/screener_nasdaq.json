@@ -1,0 +1,153 @@
+{
+ "data": {
+  "asOf": null,
+  "headers": {
+   "symbol": "Symbol",
+   "name": "Name",
+   "lastsale": "Last Sale",
+   "netchange": "Net Change",
+   "pctchange": "% Change",
+   "marketCap": "Market Cap",
+   "country": "Country",
+   "ipoyear": "IPO Year",
+   "volume": "Volume",
+   "sector": "Sector",
+   "industry": "Industry",
+   "url": "Url"
+  },
+  "rows": [
+   {
+    "symbol": "AAPL",
+    "name": "Apple Inc. Common Stock",
+    "lastsale": "$355.58",
+    "netchange": "1.51",
+    "pctchange": "0.426%",
+    "volume": "54285255",
+    "marketCap": "5167353275560.00",
+    "country": "United States",
+    "ipoyear": "1980",
+    "industry": "Computer Manufacturing",
+    "sector": "Technology",
+    "url": "/market-activity/stocks/aapl"
+   },
+   {
+    "symbol": "ADBE",
+    "name": "Adobe Inc. Common Stock",
+    "lastsale": "$232.83",
+    "netchange": "0.75",
+    "pctchange": "0.323%",
+    "volume": "3753708",
+    "marketCap": "90617436000.00",
+    "country": "United States",
+    "ipoyear": "1986",
+    "industry": "Computer Software: Prepackaged Software",
+    "sector": "Technology",
+    "url": "/market-activity/stocks/adbe"
+   },
+   {
+    "symbol": "AMAT",
+    "name": "Applied Materials Inc. Common Stock",
+    "lastsale": "$311.18",
+    "netchange": "-12.58",
+    "pctchange": "-3.886%",
+    "volume": "11719393",
+    "marketCap": "246951652313.00",
+    "country": "United States",
+    "ipoyear": "1972",
+    "industry": "Semiconductors",
+    "sector": "Technology",
+    "url": "/market-activity/stocks/amat"
+   },
+   {
+    "symbol": "AMD",
+    "name": "Advanced Micro Devices Inc. Common Stock",
+    "lastsale": "$406.03",
+    "netchange": "-7.24",
+    "pctchange": "-1.752%",
+    "volume": "51632011",
+    "marketCap": "672514598179.00",
+    "country": "United States",
+    "ipoyear": "",
+    "industry": "Semiconductors",
+    "sector": "Technology",
+    "url": "/market-activity/stocks/amd"
+   },
+   {
+    "symbol": "AMZN",
+    "name": "Amazon.com Inc. Common Stock",
+    "lastsale": "$244.43",
+    "netchange": "-7.86",
+    "pctchange": "-3.115%",
+    "volume": "62479489",
+    "marketCap": "2643055396136.00",
+    "country": "United States",
+    "ipoyear": "1997",
+    "industry": "Catalog/Specialty Distribution",
+    "sector": "Consumer Discretionary",
+    "url": "/market-activity/stocks/amzn"
+   },
+   {
+    "symbol": "INTC",
+    "name": "Intel Corporation Common Stock",
+    "lastsale": "$54.47",
+    "netchange": "-0.33",
+    "pctchange": "-0.602%",
+    "volume": "129277853",
+    "marketCap": "289508050000.00",
+    "country": "United States",
+    "ipoyear": "",
+    "industry": "Semiconductors",
+    "sector": "Technology",
+    "url": "/market-activity/stocks/intc"
+   },
+   {
+    "symbol": "MSFT",
+    "name": "Microsoft Corporation Common Stock",
+    "lastsale": "$489.93",
+    "netchange": "-6.20",
+    "pctchange": "-1.25%",
+    "volume": "26759457",
+    "marketCap": "3638315496861.00",
+    "country": "United States",
+    "ipoyear": "1986",
+    "industry": "Computer Software: Prepackaged Software",
+    "sector": "Technology",
+    "url": "/market-activity/stocks/msft"
+   },
+   {
+    "symbol": "NVDA",
+    "name": "NVIDIA Corporation Common Stock",
+    "lastsale": "$149.30",
+    "netchange": "-6.08",
+    "pctchange": "-3.913%",
+    "volume": "366571890",
+    "marketCap": "3598130000000.00",
+    "country": "United States",
+    "ipoyear": "1999",
+    "industry": "Semiconductors",
+    "sector": "Technology",
+    "url": "/market-activity/stocks/nvda"
+   },
+   {
+    "symbol": "AACO",
+    "name": "Abony Acquisition Corp. I Class A Ordinary Share",
+    "lastsale": "$10.025",
+    "netchange": "-0.005",
+    "pctchange": "-0.05%",
+    "volume": "24046",
+    "marketCap": "0.00",
+    "country": "United States",
+    "ipoyear": "2026",
+    "industry": "",
+    "sector": "",
+    "url": "/market-activity/stocks/aaco"
+   }
+  ]
+ },
+ "message": null,
+ "status": {
+  "rCode": 200,
+  "bCodeMessage": null,
+  "developerMessage": null
+ }
+}

@@ -15,7 +15,15 @@
  * strings become numbers here only to rank and measure, never to show.
  */
 
-import type {AoiRecord, ReasonNode, Signal} from '@joseph/contracts';
+import type {ReasonNode, Signal} from '@joseph/contracts';
+
+/** Price bounds of a zone a signal references (decimal strings). */
+export interface AoiZone {
+  /** Lower bound. */
+  lower: string;
+  /** Upper bound. */
+  upper: string;
+}
 
 /** Sort keys offered by the alerts panel. */
 export type SignalSort =
@@ -61,7 +69,7 @@ export function confluenceOf(node: ReasonNode): number {
  */
 export function aoiDistancePct(
   price: number | null,
-  aois: ReadonlyArray<Pick<AoiRecord, 'lower' | 'upper'>>
+  aois: readonly AoiZone[]
 ): number | null {
   if (price === null || !Number.isFinite(price) || price <= 0) return null;
   let best: number | null = null;

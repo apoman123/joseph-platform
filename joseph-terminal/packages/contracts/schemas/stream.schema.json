@@ -33,7 +33,7 @@
     "ChannelName": {
       "title": "ChannelName",
       "type": "string",
-      "enum": ["candles", "aois", "feed_health", "qualification", "signals", "orders", "fills", "positions", "account", "risk"]
+      "enum": ["candles", "feed_health", "qualification", "signals", "orders", "fills", "positions", "account", "risk"]
     },
     "ChannelSpec": {
       "title": "ChannelSpec",

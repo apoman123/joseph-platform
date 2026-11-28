@@ -27,7 +27,7 @@ async def test_sdk_negotiates_protocol_and_reads_resources() -> None:
         config.Settings(),
         demo_only=True,
         database_url="sqlite://",
-        pipeline_enabled=False,
+        strategy_activations_enabled=False,
         dev_tokens=config.parse_dev_tokens("protocol-user:tenant-a:user-a"),
     )
     container = bootstrap.build_container(settings)

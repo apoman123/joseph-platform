@@ -42,7 +42,6 @@ import {
   type TerminalSelection,
   type UiSlot,
 } from '@joseph/feature-registry';
-import {toValidationResult} from '@joseph/strategy-builder';
 import {render, type RenderResult} from '@testing-library/react';
 import type {ReactNode} from 'react';
 import type {
@@ -292,10 +291,6 @@ export function fakeMarketClient(): MarketDataClient {
         r => (!venue || r.venue === venue) && (!status || r.status === status)
       ),
     }),
-    listIndicatorPlugins: unsupported,
-    getIndicatorSnapshots: unsupported,
-    getAois: unsupported,
-    getIndicatorSeries: unsupported,
   };
 }
 
@@ -346,9 +341,7 @@ export function createFakeContext(
       fillDelayMs: delay,
       partialFills: false,
     });
-  const strategy = new DemoStrategyClient({
-    validate: def => toValidationResult(def),
-  });
+  const strategy = new DemoStrategyClient();
   const market = fakeMarketClient();
   const clients: BackendClients = {
     market,

@@ -31,7 +31,11 @@ MODULES: dict[str, tuple[str, ...]] = {
         "volume_delta",
         "pivot_points",
     ),
-    "strategies": (),
+    "strategies": (
+        "ema_trend_long",
+        "rsi_reversion_short",
+        "pivot_bounce_long",
+    ),
     "filters": (),
     "alerts": (),
 }

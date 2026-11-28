@@ -1,16 +1,16 @@
 # Copyright 2026 apoman123
 # SPDX-License-Identifier: MIT
 
-"""Unit tests for composition-root helpers: senders, channels, plugins."""
+"""Unit tests for composition-root helpers: senders, logging, plugins."""
 
 from __future__ import annotations
 
 import dataclasses
 import logging
-from typing import Any
 
 import httpx
 import pytest
+from fastapi import testclient
 
 from joseph import bootstrap
 from joseph.alerts.domain import model as alert_model
@@ -46,50 +46,6 @@ async def test_every_configured_channel_gets_a_sender() -> None:
     assert set(plain) == {alert_model.Channel.UI}
 
 
-class _Repository:
-    """Strategy repository stand-in.
-
-    Attributes:
-        answer: Version returned (or exception raised) by ``get``.
-    """
-
-    def __init__(self, answer: Any) -> None:
-        """Initializes the stub.
-
-        Args:
-            answer: Version to return, or an exception to raise.
-        """
-        self.answer = answer
-
-    def get(self, tenant_id: str, strategy_id: str, number: int) -> Any:
-        """Returns the scripted version.
-
-        Args:
-            tenant_id: Tenant (unused).
-            strategy_id: Strategy (unused).
-            number: Version number (unused).
-
-        Returns:
-            The scripted version.
-
-        Raises:
-            Exception: ``answer``, when it is an exception.
-        """
-        del tenant_id, strategy_id, number
-        if isinstance(self.answer, Exception):
-            raise self.answer
-        return self.answer
-
-
-def test_channel_policy_defaults_to_the_ui() -> None:
-    """Unknown or malformed versions notify the UI only."""
-    missing = bootstrap._channel_policy(_Repository(None))  # type: ignore[arg-type]  # a stub stands in for the strategy repository
-    assert missing("t1", "s1:v1") == frozenset({"UI"})
-    broken = bootstrap._channel_policy(_Repository(LookupError("x")))  # type: ignore[arg-type]  # a stub stands in for the strategy repository
-    assert broken("t1", "s1:v2") == frozenset({"UI"})
-    assert broken("t1", "no-version") == frozenset({"UI"})
-
-
 def test_logging_setup_redacts_every_handler(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
@@ -110,27 +66,28 @@ def test_logging_setup_redacts_every_handler(
     assert record.exc_text == "Traceback: password=***"
 
 
-async def test_signal_stack_uses_discovered_plugins_and_settings() -> None:
-    """Discovery settings shape the registry and the rule vocabulary."""
+def test_script_catalog_follows_plugin_settings() -> None:
+    """Script plugin settings shape the catalog the API serves."""
     settings = dataclasses.replace(
         config.Settings(),
         demo_only=True,
         database_url="sqlite://",
-        pipeline_enabled=False,
-        indicator_plugin_packages="none",
-        indicator_plugins_disabled=("rsi",),
+        strategy_activations_enabled=False,
+        script_plugin_packages="none",
+        script_plugins_disabled=("builtin:rsi",),
+        dev_tokens=config.parse_dev_tokens("wiring:tenant:user"),
     )
     container = bootstrap.build_container(
         settings, clock=clock_lib.ManualClock(1_795_132_800_000)
     )
-    try:
-        stack = container.signal_stack
-        assert stack is not None
-        vocabulary = stack.versions.vocabulary
-        assert "rsi" in vocabulary.order
-        assert "rsi" not in vocabulary.usable
-        assert "ema" in vocabulary.usable
-        assert vocabulary.kind_plugin["PIVOT_S1"] == "pivot_points"
-        assert "rsi" not in stack.plugins.ids()
-    finally:
-        await container.aclose()
+    with testclient.TestClient(
+        bootstrap.create_application(container)
+    ) as client:
+        listing = client.get(
+            "/v1/scripts/catalog",
+            params={"kind": "indicator"},
+            headers={"Authorization": "Bearer wiring"},
+        ).json()["scripts"]
+    enabled = {row["script_id"]: row["enabled"] for row in listing}
+    assert enabled["builtin:rsi"] is False
+    assert enabled["builtin:ema"] is True
