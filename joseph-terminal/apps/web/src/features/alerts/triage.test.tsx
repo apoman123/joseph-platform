@@ -5,11 +5,11 @@
  */
 
 /**
- * @fileoverview Tests for signal ranking (newest, R multiple, confluence,
- * age) and local snooze/dismiss triage.
+ * @fileoverview Tests for signal ranking (newest, R multiple, age) and
+ * local snooze/dismiss triage.
  */
 
-import type {ReasonNode, Signal} from '@joseph/contracts';
+import type {Signal} from '@joseph/contracts';
 import {fireEvent, screen, waitFor, within} from '@testing-library/react';
 import {afterEach, describe, expect, it} from 'vitest';
 import {
@@ -18,7 +18,6 @@ import {
 } from '../trading/testing/fake-context';
 import {ALERTS_FEATURE, triageFromSettings} from './index';
 import {
-  confluenceOf,
   isSnoozed,
   setDismissed,
   snooze,
@@ -35,25 +34,6 @@ afterEach(() => {
 });
 
 /**
- * Builds a reason node.
- * @param result Result.
- * @param children Children.
- * @return Node.
- */
-function node(
-  result: ReasonNode['result'],
-  children: ReasonNode[] = []
-): ReasonNode {
-  return {
-    node_path: 'n',
-    op: 'AND',
-    detail: '',
-    result,
-    children,
-  };
-}
-
-/**
  * Builds a partial signal with the fields ranking and triage read.
  * @param id Signal id.
  * @param extra Field overrides.
@@ -66,34 +46,19 @@ function signal(id: string, extra: Partial<Signal>): Signal {
     bar_close_ms: 1000,
     evaluated_at_ms: 1000,
     rr: null,
-    reason_tree: node('TRUE'),
     ...extra,
   } as unknown as Signal;
 }
 
 describe('signal ranking', () => {
-  const a = signal('a', {
-    bar_close_ms: 3000,
-    rr: '1.5',
-    reason_tree: node('TRUE', [node('TRUE'), node('FALSE')]),
-  });
-  const b = signal('b', {
-    bar_close_ms: 2000,
-    rr: '3.2',
-    reason_tree: node('TRUE', [node('TRUE'), node('TRUE'), node('UNKNOWN')]),
-  });
+  const a = signal('a', {bar_close_ms: 3000, rr: '1.5'});
+  const b = signal('b', {bar_close_ms: 2000, rr: '3.2'});
   const c = signal('c', {bar_close_ms: 1000, rr: null});
-
-  it('counts satisfied leaves as confluence', () => {
-    expect(confluenceOf(a.reason_tree)).toBe(1);
-    expect(confluenceOf(b.reason_tree)).toBe(2);
-  });
 
   it('sorts by every key with missing values last', () => {
     const ids = (list: Signal[]) => list.map(s => s.signal_id);
     expect(ids(sortSignals([c, b, a], 'newest'))).toEqual(['a', 'b', 'c']);
     expect(ids(sortSignals([a, b, c], 'rr'))).toEqual(['b', 'a', 'c']);
-    expect(ids(sortSignals([a, b, c], 'confluence'))).toEqual(['b', 'a', 'c']);
     expect(ids(sortSignals([a, b, c], 'age'))).toEqual(['c', 'b', 'a']);
   });
 

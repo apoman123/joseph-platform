@@ -31,7 +31,6 @@ from __future__ import annotations
 import asyncio
 import contextlib
 import decimal
-import json
 import logging
 import uuid
 from collections.abc import Sequence
@@ -47,7 +46,6 @@ from joseph.alerts.app import ports as alert_ports
 from joseph.alerts.domain import model as deliveries
 from joseph.domain import errors
 from joseph.domain import identity
-from joseph.domain import ids
 from joseph.domain import instruments
 from joseph.domain import timeframes
 from joseph.scripts import models
@@ -56,9 +54,6 @@ from joseph.signals.app import service as signal_service
 from joseph.signals.domain import signal as signals
 
 _LOG = logging.getLogger(__name__)
-
-EVALUATOR_VERSION = "python-strategy-1"
-"""Semantics version recorded on strategy signals."""
 
 ActivationMode: TypeAlias = Literal[
     "ALERT_ONLY", "PAPER", "SHADOW", "AUTO_LIVE"
@@ -298,53 +293,21 @@ def build_signals(
                 tenant_id=tenant_id,
                 strategy_id=activation.script_id,
                 strategy_version_id=activation.strategy_version_id,
-                setup_id=None,
+                source_hash=activation.source_hash,
                 instrument_id=instrument_id,
                 direction=direction,
                 timeframe=activation.tf.value,
                 kind=kind,
-                setup_state="FIRED",
                 severity=signals.SEVERITY_BY_KIND[kind],
+                mode=activation.mode,
                 bar_start_ms=last_start,
                 bar_close_ms=close_ms,
                 evaluated_at_ms=now_ms,
-                inputs_snapshot_hash="sha256:"
-                + ids.sha256_hex(
-                    json.dumps(
-                        {
-                            "inputs": activation.inputs,
-                            "instrument_id": instrument_id,
-                            "tf": activation.tf.value,
-                            "bar": last_start,
-                        },
-                        sort_keys=True,
-                    ).encode()
-                ),
-                rule_version=activation.source_hash,
-                evaluator_version=EVALUATOR_VERSION,
-                indicator_versions={},
-                reason_tree={
-                    "node_id": "strategy",
-                    "node_path": f"/python/{activation.activation_id}",
-                    "op": "PYTHON",
-                    "result": "TRUE",
-                    "detail": comment,
-                    "evidence": {
-                        "activation_id": activation.activation_id,
-                        "provider": result.data_source,
-                    },
-                    "children": [],
-                },
-                aoi_ids=(),
-                group_ids=(),
+                data_source=result.feed_state,
                 entry_price=entry,
                 stop_price=stop,
                 target_price=target,
                 rr=rr,
-                risk_status="PASS" if rr is not None else "NOT_APPLICABLE",
-                risk_reasons=(),
-                mode=activation.mode,
-                data_source=result.feed_state,
                 message=message[:500],
             )
         )

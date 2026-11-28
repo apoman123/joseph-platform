@@ -227,6 +227,26 @@ def test_unknown_time_zone_is_rejected(client: testclient.TestClient) -> None:
     assert response.status_code == 422
 
 
+def test_retired_signal_kinds_are_rejected(
+    client: testclient.TestClient,
+) -> None:
+    """Kinds filters accept only the kinds strategies and alerts emit."""
+    response = client.put(
+        "/v1/alerts/subscriptions/phone",
+        json=_body(kinds=["ENTRY_CONFIRMED", "WATCHING_AOI"]),
+        headers=_AUTH_A,
+    )
+    assert response.status_code == 422
+    assert "WATCHING_AOI" in response.json()["message"]
+    stored = client.put(
+        "/v1/alerts/subscriptions/phone",
+        json=_body(kinds=["POSITION_EXITED", "CUSTOM_ALERT"]),
+        headers=_AUTH_A,
+    )
+    assert stored.status_code == 200, stored.text
+    assert stored.json()["kinds"] == ["CUSTOM_ALERT", "POSITION_EXITED"]
+
+
 def test_subscriptions_are_tenant_scoped(
     client: testclient.TestClient,
 ) -> None:

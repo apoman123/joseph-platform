@@ -3,9 +3,12 @@
 
 """Signal records: immutable notifications of strategies and alerts.
 
-A fired signal is never rewritten. Its ``dedupe_key`` is unique per tenant,
-so replaying the same bars cannot create a second record, and its id is
-derived from that key so batch, replay and live runs agree.
+Strategy activations emit ``ENTRY_CONFIRMED`` and ``POSITION_EXITED``;
+alert jobs emit ``CUSTOM_ALERT``. A fired signal is never rewritten (the
+signal store only normalizes bodies stored by the removed declarative
+strategies). Its ``dedupe_key`` is unique per tenant, so replaying the same
+bars cannot create a second record, and its id is derived from that key so
+batch, replay and live runs agree.
 """
 
 from __future__ import annotations
@@ -18,17 +21,30 @@ from joseph.domain import decimals
 from joseph.domain import ids
 
 SEVERITY_BY_KIND: Mapping[str, str] = {
-    "WATCHING_AOI": "INFO",
-    "PRE_SIGNAL": "INFO",
     "ENTRY_CONFIRMED": "ENTRY",
-    "ENTRY_BLOCKED": "WARNING",
-    "AOI_INVALIDATED": "WARNING",
-    "SETUP_EXPIRED": "INFO",
-    "QUALIFICATION_CHANGED": "INFO",
     "POSITION_EXITED": "INFO",
     "CUSTOM_ALERT": "INFO",
 }
-"""Contract severity of each signal kind."""
+"""Signal kinds and their default severity.
+
+Strategy activations emit ``ENTRY_CONFIRMED`` and ``POSITION_EXITED``;
+alert jobs emit ``CUSTOM_ALERT`` with the severity their condition chose.
+"""
+
+SIGNAL_KINDS: frozenset[str] = frozenset(SEVERITY_BY_KIND)
+"""Every signal kind of the contract."""
+
+RETIRED_KINDS: frozenset[str] = frozenset(
+    {
+        "WATCHING_AOI",
+        "PRE_SIGNAL",
+        "ENTRY_BLOCKED",
+        "AOI_INVALIDATED",
+        "SETUP_EXPIRED",
+        "QUALIFICATION_CHANGED",
+    }
+)
+"""Kinds of the removed declarative strategies; only old rows carry them."""
 
 # Order used by minimum-severity routing; unknown severities rank as INFO.
 _SEVERITY_RANK: Mapping[str, int] = {
@@ -65,44 +81,32 @@ def signal_id_for(key: str) -> str:
 
 @dataclasses.dataclass(frozen=True, slots=True)
 class Signal:
-    """One lifecycle notification (contract ``Signal``).
+    """One notification of a strategy or alert script (contract ``Signal``).
 
     Attributes:
         signal_id: Deterministic id derived from ``dedupe_key``.
         dedupe_key: Unique key per tenant.
         tenant_id: Owning tenant.
-        strategy_id: Strategy slug.
-        strategy_version_id: Immutable version id.
-        setup_id: Setup id, or ``None`` for signals without a setup.
+        strategy_id: Script id of the strategy or alert.
+        strategy_version_id: Immutable script version id.
+        source_hash: Hash of the script source that ran.
         instrument_id: Canonical instrument id.
-        direction: ``LONG`` or ``SHORT``.
+        direction: ``LONG`` or ``SHORT``; ``NONE`` for alerts.
         timeframe: Signal timeframe.
         kind: Signal kind (a key of ``SEVERITY_BY_KIND``).
-        setup_state: Setup state after the bar.
         severity: ``INFO``, ``WARNING``, ``ENTRY`` or ``CRITICAL``.
+        mode: Activation mode; ``ALERT_ONLY`` for alerts.
         bar_start_ms: Evaluated bar start in UTC epoch ms.
         bar_close_ms: Evaluated bar close in UTC epoch ms.
         evaluated_at_ms: Evaluation time in UTC epoch ms.
-        inputs_snapshot_hash: Hash of the evaluated inputs.
-        rule_version: Definition hash.
-        evaluator_version: Evaluator semantics version.
-        indicator_versions: Plugin versions read.
-        reason_tree: Contract ``ReasonNode`` dict.
-        aoi_ids: Touched AOIs.
-        group_ids: AOI group ids bound by true zone conditions.
-        entry_price: Projected entry, or ``None``.
-        stop_price: Projected stop, or ``None``.
-        target_price: Projected target, or ``None``.
-        rr: Net reward/risk, or ``None``.
-        risk_status: ``PASS``, ``FAIL``, ``UNKNOWN`` or ``NOT_APPLICABLE``.
-        risk_reasons: Risk notes or blockers.
-        mode: Strategy activation mode.
-        data_source: Provenance of the evaluated bar.
-        revision: Revision counter (0 for originals).
+        data_source: Feed state of the evaluated bars.
+        entry_price: Planned entry (the signal bar's close), or ``None``.
+        stop_price: Strategy stop, or ``None``.
+        target_price: Strategy target, or ``None``.
+        rr: Reward/risk of entry, stop and target, or ``None``.
         message: Human-readable summary.
-        bar_base_volume: Base volume of the evaluated bar.
-        bar_quote_volume: Venue-published quote turnover of the evaluated
-            bar (``None`` when the venue publishes none; never estimated).
+        condition: Name of the alert condition that matched, or ``None``
+            for strategy signals.
     """
 
     signal_id: str
@@ -110,35 +114,23 @@ class Signal:
     tenant_id: str
     strategy_id: str
     strategy_version_id: str
-    setup_id: str | None
+    source_hash: str
     instrument_id: str
     direction: str
     timeframe: str
     kind: str
-    setup_state: str
     severity: str
+    mode: str
     bar_start_ms: int
     bar_close_ms: int
     evaluated_at_ms: int
-    inputs_snapshot_hash: str
-    rule_version: str
-    evaluator_version: str
-    indicator_versions: Mapping[str, str]
-    reason_tree: Mapping[str, object]
-    aoi_ids: tuple[str, ...]
-    group_ids: tuple[str, ...]
-    entry_price: decimal.Decimal | None
-    stop_price: decimal.Decimal | None
-    target_price: decimal.Decimal | None
-    rr: decimal.Decimal | None
-    risk_status: str
-    risk_reasons: tuple[str, ...]
-    mode: str
     data_source: str
-    revision: int = 0
+    entry_price: decimal.Decimal | None = None
+    stop_price: decimal.Decimal | None = None
+    target_price: decimal.Decimal | None = None
+    rr: decimal.Decimal | None = None
     message: str = ""
-    bar_base_volume: decimal.Decimal | None = None
-    bar_quote_volume: decimal.Decimal | None = None
+    condition: str | None = None
 
     def to_contract(self) -> dict[str, object]:
         """Serializes to the contract ``Signal`` object.
@@ -152,42 +144,33 @@ class Signal:
             "tenant_id": self.tenant_id,
             "strategy_id": self.strategy_id,
             "strategy_version_id": self.strategy_version_id,
-            "setup_id": self.setup_id,
+            "source_hash": self.source_hash,
             "instrument_id": self.instrument_id,
             "direction": self.direction,
             "timeframe": self.timeframe,
             "kind": self.kind,
-            "setup_state": self.setup_state,
             "severity": self.severity,
+            "mode": self.mode,
             "bar_start_ms": self.bar_start_ms,
             "bar_close_ms": self.bar_close_ms,
             "evaluated_at_ms": self.evaluated_at_ms,
-            "inputs_snapshot_hash": self.inputs_snapshot_hash,
-            "rule_version": self.rule_version,
-            "evaluator_version": self.evaluator_version,
-            "indicator_versions": dict(self.indicator_versions),
-            "reason_tree": dict(self.reason_tree),
-            "aoi_ids": list(self.aoi_ids),
-            "group_ids": list(self.group_ids),
+            "data_source": self.data_source,
             "entry_price": decimals.format_optional(self.entry_price),
             "stop_price": decimals.format_optional(self.stop_price),
             "target_price": decimals.format_optional(self.target_price),
             "rr": decimals.format_optional(self.rr),
-            "risk_evaluation": {
-                "status": self.risk_status,
-                "reasons": list(self.risk_reasons),
-            },
-            "mode": self.mode,
-            "data_source": self.data_source,
-            "revision": self.revision,
             "message": self.message,
-            "bar_base_volume": decimals.format_optional(self.bar_base_volume),
-            "bar_quote_volume": decimals.format_optional(self.bar_quote_volume),
+            "condition": self.condition,
         }
 
     @classmethod
     def from_contract(cls, data: Mapping[str, object]) -> Signal:
         """Restores a signal from its contract dict.
+
+        Bodies stored before the declarative strategies were removed are
+        read too: their ``rule_version`` becomes ``source_hash``, the
+        condition name comes from the alert's reason tree and the other
+        fields of that era are ignored.
 
         Args:
             data: Contract ``Signal`` object.
@@ -199,56 +182,63 @@ class Signal:
             ValueError: If required fields are malformed.
             KeyError: If a required field is missing.
         """
-        risk_eval = data.get("risk_evaluation")
-        if not isinstance(risk_eval, Mapping):
-            raise ValueError("risk_evaluation missing")
-        reason_tree = data.get("reason_tree")
-        versions = data.get("indicator_versions") or {}
-        if not isinstance(reason_tree, Mapping) or not isinstance(
-            versions, Mapping
-        ):
-            raise ValueError("reason_tree or indicator_versions malformed")
-        setup_id = data.get("setup_id")
+        source_hash = data.get("source_hash", data.get("rule_version"))
+        if source_hash is None:
+            raise KeyError("source_hash")
+        condition = data.get("condition", _legacy_condition(data))
         return cls(
             signal_id=str(data["signal_id"]),
             dedupe_key=str(data["dedupe_key"]),
             tenant_id=str(data["tenant_id"]),
             strategy_id=str(data["strategy_id"]),
             strategy_version_id=str(data["strategy_version_id"]),
-            setup_id=None if setup_id is None else str(setup_id),
+            source_hash=str(source_hash),
             instrument_id=str(data["instrument_id"]),
             direction=str(data["direction"]),
             timeframe=str(data["timeframe"]),
             kind=str(data["kind"]),
-            setup_state=str(data["setup_state"]),
             severity=str(data["severity"]),
+            mode=str(data["mode"]),
             bar_start_ms=_int(data["bar_start_ms"]),
             bar_close_ms=_int(data["bar_close_ms"]),
             evaluated_at_ms=_int(data["evaluated_at_ms"]),
-            inputs_snapshot_hash=str(data["inputs_snapshot_hash"]),
-            rule_version=str(data["rule_version"]),
-            evaluator_version=str(data["evaluator_version"]),
-            indicator_versions={str(k): str(v) for k, v in versions.items()},
-            reason_tree=dict(reason_tree),
-            aoi_ids=tuple(str(v) for v in _seq(data.get("aoi_ids"))),
-            group_ids=tuple(str(v) for v in _seq(data.get("group_ids"))),
+            data_source=str(data["data_source"]),
             entry_price=decimals.to_optional_decimal(data.get("entry_price")),
             stop_price=decimals.to_optional_decimal(data.get("stop_price")),
             target_price=decimals.to_optional_decimal(data.get("target_price")),
             rr=decimals.to_optional_decimal(data.get("rr")),
-            risk_status=str(risk_eval["status"]),
-            risk_reasons=tuple(str(v) for v in _seq(risk_eval.get("reasons"))),
-            mode=str(data["mode"]),
-            data_source=str(data["data_source"]),
-            revision=_int(data.get("revision", 0)),
             message=str(data.get("message", "")),
-            bar_base_volume=decimals.to_optional_decimal(
-                data.get("bar_base_volume")
-            ),
-            bar_quote_volume=decimals.to_optional_decimal(
-                data.get("bar_quote_volume")
-            ),
+            condition=None if condition is None else str(condition),
         )
+
+
+def is_legacy_body(data: Mapping[str, object]) -> bool:
+    """Checks whether a stored body predates the current contract.
+
+    Args:
+        data: Stored contract ``Signal`` object.
+
+    Returns:
+        True when it lacks ``source_hash`` (it was written with the
+        declarative-strategy fields).
+    """
+    return "source_hash" not in data
+
+
+def _legacy_condition(data: Mapping[str, object]) -> object:
+    """Reads the condition name of an alert stored with a reason tree.
+
+    Args:
+        data: Stored contract ``Signal`` object.
+
+    Returns:
+        The reason tree's ``node_id`` for ``CUSTOM_ALERT`` bodies, else
+        ``None``.
+    """
+    tree = data.get("reason_tree")
+    if data.get("kind") != "CUSTOM_ALERT" or not isinstance(tree, Mapping):
+        return None
+    return tree.get("node_id")
 
 
 def _int(value: object) -> int:
@@ -265,23 +255,4 @@ def _int(value: object) -> int:
     """
     if isinstance(value, bool) or not isinstance(value, int):
         raise ValueError(f"expected int, got {value!r}")
-    return value
-
-
-def _seq(value: object) -> list[object]:
-    """Coerces a stored list (``None`` becomes empty).
-
-    Args:
-        value: Stored value.
-
-    Returns:
-        The list.
-
-    Raises:
-        ValueError: If not a list.
-    """
-    if value is None:
-        return []
-    if not isinstance(value, list):
-        raise ValueError(f"expected list, got {value!r}")
     return value

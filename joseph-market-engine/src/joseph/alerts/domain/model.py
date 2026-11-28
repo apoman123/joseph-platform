@@ -200,6 +200,27 @@ class Subscription:
         )
 
 
+def current_kinds(kinds: frozenset[str]) -> frozenset[str]:
+    """Migrates a stored kinds filter to the current signal kinds.
+
+    Kinds of the removed declarative strategies (and any other unknown
+    kind) are dropped. A filter that listed only such kinds would turn
+    into "every kind" by accident, so it becomes the explicit list of
+    every current kind instead; it keeps receiving whatever strategies and
+    alerts emit now.
+
+    Args:
+        kinds: Stored filter; empty means every kind.
+
+    Returns:
+        The filter restricted to current kinds; empty stays empty.
+    """
+    kept = kinds & signal_domain.SIGNAL_KINDS
+    if kinds and not kept:
+        return signal_domain.SIGNAL_KINDS
+    return kept
+
+
 @dataclasses.dataclass(frozen=True, slots=True)
 class DeliveryRecord:
     """One durable delivery attempt sequence in the outbox.
@@ -392,19 +413,15 @@ def redact(text: str, secrets: Iterable[str]) -> str:
 # Message titles by signal kind; other kinds print their raw name.
 _TITLES = {
     "ENTRY_CONFIRMED": "Entry confirmed",
-    "ENTRY_BLOCKED": "Entry blocked",
-    "PRE_SIGNAL": "Pre-signal",
-    "WATCHING_AOI": "Watching AOI",
-    "AOI_INVALIDATED": "AOI invalidated",
-    "SETUP_EXPIRED": "Setup expired",
+    "POSITION_EXITED": "Position exited",
 }
 
 
 def format_text(payload: Mapping[str, object]) -> str:
     """Formats a signal for chat and e-mail channels.
 
-    Includes the exact venue instrument, strategy version, AOIs, levels and
-    risk notes so the message can be acted on and traced.
+    Includes the exact venue instrument, strategy version and levels so the
+    message can be acted on and traced.
 
     Args:
         payload: Contract ``Signal`` dict.
@@ -433,26 +450,20 @@ def format_text(payload: Mapping[str, object]) -> str:
         when = datetime.datetime.fromtimestamp(
             close_ms / 1000, tz=datetime.UTC
         ).strftime("%Y-%m-%d %H:%M UTC")
-    risk = payload.get("risk_evaluation")
-    notes = []
-    if isinstance(risk, Mapping):
-        reasons = risk.get("reasons")
-        if isinstance(reasons, list):
-            notes = [str(r) for r in reasons]
-    aois = payload.get("aoi_ids")
-    aoi_text = (
-        ", ".join(str(a) for a in aois) if isinstance(aois, list) else "-"
-    )
     lines = [
         f"{_TITLES.get(kind, kind)}: {payload.get('direction')} "
         f"{payload.get('instrument_id')} {payload.get('timeframe')}",
         f"Strategy {payload.get('strategy_version_id')} "
         f"({payload.get('mode')})",
-        f"Entry {payload.get('entry_price')}  Stop {payload.get('stop_price')}"
-        f"  Target {payload.get('target_price')}  R:R {payload.get('rr')}",
-        f"AOIs {aoi_text}",
-        f"Bar close {when}  Data {payload.get('data_source')}",
     ]
-    if notes:
-        lines.append("Notes: " + "; ".join(notes))
+    if kind == "ENTRY_CONFIRMED":
+        lines.append(
+            f"Entry {payload.get('entry_price')}  "
+            f"Stop {payload.get('stop_price')}  "
+            f"Target {payload.get('target_price')}  R:R {payload.get('rr')}"
+        )
+    message = payload.get("message")
+    if message:
+        lines.append(str(message))
+    lines.append(f"Bar close {when}  Data {payload.get('data_source')}")
     return "\n".join(lines)[:4000]

@@ -8,8 +8,7 @@
       "title": "StreamEventType",
       "type": "string",
       "enum": [
-        "candle.updated", "aoi.updated", "aoi.removed", "structure.event", "feed.health",
-        "signal.created", "signal.updated",
+        "candle.updated", "feed.health", "signal.created",
         "order.updated", "fill.created", "position.updated", "account.updated", "risk.kill_switch",
         "subscribed", "snapshot_required", "heartbeat", "error"
       ]

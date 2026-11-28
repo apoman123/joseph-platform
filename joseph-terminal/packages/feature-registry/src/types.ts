@@ -208,12 +208,11 @@ export interface TerminalEventMap {
     modelId: string;
     price: number;
   };
-  /** Request to focus an exact signal/AOI on the chart. */
+  /** Request to focus an exact signal's instrument and bar on the chart. */
   'signal.focus': {
     instrumentId: InstrumentId;
     timeframe: Timeframe;
     timeMs: number;
-    aoiIds: readonly string[];
   };
   /** Request to open the order ticket prefilled. */
   'ticket.open': {

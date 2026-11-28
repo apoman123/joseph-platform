@@ -61,11 +61,8 @@ const CHANNELS: Readonly<
 
 /** Signal kinds offered as checkboxes, in plain language. */
 const KINDS: ReadonlyArray<{kind: SignalKind; label: string}> = [
-  {kind: 'ENTRY_CONFIRMED', label: 'Entries'},
-  {kind: 'ENTRY_BLOCKED', label: 'Blocked entries'},
-  {kind: 'PRE_SIGNAL', label: 'Setups forming'},
-  {kind: 'AOI_INVALIDATED', label: 'Zones invalidated'},
-  {kind: 'SETUP_EXPIRED', label: 'Setups expired'},
+  {kind: 'ENTRY_CONFIRMED', label: 'Strategy entries'},
+  {kind: 'POSITION_EXITED', label: 'Strategy exits'},
   {kind: 'CUSTOM_ALERT', label: 'Alerts (built-in and Python)'},
 ];
 

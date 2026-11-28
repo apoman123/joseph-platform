@@ -2,75 +2,8 @@
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "$id": "https://schemas.joseph.local/v1/signal.schema.json",
   "title": "JosephSignal",
-  "description": "Strategy evaluation outputs. A fired signal is never rewritten; corrections produce a new revision with an audit trail.",
+  "description": "Notifications of Python strategy activations (ENTRY_CONFIRMED, POSITION_EXITED) and alert jobs (CUSTOM_ALERT). A recorded signal is never rewritten.",
   "$defs": {
-    "TriState": {
-      "title": "TriState",
-      "type": "string",
-      "enum": [
-        "TRUE",
-        "FALSE",
-        "UNKNOWN"
-      ]
-    },
-    "ReasonNode": {
-      "title": "ReasonNode",
-      "description": "Explanation trace for one evaluated rule node, for both true and false predicates.",
-      "type": "object",
-      "additionalProperties": false,
-      "required": [
-        "node_path",
-        "op",
-        "result",
-        "detail",
-        "children"
-      ],
-      "properties": {
-        "node_path": {
-          "type": "string",
-          "description": "JSON pointer of the node inside `when`."
-        },
-        "node_id": {
-          "type": [
-            "string",
-            "null"
-          ]
-        },
-        "op": {
-          "type": "string"
-        },
-        "result": {
-          "$ref": "#/$defs/TriState"
-        },
-        "detail": {
-          "type": "string"
-        },
-        "evidence": {
-          "type": "object"
-        },
-        "children": {
-          "type": "array",
-          "items": {
-            "$ref": "#/$defs/ReasonNode"
-          }
-        }
-      }
-    },
-    "SetupState": {
-      "title": "SetupState",
-      "type": "string",
-      "enum": [
-        "WAITING",
-        "AOI_TOUCHED",
-        "CONFIRMING",
-        "READY",
-        "FIRED",
-        "EXPIRED",
-        "INVALIDATED",
-        "CANCELLED",
-        "BLOCKED"
-      ]
-    },
     "Severity": {
       "title": "Severity",
       "type": "string",
@@ -81,35 +14,9 @@
         "CRITICAL"
       ]
     },
-    "RiskEvaluation": {
-      "title": "RiskEvaluation",
-      "type": "object",
-      "additionalProperties": false,
-      "required": [
-        "status",
-        "reasons"
-      ],
-      "properties": {
-        "status": {
-          "type": "string",
-          "enum": [
-            "PASS",
-            "FAIL",
-            "UNKNOWN",
-            "NOT_APPLICABLE"
-          ]
-        },
-        "reasons": {
-          "type": "array",
-          "items": {
-            "type": "string"
-          }
-        }
-      }
-    },
     "Signal": {
       "title": "Signal",
-      "description": "One lifecycle notification of a strategy setup on one exact venue instrument.",
+      "description": "One notification of a Python strategy or alert on one exact venue instrument and closed bar. Mode is ALERT_ONLY for alerts.",
       "type": "object",
       "additionalProperties": false,
       "required": [
@@ -118,48 +25,47 @@
         "tenant_id",
         "strategy_id",
         "strategy_version_id",
+        "source_hash",
         "instrument_id",
         "direction",
         "timeframe",
         "kind",
-        "setup_state",
         "severity",
+        "mode",
         "bar_start_ms",
         "bar_close_ms",
         "evaluated_at_ms",
-        "inputs_snapshot_hash",
-        "rule_version",
-        "evaluator_version",
-        "indicator_versions",
-        "reason_tree",
-        "aoi_ids",
-        "risk_evaluation",
-        "mode",
         "data_source",
-        "revision"
+        "entry_price",
+        "stop_price",
+        "target_price",
+        "rr",
+        "message",
+        "condition"
       ],
       "properties": {
         "signal_id": {
-          "type": "string"
+          "type": "string",
+          "description": "Deterministic id derived from dedupe_key."
         },
         "dedupe_key": {
           "type": "string",
-          "description": "tenant + strategy_version + account scope + instrument + direction + setup id + kind."
+          "description": "Unique per tenant: strategy signals key tenant, activation, source hash, instrument, bar, kind and direction; alerts key the job, script version, condition and bar."
         },
         "tenant_id": {
           "type": "string"
         },
         "strategy_id": {
-          "type": "string"
+          "type": "string",
+          "description": "Script id of the strategy or alert."
         },
         "strategy_version_id": {
-          "type": "string"
+          "type": "string",
+          "description": "Immutable script version; execution deployments bind it."
         },
-        "setup_id": {
-          "type": [
-            "string",
-            "null"
-          ]
+        "source_hash": {
+          "type": "string",
+          "description": "Hash of the script source that produced the signal."
         },
         "instrument_id": {
           "$ref": "common.schema.json#/$defs/InstrumentId"
@@ -179,11 +85,11 @@
         "kind": {
           "$ref": "#/$defs/SignalKind"
         },
-        "setup_state": {
-          "$ref": "#/$defs/SetupState"
-        },
         "severity": {
           "$ref": "#/$defs/Severity"
+        },
+        "mode": {
+          "$ref": "common.schema.json#/$defs/ExecutionMode"
         },
         "bar_start_ms": {
           "$ref": "common.schema.json#/$defs/TimestampMs"
@@ -194,61 +100,11 @@
         "evaluated_at_ms": {
           "$ref": "common.schema.json#/$defs/TimestampMs"
         },
-        "inputs_snapshot_hash": {
-          "type": "string"
-        },
-        "rule_version": {
-          "type": "string",
-          "description": "definition_hash of the evaluated StrategyVersion."
-        },
-        "evaluator_version": {
-          "type": "string"
-        },
-        "indicator_versions": {
-          "type": "object",
-          "additionalProperties": {
-            "type": "string"
-          }
-        },
-        "reason_tree": {
-          "$ref": "#/$defs/ReasonNode"
-        },
-        "aoi_ids": {
-          "type": "array",
-          "items": {
-            "type": "string"
-          }
-        },
-        "group_ids": {
-          "description": "Zone groups (AOI `group_id`s) bound by true `IN_ZONE` conditions.",
-          "type": "array",
-          "items": {
-            "type": "string"
-          }
-        },
-        "bar_base_volume": {
-          "description": "Base volume of the evaluated (signal) bar. Not comparable across instruments; rank by bar_quote_volume.",
-          "oneOf": [
-            {
-              "$ref": "common.schema.json#/$defs/NonNegativeDecimalString"
-            },
-            {
-              "type": "null"
-            }
-          ]
-        },
-        "bar_quote_volume": {
-          "description": "Quote-currency turnover of the evaluated bar as published by the venue; null when the venue publishes none (never estimated).",
-          "oneOf": [
-            {
-              "$ref": "common.schema.json#/$defs/NonNegativeDecimalString"
-            },
-            {
-              "type": "null"
-            }
-          ]
+        "data_source": {
+          "$ref": "common.schema.json#/$defs/FeedState"
         },
         "entry_price": {
+          "description": "Planned entry (close of the signal bar) of ENTRY_CONFIRMED; null otherwise.",
           "oneOf": [
             {
               "$ref": "common.schema.json#/$defs/DecimalString"
@@ -259,6 +115,7 @@
           ]
         },
         "stop_price": {
+          "description": "Stop the strategy declared with the entry, if any.",
           "oneOf": [
             {
               "$ref": "common.schema.json#/$defs/DecimalString"
@@ -269,6 +126,7 @@
           ]
         },
         "target_price": {
+          "description": "Target the strategy declared with the entry, if any.",
           "oneOf": [
             {
               "$ref": "common.schema.json#/$defs/DecimalString"
@@ -279,6 +137,7 @@
           ]
         },
         "rr": {
+          "description": "Reward/risk of entry, stop and target, when all three are set.",
           "oneOf": [
             {
               "$ref": "common.schema.json#/$defs/DecimalString"
@@ -288,21 +147,16 @@
             }
           ]
         },
-        "risk_evaluation": {
-          "$ref": "#/$defs/RiskEvaluation"
-        },
-        "mode": {
-          "$ref": "common.schema.json#/$defs/ExecutionMode"
-        },
-        "data_source": {
-          "$ref": "common.schema.json#/$defs/FeedState"
-        },
-        "revision": {
-          "type": "integer",
-          "minimum": 0
-        },
         "message": {
-          "type": "string"
+          "type": "string",
+          "description": "Human-readable summary."
+        },
+        "condition": {
+          "type": [
+            "string",
+            "null"
+          ],
+          "description": "Name of the alert condition that matched (CUSTOM_ALERT); null for strategy signals."
         }
       }
     },
@@ -551,15 +405,10 @@
     },
     "SignalKind": {
       "title": "SignalKind",
+      "description": "ENTRY_CONFIRMED and POSITION_EXITED come from strategy activations, CUSTOM_ALERT from alert jobs.",
       "type": "string",
       "enum": [
-        "WATCHING_AOI",
-        "PRE_SIGNAL",
         "ENTRY_CONFIRMED",
-        "ENTRY_BLOCKED",
-        "AOI_INVALIDATED",
-        "SETUP_EXPIRED",
-        "QUALIFICATION_CHANGED",
         "POSITION_EXITED",
         "CUSTOM_ALERT"
       ]

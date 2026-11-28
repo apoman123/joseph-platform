@@ -193,6 +193,7 @@ describe('DEMO scripts client', () => {
     expect(log.length).toBeGreaterThanOrEqual(2);
     expect(log.every(s => s.kind === 'CUSTOM_ALERT')).toBe(true);
     expect(log.every(s => s.data_source === 'DEMO')).toBe(true);
+    expect(log.every(s => typeof s.condition === 'string')).toBe(true);
     expect(await client.alertLog()).toEqual(log);
     expect((await client.alerts())[0]?.emitted).toBe(log.length);
     await expect(

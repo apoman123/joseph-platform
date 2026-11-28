@@ -144,7 +144,7 @@ describe('DemoStrategyClient', () => {
       'demo-signal-3',
     ]);
     expect(
-      (await client.listSignals({kinds: ['ENTRY_BLOCKED']})).signals
+      (await client.listSignals({kinds: ['POSITION_EXITED']})).signals
     ).toHaveLength(1);
   });
 
@@ -157,17 +157,12 @@ describe('DemoStrategyClient', () => {
     ]);
     for (const signal of signals) {
       expect(signal.strategy_version_id).toBe(`${signal.strategy_id}:vdemo`);
-      expect(signal.group_ids).toEqual([]);
+      expect(signal.condition).toBeNull();
     }
-    expect(signals[0]?.aoi_ids).toEqual(['demo-pivot-s1-5m']);
-  });
-
-  it('fills the signal bar volume from the DEMO venue candle', () => {
-    for (const signal of createDemoSignals(1_800_000_000_000)) {
-      expect(Number(signal.bar_base_volume)).toBeGreaterThan(0);
-      expect(Number(signal.bar_quote_volume)).toBeGreaterThan(
-        Number(signal.bar_base_volume)
-      );
-    }
+    expect(signals.map(s => s.kind)).toEqual([
+      'ENTRY_CONFIRMED',
+      'POSITION_EXITED',
+      'ENTRY_CONFIRMED',
+    ]);
   });
 });

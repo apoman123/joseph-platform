@@ -7,6 +7,7 @@ from __future__ import annotations
 
 import dataclasses
 import datetime
+import decimal
 
 import pytest
 
@@ -31,40 +32,31 @@ def _signal(
         strategy_id: Strategy slug; the version id is ``{strategy_id}:v1``.
 
     Returns:
-        A live-data signal on setup ``s1`` that cites AOI ``zone-1``.
+        A live-data signal with entry, stop and target.
     """
-    key = f"{tenant}|{strategy_id}:v1|*|binance:perp:BTCUSDT|LONG|s1|{kind}"
+    key = f"{tenant}|{strategy_id}:v1|binance:perp:BTCUSDT|LONG|{kind}"
     return signal_domain.Signal(
         signal_id=signal_domain.signal_id_for(key),
         dedupe_key=key,
         tenant_id=tenant,
         strategy_id=strategy_id,
         strategy_version_id=f"{strategy_id}:v1",
-        setup_id="s1",
+        source_hash="sha256:y",
         instrument_id="binance:perp:BTCUSDT",
         direction="LONG",
         timeframe="5m",
         kind=kind,
-        setup_state="FIRED",
         severity=signal_domain.SEVERITY_BY_KIND[kind],
+        mode=mode,
         bar_start_ms=1_795_132_800_000,
         bar_close_ms=1_795_133_100_000,
         evaluated_at_ms=1_795_133_100_100,
-        inputs_snapshot_hash="sha256:x",
-        rule_version="sha256:y",
-        evaluator_version="1.0.0",
-        indicator_versions={},
-        reason_tree={},
-        aoi_ids=("zone-1",),
-        group_ids=(),
-        entry_price=None,
-        stop_price=None,
-        target_price=None,
-        rr=None,
-        risk_status="PASS",
-        risk_reasons=(),
-        mode=mode,
         data_source="LIVE",
+        entry_price=decimal.Decimal("94790"),
+        stop_price=decimal.Decimal("94430"),
+        target_price=decimal.Decimal("95870"),
+        rr=decimal.Decimal("3"),
+        message="EMA trend LONG entry",
     )
 
 
@@ -143,7 +135,7 @@ def test_strategy_channel_policy_is_enforced() -> None:
 @pytest.mark.parametrize(
     ("sub_kwargs", "delivered"),
     [
-        ({"kinds": frozenset({"ENTRY_BLOCKED"})}, False),
+        ({"kinds": frozenset({"POSITION_EXITED"})}, False),
         ({"min_severity": "CRITICAL"}, False),
         ({"strategy_ids": frozenset({"other"})}, False),
         ({"enabled": False}, False),
@@ -207,7 +199,7 @@ def test_execution_forwarding_only_for_tradable_entries() -> None:
     assert _forwarded(_signal(mode="PAPER"))
     assert _forwarded(_signal(mode="SHADOW"))
     assert not _forwarded(_signal(mode="ALERT_ONLY"))
-    assert not _forwarded(_signal(kind="ENTRY_BLOCKED"))
+    assert not _forwarded(_signal(kind="POSITION_EXITED"))
 
 
 def test_idempotency_key_and_delivery_id_are_stable() -> None:
@@ -234,9 +226,40 @@ def test_backoff_and_redaction() -> None:
 
 
 def test_format_text_carries_trace_fields() -> None:
-    """Message text names the instrument, version, AOIs and UTC time."""
+    """Message text names the instrument, version, levels and UTC time."""
     text = model.format_text(_signal().to_contract())
-    assert "binance:perp:BTCUSDT" in text
+    assert text.startswith("Entry confirmed: LONG binance:perp:BTCUSDT 5m")
     assert "ema-trend-long:v1" in text
-    assert "zone-1" in text
+    assert "Stop 94430" in text and "R:R 3" in text
+    assert "EMA trend LONG entry" in text
     assert "UTC" in text
+    exit_text = model.format_text(_signal(kind="POSITION_EXITED").to_contract())
+    assert exit_text.startswith("Position exited: LONG")
+    assert "Stop" not in exit_text
+
+
+@pytest.mark.parametrize(
+    ("stored", "migrated"),
+    [
+        (frozenset(), frozenset()),
+        (frozenset({"ENTRY_CONFIRMED"}), frozenset({"ENTRY_CONFIRMED"})),
+        (
+            frozenset({"ENTRY_CONFIRMED", "ENTRY_BLOCKED", "PRE_SIGNAL"}),
+            frozenset({"ENTRY_CONFIRMED"}),
+        ),
+        (
+            frozenset({"WATCHING_AOI", "SETUP_EXPIRED"}),
+            signal_domain.SIGNAL_KINDS,
+        ),
+    ],
+)
+def test_current_kinds_migrates_retired_kinds(
+    stored: frozenset[str], migrated: frozenset[str]
+) -> None:
+    """Retired kinds are dropped; a filter of only retired kinds keeps all.
+
+    Args:
+        stored: Kinds filter stored before the migration.
+        migrated: Expected filter afterwards.
+    """
+    assert model.current_kinds(stored) == migrated

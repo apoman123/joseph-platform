@@ -1333,54 +1333,24 @@ export type ForwardingEnabled = boolean;
 export type RuntimeEnabled = boolean;
 /**
  * This interface was referenced by `JosephContracts`'s JSON-Schema
- * via the `definition` "TriState".
- */
-export type TriState = 'TRUE' | 'FALSE' | 'UNKNOWN';
-/**
- * This interface was referenced by `JosephContracts`'s JSON-Schema
- * via the `definition` "SetupState".
- */
-export type SetupState =
-  | 'WAITING'
-  | 'AOI_TOUCHED'
-  | 'CONFIRMING'
-  | 'READY'
-  | 'FIRED'
-  | 'EXPIRED'
-  | 'INVALIDATED'
-  | 'CANCELLED'
-  | 'BLOCKED';
-/**
- * This interface was referenced by `JosephContracts`'s JSON-Schema
  * via the `definition` "Severity".
  */
 export type Severity1 = 'INFO' | 'WARNING' | 'ENTRY' | 'CRITICAL';
 /**
+ * ENTRY_CONFIRMED and POSITION_EXITED come from strategy activations, CUSTOM_ALERT from alert jobs.
+ *
  * This interface was referenced by `JosephContracts`'s JSON-Schema
  * via the `definition` "SignalKind".
  */
-export type SignalKind =
-  | 'WATCHING_AOI'
-  | 'PRE_SIGNAL'
-  | 'ENTRY_CONFIRMED'
-  | 'ENTRY_BLOCKED'
-  | 'AOI_INVALIDATED'
-  | 'SETUP_EXPIRED'
-  | 'QUALIFICATION_CHANGED'
-  | 'POSITION_EXITED'
-  | 'CUSTOM_ALERT';
+export type SignalKind = 'ENTRY_CONFIRMED' | 'POSITION_EXITED' | 'CUSTOM_ALERT';
 /**
  * This interface was referenced by `JosephContracts`'s JSON-Schema
  * via the `definition` "StreamEventType".
  */
 export type StreamEventType =
   | 'candle.updated'
-  | 'aoi.updated'
-  | 'aoi.removed'
-  | 'structure.event'
   | 'feed.health'
   | 'signal.created'
-  | 'signal.updated'
   | 'order.updated'
   | 'fill.created'
   | 'position.updated'
@@ -3373,47 +3343,33 @@ export interface StrategyActivationList {
   runtime_enabled: RuntimeEnabled;
 }
 /**
- * Explanation trace for one evaluated rule node, for both true and false predicates.
- *
- * This interface was referenced by `JosephContracts`'s JSON-Schema
- * via the `definition` "ReasonNode".
- */
-export interface ReasonNode {
-  /**
-   * JSON pointer of the node inside `when`.
-   */
-  node_path: string;
-  node_id?: string | null;
-  op: string;
-  result: TriState;
-  detail: string;
-  evidence?: {};
-  children: ReasonNode[];
-}
-/**
- * This interface was referenced by `JosephContracts`'s JSON-Schema
- * via the `definition` "RiskEvaluation".
- */
-export interface RiskEvaluation {
-  status: 'PASS' | 'FAIL' | 'UNKNOWN' | 'NOT_APPLICABLE';
-  reasons: string[];
-}
-/**
- * One lifecycle notification of a strategy setup on one exact venue instrument.
+ * One notification of a Python strategy or alert on one exact venue instrument and closed bar. Mode is ALERT_ONLY for alerts.
  *
  * This interface was referenced by `JosephContracts`'s JSON-Schema
  * via the `definition` "Signal".
  */
 export interface Signal {
+  /**
+   * Deterministic id derived from dedupe_key.
+   */
   signal_id: string;
   /**
-   * tenant + strategy_version + account scope + instrument + direction + setup id + kind.
+   * Unique per tenant: strategy signals key tenant, activation, source hash, instrument, bar, kind and direction; alerts key the job, script version, condition and bar.
    */
   dedupe_key: string;
   tenant_id: string;
+  /**
+   * Script id of the strategy or alert.
+   */
   strategy_id: string;
+  /**
+   * Immutable script version; execution deployments bind it.
+   */
   strategy_version_id: string;
-  setup_id?: string | null;
+  /**
+   * Hash of the script source that produced the signal.
+   */
+  source_hash: string;
   instrument_id: InstrumentId;
   /**
    * NONE denotes a directionless Python alert.
@@ -3421,43 +3377,36 @@ export interface Signal {
   direction: 'LONG' | 'SHORT' | 'NONE';
   timeframe: Timeframe;
   kind: SignalKind;
-  setup_state: SetupState;
   severity: Severity1;
+  mode: ExecutionMode;
   bar_start_ms: TimestampMs;
   bar_close_ms: TimestampMs;
   evaluated_at_ms: TimestampMs;
-  inputs_snapshot_hash: string;
-  /**
-   * definition_hash of the evaluated StrategyVersion.
-   */
-  rule_version: string;
-  evaluator_version: string;
-  indicator_versions: {
-    [k: string]: string | undefined;
-  };
-  reason_tree: ReasonNode;
-  aoi_ids: string[];
-  /**
-   * Zone groups (AOI `group_id`s) bound by true `IN_ZONE` conditions.
-   */
-  group_ids?: string[];
-  /**
-   * Base volume of the evaluated (signal) bar. Not comparable across instruments; rank by bar_quote_volume.
-   */
-  bar_base_volume?: NonNegativeDecimalString | null;
-  /**
-   * Quote-currency turnover of the evaluated bar as published by the venue; null when the venue publishes none (never estimated).
-   */
-  bar_quote_volume?: NonNegativeDecimalString | null;
-  entry_price?: DecimalString | null;
-  stop_price?: DecimalString | null;
-  target_price?: DecimalString | null;
-  rr?: DecimalString | null;
-  risk_evaluation: RiskEvaluation;
-  mode: ExecutionMode;
   data_source: FeedState;
-  revision: number;
-  message?: string;
+  /**
+   * Planned entry (close of the signal bar) of ENTRY_CONFIRMED; null otherwise.
+   */
+  entry_price: DecimalString | null;
+  /**
+   * Stop the strategy declared with the entry, if any.
+   */
+  stop_price: DecimalString | null;
+  /**
+   * Target the strategy declared with the entry, if any.
+   */
+  target_price: DecimalString | null;
+  /**
+   * Reward/risk of entry, stop and target, when all three are set.
+   */
+  rr: DecimalString | null;
+  /**
+   * Human-readable summary.
+   */
+  message: string;
+  /**
+   * Name of the alert condition that matched (CUSTOM_ALERT); null for strategy signals.
+   */
+  condition: string | null;
 }
 /**
  * This interface was referenced by `JosephContracts`'s JSON-Schema

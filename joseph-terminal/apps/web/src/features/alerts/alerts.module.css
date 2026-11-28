@@ -72,38 +72,23 @@
   white-space: normal;
 }
 
-.message {
+.facts {
   color: var(--chalk);
+  display: grid;
   font-size: var(--text-sm);
-  margin: 0 0 var(--space-2);
-}
-
-.tree,
-.reasonChildren {
-  list-style: none;
+  gap: 2px var(--space-3);
+  grid-template-columns: auto 1fr;
   margin: 0;
-  padding-left: var(--space-4);
+  max-width: 80ch;
 }
 
-.tree {
-  padding-left: 0;
-}
-
-.reason {
-  margin: 2px 0;
-}
-
-.reasonLine {
-  align-items: center;
-  display: flex;
-  font-size: var(--text-sm);
-  gap: var(--space-2);
-}
-
-.op {
+.facts dt {
   color: var(--haze);
-  font-size: var(--text-xs);
-  min-width: 96px;
+}
+
+.facts dd {
+  margin: 0;
+  overflow-wrap: anywhere;
 }
 
 .srOnly {
