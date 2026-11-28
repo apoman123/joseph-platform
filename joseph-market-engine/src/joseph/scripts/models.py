@@ -104,14 +104,49 @@ class SeriesRequest(pydantic.BaseModel):
     Attributes:
         instrument_id: Optional canonical symbol; defaults to the chart symbol.
         tf: Requested resolution, with confirmed-bar visibility enforced by
-            host.
-        limit: Maximum closed source bars, one through five hundred.
+            host; "auto" picks the chart's lower timeframe for intrabars.
+        limit: Maximum closed source bars, one through five hundred (five
+            thousand for intrabars).
+        intrabars: Lower-timeframe bars inside the newest chart bars.
+        tf_input: Input whose value, unless "auto", replaces ``tf``.
+        unless: Optional bar field; intrabars are fetched only for chart
+            bars that lack it.
+        unless_input: Boolean input that switches ``unless`` on.
     """
 
     model_config = pydantic.ConfigDict(extra="forbid", strict=True)
     instrument_id: InstrumentIdStr | None = None
-    tf: timeframes.Timeframe = pydantic.Field(strict=False)
-    limit: Annotated[int, pydantic.Field(ge=1, le=500)] = 500
+    tf: (
+        Annotated[timeframes.Timeframe, pydantic.Field(strict=False)]
+        | Literal["auto"]
+    )
+    limit: Annotated[int, pydantic.Field(ge=1, le=5000)] = 500
+    intrabars: bool = False
+    tf_input: Annotated[str, pydantic.Field(max_length=64)] = ""
+    unless: Literal["", "quote_turnover", "trade_count", "taker_buy_volume"] = (
+        ""
+    )
+    unless_input: Annotated[str, pydantic.Field(max_length=64)] = ""
+
+    @pydantic.model_validator(mode="after")
+    def _bounded(self) -> SeriesRequest:
+        """Bounds ordinary requests to five hundred bars.
+
+        Returns:
+            The request.
+
+        Raises:
+            ValueError: If an ordinary request exceeds five hundred bars or
+                a non-intrabar request uses "auto" or ``unless``.
+        """
+        if not self.intrabars and (
+            self.limit > 500 or self.tf == "auto" or self.unless
+        ):
+            raise ValueError(
+                "only intrabar requests may use auto, unless or more than "
+                "five hundred bars"
+            )
+        return self
 
 
 class ScriptInput(pydantic.BaseModel):
@@ -164,9 +199,11 @@ class ScriptRun(pydantic.BaseModel):
         version: Pinned script version, or latest when omitted.
         instrument_id: Canonical venue:market:symbol identifier.
         tf: Supported chart timeframe, one second through one calendar month.
-        limit: Maximum closed bars, from two through two thousand.
+        limit: Maximum closed bars, from two through five thousand.
         from_ms: Optional inclusive UTC epoch millisecond lower boundary.
         to_ms: Optional exclusive UTC epoch millisecond visibility boundary.
+        window_from_ms: Optional start of the displayed window; intrabar
+            requests then cover only chart bars from there on.
         include_open: Evaluate the provisional last bar for indicators only;
             alerts and simulated orders always require closed bars.
         inputs: JSON input values overriding the version's defaults.
@@ -179,9 +216,10 @@ class ScriptRun(pydantic.BaseModel):
     version: Annotated[int, pydantic.Field(ge=1)] | None = None
     instrument_id: InstrumentIdStr
     tf: timeframes.Timeframe = pydantic.Field(strict=False)
-    limit: Annotated[int, pydantic.Field(ge=2, le=2000)] = 500
+    limit: Annotated[int, pydantic.Field(ge=2, le=5000)] = 500
     from_ms: Annotated[int, pydantic.Field(ge=0)] | None = None
     to_ms: Annotated[int, pydantic.Field(ge=0)] | None = None
+    window_from_ms: Annotated[int, pydantic.Field(ge=0)] | None = None
     include_open: bool = False
     inputs: JsonInputs = pydantic.Field(default_factory=dict)
     initial_equity: Annotated[
@@ -193,6 +231,36 @@ class ScriptRun(pydantic.BaseModel):
     slippage_bps: Annotated[
         float, pydantic.Field(ge=0, le=1000, allow_inf_nan=False)
     ] = 0.0
+
+
+class ScriptBatchItem(pydantic.BaseModel):
+    """One study of a batched run.
+
+    Attributes:
+        script_id: Tenant slug, ``builtin:<id>`` or ``plugin:<entry>:<id>``.
+        version: Pinned tenant version, or latest when omitted.
+        inputs: Input overrides of this study.
+    """
+
+    model_config = pydantic.ConfigDict(extra="forbid", strict=True)
+    script_id: ScriptRef
+    version: Annotated[int, pydantic.Field(ge=1)] | None = None
+    inputs: JsonInputs = pydantic.Field(default_factory=dict)
+
+
+class ScriptBatchRun(ScriptRun):
+    """Runs several studies over one fetch of the same chart candles.
+
+    The shared fields select the candles and simulation settings; top-level
+    ``inputs`` are merged under each study's own.
+
+    Attributes:
+        runs: One through sixteen studies, run in order.
+    """
+
+    runs: Annotated[
+        list[ScriptBatchItem], pydantic.Field(min_length=1, max_length=16)
+    ]
 
 
 class PlotPoint(pydantic.BaseModel):
@@ -223,12 +291,12 @@ class PlotSeries(pydantic.BaseModel):
 
     Attributes:
         name: Public series name, one to sixty-four characters.
-        points: At most two thousand chronological closed-bar values.
+        points: At most five thousand chronological closed-bar values.
     """
 
     model_config = pydantic.ConfigDict(extra="forbid")
     name: Annotated[str, pydantic.Field(min_length=1, max_length=64)]
-    points: Annotated[list[PlotPoint], pydantic.Field(max_length=2000)]
+    points: Annotated[list[PlotPoint], pydantic.Field(max_length=5000)]
 
 
 class SimulatedFill(pydantic.BaseModel):
@@ -346,7 +414,7 @@ class ScriptResult(pydantic.BaseModel):
     overlay: bool
     plots: Annotated[list[PlotSeries], pydantic.Field(max_length=64)]
     fills: Annotated[list[SimulatedFill], pydantic.Field(max_length=4000)]
-    equity_curve: Annotated[list[PlotPoint], pydantic.Field(max_length=2000)]
+    equity_curve: Annotated[list[PlotPoint], pydantic.Field(max_length=5000)]
     metrics: dict[str, Annotated[float, pydantic.Field(allow_inf_nan=False)]]
     matched: bool | None = None
     alerts: Annotated[
@@ -572,3 +640,29 @@ def validate_source(script: ScriptInput) -> None:
                 "source aliases must be public Python identifiers of at "
                 "most 64 characters"
             )
+
+
+class ScriptBatchEntry(pydantic.BaseModel):
+    """The outcome of one study of a batched run.
+
+    Attributes:
+        script_id: Requested script id.
+        result: Validated result, or None when the study failed.
+        error: Why the study failed, otherwise None.
+    """
+
+    model_config = pydantic.ConfigDict(extra="forbid")
+    script_id: str
+    result: ScriptResult | None = None
+    error: str | None = None
+
+
+class ScriptBatchResult(pydantic.BaseModel):
+    """Per-study outcomes of a batched run, in request order.
+
+    Attributes:
+        results: One entry per requested study.
+    """
+
+    model_config = pydantic.ConfigDict(extra="forbid")
+    results: list[ScriptBatchEntry]

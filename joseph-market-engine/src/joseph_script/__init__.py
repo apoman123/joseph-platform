@@ -82,26 +82,54 @@ class Request:
 
     Attributes:
         tf: Resolution such as "1d"; source bars become visible only after
-            they have closed.
+            they have closed. With ``intrabars`` it may be "auto": the host
+            picks the lower timeframe for the chart resolution (1s on
+            seconds charts, 1m intraday, 5m on daily and 1h on weekly and
+            monthly charts; none on 1s and 1m charts).
         instrument_id: Optional canonical symbol; the chart symbol when None.
-        limit: Maximum closed source bars, one through five hundred.
+        limit: Maximum closed source bars, one through five hundred (five
+            thousand for intrabars).
+        intrabars: Lower-timeframe bars inside the chart bars, read with
+            ``ctx.intrabars``; the host fetches only the newest chart bars'
+            intrabars that fit ``limit`` (from the run's ``window_from_ms``
+            when given).
+        tf_input: Optional input name whose value, unless "auto", replaces
+            ``tf``.
+        unless: Optional optional-bar field (such as "taker_buy_volume");
+            intrabars are fetched only for chart bars that lack it.
+        unless_input: Optional boolean input; ``unless`` applies only while
+            it is true.
     """
 
     tf: str
     instrument_id: str | None = None
     limit: int = 500
+    intrabars: bool = False
+    tf_input: str = ""
+    unless: str = ""
+    unless_input: str = ""
 
     def to_json(self) -> dict[str, Any]:
         """Describes the request in the script-version JSON shape.
 
         Returns:
-            Mapping with tf, instrument_id and limit.
+            Mapping with tf, instrument_id and limit, plus intrabars,
+            tf_input, unless and unless_input when set.
         """
-        return {
+        data: dict[str, Any] = {
             "tf": self.tf,
             "instrument_id": self.instrument_id,
             "limit": self.limit,
         }
+        if self.intrabars:
+            data["intrabars"] = True
+        if self.tf_input:
+            data["tf_input"] = self.tf_input
+        if self.unless:
+            data["unless"] = self.unless
+        if self.unless_input:
+            data["unless_input"] = self.unless_input
+        return data
 
 
 class Script:
@@ -117,6 +145,9 @@ class Script:
         INPUTS: Declared inputs in display order, keyed by input name.
         REQUESTS: Additional series aliases read with ctx.request.
         CATEGORY: Optional catalog section such as "Trend" or "Volume".
+        PERIODS: Calendar periods ("1d", "1w", "1M") whose bounds the host
+            computes for every bar on the instrument's session calendar,
+            read with ``ctx.period``.
     """
 
     ID: ClassVar[str] = ""
@@ -127,6 +158,7 @@ class Script:
     INPUTS: ClassVar[Mapping[str, Input]] = {}
     REQUESTS: ClassVar[Mapping[str, Request]] = {}
     CATEGORY: ClassVar[str] = ""
+    PERIODS: ClassVar[tuple[str, ...]] = ()
 
 
 class Indicator(Script, abc.ABC):

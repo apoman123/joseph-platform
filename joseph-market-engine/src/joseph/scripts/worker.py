@@ -65,6 +65,8 @@ class Context:
         extra_series: Declared additional symbol/resolution histories.
         bar_visuals: Separately bounded per-bar symbols, colors and OHLC plots.
         total_bars: Number of source bars in the current isolated run.
+        periods: Host-computed [start, next start] calendar period bounds
+            per source bar, by period resolution.
     """
 
     def __init__(self, bundle: dict[str, Any]) -> None:
@@ -102,6 +104,11 @@ class Context:
             bundle.get("extra_series", {})
         )
         self.bar_visuals: dict[str, dict[str, Any]] = {}
+        self.periods: dict[str, list[list[int]]] = dict(
+            bundle.get("periods", {})
+        )
+        self._cursors: dict[str, int] = {}
+        self._closed: dict[str, int] = {}
 
     @property
     def bar(self) -> dict[str, Any]:
@@ -191,6 +198,80 @@ class Context:
             if bar["end_ms"] <= end
             and (not intrabars or bar["time_ms"] >= start)
         ]
+
+    def intrabars(self, alias: str) -> list[dict[str, Any]]:
+        """Reads the declared lower-timeframe bars inside the current bar.
+
+        Successive bars advance a cursor, so a whole run reads each intrabar
+        once.
+
+        Args:
+            alias: Intrabar request alias declared by the script.
+
+        Returns:
+            Closed intrabars that start at or after the current bar's start
+            and end by its close, oldest first; empty where the host fetched
+            none.
+
+        Raises:
+            ValueError: If the alias was not declared.
+        """
+        if alias not in self.extra_series:
+            raise ValueError("declare the requested series alias")
+        series = self.extra_series[alias]
+        start = self.bar["time_ms"]
+        end = self.bar.get("end_ms", start)
+        index = self._cursors.get(alias, 0)
+        while index < len(series) and series[index]["time_ms"] < start:
+            index += 1
+        self._cursors[alias] = index
+        found = []
+        while index < len(series) and series[index]["end_ms"] <= end:
+            found.append(series[index])
+            index += 1
+        return found
+
+    def closed_bar(self, alias: str) -> dict[str, Any] | None:
+        """Reads the latest declared-series bar closed by the current close.
+
+        Args:
+            alias: Request alias declared by the script.
+
+        Returns:
+            That bar's OHLCV dictionary, or None before the first one.
+
+        Raises:
+            ValueError: If the alias was not declared.
+        """
+        if alias not in self.extra_series:
+            raise ValueError("declare the requested series alias")
+        series = self.extra_series[alias]
+        end = self.bar.get("end_ms", self.bar["time_ms"])
+        index = self._closed.get(alias, -1)
+        while index + 1 < len(series) and series[index + 1]["end_ms"] <= end:
+            index += 1
+        self._closed[alias] = index
+        return series[index] if index >= 0 else None
+
+    def period(self, tf: str) -> tuple[int, int]:
+        """Reads the calendar period containing the current bar.
+
+        Args:
+            tf: A period the script declares in ``PERIODS``.
+
+        Returns:
+            UTC millisecond start of the period and of the next one, on the
+            instrument's session calendar (UTC days, ISO weeks and months on
+            24x7 markets; sessions, their weeks and months on exchanges).
+
+        Raises:
+            ValueError: If the host computed no bounds for that period.
+        """
+        bounds = self.periods.get(tf)
+        if bounds is None or len(bounds) < len(self.history):
+            raise ValueError("declare the period in PERIODS")
+        start, following = bounds[len(self.history) - 1]
+        return int(start), int(following)
 
     def input(
         self,
@@ -292,6 +373,7 @@ class Context:
         style: str = "line",
         width: int = 2,
         offset: int = 0,
+        display: str = "all",
     ) -> None:
         """Appends or replaces a named plot value on the current bar.
 
@@ -303,6 +385,8 @@ class Context:
             width: Pixel width from one through five, default two.
             offset: Display offset in bars, from minus five hundred through five
                 hundred.
+            display: "all" draws the series; "data_window" only lists its
+                values in the legend and data window.
 
         Returns:
             None after updating the named output series.
@@ -336,14 +420,18 @@ class Context:
             }
             or not 1 <= width <= 5
             or not -500 <= offset <= 500
+            or display not in {"all", "data_window"}
         ):
-            raise ValueError("invalid plot style, width or offset")
-        self.plot_styles[name] = {
+            raise ValueError("invalid plot style, width, offset or display")
+        styling: dict[str, Any] = {
             "color": color,
             "style": style,
             "width": width,
             "offset": offset,
         }
+        if display != "all":
+            styling["display"] = display
+        self.plot_styles[name] = styling
         point = {"time_ms": self.bar["time_ms"], "value": value, "color": color}
         if points and points[-1]["time_ms"] == point["time_ms"]:
             points[-1] = point

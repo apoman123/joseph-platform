@@ -59,7 +59,7 @@ class SimpleMovingAverage(joseph_script.Indicator):
     OVERLAY = True
     INPUTS = {
         "length": joseph_script.Input(
-            9, title="Length", minimum=1, maximum=5000, step=1
+            20, title="Length", minimum=1, maximum=5000, step=1
         ),
         "source": joseph_script.Input("close", title="Source", options=SOURCES),
         "offset": joseph_script.Input(

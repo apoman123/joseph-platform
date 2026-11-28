@@ -43,8 +43,11 @@ from collections.abc import Mapping
 from collections.abc import Sequence
 from typing import Any
 
+import pydantic
+
 import joseph_script
 from joseph.domain import errors
+from joseph.scripts import models
 
 ENTRY_POINT_GROUP = "joseph.scripts"
 """Entry-point group of plugin script factories."""
@@ -68,6 +71,9 @@ CATALOG_ID = re.compile(
     r"^(?:builtin|plugin:[a-z0-9_.-]{1,64}):[a-z][a-z0-9_-]{0,63}$"
 )
 """Built-in or plugin catalog id."""
+
+PERIOD_TIMEFRAMES = frozenset({"1d", "1w", "1M"})
+"""Calendar periods a script may declare in ``PERIODS``."""
 
 _SLUG = re.compile(r"^[a-z][a-z0-9_-]{0,63}$")
 _ENTRY = re.compile(r"^[a-z0-9_.-]{1,64}$")
@@ -152,6 +158,7 @@ class CatalogEntry:
         overlay: Whether plots share the price pane.
         inputs: Declared inputs as JSON objects, in display order.
         requests: Declared additional series as JSON objects.
+        periods: Declared calendar periods read with ``ctx.period``.
         source: Public module source for built-ins; None (protected) for
             plugins.
         source_hash: SHA-256 identifying the exact installed code.
@@ -174,6 +181,7 @@ class CatalogEntry:
     source: str | None
     source_hash: str
     enabled: bool = True
+    periods: tuple[str, ...] = ()
 
     @property
     def defaults(self) -> dict[str, Any]:
@@ -290,11 +298,37 @@ def _check_inputs(cls: type) -> tuple[dict[str, Any], dict[str, Any]]:
                 " Request values"
             )
         requests[alias] = spec.to_json()
+        try:
+            models.SeriesRequest.model_validate(requests[alias], strict=False)
+        except pydantic.ValidationError:
+            raise errors.ValidationFailedError(
+                f"{cls.__qualname__}.REQUESTS[{alias!r}] is invalid"
+            ) from None
     if len(requests) > 4:
         raise errors.ValidationFailedError(
             f"{cls.__qualname__} declares more than four requests"
         )
     return inputs, requests
+
+
+def _check_periods(cls: type) -> tuple[str, ...]:
+    """Validates a class's declared calendar periods.
+
+    Args:
+        cls: Script class.
+
+    Returns:
+        The declared periods.
+
+    Raises:
+        errors.ValidationFailedError: For a period other than 1d, 1w or 1M.
+    """
+    periods = tuple(getattr(cls, "PERIODS", ()))
+    if any(period not in PERIOD_TIMEFRAMES for period in periods):
+        raise errors.ValidationFailedError(
+            f"{cls.__qualname__}.PERIODS accepts only 1d, 1w and 1M"
+        )
+    return periods
 
 
 def make_entry(
@@ -366,6 +400,7 @@ def make_entry(
         requests=requests,
         source=source,
         source_hash=digest,
+        periods=_check_periods(cls),
     )
 
 

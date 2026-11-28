@@ -1,0 +1,774 @@
+{
+  "scripts": [
+    {
+      "script_id": "builtin:sma",
+      "kind": "indicator",
+      "origin": "builtin",
+      "package": null,
+      "package_version": null,
+      "title": "Moving Average Simple",
+      "short_title": "SMA",
+      "description": "Simple moving average: the mean of the source price over the last length bars; empty until length bars exist.",
+      "category": "Moving averages",
+      "overlay": true,
+      "inputs": {
+        "length": {
+          "default": 20,
+          "title": "Length",
+          "minimum": 1.0,
+          "maximum": 5000.0,
+          "options": null,
+          "step": 1.0,
+          "group": "",
+          "tooltip": ""
+        },
+        "source": {
+          "default": "close",
+          "title": "Source",
+          "minimum": null,
+          "maximum": null,
+          "options": [
+            "open",
+            "high",
+            "low",
+            "close",
+            "hl2",
+            "hlc3",
+            "ohlc4"
+          ],
+          "step": null,
+          "group": "",
+          "tooltip": ""
+        },
+        "offset": {
+          "default": 0,
+          "title": "Offset",
+          "minimum": -500.0,
+          "maximum": 500.0,
+          "options": null,
+          "step": null,
+          "group": "",
+          "tooltip": ""
+        },
+        "color": {
+          "default": "#2962ff",
+          "title": "Color",
+          "minimum": null,
+          "maximum": null,
+          "options": null,
+          "step": null,
+          "group": "Style",
+          "tooltip": ""
+        }
+      },
+      "requests": {},
+      "source_available": true,
+      "source_hash": "b02c46663af852770256822f98deca5055bd3c93aaa2ed02fe0bc92042c8221d",
+      "enabled": true,
+      "source": null
+    },
+    {
+      "script_id": "builtin:ema",
+      "kind": "indicator",
+      "origin": "builtin",
+      "package": null,
+      "package_version": null,
+      "title": "Moving Average Exponential",
+      "short_title": "EMA",
+      "description": "Exponential moving average with alpha 2 / (length + 1), seeded with the first source value.",
+      "category": "Moving averages",
+      "overlay": true,
+      "inputs": {
+        "length": {
+          "default": 20,
+          "title": "Length",
+          "minimum": 1.0,
+          "maximum": 5000.0,
+          "options": null,
+          "step": 1.0,
+          "group": "",
+          "tooltip": ""
+        },
+        "source": {
+          "default": "close",
+          "title": "Source",
+          "minimum": null,
+          "maximum": null,
+          "options": [
+            "open",
+            "high",
+            "low",
+            "close",
+            "hl2",
+            "hlc3",
+            "ohlc4"
+          ],
+          "step": null,
+          "group": "",
+          "tooltip": ""
+        },
+        "offset": {
+          "default": 0,
+          "title": "Offset",
+          "minimum": -500.0,
+          "maximum": 500.0,
+          "options": null,
+          "step": null,
+          "group": "",
+          "tooltip": ""
+        },
+        "color": {
+          "default": "#2962ff",
+          "title": "Color",
+          "minimum": null,
+          "maximum": null,
+          "options": null,
+          "step": null,
+          "group": "Style",
+          "tooltip": ""
+        }
+      },
+      "requests": {},
+      "source_available": true,
+      "source_hash": "2bca8b96ddb3e3f46e504b0d8e44067e159fed881c8e1230fdd7c18ea79b171b",
+      "enabled": true,
+      "source": null
+    },
+    {
+      "script_id": "builtin:anchored_vwap",
+      "kind": "indicator",
+      "origin": "builtin",
+      "package": null,
+      "package_version": null,
+      "title": "Volume Weighted Average Price",
+      "short_title": "VWAP",
+      "description": "Volume-weighted average price from a session, week, month or a chosen bar, with up to three standard-deviation bands.",
+      "category": "Volume",
+      "overlay": true,
+      "inputs": {
+        "anchor": {
+          "default": "session",
+          "title": "Anchor period",
+          "minimum": null,
+          "maximum": null,
+          "options": [
+            "session",
+            "week",
+            "month",
+            "time"
+          ],
+          "step": null,
+          "group": "",
+          "tooltip": ""
+        },
+        "anchor_ms": {
+          "default": 0,
+          "title": "Anchor time",
+          "minimum": 0.0,
+          "maximum": 4102444800000.0,
+          "options": null,
+          "step": null,
+          "group": "",
+          "tooltip": "UTC milliseconds of the anchor bar when anchor is time."
+        },
+        "source": {
+          "default": "hlc3",
+          "title": "Source",
+          "minimum": null,
+          "maximum": null,
+          "options": [
+            "hlc3",
+            "close",
+            "hl2",
+            "ohlc4"
+          ],
+          "step": null,
+          "group": "",
+          "tooltip": ""
+        },
+        "band_1": {
+          "default": 1.0,
+          "title": "Band 1 multiplier",
+          "minimum": 0.0,
+          "maximum": 10.0,
+          "options": null,
+          "step": 0.5,
+          "group": "",
+          "tooltip": ""
+        },
+        "band_2": {
+          "default": 0.0,
+          "title": "Band 2 multiplier",
+          "minimum": 0.0,
+          "maximum": 10.0,
+          "options": null,
+          "step": 0.5,
+          "group": "",
+          "tooltip": ""
+        },
+        "band_3": {
+          "default": 0.0,
+          "title": "Band 3 multiplier",
+          "minimum": 0.0,
+          "maximum": 10.0,
+          "options": null,
+          "step": 0.5,
+          "group": "",
+          "tooltip": ""
+        },
+        "color": {
+          "default": "#2962ff",
+          "title": "VWAP",
+          "minimum": null,
+          "maximum": null,
+          "options": null,
+          "step": null,
+          "group": "Style",
+          "tooltip": ""
+        },
+        "band_color": {
+          "default": "#4caf50",
+          "title": "Bands",
+          "minimum": null,
+          "maximum": null,
+          "options": null,
+          "step": null,
+          "group": "Style",
+          "tooltip": ""
+        }
+      },
+      "requests": {},
+      "source_available": true,
+      "source_hash": "bd2af854a40633a82da5a685a1637e3f4379e87dbe4c4bf52e65750b210abe2f",
+      "enabled": true,
+      "source": null
+    },
+    {
+      "script_id": "builtin:regression_channel",
+      "kind": "indicator",
+      "origin": "builtin",
+      "package": null,
+      "package_version": null,
+      "title": "Linear Regression Channel",
+      "short_title": "LinReg",
+      "description": "Least-squares trend line with standard-deviation bands and Pearson's R, over the last bars or from an anchor bar.",
+      "category": "Trend",
+      "overlay": true,
+      "inputs": {
+        "length": {
+          "default": 100,
+          "title": "Length",
+          "minimum": 2.0,
+          "maximum": 5000.0,
+          "options": null,
+          "step": 1.0,
+          "group": "",
+          "tooltip": ""
+        },
+        "anchor_ms": {
+          "default": 0,
+          "title": "Anchor time",
+          "minimum": 0.0,
+          "maximum": 4102444800000.0,
+          "options": null,
+          "step": null,
+          "group": "",
+          "tooltip": "UTC milliseconds of the first bar; 0 uses length."
+        },
+        "end_ms": {
+          "default": 0,
+          "title": "End time",
+          "minimum": 0.0,
+          "maximum": 4102444800000.0,
+          "options": null,
+          "step": null,
+          "group": "",
+          "tooltip": "UTC milliseconds of the last bar; 0 is the latest bar."
+        },
+        "source": {
+          "default": "close",
+          "title": "Source",
+          "minimum": null,
+          "maximum": null,
+          "options": [
+            "close",
+            "hl2",
+            "hlc3",
+            "ohlc4"
+          ],
+          "step": null,
+          "group": "",
+          "tooltip": ""
+        },
+        "deviations": {
+          "default": 2.0,
+          "title": "Deviations",
+          "minimum": 0.0,
+          "maximum": 10.0,
+          "options": null,
+          "step": 0.5,
+          "group": "",
+          "tooltip": ""
+        },
+        "show_pearson": {
+          "default": true,
+          "title": "Show Pearson's R",
+          "minimum": null,
+          "maximum": null,
+          "options": null,
+          "step": null,
+          "group": "",
+          "tooltip": ""
+        },
+        "color": {
+          "default": "#2962ff",
+          "title": "Line",
+          "minimum": null,
+          "maximum": null,
+          "options": null,
+          "step": null,
+          "group": "Style",
+          "tooltip": ""
+        },
+        "band_color": {
+          "default": "#ef5350",
+          "title": "Bands",
+          "minimum": null,
+          "maximum": null,
+          "options": null,
+          "step": null,
+          "group": "Style",
+          "tooltip": ""
+        }
+      },
+      "requests": {},
+      "source_available": true,
+      "source_hash": "7c8b570b8bf1e3462d2a224e149438f5fa417e7fe9937cbff48879c35dcb5488",
+      "enabled": true,
+      "source": null
+    },
+    {
+      "script_id": "builtin:bollinger_bands",
+      "kind": "indicator",
+      "origin": "builtin",
+      "package": null,
+      "package_version": null,
+      "title": "Bollinger Bands",
+      "short_title": "BB",
+      "description": "Simple moving average of the source price with bands mult population standard deviations above and below it.",
+      "category": "Volatility",
+      "overlay": true,
+      "inputs": {
+        "length": {
+          "default": 20,
+          "title": "Length",
+          "minimum": 1.0,
+          "maximum": 5000.0,
+          "options": null,
+          "step": 1.0,
+          "group": "",
+          "tooltip": ""
+        },
+        "source": {
+          "default": "close",
+          "title": "Source",
+          "minimum": null,
+          "maximum": null,
+          "options": [
+            "close",
+            "open",
+            "high",
+            "low",
+            "hl2",
+            "hlc3",
+            "ohlc4"
+          ],
+          "step": null,
+          "group": "",
+          "tooltip": ""
+        },
+        "mult": {
+          "default": 2.0,
+          "title": "StdDev",
+          "minimum": 0.001,
+          "maximum": 50.0,
+          "options": null,
+          "step": 0.1,
+          "group": "",
+          "tooltip": ""
+        },
+        "offset": {
+          "default": 0,
+          "title": "Offset",
+          "minimum": -500.0,
+          "maximum": 500.0,
+          "options": null,
+          "step": null,
+          "group": "",
+          "tooltip": ""
+        },
+        "basis_color": {
+          "default": "#ff6d00",
+          "title": "Basis",
+          "minimum": null,
+          "maximum": null,
+          "options": null,
+          "step": null,
+          "group": "Style",
+          "tooltip": ""
+        },
+        "upper_color": {
+          "default": "#2962ff",
+          "title": "Upper",
+          "minimum": null,
+          "maximum": null,
+          "options": null,
+          "step": null,
+          "group": "Style",
+          "tooltip": ""
+        },
+        "lower_color": {
+          "default": "#089981",
+          "title": "Lower",
+          "minimum": null,
+          "maximum": null,
+          "options": null,
+          "step": null,
+          "group": "Style",
+          "tooltip": ""
+        },
+        "fill_color": {
+          "default": "#2196f3",
+          "title": "Background",
+          "minimum": null,
+          "maximum": null,
+          "options": null,
+          "step": null,
+          "group": "Style",
+          "tooltip": ""
+        }
+      },
+      "requests": {},
+      "source_available": true,
+      "source_hash": "e7a6b433672082fedaf4e98cce869cceb0f713bd63046ddbceb84dca1ae5b40c",
+      "enabled": true,
+      "source": null
+    },
+    {
+      "script_id": "builtin:rsi",
+      "kind": "indicator",
+      "origin": "builtin",
+      "package": null,
+      "package_version": null,
+      "title": "Relative Strength Index",
+      "short_title": "RSI",
+      "description": "Relative strength index from Wilder moving averages of gains and losses; 100 without losses, 0 without gains.",
+      "category": "Momentum",
+      "overlay": false,
+      "inputs": {
+        "length": {
+          "default": 14,
+          "title": "Length",
+          "minimum": 1.0,
+          "maximum": 500.0,
+          "options": null,
+          "step": 1.0,
+          "group": "",
+          "tooltip": ""
+        },
+        "source": {
+          "default": "close",
+          "title": "Source",
+          "minimum": null,
+          "maximum": null,
+          "options": [
+            "close",
+            "open",
+            "high",
+            "low",
+            "hl2",
+            "hlc3",
+            "ohlc4"
+          ],
+          "step": null,
+          "group": "",
+          "tooltip": ""
+        },
+        "upper": {
+          "default": 70,
+          "title": "Upper band",
+          "minimum": 0.0,
+          "maximum": 100.0,
+          "options": null,
+          "step": null,
+          "group": "Levels",
+          "tooltip": ""
+        },
+        "middle": {
+          "default": 50,
+          "title": "Middle band",
+          "minimum": 0.0,
+          "maximum": 100.0,
+          "options": null,
+          "step": null,
+          "group": "Levels",
+          "tooltip": ""
+        },
+        "lower": {
+          "default": 30,
+          "title": "Lower band",
+          "minimum": 0.0,
+          "maximum": 100.0,
+          "options": null,
+          "step": null,
+          "group": "Levels",
+          "tooltip": ""
+        },
+        "color": {
+          "default": "#7e57c2",
+          "title": "RSI",
+          "minimum": null,
+          "maximum": null,
+          "options": null,
+          "step": null,
+          "group": "Style",
+          "tooltip": ""
+        }
+      },
+      "requests": {},
+      "source_available": true,
+      "source_hash": "ec4b9d93ec2facff8b2d419c2751278792fa5f511d7a3e8149be580138c6a44b",
+      "enabled": true,
+      "source": null
+    },
+    {
+      "script_id": "builtin:atr",
+      "kind": "indicator",
+      "origin": "builtin",
+      "package": null,
+      "package_version": null,
+      "title": "Average True Range",
+      "short_title": "ATR",
+      "description": "Average true range: Wilder moving average of the true range, seeded with its simple average; the first true range is high minus low.",
+      "category": "Volatility",
+      "overlay": false,
+      "inputs": {
+        "length": {
+          "default": 14,
+          "title": "Length",
+          "minimum": 1.0,
+          "maximum": 500.0,
+          "options": null,
+          "step": 1.0,
+          "group": "",
+          "tooltip": ""
+        },
+        "color": {
+          "default": "#b71c1c",
+          "title": "ATR",
+          "minimum": null,
+          "maximum": null,
+          "options": null,
+          "step": null,
+          "group": "Style",
+          "tooltip": ""
+        }
+      },
+      "requests": {},
+      "source_available": true,
+      "source_hash": "ee4000ca33ca0bfb3ef514f5f7c8b531f4c31f9d1387eba52a66e2d5885ece73",
+      "enabled": true,
+      "source": null
+    },
+    {
+      "script_id": "builtin:volume_delta",
+      "kind": "indicator",
+      "origin": "builtin",
+      "package": null,
+      "package_version": null,
+      "title": "Volume Delta",
+      "short_title": "Delta %",
+      "description": "Buy minus sell volume of each bar as a percentage of its volume: venue taker volume or classified trades when available, otherwise an estimate from intrabar candle direction.",
+      "category": "Volume",
+      "overlay": false,
+      "inputs": {
+        "use_buy_volume": {
+          "default": true,
+          "title": "Use venue buy volume",
+          "minimum": null,
+          "maximum": null,
+          "options": null,
+          "step": null,
+          "group": "",
+          "tooltip": "True delta from the bar's taker buy volume when the source publishes it; off always estimates from intrabars."
+        },
+        "intrabar_tf": {
+          "default": "auto",
+          "title": "Intrabar timeframe",
+          "minimum": null,
+          "maximum": null,
+          "options": [
+            "auto",
+            "1s",
+            "5s",
+            "15s",
+            "1m",
+            "3m",
+            "5m",
+            "15m"
+          ],
+          "step": null,
+          "group": "",
+          "tooltip": ""
+        },
+        "min_intrabars": {
+          "default": 5,
+          "title": "Minimum intrabars",
+          "minimum": 1.0,
+          "maximum": 100.0,
+          "options": null,
+          "step": 1.0,
+          "group": "",
+          "tooltip": ""
+        },
+        "min_coverage": {
+          "default": 0.8,
+          "title": "Minimum coverage",
+          "minimum": 0.5,
+          "maximum": 1.0,
+          "options": null,
+          "step": 0.05,
+          "group": "",
+          "tooltip": "Share of the bar volume the intrabars must cover."
+        },
+        "up_color": {
+          "default": "#26a69a",
+          "title": "Up",
+          "minimum": null,
+          "maximum": null,
+          "options": null,
+          "step": null,
+          "group": "Style",
+          "tooltip": ""
+        },
+        "down_color": {
+          "default": "#ef5350",
+          "title": "Down",
+          "minimum": null,
+          "maximum": null,
+          "options": null,
+          "step": null,
+          "group": "Style",
+          "tooltip": ""
+        }
+      },
+      "requests": {
+        "intrabars": {
+          "tf": "auto",
+          "instrument_id": null,
+          "limit": 3000,
+          "intrabars": true,
+          "tf_input": "intrabar_tf",
+          "unless": "taker_buy_volume",
+          "unless_input": "use_buy_volume"
+        }
+      },
+      "source_available": true,
+      "source_hash": "0f58688f657ce3b6e44b25e5d0d9808fec6dc8a28997b22a61e32991c4f101a7",
+      "enabled": true,
+      "source": null
+    },
+    {
+      "script_id": "builtin:pivot_points",
+      "kind": "indicator",
+      "origin": "builtin",
+      "package": null,
+      "package_version": null,
+      "title": "Pivot Points Standard",
+      "short_title": "Pivots",
+      "description": "Classic floor pivot levels P, R1 to R3 and S1 to S3 from the previous period's high, low and close.",
+      "category": "Support and resistance",
+      "overlay": true,
+      "inputs": {
+        "period": {
+          "default": "auto",
+          "title": "Pivots timeframe",
+          "minimum": null,
+          "maximum": null,
+          "options": [
+            "auto",
+            "1d",
+            "1w",
+            "1M"
+          ],
+          "step": null,
+          "group": "",
+          "tooltip": ""
+        },
+        "pivots_back": {
+          "default": 15,
+          "title": "Number of pivots back",
+          "minimum": 1.0,
+          "maximum": 60.0,
+          "options": null,
+          "step": 1.0,
+          "group": "",
+          "tooltip": ""
+        },
+        "show_labels": {
+          "default": true,
+          "title": "Show labels",
+          "minimum": null,
+          "maximum": null,
+          "options": null,
+          "step": null,
+          "group": "",
+          "tooltip": ""
+        },
+        "pivot_color": {
+          "default": "#f7a600",
+          "title": "P",
+          "minimum": null,
+          "maximum": null,
+          "options": null,
+          "step": null,
+          "group": "Style",
+          "tooltip": ""
+        },
+        "resistance_color": {
+          "default": "#ef5350",
+          "title": "R levels",
+          "minimum": null,
+          "maximum": null,
+          "options": null,
+          "step": null,
+          "group": "Style",
+          "tooltip": ""
+        },
+        "support_color": {
+          "default": "#26a69a",
+          "title": "S levels",
+          "minimum": null,
+          "maximum": null,
+          "options": null,
+          "step": null,
+          "group": "Style",
+          "tooltip": ""
+        }
+      },
+      "requests": {
+        "period": {
+          "tf": "1d",
+          "instrument_id": null,
+          "limit": 100,
+          "tf_input": "period"
+        }
+      },
+      "source_available": true,
+      "source_hash": "1232adcf776e2b3b358bab688486ffd08ab11d2fb539f46710d95bf952e70ce1",
+      "enabled": true,
+      "source": null
+    }
+  ],
+  "failures": []
+}

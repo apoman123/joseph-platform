@@ -190,6 +190,7 @@ _SCRIPT_DECLARATIONS = frozenset(
         "OVERLAY",
         "INPUTS",
         "REQUESTS",
+        "PERIODS",
     }
 )
 _SCRIPT_ROLES = frozenset(
