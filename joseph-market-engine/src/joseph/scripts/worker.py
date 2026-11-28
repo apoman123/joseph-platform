@@ -27,6 +27,9 @@ from typing import Any
 
 import joseph_script
 
+ALERT_LIMIT = 2000
+"""Alert events kept per run; older events are dropped first."""
+
 OPTIONAL_FIELDS = frozenset(
     {"quote_turnover", "trade_count", "taker_buy_volume"}
 )
@@ -475,11 +478,11 @@ class Context:
             severity: INFO, WARNING, ENTRY or CRITICAL notification priority.
 
         Returns:
-            None after recording at most one named event for this closed bar.
+            None after recording at most one named event for this closed bar;
+            beyond ALERT_LIMIT events the oldest are dropped.
 
         Raises:
-            ValueError: For unsupported roles, invalid text/priority or event
-                limits.
+            ValueError: For unsupported roles or invalid text/priority.
         """
         if (
             self.kind not in {"indicator", "strategy", "alert"}
@@ -490,8 +493,6 @@ class Context:
             raise ValueError("invalid alert role, name, message or severity")
         if not self.bar.get("is_final", True):
             return
-        if len(self.alerts) >= 2000:
-            raise ValueError("alert event limit exceeded")
         event = {
             "name": name,
             "message": message,
@@ -506,6 +507,10 @@ class Context:
             self.alerts[-1] = event
         else:
             self.alerts.append(event)
+            # Keep the newest events: alert jobs and previews act on the
+            # latest bars, so a long history must not fail the run.
+            if len(self.alerts) > ALERT_LIMIT:
+                del self.alerts[0]
 
     def visual(self, kind: str, *, id: str | None = None, **data: Any) -> str:  # noqa: A002 - Public drawing and OHLC parameter names match their SDK fields.
         """Creates or replaces a bounded declarative visual object.

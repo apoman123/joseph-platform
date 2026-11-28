@@ -266,7 +266,7 @@ scripts. Built-in scripts are self-contained and import nothing but
 | Bars per run | 2 to 5,000 (chart studies, backtests) |
 | Plot series | 64 |
 | Persistent drawings | 500; per-bar visuals 16,000 |
-| Alert events per run | 2,000 |
+| Alert events per run | 2,000 newest (older events are dropped) |
 | Requests | 4 aliases, 500 bars each (5,000 intrabars) |
 | Your scripts in the runner | 10 s wall clock (operator setting, at most 30 s), 256 MiB, 1 CPU, no network |
 

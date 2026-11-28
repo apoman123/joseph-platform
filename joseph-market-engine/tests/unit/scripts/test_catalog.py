@@ -206,3 +206,30 @@ def test_catalog_ids_are_distinct_from_tenant_slugs() -> None:
     assert catalog.is_catalog_id("builtin:ema")
     assert catalog.is_catalog_id("plugin:pkg.one:echo")
     assert not catalog.is_catalog_id("my-ema")
+
+
+class Chatty(joseph_script.Alert):
+    """Raises one alert per bar; a fixture for the event limit."""
+
+    ID = "chatty"
+
+    def on_bar(self, ctx: worker.Context) -> None:
+        """Alerts on every bar.
+
+        Args:
+            ctx: Script context.
+        """
+        ctx.alert(f"bar {ctx.bar_index}", name="every-bar")
+
+
+def test_alert_limit_keeps_the_newest_events() -> None:
+    """Long runs keep the newest ALERT_LIMIT events instead of failing."""
+    count = worker.ALERT_LIMIT + 25
+    result = worker.run_class(
+        Chatty,
+        {"kind": "alert", "bars": _bars([1.0] * count), "inputs": {}},
+    )
+    alerts = result["alerts"]
+    assert len(alerts) == worker.ALERT_LIMIT
+    assert alerts[-1]["message"] == f"bar {count - 1}"
+    assert alerts[0]["message"] == "bar 25"
