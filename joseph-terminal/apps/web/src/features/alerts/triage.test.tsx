@@ -6,7 +6,7 @@
 
 /**
  * @fileoverview Tests for signal ranking (newest, R multiple, confluence,
- * age, distance to AOI) and local snooze/dismiss triage.
+ * age) and local snooze/dismiss triage.
  */
 
 import type {ReasonNode, Signal} from '@joseph/contracts';
@@ -18,7 +18,6 @@ import {
 } from '../trading/testing/fake-context';
 import {ALERTS_FEATURE, triageFromSettings} from './index';
 import {
-  aoiDistancePct,
   confluenceOf,
   isSnoozed,
   setDismissed,
@@ -96,21 +95,6 @@ describe('signal ranking', () => {
     expect(ids(sortSignals([a, b, c], 'rr'))).toEqual(['b', 'a', 'c']);
     expect(ids(sortSignals([a, b, c], 'confluence'))).toEqual(['b', 'a', 'c']);
     expect(ids(sortSignals([a, b, c], 'age'))).toEqual(['c', 'b', 'a']);
-    expect(
-      ids(sortSignals([a, b, c], 'distance', {a: 1.2, b: 0, c: null}))
-    ).toEqual(['b', 'a', 'c']);
-  });
-
-  it('measures distance to the nearest AOI, zero inside', () => {
-    expect(
-      aoiDistancePct(100, [
-        {lower: '98', upper: '99'},
-        {lower: '103', upper: '104'},
-      ])
-    ).toBeCloseTo(1);
-    expect(aoiDistancePct(100, [{lower: '99', upper: '101'}])).toBe(0);
-    expect(aoiDistancePct(null, [{lower: '1', upper: '2'}])).toBeNull();
-    expect(aoiDistancePct(100, [])).toBeNull();
   });
 
   it('snoozes until a time, expires old snoozes and dismisses', () => {

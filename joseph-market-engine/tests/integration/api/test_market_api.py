@@ -150,12 +150,6 @@ def test_demo_endpoints_are_contract_valid(
             "market.schema.json",
             "OrderBook",
         ),
-        (
-            "/v1/market/qualification",
-            {},
-            "qualification.schema.json",
-            "QualificationReport",
-        ),
     ]
     for path, params, schema, definition in checks:
         response = demo_client.get(path, params=params)
@@ -181,24 +175,11 @@ def test_candles_carry_demo_provenance(
     assert len(body["candles"]) == 20
 
 
-def test_qualification_reports_gate_evidence(
+def test_qualification_route_is_gone(
     demo_client: testclient.TestClient,
 ) -> None:
-    """Every record exposes observed values, thresholds and reasons."""
-    body = demo_client.get(
-        "/v1/market/qualification", params={"venue": "mock"}
-    ).json()
-    statuses = {r["instrument_id"]: r for r in body["records"]}
-    assert statuses["mock:perp:BTCUSD"]["status"] == "QUALIFIED"
-    assert statuses["mock:perp:ETHUSD"]["risk_tags"] == ["WATCH"]
-    rejected = statuses["mock:perp:SOLUSD"]
-    assert rejected["status"] == "REJECTED"
-    spread = next(g for g in rejected["gates"] if g["gate"] == "SPREAD_PCT")
-    assert spread["passed"] is False and spread["comparator"] == "lt"
-    only = demo_client.get(
-        "/v1/market/qualification", params={"status": "REJECTED"}
-    ).json()
-    assert [r["instrument_id"] for r in only["records"]] == ["mock:perp:SOLUSD"]
+    """Qualification runs as the built-in Liquidity qualification filter."""
+    assert demo_client.get("/v1/market/qualification").status_code == 404
 
 
 def test_validation_and_not_found_errors(
@@ -604,7 +585,7 @@ def test_ws_resume_replays_or_requires_snapshot(
     def flood() -> None:
         """Publishes five envelopes more than the hub retains."""
         for i in range(demo_container.settings.stream_retention + 5):
-            hub.publish("qualification", "qualification.changed", {"i": i})
+            hub.publish("feed_health", "feed.health", {"i": i})
 
     demo_client.portal.call(flood)  # type: ignore[union-attr]  # the portal is set while the client is open
     with demo_client.websocket_connect("/v1/stream/market") as ws:

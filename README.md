@@ -1,6 +1,6 @@
 # Joseph trading platform
 
-Joseph is a self-hosted platform for charting, researching and trading crypto perpetuals, Taiwan and US stocks and ETFs, with US Treasury yields as reference data. It has three parts: a browser charting terminal, a market engine (data, screening, indicator plugins, strategies, alerts, backtests) and an execution engine (risk gateway, order management, paper, shadow and live trading, audit, kill switch).
+Joseph is a self-hosted platform for charting, researching and trading crypto perpetuals, Taiwan and US stocks and ETFs, with US Treasury yields as reference data. It has three parts: a browser charting terminal, a market engine (data, screener filters, indicator plugins, strategies, alerts, backtests) and an execution engine (risk gateway, order management, paper, shadow and live trading, audit, kill switch).
 
 > **Risk disclaimer.** Joseph is research software, provided as is under the AGPL-3.0-only licence with no warranty. Live trading can lose money. The LIVE adapters are tested only against mocked venues and fake broker clients, never with real orders. Nothing in this repository is financial advice.
 
@@ -23,7 +23,7 @@ Futures and options are not supported.
 | Path | Port | What it is |
 |---|---|---|
 | `joseph-terminal/` | 3000 | Next.js terminal: charts, drawing tools, screener, Python strategy panel, order tickets. Renders engine outputs; holds only a session token. Own licence; can become a separate repository |
-| `joseph-market-engine/` | 8000 | FastAPI service: market data, screening, indicators (built-ins and plugin packages), Python scripts and strategy activations, signals, alerts, backtests. Holds no trading credentials |
+| `joseph-market-engine/` | 8000 | FastAPI service: market data, screener filters and alert conditions, indicators (built-ins and plugin packages), Python scripts and strategy activations, signals, alerts, backtests. Holds no trading credentials |
 | `joseph-execution-engine/` | 8100 | FastAPI service: accounts and an encrypted credential vault, risk gateway, order management system (OMS), reconciliation, audit log, kill switch. The only holder of trading credentials |
 | `system-tests/` | | Cross-service tests that boot both engines |
 | `deploy/` | | Docker Compose stack for the three services (plus optional IB Gateway) |

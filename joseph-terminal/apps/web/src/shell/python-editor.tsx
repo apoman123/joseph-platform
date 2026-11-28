@@ -655,10 +655,11 @@ export function PythonEditor({
       )}
       {['alert', 'indicator', 'strategy'].includes(kind) && (
         <fieldset>
-          <legend>Live Python alerts</legend>
+          <legend>Live alerts on this script</legend>
           <p className={styles.notice}>
             Enabling pins this saved version and evaluates only future closed
             bars. Browser/UI is included; select external destinations below.
+            Built-in alert conditions are in the Alert manager.
           </p>
           <div className={styles.toolbar}>
             {subscriptions
@@ -702,56 +703,62 @@ export function PythonEditor({
               Enable new live alert
             </button>
           </div>
-          {alerts.map(job => (
-            <div key={job.job_id} className={styles.row}>
-              <span>
-                {job.script_id} v{job.version} · {job.instrument_id} {job.tf} ·{' '}
-                {job.enabled ? 'Enabled' : 'Disabled'} · {job.emitted} alerts{' '}
-                {job.last_error}
-              </span>
-              <button
-                className="j-btn"
-                disabled={busy}
-                onClick={() =>
-                  void run(async () => {
-                    const {
-                      job_id,
-                      created_at_ms,
-                      last_processed_ms,
-                      last_error,
-                      last_checked_ms,
-                      emitted,
-                      ...body
-                    } = job;
-                    void created_at_ms;
-                    void last_processed_ms;
-                    void last_error;
-                    void last_checked_ms;
-                    void emitted;
-                    await state.client.saveAlert(
-                      {...body, enabled: !job.enabled},
-                      job_id
-                    );
-                    await load();
-                  })
-                }
-              >
-                {job.enabled ? 'Disable' : 'Enable'}
-              </button>
-              <button
-                className="j-btn"
-                disabled={busy}
-                onClick={() =>
-                  void run(async () => {
-                    await state.client.deleteAlert(job.job_id);
-                    await load();
-                  })
-                }
-              >
-                Delete alert
-              </button>
-            </div>
-          ))}
+          {alerts
+            .filter(job => !job.script_id.includes(':'))
+            .map(job => (
+              <div key={job.job_id} className={styles.row}>
+                <span>
+                  {job.script_id} v{job.version} · {job.instrument_id} {job.tf}{' '}
+                  · {job.enabled ? 'Enabled' : 'Disabled'} · {job.emitted}{' '}
+                  alerts {job.last_error}
+                </span>
+                <button
+                  className="j-btn"
+                  disabled={busy}
+                  onClick={() =>
+                    void run(async () => {
+                      const {
+                        job_id,
+                        created_at_ms,
+                        last_processed_ms,
+                        last_error,
+                        last_checked_ms,
+                        emitted,
+                        source_hash,
+                        title,
+                        ...body
+                      } = job;
+                      void source_hash;
+                      void title;
+                      void created_at_ms;
+                      void last_processed_ms;
+                      void last_error;
+                      void last_checked_ms;
+                      void emitted;
+                      await state.client.saveAlert(
+                        {...body, enabled: !job.enabled},
+                        job_id
+                      );
+                      await load();
+                    })
+                  }
+                >
+                  {job.enabled ? 'Disable' : 'Enable'}
+                </button>
+                <button
+                  className="j-btn"
+                  disabled={busy}
+                  onClick={() =>
+                    void run(async () => {
+                      await state.client.deleteAlert(job.job_id);
+                      await load();
+                    })
+                  }
+                >
+                  Delete alert
+                </button>
+              </div>
+            ))}
         </fieldset>
       )}
       {busy && <p role="status">Working…</p>}

@@ -220,8 +220,33 @@ class Library(Script, abc.ABC):
         ...
 
 
+FILTER_METRICS: tuple[str, ...] = ("order_book", "open_interest", "funding")
+"""Market data a filter may declare in ``Filter.METRICS``.
+
+* ``order_book``: ``ctx.snapshot["order_book"]``, a contract ``OrderBook``
+  of up to one hundred levels per side, or None when unavailable;
+* ``open_interest`` and ``funding``: fetched for derivatives when the bulk
+  snapshot lacks them; they stay None when the venue has none.
+"""
+
+
+class Unavailable(Exception):  # noqa: N818 - Public SDK name reads as a scan outcome, not a failure.
+    """Missing or stale data that keeps a filter from deciding.
+
+    ``Filter.matches`` raises it instead of guessing; the scanner reports
+    the instrument as unavailable with the message, never as a match.
+    """
+
+
 class Filter(Script, abc.ABC):
-    """Base class for Python market-universe filtering."""
+    """Base class for Python market-universe filtering.
+
+    Attributes:
+        METRICS: Data beyond the snapshot that the scanner loads before
+            ``matches`` (names from ``FILTER_METRICS``).
+    """
+
+    METRICS: ClassVar[tuple[str, ...]] = ()
 
     @abc.abstractmethod
     def matches(self, ctx: worker.Context) -> bool:
@@ -232,7 +257,8 @@ class Filter(Script, abc.ABC):
 
         Returns:
             True to include the instrument, False to exclude it. Missing data
-            is reported separately by the scanner and never inferred as a match.
+            is reported separately by the scanner and never inferred as a
+            match: raise ``Unavailable`` when required data is missing.
         """
         ...
 

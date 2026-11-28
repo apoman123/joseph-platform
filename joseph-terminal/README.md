@@ -19,7 +19,7 @@ Two external services do the work over HTTP and WebSocket, following the version
 
 | Service | Provides |
 |---|---|
-| Market engine | Instruments, candles, indicators, screening, strategies, signals, backtests |
+| Market engine | Instruments, candles, indicators, screener scans, alert jobs, strategies, signals, backtests |
 | Execution engine | Accounts, orders, risk gateway, positions, kill switch, audit |
 
 Set their URLs at build time (Next.js inlines them; see `apps/web/.env.example`):

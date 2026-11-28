@@ -38,6 +38,7 @@ import {
 } from 'react';
 import {useStore, type WebFeatureContext} from '../../shell/react-bindings';
 import {usePolling} from '../trading/ui/hooks';
+import {useScanJob} from '../trading/ui/scan';
 import {
   EmptyState,
   FeedBadge,
@@ -128,9 +129,55 @@ export function moveItem<T>(
   return next;
 }
 
+/** Re-scan interval of the qualified list. */
+const QUALIFIED_REFRESH_MS = 300_000;
+
+/** Qualified perpetuals and the state of their scan. */
+interface QualifiedList {
+  /** Matching instrument ids, most active first. */
+  ids: string[];
+  /** Message of a failed scan, or null. */
+  error: string | null;
+  /** Whether the first scan is still running. */
+  loading: boolean;
+}
+
 /**
- * Renders the watchlist: the user's list or the engine's qualified
- * perpetuals, with prices polled every 5 s.
+ * Scans the perpetuals with the built-in Liquidity qualification filter
+ * while enabled, again five minutes after each scan finished.
+ * @param ctx Feature context.
+ * @param enabled Whether the qualified list is shown.
+ * @return Matching ids and scan state.
+ */
+function useQualified(ctx: WebFeatureContext, enabled: boolean): QualifiedList {
+  const scan = useScanJob(ctx.clients.scripts);
+  const {start, running, job} = scan;
+  useEffect(() => {
+    if (!enabled || running) return;
+    const run = () =>
+      void start({
+        market_type: 'perp',
+        order_by: 'turnover',
+        max_symbols: 200,
+        conditions: [{script_id: 'builtin:liquidity-qualification'}],
+      });
+    if (!job) {
+      run();
+      return;
+    }
+    const timer = setTimeout(run, QUALIFIED_REFRESH_MS);
+    return () => void clearTimeout(timer);
+  }, [enabled, running, job, start]);
+  return {
+    ids: (job?.matches ?? []).map(match => String(match.instrument_id)),
+    error: scan.error ?? job?.error ?? null,
+    loading: !job || (running && !(job.matches ?? []).length),
+  };
+}
+
+/**
+ * Renders the watchlist: the user's list or the perpetuals that pass the
+ * built-in Liquidity qualification filter, with prices polled every 5 s.
  * @param props Feature context and the persisted items and preferences.
  * @return Panel element.
  */
@@ -142,18 +189,8 @@ export function WatchlistPanel({
   const mine = useStore(items);
   const view = useStore(prefs);
   const qualifiedSource = view.source === 'qualified';
-  const qualified = usePolling(
-    async () =>
-      qualifiedSource
-        ? (await ctx.clients.market.getQualification(undefined, 'QUALIFIED'))
-            .records
-        : [],
-    `qualified|${qualifiedSource}`,
-    60_000
-  );
-  const qualifiedIds = (qualified.data ?? [])
-    .filter(record => record.status === 'QUALIFIED')
-    .map(record => record.instrument_id);
+  const qualified = useQualified(ctx, qualifiedSource);
+  const qualifiedIds = qualified.ids;
   const list = qualifiedSource ? qualifiedIds : mine;
   const [showColumns, setShowColumns] = useState(false);
   const selection = useStore(ctx.selection);
@@ -314,8 +351,9 @@ export function WatchlistPanel({
         )}
         {qualifiedSource && (
           <p className={styles.hint}>
-            Exact-venue perpetuals the engine currently marks Qualified. Missing
-            data is never counted as qualified.
+            Exact-venue perpetuals that pass the built-in Liquidity
+            qualification filter, scanned on the market engine every five
+            minutes. Missing data is never counted as qualified.
           </p>
         )}
         {qualified.error && qualifiedSource && (
@@ -379,8 +417,8 @@ export function WatchlistPanel({
           qualifiedSource ? (
             <EmptyState title="No qualified perpetuals">
               {qualified.loading
-                ? 'Loading the qualification results…'
-                : 'The engine reports no instrument as Qualified right now.'}
+                ? 'Scanning the perpetuals…'
+                : 'No perpetual passes the Liquidity qualification filter right now.'}
             </EmptyState>
           ) : (
             <EmptyState title="Your watchlist is empty">

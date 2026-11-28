@@ -327,7 +327,7 @@ export type KillSwitchScope = 'GLOBAL' | 'ACCOUNT' | 'STRATEGY';
 export type InstrumentStatus =
   'TRADING' | 'HALTED' | 'PRE_LAUNCH' | 'DELISTED' | 'UNKNOWN';
 /**
- * Asset class used to select qualification thresholds.
+ * Asset class; selects the thresholds of the built-in liquidity qualification filter.
  *
  * This interface was referenced by `JosephContracts`'s JSON-Schema
  * via the `definition` "AssetClass".
@@ -377,10 +377,12 @@ export type LastCheckedMs = number | null;
 export type LastError1 = string | null;
 export type LastProcessedMs1 = number;
 export type ScriptId = string;
+export type SourceHash = string | null;
 /**
  * @maxItems 50
  */
 export type SubscriptionIds = string[];
+export type Title = string;
 export type Version = number;
 export type Enabled1 = boolean;
 export type HistoryBars1 = number;
@@ -396,7 +398,7 @@ export type Maximum = number | null;
 export type Minimum = number | null;
 export type Options = JsonValue[] | null;
 export type Step = number | null;
-export type Title = string;
+export type Title1 = string;
 export type Tooltip = string;
 export type Failures = {
   [k: string]: string | null | undefined;
@@ -405,6 +407,7 @@ export type Category = string;
 export type Description = string;
 export type Enabled2 = boolean;
 export type Kind = 'indicator' | 'strategy' | 'library' | 'filter' | 'alert';
+export type Metrics = string[];
 export type Origin = 'builtin' | 'plugin';
 export type Overlay = boolean;
 export type Package = string | null;
@@ -413,8 +416,8 @@ export type ScriptId2 = string;
 export type ShortTitle = string;
 export type Source = string | null;
 export type SourceAvailable = boolean;
-export type SourceHash = string;
-export type Title1 = string;
+export type SourceHash1 = string;
+export type Title2 = string;
 export type Scripts = CatalogScript[];
 export type Available = boolean;
 export type Currency = string;
@@ -478,10 +481,93 @@ export type Name1 = string;
  * @maxItems 5000
  */
 export type Points = PlotPoint[];
+export type ScriptId4 = string;
+export type Version3 = number | null;
+export type ScriptId5 = string;
+export type SourceHash2 = string;
+export type Title3 = string;
+export type Version4 = number;
+/**
+ * @maxItems 10
+ */
+export type Conditions =
+  | []
+  | [ScanCondition]
+  | [ScanCondition, ScanCondition]
+  | [ScanCondition, ScanCondition, ScanCondition]
+  | [ScanCondition, ScanCondition, ScanCondition, ScanCondition]
+  | [ScanCondition, ScanCondition, ScanCondition, ScanCondition, ScanCondition]
+  | [
+      ScanCondition,
+      ScanCondition,
+      ScanCondition,
+      ScanCondition,
+      ScanCondition,
+      ScanCondition,
+    ]
+  | [
+      ScanCondition,
+      ScanCondition,
+      ScanCondition,
+      ScanCondition,
+      ScanCondition,
+      ScanCondition,
+      ScanCondition,
+    ]
+  | [
+      ScanCondition,
+      ScanCondition,
+      ScanCondition,
+      ScanCondition,
+      ScanCondition,
+      ScanCondition,
+      ScanCondition,
+      ScanCondition,
+    ]
+  | [
+      ScanCondition,
+      ScanCondition,
+      ScanCondition,
+      ScanCondition,
+      ScanCondition,
+      ScanCondition,
+      ScanCondition,
+      ScanCondition,
+      ScanCondition,
+    ]
+  | [
+      ScanCondition,
+      ScanCondition,
+      ScanCondition,
+      ScanCondition,
+      ScanCondition,
+      ScanCondition,
+      ScanCondition,
+      ScanCondition,
+      ScanCondition,
+      ScanCondition,
+    ];
 export type HistoryBars2 = number;
 export type MaxSymbols = number;
+/**
+ * @maxItems 3
+ */
+export type Metrics2 =
+  | []
+  | ['order_book' | 'open_interest' | 'funding']
+  | [
+      'order_book' | 'open_interest' | 'funding',
+      'order_book' | 'open_interest' | 'funding',
+    ]
+  | [
+      'order_book' | 'open_interest' | 'funding',
+      'order_book' | 'open_interest' | 'funding',
+      'order_book' | 'open_interest' | 'funding',
+    ];
+export type OrderBy = 'symbol' | 'turnover';
 export type Query = string;
-export type Version3 = number | null;
+export type Version5 = number | null;
+export type Conditions1 = ScanConditionPin[];
 export type CreatedAtMs1 = number;
 export type Error1 = string | null;
 export type Errors = {
@@ -492,13 +578,16 @@ export type Matches = {
   [k: string]: JsonValue | undefined;
 }[];
 export type Scanned = number;
-export type ScriptId4 = string;
-export type SourceHash1 = string;
+export type ScriptId6 = string;
+export type SourceHash3 = string;
 export type Status =
   'pending' | 'running' | 'complete' | 'failed' | 'cancelled';
 export type Total = number;
+export type Unavailable = {
+  [k: string]: string | undefined;
+}[];
 export type UniverseCount1 = number;
-export type Version4 = number;
+export type Version6 = number;
 export type Message = string;
 export type Name2 = string;
 export type Severity = 'INFO' | 'WARNING' | 'ENTRY' | 'CRITICAL';
@@ -567,8 +656,8 @@ export type Overlay1 = boolean;
  */
 export type Plots = PlotSeries[];
 export type PositionSize = number;
-export type ScriptId5 = string;
-export type SourceHash2 = string;
+export type ScriptId7 = string;
+export type SourceHash4 = string;
 export type Tf = string;
 export type Direction1 = 'LONG' | 'SHORT';
 export type EntryPrice = number;
@@ -583,14 +672,14 @@ export type ReturnPct = number | null;
  * @maxItems 4000
  */
 export type Trades = StrategyTrade[];
-export type Version5 = number;
+export type Version7 = number;
 /**
  * @maxItems 500
  */
 export type Visuals = ScriptVisual[];
-export type ScriptId6 = string;
-export type ScriptId7 = string;
-export type Version6 = number | null;
+export type ScriptId8 = string;
+export type ScriptId9 = string;
+export type Version8 = number | null;
 export type Results = ScriptBatchEntry[];
 export type CommissionBps = number;
 export type FromMs = number | null;
@@ -759,7 +848,7 @@ export type Runs =
     ];
 export type SlippageBps = number;
 export type ToMs = number | null;
-export type Version7 = number | null;
+export type Version9 = number | null;
 export type WindowFromMs = number | null;
 export type ExpectedVersion = number | null;
 export type Kind3 = 'indicator' | 'strategy' | 'library' | 'filter' | 'alert';
@@ -772,7 +861,7 @@ export type Tf1 = Timeframe | 'auto';
 export type TfInput = string;
 export type Unless = '' | 'quote_turnover' | 'trade_count' | 'taker_buy_volume';
 export type UnlessInput = string;
-export type ScriptId8 = string;
+export type ScriptId10 = string;
 export type Source2 = string;
 export type CommissionBps1 = number;
 export type FromMs1 = number | null;
@@ -782,17 +871,17 @@ export type InstrumentId7 = string;
 export type Limit3 = number;
 export type SlippageBps1 = number;
 export type ToMs1 = number | null;
-export type Version8 = number | null;
+export type Version10 = number | null;
 export type WindowFromMs1 = number | null;
 export type CreatedAtMs2 = number;
 export type ExpectedVersion1 = number | null;
 export type Kind4 = 'indicator' | 'strategy' | 'library' | 'filter' | 'alert';
 export type Name4 = string;
 export type Overlay3 = boolean;
-export type ScriptId9 = string;
+export type ScriptId11 = string;
 export type Source3 = string;
-export type SourceHash3 = string;
-export type Version9 = number;
+export type SourceHash5 = string;
+export type Version11 = number;
 export type ActivationId = string;
 /**
  * @maxItems 8
@@ -1015,12 +1104,12 @@ export type LastCheckedMs1 = number | null;
 export type LastError2 = string | null;
 export type Mode = 'ALERT_ONLY' | 'PAPER' | 'SHADOW' | 'AUTO_LIVE';
 export type Name5 = string;
-export type ScriptId10 = string;
-export type SourceHash4 = string;
+export type ScriptId12 = string;
+export type SourceHash6 = string;
 export type State = 'ACTIVE' | 'PAUSED';
 export type StrategyVersionId = string;
 export type UpdatedAtMs = number;
-export type Version10 = number;
+export type Version12 = number;
 /**
  * @maxItems 8
  */
@@ -1237,40 +1326,11 @@ export type InstrumentIds1 =
       string,
     ];
 export type Mode1 = 'ALERT_ONLY' | 'PAPER' | 'SHADOW' | 'AUTO_LIVE';
-export type ScriptId11 = string;
-export type Version11 = number | null;
+export type ScriptId13 = string;
+export type Version13 = number | null;
 export type Activations = StrategyActivation[];
 export type ForwardingEnabled = boolean;
 export type RuntimeEnabled = boolean;
-/**
- * This interface was referenced by `JosephContracts`'s JSON-Schema
- * via the `definition` "QualificationStatus".
- */
-export type QualificationStatus =
-  'QUALIFIED' | 'REJECTED' | 'INSUFFICIENT_DATA';
-/**
- * This interface was referenced by `JosephContracts`'s JSON-Schema
- * via the `definition` "RiskTag".
- */
-export type RiskTag = 'WATCH' | 'HIGH_RISK';
-/**
- * UNKNOWN: funding applies but is unavailable. NOT_APPLICABLE: the instrument has no funding (exchange-listed securities).
- *
- * This interface was referenced by `JosephContracts`'s JSON-Schema
- * via the `definition` "FundingRisk".
- */
-export type FundingRisk =
-  'NORMAL' | 'WATCH' | 'HIGH_RISK' | 'UNKNOWN' | 'NOT_APPLICABLE';
-/**
- * This interface was referenced by `JosephContracts`'s JSON-Schema
- * via the `definition` "GateName".
- */
-export type GateName =
-  | 'TURNOVER_24H'
-  | 'OPEN_INTEREST_USD'
-  | 'TURNOVER_OI_RATIO'
-  | 'SPREAD_PCT'
-  | 'SLIPPAGE_50K_PCT';
 /**
  * This interface was referenced by `JosephContracts`'s JSON-Schema
  * via the `definition` "TriState".
@@ -1319,7 +1379,6 @@ export type StreamEventType =
   | 'aoi.removed'
   | 'structure.event'
   | 'feed.health'
-  | 'qualification.changed'
   | 'signal.created'
   | 'signal.updated'
   | 'order.updated'
@@ -1338,7 +1397,6 @@ export type StreamEventType =
 export type ChannelName =
   | 'candles'
   | 'feed_health'
-  | 'qualification'
   | 'signals'
   | 'orders'
   | 'fills'
@@ -2285,6 +2343,9 @@ export interface ActivationInstrumentStatus {
  *     last_error: Visible missing-data, provider or user-code failure, if any.
  *     last_checked_ms: Last evaluation attempt in UTC epoch milliseconds.
  *     emitted: Number of distinct conditions recorded for this job.
+ *     source_hash: Source identity pinned at save; a catalog script whose
+ *         installed source changed is not evaluated until saved again.
+ *     title: Display name of the condition script at save.
  *
  * This interface was referenced by `JosephContracts`'s JSON-Schema
  * via the `definition` "AlertJob".
@@ -2301,8 +2362,10 @@ export interface AlertJob {
   last_error?: LastError1;
   last_processed_ms: LastProcessedMs1;
   script_id: ScriptId;
+  source_hash?: SourceHash;
   subscription_ids?: SubscriptionIds;
   tf: Timeframe;
+  title?: Title;
   version: Version;
 }
 export interface Inputs {
@@ -2365,7 +2428,7 @@ export interface CatalogInput {
   minimum: Minimum;
   options: Options;
   step: Step;
-  title: Title;
+  title: Title1;
   tooltip: Tooltip;
 }
 /**
@@ -2402,6 +2465,7 @@ export interface CatalogList {
  *     source_hash: Identity of the installed code.
  *     enabled: False when disabled by configuration.
  *     source: Public source text on the single-script route, else None.
+ *     metrics: Market data a filter loads beyond the snapshot.
  *
  * This interface was referenced by `JosephContracts`'s JSON-Schema
  * via the `definition` "CatalogScript".
@@ -2412,6 +2476,7 @@ export interface CatalogScript {
   enabled: Enabled2;
   inputs: Inputs2;
   kind: Kind;
+  metrics?: Metrics;
   origin: Origin;
   overlay: Overlay;
   package: Package;
@@ -2421,8 +2486,8 @@ export interface CatalogScript {
   short_title: ShortTitle;
   source?: Source;
   source_available: SourceAvailable;
-  source_hash: SourceHash;
-  title: Title1;
+  source_hash: SourceHash1;
+  title: Title2;
 }
 export interface Inputs2 {
   [k: string]: CatalogInput | undefined;
@@ -2622,12 +2687,12 @@ export interface HeatmapTile {
   industry?: Industry;
   instrument_id?: InstrumentId3;
   key: Key;
-  metrics?: Metrics;
+  metrics?: Metrics1;
   name?: Name;
   price?: Price;
   symbol: Symbol;
 }
-export interface Metrics {
+export interface Metrics1 {
   [k: string]: string | undefined;
 }
 /**
@@ -2675,6 +2740,49 @@ export interface PlotSeries {
   points: Points;
 }
 /**
+ * One filter of a composed scan; an instrument must match every one.
+ *
+ * Attributes:
+ *     script_id: Owned Filter slug, ``builtin:<id>`` or a plugin id.
+ *     version: Tenant version, latest when omitted; catalog scripts pin
+ *         their installed source hash instead.
+ *     inputs: JSON values overriding the filter's defaults.
+ *
+ * This interface was referenced by `JosephContracts`'s JSON-Schema
+ * via the `definition` "ScanCondition".
+ */
+export interface ScanCondition {
+  inputs?: Inputs3;
+  script_id: ScriptId4;
+  version?: Version3;
+}
+export interface Inputs3 {
+  [k: string]: JsonValue | undefined;
+}
+/**
+ * A scan condition resolved and pinned at submission.
+ *
+ * Attributes:
+ *     script_id: Filter identifier.
+ *     version: Tenant version, or 0 for a catalog script.
+ *     source_hash: Exact source identity evaluated.
+ *     title: Display name of the filter.
+ *     inputs: Effective inputs (defaults plus overrides).
+ *
+ * This interface was referenced by `JosephContracts`'s JSON-Schema
+ * via the `definition` "ScanConditionPin".
+ */
+export interface ScanConditionPin {
+  inputs?: Inputs4;
+  script_id: ScriptId5;
+  source_hash: SourceHash2;
+  title: Title3;
+  version: Version4;
+}
+export interface Inputs4 {
+  [k: string]: JsonValue | undefined;
+}
+/**
  * Selects a real market universe for an isolated Python filter job.
  *
  * Attributes:
@@ -2686,21 +2794,31 @@ export interface PlotSeries {
  *     history_bars: Closed bars per instrument; zero uses snapshots only.
  *     tf: Resolution used when historical bars are requested.
  *     inputs: JSON values overriding the pinned filter's defaults.
+ *     conditions: Further filters an instrument must also match (AND);
+ *         the only filters of a scan submitted without a path script.
+ *     metrics: Data to load beyond the snapshot; catalog filters add the
+ *         metrics they declare.
+ *     order_by: "symbol" scans instruments by id; "turnover" loads every
+ *         quote first and scans the highest 24h turnover first, so
+ *         max_symbols keeps the most active instruments.
  *
  * This interface was referenced by `JosephContracts`'s JSON-Schema
  * via the `definition` "ScanInput".
  */
 export interface ScanInput {
+  conditions?: Conditions;
   history_bars?: HistoryBars2;
-  inputs?: Inputs3;
+  inputs?: Inputs5;
   market_type?: MarketType | null;
   max_symbols?: MaxSymbols;
+  metrics?: Metrics2;
+  order_by?: OrderBy;
   query?: Query;
   tf?: Timeframe;
   venue?: Venue | null;
-  version?: Version3;
+  version?: Version5;
 }
-export interface Inputs3 {
+export interface Inputs5 {
   [k: string]: JsonValue | undefined;
 }
 /**
@@ -2716,27 +2834,33 @@ export interface Inputs3 {
  *         bound.
  *     scanned: Instruments evaluated or reported unavailable so far.
  *     matches: Matching instrument records with real source snapshots.
- *     errors: Per-instrument missing-data or user-code errors.
+ *     errors: Per-instrument filter failures (script errors).
  *     error: Job-level error, otherwise None.
  *     source_hash: Immutable source/dependency configuration hash.
  *     universe_count: Total eligible market instruments before max_symbols.
+ *     conditions: Every pinned filter, in evaluation order; the first is
+ *         also described by script_id, version and source_hash.
+ *     unavailable: Instruments without the data a filter needs (missing
+ *         quote, history or metric), with the reason; never matches.
  *
  * This interface was referenced by `JosephContracts`'s JSON-Schema
  * via the `definition` "ScanJob".
  */
 export interface ScanJob {
+  conditions?: Conditions1;
   created_at_ms: CreatedAtMs1;
   error?: Error1;
   errors?: Errors;
   job_id: JobId1;
   matches?: Matches;
   scanned?: Scanned;
-  script_id: ScriptId4;
-  source_hash: SourceHash1;
+  script_id: ScriptId6;
+  source_hash: SourceHash3;
   status: Status;
   total?: Total;
+  unavailable?: Unavailable;
   universe_count?: UniverseCount1;
-  version: Version4;
+  version: Version6;
 }
 /**
  * One user-authored alert condition matched on a source bar.
@@ -2771,7 +2895,7 @@ export interface ScriptAlertEvent {
 export interface ScriptBatchEntry {
   error?: Error2;
   result?: ScriptResult | null;
-  script_id: ScriptId6;
+  script_id: ScriptId8;
 }
 /**
  * Reproducible plots and optional simulated strategy performance.
@@ -2824,17 +2948,17 @@ export interface ScriptResult {
   instrument_id: InstrumentId4;
   kind: Kind2;
   matched?: Matched;
-  metrics: Metrics1;
+  metrics: Metrics3;
   orders?: Orders;
   overlay: Overlay1;
   plot_styles?: PlotStyles;
   plots: Plots;
   position_size?: PositionSize;
-  script_id: ScriptId5;
-  source_hash: SourceHash2;
+  script_id: ScriptId7;
+  source_hash: SourceHash4;
   tf: Tf;
   trades?: Trades;
-  version: Version5;
+  version: Version7;
   visuals?: Visuals;
 }
 export interface BarCloses {
@@ -2882,7 +3006,7 @@ export interface SimulatedFill {
   side: Side;
   time_ms: TimeMs2;
 }
-export interface Metrics1 {
+export interface Metrics3 {
   [k: string]: number | undefined;
 }
 /**
@@ -2963,11 +3087,11 @@ export interface StrategyTrade {
  * via the `definition` "ScriptBatchItem".
  */
 export interface ScriptBatchItem {
-  inputs?: Inputs4;
-  script_id: ScriptId7;
-  version?: Version6;
+  inputs?: Inputs6;
+  script_id: ScriptId9;
+  version?: Version8;
 }
-export interface Inputs4 {
+export interface Inputs6 {
   [k: string]: JsonValue | undefined;
 }
 /**
@@ -2999,17 +3123,17 @@ export interface ScriptBatchRun {
   from_ms?: FromMs;
   include_open?: IncludeOpen;
   initial_equity?: InitialEquity;
-  inputs?: Inputs5;
+  inputs?: Inputs7;
   instrument_id: InstrumentId5;
   limit?: Limit1;
   runs: Runs;
   slippage_bps?: SlippageBps;
   tf: Timeframe;
   to_ms?: ToMs;
-  version?: Version7;
+  version?: Version9;
   window_from_ms?: WindowFromMs;
 }
-export interface Inputs5 {
+export interface Inputs7 {
   [k: string]: JsonValue | undefined;
 }
 /**
@@ -3037,7 +3161,7 @@ export interface ScriptInput {
   name: Name3;
   overlay?: Overlay2;
   requests?: Requests1;
-  script_id: ScriptId8;
+  script_id: ScriptId10;
   source: Source2;
 }
 export interface Defaults1 {
@@ -3103,16 +3227,16 @@ export interface ScriptRun {
   from_ms?: FromMs1;
   include_open?: IncludeOpen1;
   initial_equity?: InitialEquity1;
-  inputs?: Inputs6;
+  inputs?: Inputs8;
   instrument_id: InstrumentId7;
   limit?: Limit3;
   slippage_bps?: SlippageBps1;
   tf: Timeframe;
   to_ms?: ToMs1;
-  version?: Version8;
+  version?: Version10;
   window_from_ms?: WindowFromMs1;
 }
-export interface Inputs6 {
+export interface Inputs8 {
   [k: string]: JsonValue | undefined;
 }
 /**
@@ -3135,10 +3259,10 @@ export interface ScriptVersion {
   name: Name4;
   overlay?: Overlay3;
   requests?: Requests2;
-  script_id: ScriptId9;
+  script_id: ScriptId11;
   source: Source3;
-  source_hash: SourceHash3;
-  version: Version9;
+  source_hash: SourceHash5;
+  version: Version11;
 }
 export interface Defaults2 {
   [k: string]: JsonValue | undefined;
@@ -3178,22 +3302,22 @@ export interface StrategyActivation {
   created_at_ms: CreatedAtMs3;
   emitted?: Emitted1;
   history_bars?: HistoryBars3;
-  inputs?: Inputs7;
+  inputs?: Inputs9;
   instrument_ids: InstrumentIds;
   instruments?: Instruments;
   last_checked_ms?: LastCheckedMs1;
   last_error?: LastError2;
   mode?: Mode;
   name: Name5;
-  script_id: ScriptId10;
-  source_hash: SourceHash4;
+  script_id: ScriptId12;
+  source_hash: SourceHash6;
   state: State;
   strategy_version_id: StrategyVersionId;
   tf: Timeframe;
   updated_at_ms: UpdatedAtMs;
-  version?: Version10;
+  version?: Version12;
 }
-export interface Inputs7 {
+export interface Inputs9 {
   [k: string]: JsonValue | undefined;
 }
 export interface Instruments {
@@ -3221,14 +3345,14 @@ export interface Instruments {
 export interface StrategyActivationInput {
   channels?: Channels1;
   history_bars?: HistoryBars4;
-  inputs?: Inputs8;
+  inputs?: Inputs10;
   instrument_ids: InstrumentIds1;
   mode?: Mode1;
-  script_id: ScriptId11;
+  script_id: ScriptId13;
   tf: Timeframe;
-  version?: Version11;
+  version?: Version13;
 }
-export interface Inputs8 {
+export interface Inputs10 {
   [k: string]: JsonValue | undefined;
 }
 /**
@@ -3247,65 +3371,6 @@ export interface StrategyActivationList {
   activations: Activations;
   forwarding_enabled: ForwardingEnabled;
   runtime_enabled: RuntimeEnabled;
-}
-/**
- * One hard gate with the observed value, threshold and outcome. passed=null means the value was missing or stale.
- *
- * This interface was referenced by `JosephContracts`'s JSON-Schema
- * via the `definition` "GateResult".
- */
-export interface GateResult {
-  gate: GateName;
-  observed: DecimalString | null;
-  threshold: DecimalString;
-  comparator: 'gt' | 'lt';
-  passed: boolean | null;
-  /**
-   * Currency of turnover thresholds is the listing currency (TWD on TWSE).
-   */
-  unit: 'USD' | 'TWD' | 'ratio' | 'pct';
-  as_of_ms?: TimestampMs | null;
-  reason: string;
-}
-/**
- * This interface was referenced by `JosephContracts`'s JSON-Schema
- * via the `definition` "FundingAssessment".
- */
-export interface FundingAssessment {
-  normalized_8h_pct: DecimalString | null;
-  interval_hours?: number | null;
-  risk: FundingRisk;
-}
-/**
- * Qualification of one exact venue instrument.
- *
- * This interface was referenced by `JosephContracts`'s JSON-Schema
- * via the `definition` "QualificationRecord".
- */
-export interface QualificationRecord {
-  instrument_id: InstrumentId;
-  venue: Venue;
-  display_symbol?: string;
-  status: QualificationStatus;
-  risk_tags: RiskTag[];
-  gates: GateResult[];
-  funding: FundingAssessment;
-  asset_class: AssetClass;
-  heat_score?: number | null;
-  rank?: number | null;
-  policy_version: string;
-  as_of_ms: TimestampMs;
-  reasons: string[];
-}
-/**
- * This interface was referenced by `JosephContracts`'s JSON-Schema
- * via the `definition` "QualificationReport".
- */
-export interface QualificationReport {
-  policy_version: string;
-  as_of_ms: TimestampMs;
-  venue?: Venue | null;
-  records: QualificationRecord[];
 }
 /**
  * Explanation trace for one evaluated rule node, for both true and false predicates.

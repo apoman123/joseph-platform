@@ -5,10 +5,10 @@
  */
 
 /**
- * @fileoverview Alerts: strategy signals newest first with filters, sorting,
- * local acknowledgment, snooze and dismiss, the explanation trace (reason
- * tree) and a jump to the exact venue, instrument, bar and AOI (area of
- * interest) on the chart.
+ * @fileoverview Alerts: strategy signals and alert-job events (the alert
+ * log) newest first with filters, sorting, local acknowledgment, snooze
+ * and dismiss, the explanation trace (reason tree) and a jump to the exact
+ * venue, instrument and bar on the chart.
  */
 
 'use client';
@@ -20,8 +20,6 @@ import {
   BAR_VOLUME_HELP,
   SIGNAL_SORTS,
   SNOOZE_MINUTES,
-  aoiDistancePct,
-  type AoiZone,
   barQuoteVolumeOf,
   confluenceOf,
   isSnoozed,
@@ -65,86 +63,6 @@ export interface AlertsPanelProps {
   triage: WritableStore<SignalTriage>;
 }
 
-/**
- * Number of newest signals whose AOI distance is measured; each distinct
- * series and instrument costs an AOI and a snapshot request.
- */
-const DISTANCE_LIMIT = 60;
-
-/**
- * Measures the distance from the latest price (mark, else last) to each
- * signal's AOIs, again every 30 s. Prices and AOIs come from the market
- * engine; nothing is inferred.
- * @param ctx Feature context.
- * @param signals Signals (newest first).
- * @return Percent distance by signal id (null when unknown); signals past
- *     `DISTANCE_LIMIT` are absent.
- */
-export function useAoiDistances(
-  ctx: WebFeatureContext,
-  signals: readonly Signal[]
-): Readonly<Record<string, number | null>> {
-  const [distances, setDistances] = useState<Record<string, number | null>>({});
-  const subset = signals.slice(0, DISTANCE_LIMIT);
-  const key = subset.map(s => `${s.signal_id}:${s.revision}`).join('|');
-  useEffect(() => {
-    if (!key) {
-      setDistances({});
-      return;
-    }
-    let alive = true;
-    const load = async () => {
-      const series = new Map<
-        string,
-        {instrumentId: string; timeframe: Signal['timeframe']}
-      >();
-      for (const signal of subset) {
-        if (signal.aoi_ids.length > 0) {
-          series.set(`${signal.instrument_id}|${signal.timeframe}`, {
-            instrumentId: signal.instrument_id,
-            timeframe: signal.timeframe,
-          });
-        }
-      }
-      const instruments = [
-        ...new Set([...series.values()].map(s => s.instrumentId)),
-      ];
-      // The engine no longer publishes AOIs (indicators are joseph_script
-      // classes drawing their own levels), so referenced zones stay unknown.
-      const snapshotResults = await Promise.allSettled(
-        instruments.map(id => ctx.clients.market.getSnapshot(id))
-      );
-      const aois = new Map<string, AoiZone>();
-      const prices = new Map<string, number>();
-      snapshotResults.forEach((result, i) => {
-        const id = instruments[i];
-        if (!id || result.status !== 'fulfilled') return;
-        const price = Number(result.value.mark ?? result.value.last ?? NaN);
-        if (Number.isFinite(price)) prices.set(id, price);
-      });
-      const next: Record<string, number | null> = {};
-      for (const signal of subset) {
-        const referenced = signal.aoi_ids
-          .map(id => aois.get(id))
-          .filter((aoi): aoi is AoiZone => aoi !== undefined);
-        next[signal.signal_id] = aoiDistancePct(
-          prices.get(signal.instrument_id) ?? null,
-          referenced
-        );
-      }
-      if (alive) setDistances(next);
-    };
-    void load().catch(() => undefined);
-    const timer = setInterval(() => void load().catch(() => undefined), 30_000);
-    return () => {
-      alive = false;
-      clearInterval(timer);
-    };
-    // eslint-disable-next-line react-hooks/exhaustive-deps -- `subset` is a new array every render; `key` (ids and revisions) stands for its content.
-  }, [ctx, key]);
-  return distances;
-}
-
 /** Kind filter groups; `kinds: null` shows every kind. */
 const FILTERS: ReadonlyArray<{
   id: string;
@@ -152,6 +70,7 @@ const FILTERS: ReadonlyArray<{
   kinds: readonly SignalKind[] | null;
 }> = [
   {id: 'all', label: 'All', kinds: null},
+  {id: 'alerts', label: 'Alert log', kinds: ['CUSTOM_ALERT']},
   {id: 'entries', label: 'Entries', kinds: ['ENTRY_CONFIRMED']},
   {id: 'blocked', label: 'Blocked', kinds: ['ENTRY_BLOCKED']},
   {
@@ -179,7 +98,7 @@ const KIND_LABELS: Readonly<Record<SignalKind, string>> = {
   SETUP_EXPIRED: 'Setup expired',
   QUALIFICATION_CHANGED: 'Qualification changed',
   POSITION_EXITED: 'Position exited',
-  CUSTOM_ALERT: 'Python alert',
+  CUSTOM_ALERT: 'Alert',
 };
 
 /** Badge class per signal kind. */
@@ -245,7 +164,6 @@ export function AlertsPanel({
     const timer = setInterval(() => void setNow(Date.now()), 30_000);
     return () => void clearInterval(timer);
   }, []);
-  const distances = useAoiDistances(ctx, signals);
   const hiddenCount = signals.filter(
     s =>
       triaged.dismissed.includes(s.signal_id) ||
@@ -263,8 +181,7 @@ export function AlertsPanel({
             (!triaged.dismissed.includes(s.signal_id) &&
               !isSnoozed(triaged, s.signal_id, now)))
       ),
-      sort,
-      distances
+      sort
     );
   }, [
     signals,
@@ -276,7 +193,6 @@ export function AlertsPanel({
     triaged,
     now,
     sort,
-    distances,
   ]);
 
   const focus = (signal: Signal) => {
@@ -368,8 +284,9 @@ export function AlertsPanel({
       )}
       {loaded && visible.length === 0 ? (
         <EmptyState title="No signals to show">
-          Signals appear here when an active strategy evaluates a closed bar.
-          Activate a strategy in alerts-only or paper mode to start.
+          Signals appear here when an active strategy or an enabled alert
+          evaluates a closed bar. Create an alert in the Alert manager, or
+          activate a strategy in alerts-only or paper mode.
         </EmptyState>
       ) : (
         <div className={styles.scroll}>
@@ -391,12 +308,6 @@ export function AlertsPanel({
                 <th className="j-num" title={BAR_VOLUME_HELP}>
                   Bar vol.
                 </th>
-                <th
-                  className="j-num"
-                  title="Distance from the latest price to the signal's AOI"
-                >
-                  To AOI
-                </th>
                 <th>Strategy</th>
                 <th>Data</th>
                 <th>
@@ -414,7 +325,6 @@ export function AlertsPanel({
                 const snoozedUntil = isSnoozed(triaged, signal.signal_id, now)
                   ? triaged.snoozed[signal.signal_id]
                   : undefined;
-                const distance = distances[signal.signal_id];
                 return (
                   <Fragment key={signal.signal_id}>
                     <tr
@@ -469,13 +379,6 @@ export function AlertsPanel({
                         {barQuoteVolumeOf(signal) === null
                           ? '—'
                           : formatCompact(signal.bar_quote_volume)}
-                      </td>
-                      <td className="j-num" data-testid="signal-distance">
-                        {distance === undefined || distance === null
-                          ? '—'
-                          : distance === 0
-                            ? 'Inside'
-                            : `${distance.toFixed(2)}%`}
                       </td>
                       <td
                         className={styles.strategy}
@@ -569,7 +472,7 @@ export function AlertsPanel({
                     </tr>
                     {expanded && (
                       <tr className={styles.detail}>
-                        <td colSpan={12}>
+                        <td colSpan={11}>
                           {signal.message && (
                             <p className={styles.message}>{signal.message}</p>
                           )}

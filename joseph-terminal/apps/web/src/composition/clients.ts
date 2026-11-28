@@ -24,6 +24,7 @@ import {
   DemoExecutionClient,
   DemoMarketDataClient,
   DemoMarketStream,
+  DemoScriptsClient,
   DemoStrategyClient,
   DemoStudyClient,
   DemoUserStream,
@@ -130,6 +131,7 @@ export function buildClients(config: TerminalConfig): ClientBundle {
         strategy,
         execution,
         userStream: new DemoUserStream(execution, strategy),
+        scripts: new DemoScriptsClient({market}),
         studies: gate.studies(new DemoStudyClient(market)),
         demo: true,
       },
@@ -174,6 +176,7 @@ export function buildClients(config: TerminalConfig): ClientBundle {
       strategy: new HttpStrategyClient({baseUrl: marketBase, getToken: token}),
       execution,
       userStream,
+      scripts: new PythonClient({baseUrl: marketBase, getToken: token}),
       studies: gate.studies(
         new PythonClient({baseUrl: marketBase, getToken: token})
       ),

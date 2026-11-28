@@ -17,6 +17,9 @@ Without arguments the OpenAPI and built-in catalog are written to
 * ``fixtures/builtin-indicator-outputs.json`` (next to ``openapi/``),
   every built-in indicator's output on fixed bars, which the DEMO study
   evaluator must reproduce (parity test).
+* ``builtin-script-catalog.json``, the ``GET /v1/scripts/catalog`` listing
+  of the built-in filters and alerts (without plugins), which the
+  terminal's DEMO screener and alert dialog mirror.
 
 Managed Python script, catalog, strategy activation and heatmap model
 schemas are also regenerated in
@@ -65,6 +68,7 @@ _QUARTER_MS = 900_000
 _MINUTE_MS = 60_000
 _DAY_MS = 86_400_000
 _SCRIPTS = _DIR.parent / "schemas" / "python-scripts.schema.json"
+_SCRIPT_CATALOG = _DIR / "builtin-script-catalog.json"
 
 
 def _script_contracts() -> str:
@@ -331,6 +335,22 @@ def _outputs() -> str:
     return json.dumps(_rounded(body), separators=(",", ":")) + "\n"
 
 
+def _script_catalog() -> str:
+    """Generates the built-in filter and alert catalog listing.
+
+    Returns:
+        ``{"scripts": [...]}`` as the catalog route describes the built-in
+        filters and alerts, as indented JSON text in catalog order.
+    """
+    built = catalog.build(catalog.CatalogConfig(packages=catalog.NO_PACKAGES))
+    listing = [
+        entry.describe()
+        for entry in built.entries()
+        if entry.kind in {"filter", "alert"}
+    ]
+    return json.dumps({"scripts": listing}, indent=2) + "\n"
+
+
 def main() -> int:
     """Writes or checks the generated files.
 
@@ -343,6 +363,7 @@ def main() -> int:
         (_BUILTINS, _builtins()),
         (_OUTPUTS, _outputs()),
         (_SCRIPTS, _script_contracts()),
+        (_SCRIPT_CATALOG, _script_catalog()),
     )
     if "--check" in sys.argv:
         stale = [

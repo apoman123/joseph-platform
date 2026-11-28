@@ -20,43 +20,72 @@
   grid-template-columns: 1fr 1fr;
 }
 
+.conditions {
+  display: grid;
+  gap: var(--space-2);
+}
+
+.condition {
+  border: 1px solid var(--fathom);
+  border-radius: var(--radius-control);
+  display: grid;
+  gap: var(--space-2);
+  margin: 0;
+  padding: var(--space-2);
+}
+
+.conditionHead,
+.actions {
+  align-items: center;
+  display: flex;
+  gap: var(--space-2);
+}
+
+.conditionHead select {
+  flex: 1;
+  min-width: 0;
+}
+
+.hint {
+  color: var(--haze-dim);
+  font-size: var(--text-xs);
+  margin: 0;
+}
+
+.inputs {
+  display: grid;
+  gap: var(--space-2);
+  grid-template-columns: repeat(auto-fill, minmax(110px, 1fr));
+}
+
+.progress {
+  display: grid;
+  font-size: var(--text-sm);
+  gap: var(--space-1);
+}
+
+.progress progress {
+  width: 100%;
+}
+
+.unavailable {
+  font-size: var(--text-sm);
+  margin-top: var(--space-2);
+}
+
+.srOnly {
+  height: 1px;
+  overflow: hidden;
+  position: absolute;
+  width: 1px;
+}
+
 .scroll {
   overflow-x: auto;
 }
 
 .row {
   cursor: pointer;
-}
-
-.pass .mark {
-  color: var(--bid);
-}
-
-.fail {
-  color: var(--ask);
-}
-
-.missing {
-  color: var(--sodium);
-}
-
-.mark {
-  display: inline-block;
-  font-size: var(--text-xs);
-  margin-left: 3px;
-  text-align: center;
-  width: 12px;
-}
-
-.tag {
-  margin-left: 4px;
-}
-
-.detail td {
-  background: var(--abyss);
-  height: auto;
-  padding: var(--space-2);
-  white-space: normal;
 }
 
 .reasons {

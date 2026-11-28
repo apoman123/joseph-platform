@@ -10,14 +10,21 @@
  */
 
 import type {MarketSnapshot, OpenInterest} from '@joseph/contracts';
-import {fireEvent, screen, waitFor, within} from '@testing-library/react';
+import {DEMO_SCRIPT_CATALOG} from '@joseph/mock-provider';
+import {fireEvent, screen, waitFor} from '@testing-library/react';
 import {afterEach, describe, expect, it} from 'vitest';
 import {
   renderFeature,
   type RenderedFeature,
 } from '../trading/testing/fake-context';
 import {SCREENER_FEATURE} from '../screener';
-import {normalizePresets, savePreset} from '../screener/screener-panel';
+import {
+  LIQUIDITY_FILTER,
+  historyBarsFor,
+  normalizePresets,
+  savePreset,
+  scanRequest,
+} from '../screener/screener-panel';
 import {
   DEFAULT_COLUMNS,
   nextSort,
@@ -122,7 +129,7 @@ describe('watchlist columns and sorting', () => {
     await waitFor(
       () =>
         void expect(
-          screen.getByText(/currently marks Qualified/)
+          screen.getByText(/pass the built-in Liquidity/)
         ).toBeInTheDocument()
     );
     const stored = rendered.ctx.settings.read<{
@@ -135,44 +142,110 @@ describe('watchlist columns and sorting', () => {
 });
 
 describe('screener presets', () => {
-  it('validates and replaces presets by name', () => {
-    expect(
-      normalizePresets([
-        {name: 'A', venue: '', status: 'QUALIFIED', sort: 'rank'},
-        {name: 'B', venue: 'nowhere', status: 'ALL', sort: 'rank'},
-        3,
-      ])
-    ).toHaveLength(1);
-    const list = savePreset(
-      [{name: 'Hot', venue: '', status: 'ALL', sort: 'rank'}],
-      {name: ' hot ', venue: '', status: 'QUALIFIED', sort: 'turnover'}
-    );
-    expect(list).toEqual([
-      {name: 'hot', venue: '', status: 'QUALIFIED', sort: 'turnover'},
+  it('validates presets and migrates the earlier qualification presets', () => {
+    const presets = normalizePresets([
+      {name: 'A', venue: '', status: 'QUALIFIED', sort: 'rank'},
+      {name: 'B', venue: 'nowhere', status: 'ALL', sort: 'rank'},
+      {
+        name: 'C',
+        venue: 'mock',
+        marketType: 'perp',
+        tf: '1h',
+        maxSymbols: 50,
+        conditions: [{script_id: 'builtin:rsi-range', inputs: {value: 30}}, 5],
+      },
+      3,
     ]);
+    expect(presets).toEqual([
+      {
+        name: 'A',
+        venue: '',
+        marketType: '',
+        tf: '1d',
+        maxSymbols: 200,
+        conditions: [{script_id: LIQUIDITY_FILTER, inputs: {}}],
+      },
+      {
+        name: 'C',
+        venue: 'mock',
+        marketType: 'perp',
+        tf: '1h',
+        maxSymbols: 50,
+        conditions: [{script_id: 'builtin:rsi-range', inputs: {value: 30}}],
+      },
+    ]);
+    const [first] = presets;
+    if (!first) throw new Error('missing preset');
+    expect(
+      savePreset(presets, {...first, name: ' c '}).map(p => p.name)
+    ).toEqual(['c', 'A']);
   });
 
-  it('saves the current filters and applies them later', async () => {
+  it('derives history bars and the scan request from the filters', () => {
+    const catalog = new Map(
+      DEMO_SCRIPT_CATALOG.map(entry => [entry.script_id, entry])
+    );
+    expect(
+      historyBarsFor([{script_id: LIQUIDITY_FILTER, inputs: {}}], catalog)
+    ).toBe(0);
+    expect(
+      historyBarsFor(
+        [
+          {script_id: 'builtin:rsi-range', inputs: {}},
+          {script_id: 'builtin:gap', inputs: {}},
+        ],
+        catalog
+      )
+    ).toBe(15);
+    expect(
+      scanRequest(
+        {
+          venue: 'mock',
+          marketType: '',
+          tf: '1d',
+          maxSymbols: 10,
+          conditions: [
+            {script_id: 'builtin:price-vs-ma', inputs: {length: 600}},
+            {script_id: 'mine', version: 2, inputs: {}},
+          ],
+        },
+        catalog
+      )
+    ).toEqual({
+      venue: 'mock',
+      max_symbols: 10,
+      order_by: 'turnover',
+      history_bars: 500,
+      tf: '1d',
+      conditions: [
+        {script_id: 'builtin:price-vs-ma', inputs: {length: 600}},
+        {script_id: 'mine', version: 2, inputs: {}},
+      ],
+    });
+  });
+
+  it('saves the current screen and applies it later', async () => {
     rendered = await renderFeature(SCREENER_FEATURE, 'side-panel');
-    await screen.findByTestId('screener-row-mock:perp:BTCUSD');
-    fireEvent.click(screen.getByRole('button', {name: 'Qualified'}));
+    const add = await screen.findByTestId('screener-add-filter');
+    await waitFor(() => void expect(add).toBeEnabled());
+    fireEvent.click(add);
+    fireEvent.change(screen.getByLabelText('Filter 2'), {
+      target: {value: 'builtin:rsi-range'},
+    });
     fireEvent.change(screen.getByLabelText('Preset name'), {
-      target: {value: 'Qualified only'},
+      target: {value: 'Liquid oversold'},
     });
     fireEvent.click(screen.getByTestId('screener-preset-save'));
-    expect(screen.getByTestId('screener-preset')).toHaveValue('Qualified only');
-    fireEvent.click(screen.getByRole('button', {name: 'All'}));
-    expect(screen.getByTestId('screener-preset')).toHaveValue('');
+    fireEvent.click(screen.getByRole('button', {name: 'Remove filter 2'}));
+    expect(screen.queryByLabelText('Filter 2')).not.toBeInTheDocument();
     fireEvent.change(screen.getByTestId('screener-preset'), {
-      target: {value: 'Qualified only'},
+      target: {value: 'Liquid oversold'},
     });
-    expect(
-      within(screen.getByRole('group', {name: 'Status'})).getByRole('button', {
-        name: 'Qualified',
-      })
-    ).toHaveAttribute('aria-pressed', 'true');
-    expect(
-      rendered.ctx.settings.read<{presets: unknown[]}>({presets: []}).presets
-    ).toHaveLength(1);
+    expect(screen.getByLabelText('Filter 2')).toHaveValue('builtin:rsi-range');
+    const stored = rendered.ctx.settings.read<{
+      presets: Array<{conditions: unknown[]}>;
+    }>({presets: []}).presets;
+    expect(stored).toHaveLength(1);
+    expect(stored[0]?.conditions).toHaveLength(2);
   });
 });

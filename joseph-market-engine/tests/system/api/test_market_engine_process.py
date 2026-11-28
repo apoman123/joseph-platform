@@ -120,7 +120,7 @@ def server(tmp_path_factory: pytest.TempPathFactory) -> Iterator[str]:
 def test_rest_endpoints_over_tcp(
     server: str, contract_validate: Validate
 ) -> None:
-    """Health, venues, candles, snapshot and qualification respond."""
+    """Health, venues, candles and the built-in filter catalog respond."""
     with httpx.Client(base_url=server, timeout=10) as client:
         assert client.get("/health").json()["status"] == "ok"
         contract_validate(
@@ -138,10 +138,15 @@ def test_rest_endpoints_over_tcp(
         )
         contract_validate("market.schema.json", "CandleBatch", batch.json())
         assert len(batch.json()["candles"]) == 100
-        qualification = client.get("/v1/market/qualification").json()
-        contract_validate(
-            "qualification.schema.json", "QualificationReport", qualification
+        filters = client.get(
+            "/v1/scripts/catalog",
+            params={"kind": "filter"},
+            headers={"Authorization": "Bearer sys-token"},
         )
+        assert filters.status_code == 200, filters.text
+        assert "builtin:liquidity-qualification" in {
+            row["script_id"] for row in filters.json()["scripts"]
+        }
         error = client.get(
             "/v1/candles", params={"instrument_id": "nope", "tf": "5m"}
         )

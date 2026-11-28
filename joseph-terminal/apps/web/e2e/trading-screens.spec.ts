@@ -34,6 +34,10 @@ test('strategy panel with the RSI reversion built-in', async ({page}) => {
 test('screener and alerts panels', async ({page}) => {
   await loadTerminal(page);
   await openPanel(page, 'Screener');
+  await page.getByTestId('screener-run').click();
+  await expect(
+    page.getByRole('table', {name: 'Screener results'})
+  ).toBeVisible();
   await openPanel(page, 'Alerts');
   await page.screenshot({path: 'e2e/screenshots/08-screener-alerts.png'});
 });

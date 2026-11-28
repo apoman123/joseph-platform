@@ -348,6 +348,8 @@ class ScriptService:
         tenant_id: str,
         script: ResolvedScript,
         data: Mapping[str, Any],
+        *,
+        cache: bool = True,
     ) -> dict[str, Any]:
         """Executes a resolved script on prepared bars and inputs.
 
@@ -361,6 +363,8 @@ class ScriptService:
             script: Resolved script.
             data: Bundle fields besides the source: bars, inputs, kind,
                 instrument and simulation settings (or ``symbols`` for scans).
+            cache: Whether a catalog result may be served from and stored in
+                the result cache; scans of changing quotes pass False.
 
         Returns:
             The raw worker result mapping.
@@ -383,6 +387,8 @@ class ScriptService:
             bundle.update(data)
             return await self.runner.run(bundle)
         payload = {**data, "kind": script.kind}
+        if not cache:
+            return await self._run_class(script, payload)
         try:
             key = script.source_hash + json.dumps(
                 payload, sort_keys=True, allow_nan=False, default=str
@@ -395,19 +401,39 @@ class ScriptService:
         if cached is not None:
             self._results.move_to_end(key)
             return cached
-        cls = script.entry.cls
+        result = await self._run_class(script, payload)
+        self._results[key] = result
+        while len(self._results) > _RESULT_CACHE_SIZE:
+            self._results.popitem(last=False)
+        return result
+
+    async def _run_class(
+        self, script: ResolvedScript, payload: dict[str, Any]
+    ) -> dict[str, Any]:
+        """Runs a catalog class on a worker thread within the slot bound.
+
+        Args:
+            script: Resolved catalog script.
+            payload: Bundle with the script kind.
+
+        Returns:
+            The raw worker result mapping.
+
+        Raises:
+            errors.ValidationFailedError: If the script fails.
+        """
+        if script.entry is None:
+            raise errors.ValidationFailedError("script is not in the catalog")
         async with self._slots:
             try:
-                result = await asyncio.to_thread(worker.run_class, cls, payload)
+                return await asyncio.to_thread(
+                    worker.run_class, script.entry.cls, payload
+                )
             except Exception as exc:  # noqa: BLE001 - Script failures become bounded validation errors.
                 raise errors.ValidationFailedError(
                     f"{script.script_id} failed: {type(exc).__name__}: "
                     f"{str(exc)[:300]}"
                 ) from None
-        self._results[key] = result
-        while len(self._results) > _RESULT_CACHE_SIZE:
-            self._results.popitem(last=False)
-        return result
 
     async def _request_bars(
         self,

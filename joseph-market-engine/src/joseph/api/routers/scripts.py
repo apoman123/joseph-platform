@@ -78,6 +78,7 @@ class CatalogScript(pydantic.BaseModel):
         source_hash: Identity of the installed code.
         enabled: False when disabled by configuration.
         source: Public source text on the single-script route, else None.
+        metrics: Market data a filter loads beyond the snapshot.
     """
 
     script_id: str
@@ -96,6 +97,7 @@ class CatalogScript(pydantic.BaseModel):
     source_hash: str
     enabled: bool
     source: str | None = None
+    metrics: list[str] = pydantic.Field(default_factory=list)
 
 
 class CatalogList(pydantic.BaseModel):

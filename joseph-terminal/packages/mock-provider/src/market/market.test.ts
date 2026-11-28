@@ -125,20 +125,6 @@ describe('DemoMarketDataClient', () => {
     ).toEqual([]);
   });
 
-  it('serves demo qualification', async () => {
-    const report = await client.getQualification(undefined, 'QUALIFIED');
-    expect(report.records.map(r => r.instrument_id)).toEqual([
-      'mock:perp:BTCUSD',
-      'mock:perp:ETHUSD',
-    ]);
-    const sol = (await client.getQualification()).records.find(
-      r => r.instrument_id === 'mock:perp:SOLUSD'
-    );
-    expect(
-      sol?.gates.find(g => g.gate === 'SLIPPAGE_50K_PCT')?.passed
-    ).toBeNull();
-  });
-
   it('reports a snapshot with separate mark and bid/ask', async () => {
     const snap = await client.getSnapshot('mock:perp:SOLUSD');
     expect(Number(snap.best_ask)).toBeGreaterThan(Number(snap.best_bid));

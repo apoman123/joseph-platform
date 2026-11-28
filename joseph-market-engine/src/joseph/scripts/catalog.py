@@ -163,6 +163,8 @@ class CatalogEntry:
             plugins.
         source_hash: SHA-256 identifying the exact installed code.
         enabled: False when disabled by configuration.
+        metrics: Market data a filter needs beyond the snapshot
+            (``joseph_script.FILTER_METRICS`` names); empty otherwise.
     """
 
     script_id: str
@@ -182,6 +184,7 @@ class CatalogEntry:
     source_hash: str
     enabled: bool = True
     periods: tuple[str, ...] = ()
+    metrics: tuple[str, ...] = ()
 
     @property
     def defaults(self) -> dict[str, Any]:
@@ -214,6 +217,7 @@ class CatalogEntry:
             "source_available": self.source is not None,
             "source_hash": self.source_hash,
             "enabled": self.enabled,
+            "metrics": list(self.metrics),
         }
 
 
@@ -367,6 +371,14 @@ def make_entry(
             f"{cls.__qualname__}.ID must be a lowercase slug"
         )
     inputs, requests = _check_inputs(cls)
+    metrics = tuple(getattr(cls, "METRICS", ()) or ())
+    if (kind != "filter" and metrics) or not set(metrics) <= set(
+        joseph_script.FILTER_METRICS
+    ):
+        raise errors.ValidationFailedError(
+            f"{cls.__qualname__}.METRICS must name filter metrics: "
+            + ", ".join(joseph_script.FILTER_METRICS)
+        )
     if origin == "builtin":
         script_id = f"builtin:{slug}"
         text = _module_source(cls)
@@ -401,6 +413,7 @@ def make_entry(
         source=source,
         source_hash=digest,
         periods=_check_periods(cls),
+        metrics=metrics,
     )
 
 

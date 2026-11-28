@@ -85,8 +85,6 @@ from joseph.platform import db
 from joseph.platform import metrics as metrics_lib
 from joseph.platform import redaction
 from joseph.platform import streaming
-from joseph.screening.adapters import coingecko
-from joseph.screening.app import service as screening_service
 from joseph.scripts import activations as strategy_activations
 from joseph.scripts import catalog as script_catalog
 from joseph.scripts import jobs as script_jobs
@@ -128,7 +126,6 @@ class Container:
         store: Candle store.
         router: Feed router.
         market_data: Market-data service.
-        qualification: Qualification service.
         stream_hub: Resumable stream hub (publish ``signals`` here).
         event_bus: In-process domain-event bus.
         engine: SQLAlchemy engine.
@@ -156,7 +153,6 @@ class Container:
     store: candle_store.CandleStore
     router: feed_router.FeedRouter
     market_data: market_service.MarketDataService
-    qualification: screening_service.QualificationService
     stream_hub: streaming.StreamHub
     event_bus: bus.EventBus
     engine: sa.Engine
@@ -385,15 +381,6 @@ def build_container(
         max_refresh_bars=settings.max_anchored_bars + 10_000,
         recorded=recorder,
     )
-    trending = (
-        coingecko.CoinGeckoTrending() if settings.coingecko_enabled else None
-    )
-    qualification = screening_service.QualificationService(
-        adapters,
-        clock,
-        top_n=settings.top_n,
-        trending=trending,
-    )
     container = Container(
         settings=settings,
         clock=clock,
@@ -402,7 +389,6 @@ def build_container(
         store=store,
         router=router,
         market_data=market_data,
-        qualification=qualification,
         stream_hub=hub,
         event_bus=event_bus,
         engine=engine,
@@ -415,8 +401,6 @@ def build_container(
     )
     if archive_engine is not None:
         container.closers.append(archive_engine.dispose)
-    if trending is not None:
-        container.closers.append(trending.close)
     if not settings.demo_only:
         container.heatmap_sources = heatmap_sources(
             clock, http_client, settings.http_timeout_s

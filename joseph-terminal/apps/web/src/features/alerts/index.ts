@@ -5,10 +5,11 @@
  */
 
 /**
- * @fileoverview Alerts feature: strategy signals (polled every 15 s and
- * merged with user-stream updates) with filters, local acknowledgment and
- * triage, explanation traces and chart focus, plus the notification
- * subscriptions panel.
+ * @fileoverview Alerts feature: strategy signals and the alert log (polled
+ * every 15 s and merged with user-stream updates) with filters, local
+ * acknowledgment and triage, explanation traces and chart focus; the alert
+ * manager (create, edit and delete alert jobs on built-in or owned
+ * scripts); and the notification subscriptions panel.
  */
 
 import type {Signal} from '@joseph/contracts';
@@ -20,6 +21,7 @@ import type {
   WebView,
 } from '../../shell/react-bindings';
 import {errorMessage} from '../trading/ui/hooks';
+import {AlertManager} from './alert-manager';
 import {AlertsPanel, type AlertsState} from './alerts-panel';
 import {NotificationsPanel} from './notifications-panel';
 import type {SignalTriage} from './ranking';
@@ -90,7 +92,7 @@ export const ALERTS_FEATURE: WebFeature = {
     owner: 'terminal-strategy',
     displayName: 'Alerts',
     description:
-      'Strategy signals with reason trees; click to open the exact venue, instrument, bar and AOI.',
+      'Strategy signals and alert-job events with reason trees, the alert manager and notification destinations.',
     uiSlots: ['bottom-panel'],
     requiredCapabilities: ['strategy'],
     permissions: ['strategy:read'],
@@ -98,7 +100,7 @@ export const ALERTS_FEATURE: WebFeature = {
     contractVersion: 1,
     removal: {
       notes:
-        'Signals stay on the server; only local acknowledgments in feature settings are kept for restoration.',
+        'Signals and alert jobs stay on the server; only local acknowledgments in feature settings are kept for restoration.',
     },
   },
   activate(ctx) {
@@ -124,9 +126,12 @@ export const ALERTS_FEATURE: WebFeature = {
     ];
     const load = async () => {
       try {
-        const {signals} = await ctx.clients.strategy.listSignals({limit: 200});
+        const [{signals}, log] = await Promise.all([
+          ctx.clients.strategy.listSignals({limit: 200}),
+          ctx.clients.scripts.alertLog(200).catch(() => [] as Signal[]),
+        ]);
         state.update(s => ({
-          signals: mergeSignals(s.signals, signals),
+          signals: mergeSignals(mergeSignals(s.signals, signals), log),
           error: null,
           loaded: true,
         }));
@@ -176,6 +181,14 @@ export const ALERTS_FEATURE: WebFeature = {
     function NotificationsSlot(props: WebSlotProps) {
       return createElement(NotificationsPanel, {ctx: props.ctx});
     }
+    /**
+     * Renders the alert manager.
+     * @param props Slot props.
+     * @return Element.
+     */
+    function ManagerSlot(props: WebSlotProps) {
+      return createElement(AlertManager, {ctx: props.ctx});
+    }
     disposers.push(
       ctx.slots.contribute('bottom-panel', {
         id: 'alerts',
@@ -183,6 +196,13 @@ export const ALERTS_FEATURE: WebFeature = {
         order: 50,
         icon: 'bell',
         view,
+      }),
+      ctx.slots.contribute('bottom-panel', {
+        id: 'alerts.manager',
+        title: 'Alert manager',
+        order: 52,
+        icon: 'bell',
+        view: ManagerSlot,
       }),
       ctx.slots.contribute('bottom-panel', {
         id: 'alerts.notifications',

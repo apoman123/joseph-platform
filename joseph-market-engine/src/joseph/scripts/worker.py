@@ -1402,6 +1402,15 @@ def evaluate(bundle: dict[str, Any]) -> dict[str, Any]:
                         "error": None,
                     }
                 )
+            except joseph_script.Unavailable as exc:
+                results.append(
+                    {
+                        "instrument_id": symbol["instrument_id"],
+                        "matched": False,
+                        "error": str(exc)[:300] or "required data unavailable",
+                        "unavailable": True,
+                    }
+                )
             except Exception as exc:  # noqa: BLE001 - One user filter failure must not discard other symbols.
                 results.append(
                     {
@@ -1457,6 +1466,15 @@ def run_class(cls: type, bundle: dict[str, Any]) -> dict[str, Any]:
                         "instrument_id": symbol["instrument_id"],
                         "matched": result["matched"],
                         "error": None,
+                    }
+                )
+            except joseph_script.Unavailable as exc:
+                results.append(
+                    {
+                        "instrument_id": symbol["instrument_id"],
+                        "matched": False,
+                        "error": str(exc)[:300] or "required data unavailable",
+                        "unavailable": True,
                     }
                 )
             except Exception as exc:  # noqa: BLE001 - One filter failure must not discard other symbols.

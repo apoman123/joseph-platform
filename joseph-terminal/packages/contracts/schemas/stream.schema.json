@@ -8,7 +8,7 @@
       "title": "StreamEventType",
       "type": "string",
       "enum": [
-        "candle.updated", "aoi.updated", "aoi.removed", "structure.event", "feed.health", "qualification.changed",
+        "candle.updated", "aoi.updated", "aoi.removed", "structure.event", "feed.health",
         "signal.created", "signal.updated",
         "order.updated", "fill.created", "position.updated", "account.updated", "risk.kill_switch",
         "subscribed", "snapshot_required", "heartbeat", "error"
@@ -33,7 +33,7 @@
     "ChannelName": {
       "title": "ChannelName",
       "type": "string",
-      "enum": ["candles", "feed_health", "qualification", "signals", "orders", "fills", "positions", "account", "risk"]
+      "enum": ["candles", "feed_health", "signals", "orders", "fills", "positions", "account", "risk"]
     },
     "ChannelSpec": {
       "title": "ChannelSpec",

@@ -7,8 +7,6 @@
 /** @fileoverview Typed managed Python scripts, scans, alerts and heatmaps. */
 
 import type {
-  CatalogList,
-  CatalogScript,
   ScriptBatchResult,
   ScriptBatchRun,
   ScriptInput,
@@ -21,9 +19,12 @@ import type {
   AlertJob,
   HeatmapCatalog,
   HeatmapSnapshot,
+  Signal,
+  CatalogList,
+  CatalogScript,
 } from '../generated/contracts';
 import {HttpTransport, type HttpClientOptions} from './http';
-import type {CatalogKind, StudyClient} from './ports';
+import type {PythonCatalog, ScriptsClient, StudyClient} from './ports';
 
 /** Heatmap request: family, optional data set and optional tile limit. */
 export interface HeatmapQuery {
@@ -35,18 +36,8 @@ export interface HeatmapQuery {
   limit?: number;
 }
 
-/** A private source catalog with explicit runtime availability. */
-export interface PythonCatalog {
-  /** Latest immutable versions visible to the authenticated tenant. */
-  scripts: ScriptVersion[];
-  /** Whether the operator enabled the isolated container runtime. */
-  runtime_enabled: boolean;
-  /** Next bounded catalog window, or null at the end. */
-  next_offset?: number | null;
-}
-
 /** Authenticated managed-code workflows; never sends broker credentials. */
-export class PythonClient implements StudyClient {
+export class PythonClient implements ScriptsClient, StudyClient {
   private readonly http: HttpTransport;
 
   /**
@@ -126,6 +117,39 @@ export class PythonClient implements StudyClient {
       undefined,
       body
     );
+  }
+
+  /**
+   * Lists built-in and installed plugin scripts.
+   * @param kind Optional role filter.
+   * @return Catalog listing without source text.
+   */
+  catalog(kind?: CatalogScript['kind']): Promise<CatalogList> {
+    return this.http.request('GET', '/v1/scripts/catalog', {kind});
+  }
+
+  /**
+   * Starts a scan of the body's conditions combined with AND
+   * (`POST /v1/script-scans`).
+   * @param body Market selection, bounds and one to ten conditions.
+   * @return Pending job for progress polling.
+   */
+  screen(body: ScanInput): Promise<ScanJob> {
+    return this.http.request('POST', '/v1/script-scans', undefined, body);
+  }
+
+  /**
+   * Lists custom alert signals (`GET /v1/signals?kind=CUSTOM_ALERT`).
+   * @param limit Maximum rows, default two hundred.
+   * @return Alert signals, newest first.
+   */
+  async alertLog(limit = 200): Promise<Signal[]> {
+    const list = await this.http.request<{signals: Signal[]}>(
+      'GET',
+      '/v1/signals',
+      {kind: 'CUSTOM_ALERT', limit}
+    );
+    return list.signals;
   }
 
   /**
@@ -232,19 +256,6 @@ export class PythonClient implements StudyClient {
       undefined,
       undefined,
       signal
-    );
-  }
-
-  /**
-   * Lists the built-in and installed plugin scripts.
-   * @param kind Optional role filter, such as `indicator`.
-   * @return Scripts in catalog order (without source) and skipped plugins.
-   */
-  catalog(kind?: CatalogKind): Promise<CatalogList> {
-    return this.http.request(
-      'GET',
-      '/v1/scripts/catalog',
-      kind ? {kind} : undefined
     );
   }
 

@@ -6,7 +6,7 @@ How Joseph fits together, for contributors: the three deployables, where each co
 Browser: joseph-terminal (Next.js)                    Server side: Python services
 ┌──────────────────────────────────────────┐         ┌────────────────────────────────────────────┐
 │ apps/web  composition root + React views │  HTTP   │ joseph-market-engine  :8000                │
-│   features/* (chart, drawing, watchlist, │  + WS   │   market_data → screening                  │
+│   features/* (chart, drawing, watchlist, │  + WS   │   market_data → scripts (filters, alerts)  │
 │   screener, strategy, trading, alerts,   │ ──────▶ │   market_data → scripts (Python roles)     │
 │   portfolio) via FeatureContext only     │         │   activations  → signals → alerts ──┐      │
 │ packages/                                │         │   backtests = script runs           │      │
@@ -26,7 +26,7 @@ LWC is the Lightweight Charts library. The browser holds only a session token; v
 | Concern | Location |
 |---|---|
 | Contracts (JSON Schema 2020-12) and shared examples | `joseph-terminal/packages/contracts/{schemas,fixtures}/` |
-| Market data, screening, Python scripts (indicators, strategies, filters, alerts) and strategy activations, signals, alerts | `joseph-market-engine/src/joseph/` ([modules](../../joseph-market-engine/README.md#modules-srcjoseph)) |
+| Market data, Python scripts (indicators, strategies, filters, alerts) and strategy activations, signals, alerts | `joseph-market-engine/src/joseph/` ([modules](../../joseph-market-engine/README.md#modules-srcjoseph)) |
 | Built-in indicator, strategy, filter and alert scripts, script catalog | `joseph-market-engine/src/joseph/scripts/` (`builtin/`, `catalog.py`, `activations.py`; ADR 0010, ADR 0011) |
 | Script plugin packages (optional) | Installed beside the market engine, never in this repository; entry-point group `joseph.scripts` ([operations](../OPERATIONS.md#script-plugins)) |
 | Risk gateway, OMS, vault, audit, venue and broker adapters | `joseph-execution-engine/src/joseph_execution/` |

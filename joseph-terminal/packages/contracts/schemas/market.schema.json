@@ -64,7 +64,7 @@
     },
     "AssetClass": {
       "title": "AssetClass",
-      "description": "Asset class used to select qualification thresholds.",
+      "description": "Asset class; selects the thresholds of the built-in liquidity qualification filter.",
       "type": "string",
       "enum": [
         "CRYPTO",

@@ -25,7 +25,6 @@ from joseph.platform import auth
 from joseph.platform import config
 from joseph.platform import metrics as metrics_lib
 from joseph.platform import streaming
-from joseph.screening.app import service as screening_service
 
 
 class AppContainer(Protocol):
@@ -34,8 +33,6 @@ class AppContainer(Protocol):
     Attributes:
         settings: Engine settings (CORS origins, demo mode).
         market_data: Market-data service behind the market routes.
-        qualification: Qualification service behind
-            ``/v1/market/qualification``.
         stream_hub: Hub behind the market WebSocket.
         authenticator: Bearer-token authenticator for protected routes.
         metrics: Registry rendered by ``/metrics``.
@@ -43,7 +40,6 @@ class AppContainer(Protocol):
 
     settings: config.Settings
     market_data: market_service.MarketDataService
-    qualification: screening_service.QualificationService
     stream_hub: streaming.StreamHub
     authenticator: auth.TokenAuthenticator
     metrics: metrics_lib.MetricsRegistry
@@ -100,7 +96,7 @@ def create_app(
         title="Joseph Market Engine",
         version=health.VERSION,
         description=(
-            "Python-authoritative market data, qualification, indicators, "
+            "Python-authoritative market data, script filters, indicators, "
             "strategies and signals. Contracts: joseph-terminal/packages/"
             "contracts/schemas."
         ),
@@ -162,9 +158,7 @@ def create_app(
             container.market_data, container.metrics, container.settings
         )
     )
-    app.include_router(
-        market.build_router(container.market_data, container.qualification)
-    )
+    app.include_router(market.build_router(container.market_data))
     app.include_router(
         stream.build_router(
             container.stream_hub, container.market_data, container.authenticator
