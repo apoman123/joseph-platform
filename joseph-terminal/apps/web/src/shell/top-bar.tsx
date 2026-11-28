@@ -115,7 +115,7 @@ export function TopBar(): ReactElement {
   const chart = activeChart(workspace);
   const replaying = replayStates[chart.chart_id] !== undefined;
   const chartId = chart.chart_id;
-  const heatmap = chart.view_type === 'stock_heatmap';
+  const heatmap = chart.view_type === 'heatmap';
   const run = (id: string) =>
     void runtime.commands.execute(id).catch(() => undefined);
   return (
@@ -127,7 +127,7 @@ export function TopBar(): ReactElement {
         <span className="brand__word">Joseph</span>
       </div>
       {heatmap ? (
-        <strong>Stock heatmap</strong>
+        <strong>Heatmap</strong>
       ) : (
         <>
           <InstrumentSelector

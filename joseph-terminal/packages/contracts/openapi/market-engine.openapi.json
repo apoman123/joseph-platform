@@ -748,72 +748,6 @@
         "title": "CandleOperand",
         "type": "object"
       },
-      "CompanyMetadata": {
-        "additionalProperties": false,
-        "description": "Explicit optional metadata for feeds without company fundamentals.\n\nAttributes:\n    instrument_id: Canonical stock or ETF identifier.\n    sector: Optional user-provided industry/sector label, maximum 120 chars.\n    market_cap: Optional positive market capitalization in its quote\n        currency,\n        encoded as a decimal string, never inferred from price or volume.\n    as_of_ms: User-declared observation time in UTC epoch milliseconds.",
-        "properties": {
-          "as_of_ms": {
-            "minimum": 0.0,
-            "title": "As Of Ms",
-            "type": "integer"
-          },
-          "instrument_id": {
-            "maxLength": 180,
-            "title": "Instrument Id",
-            "type": "string"
-          },
-          "market_cap": {
-            "anyOf": [
-              {
-                "maxLength": 64,
-                "pattern": "^[0-9]+(?:\\.[0-9]+)?$",
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Market Cap"
-          },
-          "sector": {
-            "anyOf": [
-              {
-                "maxLength": 120,
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Sector"
-          }
-        },
-        "required": [
-          "instrument_id",
-          "as_of_ms"
-        ],
-        "title": "CompanyMetadata",
-        "type": "object"
-      },
-      "CompanyMetadataBatch": {
-        "additionalProperties": false,
-        "description": "An explicit batch of user-owned heatmap fundamentals.\n\nAttributes:\n    records: At most five thousand canonical, dated company records.",
-        "properties": {
-          "records": {
-            "items": {
-              "$ref": "#/components/schemas/CompanyMetadata"
-            },
-            "maxItems": 5000,
-            "title": "Records",
-            "type": "array"
-          }
-        },
-        "required": [
-          "records"
-        ],
-        "title": "CompanyMetadataBatch",
-        "type": "object"
-      },
       "CompareNode": {
         "additionalProperties": false,
         "description": "Binary comparison of two operands.\n\nAttributes:\n    op: Discriminator ``COMPARE``.\n    id: Stable editor id.\n    label: Optional display label.\n    left: Left operand.\n    cmp: Comparator.\n    right: Right operand.",
@@ -1268,39 +1202,314 @@
         "title": "HTTPValidationError",
         "type": "object"
       },
-      "HeatmapSnapshot": {
-        "description": "Real stock heatmap data and explicit market/coverage limits.\n\nAttributes:\n    tiles: Selected stocks, including unavailable/neutral tiles.\n    universe_count: Actual eligible stocks before the requested result\n        limit.\n    quote_count: Number with a returned source quote.\n    generated_at_ms: Response generation time, UTC epoch milliseconds.\n    region: US or Taiwan universe; quote currencies are never mixed by size.\n    currency: USD or TWD quote currency of the selected stock region.\n    available_metrics: Metrics actually present in at least one selected\n        tile.\n    missing_metadata: Whether sector or market-cap information is\n        incomplete.\n    source_errors: Provider metadata failures limiting the selected\n        universe.",
+      "HeatmapCatalog": {
+        "description": "Every data set and the default per heatmap family.\n\nAttributes:\n    datasets: Data sets in menu order.\n    defaults: Default data set id per heatmap family.",
         "properties": {
-          "available_metrics": {
+          "datasets": {
             "items": {
+              "$ref": "#/components/schemas/HeatmapDataset"
+            },
+            "title": "Datasets",
+            "type": "array"
+          },
+          "defaults": {
+            "additionalProperties": {
               "type": "string"
             },
-            "title": "Available Metrics",
+            "title": "Defaults",
+            "type": "object"
+          }
+        },
+        "required": [
+          "datasets",
+          "defaults"
+        ],
+        "title": "HeatmapCatalog",
+        "type": "object"
+      },
+      "HeatmapDataset": {
+        "description": "A selectable data set (an index, a market or a coin universe).\n\nAttributes:\n    id: Stable id, e.g. ``us_sp500`` or ``crypto_all``.\n    type: Heatmap family.\n    label: Human label, e.g. ``S&P 500``.\n    section: Menu section, e.g. ``United States``, ``Taiwan``, ``Crypto``.\n    currency: Quote currency of prices and sizes (``USD`` or ``TWD``).\n    default_limit: Tiles shown by default (the largest first).\n    available: Whether the configured sources can serve it.\n    reason: Why it is unavailable, or None.",
+        "properties": {
+          "available": {
+            "title": "Available",
+            "type": "boolean"
+          },
+          "currency": {
+            "title": "Currency",
+            "type": "string"
+          },
+          "default_limit": {
+            "title": "Default Limit",
+            "type": "integer"
+          },
+          "id": {
+            "title": "Id",
+            "type": "string"
+          },
+          "label": {
+            "title": "Label",
+            "type": "string"
+          },
+          "reason": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Reason"
+          },
+          "section": {
+            "title": "Section",
+            "type": "string"
+          },
+          "type": {
+            "enum": [
+              "stocks",
+              "etfs",
+              "crypto"
+            ],
+            "title": "Type",
+            "type": "string"
+          }
+        },
+        "required": [
+          "id",
+          "type",
+          "label",
+          "section",
+          "currency",
+          "default_limit",
+          "available"
+        ],
+        "title": "HeatmapDataset",
+        "type": "object"
+      },
+      "HeatmapGrouping": {
+        "description": "A grouping option of the selected data set.\n\nAttributes:\n    id: ``sector``, ``asset_class`` or ``none``.\n    label: Human label, e.g. ``Sector``.\n    available: Whether tiles carry this grouping.\n    reason: Why the grouping is unavailable, or None.",
+        "properties": {
+          "available": {
+            "title": "Available",
+            "type": "boolean"
+          },
+          "id": {
+            "enum": [
+              "sector",
+              "asset_class",
+              "none"
+            ],
+            "title": "Id",
+            "type": "string"
+          },
+          "label": {
+            "title": "Label",
+            "type": "string"
+          },
+          "reason": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Reason"
+          }
+        },
+        "required": [
+          "id",
+          "label",
+          "available"
+        ],
+        "title": "HeatmapGrouping",
+        "type": "object"
+      },
+      "HeatmapMetric": {
+        "description": "One size or colour metric and whether the source supplies it.\n\nAttributes:\n    id: Stable metric id, e.g. ``market_cap`` or ``change_1d``.\n    label: Human label, e.g. ``Change 1D, %``.\n    format: Value format: currency amount, percent, plain number or\n        ratio (relative volume).\n    scale: Colour scale of a colour metric: ``diverging`` (red/grey/green)\n        or ``sequential`` (single-hue intensity); None for size metrics.\n    available: Whether at least the source can supply the metric.\n    reason: Why the metric is unavailable, or None when available.",
+        "properties": {
+          "available": {
+            "title": "Available",
+            "type": "boolean"
+          },
+          "format": {
+            "enum": [
+              "currency",
+              "percent",
+              "number",
+              "ratio"
+            ],
+            "title": "Format",
+            "type": "string"
+          },
+          "id": {
+            "title": "Id",
+            "type": "string"
+          },
+          "label": {
+            "title": "Label",
+            "type": "string"
+          },
+          "reason": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Reason"
+          },
+          "scale": {
+            "anyOf": [
+              {
+                "enum": [
+                  "diverging",
+                  "sequential"
+                ],
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Scale"
+          }
+        },
+        "required": [
+          "id",
+          "label",
+          "format",
+          "available"
+        ],
+        "title": "HeatmapMetric",
+        "type": "object"
+      },
+      "HeatmapProvenance": {
+        "description": "Where one part of the heatmap comes from.\n\nAttributes:\n    field: What the source supplies, e.g. ``Sector & market cap``.\n    source: Source label, e.g. ``Nasdaq.com screener (unofficial,\n        delayed)``.\n    as_of_ms: When the source data was fetched or observed, UTC epoch\n        milliseconds, or None when it is not loaded yet.\n    note: Optional caveat such as ``derived: shares x last price``.",
+        "properties": {
+          "as_of_ms": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "As Of Ms"
+          },
+          "field": {
+            "title": "Field",
+            "type": "string"
+          },
+          "note": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Note"
+          },
+          "source": {
+            "title": "Source",
+            "type": "string"
+          }
+        },
+        "required": [
+          "field",
+          "source"
+        ],
+        "title": "HeatmapProvenance",
+        "type": "object"
+      },
+      "HeatmapSnapshot": {
+        "description": "A heatmap of one data set with metric availability and provenance.\n\nAttributes:\n    type: Heatmap family.\n    dataset: Data set id.\n    dataset_label: Data set label.\n    currency: Currency of prices and currency-valued metrics.\n    tiles: Tiles, largest default size first.\n    universe_count: Members of the data set before the limit.\n    limit: Requested maximum tiles.\n    priced_count: Tiles with a price.\n    size_metrics: Size-by options with availability.\n    color_metrics: Colour-by options with availability.\n    groupings: Group-by options with availability.\n    default_size: Default size metric id.\n    default_color: Default colour metric id.\n    default_grouping: Default grouping id.\n    provenance: Source of each part of the data.\n    source_errors: Per-source failures limiting the result.\n    pending: True while a slow source is still loading; the client\n        should poll again soon for fuller coverage.\n    generated_at_ms: Response time, UTC epoch milliseconds.\n    demo: True for synthetic DEMO data.",
+        "properties": {
+          "color_metrics": {
+            "items": {
+              "$ref": "#/components/schemas/HeatmapMetric"
+            },
+            "title": "Color Metrics",
             "type": "array"
           },
           "currency": {
             "title": "Currency",
             "type": "string"
           },
+          "dataset": {
+            "title": "Dataset",
+            "type": "string"
+          },
+          "dataset_label": {
+            "title": "Dataset Label",
+            "type": "string"
+          },
+          "default_color": {
+            "title": "Default Color",
+            "type": "string"
+          },
+          "default_grouping": {
+            "enum": [
+              "sector",
+              "asset_class",
+              "none"
+            ],
+            "title": "Default Grouping",
+            "type": "string"
+          },
+          "default_size": {
+            "title": "Default Size",
+            "type": "string"
+          },
+          "demo": {
+            "default": false,
+            "title": "Demo",
+            "type": "boolean"
+          },
           "generated_at_ms": {
             "title": "Generated At Ms",
             "type": "integer"
           },
-          "missing_metadata": {
-            "title": "Missing Metadata",
-            "type": "boolean"
+          "groupings": {
+            "items": {
+              "$ref": "#/components/schemas/HeatmapGrouping"
+            },
+            "title": "Groupings",
+            "type": "array"
           },
-          "quote_count": {
-            "title": "Quote Count",
+          "limit": {
+            "title": "Limit",
             "type": "integer"
           },
-          "region": {
-            "enum": [
-              "us",
-              "taiwan"
-            ],
-            "title": "Region",
-            "type": "string"
+          "pending": {
+            "default": false,
+            "title": "Pending",
+            "type": "boolean"
+          },
+          "priced_count": {
+            "title": "Priced Count",
+            "type": "integer"
+          },
+          "provenance": {
+            "items": {
+              "$ref": "#/components/schemas/HeatmapProvenance"
+            },
+            "title": "Provenance",
+            "type": "array"
+          },
+          "size_metrics": {
+            "items": {
+              "$ref": "#/components/schemas/HeatmapMetric"
+            },
+            "title": "Size Metrics",
+            "type": "array"
           },
           "source_errors": {
             "additionalProperties": {
@@ -1316,26 +1525,43 @@
             "title": "Tiles",
             "type": "array"
           },
+          "type": {
+            "enum": [
+              "stocks",
+              "etfs",
+              "crypto"
+            ],
+            "title": "Type",
+            "type": "string"
+          },
           "universe_count": {
             "title": "Universe Count",
             "type": "integer"
           }
         },
         "required": [
+          "type",
+          "dataset",
+          "dataset_label",
+          "currency",
           "tiles",
           "universe_count",
-          "quote_count",
-          "generated_at_ms",
-          "region",
-          "currency",
-          "available_metrics",
-          "missing_metadata"
+          "limit",
+          "priced_count",
+          "size_metrics",
+          "color_metrics",
+          "groupings",
+          "default_size",
+          "default_color",
+          "default_grouping",
+          "provenance",
+          "generated_at_ms"
         ],
         "title": "HeatmapSnapshot",
         "type": "object"
       },
       "HeatmapTile": {
-        "description": "One stock tile whose missing metrics remain unavailable.\n\nAttributes:\n    instrument_id: Exact venue-scoped stock or ETF identifier.\n    symbol: Provider display symbol.\n    name: Provider company/security name when available.\n    exchange: Actual listing exchange or canonical venue.\n    last: Latest source price as a decimal string, or None.\n    change_pct: Source daily price change in percent, or None.\n    volume: Source daily base volume as a decimal string, or None.\n    turnover: Source daily quote turnover, or None.\n    market_cap: Explicit optional company metadata, never a volume proxy.\n    sector: Explicit optional company sector, otherwise unclassified.\n    metadata_as_of_ms: Date of user-supplied fundamentals, or None.\n    feed_state: Actual quote provenance state; unavailable without a quote.\n    source: Actual provider label; never promoted to a broader market feed.\n    as_of_ms: Actual quote observation time, or None without a quote.\n    error: Provider/missing-data explanation, or None for an available\n        quote.",
+        "description": "One symbol of the map.\n\nAttributes:\n    key: Unique key within the data set (ticker or coin id).\n    symbol: Display ticker.\n    name: Company, fund or coin name, or None.\n    group: Sector (stocks), asset class (ETFs) or None (crypto).\n    industry: Industry within the sector, or None.\n    exchange: Listing exchange, or None.\n    instrument_id: Canonical instrument to chart, or None when no\n        configured venue lists it.\n    chart_unavailable_reason: Why no chart can open, or None.\n    price: Last price as a decimal string, or None.\n    metrics: Available metric values by metric id (decimal strings);\n        a missing key means the value is unavailable for this symbol.\n    as_of_ms: Quote observation or fetch time, or None.\n    error: Per-symbol source problem, or None.",
         "properties": {
           "as_of_ms": {
             "anyOf": [
@@ -1348,7 +1574,7 @@
             ],
             "title": "As Of Ms"
           },
-          "change_pct": {
+          "chart_unavailable_reason": {
             "anyOf": [
               {
                 "type": "string"
@@ -1357,7 +1583,7 @@
                 "type": "null"
               }
             ],
-            "title": "Change Pct"
+            "title": "Chart Unavailable Reason"
           },
           "error": {
             "anyOf": [
@@ -1371,49 +1597,59 @@
             "title": "Error"
           },
           "exchange": {
-            "title": "Exchange",
-            "type": "string"
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Exchange"
           },
-          "feed_state": {
-            "title": "Feed State",
-            "type": "string"
+          "group": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Group"
+          },
+          "industry": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Industry"
           },
           "instrument_id": {
-            "title": "Instrument Id",
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Instrument Id"
+          },
+          "key": {
+            "title": "Key",
             "type": "string"
           },
-          "last": {
-            "anyOf": [
-              {
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Last"
-          },
-          "market_cap": {
-            "anyOf": [
-              {
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Market Cap"
-          },
-          "metadata_as_of_ms": {
-            "anyOf": [
-              {
-                "type": "integer"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Metadata As Of Ms"
+          "metrics": {
+            "additionalProperties": {
+              "type": "string"
+            },
+            "title": "Metrics",
+            "type": "object"
           },
           "name": {
             "anyOf": [
@@ -1426,7 +1662,7 @@
             ],
             "title": "Name"
           },
-          "sector": {
+          "price": {
             "anyOf": [
               {
                 "type": "string"
@@ -1435,62 +1671,16 @@
                 "type": "null"
               }
             ],
-            "title": "Sector"
-          },
-          "source": {
-            "anyOf": [
-              {
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Source"
+            "title": "Price"
           },
           "symbol": {
             "title": "Symbol",
             "type": "string"
-          },
-          "turnover": {
-            "anyOf": [
-              {
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Turnover"
-          },
-          "volume": {
-            "anyOf": [
-              {
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Volume"
           }
         },
         "required": [
-          "instrument_id",
-          "symbol",
-          "name",
-          "exchange",
-          "last",
-          "change_pct",
-          "volume",
-          "turnover",
-          "market_cap",
-          "sector",
-          "metadata_as_of_ms",
-          "feed_state",
-          "source",
-          "as_of_ms",
-          "error"
+          "key",
+          "symbol"
         ],
         "title": "HeatmapTile",
         "type": "object"
@@ -4467,48 +4657,40 @@
     },
     "/v1/heatmap": {
       "get": {
-        "description": "Loads actual quotes and preserves unavailable stocks.\n\nLoads actual quotes and preserves unavailable stocks as neutral tiles.\n\nArgs:\n    principal: Authenticated owner of optional company information.\n    region: US or Taiwan listings, default US.\n    venue: Optional configured exchange filter.\n    query: Optional symbol or company-name search.\n    limit: Explicit maximum stocks, one through five thousand.\n\nReturns:\n    Actual quotes, market coverage, provenance and available metrics.",
+        "description": "Loads one data set within a short time budget.\n\nSlow sources keep loading in the background; the response then\ncarries the cached or partial data with ``pending`` set.\n\nArgs:\n    principal: Authenticated caller.\n    type: Heatmap family: stocks, etfs or crypto.\n    dataset: Data set id of that family, default its preferred one.\n    limit: Maximum tiles, default the data set's own size.\n\nReturns:\n    Tiles, metric availability, coverage and provenance.",
         "operationId": "snapshot_v1_heatmap_get",
         "parameters": [
           {
             "in": "query",
-            "name": "region",
+            "name": "type",
             "required": false,
             "schema": {
-              "default": "us",
+              "default": "stocks",
               "enum": [
-                "us",
-                "taiwan"
+                "stocks",
+                "etfs",
+                "crypto"
               ],
-              "title": "Region",
+              "title": "Type",
               "type": "string"
             }
           },
           {
             "in": "query",
-            "name": "venue",
+            "name": "dataset",
             "required": false,
             "schema": {
               "anyOf": [
                 {
-                  "$ref": "#/components/schemas/Venue"
+                  "maxLength": 40,
+                  "pattern": "^[a-z0-9_]+$",
+                  "type": "string"
                 },
                 {
                   "type": "null"
                 }
               ],
-              "title": "Venue"
-            }
-          },
-          {
-            "in": "query",
-            "name": "query",
-            "required": false,
-            "schema": {
-              "default": "",
-              "maxLength": 120,
-              "title": "Query",
-              "type": "string"
+              "title": "Dataset"
             }
           },
           {
@@ -4516,11 +4698,17 @@
             "name": "limit",
             "required": false,
             "schema": {
-              "default": 1000,
-              "maximum": 5000,
-              "minimum": 1,
-              "title": "Limit",
-              "type": "integer"
+              "anyOf": [
+                {
+                  "maximum": 2000,
+                  "minimum": 1,
+                  "type": "integer"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Limit"
             }
           }
         ],
@@ -4548,62 +4736,29 @@
         },
         "summary": "Snapshot",
         "tags": [
-          "stock-heatmap"
+          "heatmap"
         ]
       }
     },
-    "/v1/heatmap/metadata": {
+    "/v1/heatmap/catalog": {
       "get": {
-        "description": "Lists the owner's explicitly supplied, dated company fundamentals.\n\nArgs:\n    principal: Authenticated tenant owner.\n\nReturns:\n    Company sectors/capitalizations with their original observation\n    dates.",
-        "operationId": "metadata_v1_heatmap_metadata_get",
+        "description": "Lists every data set with its availability.\n\nArgs:\n    principal: Authenticated caller.\n\nReturns:\n    Data sets in menu order and the default per family.",
+        "operationId": "catalog_v1_heatmap_catalog_get",
         "responses": {
           "200": {
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/CompanyMetadataBatch"
+                  "$ref": "#/components/schemas/HeatmapCatalog"
                 }
               }
             },
             "description": "Successful Response"
           }
         },
-        "summary": "Metadata",
+        "summary": "Catalog",
         "tags": [
-          "stock-heatmap"
-        ]
-      },
-      "put": {
-        "description": "Stores owned optional fundamentals separately.\n\nStores owned optional fundamentals separately from provider quote data.\n\nArgs:\n    body: Explicit dated stock/ETF sectors and capitalization records.\n    principal: Authenticated author.\n\nReturns:\n    Empty response after atomic persistence of supplied records.",
-        "operationId": "put_metadata_v1_heatmap_metadata_put",
-        "requestBody": {
-          "content": {
-            "application/json": {
-              "schema": {
-                "$ref": "#/components/schemas/CompanyMetadataBatch"
-              }
-            }
-          },
-          "required": true
-        },
-        "responses": {
-          "204": {
-            "description": "Successful Response"
-          },
-          "422": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/HTTPValidationError"
-                }
-              }
-            },
-            "description": "Validation Error"
-          }
-        },
-        "summary": "Put Metadata",
-        "tags": [
-          "stock-heatmap"
+          "heatmap"
         ]
       }
     },

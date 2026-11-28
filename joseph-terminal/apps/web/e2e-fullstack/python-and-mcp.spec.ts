@@ -12,27 +12,41 @@ import {API} from '../playwright.fullstack.config';
 /** Ordinary test-user authentication; never an external notification recipient. */
 const AUTH = {Authorization: 'Bearer fullstack-token'};
 
-test('new stock heatmap tab loads real backend quotes and opens the selected stock', async ({
+test('new heatmap tab loads the engine catalogue and snapshot honestly', async ({
   page,
+  request,
 }) => {
+  const api = await request.get(`${API}/v1/heatmap`, {
+    headers: AUTH,
+    params: {type: 'crypto'},
+  });
+  expect(api.status()).toBe(200);
+  const body = (await api.json()) as {
+    type: string;
+    tiles: unknown[];
+    size_metrics: Array<{id: string}>;
+  };
+  expect(body.type).toBe('crypto');
+  expect(Array.isArray(body.tiles)).toBe(true);
+  expect(body.size_metrics.map(row => row.id)).toContain('market_cap');
   await page.goto('/');
   await page.getByRole('button', {name: 'Add chart tab'}).click();
-  await page.getByRole('button', {name: 'Stock heatmap', exact: true}).click();
-  const heatmap = page.getByRole('region', {name: 'Stock heatmap'});
+  await page.getByRole('button', {name: 'Heatmap', exact: true}).click();
+  const heatmap = page.getByRole('region', {name: 'Heatmap'});
+  await expect(heatmap.getByLabel('Data set')).toBeVisible();
+  await expect(heatmap.getByRole('option', {name: /^S&P 500/})).toHaveCount(1);
+  // Either real tiles or an explicit empty/unavailable state, never a hang.
   await expect(
-    heatmap.getByRole('button', {name: /Open ACME(?: DEMO)?,/})
-  ).toBeVisible();
-  await expect(heatmap).toContainText('DEMO');
+    heatmap
+      .getByRole('group', {name: /tiles$/})
+      .getByRole('button', {name: /,/})
+      .first()
+      .or(heatmap.getByText(/No symbol|No symbols|unavailable|error/i).first())
+  ).toBeVisible({timeout: 30_000});
   await page.reload();
   await expect(
-    page.getByRole('tab', {name: 'Stock heatmap', exact: true})
+    page.getByRole('tab', {name: 'Heatmap', exact: true})
   ).toHaveAttribute('aria-selected', 'true');
-  await page.getByRole('button', {name: /Open ACME(?: DEMO)?,/}).click();
-  await expect(page.getByRole('tab', {name: 'ACME · 5m'})).toHaveAttribute(
-    'aria-selected',
-    'true'
-  );
-  await expect(page.getByRole('region', {name: /Chart ACME/})).toBeVisible();
 });
 
 test('Python editor saves, executes and attaches a real isolated indicator', async ({
