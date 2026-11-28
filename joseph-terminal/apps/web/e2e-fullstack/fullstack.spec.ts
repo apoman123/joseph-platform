@@ -305,7 +305,7 @@ test('a paper order from the ticket is created by the execution engine', async (
 test('a built-in Python strategy backtests and activates on the engine', async ({
   page,
 }) => {
-  await loadTerminal(page);
+  await loadOnDemoVenue(page);
   await openPanel(page, 'Strategy');
   await page
     .getByRole('combobox', {name: 'Strategy script'})
