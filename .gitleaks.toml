@@ -24,6 +24,8 @@ regexes = [
   '''^(tse|otc)_[0-9A-Z]{4,6}\.tw_[0-9]{8}$''',
   # Alpaca pagination token in a documented-shape fixture (base64 of a cursor).
   '''^QUFQTHxNfDIwMjYtMTEtMjBUMTQ6MzI6MDAuMDAwMDAwMDAwWg==$''',
+  # Multi-symbol daily-bars pagination token (base64 of "AAPL|2026-11-19").
+  '''^QUFQTHwyMDI2LTExLTE5$''',
 ]
 
 [[rules]]
