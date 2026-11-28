@@ -44,6 +44,9 @@ BROWSER_HEADERS = {
 }
 """Headers the Nasdaq.com API requires (it rejects non-browser agents)."""
 
+WIKIPEDIA_HEADERS = {"User-Agent": f"{http.USER_AGENT} (heatmap index members)"}
+"""Wikimedia asks API clients to name themselves (generic agents get 403)."""
+
 UNCLASSIFIED = "Miscellaneous"
 """Sector of a listing the screener does not classify."""
 
@@ -292,6 +295,7 @@ class UsEquitySource:
                 "format": "json",
                 "formatversion": "2",
             },
+            headers=WIKIPEDIA_HEADERS,
         )
         return parse_sp500(payload)
 

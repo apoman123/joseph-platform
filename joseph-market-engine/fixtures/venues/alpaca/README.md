@@ -18,6 +18,7 @@ XNYS session starting 14:30 UTC). They contain no credentials.
 | `close_bars_1min.json` | `GET /v2/stocks/AAPL/bars?timeframe=1Min` around the 2026-11-20 close (15:57-16:01 New York plus 13:30 and 15:30): the 16:00 minute holds the closing cross and post-market trades | https://docs.alpaca.markets/reference/stockbarsingle-1 |
 | `close_trades.json` | `GET /v2/stocks/AAPL/trades` for the closing window `[16:00, 16:01)`: the Nasdaq closing cross (`6`), another market center's closing print, an odd-lot closing print (`6`, `I`), a canceled print (`u`), Form T trades (`T`) | https://docs.alpaca.markets/reference/stocktradesingle-1 |
 | `close_bars_1day.json` | `GET /v2/stocks/AAPL/bars?timeframe=1Day` for 2026-11-19/20; the 2026-11-20 close is the closing cross price (daily bars: `6` updates the close, `T` does not) | https://docs.alpaca.markets/reference/stockbarsingle-1 |
+| `bars_multi_page1.json`, `bars_multi_page2.json` | `GET /v2/stocks/bars?symbols=AAPL,SPY&timeframe=1Day` (multi-symbol daily bars keyed by symbol, two pages joined by `next_page_token`; used by heatmaps) | https://docs.alpaca.markets/reference/stockbars-1 |
 | `early_close_bars_1min.json`, `early_close_trades.json` | the same two endpoints for GOVT (Cboe BZX, tape B) around the 13:00 early close of 2025-11-28 | https://docs.alpaca.markets/reference/stocktradesingle-1 |
 
 Sale-condition update rules used for bars:
