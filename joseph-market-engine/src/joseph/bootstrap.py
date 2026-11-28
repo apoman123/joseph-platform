@@ -815,7 +815,7 @@ def create_application(
     universe = market_universe.UniverseService(built.market_data)
     routers.append(
         heatmap_router.build_router(
-            heatmap_service.HeatmapService(universe, built.engine),
+            heatmap_service.HeatmapService(universe),
             deps.get_principal,
         )
     )
