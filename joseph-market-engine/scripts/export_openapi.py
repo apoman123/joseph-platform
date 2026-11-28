@@ -13,7 +13,10 @@ Without arguments the OpenAPI and built-in catalog are written to
 * ``market-engine.openapi.json``, from a DEMO-only application (in-memory
   SQLite, no pipeline, no indicator plugin packages);
 * ``builtin-indicator-plugins.json``, the contract ``IndicatorPluginList``
-  of the built-in indicators, which the terminal's DEMO mode mirrors.
+  of the built-in indicators, which the terminal's DEMO mode mirrors;
+* ``builtin-script-catalog.json``, the ``GET /v1/scripts/catalog`` listing
+  of the built-in filters and alerts (without plugins), which the
+  terminal's DEMO screener and alert dialog mirror.
 
 Managed Python/heatmap model schemas are also regenerated in
 ``joseph-terminal/packages/contracts/schemas/python-scripts.schema.json``.
@@ -35,6 +38,7 @@ from joseph import bootstrap
 from joseph.indicators import catalog
 from joseph.market_data.app import heatmap
 from joseph.platform import config
+from joseph.scripts import catalog as script_catalog
 from joseph.scripts import models as scripts
 
 _DIR = (
@@ -47,6 +51,7 @@ _DIR = (
 _OPENAPI = _DIR / "market-engine.openapi.json"
 _BUILTINS = _DIR / "builtin-indicator-plugins.json"
 _SCRIPTS = _DIR.parent / "schemas" / "python-scripts.schema.json"
+_SCRIPT_CATALOG = _DIR / "builtin-script-catalog.json"
 
 
 def _script_contracts() -> str:
@@ -119,6 +124,24 @@ def _builtins() -> str:
     return json.dumps(listing, indent=2) + "\n"
 
 
+def _script_catalog() -> str:
+    """Generates the built-in filter and alert catalog listing.
+
+    Returns:
+        ``{"scripts": [...]}`` as the catalog route describes the built-in
+        filters and alerts, as indented JSON text in catalog order.
+    """
+    built = script_catalog.build(
+        script_catalog.CatalogConfig(packages=script_catalog.NO_PACKAGES)
+    )
+    listing = [
+        entry.describe()
+        for entry in built.entries()
+        if entry.kind in {"filter", "alert"}
+    ]
+    return json.dumps({"scripts": listing}, indent=2) + "\n"
+
+
 def main() -> int:
     """Writes or checks the generated files.
 
@@ -130,6 +153,7 @@ def main() -> int:
         (_OPENAPI, _openapi()),
         (_BUILTINS, _builtins()),
         (_SCRIPTS, _script_contracts()),
+        (_SCRIPT_CATALOG, _script_catalog()),
     )
     if "--check" in sys.argv:
         stale = [

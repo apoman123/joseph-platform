@@ -19,6 +19,8 @@ import {
   DEMO_BROKER_INSTRUMENTS,
   DEMO_MARKS,
   DemoExecutionClient,
+  DemoMarketDataClient,
+  DemoScriptsClient,
   DemoStrategyClient,
   DemoUserStream,
 } from '@joseph/mock-provider';
@@ -354,6 +356,7 @@ export function createFakeContext(
     strategy,
     execution: broker,
     userStream: new DemoUserStream(broker, strategy),
+    scripts: new DemoScriptsClient({market: new DemoMarketDataClient()}),
     demo: true,
     ...options.clients,
   };

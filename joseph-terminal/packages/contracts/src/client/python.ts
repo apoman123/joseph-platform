@@ -17,6 +17,7 @@ import type {
   AlertJob,
   HeatmapSnapshot,
   CompanyMetadataBatch,
+  Signal,
 } from '../generated/contracts';
 import {HttpTransport, type HttpClientOptions} from './http';
 
@@ -30,8 +31,122 @@ export interface PythonCatalog {
   next_offset?: number | null;
 }
 
+/** One declared input of a catalog script (`joseph_script.Input`). */
+export interface CatalogInput {
+  /** JSON default value. */
+  default: unknown;
+  /** Settings label; the input name when empty. */
+  title: string;
+  /** Inclusive numeric lower bound, or null. */
+  minimum: number | null;
+  /** Inclusive numeric upper bound, or null. */
+  maximum: number | null;
+  /** Accepted values shown as a choice list, or null. */
+  options: unknown[] | null;
+  /** Numeric spinner step, or null. */
+  step: number | null;
+  /** Settings section, or empty. */
+  group: string;
+  /** Help text, or empty. */
+  tooltip: string;
+}
+
+/** A built-in or installed plugin script (`GET /v1/scripts/catalog`). */
+export interface CatalogScript {
+  /** `builtin:<id>` or `plugin:<entry point>:<id>`. */
+  script_id: string;
+  /** Script role. */
+  kind: ScriptVersion['kind'];
+  /** Built-in platform script or operator-installed plugin. */
+  origin: 'builtin' | 'plugin';
+  /** Display name. */
+  title: string;
+  /** Compact legend name. */
+  short_title: string;
+  /** Catalog description. */
+  description: string;
+  /** Catalog section such as `Price`. */
+  category: string;
+  /** Declared inputs in display order. */
+  inputs: Record<string, CatalogInput>;
+  /** Identity of the installed code (pinned by alert jobs). */
+  source_hash: string;
+  /** False when disabled by configuration. */
+  enabled: boolean;
+  /** Market data a filter loads beyond the snapshot. */
+  metrics?: string[];
+}
+
+/** Catalog listing. */
+export interface CatalogList {
+  /** Scripts in catalog order. */
+  scripts: CatalogScript[];
+}
+
+/**
+ * Market filters (scans) and alert conditions over built-in, plugin and
+ * owned scripts. The HTTP implementation is `PythonClient`; DEMO mode has
+ * an offline implementation.
+ */
+export interface ScriptsClient {
+  /**
+   * Lists built-in and plugin scripts.
+   * @param kind Optional role filter.
+   * @return Catalog listing.
+   */
+  catalog(kind?: CatalogScript['kind']): Promise<CatalogList>;
+  /**
+   * Lists the caller's own scripts.
+   * @param offset Nonnegative offset.
+   * @return Owned latest versions and runtime availability.
+   */
+  list(offset?: number): Promise<PythonCatalog>;
+  /**
+   * Starts a scan of conditions combined with AND.
+   * @param body Market, bounds and conditions.
+   * @return Pending job.
+   */
+  screen(body: ScanInput): Promise<ScanJob>;
+  /**
+   * Reads scan progress and results.
+   * @param id Job id.
+   * @return Current job state.
+   */
+  scanStatus(id: string): Promise<ScanJob>;
+  /**
+   * Cancels a scan, keeping partial results.
+   * @param id Job id.
+   * @return Job state.
+   */
+  cancelScan(id: string): Promise<ScanJob>;
+  /**
+   * Lists alert jobs.
+   * @return Owned alert jobs.
+   */
+  alerts(): Promise<AlertJob[]>;
+  /**
+   * Creates or replaces an alert job.
+   * @param body Condition script, symbol, inputs and destinations.
+   * @param id Job to replace, when editing.
+   * @return Saved job.
+   */
+  saveAlert(body: AlertJobInput, id?: string): Promise<AlertJob>;
+  /**
+   * Deletes an alert job, keeping its log.
+   * @param id Job id.
+   * @return Resolves after removal.
+   */
+  deleteAlert(id: string): Promise<void>;
+  /**
+   * Lists the alert log: signals of kind `CUSTOM_ALERT`, newest first.
+   * @param limit Maximum rows.
+   * @return Alert signals.
+   */
+  alertLog(limit?: number): Promise<Signal[]>;
+}
+
 /** Authenticated managed-code workflows; never sends broker credentials. */
-export class PythonClient {
+export class PythonClient implements ScriptsClient {
   private readonly http: HttpTransport;
 
   /**
@@ -111,6 +226,39 @@ export class PythonClient {
       undefined,
       body
     );
+  }
+
+  /**
+   * Lists built-in and installed plugin scripts.
+   * @param kind Optional role filter.
+   * @return Catalog listing without source text.
+   */
+  catalog(kind?: CatalogScript['kind']): Promise<CatalogList> {
+    return this.http.request('GET', '/v1/scripts/catalog', {kind});
+  }
+
+  /**
+   * Starts a scan of the body's conditions combined with AND
+   * (`POST /v1/script-scans`).
+   * @param body Market selection, bounds and one to ten conditions.
+   * @return Pending job for progress polling.
+   */
+  screen(body: ScanInput): Promise<ScanJob> {
+    return this.http.request('POST', '/v1/script-scans', undefined, body);
+  }
+
+  /**
+   * Lists custom alert signals (`GET /v1/signals?kind=CUSTOM_ALERT`).
+   * @param limit Maximum rows, default two hundred.
+   * @return Alert signals, newest first.
+   */
+  async alertLog(limit = 200): Promise<Signal[]> {
+    const list = await this.http.request<{signals: Signal[]}>(
+      'GET',
+      '/v1/signals',
+      {kind: 'CUSTOM_ALERT', limit}
+    );
+    return list.signals;
   }
 
   /**

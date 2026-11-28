@@ -66,6 +66,7 @@ import type {
   VenueStatusList,
 } from '../generated/contracts';
 import type {ExchangeCalendarId} from '../sessions';
+import type {ScriptsClient} from './python';
 
 /** Query for the instrument registry. */
 export interface InstrumentQuery {
@@ -514,6 +515,8 @@ export interface BackendClients {
   execution: ExecutionClient;
   /** Authenticated user stream (orders, fills, positions, signals). */
   userStream: StreamClient;
+  /** Market filter scans and alert jobs over built-in and owned scripts. */
+  scripts: ScriptsClient;
   /** Whether these clients serve synthetic DEMO data. */
   demo: boolean;
 }
