@@ -37,7 +37,7 @@ import {useRuntime} from './runtime-context';
 import {SlotInline} from './slot-host';
 import {formatNumber} from './format';
 import {Splitter} from './splitter';
-import {StockHeatmap} from './stock-heatmap';
+import {Heatmap} from './heatmap/heatmap-view';
 import {DrawingFavorites} from './drawing-favorites';
 
 /** Workspace panel key holding chart-grid track sizes per layout. */
@@ -141,8 +141,8 @@ function ChartSlot({
       <DetachedPlaceholder pane={detached.pane} status={detached.status} />
     );
   }
-  if (chart.view_type === 'stock_heatmap') {
-    return <StockHeatmap chart={chart} active={active} runtime={runtime} />;
+  if (chart.view_type === 'heatmap') {
+    return <Heatmap chart={chart} active={active} runtime={runtime} />;
   }
   return (
     <ChartPane

@@ -222,34 +222,13 @@ re-enabling a configuration resets its future-bar checkpoint; it does not replay
 historical notifications. Choose enough history for the condition and expected
 outages. Evaluation diagnostics are visible in the editor.
 
-## Stock heatmaps
+## Heatmaps
 
-The plus button opens **New tab**, with **Candlestick chart** and **Stock heatmap**
-choices. Saved tab type survives reload and export/import. There is no fixed
-saved-tab limit; layouts still mount up to eight panes.
-
-The heatmap shows the configured US or Taiwan stock/ETF universe, daily return
-colors, weighted rectangles, exchange/sector grouping, search, group drill-down,
-quote details, and click-to-open candle charts. It refreshes every 30 seconds.
-The market request uses selected-symbol bulk quotes when supported and a bounded
-shared cache otherwise. Partial quotes, unavailable sources, and timestamps are
-shown; missing daily returns are gray. Regions keep USD and TWD sizing separate.
-Alpaca IEX data retains its IEX coverage; it is not relabeled consolidated SIP.
-
-Size supports equal, actual source volume/turnover, and market capitalization
-when supplied. Current feeds do not provide a complete company-cap/sector table.
-Those choices remain unavailable until dated, tenant-owned metadata is imported.
-No index membership, sectors, or capitalization are fabricated. Import JSON:
-
-```json
-{"records":[{"instrument_id":"nasdaq:stock:AAPL","sector":"Technology","market_cap":"3000000000000","as_of_ms":1795737600000}]}
-```
-
-That example is an input-format illustration, not a current valuation. Supply
-your own observation and date. Metadata remains separate from quote provenance.
-Missing size values use a minimal fallback weight. The design follows
-[TradingView heatmaps](https://www.tradingview.com/support/solutions/43000766446-tradingview-heatmaps-from-global-trends-to-details/)
-and its [view modes](https://www.tradingview.com/support/solutions/43000794279-heatmap-view-mode/).
+The plus button opens **New tab**, with **Candlestick chart** and **Heatmap**
+choices. Stock, ETF and crypto heatmaps, their data sources, caching and the
+options that free sources cannot supply are described in
+[Heatmaps](HEATMAPS.md). MCP clients read them with `market_get_heatmap` and
+`market_get_heatmap_catalog`.
 
 ## MCP connection and capability coverage
 
