@@ -155,8 +155,8 @@ Unrecorded time shows as a gap, never as invented bars.
 
 ## Watchlist and screener
 
-- **Watchlist:** *My list* or *Qualified perpetuals* (read-only, from the engine). Columns *Last*, *Mark*, *24h*, *Turnover*, *Spread*, *Fund 8h*, *OI*, *Data*; pick them with the column button, click a header to sort.
-- **Screener:** *Qualified* only if every gate passes strictly (equal fails); *Missing data* never passes. Perpetuals: 24h turnover, open interest, turnover/OI, spread, slippage for a USD 50,000 order, and no high-risk funding (8h funding from |0.30%|; *Watch* from |0.10%|). Stocks and ETFs: session turnover, spread and slippage. Filter, sort and save a *Preset*.
+- **Watchlist:** *My list* or *Qualified perpetuals* (read-only: the perpetuals that pass the built-in *Liquidity qualification* filter, rescanned every five minutes). Columns *Last*, *Mark*, *24h*, *Turnover*, *Spread*, *Fund 8h*, *OI*, *Data*; pick them with the column button, click a header to sort.
+- **Screener:** choose the *Venue*, *Market* type, *Bars* resolution and *Max symbols* (the most active by 24h turnover are scanned first), then combine filters, all of which must match: the built-in *Liquidity qualification* (every gate passes strictly, equal fails: perpetuals need 24h turnover, open interest, turnover/OI, spread, slippage for a USD 50,000 order and no high-risk funding from |0.30%| per 8h; stocks and ETFs session turnover, spread and slippage), *Price*, *Change %*, *Volume*, *Turnover*, *Relative volume*, *Gap %*, *Price vs moving average*, *RSI* and *New high or low*, each with its inputs, or one of your Filter scripts. *Scan* shows progress and can be cancelled; results list last price, 24h change, volume, turnover, spread, funding and open interest, and a click opens the chart. Instruments without the data a filter needs are listed as *unavailable*, never as matches. *Save screen as…* keeps a preset (earlier presets open as a Liquidity qualification screen).
 
 ## Strategies and alerts
 
@@ -168,7 +168,8 @@ Unrecorded time shows as a gap, never as invented bars.
 
 Signals fire once per setup, on bars closed after activation. Missing or stale data makes a condition *unknown*, which blocks the entry. The *JSON* tab exports and imports rules.
 
-- **Alerts:** kind, instrument, R:R, data source and an expandable **reason tree**; *Show on chart* jumps to the bar and zone. Sort by time, R multiple, confluence, bar volume or distance to AOI. *Acknowledge*, *Snooze* and *Dismiss* are local.
+- **Alerts:** kind, instrument, R:R, data source and an expandable **reason tree**; *Show on chart* jumps to the bar. *Alert log* shows the events of your alert jobs. Sort by time, R multiple, confluence or bar volume. *Acknowledge*, *Snooze* and *Dismiss* are local.
+- **Alert manager:** *Create alert* picks a condition — a built-in alert (*Price crossing*, *Price channel*, *Moving average cross*, *RSI overbought / oversold*, *Volume spike*, *Percent change*, *New high or low breakout*) or one of your alert, indicator or strategy scripts — the symbol, timeframe, inputs, history, the notification destinations and whether it is enabled. Each alert is checked on every newly closed bar; matches go to the alert log and the chosen destinations, never to trading. *Pause*, *Edit* and *Delete* manage it; errors such as missing data show in its status.
 - **Notifications:** Telegram, LINE, e-mail or an HTTPS webhook, filtered by kind and severity, with quiet hours (critical alerts still arrive). *Not delivered*: the server has no credentials for that channel.
 
 ## Backtests

@@ -143,31 +143,106 @@ supported exchanges and brokers retained.
 
 ## Market filters and Python alerts
 
-A filter selects a configured venue and market type, input overrides, a maximum
-symbol count (1–10,000), and optional closed history (0–500 bars). Snapshot-only
-filters avoid historical requests. Submission returns 202 immediately; progress,
-matches, errors, cancellation, source hash, and the total eligible universe are
-available under `/v1/script-scans/{job_id}`. Missing source data is reported
-separately from false decisions. Interrupted scans retain partial results and
-show a restart error rather than silently resuming different data.
+Every default filter and alert condition is a built-in script: one class
+inheriting `joseph_script.Filter` (`matches(self, ctx) -> bool`) or
+`joseph_script.Alert` (`on_bar(self, ctx)` publishing through `ctx.alert` or
+`ctx.alertcondition`), listed by `GET /v1/scripts/catalog?kind=filter|alert` as
+`builtin:<id>`. Built-ins (and installed plugins) run in process, so scans and
+alerts on them need no Docker runtime; owned scripts still run only in the
+isolated runner. The public source of a built-in can be copied into the editor
+and saved as an owned script.
+
+Built-in filters (inputs in parentheses; *operator* is `above`, `below` or
+`between` with `value` and `value2`):
+
+| Id | Reads | Inputs |
+| --- | --- | --- |
+| `liquidity-qualification` | snapshot, order book, open interest, funding | max data age (s), reject high funding risk |
+| `price` | latest trade, else mark | operator, value, value2 |
+| `change` | rolling 24h change % | operator, value, value2 |
+| `volume` | rolling 24h / session base volume | operator, value, value2 |
+| `turnover` | rolling 24h / session quote turnover | operator, value, value2 |
+| `relative-volume` | latest bar volume / mean of the preceding bars | length, operator, value, value2 |
+| `gap` | latest bar open vs previous close, % | operator, value, value2 |
+| `price-vs-ma` | latest price vs SMA/EMA of closes | average type, length, above/below |
+| `rsi` | Wilder RSI of closes | length, operator, value, value2 |
+| `new-high-low` | latest bar sets the N-bar high or low | bars, high/low |
+
+**Liquidity qualification** applies strict gates per asset class (a value equal
+to a threshold fails): crypto and RWA perpetuals need 24h turnover above USD 50M,
+equity perpetuals above USD 30M, both open interest above USD 10M, turnover/OI
+above 0.20, spread below 0.10 % and USD 50K worst-side book-walk slippage below
+0.25 %; US stocks/ETFs need session turnover above USD 20M (bond ETFs USD 10M);
+TWSE and TPEx listings above TWD 300M (bond ETFs TWD 100M) with spread below
+0.60 % and TWD 1.5M slippage below 1.00 %. Listed securities have no funding or
+open-interest gates. High-risk funding (|8h| ≥ 0.30 %) excludes a perpetual
+unless the input is turned off. Rate series never match; on Binance only
+USDT-quoted contracts are eligible. A failed gate excludes; otherwise a missing
+or stale input (older than the max data age) makes the instrument unavailable.
+
+A filter that lacks data raises `joseph_script.Unavailable`; the scan lists the
+instrument under `unavailable` with the reason, never as a match. A filter can
+declare `METRICS = ("order_book", "open_interest", "funding")` (or a scan can
+request `metrics`) to receive `ctx.snapshot["order_book"]` (100 levels per
+side) and the open interest and funding of derivatives when the bulk snapshot
+lacks them. `ctx.snapshot["evaluated_at_ms"]` is the evaluation time.
+
+A scan selects a configured venue and market type, an optional search, a
+maximum symbol count (1–10,000), optional closed history (0–500 bars) on one
+resolution, and up to eleven filters combined with AND: `POST
+/v1/script-scans` with `conditions: [{script_id, version?, inputs}]`, or `POST
+/v1/scripts/{id}/scan` for a path filter plus optional further conditions.
+`order_by: "turnover"` loads every quote first and scans the most active
+instruments first, so `max_symbols` keeps them. An instrument is excluded as
+soon as one filter returns False; a filter failure is listed under `errors`.
+Every filter is pinned at submission (`conditions` with version and source hash;
+catalog filters have version 0). Submission returns 202 immediately; progress,
+matches (with their snapshot), unavailable instruments, errors, cancellation and
+the total eligible universe are available under `/v1/script-scans/{job_id}`.
+Scans evaluate 25 instruments per batch with bounded data requests. Interrupted
+scans retain partial results and show a restart error rather than silently
+resuming different data.
+
+Built-in alert conditions (event names in parentheses):
+
+| Id | Fires on a closed bar when | Inputs |
+| --- | --- | --- |
+| `price-cross` | the close crosses a level (`crossing-up`, `crossing-down`) | level, crossing / up / down |
+| `channel` | the close enters, exits, closes inside or outside a band (`entering-channel`, …) | upper, lower, condition |
+| `ma-cross` | a fast average crosses a slow one (`ma-cross-up`, `ma-cross-down`) | fast, slow, EMA/SMA, crossing / up / down |
+| `rsi-level` | RSI rises above overbought or falls below oversold (`rsi-overbought`, `rsi-oversold`) | length, overbought, oversold, which |
+| `volume-spike` | volume exceeds a multiple of the preceding mean (`volume-spike`) | length, multiple |
+| `percent-change` | the close moves by at least a % over N bars (`move-up`, `move-down`) | bars, threshold %, direction |
+| `breakout` | the high/low breaks the preceding N bars (`new-high`, `new-low`) | bars, high / low / either |
 
 `ctx.alert(message, name="condition", severity="INFO")` records a condition.
-Preview runs **do not send notifications**. **Enable new live alert** pins a
-saved source/version, symbol, timeframe, inputs, and selected owned notification
-destinations. Jobs poll every ten seconds and deliver only future confirmed bars
-through the durable outbox. The checkpoint is based on the exact evaluated
-window, not a later quote request. Deduplication includes tenant, job, version,
-condition name, and bar. UI/browser delivery is implicit; Telegram, WhatsApp,
-Web Push, and other selected destinations retain their existing enabled,
-strategy, signal-kind, severity, and quiet-hours filters. Select **Python alerts**
-in destination filters. Their canonical kind is `CUSTOM_ALERT`, direction is
-`NONE`, and mode is always `ALERT_ONLY`; they never enter execution forwarding.
+Preview runs **do not send notifications**. An alert job pins its condition
+script (owned version, or version 0 plus the installed source hash of a
+built-in or plugin), symbol, timeframe, inputs, history and selected owned
+notification destinations: create it in the terminal's **Alert manager** or
+with `POST /v1/script-alerts`; owned scripts also offer **Enable new live
+alert** in the editor. Inputs of catalog scripts are checked against their
+declarations. Jobs poll every ten seconds and deliver only future confirmed
+bars through the durable outbox. The checkpoint is based on the exact evaluated
+window, not a later quote request. Deduplication includes tenant, job,
+version (or source hash), condition name, and bar. If an installed built-in's
+source changes, its jobs report the change and stop until saved again. UI/browser
+delivery is implicit; Telegram, WhatsApp, Web Push, and other selected
+destinations retain their existing enabled, strategy, signal-kind, severity, and
+quiet-hours filters. Select **Alerts (built-in and Python)** in destination
+filters. Their canonical kind is `CUSTOM_ALERT`, direction is `NONE`, and mode
+is always `ALERT_ONLY`; they never enter execution forwarding. The **Alert log**
+filter of the Alerts panel lists them.
 
 Run one market-engine worker per database for scan ownership and scheduling.
 Jobs survive restart. Disabling/deleting stops future evaluation. Replacing or
 re-enabling a configuration resets its future-bar checkpoint; it does not replay
 historical notifications. Choose enough history for the condition and expected
-outages. Evaluation diagnostics are visible in the editor.
+outages. Evaluation diagnostics are visible in the Alert manager and editor.
+
+In DEMO mode the screener and alert manager evaluate TypeScript mirrors of the
+built-in filters and alerts on the synthetic DEMO instruments; results are DEMO
+data and owned scripts need a connected market engine.
 
 ## Stock heatmaps
 

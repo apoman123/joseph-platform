@@ -224,7 +224,8 @@ export function scanRequest(
     order_by: 'turnover',
     history_bars: historyBarsFor(preset.conditions, catalog),
     tf: preset.tf,
-    conditions,
+    // The generated contract spells the ten-condition bound as tuples.
+    conditions: conditions.slice(0, 10) as ScanInput['conditions'],
   };
 }
 
