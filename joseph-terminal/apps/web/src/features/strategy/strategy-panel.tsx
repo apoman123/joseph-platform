@@ -5,191 +5,150 @@
  */
 
 /**
- * @fileoverview Strategy builder panel: settings, rule tree, risk and
- * notifications, JSON import/export, backtests and versions with
- * activation. Automatic live trading is visibly locked here; it can only be
- * enabled through an execution deployment with explicit consent.
+ * @fileoverview Python strategy panel: pick a built-in, plugin or owned
+ * Strategy script, edit its declared inputs, backtest it on closed bars,
+ * activate or pause it and review its signals. Automatic live trading is
+ * visibly locked here; it can only be enabled through an execution
+ * deployment with explicit consent.
  */
 
 'use client';
 import {formatFixed, formatUtcDateTime} from '@joseph/chart-trading';
 import {
-  VENUES,
-  VENUE_NAMES,
-  type ActivateRequest,
-  type BacktestReport,
-  type StrategyDefinition,
-  type StrategyVersion,
+  TIMEFRAMES,
+  type CatalogScript,
+  type ScriptResult,
   type Timeframe,
-  type ValidationIssue,
-  type Venue,
 } from '@joseph/contracts';
-import {
-  STRATEGY_TEMPLATES,
-  TIMEFRAME_ORDER,
-  WARNING_CODES,
-  buildVocabulary,
-  describeTarget,
-  describeTree,
-  diffDefinitions,
-  exportDefinition,
-  importDefinition,
-  kindLabel,
-  nodeIdAtPointer,
-  pluginName,
-  type Vocabulary,
-} from '@joseph/strategy-builder';
+import {createStore} from '@joseph/feature-registry';
 import {Lock} from 'lucide-react';
 import {useEffect, useMemo, useState, type ReactNode} from 'react';
-import {useIndicatorPlugins} from '../../shell/indicator-plugins';
+import {pythonState} from '../../shell/python-state';
 import {useStore, type WebFeatureContext} from '../../shell/react-bindings';
-import {errorMessage} from '../trading/ui/hooks';
-import {ConfirmDialog, EmptyState, Notice} from '../trading/ui/primitives';
-import {RuleEditor} from './rule-editor';
-import type {StrategyEditor} from './strategy-store';
+import {useOptionalRuntime} from '../../shell/runtime-context';
+import {EmptyState, Notice} from '../trading/ui/primitives';
+import type {ActivationMode, StrategyController} from './strategy-store';
 import styles from './strategy.module.css';
 
 /** Props of the strategy panel. */
 export interface StrategyPanelProps {
   /** Feature context. */
   ctx: WebFeatureContext;
-  /** Editor. */
-  editor: StrategyEditor;
+  /** Panel controller. */
+  controller: StrategyController;
 }
 
-/** Panel tabs: rule tree, JSON, backtest and saved versions. */
-type Tab = 'rules' | 'json' | 'backtest' | 'versions';
+/** Panel tabs. */
+type Tab = 'inputs' | 'backtest' | 'activate' | 'signals' | 'source';
 
 /** Plain-language explanation of the AUTO_LIVE lock. */
 export const AUTO_LIVE_LOCK_REASON =
   'Automatic live trading is locked. It needs an execution deployment for one account with limits, explicit scoped consent and live trading enabled on the server. This terminal cannot turn it on.';
 
-/**
- * Groups issues by the rule-tree node their JSON pointer points into.
- * @param definition Definition.
- * @param issues Issues with JSON pointers.
- * @return Map from node id to issues, plus the issues outside the rule tree
- *     (`general`).
- */
-export function issuesByNode(
-  definition: StrategyDefinition,
-  issues: readonly ValidationIssue[]
-): {byNode: Map<string, ValidationIssue[]>; general: ValidationIssue[]} {
-  const byNode = new Map<string, ValidationIssue[]>();
-  const general: ValidationIssue[] = [];
-  for (const issue of issues) {
-    const id = nodeIdAtPointer(definition, issue.path);
-    if (id) byNode.set(id, [...(byNode.get(id) ?? []), issue]);
-    else general.push(issue);
-  }
-  return {byNode, general};
-}
+/** Notification channels an activation can use besides execution. */
+const CHANNELS = ['UI', 'TELEGRAM', 'LINE', 'EMAIL', 'WEBHOOK', 'WEB_PUSH'];
+
+/** Labels of the catalog origins. */
+const ORIGINS = [
+  ['builtin', 'Built-in'],
+  ['plugin', 'Plugins'],
+  ['tenant', 'My scripts'],
+] as const;
 
 /**
- * Renders the strategy panel: toolbar (template, validate, save) and the
- * rules, JSON, backtest and versions tabs.
- * @param props Feature context and the feature's editor.
+ * Renders the strategy panel.
+ * @param props Feature context and controller.
  * @return Panel element.
  */
-export function StrategyPanel({ctx, editor}: StrategyPanelProps): ReactNode {
-  const state = useStore(editor.state);
-  const plugins = useIndicatorPlugins();
-  const vocab = useMemo(() => buildVocabulary(plugins ?? []), [plugins]);
+export function StrategyPanel({
+  ctx,
+  controller,
+}: StrategyPanelProps): ReactNode {
+  const state = useStore(controller.state);
+  const selection = useStore(ctx.selection);
+  const [tab, setTab] = useState<Tab>('inputs');
+  const [tf, setTf] = useState<Timeframe>(selection.timeframe);
   useEffect(() => {
-    // Until the engine lists its plugins, only the structure is checked.
-    editor.setVocabulary(plugins ? vocab : null);
-  }, [editor, plugins, vocab]);
-  const [tab, setTab] = useState<Tab>('rules');
-  const [editError, setEditError] = useState<string | null>(null);
-  const def = state.definition;
-  const latest = state.versions[0] ?? null;
-  const allIssues = useMemo(
-    () => [
-      ...state.validation.errors,
-      ...state.validation.warnings,
-      ...state.serverIssues,
-    ],
-    [state.validation, state.serverIssues]
-  );
-  const {byNode, general} = useMemo(
-    () => issuesByNode(def, allIssues),
-    [def, allIssues]
-  );
-  const update = (patch: Partial<StrategyDefinition>) =>
-    void editor.setDefinition({...def, ...patch});
-
+    void controller.load();
+  }, [controller]);
+  const script = state.scripts.find(row => row.script_id === state.selectedId);
   return (
-    <section
-      className={`j-panel ${styles.panel}`}
-      aria-label="Strategy builder"
-    >
+    <section className={`j-panel ${styles.panel}`} aria-label="Strategy">
       <header className="j-panel__header">
         <h2>Strategy</h2>
-        <span className={styles.version} data-testid="strategy-version">
-          {latest
-            ? `Version ${latest.version}${state.dirty ? ', edited' : ''}`
-            : 'Not saved'}
-        </span>
-        {latest && (
-          <span
-            className={`j-badge ${latest.state === 'ACTIVE' ? 'j-badge--live' : ''}`}
-          >
-            {latest.state.toLowerCase()}
-          </span>
-        )}
         <span className={styles.grow} />
         {ctx.clients.demo && (
           <span className="j-badge j-badge--demo">Demo</span>
         )}
       </header>
       <div className={styles.toolbar}>
-        <label className={styles.template}>
-          <span className={styles.srOnly}>Start from a template</span>
+        <label className="j-field">
+          <span className="j-label">Strategy script</span>
           <select
             className="j-select"
-            // Always back on the prompt: the select acts as a menu.
-            value=""
-            aria-label="Start from a template"
-            onChange={e =>
-              e.target.value && void editor.applyTemplate(e.target.value)
-            }
+            aria-label="Strategy script"
+            value={state.selectedId ?? ''}
+            onChange={e => void controller.select(e.target.value)}
           >
-            <option value="">Start from a template</option>
-            {STRATEGY_TEMPLATES.map(t => (
-              <option key={t.id} value={t.id} title={t.summary}>
-                {t.title}
-              </option>
-            ))}
+            {ORIGINS.map(([origin, label]) => {
+              const rows = state.scripts.filter(row => row.origin === origin);
+              return rows.length ? (
+                <optgroup key={origin} label={label}>
+                  {rows.map(row => (
+                    <option
+                      key={row.script_id}
+                      value={row.script_id}
+                      disabled={!row.enabled}
+                    >
+                      {row.title}
+                      {row.version ? ` (v${row.version})` : ''}
+                    </option>
+                  ))}
+                </optgroup>
+              ) : null;
+            })}
           </select>
         </label>
-        <button
-          type="button"
-          className="j-btn j-btn--sm"
-          disabled={state.busy !== null}
-          onClick={() => void editor.validateOnServer()}
-        >
-          {state.busy === 'validate' ? 'Validating…' : 'Validate'}
-        </button>
-        <button
-          type="button"
-          className="j-btn j-btn--sm j-btn--primary"
-          disabled={state.busy !== null || !state.dirty}
-          onClick={() => void editor.save()}
-        >
-          {state.busy === 'save'
-            ? 'Saving…'
-            : latest
-              ? 'Save new version'
-              : 'Save strategy'}
-        </button>
+        {script?.description && (
+          <p className={styles.description}>{script.description}</p>
+        )}
+        <div className={styles.row2}>
+          <label className="j-field">
+            <span className="j-label">Timeframe</span>
+            <select
+              className="j-select"
+              value={tf}
+              onChange={e => void setTf(e.target.value as Timeframe)}
+            >
+              {TIMEFRAMES.map(value => (
+                <option key={value} value={value}>
+                  {value}
+                </option>
+              ))}
+            </select>
+          </label>
+          <label className="j-field">
+            <span className="j-label">Closed bars</span>
+            <input
+              className="j-input j-tabular"
+              type="number"
+              min={50}
+              max={2000}
+              value={state.bars}
+              onChange={e => void controller.setBars(Number(e.target.value))}
+            />
+          </label>
+        </div>
+        <span className="j-muted">{selection.instrumentId}</span>
       </div>
       <div className="j-tabs" role="tablist" aria-label="Strategy sections">
         {(
           [
-            ['rules', 'Rules'],
-            ['json', 'JSON'],
+            ['inputs', 'Inputs'],
             ['backtest', 'Backtest'],
-            ['versions', 'Versions'],
+            ['activate', 'Activate'],
+            ['signals', 'Signals'],
+            ['source', 'Source'],
           ] as const
         ).map(([id, label]) => (
           <button
@@ -208,337 +167,40 @@ export function StrategyPanel({ctx, editor}: StrategyPanelProps): ReactNode {
         {state.message && (
           <Notice tone={state.message.tone}>{state.message.text}</Notice>
         )}
-        {editError && (
-          <Notice tone="warning">
-            {editError}{' '}
-            <button
-              type="button"
-              className="j-btn j-btn--ghost j-btn--sm"
-              onClick={() => void setEditError(null)}
-            >
-              Dismiss
-            </button>
-          </Notice>
+        {!script && state.busy !== 'load' && (
+          <EmptyState title="No strategies">
+            The market engine lists its built-in and installed strategies here,
+            together with your own Strategy scripts.
+          </EmptyState>
         )}
-        {tab === 'rules' && (
-          <>
-            <fieldset className={styles.settings}>
-              <legend className={styles.sectionTitle}>Setup</legend>
-              <label className="j-field">
-                <span className="j-label">Name</span>
-                <input
-                  className="j-input"
-                  value={def.name}
-                  onChange={e => void update({name: e.target.value})}
-                />
-              </label>
-              <label className="j-field">
-                <span className="j-label">Strategy id</span>
-                <input
-                  className="j-input"
-                  value={def.strategy_id}
-                  disabled={state.versions.length > 0}
-                  onChange={e => void update({strategy_id: e.target.value})}
-                />
-              </label>
-              <div className={styles.row2}>
-                <div className="j-field">
-                  <span className="j-label" id="direction-label">
-                    Direction
-                  </span>
-                  <div
-                    className="j-segmented"
-                    role="group"
-                    aria-labelledby="direction-label"
-                  >
-                    <button
-                      type="button"
-                      aria-pressed={def.direction === 'LONG'}
-                      onClick={() => void update({direction: 'LONG'})}
-                    >
-                      Long
-                    </button>
-                    <button
-                      type="button"
-                      aria-pressed={def.direction === 'SHORT'}
-                      onClick={() => void update({direction: 'SHORT'})}
-                    >
-                      Short
-                    </button>
-                  </div>
-                </div>
-                <label className="j-field">
-                  <span className="j-label">Signal timeframe</span>
-                  <select
-                    className="j-select"
-                    value={def.signal_timeframe}
-                    onChange={e =>
-                      void update({
-                        signal_timeframe: e.target.value as Timeframe,
-                      })
-                    }
-                  >
-                    {TIMEFRAME_ORDER.map(tf => (
-                      <option key={tf} value={tf}>
-                        {tf}
-                      </option>
-                    ))}
-                  </select>
-                </label>
-              </div>
-              <fieldset className={styles.checks}>
-                <legend className="j-label">Venues</legend>
-                {VENUES.map(v => (
-                  <label key={v} className="j-check">
-                    <input
-                      type="checkbox"
-                      checked={def.universe.venues.includes(v)}
-                      onChange={e => {
-                        const venues = e.target.checked
-                          ? [...def.universe.venues, v]
-                          : def.universe.venues.filter(x => x !== v);
-                        // The contract wants at least one venue. An empty
-                        // list is kept anyway, so client validation can
-                        // point at it ("Choose at least one venue").
-                        update({
-                          universe: {
-                            ...def.universe,
-                            venues: venues as [Venue, ...Venue[]],
-                          },
-                        });
-                      }}
-                    />
-                    {VENUE_NAMES[v]}
-                  </label>
-                ))}
-              </fieldset>
-              <div className={styles.row2}>
-                <label className="j-field">
-                  <span className="j-label">Universe</span>
-                  <select
-                    className="j-select"
-                    value={def.universe.qualification}
-                    onChange={e =>
-                      void update({
-                        universe: {
-                          ...def.universe,
-                          qualification: e.target.value as
-                            'QUALIFIED_ONLY' | 'ANY',
-                        },
-                      })
-                    }
-                  >
-                    <option value="QUALIFIED_ONLY">
-                      Qualified perpetuals only
-                    </option>
-                    <option value="ANY">Any instrument</option>
-                  </select>
-                </label>
-                <label className="j-field">
-                  <span className="j-label">Requested mode</span>
-                  <select
-                    className="j-select"
-                    value={def.execution_mode}
-                    onChange={e =>
-                      void update({
-                        execution_mode: e.target
-                          .value as StrategyDefinition['execution_mode'],
-                      })
-                    }
-                  >
-                    <option value="ALERT_ONLY">Alerts only</option>
-                    <option value="PAPER">Paper trading</option>
-                    <option value="SHADOW">Shadow (record only)</option>
-                    <option value="AUTO_LIVE" disabled>
-                      Automatic live (locked)
-                    </option>
-                  </select>
-                </label>
-              </div>
-              {general.map(issue => (
-                <span
-                  key={`${issue.path}:${issue.code}`}
-                  className={
-                    WARNING_CODES.has(issue.code)
-                      ? 'j-field__hint'
-                      : 'j-field__error'
-                  }
-                >
-                  {issue.path}: {issue.message}
-                </span>
-              ))}
-            </fieldset>
-            <section aria-label="Entry conditions">
-              <h3 className={styles.sectionTitle}>Entry conditions</h3>
-              <RuleEditor
-                root={def.when}
-                onChange={when => void update({when})}
-                issues={byNode}
-                direction={def.direction}
-                signalTf={def.signal_timeframe}
-                vocab={vocab}
-                onError={setEditError}
-              />
-            </section>
-            <fieldset className={styles.settings}>
-              <legend className={styles.sectionTitle}>Risk and alerts</legend>
-              <div className={styles.row2}>
-                <label className="j-field">
-                  <span className="j-label">Minimum reward to risk</span>
-                  <input
-                    className="j-input j-tabular"
-                    inputMode="decimal"
-                    value={def.risk.min_rr}
-                    onChange={e =>
-                      void update({risk: {...def.risk, min_rr: e.target.value}})
-                    }
-                  />
-                </label>
-                <label className="j-field">
-                  <span className="j-label">Fee estimate (bps)</span>
-                  <input
-                    className="j-input j-tabular"
-                    inputMode="decimal"
-                    value={def.risk.fee_bps_estimate ?? ''}
-                    placeholder="5"
-                    onChange={e =>
-                      void update({
-                        risk: {
-                          ...def.risk,
-                          fee_bps_estimate: e.target.value || undefined,
-                        },
-                      })
-                    }
-                  />
-                </label>
-                <label className="j-field">
-                  <span className="j-label">Stop</span>
-                  <select
-                    className="j-select"
-                    value={def.risk.stop_model}
-                    onChange={e =>
-                      void update({
-                        risk: {
-                          ...def.risk,
-                          stop_model: e.target
-                            .value as StrategyDefinition['risk']['stop_model'],
-                        },
-                      })
-                    }
-                  >
-                    <option value="AOI_INVALIDATION">
-                      Beyond the touched area
-                    </option>
-                    <option value="SWING">Beyond the last swing</option>
-                    <option value="ATR">ATR distance</option>
-                  </select>
-                </label>
-                <label className="j-field">
-                  <span className="j-label">Target</span>
-                  <select
-                    className="j-select"
-                    value={def.risk.target_model}
-                    onChange={e =>
-                      void update({risk: withTarget(def.risk, e.target.value)})
-                    }
-                  >
-                    <option value="FIXED_R">Fixed R multiple</option>
-                    <option value="NEAREST_AOI">Nearest zone or level</option>
-                  </select>
-                </label>
-                {def.risk.target_model === 'FIXED_R' && (
-                  <label className="j-field">
-                    <span className="j-label">Target (R multiple)</span>
-                    <input
-                      className="j-input j-tabular"
-                      inputMode="decimal"
-                      value={def.risk.fixed_r ?? ''}
-                      onChange={e =>
-                        void update({
-                          risk: {
-                            ...def.risk,
-                            fixed_r: e.target.value || undefined,
-                          },
-                        })
-                      }
-                    />
-                  </label>
-                )}
-                <label className="j-field">
-                  <span className="j-label">Cooldown (bars)</span>
-                  <input
-                    className="j-input j-tabular"
-                    type="number"
-                    min={0}
-                    max={10000}
-                    value={def.notification.cooldown_bars}
-                    onChange={e =>
-                      void update({
-                        notification: {
-                          ...def.notification,
-                          cooldown_bars: Number(e.target.value),
-                        },
-                      })
-                    }
-                  />
-                </label>
-              </div>
-              <label className="j-check">
-                <input
-                  type="checkbox"
-                  checked={def.notification.once_per_aoi}
-                  onChange={e =>
-                    void update({
-                      notification: {
-                        ...def.notification,
-                        once_per_aoi: e.target.checked,
-                      },
-                    })
-                  }
-                />
-                Alert once per area of interest
-              </label>
-              {def.risk.target_model === 'NEAREST_AOI' && (
-                <TargetKinds
-                  kinds={def.risk.target_kinds ?? []}
-                  vocab={vocab}
-                  onChange={kinds =>
-                    void update({
-                      risk: {
-                        ...def.risk,
-                        // An emptied list stays so validation can ask for
-                        // a kind.
-                        target_kinds: kinds as NonNullable<
-                          StrategyDefinition['risk']['target_kinds']
-                        >,
-                      },
-                    })
-                  }
-                />
-              )}
-              <p className="j-muted" data-testid="risk-target">
-                {describeTarget(def.risk, vocab)}
-              </p>
-            </fieldset>
-            <details className={styles.summaryBlock}>
-              <summary>Read the rule as text</summary>
-              <pre className={styles.outline}>
-                {describeTree(def.when, vocab)}
-              </pre>
-            </details>
-          </>
+        {script && tab === 'inputs' && (
+          <InputsTab
+            inputs={script.inputs}
+            values={state.inputs}
+            controller={controller}
+          />
         )}
-        {tab === 'json' && (
-          <JsonTab editor={editor} definition={def} vocab={vocab} />
+        {script && tab === 'backtest' && (
+          <BacktestTab
+            controller={controller}
+            result={state.backtest}
+            busy={state.busy === 'backtest'}
+            instrumentId={selection.instrumentId}
+            tf={tf}
+          />
         )}
-        {tab === 'backtest' && (
-          <BacktestTab ctx={ctx} editor={editor} latest={latest} />
+        {script && tab === 'activate' && (
+          <ActivateTab
+            controller={controller}
+            instrumentId={selection.instrumentId}
+            tf={tf}
+          />
         )}
-        {tab === 'versions' && (
-          <VersionsTab
-            editor={editor}
-            versions={state.versions}
-            busy={state.busy !== null}
+        {script && tab === 'signals' && <SignalsTab controller={controller} />}
+        {script && tab === 'source' && (
+          <SourceTab
+            controller={controller}
+            available={script.source_available}
           />
         )}
       </div>
@@ -547,449 +209,545 @@ export function StrategyPanel({ctx, editor}: StrategyPanelProps): ReactNode {
 }
 
 /**
- * Returns a risk model with another target model: a fixed-R target keeps
- * (or starts at 2) its R multiple and drops the target kinds, which only
- * the nearest-zone target uses.
- * @param risk Current risk model.
- * @param model `FIXED_R` or `NEAREST_AOI`.
- * @return New risk model.
+ * Renders one declared input.
+ * @param props Name, declaration, value and change handler.
+ * @return Field element.
  */
-function withTarget(
-  risk: StrategyDefinition['risk'],
-  model: string
-): StrategyDefinition['risk'] {
-  if (model === 'NEAREST_AOI') return {...risk, target_model: 'NEAREST_AOI'};
-  const next: StrategyDefinition['risk'] = {
-    ...risk,
-    target_model: 'FIXED_R',
-    fixed_r: risk.fixed_r ?? '2',
-  };
-  delete next.target_kinds;
-  return next;
-}
-
-/**
- * Renders the AOI kinds a nearest-zone target may use, as checkboxes over
- * the kinds the installed plugins publish (plus any already chosen).
- * @param props Chosen kinds, vocabulary and change handler.
- * @return Element.
- */
-function TargetKinds({
-  kinds,
-  vocab,
+function InputField({
+  name,
+  spec,
+  value,
   onChange,
 }: {
-  kinds: readonly string[];
-  vocab: Vocabulary;
-  onChange: (kinds: string[]) => void;
+  name: string;
+  spec: NonNullable<CatalogScript['inputs'][string]>;
+  value: unknown;
+  onChange: (value: unknown) => void;
 }): ReactNode {
-  const options = [...new Set([...vocab.kinds.keys(), ...kinds])];
-  return (
-    <fieldset className={styles.checks}>
-      <legend className="j-label">Target zones and levels</legend>
-      {options.map(kind => (
-        <label
-          key={kind}
-          className="j-check"
-          title={`${kind} (${pluginName(vocab, vocab.kinds.get(kind)?.pluginId ?? 'not installed')})`}
+  const label = spec.title || name;
+  if (typeof spec.default === 'boolean') {
+    return (
+      <label className="j-check" title={spec.tooltip || undefined}>
+        <input
+          type="checkbox"
+          checked={value === true}
+          onChange={e => void onChange(e.target.checked)}
+        />
+        {label}
+      </label>
+    );
+  }
+  if (spec.options) {
+    return (
+      <label className="j-field">
+        <span className="j-label">{label}</span>
+        <select
+          className="j-select"
+          value={String(value)}
+          onChange={e =>
+            void onChange(
+              spec.options?.find(option => String(option) === e.target.value)
+            )
+          }
         >
-          <input
-            type="checkbox"
-            checked={kinds.includes(kind)}
-            onChange={e =>
-              void onChange(
-                e.target.checked
-                  ? [...kinds, kind]
-                  : kinds.filter(k => k !== kind)
-              )
-            }
-          />
-          {kindLabel(vocab, kind)}
-        </label>
-      ))}
-      {options.length === 0 && (
-        <span className="j-field__hint">
-          No installed indicator publishes zones or levels.
-        </span>
-      )}
-    </fieldset>
+          {spec.options.map(option => (
+            <option key={String(option)} value={String(option)}>
+              {String(option)}
+            </option>
+          ))}
+        </select>
+      </label>
+    );
+  }
+  if (typeof spec.default === 'number') {
+    return (
+      <label className="j-field" title={spec.tooltip || undefined}>
+        <span className="j-label">{label}</span>
+        <input
+          className="j-input j-tabular"
+          type="number"
+          min={spec.minimum ?? undefined}
+          max={spec.maximum ?? undefined}
+          step={spec.step ?? 'any'}
+          value={typeof value === 'number' ? value : ''}
+          onChange={e =>
+            void onChange(
+              e.target.value === '' ? undefined : Number(e.target.value)
+            )
+          }
+        />
+      </label>
+    );
+  }
+  return (
+    <label className="j-field">
+      <span className="j-label">{label}</span>
+      <input
+        className="j-input"
+        value={typeof value === 'string' ? value : ''}
+        onChange={e => void onChange(e.target.value)}
+      />
+    </label>
   );
 }
 
 /**
- * Renders the JSON export and import of version 2 rules.
- * @param props Editor, current definition and the plugin vocabulary.
+ * Renders the declared inputs, grouped by section.
+ * @param props Declarations, values and controller.
  * @return Element.
  */
-function JsonTab({
-  editor,
-  definition,
-  vocab,
+function InputsTab({
+  inputs,
+  values,
+  controller,
 }: {
-  editor: StrategyEditor;
-  definition: StrategyDefinition;
-  vocab: Vocabulary;
+  inputs: CatalogScript['inputs'];
+  values: Record<string, unknown>;
+  controller: StrategyController;
 }): ReactNode {
-  const [text, setText] = useState('');
-  const [error, setError] = useState<string | null>(null);
-  const exported = exportDefinition(definition);
-  return (
-    <div className={styles.jsonTab}>
-      <label className="j-field">
-        <span className="j-label">Current rule (schema version 2)</span>
-        <textarea
-          className={`j-input ${styles.code}`}
-          readOnly
-          value={exported}
-          rows={14}
-        />
-      </label>
-      <button
-        type="button"
-        className="j-btn j-btn--sm"
-        onClick={() => void navigator.clipboard?.writeText(exported)}
-      >
-        Copy JSON
-      </button>
-      <label className="j-field">
-        <span className="j-label">Import a rule</span>
-        <textarea
-          className={`j-input ${styles.code}`}
-          value={text}
-          rows={6}
-          placeholder="Paste a version 2 rule"
-          onChange={e => void setText(e.target.value)}
-        />
-      </label>
-      <button
-        type="button"
-        className="j-btn j-btn--sm"
-        disabled={!text.trim()}
-        onClick={() => {
-          const result = importDefinition(text, vocab);
-          if (!result.ok) {
-            setError(result.error);
-            return;
-          }
-          setError(null);
-          editor.setDefinition(result.definition);
-        }}
-      >
-        Import rule
-      </button>
-      {error && <Notice tone="danger">{error}</Notice>}
-    </div>
+  const entries = Object.entries(inputs).flatMap(([name, spec]) =>
+    spec ? [{name, spec}] : []
   );
-}
-
-/**
- * Renders the backtest form and results for the latest saved version on
- * the selected instrument; fees are in bps (basis points) per side.
- * @param props Context, editor and latest version.
- * @return Element, or a prompt to save when no version exists.
- */
-function BacktestTab({
-  ctx,
-  editor,
-  latest,
-}: {
-  ctx: WebFeatureContext;
-  editor: StrategyEditor;
-  latest: StrategyVersion | null;
-}): ReactNode {
-  const selection = useStore(ctx.selection);
-  const [days, setDays] = useState('7');
-  const [fee, setFee] = useState('5');
-  const [busy, setBusy] = useState(false);
-  const [error, setError] = useState<string | null>(null);
-  const [report, setReport] = useState<BacktestReport | null>(null);
-  if (!latest) {
+  const groups = [...new Set(entries.map(entry => entry.spec.group))];
+  if (!entries.length) {
     return (
-      <EmptyState title="Save the strategy first">
-        Backtests run against a saved, immutable version so results stay
-        reproducible.
+      <EmptyState title="No inputs">
+        This strategy declares no inputs.
       </EmptyState>
     );
   }
-  const run = async () => {
-    setBusy(true);
-    setError(null);
-    try {
-      // An empty or invalid day count runs the default 7 days.
-      const to = Date.now();
-      const from = to - Math.max(1, Number(days) || 7) * 86_400_000;
-      setReport(
-        await ctx.clients.strategy.backtest(
-          editor.state.get().definition.strategy_id,
-          {
-            version: latest.version,
-            instrument_id: selection.instrumentId,
-            from_ms: from,
-            to_ms: to,
-            fee_bps: fee || undefined,
-          }
-        )
-      );
-    } catch (err) {
-      setError(errorMessage(err));
-    } finally {
-      setBusy(false);
-    }
-  };
-  const metric = (label: string, value: string | null | number) => (
+  return (
+    <>
+      {groups.map(group => (
+        <fieldset key={group || 'general'} className={styles.section}>
+          <legend className={styles.sectionTitle}>{group || 'Settings'}</legend>
+          {entries
+            .filter(entry => entry.spec.group === group)
+            .map(({name, spec}) => (
+              <InputField
+                key={name}
+                name={name}
+                spec={spec}
+                value={values[name]}
+                onChange={value => void controller.setInput(name, value)}
+              />
+            ))}
+        </fieldset>
+      ))}
+      <div className={styles.actions}>
+        <button
+          type="button"
+          className="j-btn j-btn--sm"
+          onClick={() => void controller.resetInputs()}
+        >
+          Reset to defaults
+        </button>
+      </div>
+    </>
+  );
+}
+
+/**
+ * Formats a number with a fixed number of decimals.
+ * @param value Number, or undefined.
+ * @param digits Decimals.
+ * @return Text, or an em dash.
+ */
+function fixed(value: number | null | undefined, digits: number): string {
+  return value === null || value === undefined || !Number.isFinite(value)
+    ? '—'
+    : formatFixed(String(value), digits);
+}
+
+/**
+ * Draws the equity curve as a small SVG line.
+ * @param props Result.
+ * @return SVG element, or null without points.
+ */
+function EquityCurve({result}: {result: ScriptResult}): ReactNode {
+  const values = result.equity_curve.flatMap(point =>
+    point.value === null ? [] : [point.value]
+  );
+  if (values.length < 2) return null;
+  const min = Math.min(...values);
+  const span = Math.max(...values) - min || 1;
+  const points = values
+    .map(
+      (value, i) =>
+        `${(i / (values.length - 1)) * 100},${40 - ((value - min) / span) * 40}`
+    )
+    .join(' ');
+  return (
+    <svg
+      className={styles.equity}
+      viewBox="0 -2 100 44"
+      preserveAspectRatio="none"
+      role="img"
+      aria-label="Equity curve"
+    >
+      <polyline points={points} vectorEffect="non-scaling-stroke" />
+    </svg>
+  );
+}
+
+/**
+ * Renders the backtest controls and report.
+ * @param props Controller, last result, busy flag and target.
+ * @return Element.
+ */
+function BacktestTab({
+  controller,
+  result,
+  busy,
+  instrumentId,
+  tf,
+}: {
+  controller: StrategyController;
+  result: ScriptResult | null;
+  busy: boolean;
+  instrumentId: string;
+  tf: Timeframe;
+}): ReactNode {
+  const runtime = useOptionalRuntime();
+  const preview = runtime ? pythonState(runtime).strategyPreview : null;
+  const fallback = useMemo(() => createStore<ScriptResult | null>(null), []);
+  const shown = useStore(preview ?? fallback);
+  const onChart = preview !== null && shown === result && result !== null;
+  const metric = (label: string, value: string) => (
     <div className={styles.metric}>
       <span className="j-label">{label}</span>
-      <strong className="j-tabular">{value ?? '—'}</strong>
+      <strong className="j-tabular">{value}</strong>
     </div>
   );
   return (
-    <div className={styles.backtest}>
+    <>
       <p className="j-muted">
-        Version {latest.version} on {selection.instrumentId} using closed bars
-        only.
+        Simulates {instrumentId} {tf} on closed bars: orders fill at the next
+        bar&apos;s open; stops and targets close at the next open after a bar
+        trades through them.
       </p>
-      <div className={styles.row2}>
-        <label className="j-field">
-          <span className="j-label">Days of history</span>
-          <input
-            className="j-input j-tabular"
-            type="number"
-            min={1}
-            max={365}
-            value={days}
-            onChange={e => void setDays(e.target.value)}
-          />
-        </label>
-        <label className="j-field">
-          <span className="j-label">Fees (bps per side)</span>
-          <input
-            className="j-input j-tabular"
-            inputMode="decimal"
-            value={fee}
-            onChange={e => void setFee(e.target.value)}
-          />
-        </label>
+      <div className={styles.actions}>
+        <button
+          type="button"
+          className="j-btn j-btn--primary j-btn--sm"
+          disabled={busy}
+          onClick={() => void controller.runBacktest(instrumentId, tf)}
+        >
+          {busy ? 'Running…' : 'Run backtest'}
+        </button>
+        {preview && result && (
+          <button
+            type="button"
+            className="j-btn j-btn--sm"
+            aria-pressed={onChart}
+            onClick={() => void preview.set(onChart ? null : result)}
+          >
+            {onChart ? 'Hide from chart' : 'Show on chart'}
+          </button>
+        )}
       </div>
-      <button
-        type="button"
-        className="j-btn j-btn--primary j-btn--sm"
-        disabled={busy}
-        onClick={() => void run()}
-      >
-        {busy ? 'Running…' : `Run backtest of version ${latest.version}`}
-      </button>
-      {error && <Notice tone="danger">{error}</Notice>}
-      {report && (
-        <div data-testid="backtest-report" className={styles.report}>
-          {report.feed_state === 'DEMO' && (
+      {result && (
+        <div data-testid="backtest-report" className={styles.section}>
+          {result.data_source === 'DEMO' && (
             <Notice tone="warning">
-              Demo report: synthetic numbers that say nothing about this
-              strategy.
+              Demo report: synthetic numbers generated in your browser. They say
+              nothing about this strategy; connect the market engine to run it.
             </Notice>
           )}
           <div className={styles.metrics}>
-            {metric('Trades', report.metrics.trades)}
-            {/* A float is exact enough for a one-decimal percentage. */}
+            {metric('Net profit', fixed(result.metrics.net_profit, 2))}
+            {metric('Return', `${fixed(result.metrics.return_pct, 2)}%`)}
             {metric(
-              'Win rate',
-              report.metrics.win_rate
-                ? `${formatFixed(String(Number(report.metrics.win_rate) * 100), 1)}%`
-                : null
+              'Max drawdown',
+              `${fixed(result.metrics.max_drawdown_pct, 2)}%`
             )}
-            {metric(
-              'Expectancy',
-              report.metrics.expectancy_r
-                ? `${report.metrics.expectancy_r}R`
-                : null
-            )}
-            {metric('Profit factor', report.metrics.profit_factor)}
-            {metric('Max drawdown', `${report.metrics.max_drawdown_r}R`)}
-            {metric(
-              'Average hold',
-              report.metrics.avg_hold_bars
-                ? `${report.metrics.avg_hold_bars} bars`
-                : null
-            )}
+            {metric('Trades', fixed(result.metrics.trade_count, 0))}
+            {metric('Win rate', `${fixed(result.metrics.win_rate_pct, 1)}%`)}
+            {metric('Fees', fixed(result.metrics.fees, 2))}
           </div>
+          <EquityCurve result={result} />
           <table className="j-table" aria-label="Backtest trades">
             <thead>
               <tr>
                 <th>Entry</th>
-                <th>Exit reason</th>
-                <th className="j-num">R</th>
-                <th className="j-num">Bars</th>
+                <th>Side</th>
+                <th className="j-num">Entry price</th>
+                <th className="j-num">Exit price</th>
+                <th className="j-num">P&amp;L</th>
               </tr>
             </thead>
             <tbody>
-              {report.trades.map(trade => (
-                <tr key={trade.signal_id}>
-                  <td>{formatUtcDateTime(trade.entry_ms)}</td>
-                  <td>{trade.exit_reason.toLowerCase().replace(/_/g, ' ')}</td>
-                  <td
-                    className={`j-num ${trade.r_multiple.startsWith('-') ? 'j-neg' : 'j-pos'}`}
-                  >
-                    {trade.r_multiple}
+              {(result.trades ?? []).map(trade => (
+                <tr key={`${trade.entry_time_ms}-${trade.direction}`}>
+                  <td>{formatUtcDateTime(trade.entry_time_ms)}</td>
+                  <td>{trade.direction.toLowerCase()}</td>
+                  <td className="j-num">{fixed(trade.entry_price, 2)}</td>
+                  <td className="j-num">
+                    {trade.exit_price === null || trade.exit_price === undefined
+                      ? 'open'
+                      : fixed(trade.exit_price, 2)}
                   </td>
-                  <td className="j-num">{trade.hold_bars}</td>
+                  <td
+                    className={`j-num ${(trade.pnl ?? 0) < 0 ? 'j-neg' : 'j-pos'}`}
+                  >
+                    {fixed(trade.pnl, 2)}
+                  </td>
                 </tr>
               ))}
             </tbody>
           </table>
-          <ul className={styles.assumptions}>
-            {report.assumptions.map(a => (
-              <li key={a}>{a}</li>
-            ))}
-          </ul>
         </div>
       )}
-    </div>
+    </>
   );
 }
 
 /**
- * Renders the version list with activation (after a confirmation), pause
- * and the changes from each previous version. AUTO_LIVE is locked.
- * @param props Editor, versions (newest first) and busy flag.
+ * Renders activation controls and the activation list.
+ * @param props Controller and target.
  * @return Element.
  */
-function VersionsTab({
-  editor,
-  versions,
-  busy,
+function ActivateTab({
+  controller,
+  instrumentId,
+  tf,
 }: {
-  editor: StrategyEditor;
-  versions: StrategyVersion[];
-  busy: boolean;
+  controller: StrategyController;
+  instrumentId: string;
+  tf: Timeframe;
 }): ReactNode {
-  const [mode, setMode] = useState<ActivateRequest['mode']>('ALERT_ONLY');
-  const [pending, setPending] = useState<StrategyVersion | null>(null);
-  const modeName = {
-    ALERT_ONLY: 'alerts-only',
-    PAPER: 'paper',
-    SHADOW: 'shadow',
-  }[mode];
+  const state = useStore(controller.state);
+  const [mode, setMode] = useState<ActivationMode>('ALERT_ONLY');
+  const [channels, setChannels] = useState<string[]>(['UI']);
   return (
-    <div className={styles.versions}>
+    <>
+      <fieldset className={styles.section}>
+        <legend className={styles.sectionTitle}>New activation</legend>
+        <label className="j-field">
+          <span className="j-label">Mode</span>
+          <select
+            className="j-select"
+            aria-label="Activation mode"
+            value={mode}
+            onChange={e => void setMode(e.target.value as ActivationMode)}
+          >
+            <option value="ALERT_ONLY">Alerts only</option>
+            <option value="PAPER">Paper</option>
+            <option value="SHADOW">Shadow</option>
+            <option value="AUTO_LIVE" disabled>
+              Automatic live (locked)
+            </option>
+          </select>
+        </label>
+        <fieldset className={styles.checks}>
+          <legend className="j-label">Notify</legend>
+          {CHANNELS.map(channel => (
+            <label key={channel} className="j-check">
+              <input
+                type="checkbox"
+                checked={channels.includes(channel)}
+                onChange={e =>
+                  void setChannels(
+                    e.target.checked
+                      ? [...channels, channel]
+                      : channels.filter(c => c !== channel)
+                  )
+                }
+              />
+              {channel.replace('_', ' ').toLowerCase()}
+            </label>
+          ))}
+        </fieldset>
+        <p className="j-muted">
+          Evaluates {instrumentId} {tf} on every newly closed bar; history is
+          never replayed.{' '}
+          {mode === 'ALERT_ONLY'
+            ? 'Entries are notifications only.'
+            : state.forwardingEnabled
+              ? 'Entries go to execution deployments bound to this strategy version.'
+              : 'Execution forwarding is not configured on this server.'}
+        </p>
+        <button
+          type="button"
+          className="j-btn j-btn--primary j-btn--sm"
+          disabled={state.busy !== null}
+          onClick={() =>
+            void controller.activate({instrumentId, tf, mode, channels})
+          }
+        >
+          {state.busy === 'activate' ? 'Activating…' : 'Activate'}
+        </button>
+      </fieldset>
       <div className={styles.lock} data-testid="auto-live-lock">
         <Lock size={16} aria-hidden />
         <p>{AUTO_LIVE_LOCK_REASON}</p>
       </div>
-      {versions.length === 0 ? (
-        <EmptyState title="No saved versions">
-          Save the strategy to create version 1. Every save creates a new
-          immutable version.
+      <h3 className={styles.sectionTitle}>Activations</h3>
+      {state.activations.length === 0 ? (
+        <EmptyState title="No activations">
+          Activate a strategy to receive its signals.
         </EmptyState>
       ) : (
-        <>
-          <label className="j-field">
-            <span className="j-label">Activate in</span>
-            <select
-              className="j-select"
-              value={mode}
-              onChange={e =>
-                void setMode(e.target.value as ActivateRequest['mode'])
-              }
+        <ul className={styles.list} aria-label="Activations">
+          {state.activations.map(activation => (
+            <li
+              key={activation.activation_id}
+              className={styles.row}
+              data-testid={`activation-${activation.activation_id}`}
             >
-              <option value="ALERT_ONLY">Alerts only</option>
-              <option value="PAPER">Paper trading</option>
-              <option value="SHADOW">Shadow (record only)</option>
-            </select>
-          </label>
-          <ol className={styles.versionList}>
-            {versions.map((version, i) => {
-              const previous = versions[i + 1];
-              const changes = previous
-                ? diffDefinitions(previous.definition, version.definition)
-                : [];
-              return (
-                <li
-                  key={version.strategy_version_id}
-                  className={styles.versionRow}
+              <div className={styles.rowHead}>
+                <strong>{activation.name}</strong>
+                <span
+                  className={`j-badge ${activation.state === 'ACTIVE' ? 'j-badge--live' : ''}`}
                 >
-                  <div className={styles.versionHead}>
-                    <strong>Version {version.version}</strong>
-                    <span
-                      className={`j-badge ${version.state === 'ACTIVE' ? 'j-badge--live' : ''}`}
-                    >
-                      {version.state.toLowerCase()}
-                    </span>
-                    {version.activation && (
-                      <span className="j-muted">
-                        {version.activation.mode
-                          .replace('_', ' ')
-                          .toLowerCase()}
-                      </span>
-                    )}
-                    <span className={styles.grow} />
-                    <span className="j-muted">
-                      {formatUtcDateTime(version.created_at_ms)}
-                    </span>
-                  </div>
-                  <div className={styles.inline}>
-                    {version.state === 'ACTIVE' ? (
-                      <button
-                        type="button"
-                        className="j-btn j-btn--sm"
-                        disabled={busy}
-                        onClick={() => void editor.pause()}
-                      >
-                        Pause version {version.version}
-                      </button>
-                    ) : (
-                      <button
-                        type="button"
-                        className="j-btn j-btn--sm"
-                        disabled={busy}
-                        onClick={() => void setPending(version)}
-                      >
-                        Activate version {version.version}
-                      </button>
-                    )}
-                  </div>
-                  {changes.length > 0 && (
-                    <details>
-                      <summary className="j-muted">
-                        {changes.length} change{changes.length === 1 ? '' : 's'}{' '}
-                        from version {previous?.version}
-                      </summary>
-                      <ul className={styles.diff}>
-                        {changes.slice(0, 30).map(change => (
-                          <li key={`${change.path}:${change.kind}`}>
-                            {change.kind} {change.path}
-                          </li>
-                        ))}
-                      </ul>
-                    </details>
-                  )}
-                </li>
-              );
-            })}
-          </ol>
-        </>
+                  {activation.state.toLowerCase()}
+                </span>
+                <span className="j-badge">
+                  {(activation.mode ?? 'ALERT_ONLY').toLowerCase()}
+                </span>
+              </div>
+              <span className="j-muted">
+                {activation.instrument_ids.join(', ')} · {activation.tf} ·{' '}
+                {activation.emitted ?? 0} signals
+              </span>
+              <span className={styles.mono}>
+                {activation.strategy_version_id}
+              </span>
+              {activation.last_error && (
+                <Notice tone="warning">{activation.last_error}</Notice>
+              )}
+              {Object.entries(activation.instruments ?? {}).map(
+                ([id, status]) =>
+                  status?.last_error ? (
+                    <Notice key={id} tone="warning">
+                      {id}: {status.last_error}
+                    </Notice>
+                  ) : null
+              )}
+              <div className={styles.actions}>
+                <button
+                  type="button"
+                  className="j-btn j-btn--sm"
+                  disabled={state.busy !== null}
+                  onClick={() =>
+                    void controller.change(
+                      activation.activation_id,
+                      activation.state === 'ACTIVE' ? 'pause' : 'resume'
+                    )
+                  }
+                >
+                  {activation.state === 'ACTIVE' ? 'Pause' : 'Resume'}
+                </button>
+                <button
+                  type="button"
+                  className="j-btn j-btn--ghost j-btn--sm"
+                  disabled={state.busy !== null}
+                  onClick={() =>
+                    void controller.change(activation.activation_id, 'delete')
+                  }
+                >
+                  Delete
+                </button>
+              </div>
+            </li>
+          ))}
+        </ul>
       )}
-      {pending && (
-        <ConfirmDialog
-          title={`Activate version ${pending.version}?`}
-          confirmLabel={`Activate version ${pending.version} in ${modeName} mode`}
-          busy={busy}
-          onCancel={() => void setPending(null)}
-          onConfirm={() => {
-            const version = pending;
-            setPending(null);
-            void editor.activate({version: version.version, mode});
-          }}
+    </>
+  );
+}
+
+/**
+ * Lists the selected strategy's recent signals.
+ * @param props Controller.
+ * @return Element.
+ */
+function SignalsTab({controller}: {controller: StrategyController}): ReactNode {
+  const {signals} = useStore(controller.state);
+  if (!signals.length) {
+    return (
+      <EmptyState title="No signals yet">
+        Signals appear when an activation sees an entry or exit on a newly
+        closed bar.
+      </EmptyState>
+    );
+  }
+  return (
+    <ul className={styles.list} aria-label="Strategy signals">
+      {signals.map(signal => (
+        <li key={signal.signal_id} className={styles.row}>
+          <div className={styles.rowHead}>
+            <strong>{signal.kind.replace(/_/g, ' ').toLowerCase()}</strong>
+            <span className="j-badge">{signal.direction.toLowerCase()}</span>
+            <span className="j-muted">
+              {signal.instrument_id} · {formatUtcDateTime(signal.bar_close_ms)}
+            </span>
+          </div>
+          {signal.message && <span>{signal.message}</span>}
+        </li>
+      ))}
+    </ul>
+  );
+}
+
+/**
+ * Shows the source and copies it into an owned script.
+ * @param props Controller and source availability.
+ * @return Element.
+ */
+function SourceTab({
+  controller,
+  available,
+}: {
+  controller: StrategyController;
+  available: boolean;
+}): ReactNode {
+  const state = useStore(controller.state);
+  const [newId, setNewId] = useState('my-strategy');
+  if (!available) {
+    return (
+      <Notice tone="info">
+        This plugin strategy is installed by the operator and does not publish
+        its source.
+      </Notice>
+    );
+  }
+  return (
+    <>
+      <div className={styles.actions}>
+        <button
+          type="button"
+          className="j-btn j-btn--sm"
+          disabled={state.busy !== null}
+          onClick={() => void controller.loadSource()}
         >
-          <p>
-            Signals from this version will be evaluated on closed bars.{' '}
-            {mode === 'ALERT_ONLY'
-              ? 'You will only receive alerts.'
-              : mode === 'PAPER'
-                ? 'Paper orders are created only for paper deployments you configure.'
-                : 'Hypothetical orders are recorded but never sent.'}
-          </p>
-          <p>Any other active version of this strategy stops.</p>
-        </ConfirmDialog>
+          {state.busy === 'source' ? 'Opening…' : 'Open source'}
+        </button>
+      </div>
+      {state.source !== null && (
+        <pre className={`j-input ${styles.code}`} aria-label="Strategy source">
+          {state.source}
+        </pre>
       )}
-    </div>
+      <fieldset className={styles.section}>
+        <legend className={styles.sectionTitle}>Copy to my scripts</legend>
+        <label className="j-field">
+          <span className="j-label">New script id</span>
+          <input
+            className="j-input"
+            value={newId}
+            onChange={e => void setNewId(e.target.value)}
+          />
+        </label>
+        <button
+          type="button"
+          className="j-btn j-btn--sm"
+          disabled={state.busy !== null || !newId}
+          onClick={() => void controller.copy(newId)}
+        >
+          {state.busy === 'copy' ? 'Copying…' : 'Copy to my scripts'}
+        </button>
+      </fieldset>
+    </>
   );
 }

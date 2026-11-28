@@ -73,7 +73,7 @@ module.exports = {
       comment:
         'Indicator visualization never depends on trading or strategy logic.',
       from: {path: '^packages/indicator-viz/'},
-      to: {path: '^packages/(chart-trading|strategy-builder|mock-provider)/'},
+      to: {path: '^packages/(chart-trading|mock-provider)/'},
     },
     {
       name: 'packages-are-framework-free',

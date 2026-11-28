@@ -411,6 +411,10 @@ def test_activation_rules(harness: _Harness) -> None:
         harness.service.create(OWNER, _request(script_id="plotter"))
     with pytest.raises(errors.ValidationFailedError):
         harness.service.create(OWNER, _request(channels=["EXECUTION"]))
+    with pytest.raises(errors.ValidationFailedError, match="bond ETF"):
+        harness.service.create(
+            OWNER, _request(instrument_ids=["treasury:rate:UST10Y"])
+        )
     with pytest.raises(errors.UnsupportedError):
         harness.service.create(OWNER, _request(script_id="my-strategy"))
     harness.scripts.runner.enabled = True

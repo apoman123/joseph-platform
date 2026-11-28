@@ -27,7 +27,7 @@ Feature flags change visibility only. No feature can grant trading permission or
 
 Indicators are computed by the market engine, by its built-ins or by plugin packages installed at run time. The terminal knows no plugin by name: it reads `GET /v1/indicators/plugins` once per runtime (`useIndicatorPlugins()` in `apps/web/src/shell/indicator-plugins.ts`) and draws every plugin from its `IndicatorPluginInfo`:
 
-- `output_kinds`, `output_events` and `output_values` declare what the plugin publishes; strategy builders and settings read the same metadata.
+- `output_kinds`, `output_events` and `output_values` declare what the plugin publishes; settings read the same metadata.
 - `display.layer`, `default_visible` and `z_index` place the plugin in the Layers menu (registration order), on new charts and in the paint order. Plugins with `layer: false` (used only by drawing tools or strategies) are not listed.
 - `display.kinds` styles AOIs: `box` zones (fill opacity, midline, line style) or `level` rays at `lower` (dashed and pending until they end when `pending_until_ended` is set). Labels, default colors and tones come from here; `display.end_reasons` labels why an AOI ended.
 - `display.events` styles events: a marker, a segment from the time a `meta` key names (`time_meta`) to the event bar, both, or nothing. `show_events` sets whether markers start shown.

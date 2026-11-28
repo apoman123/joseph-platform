@@ -10,7 +10,6 @@
 
 import {readFileSync, readdirSync} from 'node:fs';
 import {join} from 'node:path';
-import type {StrategyDefinition} from '@joseph/contracts';
 import Ajv2020 from 'ajv/dist/2020';
 import addFormats from 'ajv-formats';
 import {describe, expect, it} from 'vitest';
@@ -19,7 +18,6 @@ import {DemoStrategyClient} from './demo-strategy-client';
 import {sha256Hex} from './sha256';
 
 const SCHEMAS = join(__dirname, '..', '..', '..', 'contracts', 'schemas');
-const FIXTURES = join(__dirname, '..', '..', '..', 'contracts', 'fixtures');
 
 /**
  * Builds a validator for one contract definition.
@@ -41,28 +39,6 @@ function validator(file: string, def: string): (value: unknown) => string {
   return value => (validate?.(value) ? '' : JSON.stringify(validate?.errors));
 }
 
-/**
- * Loads the valid strategies of the shared fixtures (the example templates).
- * @return Strategy definitions.
- */
-function fixtureStrategies(): StrategyDefinition[] {
-  const fixture = JSON.parse(
-    readFileSync(join(FIXTURES, 'strategy.fixture.json'), 'utf8')
-  ) as {valid: StrategyDefinition[]};
-  return fixture.valid;
-}
-
-/**
- * Loads the EMA trend example, the first valid strategy in the fixtures.
- * @return Strategy definition.
- * @throws Error when the fixture has no valid strategy.
- */
-function emaTrend(): StrategyDefinition {
-  const def = fixtureStrategies()[0];
-  if (!def) throw new Error('missing fixture');
-  return def;
-}
-
 describe('sha256Hex', () => {
   it('matches known vectors', () => {
     expect(sha256Hex('')).toBe(
@@ -75,77 +51,84 @@ describe('sha256Hex', () => {
 });
 
 describe('DemoStrategyClient', () => {
-  it('creates immutable versions with schema-valid records', async () => {
-    const client = new DemoStrategyClient({now: () => 1_800_000_000_000});
-    const v1 = await client.createStrategy(emaTrend());
-    expect(validator('strategy.schema.json', 'StrategyVersion')(v1)).toBe('');
-    const edited = {...emaTrend(), name: 'EMA trend edited'};
-    const v2 = await client.createVersion(v1.strategy_id, edited);
-    expect(v2.version).toBe(2);
-    const {versions} = await client.getStrategy(v1.strategy_id);
-    expect(versions.map(v => v.version)).toEqual([2, 1]);
-    expect(versions[1]?.definition.name).toBe(emaTrend().name);
-    await expect(client.createStrategy(emaTrend())).rejects.toMatchObject({
-      body: {code: 'CONFLICT'},
-    });
-  });
-
-  it('rejects invalid definitions using the injected validator', async () => {
-    const client = new DemoStrategyClient({
-      validate: () => ({
-        valid: false,
-        errors: [{path: '/when', code: 'x', message: 'bad'}],
-        warnings: [],
-        required_plugins: [],
-        required_timeframes: [],
-        node_count: 0,
-        max_depth: 0,
-      }),
-    });
-    await expect(client.createStrategy(emaTrend())).rejects.toMatchObject({
-      body: {
-        code: 'VALIDATION_FAILED',
-        field_errors: [{field: '/when', message: 'bad'}],
-      },
-    });
-  });
-
-  it('activates one version and never AUTO_LIVE', async () => {
+  it('lists the built-in strategies with their declared inputs', async () => {
     const client = new DemoStrategyClient();
-    await client.createStrategy(emaTrend());
-    await client.createVersion('ema-trend-long', emaTrend());
-    await client.activate('ema-trend-long', {version: 1, mode: 'PAPER'});
-    const active = await client.activate('ema-trend-long', {
-      version: 2,
-      mode: 'ALERT_ONLY',
-    });
-    expect(active.state).toBe('ACTIVE');
-    const {versions} = await client.getStrategy('ema-trend-long');
-    expect(versions.filter(v => v.state === 'ACTIVE')).toHaveLength(1);
+    const {scripts, runtime_enabled} = await client.listStrategyScripts();
+    expect(runtime_enabled).toBe(false);
+    expect(scripts.map(s => s.script_id)).toEqual([
+      'builtin:ema-trend-long',
+      'builtin:rsi-reversion-short',
+      'builtin:pivot-bounce-long',
+    ]);
+    expect(scripts[0]?.inputs.ema_length?.default).toBe(20);
+    expect(await client.getStrategySource('builtin:ema-trend-long')).toMatch(
+      /^# DEMO/
+    );
+  });
+
+  it('labels synthetic backtests as DEMO and pairs fills into trades', async () => {
+    const client = new DemoStrategyClient({now: () => 1_800_000_000_000});
+    const result = await client.backtestStrategy(
+      'builtin:rsi-reversion-short',
+      {
+        instrument_id: 'mock:perp:BTCUSD',
+        tf: '5m',
+        limit: 200,
+      }
+    );
+    expect(result.data_source).toBe('DEMO');
+    expect(result.feed_state).toBe('DEMO');
+    expect(result.bars_count).toBe(200);
+    expect(result.trades?.length).toBeGreaterThan(0);
+    expect(result.trades?.every(t => t.direction === 'SHORT')).toBe(true);
+    expect(result.fills.length).toBeGreaterThanOrEqual(
+      2 * (result.metrics.trade_count ?? 0)
+    );
+    expect(result.equity_curve).toHaveLength(200);
+  });
+
+  it('refuses AUTO_LIVE and keeps activation state in memory', async () => {
+    const client = new DemoStrategyClient({now: () => 1_800_000_000_000});
     await expect(
-      client.activate('ema-trend-long', {
-        version: 1,
-        // Deliberately outside the contract type, as an untyped caller sends.
-        mode: 'AUTO_LIVE' as 'PAPER',
+      client.createActivation({
+        script_id: 'builtin:ema-trend-long',
+        instrument_ids: ['mock:perp:BTCUSD'],
+        tf: '15m',
+        mode: 'AUTO_LIVE',
       })
     ).rejects.toMatchObject({body: {code: 'TRADE_MODE_DISABLED'}});
-    expect((await client.pause('ema-trend-long')).state).toBe('PAUSED');
+    const created = await client.createActivation({
+      script_id: 'builtin:ema-trend-long',
+      instrument_ids: ['mock:perp:BTCUSD'],
+      tf: '15m',
+      mode: 'PAPER',
+    });
+    expect(created.strategy_version_id).toBe('builtin:ema-trend-long:vdemo');
+    expect((await client.pauseActivation(created.activation_id)).state).toBe(
+      'PAUSED'
+    );
+    expect((await client.resumeActivation(created.activation_id)).state).toBe(
+      'ACTIVE'
+    );
+    await client.deleteActivation(created.activation_id);
+    expect((await client.listActivations()).activations).toEqual([]);
   });
 
-  it('returns a canned backtest explicitly marked DEMO', async () => {
+  it('copies a built-in into an owned DEMO strategy', async () => {
     const client = new DemoStrategyClient();
-    await client.createStrategy(emaTrend());
-    const report = await client.backtest('ema-trend-long', {
-      version: 1,
-      instrument_id: 'mock:perp:BTCUSD',
-      from_ms: 1_800_000_000_000,
-      to_ms: 1_800_600_000_000,
-    });
-    expect(report.feed_state).toBe('DEMO');
-    expect(report.assumptions[0]).toMatch(/^DEMO/);
-    expect(validator('strategy.schema.json', 'BacktestReport')(report)).toBe(
-      ''
+    const copy = await client.copyStrategy(
+      'builtin:pivot-bounce-long',
+      'my-pivot'
     );
+    expect(copy.kind).toBe('strategy');
+    const {scripts} = await client.listStrategyScripts();
+    expect(scripts.at(-1)).toMatchObject({
+      script_id: 'my-pivot',
+      origin: 'tenant',
+    });
+    await expect(
+      client.copyStrategy('builtin:pivot-bounce-long', 'my-pivot')
+    ).rejects.toMatchObject({body: {code: 'CONFLICT'}});
   });
 
   it('serves schema-valid fixture signals newest first', async () => {
@@ -165,17 +148,15 @@ describe('DemoStrategyClient', () => {
     ).toHaveLength(1);
   });
 
-  it('signals come from the example strategies', () => {
-    const ids = fixtureStrategies().map(def => def.strategy_id);
+  it('signals come from the built-in strategies', () => {
     const signals = createDemoSignals(1_800_000_000_000);
     expect(signals.map(s => s.strategy_id)).toEqual([
-      'pivot-bounce-long',
-      'rsi-reversion-short',
-      'ema-trend-long',
+      'builtin:pivot-bounce-long',
+      'builtin:rsi-reversion-short',
+      'builtin:ema-trend-long',
     ]);
     for (const signal of signals) {
-      expect(ids).toContain(signal.strategy_id);
-      expect(signal.strategy_version_id).toBe(`${signal.strategy_id}:v1`);
+      expect(signal.strategy_version_id).toBe(`${signal.strategy_id}:vdemo`);
       expect(signal.group_ids).toEqual([]);
     }
     expect(signals[0]?.aoi_ids).toEqual(['demo-pivot-s1-5m']);

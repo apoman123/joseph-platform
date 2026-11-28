@@ -5,66 +5,22 @@
  */
 
 /**
- * @fileoverview Component tests for the strategy builder. The installed
- * indicator plugins come from the shared plugin descriptor fixtures, plus a
- * second publisher of the fixture events.
+ * @fileoverview Component tests for the Python strategy panel against the
+ * DEMO strategy client.
  */
 
-import {readFileSync} from 'node:fs';
-import {join} from 'node:path';
-import type {IndicatorPluginInfo} from '@joseph/contracts';
-import {STRATEGY_TEMPLATES, exportDefinition} from '@joseph/strategy-builder';
-import {fireEvent, screen, waitFor, within} from '@testing-library/react';
+import {screen, waitFor, within} from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
-import {afterEach, beforeAll, describe, expect, it, vi} from 'vitest';
+import {afterEach, describe, expect, it} from 'vitest';
 import {
   renderFeature,
   type RenderedFeature,
 } from '../trading/testing/fake-context';
 import {STRATEGY_FEATURE} from './index';
-import {issuesByNode} from './strategy-panel';
-
-const plugins = vi.hoisted((): {infos: readonly IndicatorPluginInfo[]} => ({
-  infos: [],
-}));
-
-vi.mock('../../shell/indicator-plugins', () => ({
-  useIndicatorPlugins: () => plugins.infos,
-}));
+import {AUTO_LIVE_LOCK_REASON} from './strategy-panel';
+import {defaultInputs} from './strategy-store';
 
 let rendered: RenderedFeature | null = null;
-
-beforeAll(() => {
-  const path = join(
-    __dirname,
-    '..',
-    '..',
-    '..',
-    '..',
-    '..',
-    'packages',
-    'contracts',
-    'fixtures',
-    'indicator-plugin.fixture.json'
-  );
-  // The fixture's valid examples are checked against `IndicatorPluginInfo`
-  // by the contracts tests.
-  const infos = (
-    JSON.parse(readFileSync(path, 'utf8')) as {valid: IndicatorPluginInfo[]}
-  ).valid;
-  const zones = infos.find(p => p.plugin_id === 'example_zones');
-  if (!zones) throw new Error('missing plugin fixture');
-  plugins.infos = [
-    ...infos,
-    {
-      ...zones,
-      plugin_id: 'other_zones',
-      display_name: 'Other zones',
-      output_kinds: [],
-      display: {...zones.display, kinds: []},
-    },
-  ];
-});
 
 afterEach(() => {
   rendered?.dispose();
@@ -72,384 +28,105 @@ afterEach(() => {
 });
 
 /**
- * Renders the strategy panel with the EMA trend template.
+ * Renders the panel and waits for the built-in strategies.
  * @return Rendered feature.
  */
-async function renderBuilder(): Promise<RenderedFeature> {
+async function renderPanel(): Promise<RenderedFeature> {
   rendered = await renderFeature(STRATEGY_FEATURE, 'side-panel');
-  await screen.findByTestId('rule-editor');
+  await screen.findByRole('option', {name: 'EMA Trend Long'});
   return rendered;
 }
 
-/**
- * Adds a condition to the root group from the add-condition menu.
- * @param title Menu item title.
- * @return Promise resolving once the item was chosen.
- */
-async function addCondition(title: string): Promise<void> {
-  const user = userEvent.setup();
-  const root = screen.getByTestId('rule-editor');
-  const buttons = within(root).getAllByRole('button', {name: 'Add condition'});
-  await user.click(buttons[buttons.length - 1] as HTMLElement);
-  await user.click(screen.getByRole('menuitem', {name: title}));
-}
-
-/**
- * Opens the inline editor of a condition card.
- * @param summary Card sentence.
- * @return The card's settings group.
- */
-async function editCard(summary: string): Promise<HTMLElement> {
-  await userEvent
-    .setup()
-    .click(screen.getByRole('button', {name: `Edit "${summary}"`}));
-  const card = screen.getByText(summary).closest('[data-node-id]');
-  if (!(card instanceof HTMLElement)) throw new Error('missing card');
-  return within(card).getByRole('group', {name: 'Condition settings'});
-}
-
-describe('strategy builder', () => {
-  it('renders the EMA trend template as plain-language condition cards', async () => {
-    await renderBuilder();
-    for (const text of [
-      'Close crosses above EMA',
-      'RSI on 1h is greater than 50',
-      'Volume delta delta_pct is greater than 0',
-      'Projected reward to risk after costs is at least 2.0R',
-    ]) {
-      expect(screen.getByText(text)).toBeInTheDocument();
-    }
-    expect(screen.getByTestId('risk-target')).toHaveTextContent(
-      'Fixed 3R target'
-    );
-    expect(screen.getByTestId('strategy-version')).toHaveTextContent(
-      'Not saved'
-    );
-  });
-
-  it('offers conditions the installed plugins can feed', async () => {
-    await renderBuilder();
+describe('strategy panel', () => {
+  it('lists built-in strategies and edits their declared inputs', async () => {
+    await renderPanel();
     const user = userEvent.setup();
-    const root = screen.getByTestId('rule-editor');
-    const buttons = within(root).getAllByRole('button', {
-      name: 'Add condition',
-    });
-    await user.click(buttons[buttons.length - 1] as HTMLElement);
-    const menu = screen.getByRole('menu', {name: 'Condition types'});
-    for (const title of [
-      'Indicator state',
-      'Price in a zone',
-      'Touched an area of interest',
-      'Indicator event',
-      'Event sequence',
-      'Time window',
-    ]) {
-      expect(
-        within(menu).getByRole('menuitem', {name: title})
-      ).toBeInTheDocument();
-    }
+    const picker = screen.getByRole('combobox', {name: 'Strategy script'});
+    expect(within(picker).getByRole('group', {name: 'Built-in'})).toBeTruthy();
+    const length = screen.getByRole('spinbutton', {name: 'EMA length'});
+    expect(length).toHaveValue(20);
+    await user.clear(length);
+    await user.type(length, '34');
+    expect(screen.getByRole('spinbutton', {name: 'EMA length'})).toHaveValue(
+      34
+    );
+    await user.selectOptions(picker, 'builtin:rsi-reversion-short');
+    expect(
+      screen.getByRole('spinbutton', {name: 'RSI crosses below'})
+    ).toHaveValue(70);
+    await user.click(screen.getByRole('button', {name: 'Reset to defaults'}));
   });
 
-  it('adds, wraps and removes conditions', async () => {
-    await renderBuilder();
-    const user = userEvent.setup();
-    await addCondition('Time window');
-    expect(
-      screen.getByText('Bar starts between 08:00 and 16:00 (UTC)')
-    ).toBeInTheDocument();
-    await addCondition('Indicator state');
-    expect(
-      screen.getByText('Volume delta: method is taker_volume on 15m')
-    ).toBeInTheDocument();
-    await user.click(
-      screen.getByRole('button', {
-        name: 'Remove "RSI on 1h is greater than 50"',
-      })
-    );
-    expect(
-      screen.queryByText('RSI on 1h is greater than 50')
-    ).not.toBeInTheDocument();
-    const rrCard = screen.getByTestId('node-rr');
-    await user.click(within(rrCard).getByRole('button', {name: 'Negate'}));
-    expect(
-      screen.getByRole('group', {name: 'This is not true'})
-    ).toBeInTheDocument();
-  });
-
-  it('edits a condition inline and validates on the client', async () => {
-    await renderBuilder();
-    const user = userEvent.setup();
-    await addCondition('Event sequence');
-    const fields = await editCard('Zone then Break up within 4 bars');
-    const bars = within(fields).getByRole('spinbutton', {name: 'Within bars'});
-    await user.clear(bars);
-    await user.type(bars, '1');
-    expect(
-      await screen.findByText(/the window needs at least 2 bars/)
-    ).toBeInTheDocument();
-    expect(screen.getByRole('button', {name: 'Save strategy'})).toBeEnabled();
-    await user.click(screen.getByRole('button', {name: 'Save strategy'}));
-    expect(
-      await screen.findByText('Fix the marked problems before saving.')
-    ).toBeInTheDocument();
-  });
-
-  it('edits state, zone and time-window conditions', async () => {
-    await renderBuilder();
-    const user = userEvent.setup();
-    await addCondition('Indicator state');
-    let fields = await editCard('Volume delta: method is taker_volume on 15m');
-    await user.selectOptions(
-      within(fields).getByRole('combobox', {name: 'Indicator'}),
-      'example_zones'
-    );
-    expect(
-      screen.getByText('Example zones: last_break is up on 15m')
-    ).toBeInTheDocument();
-    await user.click(within(fields).getByRole('checkbox', {name: 'down'}));
-    await user.click(within(fields).getByRole('checkbox', {name: '1h'}));
-    expect(
-      screen.getByText('Example zones: last_break is up or down on 15m and 1h')
-    ).toBeInTheDocument();
-
-    await addCondition('Price in a zone');
-    fields = await editCard('Close is inside a bullish P on 15m');
-    await user.click(within(fields).getByRole('checkbox', {name: 'S1'}));
-    await user.click(within(fields).getByRole('checkbox', {name: 'P'}));
-    await user.selectOptions(
-      within(fields).getByRole('combobox', {name: 'Side'}),
-      ''
-    );
-    expect(screen.getByText('Close is inside a S1 on 15m')).toBeInTheDocument();
-
-    await addCondition('Time window');
-    fields = await editCard('Bar starts between 08:00 and 16:00 (UTC)');
-    await user.selectOptions(
-      within(fields).getByRole('combobox', {name: 'Time zone'}),
-      'America/New_York'
-    );
-    fireEvent.change(within(fields).getByLabelText('Window 1 from'), {
-      target: {value: '09:30'},
-    });
-    await user.click(within(fields).getByRole('checkbox', {name: 'Sat'}));
-    await user.click(within(fields).getByRole('checkbox', {name: 'Sun'}));
-    expect(
-      screen.getByText(
-        'Bar starts between 09:30 and 16:00 (America/New_York), Sat, Sun'
-      )
-    ).toBeInTheDocument();
-    fireEvent.change(within(fields).getByLabelText('Window 1 until'), {
-      target: {value: '09:30'},
-    });
-    expect(await screen.findByText(/it never matches/)).toBeInTheDocument();
-  });
-
-  it('chooses an event source when several plugins publish the event', async () => {
-    await renderBuilder();
-    const user = userEvent.setup();
-    await addCondition('Indicator event');
-    expect(
-      screen.getByText(/Several indicators publish EXAMPLE_ZONE_FORMED/)
-    ).toHaveClass('j-field__hint');
-    const fields = await editCard('Zone confirmed in the last 3 bars');
-    await user.selectOptions(
-      within(fields).getByRole('combobox', {name: 'Source'}),
-      'other_zones'
-    );
-    expect(
-      screen.getByText('Zone confirmed in the last 3 bars (from Other zones)')
-    ).toBeInTheDocument();
-    expect(
-      screen.queryByText(/Several indicators publish/)
-    ).not.toBeInTheDocument();
-  });
-
-  it('targets the nearest zone or level of chosen kinds', async () => {
-    await renderBuilder();
-    const user = userEvent.setup();
-    await user.selectOptions(
-      screen.getByRole('combobox', {name: 'Target'}),
-      'NEAREST_AOI'
-    );
-    expect(
-      await screen.findByText(
-        '/risk/target_kinds: Choose the AOI kinds the target may use.'
-      )
-    ).toBeInTheDocument();
-    const kinds = screen.getByRole('group', {name: 'Target zones and levels'});
-    await user.click(within(kinds).getByRole('checkbox', {name: 'R1'}));
-    expect(screen.getByTestId('risk-target')).toHaveTextContent(
-      'Nearest R1 beyond the entry'
-    );
-    expect(screen.queryByText(/Choose the AOI kinds/)).not.toBeInTheDocument();
-    await user.selectOptions(
-      screen.getByRole('combobox', {name: 'Target'}),
-      'FIXED_R'
-    );
-    expect(screen.getByTestId('risk-target')).toHaveTextContent(
-      'Fixed 3R target'
-    );
-  });
-
-  it('saves immutable versions and shows AUTO_LIVE as locked', async () => {
-    const {ctx} = await renderBuilder();
-    const user = userEvent.setup();
-    await user.click(screen.getByRole('button', {name: 'Save strategy'}));
-    await waitFor(
-      () =>
-        void expect(screen.getByTestId('strategy-version')).toHaveTextContent(
-          'Version 1'
-        )
-    );
-    await user.clear(screen.getByRole('textbox', {name: 'Name'}));
-    await user.type(
-      screen.getByRole('textbox', {name: 'Name'}),
-      'EMA trend tuned'
-    );
-    expect(screen.getByTestId('strategy-version')).toHaveTextContent(
-      'Version 1, edited'
-    );
-    await user.click(screen.getByRole('button', {name: 'Save new version'}));
-    await waitFor(
-      () =>
-        void expect(screen.getByTestId('strategy-version')).toHaveTextContent(
-          'Version 2'
-        )
-    );
-    expect(
-      screen.getByRole('option', {name: 'Automatic live (locked)'})
-    ).toBeDisabled();
-    await user.click(screen.getByRole('tab', {name: 'Versions'}));
-    expect(screen.getByTestId('auto-live-lock')).toHaveTextContent(
-      /Automatic live trading is locked/
-    );
-    await user.selectOptions(
-      screen.getByRole('combobox', {name: 'Activate in'}),
-      'PAPER'
-    );
-    await user.click(screen.getByRole('button', {name: 'Activate version 2'}));
-    await user.click(
-      screen.getByRole('button', {name: 'Activate version 2 in paper mode'})
-    );
-    await waitFor(async () => {
-      const {versions} = await ctx.strategy.getStrategy('ema-trend-long');
-      expect(versions[0]?.state).toBe('ACTIVE');
-      expect(versions[0]?.activation?.mode).toBe('PAPER');
-    });
-  });
-
-  it('maps server validation errors to the condition', async () => {
-    const {ctx} = await renderBuilder();
-    ctx.strategy.validate = async () => ({
-      valid: false,
-      errors: [
-        {
-          path: '/when/children/1/left/field',
-          code: 'server_rule',
-          message: 'Server says the value is unknown',
-        },
-      ],
-      warnings: [],
-      required_plugins: [],
-      required_timeframes: [],
-      node_count: 5,
-      max_depth: 2,
-      definition_hash: null,
-    });
-    await userEvent
-      .setup()
-      .click(screen.getByRole('button', {name: 'Validate'}));
-    const card = await screen.findByTestId('node-htf');
-    expect(
-      within(card).getByText('Server says the value is unknown')
-    ).toBeInTheDocument();
-  });
-
-  it('runs a backtest of the saved version and labels demo output', async () => {
-    await renderBuilder();
+  it('runs a labelled DEMO backtest with metrics and trades', async () => {
+    await renderPanel();
     const user = userEvent.setup();
     await user.click(screen.getByRole('tab', {name: 'Backtest'}));
-    expect(screen.getByText('Save the strategy first')).toBeInTheDocument();
-    await user.click(screen.getByRole('button', {name: 'Save strategy'}));
-    await waitFor(
-      () =>
-        void expect(screen.getByTestId('strategy-version')).toHaveTextContent(
-          'Version 1'
-        )
-    );
-    await user.click(
-      await screen.findByRole('button', {name: 'Run backtest of version 1'})
-    );
+    await user.click(screen.getByRole('button', {name: 'Run backtest'}));
     const report = await screen.findByTestId('backtest-report');
-    expect(report).toHaveTextContent(/Demo report/);
-    expect(
-      within(report).getByRole('table', {name: 'Backtest trades'})
-    ).toBeInTheDocument();
+    expect(within(report).getByText(/Demo report/)).toBeInTheDocument();
+    expect(within(report).getByText('Win rate')).toBeInTheDocument();
+    const trades = within(report).getByRole('table', {name: 'Backtest trades'});
+    expect(within(trades).getAllByRole('row').length).toBeGreaterThan(1);
   });
 
-  it('imports version 2 rules only and checks them against the plugins', async () => {
-    await renderBuilder();
+  it('activates, pauses and deletes with AUTO_LIVE locked', async () => {
+    const {ctx} = await renderPanel();
     const user = userEvent.setup();
-    await user.click(screen.getByRole('tab', {name: 'JSON'}));
-    const box = screen.getByRole('textbox', {name: 'Import a rule'});
-    await user.click(box);
-    await user.paste(JSON.stringify({version: 1, id: 'old-rule'}));
-    await user.click(screen.getByRole('button', {name: 'Import rule'}));
+    await user.click(screen.getByRole('tab', {name: 'Activate'}));
+    const mode = screen.getByRole('combobox', {name: 'Activation mode'});
     expect(
-      screen.getByText('Expected a Rule AST v2 definition (schema_version 2).')
-    ).toBeInTheDocument();
-    const pivot = STRATEGY_TEMPLATES.find(t => t.id === 'pivot-bounce-long');
-    if (!pivot) throw new Error('missing template');
-    const definition = pivot.create();
-    if (definition.when.op !== 'ALL') throw new Error('unexpected root');
-    definition.when.children[0] = {
-      op: 'AOI_TOUCH',
-      kinds: ['PIVOT_S1', 'UNKNOWN_LEVEL'],
-      side: 'bullish',
-      within_bars: 3,
-    };
-    await user.clear(box);
-    await user.click(box);
-    await user.paste(exportDefinition(definition));
-    await user.click(screen.getByRole('button', {name: 'Import rule'}));
-    await user.click(screen.getByRole('tab', {name: 'Rules'}));
-    expect(
-      screen.getByText(
-        'Touched a bullish S1 or UNKNOWN_LEVEL in the last 3 bars (wick)'
-      )
-    ).toBeInTheDocument();
-    expect(
-      screen.getByText(
-        'No installed indicator plugin publishes AOI kind UNKNOWN_LEVEL.'
-      )
-    ).toBeInTheDocument();
-    expect(screen.getByTestId('risk-target')).toHaveTextContent(
-      'Nearest P or R1 beyond the entry'
+      within(mode).getByRole('option', {name: 'Automatic live (locked)'})
+    ).toBeDisabled();
+    expect(screen.getByTestId('auto-live-lock')).toHaveTextContent(
+      AUTO_LIVE_LOCK_REASON
     );
+    await user.selectOptions(mode, 'PAPER');
+    await user.click(screen.getByRole('button', {name: 'Activate'}));
+    const list = await screen.findByRole('list', {name: 'Activations'});
+    expect(within(list).getByText('active')).toBeInTheDocument();
+    expect(
+      within(list).getByText('builtin:ema-trend-long:vdemo')
+    ).toBeInTheDocument();
+    await user.click(within(list).getByRole('button', {name: 'Pause'}));
+    await within(list).findByText('paused');
+    await user.click(within(list).getByRole('button', {name: 'Delete'}));
+    await screen.findByText('No activations');
+    await expect(
+      ctx.strategy.createActivation({
+        script_id: 'builtin:ema-trend-long',
+        instrument_ids: ['mock:perp:BTCUSD'],
+        tf: '5m',
+        mode: 'AUTO_LIVE',
+      })
+    ).rejects.toMatchObject({body: {code: 'TRADE_MODE_DISABLED'}});
   });
 
-  it('groups issues by node id', () => {
-    const def = {
-      schema_version: 2,
-      strategy_id: 'x',
-      name: 'x',
-      direction: 'LONG',
-      signal_timeframe: '5m',
-      universe: {qualification: 'ANY', venues: ['mock']},
-      when: {
-        op: 'ALL',
-        id: 'root',
-        children: [{op: 'RISK_REWARD', id: 'rr', min_rr: '2'}],
-      },
-      risk: {min_rr: '2', stop_model: 'ATR', target_model: 'FIXED_R'},
-      notification: {cooldown_bars: 0, once_per_aoi: true},
-      execution_mode: 'ALERT_ONLY',
-    } as const;
-    const {byNode, general} = issuesByNode(def as never, [
-      {path: '/when/children/0/min_rr', code: 'a', message: 'a'},
-      {path: '/risk/fixed_r', code: 'b', message: 'b'},
-    ]);
-    expect(byNode.get('rr')).toHaveLength(1);
-    expect(general).toHaveLength(1);
+  it('shows recent signals and copies a built-in to owned scripts', async () => {
+    await renderPanel();
+    const user = userEvent.setup();
+    await user.selectOptions(
+      screen.getByRole('combobox', {name: 'Strategy script'}),
+      'builtin:pivot-bounce-long'
+    );
+    await user.click(screen.getByRole('tab', {name: 'Signals'}));
+    const signals = await screen.findByRole('list', {name: 'Strategy signals'});
+    expect(within(signals).getAllByRole('listitem')).toHaveLength(1);
+    await user.click(screen.getByRole('tab', {name: 'Source'}));
+    await user.click(screen.getByRole('button', {name: 'Open source'}));
+    expect(await screen.findByLabelText('Strategy source')).toHaveTextContent(
+      '# DEMO'
+    );
+    await user.click(screen.getByRole('button', {name: 'Copy to my scripts'}));
+    await waitFor(() => {
+      expect(
+        within(
+          screen.getByRole('combobox', {name: 'Strategy script'})
+        ).getByRole('group', {name: 'My scripts'})
+      ).toBeTruthy();
+    });
+  });
+
+  it('reads input defaults from declarations', () => {
+    expect(defaultInputs(undefined)).toEqual({});
   });
 });

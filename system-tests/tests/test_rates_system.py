@@ -5,164 +5,57 @@
 
 Rejection is static validation, so it works offline although the Treasury
 adapter (which needs the network) is not enabled in the DEMO market
-engine: the strategy compiler refuses the venue and the instrument, the
-strategy service refuses activation and backtests, and the execution
-engine refuses orders.
+engine: the market engine refuses strategy activations and backtests on a
+rate series, and the execution engine refuses orders.
 """
 
 from __future__ import annotations
 
-import json
-import pathlib
 from collections.abc import Callable
 from typing import TypeAlias
 
 import httpx
 
-from tests import conftest
-
 UST10Y = "treasury:rate:UST10Y"
-_FIXTURES = (
-    conftest.ROOT / "joseph-terminal" / "packages" / "contracts" / "fixtures"
-)
 
 _Validate: TypeAlias = Callable[[str, str, object], None]
 
 
-def _definition(
-    strategy_id: str, universe: dict[str, object]
-) -> dict[str, object]:
-    """Builds the EMA trend template with another id and universe.
-
-    Args:
-        strategy_id: Strategy id (slug) of the copy.
-        universe: Contract ``Universe``.
-
-    Returns:
-        The fixture's first valid definition with ``strategy_id``,
-        ``universe`` and the ``ALERT_ONLY`` execution mode.
-    """
-    path = pathlib.Path(_FIXTURES / "strategy.fixture.json")
-    body = json.loads(path.read_text(encoding="utf-8"))
-    definition = dict(body["valid"][0])
-    definition.update(
-        strategy_id=strategy_id,
-        universe=universe,
-        execution_mode="ALERT_ONLY",
-    )
-    return definition
-
-
-def _rate_strategy(strategy_id: str) -> dict[str, object]:
-    """Builds a strategy whose universe is the UST10Y rate series.
-
-    Args:
-        strategy_id: Strategy id (slug).
-
-    Returns:
-        An ``ALERT_ONLY`` definition whose only venue is ``treasury``.
-    """
-    return _definition(
-        strategy_id,
-        {"qualification": "ANY", "venues": ["treasury"], "whitelist": [UST10Y]},
-    )
-
-
-def _codes(result: dict[str, object]) -> dict[str, str]:
-    """Maps the error codes of a ``ValidationResult`` to their paths.
-
-    Args:
-        result: Contract ``ValidationResult``.
-
-    Returns:
-        Each error code mapped to the JSON pointer of its field.
-    """
-    errors = result["errors"]
-    assert isinstance(errors, list)
-    return {error["code"]: error["path"] for error in errors}
-
-
-def test_compiler_rejects_a_rate_universe(
+def test_rate_series_cannot_be_activated(
     market: httpx.Client, validate: _Validate
 ) -> None:
-    """The treasury venue and UST10Y fail with their codes and an ETF hint."""
-    result = market.post(
-        "/v1/strategies/validate", json=_rate_strategy("system-rate-ust10y")
-    ).json()
-    validate("strategy.schema.json", "ValidationResult", result)
-    assert result["valid"] is False
-    codes = _codes(result)
-    assert codes["RATE_VENUE_NOT_TRADABLE"] == "/universe/venues/0"
-    assert codes["RATE_NOT_TRADABLE"] == "/universe/whitelist/0"
-    messages = " ".join(error["message"] for error in result["errors"])
-    assert "bond ETF" in messages
-
-
-def test_rate_whitelist_is_rejected_on_a_tradable_venue(
-    market: httpx.Client, validate: _Validate
-) -> None:
-    """UST10Y in the whitelist of a DEMO-venue universe is still refused."""
-    definition = _definition(
-        "system-rate-whitelist",
-        {"qualification": "ANY", "venues": ["mock"], "whitelist": [UST10Y]},
-    )
-    result = market.post("/v1/strategies/validate", json=definition).json()
-    validate("strategy.schema.json", "ValidationResult", result)
-    assert result["valid"] is False
-    assert _codes(result)["RATE_NOT_TRADABLE"] == "/universe/whitelist/0"
-
-
-def test_stored_rate_strategy_cannot_be_activated(
-    market: httpx.Client, validate: _Validate
-) -> None:
-    """A saved rate draft revalidates with the codes and never activates."""
-    created = market.post(
-        "/v1/strategies", json=_rate_strategy("system-rate-draft")
-    )
-    assert created.status_code == 201, created.text
-    validate("strategy.schema.json", "StrategyVersion", created.json())
-    assert created.json()["state"] != "ACTIVE"
-    revalidated = market.post(
-        "/v1/strategies/system-rate-draft/validate", json={"version": 1}
-    ).json()
-    validate("strategy.schema.json", "ValidationResult", revalidated)
-    assert {"RATE_VENUE_NOT_TRADABLE", "RATE_NOT_TRADABLE"} <= set(
-        _codes(revalidated)
-    )
-    for mode in ("ALERT_ONLY", "PAPER"):
+    """A strategy activation on UST10Y is refused in every mode."""
+    for mode in ("ALERT_ONLY", "PAPER", "SHADOW"):
         response = market.post(
-            "/v1/strategies/system-rate-draft/activate",
-            json={"version": 1, "mode": mode},
+            "/v1/strategy-activations",
+            json={
+                "script_id": "builtin:ema-trend-long",
+                "instrument_ids": [UST10Y],
+                "tf": "1d",
+                "mode": mode,
+            },
         )
         assert response.status_code == 422, response.text
         body = response.json()
         validate("common.schema.json", "ErrorResponse", body)
         assert body["code"] == "VALIDATION_FAILED"
-        fields = {f["field"] for f in body["field_errors"]}
-        assert fields == {"/universe/venues/0", "/universe/whitelist/0"}
+        assert "bond ETF" in body["message"]
+    listing = market.get("/v1/strategy-activations").json()
+    assert all(
+        UST10Y not in a["instrument_ids"] for a in listing["activations"]
+    )
 
 
 def test_rate_series_cannot_be_backtested(
     market: httpx.Client, validate: _Validate
 ) -> None:
-    """A valid DEMO strategy refuses a backtest on UST10Y."""
-    definition = _definition(
-        "system-rate-backtest", {"qualification": "ANY", "venues": ["mock"]}
-    )
-    created = market.post("/v1/strategies", json=definition)
-    assert created.status_code == 201, created.text
+    """A built-in strategy refuses a backtest on UST10Y."""
     response = market.post(
-        "/v1/strategies/system-rate-backtest/backtests",
-        json={
-            "version": 1,
-            "instrument_id": UST10Y,
-            "from_ms": conftest.ny_ms(2026, 11, 2),
-            "to_ms": conftest.ny_ms(2026, 11, 3),
-        },
+        "/v1/scripts/builtin:ema-trend-long/run",
+        json={"instrument_id": UST10Y, "tf": "1d", "limit": 100},
     )
-    assert response.status_code == 422, response.text
+    assert 400 <= response.status_code < 500, response.text
     validate("common.schema.json", "ErrorResponse", response.json())
-    assert "published rate series" in response.json()["message"]
 
 
 def test_execution_engine_refuses_rate_orders(

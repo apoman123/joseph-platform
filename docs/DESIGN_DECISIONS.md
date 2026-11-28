@@ -7,7 +7,7 @@ How the built platform differs from its original, unpublished design plan (V5): 
 | # | Original plan | Built | Why |
 |---|---|---|---|
 | D1 | No single instrument string (`BINANCE:PERP:BTCUSDT`, `hyperliquid:perp:BTC:USDC` and `BTC-USDT-PERP@BINANCE` all appear) | `{venue}:{market_type}:{venue_market_id}` with a lowercase venue, e.g. `binance:perp:BTCUSDT`. Quote, settlement and version live in `InstrumentKey` | One regex-validated id in both stacks; a settlement change bumps `instrument_version`, not the id |
-| D2 | Three rule-AST shapes (`op`, `all`/`any`, `ref`) | Rule AST v2 with an `op` discriminator (`strategy.schema.json`); STATE takes `timeframes[]` + `match` (ALL / K_OF_N); IN_ZONE members bind by `group`; plugins, kinds, events and values come from plugin metadata | One typed union is easier to validate, generate and evolve, and covers every example and K-of-N; no node is tied to one indicator set |
+| D2 | Three rule-AST shapes (`op`, `all`/`any`, `ref`) | No rule AST: a strategy is a Python `joseph_script.Strategy` subclass (built-in, plugin or tenant version) activated through `/v1/strategy-activations`; backtests are script runs ([ADR 0010](adr/0010-python-strategy-scripts.md), superseding the Rule AST v2 of ADR 0005) | One strategy format, one simulator for backtests and live signals, and no strategy vocabulary in platform contracts |
 | D12 | No defined response for a submission the risk checks block | `POST /v1/orders/intents` records and audits the blocked intent and returns `201` with the `RiskDecision` and `orders: []` | The UI shows every failed check; the audit captures every attempt |
 
 ## Terminal

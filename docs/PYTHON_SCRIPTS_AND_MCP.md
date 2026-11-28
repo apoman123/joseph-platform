@@ -129,12 +129,65 @@ The API's categories follow its [visuals overview](https://www.tradingview.com/p
 
 ## Strategy simulations
 
-`ctx.entry("long" | "short", quantity=1)` and `ctx.close()` queue an intent.
-It fills on the **following available source bar's opening price**, with the
-selected adverse slippage and commission. Arrows point to that fill bar; exits
-and reversals have their own labels. The editor reports fills, fees, marked
-equity, return, drawdown, rejected orders, and unfilled final-bar intents.
-Positions exceeding the simulated equity limit are rejected.
+Python `Strategy` scripts are the only strategy format
+([ADR 0010](adr/0010-python-strategy-scripts.md)).
+
+`ctx.entry("long" | "short", quantity=1, stop=None, target=None, comment="")`
+and `ctx.close(comment="")` queue an order; a later call on the same bar
+replaces it. A stop must lie below the current close for a long entry and above
+it for a short entry, a target on the other side; a wrong side raises
+`ValueError`. The order fills on the **following available source bar's opening
+price**, with the selected adverse slippage and commission. While a position is
+open, `ctx.position_stop` and `ctx.position_target` hold the levels of the
+entry that opened it; the simulator never exits on them by itself, so a
+strategy closes the position when a bar trades through them (the built-ins
+close at the next open). Arrows point to the fill bar; exits and reversals have
+their own labels. Positions exceeding the simulated equity limit are rejected.
+
+A strategy run returns, besides plots and the equity curve:
+
+- `fills`: verified next-bar-open fills;
+- `orders`: every queued order with its bar, action, quantity, `reference`
+  (the bar close), stop, target, comment and outcome (`pending` on the last
+  bar, `filled`, `rejected` or `unchanged`) and fill bar;
+- `trades`: round trips the host rebuilds from the fills (direction, entry and
+  exit bars and prices, fees, profit and return; the last one stays open while
+  the position is);
+- `position_size` after the last bar, and metrics including `fees`,
+  `max_drawdown_pct`, `trade_count`, `win_rate_pct`, `rejected_orders` and
+  `unfilled_intents`.
+
+`POST /v1/scripts/{id}/run` is the backtest: it accepts tenant slugs and the
+catalog ids `builtin:<id>` and `plugin:<entry point>:<id>`
+(`GET /v1/scripts/catalog?kind=strategy` lists them). The built-in strategies
+are `builtin:ema-trend-long`, `builtin:rsi-reversion-short` and
+`builtin:pivot-bounce-long`; their source is public and can be copied into an
+owned script.
+
+### Strategy activations
+
+`POST /v1/strategy-activations` evaluates a strategy live on closed bars:
+`script_id` (and `version` for tenant scripts, the latest when omitted),
+one to twenty `instrument_ids`, `tf`, `inputs`, `mode` (`ALERT_ONLY`, `PAPER`
+or `SHADOW`; `AUTO_LIVE` returns 409 `TRADE_MODE_DISABLED`), notification
+`channels` (default `UI`) and `history_bars` (50–2000, the warm-up). Activations
+persist across restarts; `POST .../{id}/pause`, `.../resume` and `DELETE` manage
+them, and `GET` shows the last evaluation and errors per instrument.
+
+Every `JOSEPH_STRATEGY_INTERVAL_S` seconds the engine re-runs each active
+activation. An order queued on the newest closed bar becomes a signal: an entry
+that opens or reverses the position is `ENTRY_CONFIRMED` with direction,
+planned entry (the bar close), stop, target and reward/risk; a close, or the
+closing half of a reversal, is `POSITION_EXITED`. Deduplication includes
+tenant, activation, source hash, instrument, bar and kind. Each instrument's
+checkpoint starts at activation or resume time, so history never fires, and a
+bar that closed more than twice the timeframe (at least two minutes) ago is
+skipped. Signals use the normal routing: the UI and selected subscriptions, and
+for `PAPER` and `SHADOW` the execution engine, whose deployments bind the
+activation's `strategy_version_id` (`<script_id>:v<version>`, or
+`<catalog id>:v<12 hash digits>` for built-in and plugin classes). A built-in or
+plugin whose installed code changed reports an error until a new activation
+adopts it. Tenant strategies need the isolated runtime.
 
 These conventions follow TradingView's [strategy execution model](https://www.tradingview.com/pine-script-docs/concepts/strategies/).
 This simulator does not submit broker orders. Existing live trading remains in
@@ -221,7 +274,7 @@ SDK-supported legacy negotiation. Tools have stable names, strict argument
 schemas, output schemas, permission checks, and side-effect annotations. The
 catalog derives every user `/v1/` HTTP operation from both engines' OpenAPI:
 market/history/feed health, indicators/AOIs, screening, Python sources/versions,
-filters/alerts, strategies/backtests/signals, notification subscriptions,
+filters/alerts, strategy activations/signals, notification subscriptions,
 accounts/orders/positions/fills/risk/deployments/consents. Internal service-token
 routes and MCP credential bootstrap are deliberately excluded.
 

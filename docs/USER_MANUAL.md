@@ -65,7 +65,7 @@ Data window remain available at the bottom of the dialog.
 | *Demo data* (hatched) | Synthetic, not a real market |
 | *Unavailable* (red dashes) | Venue unreachable or not enabled; the chart stays empty |
 
-Magenta marks are yours (drawings, draft orders, rule cards); green and red show direction.
+Magenta marks are yours (drawings, draft orders); green and red show direction.
 
 ## Charts
 
@@ -160,20 +160,22 @@ Unrecorded time shows as a gap, never as invented bars.
 
 ## Strategies and alerts
 
-1. *Strategy* → *Start from a template*: *EMA trend (long)*, *RSI reversion (short)*, *Pivot bounce (long)* or blank.
-2. Write conditions as sentence cards in *All of* / *Any of* groups; *Negate* adds NOT, *Add alternatives* adds OR. Cards offer what the engine's indicators publish: values and crossings, an indicator's state (e.g. the volume delta's method), zone and level touches, price inside a zone, events, market values, time windows and R:R. Inside-a-zone conditions that share a *group* must match zones of the same group.
-3. *Validate* checks on the server and points at the failing card.
-4. *Save strategy* creates an immutable version; activations never carry over to edits.
-5. Activate as **Alerts only**, **Paper trading** or **Shadow** (record only). *Automatic live* is locked: it needs an execution-engine deployment with limits, scoped consent and LIVE enabled on the server.
+Strategies are Python `Strategy` scripts.
 
-Signals fire once per setup, on bars closed after activation. Missing or stale data makes a condition *unknown*, which blocks the entry. The *JSON* tab exports and imports rules.
+1. *Strategy* → pick a script: the built-ins *EMA Trend Long*, *RSI Reversion Short* and *Pivot Bounce Long*, installed plugin strategies, or your own Strategy scripts.
+2. Edit the inputs the script declares (lengths, thresholds, stop and target settings, cooldown).
+3. *Backtest* (below) shows how the inputs behave on the active instrument.
+4. Activate on the active instrument and timeframe as **Alerts only**, **Paper trading** or **Shadow** (record only). *Automatic live* is locked: it needs an execution-engine deployment with limits, scoped consent and LIVE enabled on the server.
+5. *Activations* lists each activation with its mode, last evaluation and errors; *Pause* and *Resume* it. *Recent signals* shows its entries and exits.
+
+An activation evaluates bars that close after it was created or resumed, never history, also not after a server restart. An order the strategy queues on a newly closed bar becomes an entry or exit signal carrying the strategy's stop and target; Paper and Shadow entries go to the execution engine, where a deployment of the activation's strategy version sizes and places them. A built-in's *Open source* shows its code; *Copy to my scripts* saves it as your own editable script. Editing a script creates a new version, which existing activations keep ignoring until you activate it again. Your own scripts run only when the server enables the isolated script runtime.
 
 - **Alerts:** kind, instrument, R:R, data source and an expandable **reason tree**; *Show on chart* jumps to the bar and zone. Sort by time, R multiple, confluence, bar volume or distance to AOI. *Acknowledge*, *Snooze* and *Dismiss* are local.
 - **Notifications:** Telegram, LINE, e-mail or an HTTPS webhook, filtered by kind and severity, with quiet hours (critical alerts still arrive). *Not delivered*: the server has no credentials for that channel.
 
 ## Backtests
 
-*Strategy* → *Backtest* runs the latest version on the active instrument over 1–365 days of closed bars. It uses the production evaluator with conservative fills (next-bar entry with slippage, stop before target when a bar touches both, fees per side, one position at a time) and reports trades, win rate, expectancy, profit factor, drawdown, average hold and its assumptions. DEMO reports are synthetic and say so.
+*Strategy* → *Backtest* runs the selected script with the edited inputs on the active instrument and timeframe over the latest closed bars, with initial equity, commission and slippage. Orders fill at the next bar's open with adverse slippage and per-fill fees; the built-ins exit at the next open after a bar trades through their stop or target. It reports return, drawdown, fees, the number of trades and win rate, the equity curve and every trade, and marks entries and exits on the chart. Live activations use the same simulator. DEMO results are labelled sample data.
 
 ## Trading
 

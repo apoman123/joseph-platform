@@ -1,6 +1,31 @@
 {
   "components": {
     "schemas": {
+      "ActivationInstrumentStatus": {
+        "description": "Evaluation progress of one activated instrument.\n\nAttributes:\n    last_processed_ms: Newest bar close already turned into signals or\n        skipped; bars at or before it are never signalled.\n    last_error: Last evaluation error, None after a clean pass.",
+        "properties": {
+          "last_error": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Last Error"
+          },
+          "last_processed_ms": {
+            "title": "Last Processed Ms",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "last_processed_ms"
+        ],
+        "title": "ActivationInstrumentStatus",
+        "type": "object"
+      },
       "AlertJob": {
         "additionalProperties": false,
         "description": "Persistent Python alert evaluation state and visible diagnostics.\n\nAttributes:\n    job_id: Opaque tenant-owned alert identifier.\n    created_at_ms: Creation time in UTC epoch milliseconds.\n    last_processed_ms: Latest successfully evaluated bar close/checkpoint.\n    last_error: Visible missing-data, provider or user-code failure, if any.\n    last_checked_ms: Last evaluation attempt in UTC epoch milliseconds.\n    emitted: Number of distinct conditions recorded for this job.",
@@ -779,31 +804,6 @@
           "error"
         ],
         "title": "HeatmapTile",
-        "type": "object"
-      },
-      "InstrumentStatus": {
-        "description": "Evaluation progress of one activated instrument.\n\nAttributes:\n    last_processed_ms: Newest bar close already turned into signals or\n        skipped; bars at or before it are never signalled.\n    last_error: Last evaluation error, None after a clean pass.",
-        "properties": {
-          "last_error": {
-            "anyOf": [
-              {
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Last Error"
-          },
-          "last_processed_ms": {
-            "title": "Last Processed Ms",
-            "type": "integer"
-          }
-        },
-        "required": [
-          "last_processed_ms"
-        ],
-        "title": "InstrumentStatus",
         "type": "object"
       },
       "JsonValue": {},
@@ -1777,7 +1777,7 @@
           },
           "instruments": {
             "additionalProperties": {
-              "$ref": "#/components/schemas/InstrumentStatus"
+              "$ref": "#/components/schemas/ActivationInstrumentStatus"
             },
             "title": "Instruments",
             "type": "object"

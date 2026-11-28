@@ -7,15 +7,15 @@ Browser: joseph-terminal (Next.js)                    Server side: Python servic
 ┌──────────────────────────────────────────┐         ┌────────────────────────────────────────────┐
 │ apps/web  composition root + React views │  HTTP   │ joseph-market-engine  :8000                │
 │   features/* (chart, drawing, watchlist, │  + WS   │   market_data → screening                  │
-│   screener, strategy, trading, alerts,   │ ──────▶ │   market_data → indicators → strategy      │
-│   portfolio) via FeatureContext only     │         │                → signals → alerts ──┐      │
-│ packages/                                │         │   backtest (same evaluator)         │      │
+│   screener, strategy, trading, alerts,   │ ──────▶ │   market_data → scripts (Python roles)     │
+│   portfolio) via FeatureContext only     │         │   activations  → signals → alerts ──┐      │
+│ packages/                                │         │   backtests = script runs           │      │
 │   contracts       schemas, types, clients│         └─────────────────────────────────────┼──────┘
 │   feature-registry manifests, lifecycle  │         ┌─────────────────────────────────────▼──────┐
 │   chart-core      ChartPort + LWC adapter│  HTTP   │ joseph-execution-engine  :8100  (secrets)  │
 │   drawing-core/-tools, indicator-viz     │  + WS   │   intent → risk gateway → OMS → adapters   │
 │   terminal-shell, chart-trading,         │ ──────▶ │   accounts/vault, reconciliation, audit    │
-│   strategy-builder, mock-provider (DEMO) │         │   adapters: paper, shadow, venues, brokers │
+│   mock-provider (DEMO)                   │         │   adapters: paper, shadow, venues, brokers │
 └──────────────────────────────────────────┘         └────────────────────────────────────────────┘
 ```
 
@@ -26,7 +26,8 @@ LWC is the Lightweight Charts library. The browser holds only a session token; v
 | Concern | Location |
 |---|---|
 | Contracts (JSON Schema 2020-12) and shared examples | `joseph-terminal/packages/contracts/{schemas,fixtures}/` |
-| Market data, screening, indicator SDK, strategies, signals, alerts, backtests | `joseph-market-engine/src/joseph/` ([modules](../../joseph-market-engine/README.md#modules-srcjoseph)) |
+| Market data, screening, indicator SDK, Python scripts and strategy activations, signals, alerts | `joseph-market-engine/src/joseph/` ([modules](../../joseph-market-engine/README.md#modules-srcjoseph)) |
+| Built-in strategy (and other role) scripts, script catalog | `joseph-market-engine/src/joseph/scripts/` (`builtin/`, `catalog.py`, `activations.py`; ADR 0010) |
 | Built-in indicators, plugin discovery | `joseph-market-engine/src/joseph/indicators/` (`builtin/`, `discovery.py`; ADR 0009) |
 | Indicator plugin packages (optional) | Installed beside the market engine, never in this repository; entry-point group `joseph.indicator_plugins` ([operations](../OPERATIONS.md#indicator-plugins)) |
 | Risk gateway, OMS, vault, audit, venue and broker adapters | `joseph-execution-engine/src/joseph_execution/` |
@@ -44,7 +45,7 @@ The [ADRs](../adr/) record each decision and its reasons. `joseph-terminal/docs/
 
 ## From candle to order
 
-1. A closed candle feeds the indicator engine (per timeframe, strict higher-timeframe visibility), which builds a `BarFrame`.
-2. The strategy evaluator (tri-state, reason tree) and the setup state machine (dedupe, cooldown) emit a `Signal`.
-3. The alert outbox delivers it (UI, Telegram, LINE, e-mail, webhook); for PAPER, SHADOW and AUTO_LIVE deployments the forwarder posts it to `/internal/v1/signals`.
+1. A closed candle reaches each active strategy activation, which re-runs its Python `Strategy` on closed bars (declared higher-timeframe series only after they close).
+2. An order the strategy queued on the newest closed bar becomes a `Signal` (`ENTRY_CONFIRMED` or `POSITION_EXITED`), deduplicated per activation, source hash, instrument, bar and kind; a per-instrument checkpoint keeps history from replaying ([ADR 0010](../adr/0010-python-strategy-scripts.md)).
+3. The alert outbox delivers it (UI, Telegram, LINE, e-mail, webhook); entries of PAPER and SHADOW activations are posted to `/internal/v1/signals`, where deployments bound to the activation's `strategy_version_id` pick them up.
 4. Deployment sizing creates an `OrderIntent` → risk gateway → OMS → paper or shadow adapter, or a live adapter for a verified account (fail-closed without credentials or with the gate off).

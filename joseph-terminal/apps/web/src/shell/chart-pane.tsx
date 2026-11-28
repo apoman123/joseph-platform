@@ -92,6 +92,7 @@ import {useVenueCapabilities} from './venue-capabilities';
 import {ProvenanceBadge, ProvenanceRibbon} from './provenance';
 import {useStore} from './react-bindings';
 import {ReplayBar} from './replay-bar';
+import {useStrategyPreview} from './strategy-preview';
 import {useStudyLines, useStudyPanes} from './study-hooks';
 
 /** Bars requested on load. */
@@ -936,6 +937,7 @@ export function ChartPane({
     runtime,
     shownRef.current.filter(bar => bar.final).at(-1)?.timeMs ?? null
   );
+  useStrategyPreview(port, chart, runtime);
   useStudyPanes(port, chart, runtime, atMs);
   useStudyLines(port, chart, runtime, atMs);
   const compare = useCompare(port, chart, runtime, symbolOf);

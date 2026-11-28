@@ -10,5 +10,6 @@
  */
 
 export * from './demo-signals';
+export * from './demo-strategy-catalog';
 export * from './demo-strategy-client';
 export * from './sha256';

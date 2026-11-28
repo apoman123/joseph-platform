@@ -1,5 +1,31 @@
 {
   "$defs": {
+    "ActivationInstrumentStatus": {
+      "description": "Evaluation progress of one activated instrument.\n\nAttributes:\n    last_processed_ms: Newest bar close already turned into signals or\n        skipped; bars at or before it are never signalled.\n    last_error: Last evaluation error, None after a clean pass.",
+      "properties": {
+        "last_error": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Last Error"
+        },
+        "last_processed_ms": {
+          "title": "Last Processed Ms",
+          "type": "integer"
+        }
+      },
+      "required": [
+        "last_processed_ms"
+      ],
+      "title": "ActivationInstrumentStatus",
+      "type": "object"
+    },
     "AlertJob": {
       "additionalProperties": false,
       "description": "Persistent Python alert evaluation state and visible diagnostics.\n\nAttributes:\n    job_id: Opaque tenant-owned alert identifier.\n    created_at_ms: Creation time in UTC epoch milliseconds.\n    last_processed_ms: Latest successfully evaluated bar close/checkpoint.\n    last_error: Visible missing-data, provider or user-code failure, if any.\n    last_checked_ms: Last evaluation attempt in UTC epoch milliseconds.\n    emitted: Number of distinct conditions recorded for this job.",
@@ -160,6 +186,250 @@
         "tf"
       ],
       "title": "AlertJobInput",
+      "type": "object"
+    },
+    "CatalogInput": {
+      "description": "A declared input of a built-in or plugin script.\n\nAttributes:\n    default: JSON default value.\n    title: Settings label.\n    minimum: Optional inclusive numeric lower bound.\n    maximum: Optional inclusive numeric upper bound.\n    options: Optional accepted values.\n    step: Optional numeric step.\n    group: Optional settings section.\n    tooltip: Optional help text.",
+      "properties": {
+        "default": {
+          "$ref": "#/$defs/JsonValue"
+        },
+        "group": {
+          "title": "Group",
+          "type": "string"
+        },
+        "maximum": {
+          "anyOf": [
+            {
+              "type": "number"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "title": "Maximum"
+        },
+        "minimum": {
+          "anyOf": [
+            {
+              "type": "number"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "title": "Minimum"
+        },
+        "options": {
+          "anyOf": [
+            {
+              "items": {
+                "$ref": "#/$defs/JsonValue"
+              },
+              "type": "array"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "title": "Options"
+        },
+        "step": {
+          "anyOf": [
+            {
+              "type": "number"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "title": "Step"
+        },
+        "title": {
+          "title": "Title",
+          "type": "string"
+        },
+        "tooltip": {
+          "title": "Tooltip",
+          "type": "string"
+        }
+      },
+      "required": [
+        "default",
+        "title",
+        "minimum",
+        "maximum",
+        "options",
+        "step",
+        "group",
+        "tooltip"
+      ],
+      "title": "CatalogInput",
+      "type": "object"
+    },
+    "CatalogList": {
+      "description": "Installed built-in and plugin scripts and skipped plugin packages.\n\nAttributes:\n    scripts: Scripts in catalog order.\n    failures: Plugin entry points that failed to load, with reasons.",
+      "properties": {
+        "failures": {
+          "items": {
+            "additionalProperties": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            },
+            "type": "object"
+          },
+          "title": "Failures",
+          "type": "array"
+        },
+        "scripts": {
+          "items": {
+            "$ref": "#/$defs/CatalogScript"
+          },
+          "title": "Scripts",
+          "type": "array"
+        }
+      },
+      "required": [
+        "scripts",
+        "failures"
+      ],
+      "title": "CatalogList",
+      "type": "object"
+    },
+    "CatalogScript": {
+      "description": "A built-in or installed plugin script that the engine runs in process.\n\nAttributes:\n    script_id: ``builtin:<id>`` or ``plugin:<entry point>:<id>``.\n    kind: indicator, strategy, library, filter or alert.\n    origin: builtin or plugin.\n    package: Providing distribution of a plugin.\n    package_version: That distribution's version.\n    title: Display name.\n    short_title: Compact legend name.\n    description: Catalog description.\n    category: Catalog section.\n    overlay: Whether plots share the price pane.\n    inputs: Declared inputs in display order.\n    requests: Declared additional series by alias.\n    source_available: Whether the public source can be read.\n    source_hash: Identity of the installed code.\n    enabled: False when disabled by configuration.\n    source: Public source text on the single-script route, else None.",
+      "properties": {
+        "category": {
+          "title": "Category",
+          "type": "string"
+        },
+        "description": {
+          "title": "Description",
+          "type": "string"
+        },
+        "enabled": {
+          "title": "Enabled",
+          "type": "boolean"
+        },
+        "inputs": {
+          "additionalProperties": {
+            "$ref": "#/$defs/CatalogInput"
+          },
+          "title": "Inputs",
+          "type": "object"
+        },
+        "kind": {
+          "enum": [
+            "indicator",
+            "strategy",
+            "library",
+            "filter",
+            "alert"
+          ],
+          "title": "Kind",
+          "type": "string"
+        },
+        "origin": {
+          "enum": [
+            "builtin",
+            "plugin"
+          ],
+          "title": "Origin",
+          "type": "string"
+        },
+        "overlay": {
+          "title": "Overlay",
+          "type": "boolean"
+        },
+        "package": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "title": "Package"
+        },
+        "package_version": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "title": "Package Version"
+        },
+        "requests": {
+          "additionalProperties": {
+            "additionalProperties": {
+              "$ref": "#/$defs/JsonValue"
+            },
+            "type": "object"
+          },
+          "title": "Requests",
+          "type": "object"
+        },
+        "script_id": {
+          "title": "Script Id",
+          "type": "string"
+        },
+        "short_title": {
+          "title": "Short Title",
+          "type": "string"
+        },
+        "source": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Source"
+        },
+        "source_available": {
+          "title": "Source Available",
+          "type": "boolean"
+        },
+        "source_hash": {
+          "title": "Source Hash",
+          "type": "string"
+        },
+        "title": {
+          "title": "Title",
+          "type": "string"
+        }
+      },
+      "required": [
+        "script_id",
+        "kind",
+        "origin",
+        "package",
+        "package_version",
+        "title",
+        "short_title",
+        "description",
+        "category",
+        "overlay",
+        "inputs",
+        "requests",
+        "source_available",
+        "source_hash",
+        "enabled"
+      ],
+      "title": "CatalogScript",
       "type": "object"
     },
     "CompanyMetadata": {
@@ -1341,6 +1611,254 @@
         "fee"
       ],
       "title": "SimulatedFill",
+      "type": "object"
+    },
+    "StrategyActivation": {
+      "additionalProperties": false,
+      "description": "A persisted activation and its evaluation state.\n\nAttributes:\n    activation_id: Opaque identifier.\n    version: Pinned tenant version, or 0 for catalog strategies.\n    name: Strategy display title.\n    source_hash: Pinned exact source identity.\n    strategy_version_id: Identity execution deployments bind:\n        ``<script_id>:v<version>`` for tenant versions and\n        ``<catalog id>:v<first 12 hash digits>`` for catalog classes.\n    state: ACTIVE or PAUSED.\n    created_at_ms: Creation time.\n    updated_at_ms: Last configuration or state change.\n    last_checked_ms: Last evaluation pass, None before one.\n    last_error: Activation-wide error (such as a changed built-in or a\n        disabled runtime), None when evaluation works.\n    emitted: Number of new signals recorded.\n    instruments: Progress per instrument id.",
+      "properties": {
+        "activation_id": {
+          "title": "Activation Id",
+          "type": "string"
+        },
+        "channels": {
+          "items": {
+            "type": "string"
+          },
+          "maxItems": 8,
+          "title": "Channels",
+          "type": "array"
+        },
+        "created_at_ms": {
+          "title": "Created At Ms",
+          "type": "integer"
+        },
+        "emitted": {
+          "default": 0,
+          "title": "Emitted",
+          "type": "integer"
+        },
+        "history_bars": {
+          "default": 500,
+          "maximum": 2000,
+          "minimum": 50,
+          "title": "History Bars",
+          "type": "integer"
+        },
+        "inputs": {
+          "additionalProperties": {
+            "$ref": "#/$defs/JsonValue"
+          },
+          "title": "Inputs",
+          "type": "object"
+        },
+        "instrument_ids": {
+          "items": {
+            "pattern": "^(bybit|okx|coinbase|kraken|deriv|binance|hyperliquid|lighter|bitget|mexc|twse|tpex|nasdaq|nyse|cboe|treasury|mock):(perp|spot|future|stock|etf|rate):[A-Za-z0-9._/-]{1,64}$",
+            "type": "string"
+          },
+          "maxItems": 20,
+          "minItems": 1,
+          "title": "Instrument Ids",
+          "type": "array"
+        },
+        "instruments": {
+          "additionalProperties": {
+            "$ref": "#/$defs/ActivationInstrumentStatus"
+          },
+          "title": "Instruments",
+          "type": "object"
+        },
+        "last_checked_ms": {
+          "anyOf": [
+            {
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Last Checked Ms"
+        },
+        "last_error": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Last Error"
+        },
+        "mode": {
+          "default": "ALERT_ONLY",
+          "enum": [
+            "ALERT_ONLY",
+            "PAPER",
+            "SHADOW",
+            "AUTO_LIVE"
+          ],
+          "title": "Mode",
+          "type": "string"
+        },
+        "name": {
+          "title": "Name",
+          "type": "string"
+        },
+        "script_id": {
+          "pattern": "^(?:[a-z][a-z0-9-]{0,62}|builtin:[a-z][a-z0-9_-]{0,63}|plugin:[a-z0-9_.-]{1,64}:[a-z][a-z0-9_-]{0,63})$",
+          "title": "Script Id",
+          "type": "string"
+        },
+        "source_hash": {
+          "title": "Source Hash",
+          "type": "string"
+        },
+        "state": {
+          "enum": [
+            "ACTIVE",
+            "PAUSED"
+          ],
+          "title": "State",
+          "type": "string"
+        },
+        "strategy_version_id": {
+          "title": "Strategy Version Id",
+          "type": "string"
+        },
+        "tf": {
+          "$ref": "common.schema.json#/$defs/Timeframe"
+        },
+        "updated_at_ms": {
+          "title": "Updated At Ms",
+          "type": "integer"
+        },
+        "version": {
+          "default": 0,
+          "title": "Version",
+          "type": "integer"
+        }
+      },
+      "required": [
+        "script_id",
+        "instrument_ids",
+        "tf",
+        "activation_id",
+        "name",
+        "source_hash",
+        "strategy_version_id",
+        "state",
+        "created_at_ms",
+        "updated_at_ms"
+      ],
+      "title": "StrategyActivation",
+      "type": "object"
+    },
+    "StrategyActivationInput": {
+      "additionalProperties": false,
+      "description": "A request to evaluate a Python strategy live on closed bars.\n\nAttributes:\n    script_id: Tenant strategy slug, ``builtin:<id>`` or\n        ``plugin:<entry>:<id>``.\n    version: Tenant version to pin; the latest when None. Ignored for\n        catalog strategies, which pin their installed source hash.\n    instrument_ids: Canonical instruments, one through twenty.\n    tf: Signal timeframe.\n    inputs: Input overrides on top of the declared defaults.\n    mode: ALERT_ONLY, PAPER or SHADOW; AUTO_LIVE is refused with\n        TRADE_MODE_DISABLED.\n    channels: Notification channels (UI and external subscriptions).\n    history_bars: Closed bars evaluated per pass, the strategy's warmup.",
+      "properties": {
+        "channels": {
+          "items": {
+            "type": "string"
+          },
+          "maxItems": 8,
+          "title": "Channels",
+          "type": "array"
+        },
+        "history_bars": {
+          "default": 500,
+          "maximum": 2000,
+          "minimum": 50,
+          "title": "History Bars",
+          "type": "integer"
+        },
+        "inputs": {
+          "additionalProperties": {
+            "$ref": "#/$defs/JsonValue"
+          },
+          "title": "Inputs",
+          "type": "object"
+        },
+        "instrument_ids": {
+          "items": {
+            "pattern": "^(bybit|okx|coinbase|kraken|deriv|binance|hyperliquid|lighter|bitget|mexc|twse|tpex|nasdaq|nyse|cboe|treasury|mock):(perp|spot|future|stock|etf|rate):[A-Za-z0-9._/-]{1,64}$",
+            "type": "string"
+          },
+          "maxItems": 20,
+          "minItems": 1,
+          "title": "Instrument Ids",
+          "type": "array"
+        },
+        "mode": {
+          "default": "ALERT_ONLY",
+          "enum": [
+            "ALERT_ONLY",
+            "PAPER",
+            "SHADOW",
+            "AUTO_LIVE"
+          ],
+          "title": "Mode",
+          "type": "string"
+        },
+        "script_id": {
+          "pattern": "^(?:[a-z][a-z0-9-]{0,62}|builtin:[a-z][a-z0-9_-]{0,63}|plugin:[a-z0-9_.-]{1,64}:[a-z][a-z0-9_-]{0,63})$",
+          "title": "Script Id",
+          "type": "string"
+        },
+        "tf": {
+          "$ref": "common.schema.json#/$defs/Timeframe"
+        },
+        "version": {
+          "anyOf": [
+            {
+              "minimum": 1,
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Version"
+        }
+      },
+      "required": [
+        "script_id",
+        "instrument_ids",
+        "tf"
+      ],
+      "title": "StrategyActivationInput",
+      "type": "object"
+    },
+    "StrategyActivationList": {
+      "description": "Owned activations.\n\nAttributes:\n    activations: Activations, newest first.\n    runtime_enabled: Whether tenant source can execute (Docker runner).\n    forwarding_enabled: Whether PAPER/SHADOW entries reach the execution\n        engine in this deployment.",
+      "properties": {
+        "activations": {
+          "items": {
+            "$ref": "#/$defs/StrategyActivation"
+          },
+          "title": "Activations",
+          "type": "array"
+        },
+        "forwarding_enabled": {
+          "title": "Forwarding Enabled",
+          "type": "boolean"
+        },
+        "runtime_enabled": {
+          "title": "Runtime Enabled",
+          "type": "boolean"
+        }
+      },
+      "required": [
+        "activations",
+        "runtime_enabled",
+        "forwarding_enabled"
+      ],
+      "title": "StrategyActivationList",
       "type": "object"
     },
     "StrategyOrder": {

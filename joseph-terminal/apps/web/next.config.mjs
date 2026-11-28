@@ -79,7 +79,6 @@ const nextConfig = {
     '@joseph/indicator-viz',
     '@joseph/terminal-shell',
     '@joseph/chart-trading',
-    '@joseph/strategy-builder',
     '@joseph/mock-provider',
   ],
   distDir: process.env.NEXT_DIST_DIR || '.next',

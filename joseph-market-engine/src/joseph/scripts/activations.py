@@ -48,6 +48,7 @@ from joseph.alerts.domain import model as deliveries
 from joseph.domain import errors
 from joseph.domain import identity
 from joseph.domain import ids
+from joseph.domain import instruments
 from joseph.domain import timeframes
 from joseph.scripts import models
 from joseph.scripts import service as script_service
@@ -124,7 +125,7 @@ class StrategyActivationInput(pydantic.BaseModel):
     history_bars: Annotated[int, pydantic.Field(ge=50, le=2000)] = 500
 
 
-class InstrumentStatus(pydantic.BaseModel):
+class ActivationInstrumentStatus(pydantic.BaseModel):
     """Evaluation progress of one activated instrument.
 
     Attributes:
@@ -169,7 +170,7 @@ class StrategyActivation(StrategyActivationInput):
     last_checked_ms: int | None = None
     last_error: str | None = None
     emitted: int = 0
-    instruments: dict[str, InstrumentStatus] = pydantic.Field(
+    instruments: dict[str, ActivationInstrumentStatus] = pydantic.Field(
         default_factory=dict
     )
 
@@ -518,7 +519,7 @@ class StrategyActivations:
         Raises:
             errors.TradeModeDisabledError: For AUTO_LIVE.
             errors.ValidationFailedError: For non-strategy scripts, unknown
-                channels or duplicate instruments.
+                channels, duplicate instruments or rate series.
             errors.UnsupportedError: If tenant source cannot run here.
         """
         script_service.require_write(principal)
@@ -536,6 +537,13 @@ class StrategyActivations:
             )
         if len(set(request.instrument_ids)) != len(request.instrument_ids):
             raise errors.ValidationFailedError("instruments must be distinct")
+        for instrument_id in request.instrument_ids:
+            parsed = instruments.InstrumentId.parse(instrument_id)
+            if parsed.market_type is instruments.MarketType.RATE:
+                raise errors.ValidationFailedError(
+                    f"{instrument_id} is a published rate series, not a "
+                    "tradable instrument; trade a bond ETF instead"
+                )
         script = self.scripts.resolve(
             principal.tenant_id, request.script_id, request.version
         )
@@ -576,7 +584,7 @@ class StrategyActivations:
             created_at_ms=now,
             updated_at_ms=now,
             instruments={
-                key: InstrumentStatus(last_processed_ms=now)
+                key: ActivationInstrumentStatus(last_processed_ms=now)
                 for key in request.instrument_ids
             },
         )
@@ -633,7 +641,7 @@ class StrategyActivations:
                 raise errors.ConflictError(_CHANGED)
             activation.last_error = None
             activation.instruments = {
-                key: InstrumentStatus(last_processed_ms=now)
+                key: ActivationInstrumentStatus(last_processed_ms=now)
                 for key in activation.instrument_ids
             }
         if not self._replace(principal.tenant_id, activation, previous):
@@ -690,7 +698,7 @@ class StrategyActivations:
             return created
         for instrument_id in current.instrument_ids:
             status = current.instruments.setdefault(
-                instrument_id, InstrumentStatus(last_processed_ms=now)
+                instrument_id, ActivationInstrumentStatus(last_processed_ms=now)
             )
             try:
                 result = await self.scripts.run(
