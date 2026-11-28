@@ -28,8 +28,13 @@ import {
   type Instrument,
   type SessionList,
 } from '@joseph/contracts';
-import {expect, test, type Page} from '@playwright/test';
-import {API} from '../playwright.fullstack.config';
+import {
+  expect,
+  test,
+  type APIRequestContext,
+  type Page,
+} from '@playwright/test';
+import {API, TOKEN} from '../playwright.fullstack.config';
 import {firstCanvas, showDataWindow} from '../e2e/support';
 import {loadTerminal} from '../e2e/trading-helpers';
 
@@ -160,61 +165,72 @@ test('the terminal loads sessions, labels exchange time and leaves no gaps', asy
     expect(label).toMatch(/(09|10|11|12|13|14|15):30 ET$/);
   }
   await expect(page.getByTestId('data-window')).toContainText(
-    'Classified (Lee–Ready)'
+    /Delta %\s*[−+-]?\d/
   );
   await page.screenshot({path: 'e2e/screenshots/41-fullstack-sessions.png'});
 });
 
+/**
+ * Runs the anchored VWAP built-in on the DEMO perpetual's 1m bars.
+ * @param request Playwright request context.
+ * @param barsBack Bars between the anchor and the latest bar.
+ * @return The study's VWAP values and the table texts it drew.
+ */
+async function anchoredVwap(
+  request: APIRequestContext,
+  barsBack: number
+): Promise<{values: Array<number | null>; tables: string}> {
+  const latest = await request.get(`${MARKET}/v1/candles`, {
+    params: {instrument_id: 'mock:perp:BTCUSD', tf: '1m', limit: 1},
+  });
+  const [bar] = ((await latest.json()) as {candles: Candle[]}).candles;
+  if (!bar) throw new Error('no bar');
+  const anchor = bar.start_ms - barsBack * 60_000;
+  const response = await request.post(`${MARKET}/v1/scripts/run-batch`, {
+    headers: {Authorization: `Bearer ${TOKEN}`},
+    data: {
+      instrument_id: 'mock:perp:BTCUSD',
+      tf: '1m',
+      from_ms: anchor,
+      limit: 5000,
+      runs: [
+        {
+          script_id: 'builtin:anchored_vwap',
+          inputs: {anchor: 'time', anchor_ms: anchor, source: 'hlc3'},
+        },
+      ],
+    },
+  });
+  expect(response.ok()).toBeTruthy();
+  const body = (await response.json()) as {
+    results: Array<{
+      result: {
+        plots: Array<{name: string; points: Array<{value: number | null}>}>;
+        visuals: Array<{kind: string; data: Record<string, unknown>}>;
+      };
+    }>;
+  };
+  const result = body.results[0]?.result;
+  return {
+    values:
+      result?.plots
+        .find(plot => plot.name === 'VWAP')
+        ?.points.map(point => point.value) ?? [],
+    tables: JSON.stringify(
+      result?.visuals.filter(visual => visual.kind === 'table') ?? []
+    ),
+  };
+}
+
 test('engine anchored VWAP accepts anchors beyond 2000 bars', async ({
   request,
 }) => {
-  const latest = await request.get(`${MARKET}/v1/candles`, {
-    params: {instrument_id: 'mock:perp:BTCUSD', tf: '1m', limit: 1},
-  });
-  const [bar] = ((await latest.json()) as {candles: Candle[]}).candles;
-  if (!bar) throw new Error('no bar');
-  const anchor = bar.start_ms - 3000 * 60_000;
-  const series = await request.get(`${MARKET}/v1/indicators/series`, {
-    params: {
-      instrument_id: 'mock:perp:BTCUSD',
-      tf: '1m',
-      plugin: 'anchored_vwap',
-      from_ms: anchor,
-      settings: JSON.stringify({
-        anchored_vwap: {anchor: 'time', anchor_ms: anchor, source: 'hlc3'},
-      }),
-    },
-  });
-  expect(series.ok()).toBeTruthy();
-  const body = (await series.json()) as {
-    points: Array<{values: Record<string, unknown>}>;
-  };
-  expect(body.points.some(p => typeof p.values.vwap === 'string')).toBeTruthy();
+  const {values} = await anchoredVwap(request, 3000);
+  expect(values.some(value => typeof value === 'number')).toBeTruthy();
 });
 
-test('the engine refuses anchors beyond 50 000 bars with a message the terminal shows', async ({
-  request,
-}) => {
-  const latest = await request.get(`${MARKET}/v1/candles`, {
-    params: {instrument_id: 'mock:perp:BTCUSD', tf: '1m', limit: 1},
-  });
-  const [bar] = ((await latest.json()) as {candles: Candle[]}).candles;
-  if (!bar) throw new Error('no bar');
-  const anchor = bar.start_ms - 50_001 * 60_000;
-  const refused = await request.get(`${MARKET}/v1/indicators/series`, {
-    params: {
-      instrument_id: 'mock:perp:BTCUSD',
-      tf: '1m',
-      plugin: 'anchored_vwap',
-      from_ms: anchor,
-      settings: JSON.stringify({
-        anchored_vwap: {anchor: 'time', anchor_ms: anchor, source: 'hlc3'},
-      }),
-    },
-  });
-  expect(refused.status()).toBe(422);
-  const body = (await refused.json()) as {code: string; message: string};
-  expect(body.message).toMatch(
-    /closed 1m bars back; anchored studies are computed for at most 50000 bars/
-  );
+test('the engine reports anchors beyond the loaded bars', async ({request}) => {
+  const {values, tables} = await anchoredVwap(request, 6000);
+  expect(values.every(value => value === null)).toBeTruthy();
+  expect(tables).toContain('Anchor is outside the loaded bars');
 });

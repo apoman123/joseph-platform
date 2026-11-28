@@ -132,7 +132,10 @@ describe('screener', () => {
     const user = userEvent.setup();
     const add = await screen.findByTestId('screener-add-filter');
     await waitFor(() => void expect(add).toBeEnabled());
-    await user.selectOptions(screen.getByLabelText('Filter 1'), 'builtin:rsi');
+    await user.selectOptions(
+      screen.getByLabelText('Filter 1'),
+      'builtin:rsi-range'
+    );
     await user.click(add);
     await user.selectOptions(
       screen.getByLabelText('Filter 2'),

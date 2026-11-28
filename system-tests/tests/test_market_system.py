@@ -13,18 +13,18 @@ import httpx
 
 MOCK_BTC = "mock:perp:BTCUSD"
 _Validate: TypeAlias = Callable[[str, str, object], None]
-BUILTIN_PLUGINS = (
-    "sma",
-    "ema",
-    "anchored_vwap",
-    "regression_channel",
-    "bollinger_bands",
-    "rsi",
-    "atr",
-    "volume_delta",
-    "pivot_points",
+BUILTIN_INDICATORS = (
+    "builtin:sma",
+    "builtin:ema",
+    "builtin:anchored_vwap",
+    "builtin:regression_channel",
+    "builtin:bollinger_bands",
+    "builtin:rsi",
+    "builtin:atr",
+    "builtin:volume_delta",
+    "builtin:pivot_points",
 )
-"""The built-in indicator plugins, in their fixed registration order."""
+"""The built-in indicator scripts, in their fixed catalog order."""
 
 
 def test_health_and_metrics(market: httpx.Client) -> None:
@@ -125,23 +125,36 @@ def test_unknown_instrument_returns_contract_error(
     validate("common.schema.json", "ErrorResponse", response.json())
 
 
-def test_indicator_plugins_and_snapshots(
+def test_builtin_indicator_catalog_and_default_studies(
     market: httpx.Client, validate: _Validate
 ) -> None:
-    """The built-ins come first, in order; snapshots and AOIs validate."""
-    plugins = market.get("/v1/indicators/plugins").json()
-    validate("indicators.schema.json", "IndicatorPluginList", plugins)
-    ids = tuple(p["plugin_id"] for p in plugins["plugins"])
-    assert ids[: len(BUILTIN_PLUGINS)] == BUILTIN_PLUGINS
-    snaps = market.get(
-        "/v1/indicators/snapshot",
-        params={"instrument_id": MOCK_BTC, "tf": "5m"},
+    """The built-in indicators come first; default studies run in a batch."""
+    catalog = market.get(
+        "/v1/scripts/catalog", params={"kind": "indicator"}
     ).json()
-    validate("indicators.schema.json", "IndicatorSnapshotList", snaps)
-    aois = market.get(
-        "/v1/aois", params={"instrument_id": MOCK_BTC, "tf": "5m"}
-    ).json()
-    validate("indicators.schema.json", "AoiList", aois)
+    validate("python-scripts.schema.json", "CatalogList", catalog)
+    ids = tuple(script["script_id"] for script in catalog["scripts"])
+    assert ids[: len(BUILTIN_INDICATORS)] == BUILTIN_INDICATORS
+    batch = market.post(
+        "/v1/scripts/run-batch",
+        json={
+            "instrument_id": MOCK_BTC,
+            "tf": "5m",
+            "limit": 2000,
+            "include_open": True,
+            "runs": [
+                {"script_id": "builtin:ema"},
+                {"script_id": "builtin:volume_delta"},
+                {"script_id": "builtin:pivot_points"},
+            ],
+        },
+    )
+    assert batch.status_code == 200, batch.text
+    body = batch.json()
+    validate("python-scripts.schema.json", "ScriptBatchResult", body)
+    assert all(entry["error"] is None for entry in body["results"]), body
+    pivots = body["results"][2]["result"]
+    assert any(visual["kind"] == "line" for visual in pivots["visuals"])
 
 
 def test_strategy_backtest_and_activation_lifecycle(

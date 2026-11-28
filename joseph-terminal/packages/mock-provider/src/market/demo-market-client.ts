@@ -8,12 +8,10 @@
  * @fileoverview DEMO implementation of `MarketDataClient` and a simulated
  * market stream for the synthetic instruments of the `mock` venue.
  *
- * Candles, snapshots, AOIs (areas of interest), indicator series and feed
- * health carry `feed_state: 'DEMO'`. Requests for any other venue's
- * instruments fail instead of inventing data. The indicator plugins mirror
- * the engine's built-ins (`demo-plugins`): their AOIs are the DEMO pivot
- * levels (`demo-indicators`), their per-bar values come from
- * `demo-studies` and, for the drawing tools, `demo-drawing-series`.
+ * Candles, snapshots and feed health carry `feed_state: 'DEMO'`. Requests
+ * for any other venue's instruments fail instead of inventing data. Chart
+ * studies run through `DemoStudyClient` (`demo-study-client`) over these
+ * candles.
  */
 
 import {
@@ -21,24 +19,16 @@ import {
   TIMEFRAMES,
   floorToTimeframe,
   isSecondsTimeframe,
-  type AoiList,
-  type AoiRecord,
   type BarCalendar,
   type CandleBatch,
   type CandleQuery,
   type ChannelSpec,
-  type IndicatorPluginList,
-  type IndicatorSeries,
-  type IndicatorValue,
-  type IndicatorSeriesQuery,
-  type IndicatorSnapshotList,
   type Instrument,
   type InstrumentList,
   type InstrumentQuery,
   type MarketDataClient,
   type MarketSnapshot,
   type OrderBook,
-  type SeriesQuery,
   type SessionList,
   type SessionQuery,
   type StreamClient,
@@ -47,10 +37,6 @@ import {
   type StreamStatus,
   type VenueStatusList,
 } from '@joseph/contracts';
-import {DEMO_AOIS} from './demo-indicators';
-import {demoDrawingSeries} from './demo-drawing-series';
-import {demoPluginInfos} from './demo-plugins';
-import {demoStudySeries} from './demo-studies';
 import {demoCalendar, demoSessionList} from './demo-sessions';
 import {
   DEMO_INSTRUMENT_SPECS,
@@ -446,99 +432,6 @@ export class DemoMarketDataClient implements MarketDataClient {
   }
 
   /**
-   * Lists indicator plugin descriptors.
-   * @return Mirrors of the engine's built-in plugins, in load order.
-   */
-  async listIndicatorPlugins(): Promise<IndicatorPluginList> {
-    return {plugins: demoPluginInfos()};
-  }
-
-  /**
-   * Returns DEMO indicator snapshots: the `getAois` records grouped by
-   * plugin. The pivot snapshot also publishes its live levels as values.
-   * @param query Series query.
-   * @return One snapshot per plugin that has AOIs or events.
-   * @throws `Error` when the instrument is not a DEMO instrument.
-   */
-  async getIndicatorSnapshots(
-    query: SeriesQuery
-  ): Promise<IndicatorSnapshotList> {
-    const list = await this.getAois(query);
-    const calendar = demoSpecCalendar(demoSpec(query.instrumentId));
-    const sources = new Set([
-      ...list.aois.map(a => a.source),
-      ...(list.events ?? []).map(e => e.source),
-    ]);
-    return {
-      as_of_ms: list.as_of_ms,
-      snapshots: [...sources].map(source => {
-        const aois = list.aois.filter(a => a.source === source);
-        return {
-          schema_version: 1,
-          instrument_id: list.instrument_id,
-          timeframe: list.timeframe,
-          plugin_id: source,
-          indicator_version: '1.0.0',
-          method: 'pine_parity',
-          as_of_ms: list.as_of_ms,
-          bar_start_ms: calendar.shift(list.timeframe, list.as_of_ms, -1),
-          aois,
-          events: (list.events ?? []).filter(e => e.source === source),
-          values: source === 'pivot_points' ? demoPivotValues(aois) : {},
-          warmup_complete: true,
-          data_quality: {
-            feed_state: 'DEMO',
-            missing_bars: 0,
-            coverage_pct: null,
-          },
-        };
-      }),
-    };
-  }
-
-  /**
-   * Returns DEMO per-bar values shaped like the backend series. The
-   * drawing tools' requests (`regression_channel`, and `anchored_vwap`
-   * anchored at a time) come from `demo-drawing-series`; the built-in
-   * studies (moving averages, Bollinger Bands, RSI, ATR, the period VWAP
-   * and volume delta) from `demo-studies`. DEMO candles carry taker-buy
-   * volume, so volume delta is "true" (`method: taker_volume`) unless the
-   * `delta_source` input asks for the candle-direction estimate. Values are
-   * synthetic and labelled DEMO.
-   * @param query Series query.
-   * @return DEMO indicator series: for a study 200 bars through the last
-   *     closed one by default; for any other plugin no points.
-   * @throws `Error` when the instrument is not a DEMO instrument or a
-   *     setting is invalid.
-   * @throws `ApiError` (422 `VALIDATION_FAILED`) for a drawing anchor beyond
-   *     the bar cap (see `demoDrawingSeries`).
-   */
-  async getIndicatorSeries(
-    query: IndicatorSeriesQuery
-  ): Promise<IndicatorSeries> {
-    const spec = demoSpec(query.instrumentId);
-    const calendar = demoSpecCalendar(spec);
-    const now = this.now();
-    if (isDrawingRequest(query)) {
-      const drawingSeries = demoDrawingSeries(spec, query, now, calendar);
-      if (drawingSeries) return drawingSeries;
-    }
-    const studySeries = demoStudySeries(spec, query, now, calendar);
-    if (studySeries) return studySeries;
-    const tf = query.timeframe;
-    const lastStart = calendar.lastClosedStart(tf, now) ?? 0;
-    return {
-      instrument_id: spec.instrumentId,
-      timeframe: tf,
-      plugin_id: query.pluginId,
-      indicator_version: 'demo',
-      points: [],
-      as_of_ms: calendar.endOf(tf, lastStart),
-      feed_state: 'DEMO',
-    };
-  }
-
-  /**
    * Lists DEMO sessions of an exchange calendar (the engine's
    * `/v1/calendars/{calendar_id}/sessions`).
    * @param query Calendar and the half-open window `[fromMs, toMs)` in epoch
@@ -548,138 +441,6 @@ export class DemoMarketDataClient implements MarketDataClient {
   async getSessions(query: SessionQuery): Promise<SessionList> {
     return demoSessionList(query);
   }
-
-  /**
-   * Materializes the relative DEMO AOI fixture (the pivot levels) for a
-   * series: bar offsets count back from the last closed bar and prices are
-   * ratios of its close, rounded to the tick. Timeframes the pivot plugin
-   * does not support get none, as from the engine.
-   * @param query Series, optional plugin filter and optional `atMs` (epoch
-   *     ms) for a point-in-time view.
-   * @return AOIs and (no) events. With an `atMs` before the latest data,
-   *     only those confirmed by then, with later expiries undone.
-   * @throws `Error` when the instrument is not a DEMO instrument.
-   */
-  async getAois(query: SeriesQuery): Promise<AoiList> {
-    const spec = demoSpec(query.instrumentId);
-    const calendar = demoSpecCalendar(spec);
-    const now = this.now();
-    const tf = query.timeframe;
-    const lastStart = calendar.lastClosedStart(tf, now) ?? 0;
-    const asOf = calendar.continuous
-      ? floorToTimeframe(tf, now)
-      : calendar.endOf(tf, lastStart);
-    const bars = (start: number, count: number) =>
-      calendar.shift(tf, start, count);
-    const close = Decimal.parse(
-      demoCandle(spec, query.timeframe, lastStart, now, calendar).close
-    );
-    const tick = Decimal.parse(demoTickAt(spec, close.toNumber()));
-    const at = (ratio: number) =>
-      close.mul(Decimal.fromNumber(ratio, 6)).roundToStep(tick).toString();
-    const wanted =
-      query.plugins && query.plugins.length > 0 ? new Set(query.plugins) : null;
-    const supported = new Set(
-      demoPluginInfos().flatMap(info =>
-        info.timeframes.includes(tf) ? [info.plugin_id] : []
-      )
-    );
-    const aois: AoiRecord[] = DEMO_AOIS.filter(
-      a => supported.has(a.source) && (!wanted || wanted.has(a.source))
-    ).map(a => {
-      const created = bars(lastStart, -a.barsAgo);
-      return {
-        schema_version: 1,
-        type: 'aoi.updated',
-        instrument_id: spec.instrumentId,
-        timeframe: query.timeframe,
-        aoi_id: `demo-${a.key}-${query.timeframe}`,
-        source: a.source,
-        kind: a.kind,
-        side: a.side,
-        state: a.state,
-        lower: at(a.lowerRatio),
-        upper: at(a.upperRatio),
-        created_at_ms: created,
-        confirmed_at_ms: bars(created, a.confirmBars + 1),
-        invalidated_at_ms:
-          a.endedBarsAgo === undefined
-            ? null
-            : bars(lastStart, -a.endedBarsAgo),
-        as_of_ms: asOf,
-        quality_score: a.score,
-        group_id: null,
-        end_reason: null,
-        indicator_version: '1.0.0',
-        method: 'pine_parity',
-        meta: {demo: true},
-      };
-    });
-    const atMs = query.atMs;
-    if (atMs === undefined || atMs >= asOf) {
-      return {
-        instrument_id: spec.instrumentId,
-        timeframe: query.timeframe,
-        aois,
-        events: [],
-        as_of_ms: asOf,
-        feed_state: 'DEMO',
-      };
-    }
-    // Point-in-time view for replay: only what was known when `atMs` closed.
-    return {
-      instrument_id: spec.instrumentId,
-      timeframe: query.timeframe,
-      aois: aois
-        .filter(a => a.confirmed_at_ms <= atMs)
-        .map(a =>
-          a.invalidated_at_ms != null && a.invalidated_at_ms > atMs
-            ? {...a, state: 'active', invalidated_at_ms: null, as_of_ms: atMs}
-            : {...a, as_of_ms: atMs}
-        ),
-      events: [],
-      as_of_ms: atMs,
-      feed_state: 'DEMO',
-    };
-  }
-}
-
-/**
- * Returns whether a series query comes from an engine-backed drawing tool:
- * every regression channel, and an anchored VWAP anchored at a time (the
- * period VWAP is a study).
- * @param query Series query.
- * @return True for drawing requests.
- */
-function isDrawingRequest(query: IndicatorSeriesQuery): boolean {
-  if (query.pluginId === 'regression_channel') return true;
-  if (query.pluginId !== 'anchored_vwap') return false;
-  const anchor = query.settings?.anchor;
-  const anchorMs = query.settings?.anchor_ms;
-  return (
-    anchor === 'time' ||
-    (anchor === undefined && anchorMs !== undefined && anchorMs !== 0)
-  );
-}
-
-/**
- * Publishes the live pivot levels of a snapshot as its values.
- * @param aois Pivot AOIs of one series.
- * @return `p`, `r1` … `s3` (decimal strings) and `period_start_ms` of the
- *     live levels; each null when that level is missing.
- */
-function demoPivotValues(
-  aois: readonly AoiRecord[]
-): Record<string, IndicatorValue> {
-  const live = aois.filter(a => a.state === 'active' || a.state === 'tested');
-  const values: Record<string, IndicatorValue> = {
-    period_start_ms: live[0]?.created_at_ms ?? null,
-  };
-  for (const level of ['p', 'r1', 'r2', 'r3', 's1', 's2', 's3']) {
-    values[level] =
-      live.find(a => a.kind === `PIVOT_${level.toUpperCase()}`)?.lower ?? null;
-  }
-  return values;
 }
 
 /** Options for the DEMO stream. */

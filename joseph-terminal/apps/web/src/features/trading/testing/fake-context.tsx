@@ -22,6 +22,7 @@ import {
   DemoMarketDataClient,
   DemoScriptsClient,
   DemoStrategyClient,
+  DemoStudyClient,
   DemoUserStream,
 } from '@joseph/mock-provider';
 import {
@@ -154,10 +155,6 @@ export function fakeMarketClient(): MarketDataClient {
       stale: false,
     }),
     getOrderBook: unsupported,
-    listIndicatorPlugins: unsupported,
-    getIndicatorSnapshots: unsupported,
-    getAois: unsupported,
-    getIndicatorSeries: unsupported,
   };
 }
 
@@ -209,13 +206,15 @@ export function createFakeContext(
       partialFills: false,
     });
   const strategy = new DemoStrategyClient();
+  const market = fakeMarketClient();
   const clients: BackendClients = {
-    market: fakeMarketClient(),
+    market,
     marketStream: silentStream(),
     strategy,
     execution: broker,
     userStream: new DemoUserStream(broker, strategy),
     scripts: new DemoScriptsClient({market: new DemoMarketDataClient()}),
+    studies: new DemoStudyClient(market),
     demo: true,
     ...options.clients,
   };

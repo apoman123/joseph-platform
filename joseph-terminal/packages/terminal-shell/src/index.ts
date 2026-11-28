@@ -13,6 +13,7 @@ export * from './detach';
 export * from './layout-sizes';
 export * from './persistence';
 export * from './replay';
+export * from './study-migration';
 export * from './templates';
 export * from './timeframes';
 export * from './workspace';

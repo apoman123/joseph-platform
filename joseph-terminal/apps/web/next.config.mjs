@@ -76,7 +76,6 @@ const nextConfig = {
     '@joseph/chart-core',
     '@joseph/drawing-core',
     '@joseph/drawing-tools',
-    '@joseph/indicator-viz',
     '@joseph/terminal-shell',
     '@joseph/chart-trading',
     '@joseph/mock-provider',

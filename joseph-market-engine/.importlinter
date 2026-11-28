@@ -14,7 +14,6 @@ forbidden_modules =
     joseph.platform
     joseph.market_data
     joseph.scripts
-    joseph.indicators
     joseph.signals
     joseph.alerts
     joseph.api
@@ -43,22 +42,6 @@ forbidden_modules =
     uvicorn
     pyarrow
 
-[importlinter:contract:builtin-indicators-pure]
-name = Built-in indicators depend only on the SDK and the domain
-type = forbidden
-source_modules =
-    joseph.indicators.builtin
-forbidden_modules =
-    joseph.platform
-    joseph.market_data
-    joseph.api
-    fastapi
-    sqlalchemy
-    httpx
-    websockets
-    uvicorn
-    pyarrow
-
 [importlinter:contract:market-data-upstream]
 name = Market data does not depend on downstream contexts
 type = forbidden
@@ -66,7 +49,6 @@ source_modules =
     joseph.market_data
 forbidden_modules =
     joseph.scripts
-    joseph.indicators
     joseph.signals
     joseph.alerts
     joseph.api
@@ -80,7 +62,6 @@ forbidden_modules =
     joseph.domain
     joseph.platform
     joseph.market_data
-    joseph.indicators
     joseph.signals
     joseph.alerts
     joseph.api
@@ -91,18 +72,6 @@ forbidden_modules =
     websockets
     uvicorn
     pyarrow
-
-[importlinter:contract:indicators-upstream-of-signals]
-name = Indicators do not depend on scripts, signals, alerts, adapters or API
-type = forbidden
-source_modules =
-    joseph.indicators
-forbidden_modules =
-    joseph.market_data.adapters
-    joseph.scripts
-    joseph.signals
-    joseph.alerts
-    joseph.api
 
 [importlinter:contract:signals-no-adapters]
 name = Signals and alerts core never import venue adapters or the API
@@ -122,7 +91,6 @@ source_modules =
     joseph.domain
     joseph.platform
     joseph.market_data
-    joseph.indicators
     joseph.scripts
     joseph.signals
     joseph.alerts

@@ -7,26 +7,24 @@
 /**
  * @fileoverview Regression channel: the market engine's least-squares line
  * over the bars between two anchors with ±k·σ channel lines. The browser
- * computes nothing; it requests the series and draws the returned values.
+ * computes nothing; it runs the built-in script and draws its values.
  *
  * - Anchors: two, t1 then t2. The earlier anchor (in time) is t1 and the
  *   later is t2, so dragging one past the other keeps the drawing valid.
  *   Each anchor's time picks its bar on the chart timeframe; prices only
  *   place handles until values arrive.
- * - Series: `GET /v1/indicators/series?plugin=regression_channel&from_ms=
- *   <t2 bar start>` with settings `{anchor_ms: <t1 bar start>, source:
- *   'close', deviations}` (decimal string). The point whose `bar_start_ms`
- *   equals the t2 bar carries `start_ms` (int or null), `start`, `end`,
- *   `upper_start`, `upper_end`, `lower_start`, `lower_end`, `slope`,
- *   `stdev`, `pearson_r`, `max_up`, `max_down` (decimal strings or null)
- *   and `bars` (int). The host re-requests when an anchor or input changes
- *   and when a bar closes.
+ * - Values: the built-in `builtin:regression_channel` script run from the
+ *   t1 bar with inputs `{anchor_ms: <t1 bar start>, end_ms: <t2 bar
+ *   start>, source: 'close', deviations}` over closed bars. On the t2 bar
+ *   the script draws its `centre`, `upper` and `lower` lines (read as
+ *   `<line>.from_ms`, `<line>.from_price` and `<line>.to_price`) and
+ *   publishes `Pearson's R`, `Slope`, `Stdev` and `Bars`. The host re-runs
+ *   it when an anchor or input changes and when a bar closes.
  * - Geometry: centre line from (`start_ms`, `start`) to (t2 bar, `end`),
- *   dashed; upper line from `upper_start` to `upper_end` and lower line
- *   from `lower_start` to `lower_end`; optional fill between them; optional
- *   "Pearson's R" label at the right end.
- * - Status: the engine computes from anchors up to 50 000 bars back; when
- *   it refuses the anchors the notice shows the engine's own message. Both
+ *   dashed; upper and lower lines likewise; optional fill between them;
+ *   optional "Pearson's R" label at the right end.
+ * - Status: a run reads up to 5 000 bars from t1; when the engine refuses
+ *   a run the notice shows the engine's own message. Both
  *   anchors on one bar, an unclosed t2 bar, null values, loading and failed
  *   requests show a notice too.
  *   Dashed vertical markers show both anchor bars while nothing is drawn.
@@ -77,7 +75,7 @@ import {
 } from '@joseph/drawing-core';
 
 /** Engine indicator plugin id of the series request. */
-export const REGRESSION_CHANNEL_PLUGIN = 'regression_channel';
+export const REGRESSION_CHANNEL_SCRIPT = 'builtin:regression_channel';
 
 /** Price source sent to the engine: bar closes. */
 export const REGRESSION_SOURCE = 'close';
@@ -203,14 +201,25 @@ export function regressionRequest(
   // The input always exists; the fallback only satisfies index checks.
   const deviations = REGRESSION_INPUTS[0];
   return {
-    pluginId: REGRESSION_CHANNEL_PLUGIN,
-    fromMs: bars[1],
-    settings: {
+    scriptId: REGRESSION_CHANNEL_SCRIPT,
+    fromMs: bars[0],
+    inputs: {
       anchor_ms: bars[0],
+      end_ms: bars[1],
       source: REGRESSION_SOURCE,
-      deviations: deviations ? String(readInput(doc, deviations)) : '2',
+      deviations: deviations ? Number(readInput(doc, deviations)) || 2 : 2,
     },
   };
+}
+
+/**
+ * Reads the bar count the script publishes on the t2 bar.
+ * @param point Values of the t2 bar.
+ * @return Bars in the fit, or null.
+ */
+function barsOf(point: Parameters<typeof decimalValue>[0]): number | null {
+  const value = decimalValue(point, 'Bars');
+  return value === null ? null : Math.round(Number(value));
 }
 
 /**
@@ -234,7 +243,7 @@ export function channelView(
   }
   const message = seriesStatusMessage(series);
   if (!series || message) return {kind: 'notice', text: message ?? ''};
-  const endMs = series.request.fromMs;
+  const endMs = Number(series.request.inputs.end_ms);
   const point = seriesPointAt(series.points, endMs);
   if (!point) {
     // The engine publishes the channel on the t2 bar once that bar has closed.
@@ -247,14 +256,14 @@ export function channelView(
     }
     return {kind: 'notice', text: 'No engine values for these anchors yet'};
   }
-  const startMs = integerValue(point, 'start_ms');
+  const startMs = integerValue(point, 'centre.from_ms');
   const keys = [
-    'start',
-    'end',
-    'upper_start',
-    'upper_end',
-    'lower_start',
-    'lower_end',
+    'centre.from_price',
+    'centre.to_price',
+    'upper.from_price',
+    'upper.to_price',
+    'lower.from_price',
+    'lower.to_price',
   ] as const;
   const [start, end, upperStart, upperEnd, lowerStart, lowerEnd] = keys.map(
     key => decimalValue(point, key)
@@ -281,10 +290,10 @@ export function channelView(
       upperEnd,
       lowerStart,
       lowerEnd,
-      pearsonR: decimalValue(point, 'pearson_r'),
-      stdev: decimalValue(point, 'stdev'),
-      slope: decimalValue(point, 'slope'),
-      bars: integerValue(point, 'bars'),
+      pearsonR: decimalValue(point, "Pearson's R"),
+      stdev: decimalValue(point, 'Stdev'),
+      slope: decimalValue(point, 'Slope'),
+      bars: barsOf(point),
     },
   };
 }

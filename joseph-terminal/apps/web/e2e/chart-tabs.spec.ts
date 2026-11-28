@@ -50,14 +50,14 @@ test('searches indicators and restores the starred collection', async ({
   const dialog = page.getByRole('dialog', {name: 'Indicators', exact: true});
   const search = dialog.getByRole('textbox', {name: 'Search indicators'});
   await expect(search).toBeFocused();
-  await search.fill('RSI');
-  await dialog.getByRole('checkbox', {name: 'RSI', exact: true}).check();
-  await dialog.getByRole('button', {name: 'Collect RSI'}).click();
+  await search.fill('Relative');
+  await dialog.getByTestId('add-study-builtin:rsi').click();
+  await dialog
+    .getByRole('button', {name: 'Collect Relative Strength Index'})
+    .click();
   await dialog.getByRole('tab', {name: /My collection/}).click();
-  await expect(
-    dialog.getByRole('checkbox', {name: 'RSI', exact: true})
-  ).toBeChecked();
-  await expect(dialog.getByRole('checkbox', {name: 'EMA'})).toHaveCount(0);
+  await expect(dialog.getByTestId('add-study-builtin:rsi')).toBeVisible();
+  await expect(dialog.getByTestId('add-study-builtin:ema')).toHaveCount(0);
   await page.screenshot({path: 'test-results/indicator-library-desktop.png'});
   const accessibility = await new AxeBuilder({page})
     .include('.indicator-library')
@@ -74,11 +74,12 @@ test('searches indicators and restores the starred collection', async ({
   await page.reload();
   await page.getByTestId('indicators-menu').click();
   await dialog.getByRole('tab', {name: /My collection/}).click();
+  await expect(dialog.getByTestId('add-study-builtin:rsi')).toBeVisible();
   await expect(
     dialog.getByRole('checkbox', {name: 'RSI', exact: true})
   ).toBeChecked();
   await dialog.getByRole('tab', {name: 'My scripts'}).click();
-  await expect(dialog.getByText('No custom scripts yet')).toBeVisible();
+  await expect(dialog.getByText('No scripts yet')).toBeVisible();
   await page.setViewportSize({width: 390, height: 844});
   await page.screenshot({path: 'test-results/indicator-library-mobile.png'});
   const box = await dialog.boundingBox();

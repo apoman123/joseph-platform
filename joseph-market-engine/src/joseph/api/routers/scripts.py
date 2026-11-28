@@ -364,6 +364,27 @@ def build_router(
         service.repository.archive(principal.tenant_id, script_id)
         return fastapi.Response(status_code=204)
 
+    @router.post("/run-batch")
+    async def run_batch(
+        body: models.ScriptBatchRun, principal: principal_dep
+    ) -> models.ScriptBatchResult:
+        """Runs several studies on one fetch of the same chart candles.
+
+        A chart loading its default studies sends one request instead of
+        one per study; each study still fails independently.
+
+        Args:
+            body: Shared candle range and settings plus one entry per study.
+            principal: Authenticated tenant owner.
+
+        Returns:
+            One result or error per study, in request order.
+
+        Raises:
+            errors.JosephError: If the shared candles cannot be fetched.
+        """
+        return await service.run_batch(principal, body)
+
     @router.post("/{script_id}/run")
     async def run_script(
         script_id: str, body: models.ScriptRun, principal: principal_dep

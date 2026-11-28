@@ -6,16 +6,18 @@
 
 /**
  * @fileoverview Chart templates: named chart presentations (style, scale,
- * volume, indicator layers with their inputs and colors, separators) that
- * can be applied to any chart. Templates never carry an instrument, so
- * applying one cannot move a chart to another venue.
+ * volume, studies with their inputs and colors, separators) that can be
+ * applied to any chart. Templates never carry an instrument, so applying
+ * one cannot move a chart to another venue. Schema v1 templates, which
+ * held indicator layers, are migrated when loaded.
  */
 
 import type {ChartState} from '@joseph/contracts';
 import type {WorkspaceStorage} from './persistence';
+import {studiesFromLayers} from './study-migration';
 import type {ChartPresentation} from './workspace';
 
-/** Storage key of the template list, stored as one JSON array (schema v1). */
+/** Storage key of the template list, stored as one JSON array. */
 export const TEMPLATE_STORAGE_KEY = 'joseph.chartTemplates.v1';
 
 /** Maximum templates kept; saving beyond it drops the oldest. */
@@ -23,8 +25,8 @@ export const MAX_TEMPLATES = 50;
 
 /** Saved chart template. */
 export interface ChartTemplate {
-  /** Document version. */
-  schema_version: 1;
+  /** Document version: 2 since templates hold studies. */
+  schema_version: 2;
   /** Unique id. */
   template_id: string;
   /** User-visible name, unique ignoring case. */
@@ -46,7 +48,7 @@ export function presentationOf(chart: ChartState): ChartPresentation {
     chart_type: chart.chart_type,
     price_scale: chart.price_scale,
     show_volume: chart.show_volume,
-    indicator_layers: structuredClone(chart.indicator_layers),
+    studies: structuredClone(chart.studies),
     session_separators: chart.session_separators === true,
   };
 }
@@ -70,7 +72,7 @@ export function createTemplate(
   const trimmed = name.trim().slice(0, 60);
   if (!trimmed) throw new Error('Give the template a name');
   return {
-    schema_version: 1,
+    schema_version: 2,
     template_id: id,
     name: trimmed,
     created_at_ms: nowMs,
@@ -79,7 +81,26 @@ export function createTemplate(
 }
 
 /**
- * Validates an untrusted template's shape. The layer entries and enum
+ * Migrates a schema v1 template (indicator layers) to schema v2 (studies);
+ * other values are returned unchanged.
+ * @param value Candidate, usually from storage.
+ * @return The v2 candidate.
+ */
+export function migrateTemplate(value: unknown): unknown {
+  if (!value || typeof value !== 'object') return value;
+  const t = value as {schema_version?: unknown; presentation?: unknown};
+  if (t.schema_version !== 1) return value;
+  const presentation = (t.presentation ?? {}) as Record<string, unknown>;
+  const {indicator_layers: layers, ...rest} = presentation;
+  return {
+    ...t,
+    schema_version: 2,
+    presentation: {...rest, studies: studiesFromLayers(layers)},
+  };
+}
+
+/**
+ * Validates an untrusted template's shape. The study entries and enum
  * values are not checked.
  * @param value Candidate, usually from storage.
  * @return True when the value has the template shape.
@@ -89,7 +110,7 @@ export function isChartTemplate(value: unknown): value is ChartTemplate {
   const t = value as Partial<ChartTemplate>;
   const p = t.presentation as Partial<ChartPresentation> | undefined;
   return (
-    t.schema_version === 1 &&
+    t.schema_version === 2 &&
     typeof t.template_id === 'string' &&
     typeof t.name === 'string' &&
     typeof t.created_at_ms === 'number' &&
@@ -97,7 +118,7 @@ export function isChartTemplate(value: unknown): value is ChartTemplate {
     typeof p.chart_type === 'string' &&
     typeof p.price_scale === 'string' &&
     typeof p.show_volume === 'boolean' &&
-    Array.isArray(p.indicator_layers)
+    Array.isArray(p.studies)
   );
 }
 
@@ -120,6 +141,7 @@ export class TemplateRepository {
       const parsed: unknown = raw ? JSON.parse(raw) : [];
       return Array.isArray(parsed)
         ? parsed
+            .map(migrateTemplate)
             .filter(isChartTemplate)
             .sort((a, b) => b.created_at_ms - a.created_at_ms)
         : [];

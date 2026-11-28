@@ -126,7 +126,7 @@ sale-condition rules. Free IEX is one exchange, so quiet symbols and closed
 market sessions can have no new trades even with a connected WebSocket.
 
 A chart's first candle request starts together with the chart library, and
-indicator-series and AOI requests wait up to 3 seconds while candles are
+study runs (`/v1/scripts/run-batch`) wait up to 3 seconds while candles are
 loading, so studies never queue ahead of the chart's own history (in the
 browser and, through background priority, at the venue rate limits). The
 terminal keeps the last twelve displayed series in memory: returning to one

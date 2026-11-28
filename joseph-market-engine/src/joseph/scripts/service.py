@@ -21,6 +21,9 @@ from joseph.domain import errors
 from joseph.domain import identity
 from joseph.domain import instruments
 from joseph.domain import market
+from joseph.domain import sessions
+from joseph.domain import timeframes
+from joseph.market_data.adapters import http
 from joseph.market_data.app import service as market_service
 from joseph.scripts import accounting
 from joseph.scripts import catalog as catalog_lib
@@ -48,6 +51,7 @@ class ResolvedScript:
         source_hash: Exact source/configuration identity.
         entry: Catalog entry for built-in and plugin scripts, else None.
         tenant: Tenant version for tenant source, else None.
+        periods: Calendar periods whose per-bar bounds the host computes.
     """
 
     script_id: str
@@ -60,6 +64,129 @@ class ResolvedScript:
     source_hash: str
     entry: catalog_lib.CatalogEntry | None
     tenant: models.ScriptVersion | None
+    periods: tuple[str, ...] = ()
+
+
+def auto_intrabar_tf(
+    chart: timeframes.Timeframe,
+) -> timeframes.Timeframe | None:
+    """Picks the lower timeframe of ``Request(tf="auto", intrabars=True)``.
+
+    Args:
+        chart: Chart resolution.
+
+    Returns:
+        1s on seconds charts, 1m intraday, 5m on daily and 1h on weekly and
+        monthly charts; None on 1s and 1m charts, which have no practical
+        lower timeframe.
+    """
+    if chart in {timeframes.Timeframe.S1, timeframes.Timeframe.M1}:
+        return None
+    if chart.is_seconds:
+        return timeframes.Timeframe.S1
+    if chart.duration_ms < timeframes.Timeframe.D1.duration_ms:
+        return timeframes.Timeframe.M1
+    if chart is timeframes.Timeframe.D1:
+        return timeframes.Timeframe.M5
+    return timeframes.Timeframe.H1
+
+
+def auto_period_tf(chart: timeframes.Timeframe) -> timeframes.Timeframe | None:
+    """Picks the period of an ordinary ``auto`` request.
+
+    Args:
+        chart: Chart resolution.
+
+    Returns:
+        The day below daily charts, the week below weekly and the month
+        below monthly charts; None on monthly charts.
+    """
+    for period in (
+        timeframes.Timeframe.D1,
+        timeframes.Timeframe.W1,
+        timeframes.Timeframe.MN1,
+    ):
+        if chart.duration_ms < period.duration_ms:
+            return period
+    return None
+
+
+def request_tf(
+    declared: models.SeriesRequest,
+    chart: timeframes.Timeframe,
+    inputs: Mapping[str, Any],
+) -> timeframes.Timeframe | None:
+    """Resolves the resolution a declared request reads for one run.
+
+    Args:
+        declared: Declared request.
+        chart: Chart resolution.
+        inputs: Effective run inputs; ``tf_input`` names one of them.
+
+    Returns:
+        The resolution, or None when an intrabar request has no lower
+        timeframe below the chart.
+
+    Raises:
+        errors.ValidationFailedError: If the selected input is not a
+            resolution.
+    """
+    chosen: object = declared.tf
+    if declared.tf_input:
+        value = inputs.get(declared.tf_input, "auto")
+        chosen = "auto" if value in ("", None) else value
+    if chosen == "auto":
+        if declared.intrabars:
+            return auto_intrabar_tf(chart)
+        return auto_period_tf(chart)
+    try:
+        resolved = timeframes.parse(str(chosen))
+    except ValueError:
+        raise errors.ValidationFailedError(
+            f"{declared.tf_input or 'tf'} is not a supported resolution"
+        ) from None
+    if declared.intrabars and resolved.duration_ms >= chart.duration_ms:
+        return None
+    return resolved
+
+
+def period_bounds(
+    instrument_id: str,
+    bars: list[dict[str, Any]],
+    periods: tuple[str, ...],
+) -> dict[str, list[list[int]]]:
+    """Computes the calendar period around every bar for ``ctx.period``.
+
+    Args:
+        instrument_id: Canonical instrument whose session calendar applies.
+        bars: Source bars in order.
+        periods: Declared periods ("1d", "1w", "1M").
+
+    Returns:
+        Per period, one [start, next start] pair per bar in UTC
+        milliseconds.
+
+    Raises:
+        errors.ValidationFailedError: If a bar lies outside the calendar.
+    """
+    calendar = sessions.for_instrument(
+        instruments.InstrumentId.parse(instrument_id)
+    )
+    table: dict[str, list[list[int]]] = {}
+    for name in periods:
+        tf = timeframes.parse(name)
+        following: dict[int, int] = {}
+        rows: list[list[int]] = []
+        try:
+            for bar in bars:
+                start = calendar.floor(tf, int(bar["time_ms"]))
+                if start not in following:
+                    following[start] = calendar.shift(tf, start, 1)
+                rows.append([start, following[start]])
+        except ValueError as exc:
+            raise errors.ValidationFailedError(str(exc)) from None
+        table[name] = rows
+    return table
 
 
 def bar_record(bar: market.Candle) -> dict[str, Any]:
@@ -188,6 +315,7 @@ class ScriptService:
                 source_hash=entry.source_hash,
                 entry=entry,
                 tenant=None,
+                periods=entry.periods,
             )
         script = self.repository.get(tenant_id, script_id, version)
         return ResolvedScript(
@@ -307,6 +435,59 @@ class ScriptService:
                     f"{str(exc)[:300]}"
                 ) from None
 
+    async def _request_bars(
+        self,
+        declared: models.SeriesRequest,
+        request: models.ScriptRun,
+        bars: list[dict[str, Any]],
+        inputs: Mapping[str, Any],
+    ) -> list[dict[str, Any]]:
+        """Fetches the closed bars of one declared request.
+
+        Intrabar requests cover only the newest chart bars that need them:
+        from ``window_from_ms`` when given, skipping bars that already
+        carry the ``unless`` field, at most ``limit`` lower bars.
+
+        Args:
+            declared: Declared request.
+            request: Run request.
+            bars: Chart bars of the run.
+            inputs: Effective run inputs.
+
+        Returns:
+            Closed bars in order; empty when nothing is needed.
+        """
+        tf = request_tf(declared, request.tf, inputs)
+        if tf is None:
+            return []
+        from_ms = None
+        skip = bool(declared.unless) and (
+            not declared.unless_input
+            or inputs.get(declared.unless_input) is True
+        )
+        if declared.intrabars:
+            needed = [
+                bar
+                for bar in bars
+                if (
+                    request.window_from_ms is None
+                    or bar["end_ms"] > request.window_from_ms
+                )
+                and (not skip or bar.get(declared.unless) is None)
+            ]
+            if not needed:
+                return []
+            from_ms = int(needed[0]["time_ms"])
+        with http.background():
+            extra = await self.market_data.get_batch(
+                declared.instrument_id or request.instrument_id,
+                tf,
+                from_ms=from_ms,
+                to_ms=int(bars[-1]["end_ms"]),
+                limit=declared.limit,
+            )
+        return [bar_record(bar) for bar in extra.candles if bar.is_final]
+
     def bundle(
         self,
         tenant_id: str,
@@ -421,11 +602,82 @@ class ScriptService:
         self.validate(principal, script)
         return self.repository.save(principal.tenant_id, script, create=create)
 
+    async def fetch(
+        self, request: models.ScriptRun
+    ) -> market_service.CandleBatchResult:
+        """Fetches the chart candles of a run request.
+
+        Args:
+            request: Instrument, resolution and range.
+
+        Returns:
+            The candle batch. Venue requests it causes yield the rate limit
+            to waiting chart batches.
+        """
+        with http.background():
+            return await self.market_data.get_batch(
+                request.instrument_id,
+                request.tf,
+                from_ms=request.from_ms,
+                to_ms=request.to_ms,
+                limit=request.limit,
+            )
+
+    async def run_batch(
+        self, principal: identity.Principal, request: models.ScriptBatchRun
+    ) -> models.ScriptBatchResult:
+        """Runs several studies over one fetch of the same chart candles.
+
+        Args:
+            principal: Authenticated tenant owner.
+            request: Shared chart range plus one entry per study.
+
+        Returns:
+            One result or error per entry, in request order; one study's
+            failure never fails the others.
+
+        Raises:
+            errors.JosephError: If the shared candles cannot be fetched.
+        """
+        source = await self.fetch(request)
+        entries = []
+        for item in request.runs:
+            shared = {
+                name: getattr(request, name)
+                for name in models.ScriptRun.model_fields
+            }
+            single = models.ScriptRun(
+                **shared
+                | {
+                    "version": item.version,
+                    "inputs": {**request.inputs, **item.inputs},
+                }
+            )
+            try:
+                result = await self.run(
+                    principal, item.script_id, single, source=source
+                )
+            except errors.JosephError as exc:
+                entries.append(
+                    models.ScriptBatchEntry(
+                        script_id=item.script_id, error=str(exc)[:500]
+                    )
+                )
+            else:
+                entries.append(
+                    models.ScriptBatchEntry(
+                        script_id=item.script_id, result=result
+                    )
+                )
+        return models.ScriptBatchResult(results=entries)
+
     async def run(
         self,
         principal: identity.Principal,
         script_id: str,
         request: models.ScriptRun,
+        *,
+        source: market_service.CandleBatchResult | None = None,
     ) -> models.ScriptResult:
         """Runs an indicator or simulates a strategy.
 
@@ -436,6 +688,8 @@ class ScriptService:
             script_id: Owned script slug.
             request: Version, instrument, resolution, inputs and simulation
                 costs.
+            source: Candles already fetched for this request (batched
+                runs); fetched here when None.
 
         Returns:
             Validated plot series, provenance and optional simulated
@@ -464,13 +718,7 @@ class ScriptService:
             raise errors.ValidationFailedError(
                 "provisional bars are supported only for indicators"
             )
-        batch = await self.market_data.get_batch(
-            request.instrument_id,
-            request.tf,
-            from_ms=request.from_ms,
-            to_ms=request.to_ms,
-            limit=request.limit,
-        )
+        batch = source or await self.fetch(request)
         bars = [
             bar_record(bar)
             for bar in batch.candles
@@ -495,24 +743,23 @@ class ScriptService:
             data["snapshot"] = snapshot.to_contract(
                 self.market_data.now_ms(), 60000
             )
+        inputs = {**script.defaults, **request.inputs}
         additional = {}
         for alias, declared in script.requests.items():
-            extra = await self.market_data.get_batch(
-                declared.instrument_id or request.instrument_id,
-                declared.tf,
-                to_ms=int(bars[-1]["end_ms"]),
-                limit=declared.limit,
+            additional[alias] = await self._request_bars(
+                declared, request, bars, inputs
             )
-            additional[alias] = [
-                bar_record(bar) for bar in extra.candles if bar.is_final
-            ]
+        if script.periods:
+            data["periods"] = period_bounds(
+                request.instrument_id, bars, script.periods
+            )
         data.update(
             {
                 "bars": bars,
                 "instrument_id": request.instrument_id,
                 "timeframe": request.tf.value,
                 "extra_series": additional,
-                "inputs": {**script.defaults, **request.inputs},
+                "inputs": inputs,
                 "initial_equity": request.initial_equity,
                 "commission_bps": request.commission_bps,
                 "slippage_bps": request.slippage_bps,

@@ -89,23 +89,22 @@ test('terminal runs on backend data, not the in-browser demo provider', async ({
 }) => {
   // Listen before loading so the response is not missed; the engine may
   // still be warming up, hence the long timeout.
-  const aois = page.waitForResponse(
+  const studies = page.waitForResponse(
     response =>
-      response.url().startsWith(`${API.NEXT_PUBLIC_MARKET_API_URL}/v1/aois`) &&
-      response.url().includes('mock%3Aperp%3ABTCUSD') &&
+      response
+        .url()
+        .startsWith(`${API.NEXT_PUBLIC_MARKET_API_URL}/v1/scripts/run-batch`) &&
       response.ok(),
     {timeout: 60_000}
   );
   await loadOnDemoVenue(page);
   // Only the fields the test reads.
-  const body = (await (await aois).json()) as {
-    aois: Array<{source: string; kind: string}>;
-    feed_state: string;
-  };
-  // Python-computed AOIs arrived from the market engine and are provenance
-  // labelled; the in-browser DEMO provider is not in use.
-  expect(body.aois.length).toBeGreaterThan(0);
-  expect(body.feed_state).toBe('DEMO');
+  const body = (await (await studies).json()) as BatchBody;
+  // Python-computed studies arrived from the market engine and are
+  // provenance labelled; the in-browser DEMO provider is not in use.
+  expect(body.results.length).toBeGreaterThan(0);
+  expect(body.results[0]?.result?.feed_state).toBe('DEMO');
+  expect(body.results[0]?.result?.source_hash).not.toBe('demo');
   await expect(page.getByText(/Demo mode: synthetic prices/)).toHaveCount(0);
   await expect(page.locator('canvas').first()).toBeVisible();
   // Let the backend layers draw before the screenshot.
@@ -113,45 +112,28 @@ test('terminal runs on backend data, not the in-browser demo provider', async ({
   await page.screenshot({path: 'e2e/screenshots/09-fullstack-terminal.png'});
 });
 
-test('engine indicator series and pivot levels reach the chart', async ({
-  page,
-}) => {
-  const series = page.waitForResponse(
+test('engine studies and pivot levels reach the chart', async ({page}) => {
+  const studies = page.waitForResponse(
     response =>
       response
         .url()
-        .startsWith(`${API.NEXT_PUBLIC_MARKET_API_URL}/v1/indicators/series`) &&
-      response.url().includes('mock%3Aperp%3ABTCUSD') &&
-      response.url().includes('plugin=volume_delta') &&
-      response.ok(),
-    {timeout: 60_000}
-  );
-  const aois = page.waitForResponse(
-    response =>
-      response.url().startsWith(`${API.NEXT_PUBLIC_MARKET_API_URL}/v1/aois`) &&
-      response.url().includes('mock%3Aperp%3ABTCUSD') &&
+        .startsWith(`${API.NEXT_PUBLIC_MARKET_API_URL}/v1/scripts/run-batch`) &&
       response.ok(),
     {timeout: 60_000}
   );
   await loadOnDemoVenue(page);
-  // The Delta % sub-pane is fed by the engine's volume delta built-in, bar
-  // by bar.
-  const seriesBody = (await (await series).json()) as {
-    plugin_id: string;
-    indicator_version: string;
-    points: Array<{bar_start_ms: number; values: Record<string, unknown>}>;
-  };
-  expect(seriesBody.plugin_id).toBe('volume_delta');
-  expect(seriesBody.indicator_version).not.toBe('demo');
-  expect(seriesBody.points.length).toBeGreaterThan(0);
-  expect(seriesBody.points[0]?.values).toHaveProperty('delta_pct');
-  // The pivot points built-in publishes the floor levels as AOIs.
-  const aoiBody = (await (await aois).json()) as {
-    aois: Array<{source: string; kind: string}>;
-  };
-  const pivots = aoiBody.aois.filter(aoi => aoi.source === 'pivot_points');
-  expect(pivots.length).toBeGreaterThan(0);
-  expect(pivots.every(aoi => aoi.kind.startsWith('PIVOT_'))).toBe(true);
+  const body = (await (await studies).json()) as BatchBody;
+  const byId = new Map(
+    body.results.map(entry => [entry.script_id, entry.result])
+  );
+  // The Delta % pane is fed by the engine's volume delta built-in.
+  const delta = byId.get('builtin:volume_delta');
+  expect(
+    delta?.plots.find(p => p.name === 'Delta %')?.points.length
+  ).toBeGreaterThan(0);
+  // The pivot points built-in draws the floor levels as labelled lines.
+  const pivots = byId.get('builtin:pivot_points');
+  expect(pivots?.visuals.some(v => v.kind === 'line')).toBe(true);
   // The data window shows the engine's Delta % under the crosshair.
   await page.getByTestId('indicators-menu').click();
   await page.getByTestId('data-window-toggle').check();
@@ -169,11 +151,25 @@ test('engine indicator series and pivot levels reach the chart', async ({
   await page.screenshot({path: 'e2e/screenshots/20-fullstack-indicators.png'});
 });
 
-/** Series point as served by `/v1/indicators/series`. */
-interface SeriesBody {
-  plugin_id: string;
-  indicator_version: string;
-  points: Array<{bar_start_ms: number; values: Record<string, unknown>}>;
+/** The fields of a `/v1/scripts/run-batch` answer the tests read. */
+interface BatchBody {
+  results: Array<{
+    script_id: string;
+    result: {
+      feed_state: string;
+      source_hash: string;
+      tf: string;
+      plots: Array<{
+        name: string;
+        points: Array<{time_ms: number; value: number | null}>;
+      }>;
+      visuals: Array<{
+        id: string;
+        kind: string;
+        data: Record<string, unknown>;
+      }>;
+    } | null;
+  }>;
 }
 
 test('seconds bars and true delta come from the engine', async ({
@@ -221,17 +217,25 @@ test('seconds bars and true delta come from the engine', async ({
   await loadOnDemoVenue(page);
   await showDataWindow(page);
   const series = page.waitForResponse(
-    response =>
-      response.url().startsWith(`${market}/v1/indicators/series`) &&
-      response.url().includes('plugin=volume_delta') &&
-      response.url().includes('tf=5s') &&
-      response.ok(),
+    async response => {
+      if (
+        !response.url().startsWith(`${market}/v1/scripts/run-batch`) ||
+        !response.ok()
+      ) {
+        return false;
+      }
+      const answer = (await response.json()) as BatchBody;
+      return answer.results.some(entry => entry.result?.tf === '5s');
+    },
     {timeout: 90_000}
   );
   await pickTimeframe(page, '5s');
-  const body = (await (await series).json()) as SeriesBody;
-  expect(body.indicator_version).not.toBe('demo');
-  expect(body.points.some(p => p.values.method === 'taker_volume')).toBe(true);
+  const body = (await (await series).json()) as BatchBody;
+  const delta = body.results.find(
+    entry => entry.script_id === 'builtin:volume_delta'
+  )?.result;
+  const table = delta?.visuals.find(v => v.kind === 'table');
+  expect(JSON.stringify(table?.data.rows)).toContain('Taker buy volume');
   // A 5 s bar without trades shows no delta, so sweep the crosshair until
   // it rests on a bar that has one.
   const dataWindow = page.getByTestId('data-window');
@@ -239,7 +243,7 @@ test('seconds bars and true delta come from the engine', async ({
   await expect(async () => {
     await hoverChart(page, fraction, 0.4);
     fraction = fraction > 0.3 ? fraction - 0.03 : 0.75;
-    await expect(dataWindow).toContainText('True (taker volume)', {
+    await expect(dataWindow).toContainText(/Delta %\s*[−+-]?\d/, {
       timeout: 1_000,
     });
   }).toPass({timeout: 30_000});
@@ -249,22 +253,34 @@ test('seconds bars and true delta come from the engine', async ({
 test('an anchored VWAP drawing reads the engine series', async ({page}) => {
   await loadOnDemoVenue(page);
   const series = page.waitForResponse(
-    response =>
-      response
-        .url()
-        .startsWith(`${API.NEXT_PUBLIC_MARKET_API_URL}/v1/indicators/series`) &&
-      response.url().includes('plugin=anchored_vwap') &&
-      response.ok(),
+    async response => {
+      if (
+        !response
+          .url()
+          .startsWith(
+            `${API.NEXT_PUBLIC_MARKET_API_URL}/v1/scripts/run-batch`
+          ) ||
+        !response.ok()
+      ) {
+        return false;
+      }
+      const answer = (await response.json()) as BatchBody;
+      return answer.results.some(
+        entry => entry.script_id === 'builtin:anchored_vwap'
+      );
+    },
     {timeout: 60_000}
   );
   await armTool(page, 'studies', 'anchored-vwap');
   await clickChart(page, 0.5, 0.5);
-  const body = (await (await series).json()) as SeriesBody;
-  expect(body.plugin_id).toBe('anchored_vwap');
-  expect(body.indicator_version).not.toBe('demo');
-  const priced = body.points.filter(p => p.values.vwap !== null);
+  const body = (await (await series).json()) as BatchBody;
+  const vwap = body.results[0]?.result;
+  expect(vwap?.source_hash).not.toBe('demo');
+  const priced =
+    vwap?.plots
+      .find(p => p.name === 'VWAP')
+      ?.points.filter(p => p.value !== null) ?? [];
   expect(priced.length).toBeGreaterThan(0);
-  expect(priced[0]?.values.anchor_in_window).toBe(true);
   await openPanel(page, 'Objects');
   await expect(objectDetail(page, 'anchored-vwap')).toHaveText(
     /^VWAP [\d,]+\.\d+ from \d{4}-\d\d-\d\d \d\d:\d\d UTC/

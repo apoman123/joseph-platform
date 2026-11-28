@@ -1019,7 +1019,7 @@
     },
     "PlotSeries": {
       "additionalProperties": false,
-      "description": "Named output series displayed by the terminal.\n\nAttributes:\n    name: Public series name, one to sixty-four characters.\n    points: At most two thousand chronological closed-bar values.",
+      "description": "Named output series displayed by the terminal.\n\nAttributes:\n    name: Public series name, one to sixty-four characters.\n    points: At most five thousand chronological closed-bar values.",
       "properties": {
         "name": {
           "maxLength": 64,
@@ -1031,7 +1031,7 @@
           "items": {
             "$ref": "#/$defs/PlotPoint"
           },
-          "maxItems": 2000,
+          "maxItems": 5000,
           "title": "Points",
           "type": "array"
         }
@@ -1371,6 +1371,220 @@
       "title": "ScriptAlertEvent",
       "type": "object"
     },
+    "ScriptBatchEntry": {
+      "additionalProperties": false,
+      "description": "The outcome of one study of a batched run.\n\nAttributes:\n    script_id: Requested script id.\n    result: Validated result, or None when the study failed.\n    error: Why the study failed, otherwise None.",
+      "properties": {
+        "error": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Error"
+        },
+        "result": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/ScriptResult"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        },
+        "script_id": {
+          "title": "Script Id",
+          "type": "string"
+        }
+      },
+      "required": [
+        "script_id"
+      ],
+      "title": "ScriptBatchEntry",
+      "type": "object"
+    },
+    "ScriptBatchItem": {
+      "additionalProperties": false,
+      "description": "One study of a batched run.\n\nAttributes:\n    script_id: Tenant slug, ``builtin:<id>`` or ``plugin:<entry>:<id>``.\n    version: Pinned tenant version, or latest when omitted.\n    inputs: Input overrides of this study.",
+      "properties": {
+        "inputs": {
+          "additionalProperties": {
+            "$ref": "#/$defs/JsonValue"
+          },
+          "title": "Inputs",
+          "type": "object"
+        },
+        "script_id": {
+          "pattern": "^(?:[a-z][a-z0-9-]{0,62}|builtin:[a-z][a-z0-9_-]{0,63}|plugin:[a-z0-9_.-]{1,64}:[a-z][a-z0-9_-]{0,63})$",
+          "title": "Script Id",
+          "type": "string"
+        },
+        "version": {
+          "anyOf": [
+            {
+              "minimum": 1,
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Version"
+        }
+      },
+      "required": [
+        "script_id"
+      ],
+      "title": "ScriptBatchItem",
+      "type": "object"
+    },
+    "ScriptBatchResult": {
+      "additionalProperties": false,
+      "description": "Per-study outcomes of a batched run, in request order.\n\nAttributes:\n    results: One entry per requested study.",
+      "properties": {
+        "results": {
+          "items": {
+            "$ref": "#/$defs/ScriptBatchEntry"
+          },
+          "title": "Results",
+          "type": "array"
+        }
+      },
+      "required": [
+        "results"
+      ],
+      "title": "ScriptBatchResult",
+      "type": "object"
+    },
+    "ScriptBatchRun": {
+      "additionalProperties": false,
+      "description": "Runs several studies over one fetch of the same chart candles.\n\nThe shared fields select the candles and simulation settings; top-level\n``inputs`` are merged under each study's own.\n\nAttributes:\n    runs: One through sixteen studies, run in order.",
+      "properties": {
+        "commission_bps": {
+          "default": 0.0,
+          "maximum": 1000,
+          "minimum": 0,
+          "title": "Commission Bps",
+          "type": "number"
+        },
+        "from_ms": {
+          "anyOf": [
+            {
+              "minimum": 0,
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "From Ms"
+        },
+        "include_open": {
+          "default": false,
+          "title": "Include Open",
+          "type": "boolean"
+        },
+        "initial_equity": {
+          "default": 10000.0,
+          "exclusiveMinimum": 0,
+          "maximum": 1000000000000.0,
+          "title": "Initial Equity",
+          "type": "number"
+        },
+        "inputs": {
+          "additionalProperties": {
+            "$ref": "#/$defs/JsonValue"
+          },
+          "title": "Inputs",
+          "type": "object"
+        },
+        "instrument_id": {
+          "pattern": "^(bybit|okx|coinbase|kraken|deriv|binance|hyperliquid|lighter|bitget|mexc|twse|tpex|nasdaq|nyse|cboe|treasury|mock):(perp|spot|future|stock|etf|rate):[A-Za-z0-9._/-]{1,64}$",
+          "title": "Instrument Id",
+          "type": "string"
+        },
+        "limit": {
+          "default": 500,
+          "maximum": 5000,
+          "minimum": 2,
+          "title": "Limit",
+          "type": "integer"
+        },
+        "runs": {
+          "items": {
+            "$ref": "#/$defs/ScriptBatchItem"
+          },
+          "maxItems": 16,
+          "minItems": 1,
+          "title": "Runs",
+          "type": "array"
+        },
+        "slippage_bps": {
+          "default": 0.0,
+          "maximum": 1000,
+          "minimum": 0,
+          "title": "Slippage Bps",
+          "type": "number"
+        },
+        "tf": {
+          "$ref": "common.schema.json#/$defs/Timeframe"
+        },
+        "to_ms": {
+          "anyOf": [
+            {
+              "minimum": 0,
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "To Ms"
+        },
+        "version": {
+          "anyOf": [
+            {
+              "minimum": 1,
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Version"
+        },
+        "window_from_ms": {
+          "anyOf": [
+            {
+              "minimum": 0,
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Window From Ms"
+        }
+      },
+      "required": [
+        "instrument_id",
+        "tf",
+        "runs"
+      ],
+      "title": "ScriptBatchRun",
+      "type": "object"
+    },
     "ScriptInput": {
       "additionalProperties": false,
       "description": "Creates an immutable script version with explicit type and dependencies.\n\nAttributes:\n    script_id: Stable tenant-local slug; must match the path on updates.\n    kind: One of the five script roles; immutable after creation.\n    name: Display title, one to one hundred twenty characters.\n    source: UTF-8 Python source, at most sixty-four KiB.\n    overlay: Whether indicator/strategy plots share the main price pane.\n    defaults: Default JSON input values overridden by an individual run.\n    libraries: Python import aliases mapped to pinned library versions.\n    expected_version: Optimistic lock for edits; required for a new version.\n    requests: Up to four declared cross-symbol/timeframe source aliases.",
@@ -1496,7 +1710,7 @@
           "items": {
             "$ref": "#/$defs/PlotPoint"
           },
-          "maxItems": 2000,
+          "maxItems": 5000,
           "title": "Equity Curve",
           "type": "array"
         },
@@ -1635,7 +1849,7 @@
     },
     "ScriptRun": {
       "additionalProperties": false,
-      "description": "Requests a reproducible run using closed, real backend candles.\n\nAttributes:\n    version: Pinned script version, or latest when omitted.\n    instrument_id: Canonical venue:market:symbol identifier.\n    tf: Supported chart timeframe, one second through one calendar month.\n    limit: Maximum closed bars, from two through two thousand.\n    from_ms: Optional inclusive UTC epoch millisecond lower boundary.\n    to_ms: Optional exclusive UTC epoch millisecond visibility boundary.\n    include_open: Evaluate the provisional last bar for indicators only;\n        alerts and simulated orders always require closed bars.\n    inputs: JSON input values overriding the version's defaults.\n    initial_equity: Positive initial simulated cash in quote units.\n    commission_bps: Commission in basis points per simulated fill.\n    slippage_bps: Adverse simulated slippage in basis points per fill.",
+      "description": "Requests a reproducible run using closed, real backend candles.\n\nAttributes:\n    version: Pinned script version, or latest when omitted.\n    instrument_id: Canonical venue:market:symbol identifier.\n    tf: Supported chart timeframe, one second through one calendar month.\n    limit: Maximum closed bars, from two through five thousand.\n    from_ms: Optional inclusive UTC epoch millisecond lower boundary.\n    to_ms: Optional exclusive UTC epoch millisecond visibility boundary.\n    window_from_ms: Optional start of the displayed window; intrabar\n        requests then cover only chart bars from there on.\n    include_open: Evaluate the provisional last bar for indicators only;\n        alerts and simulated orders always require closed bars.\n    inputs: JSON input values overriding the version's defaults.\n    initial_equity: Positive initial simulated cash in quote units.\n    commission_bps: Commission in basis points per simulated fill.\n    slippage_bps: Adverse simulated slippage in basis points per fill.",
       "properties": {
         "commission_bps": {
           "default": 0.0,
@@ -1683,7 +1897,7 @@
         },
         "limit": {
           "default": 500,
-          "maximum": 2000,
+          "maximum": 5000,
           "minimum": 2,
           "title": "Limit",
           "type": "integer"
@@ -1723,6 +1937,19 @@
           ],
           "default": null,
           "title": "Version"
+        },
+        "window_from_ms": {
+          "anyOf": [
+            {
+              "minimum": 0,
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Window From Ms"
         }
       },
       "required": [
@@ -1876,7 +2103,7 @@
     },
     "SeriesRequest": {
       "additionalProperties": false,
-      "description": "Declares another symbol/resolution before isolated indicator execution.\n\nAttributes:\n    instrument_id: Optional canonical symbol; defaults to the chart symbol.\n    tf: Requested resolution, with confirmed-bar visibility enforced by\n        host.\n    limit: Maximum closed source bars, one through five hundred.",
+      "description": "Declares another symbol/resolution before isolated indicator execution.\n\nAttributes:\n    instrument_id: Optional canonical symbol; defaults to the chart symbol.\n    tf: Requested resolution, with confirmed-bar visibility enforced by\n        host; \"auto\" picks the chart's lower timeframe for intrabars.\n    limit: Maximum closed source bars, one through five hundred (five\n        thousand for intrabars).\n    intrabars: Lower-timeframe bars inside the newest chart bars.\n    tf_input: Input whose value, unless \"auto\", replaces ``tf``.\n    unless: Optional bar field; intrabars are fetched only for chart\n        bars that lack it.\n    unless_input: Boolean input that switches ``unless`` on.",
       "properties": {
         "instrument_id": {
           "anyOf": [
@@ -1891,15 +2118,52 @@
           "default": null,
           "title": "Instrument Id"
         },
+        "intrabars": {
+          "default": false,
+          "title": "Intrabars",
+          "type": "boolean"
+        },
         "limit": {
           "default": 500,
-          "maximum": 500,
+          "maximum": 5000,
           "minimum": 1,
           "title": "Limit",
           "type": "integer"
         },
         "tf": {
-          "$ref": "common.schema.json#/$defs/Timeframe"
+          "anyOf": [
+            {
+              "$ref": "common.schema.json#/$defs/Timeframe"
+            },
+            {
+              "const": "auto",
+              "type": "string"
+            }
+          ],
+          "title": "Tf"
+        },
+        "tf_input": {
+          "default": "",
+          "maxLength": 64,
+          "title": "Tf Input",
+          "type": "string"
+        },
+        "unless": {
+          "default": "",
+          "enum": [
+            "",
+            "quote_turnover",
+            "trade_count",
+            "taker_buy_volume"
+          ],
+          "title": "Unless",
+          "type": "string"
+        },
+        "unless_input": {
+          "default": "",
+          "maxLength": 64,
+          "title": "Unless Input",
+          "type": "string"
         }
       },
       "required": [

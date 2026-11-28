@@ -15,6 +15,8 @@
  */
 
 import type {
+  ScriptBatchResult,
+  ScriptBatchRun,
   AlertJob,
   AlertJobInput,
   ScanInput,
@@ -27,7 +29,6 @@ import type {
   AlertSubscriptionList,
   AccountSummary,
   AmendRequest,
-  AoiList,
   AuditEventList,
   CandleBatch,
   CatalogList,
@@ -38,9 +39,6 @@ import type {
   DeploymentList,
   DeploymentRequest,
   FillList,
-  IndicatorPluginList,
-  IndicatorSeries,
-  IndicatorSnapshotList,
   InstrumentList,
   KillSwitchList,
   KillSwitchRequest,
@@ -171,37 +169,6 @@ export interface CandleQuery {
   limit?: number;
 }
 
-/** Query for indicator snapshots or areas of interest (AOIs) on one series. */
-export interface SeriesQuery {
-  /** Canonical instrument id. */
-  instrumentId: string;
-  /** Series timeframe. */
-  timeframe: Timeframe;
-  /** Optional plugin ids; all plugins when omitted. */
-  plugins?: readonly string[];
-  /** Optional point-in-time (UTC ms); latest when omitted. */
-  atMs?: number;
-  /**
-   * Optional per-plugin input overrides, e.g. `{ema: {length: 50}}`. The
-   * backend validates them against each plugin's input schema.
-   */
-  settings?: Readonly<Record<string, Readonly<Record<string, unknown>>>>;
-}
-
-/** Query for per-bar values of one plugin. */
-export interface IndicatorSeriesQuery {
-  /** Canonical instrument id. */
-  instrumentId: string;
-  /** Series timeframe. */
-  timeframe: Timeframe;
-  /** Plugin id, e.g. `volume_delta`. */
-  pluginId: string;
-  /** Inclusive start (UTC ms); a default window when omitted. */
-  fromMs?: number;
-  /** Optional input overrides for this plugin. */
-  settings?: Readonly<Record<string, unknown>>;
-}
-
 /** Query for the trading sessions of an exchange calendar. */
 export interface SessionQuery {
   /** Exchange calendar (never `24x7`, which has no sessions). */
@@ -260,29 +227,6 @@ export interface MarketDataClient {
    * @return Order book.
    */
   getOrderBook(instrumentId: string, depth?: number): Promise<OrderBook>;
-  /**
-   * Lists indicator plugins exposed by the backend.
-   * @return Plugin descriptors.
-   */
-  listIndicatorPlugins(): Promise<IndicatorPluginList>;
-  /**
-   * Fetches indicator snapshots for a series.
-   * @param query Series and plugin filter.
-   * @return Snapshots.
-   */
-  getIndicatorSnapshots(query: SeriesQuery): Promise<IndicatorSnapshotList>;
-  /**
-   * Fetches AOIs for a series.
-   * @param query Series and optional point-in-time.
-   * @return AOI list.
-   */
-  getAois(query: SeriesQuery): Promise<AoiList>;
-  /**
-   * Fetches per-bar published values of one plugin (sub-pane data).
-   * @param query Series, plugin and optional range/settings.
-   * @return Point-in-time values per closed bar.
-   */
-  getIndicatorSeries(query: IndicatorSeriesQuery): Promise<IndicatorSeries>;
   /**
    * Lists the trading sessions of an exchange calendar overlapping a window
    * (`GET /v1/calendars/{calendar_id}/sessions`). Optional: without it the
@@ -603,6 +547,34 @@ export interface StreamClient {
   close(): void;
 }
 
+/** Script role names of the engine catalog. */
+export type CatalogKind = CatalogScript['kind'];
+
+/**
+ * Chart studies: the engine's built-in and plugin script catalog and
+ * batched script runs (`/v1/scripts/catalog`, `/v1/scripts/run-batch`).
+ */
+export interface StudyClient {
+  /**
+   * Lists the built-in and installed plugin scripts.
+   * @param kind Optional role filter, such as `indicator`.
+   * @return Scripts in catalog order (without source) and skipped plugins.
+   */
+  catalog(kind?: CatalogKind): Promise<CatalogList>;
+  /**
+   * Reads one catalog script with its public source, when it has one.
+   * @param scriptId Catalog id such as `builtin:ema`.
+   * @return The script; protected plugin source is null.
+   */
+  catalogScript(scriptId: string): Promise<CatalogScript>;
+  /**
+   * Runs several studies over one fetch of the same chart candles.
+   * @param body Shared candle range plus one entry per study.
+   * @return One result or error per study, in request order.
+   */
+  runBatch(body: ScriptBatchRun): Promise<ScriptBatchResult>;
+}
+
 /** All backend clients injected into features. */
 export interface BackendClients {
   /** Public market data. */
@@ -617,6 +589,8 @@ export interface BackendClients {
   userStream: StreamClient;
   /** Market filter scans and alert jobs over built-in and owned scripts. */
   scripts: ScriptsClient;
+  /** Chart study catalog and runs. */
+  studies: StudyClient;
   /** Whether these clients serve synthetic DEMO data. */
   demo: boolean;
 }

@@ -14,21 +14,21 @@ Engines store state in SQLite (`./var/*.db`) or PostgreSQL (`postgresql+psycopg:
 
 ## Start
 
-### Indicator plugins
+### Script plugins
 
-The market engine always loads its nine built-in indicators: SMA, EMA, VWAP, regression channel, Bollinger Bands, RSI, ATR, volume delta and pivot points. Other indicators come from **plugin packages**: Python distributions with entry points in the group `joseph.indicator_plugins`, installed next to the engine before it starts ([writing one](EXTENDING.md#add-or-change-an-indicator-python)). Nothing is fetched at run time, and without plugins nothing needs private access.
+The market engine always loads its built-in scripts, among them nine indicators: SMA, EMA, VWAP, regression channel, Bollinger Bands, RSI, ATR, volume delta and pivot points (`builtin:<id>`). Other indicators, strategies, filters and alerts come from **plugin packages**: Python distributions with entry points in the group `joseph.scripts` whose classes subclass a `joseph_script` role, installed next to the engine before it starts ([writing one](EXTENDING.md#add-or-change-an-indicator-python)). Nothing is fetched at run time, and without plugins nothing needs private access.
 
 | Where | How |
 |---|---|
-| Local | After `make setup`: `make plugins PLUGIN_REQUIREMENTS="-e ../my-indicators"` (paths relative to the repository root). `uv sync`, and so `make setup`, removes plugins; run `make plugins` again. `uv run` keeps them |
+| Local | After `make setup`: `make plugins PLUGIN_REQUIREMENTS="-e ../my-scripts"` (paths relative to the repository root). `uv sync`, and so `make setup`, removes plugins; run `make plugins` again. `uv run` keeps them |
 | Image | Build arg `PLUGIN_REQUIREMENTS`, e.g. `make images PLUGIN_REQUIREMENTS="git+https://github.com/<owner>/<repo>.git@<commit>"`. For a private GitHub repository, export a read-only `PLUGIN_GIT_TOKEN`: it reaches the build only as the BuildKit secret `plugin_git_token`. A running ssh-agent serves `git+ssh://` URLs |
 | Compose | `MARKET_PLUGIN_REQUIREMENTS` and `PLUGIN_GIT_TOKEN` in `deploy/.env`; `MARKET_IMAGE_LICENSES` sets the image's licence label |
-| CI | Variable `MARKET_PLUGIN_REQUIREMENTS`, secret `PLUGIN_GIT_TOKEN` ([CI/CD](CI_CD.md#indicator-plugins-in-the-market-image)) |
+| CI | Variable `MARKET_PLUGIN_REQUIREMENTS`, secret `PLUGIN_GIT_TOKEN` ([CI/CD](CI_CD.md#script-plugins-in-the-market-image)) |
 
-- Requirements are space-separated pip requirements, installed **without their dependencies**: list every package a plugin needs and pin git URLs to a commit. `make plugins` and image builds then run `python -m joseph.indicators.discovery --check`, which prints the loaded plugin ids and fails if an entry point or plugin does not load.
-- At startup the built-ins register first, then entry points sorted by name. A failing entry point or plugin is logged and skipped, and the engine still starts. A plugin is rejected when its id or an AOI kind is already taken (so no package replaces a built-in), when its `schema_version` is unsupported or when its metadata is invalid.
-- Plugin code runs inside the market engine with its full trust, like any installed package. In production, allowlist entry points with `JOSEPH_INDICATOR_PLUGIN_PACKAGES` and list the plugins you need in `JOSEPH_INDICATOR_PLUGINS_REQUIRED`, so a broken install fails startup instead of leaving them unavailable ([settings](#market-engine)).
-- Disabling or removing a plugin keeps saved workspaces: its layers report the plugin as unavailable until it is back.
+- Requirements are space-separated pip requirements, installed **without their dependencies**: list every package a plugin needs and pin git URLs to a commit. `make plugins` and image builds then run `python -m joseph.scripts.catalog --check`, which prints the loaded catalog ids (`plugin:<entry point>:<ID>`) and fails if an entry point or class does not load.
+- At startup the built-ins load first, then entry points sorted by name. A failing entry point or class is logged and skipped, and the engine still starts; `GET /v1/scripts/catalog` lists the failures. Plugin ids are namespaced by their entry point, so no package replaces a built-in.
+- Plugin code runs inside the market engine with its full trust, like any installed package; tenant scripts never do (they need the isolated runner). In production, allowlist entry points with `JOSEPH_SCRIPT_PLUGIN_PACKAGES` and list the catalog ids you need in `JOSEPH_SCRIPT_PLUGINS_REQUIRED`, so a broken install fails startup instead of leaving them unavailable ([settings](#market-engine)).
+- Disabling or removing a plugin keeps saved workspaces: its chart studies report the script as unavailable until it is back.
 - A plugin package keeps its own licence; check it before you use or redistribute an image that contains it ([licensing](reports/LICENSING_REPORT.md)).
 
 ### Local
@@ -41,7 +41,7 @@ The market engine always loads its nine built-in indicators: SMA, EMA, VWAP, reg
 2. Put secret files in `deploy/secrets/`, mounted at `/run/joseph-secrets` for the `*_FILE` variables.
 3. Run `make compose-up`.
 
-CI deploys the same `deploy/docker-compose.yml` ([CI/CD](CI_CD.md#servers)). It enables every venue, turns the global LIVE gate on and passes the [settings](#settings) not marked †; add others to its `environment:`. Compose-only: `JOSEPH_{MARKET,EXECUTION}_DATABASE_URL`, build args `EXECUTION_UV_EXTRAS="--extra ibkr --extra sinopac"` (broker SDKs), `MARKET_PLUGIN_REQUIREMENTS` and `MARKET_IMAGE_LICENSES` with the build secret `PLUGIN_GIT_TOKEN` ([plugins](#indicator-plugins)), `PUBLIC_*` terminal URLs, image and port variables, and `IBKR_*` ([BROKERS](BROKERS.md#interactive-brokers)).
+CI deploys the same `deploy/docker-compose.yml` ([CI/CD](CI_CD.md#servers)). It enables every venue, turns the global LIVE gate on and passes the [settings](#settings) not marked †; add others to its `environment:`. Compose-only: `JOSEPH_{MARKET,EXECUTION}_DATABASE_URL`, build args `EXECUTION_UV_EXTRAS="--extra ibkr --extra sinopac"` (broker SDKs), `MARKET_PLUGIN_REQUIREMENTS` and `MARKET_IMAGE_LICENSES` with the build secret `PLUGIN_GIT_TOKEN` ([plugins](#script-plugins)), `PUBLIC_*` terminal URLs, image and port variables, and `IBKR_*` ([BROKERS](BROKERS.md#interactive-brokers)).
 
 ### Production checklist
 
@@ -79,10 +79,10 @@ Crypto, TWSE/TPEx official data and Treasury yields need no keys.
 | `JOSEPH_REPLAY_DIR`† | unset | JSONL candles for the replay adapter |
 | `JOSEPH_HTTP_TIMEOUT_S`†, `JOSEPH_POLL_INTERVAL_S`† | `10`, `5` (≥1) | Venue HTTP timeout; REST polling |
 | `JOSEPH_SNAPSHOT_STALE_AFTER_MS`†, `JOSEPH_STREAM_RETENTION`† | `30000`, `2000` | Stale age; envelopes kept per stream for resume |
-| `JOSEPH_MAX_ANCHORED_BARS`† | `50000` (≥2000) | Anchored-study reach |
-| `JOSEPH_INDICATOR_PLUGIN_PACKAGES` | `*` | [Plugin](#indicator-plugins) entry points to load: `*` (all), `none`, or comma-separated entry-point names; built-ins always load |
-| `JOSEPH_INDICATOR_PLUGINS_DISABLED` | empty | Comma-separated plugin ids, built-ins included, registered but disabled |
-| `JOSEPH_INDICATOR_PLUGINS_REQUIRED` | empty | Comma-separated plugin ids that must load enabled, else startup fails |
+| `JOSEPH_MAX_ANCHORED_BARS`† | `50000` (≥2000) | Deep history kept and refreshed per candle series |
+| `JOSEPH_SCRIPT_PLUGIN_PACKAGES` | `*` | [Plugin](#script-plugins) entry points (`joseph.scripts`) to load: `*` (all), `none`, or comma-separated entry-point names; built-ins always load |
+| `JOSEPH_SCRIPT_PLUGINS_DISABLED` | empty | Comma-separated catalog ids (e.g. `builtin:rsi`, `plugin:<entry>:<id>`), listed but not runnable |
+| `JOSEPH_SCRIPT_PLUGINS_REQUIRED` | empty | Comma-separated catalog ids that must load enabled, else startup fails |
 | `JOSEPH_STRATEGY_ACTIVATIONS_ENABLED`†, `JOSEPH_STRATEGY_INTERVAL_S`† | `true`, `10` (≥1) | Strategy activation loop (closed bars → signals) |
 | `JOSEPH_FORWARD_SIGNALS`†, `JOSEPH_ALERT_INTERVAL_S`† | `true`, `2` (≥0.5) | Forward PAPER/SHADOW/AUTO_LIVE entries; alert outbox pass |
 | `JOSEPH_TELEGRAM_BOT_TOKEN`, `JOSEPH_LINE_CHANNEL_TOKEN`, `JOSEPH_WEBHOOK_SECRET`, `JOSEPH_SMTP_HOST`, `_PORT`† (`587`), `_FROM`, `_USERNAME`, `_PASSWORD` | unset | Notification channels |
@@ -148,7 +148,7 @@ Crypto, TWSE/TPEx official data and Treasury yields need no keys.
 | After 2026-12-01 10:00 UTC | MEXC retires its JSON market data: `make test-network` (the MEXC JSON case should fail); remove any `JOSEPH_MEXC_WS_FORMAT=json` |
 | Taiwan extends the bond-ETF tax suspension (ends 2026-12-31; a 2036 extension is not law yet) | Update `BOND_ETF_TAX_SUSPENSION` in `joseph-execution-engine/src/joseph_execution/domain/equities.py` |
 | Yearly, or after an ad hoc closure | In `joseph-market-engine/`: `uv run python scripts/generate_xtai_calendar.py` and `scripts/generate_usbond_calendar.py` (TWSE's published holidays also apply at runtime) |
-| Before `PLUGIN_GIT_TOKEN` expires (if you use one) | [Rotate it](CI_CD.md#indicator-plugins-in-the-market-image) |
+| Before `PLUGIN_GIT_TOKEN` expires (if you use one) | [Rotate it](CI_CD.md#script-plugins-in-the-market-image) |
 | Weekly | IBKR 2FA login ([BROKERS](BROKERS.md#interactive-brokers)) |
 
 ## Incidents

@@ -9,16 +9,19 @@
  * JSON import/export, share links and debounced autosave.
  *
  * Workspaces are stored under `joseph.workspace.v1.<workspace id>`. The
- * stored and shared `WorkspaceDocument` stays at schema v1. Export files
- * carry their own format version, migrated step by step on import:
+ * stored and shared `WorkspaceDocument` is at schema v2 (charts list their
+ * studies); a schema v1 document, from storage, a link or a file, is
+ * migrated on read (`migrateWorkspaceV1`: indicator layers and attached
+ * scripts become studies). Export files carry their own format version,
+ * migrated step by step on import:
  *
  * - format 0: the single chart (`exchange`/`symbol`/`timeframe`) of the V4
- *   starter, the terminal that predates schema v1, migrated to a v1
+ *   starter, the terminal that predates schema v1, migrated to a current
  *   document (`migrateWorkspaceV0`);
- * - format 1: a plain v1 `WorkspaceDocument` (exports before drawings were
+ * - format 1: a plain `WorkspaceDocument` (exports before drawings were
  *   included); it imports without touching drawings;
  * - format 2: the `WorkspaceExport` envelope (`format:
- *   'joseph.workspace-export'`) holding the v1 document plus the drawings
+ *   'joseph.workspace-export'`) holding the document plus the drawings
  *   of its instruments (`WorkspaceExportDrawings`). The drawing documents
  *   themselves are validated and migrated by `@joseph/drawing-core`.
  *
@@ -33,6 +36,7 @@ import {
   type WorkspaceExport,
   type WorkspaceExportDrawings,
 } from '@joseph/contracts';
+import {migrateWorkspaceV1} from './study-migration';
 import {LAYOUT_PANES, createChartState} from './workspace';
 
 /**
@@ -113,12 +117,12 @@ interface LegacyV0Workspace {
 }
 
 /**
- * Migrates the V4 starter's single-chart state to schema v1. The instrument
+ * Migrates the V4 starter's single-chart state to schema v2. The instrument
  * becomes a perpetual (`<exchange>:perp:<SYMBOL>`) and the timeframe is
  * copied unchecked; callers validate the result with `validateWorkspace`.
  * @param raw Legacy object.
  * @param nowMs Migration time (UTC epoch ms), stored as `updated_at_ms`.
- * @return v1 workspace candidate, not yet validated.
+ * @return v2 workspace candidate, not yet validated.
  */
 export function migrateWorkspaceV0(
   raw: LegacyV0Workspace,
@@ -128,7 +132,7 @@ export function migrateWorkspaceV0(
   const symbol = (raw.symbol ?? 'BTCUSD').toUpperCase();
   const instrumentId = `${venue}:perp:${symbol}`;
   return {
-    schema_version: 1,
+    schema_version: 2,
     workspace_id: 'default',
     name: 'Imported workspace',
     layout: '1',
@@ -179,16 +183,16 @@ export function migrateHeatmapViewType(raw: unknown): boolean {
 }
 
 /**
- * Checks the structure of a v1 workspace candidate: schema version, id,
- * layout, a nonempty chart list with ids, valid instrument ids and layer lists, and
- * the sync options. Other fields are not checked.
+ * Checks the structure of a v2 workspace candidate: schema version, id,
+ * layout, a nonempty chart list with ids, valid instrument ids and study
+ * lists, and the sync options. Other fields are not checked.
  * @param value Candidate, usually parsed JSON.
  * @return Error message for the user, or null when the checks pass.
  */
 export function validateWorkspace(value: unknown): string | null {
   if (!value || typeof value !== 'object') return 'Workspace must be an object';
   const doc = value as Partial<WorkspaceDocument>;
-  if (doc.schema_version !== 1) return 'Unsupported workspace version';
+  if (doc.schema_version !== 2) return 'Unsupported workspace version';
   if (typeof doc.workspace_id !== 'string' || !doc.workspace_id) {
     return 'Missing workspace id';
   }
@@ -203,8 +207,8 @@ export function validateWorkspace(value: unknown): string | null {
     if (!isInstrumentId(String(chart.instrument_id))) {
       return `Chart ${chart.chart_id} has an invalid instrument id`;
     }
-    if (!Array.isArray(chart.indicator_layers)) {
-      return `Chart ${chart.chart_id} has no layers`;
+    if (!Array.isArray(chart.studies)) {
+      return `Chart ${chart.chart_id} has no study list`;
     }
   }
   if (!doc.sync || typeof doc.sync.crosshair !== 'boolean') {
@@ -215,7 +219,7 @@ export function validateWorkspace(value: unknown): string | null {
 
 /**
  * Validates a parsed workspace value, migrating the V4 starter shape (an
- * object without `schema_version`).
+ * object without `schema_version`) and schema v1 documents.
  * @param value Parsed JSON.
  * @param nowMs Current time (UTC epoch ms) for migrations.
  * @param maxBytes Optional text limit in UTF-16 units; defaults to the share
@@ -231,6 +235,13 @@ function readWorkspaceValue(
   let migrated = false;
   if (raw && typeof raw === 'object' && !('schema_version' in raw)) {
     raw = migrateWorkspaceV0(raw, nowMs);
+    migrated = true;
+  } else if (
+    raw &&
+    typeof raw === 'object' &&
+    (raw as {schema_version?: unknown}).schema_version === 1
+  ) {
+    raw = migrateWorkspaceV1(raw);
     migrated = true;
   }
   if (migrateHeatmapViewType(raw)) migrated = true;

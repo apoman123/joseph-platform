@@ -48,7 +48,7 @@ def _settings(**changes: object) -> config.Settings:
         config.Settings(),
         database_url="sqlite://",
         strategy_activations_enabled=False,
-        indicator_plugin_packages="none",
+        script_plugin_packages="none",
     )
     return dataclasses.replace(base, **changes)  # type: ignore[arg-type]  # overrides are per-field values
 

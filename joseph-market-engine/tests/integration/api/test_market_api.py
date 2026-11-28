@@ -20,6 +20,7 @@ import respx
 from fastapi import testclient
 
 from joseph import bootstrap
+from joseph.scripts import models as script_models
 
 Validate: TypeAlias = Callable[[str, str, object], None]
 
@@ -103,20 +104,19 @@ def test_stock_monthly_default_window_returns_available_history(
     )
     assert first_start.isoformat() == "1990-01-02T14:30:00+00:00"
     assert body["feed_state"] == "DEMO"
-    indicator = demo_client.get(
-        "/v1/indicators/series",
-        params={
+    indicator = demo_client.post(
+        "/v1/scripts/builtin:ema/run",
+        headers={"Authorization": "Bearer it-token-tenant-01"},
+        json={
             "instrument_id": "mock:stock:ACME",
             "tf": "1M",
-            "plugin": "ema",
             "from_ms": body["candles"][0]["start_ms"],
+            "limit": 500,
         },
     )
     assert indicator.status_code == 200, indicator.text
-    contract_validate(
-        "indicators.schema.json", "IndicatorSeries", indicator.json()
-    )
-    assert indicator.json()["points"]
+    result = script_models.ScriptResult.model_validate(indicator.json())
+    assert result.plots[0].points
 
 
 def test_demo_endpoints_are_contract_valid(

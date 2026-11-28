@@ -97,7 +97,7 @@ CCXT is no longer required or selected by the running market engine. An idle on-
 after REST data is received, or `LIVE` after WebSocket events arrive. See [market-data scope](docs/MARKET_DATA_SCOPE.md) for
 timeframe and provenance details.
 
-**Indicators.** The market engine ships nine built-in indicators (moving averages, VWAP, regression channel, Bollinger Bands, RSI, ATR, volume delta, pivot points). Other indicators come from plugin packages, installed with `make plugins PLUGIN_REQUIREMENTS="..."` and discovered at startup ([indicator plugins](docs/OPERATIONS.md#indicator-plugins)).
+**Indicators.** Every indicator is a Python `joseph_script.Indicator` class ([ADR 0011](docs/adr/0011-indicators-are-joseph-script-classes.md)). The market engine ships nine built-ins (moving averages, VWAP, regression channel, Bollinger Bands, RSI, ATR, volume delta, pivot points); plugin packages add more through the `joseph.scripts` entry points, installed with `make plugins PLUGIN_REQUIREMENTS="..."` and loaded at startup ([script plugins](docs/OPERATIONS.md#script-plugins)); users write their own in the Python editor. The terminal runs and draws all of them the same way.
 
 **Containers.** Build and start the whole stack:
 
@@ -153,7 +153,7 @@ These come from venues, data plans or law; code cannot remove them.
 - **Users:** [User manual](docs/USER_MANUAL.md) · [Heatmaps](docs/HEATMAPS.md)
 - **Operators:** [Operations runbook](docs/OPERATIONS.md) · [Brokers](docs/BROKERS.md) · [CI/CD](docs/CI_CD.md)
 - **Contributors:** [Architecture](docs/architecture/INDEX.md) · [ADRs](docs/adr/) · [Extending](docs/EXTENDING.md) · [Coding standards](docs/standards/CODING_STANDARDS.md) · [Design decisions](docs/DESIGN_DECISIONS.md) · [Feature status](docs/FEATURE_STATUS.md)
-- **Components:** [Market engine](joseph-market-engine/README.md) · [Indicators](joseph-market-engine/src/joseph/indicators/README.md) · [Execution engine](joseph-execution-engine/README.md) · [Terminal](joseph-terminal/README.md)
+- **Components:** [Market engine](joseph-market-engine/README.md) · [Execution engine](joseph-execution-engine/README.md) · [Terminal](joseph-terminal/README.md)
 - **Reports:** [Threat model](docs/reports/THREAT_MODEL.md) · [Licensing](docs/reports/LICENSING_REPORT.md) · [TradingView use-case audit](docs/reports/TRADINGVIEW_USE_CASE_AUDIT.md) · [Tests](docs/reports/TEST_REPORT.md)
 - **API contracts:** `joseph-terminal/packages/contracts/` (`schemas/`, `openapi/`, `asyncapi/`)
 

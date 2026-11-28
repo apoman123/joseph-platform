@@ -196,7 +196,7 @@ describe('DEMO session instruments', () => {
     }
   });
 
-  it('publishes metadata, classified delta and no volume for the yield', async () => {
+  it('publishes metadata and no volume for the yield', async () => {
     const {instruments} = await client.listInstruments({q: '半導體'});
     expect(instruments.map(i => i.instrument_id)).toEqual(['mock:stock:9901']);
     expect(instruments[0]).toMatchObject({
@@ -218,12 +218,6 @@ describe('DEMO session instruments', () => {
     });
     expect(yieldBars.candles[0]?.taker_buy_base_volume).toBeNull();
     expect(yieldBars.candles[0]?.quote_turnover).toBeNull();
-    const delta = await client.getIndicatorSeries({
-      instrumentId: 'mock:stock:ACME',
-      timeframe: '1h',
-      pluginId: 'volume_delta',
-    });
-    expect(delta.points.at(-1)?.values.method).toBe('trade_classification');
     const sessions = await client.getSessions({
       calendar: 'XTAI',
       fromMs: ny('2026-12-21'),
@@ -290,10 +284,5 @@ describe('DEMO session instruments', () => {
       ny('2026-11-20', 15, 30),
     ]);
     expect(batch.candles.every(c => c.is_final)).toBe(true);
-    const aois = await closed.getAois({
-      instrumentId: 'mock:stock:ACME',
-      timeframe: '1h',
-    });
-    expect(aois.as_of_ms).toBe(ny('2026-11-20', 16));
   });
 });

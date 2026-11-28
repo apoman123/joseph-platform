@@ -152,7 +152,7 @@ describe('screener presets', () => {
         marketType: 'perp',
         tf: '1h',
         maxSymbols: 50,
-        conditions: [{script_id: 'builtin:rsi', inputs: {value: 30}}, 5],
+        conditions: [{script_id: 'builtin:rsi-range', inputs: {value: 30}}, 5],
       },
       3,
     ]);
@@ -171,7 +171,7 @@ describe('screener presets', () => {
         marketType: 'perp',
         tf: '1h',
         maxSymbols: 50,
-        conditions: [{script_id: 'builtin:rsi', inputs: {value: 30}}],
+        conditions: [{script_id: 'builtin:rsi-range', inputs: {value: 30}}],
       },
     ]);
     const [first] = presets;
@@ -191,7 +191,7 @@ describe('screener presets', () => {
     expect(
       historyBarsFor(
         [
-          {script_id: 'builtin:rsi', inputs: {}},
+          {script_id: 'builtin:rsi-range', inputs: {}},
           {script_id: 'builtin:gap', inputs: {}},
         ],
         catalog
@@ -230,7 +230,7 @@ describe('screener presets', () => {
     await waitFor(() => void expect(add).toBeEnabled());
     fireEvent.click(add);
     fireEvent.change(screen.getByLabelText('Filter 2'), {
-      target: {value: 'builtin:rsi'},
+      target: {value: 'builtin:rsi-range'},
     });
     fireEvent.change(screen.getByLabelText('Preset name'), {
       target: {value: 'Liquid oversold'},
@@ -241,7 +241,7 @@ describe('screener presets', () => {
     fireEvent.change(screen.getByTestId('screener-preset'), {
       target: {value: 'Liquid oversold'},
     });
-    expect(screen.getByLabelText('Filter 2')).toHaveValue('builtin:rsi');
+    expect(screen.getByLabelText('Filter 2')).toHaveValue('builtin:rsi-range');
     const stored = rendered.ctx.settings.read<{
       presets: Array<{conditions: unknown[]}>;
     }>({presets: []}).presets;

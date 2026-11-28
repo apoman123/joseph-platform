@@ -11,11 +11,8 @@
  */
 
 import {
-  HttpMarketDataClient,
-  type IndicatorSeriesPoint,
-} from '@joseph/contracts';
-import {
   SERIES_LOADING_MESSAGE,
+  type DrawingSeriesPoint,
   type DrawingSeriesState,
 } from '@joseph/drawing-core';
 import {describe, expect, it} from 'vitest';
@@ -40,7 +37,7 @@ const DOC = makeDoc(tool, [{time_ms: 140_000, price: '120'}]);
  * @throws Error when the fixture drawing yields no series request.
  */
 function ready(
-  points: IndicatorSeriesPoint[],
+  points: DrawingSeriesPoint[],
   asOfMs = 600_000
 ): DrawingSeriesState {
   const request = anchoredVwapRequest(DOC, '1m');
@@ -61,20 +58,15 @@ function ready(
  * @param vwap VWAP, or null for a bar without values.
  * @return Series point.
  */
-function point(minute: number, vwap: number | null): IndicatorSeriesPoint {
+function point(minute: number, vwap: number | null): DrawingSeriesPoint {
   return {
     bar_start_ms: minute * 60_000,
     values: {
-      vwap: vwap === null ? null : String(vwap),
-      stdev: vwap === null ? null : '2',
-      upper_1: vwap === null ? null : String(vwap + 2),
-      lower_1: vwap === null ? null : String(vwap - 2),
-      upper_2: null,
-      lower_2: null,
-      upper_3: null,
-      lower_3: null,
-      anchor_ms: vwap === null ? null : 120_000,
-      bars: vwap === null ? 0 : minute - 1,
+      'VWAP': vwap === null ? null : String(vwap),
+      'Stdev': vwap === null ? null : '2',
+      'Upper 1': vwap === null ? null : String(vwap + 2),
+      'Lower 1': vwap === null ? null : String(vwap - 2),
+      'Bars': vwap === null ? null : String(minute - 1),
     },
   };
 }
@@ -114,57 +106,27 @@ describe('anchored-vwap', () => {
     expect(tool.manifest).toMatchObject({group: 'studies', anchorCount: 1});
   });
 
-  it('requests the engine series from the anchor bar with string decimals', () => {
+  it('runs the built-in script from the anchor bar', () => {
     expect(anchoredVwapRequest(DOC, '1m')).toEqual({
-      pluginId: 'anchored_vwap',
+      scriptId: 'builtin:anchored_vwap',
       fromMs: 120_000,
-      settings: {
+      inputs: {
         anchor: 'time',
         anchor_ms: 120_000,
         source: 'hlc3',
-        band_1: '1',
-        band_2: '0',
-        band_3: '0',
+        band_1: 1,
+        band_2: 0,
+        band_3: 0,
       },
     });
     const banded = {...DOC, props: {band_1: '0', band_2: '2', band_3: '9'}};
-    expect(anchoredVwapRequest(banded, '5m')?.settings).toMatchObject({
+    expect(anchoredVwapRequest(banded, '5m')?.inputs).toMatchObject({
       anchor_ms: 0,
-      band_1: '0',
-      band_2: '2',
-      band_3: '0',
+      band_1: 0,
+      band_2: 2,
+      band_3: 0,
     });
     expect(tool.seriesRequest?.(DOC, {timeframe: '1m'})?.fromMs).toBe(120_000);
-  });
-
-  it('sends the documented GET through the market client', async () => {
-    const urls: string[] = [];
-    const client = new HttpMarketDataClient({
-      baseUrl: 'http://engine.test',
-      fetchImpl: async url => {
-        urls.push(String(url));
-        return new Response('{"points":[]}', {status: 200});
-      },
-    });
-    const request = anchoredVwapRequest(DOC, '1m');
-    if (!request) throw new Error('no request');
-    await client.getIndicatorSeries({
-      instrumentId: 'mock:perp:BTCUSD',
-      timeframe: '1m',
-      pluginId: request.pluginId,
-      fromMs: request.fromMs,
-      settings: request.settings,
-    });
-    const url = new URL(urls[0] ?? '');
-    expect(url.pathname).toBe('/v1/indicators/series');
-    expect(Object.fromEntries(url.searchParams)).toEqual({
-      instrument_id: 'mock:perp:BTCUSD',
-      tf: '1m',
-      plugin: 'anchored_vwap',
-      from_ms: '120000',
-      settings:
-        '{"anchored_vwap":{"anchor":"time","anchor_ms":120000,"source":"hlc3","band_1":"1","band_2":"0","band_3":"0"}}',
-    });
   });
 
   it('draws the VWAP line and enabled bands from the anchor forward', () => {

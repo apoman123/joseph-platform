@@ -17,8 +17,8 @@ same market engine:
 * ``live``: the stock entry point with ``JOSEPH_LIVE_TRADING_ENABLED=true``,
   a step-up TOTP secret and no venue or broker credentials.
 
-The market engine caps anchored studies at ``MAX_ANCHORED_BARS`` (the
-smallest value it accepts) so the cap is cheap to exceed. It also loads
+The market engine keeps ``MAX_ANCHORED_BARS`` (the smallest value it
+accepts) of deep history per candle series. It also loads
 the ``PROBE_ID`` plugin strategy (``PROBE_SOURCE``) through the
 ``joseph.scripts`` entry-point group: an installed-package stand-in on its
 ``PYTHONPATH`` whose single deterministic entry drives the signal chain.
@@ -60,7 +60,7 @@ TOKEN_B = "system-token-b"
 TENANT_A = "tenant-a"
 TENANT_B = "tenant-b"
 MAX_ANCHORED_BARS = 2_000
-"""Anchored-study cap of the system-test market engine (engine minimum)."""
+"""Deep-history budget of the system-test market engine (engine minimum)."""
 STEP_UP_SECRET = "NJXXGZLQNAWXG6LTORSW2LLUMVZXILJR"
 """Base32 TOTP secret of the ``live`` execution engine."""
 ENGINE_VENVS = "JOSEPH_SYSTEM_ENGINE_VENVS"

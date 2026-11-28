@@ -19,7 +19,6 @@ import type {
   AlertSubscriptionList,
   AccountSummary,
   AmendRequest,
-  AoiList,
   AuditEventList,
   CandleBatch,
   CatalogList,
@@ -30,9 +29,6 @@ import type {
   DeploymentRequest,
   ErrorResponse,
   FillList,
-  IndicatorPluginList,
-  IndicatorSeries,
-  IndicatorSnapshotList,
   InstrumentList,
   KillSwitchList,
   KillSwitchRequest,
@@ -59,10 +55,8 @@ import type {
 import type {
   CandleQuery,
   ExecutionClient,
-  IndicatorSeriesQuery,
   InstrumentQuery,
   MarketDataClient,
-  SeriesQuery,
   SessionQuery,
   SignalQuery,
   StrategyClient,
@@ -208,20 +202,6 @@ export class HttpTransport {
 }
 
 /**
- * Encodes per-plugin setting overrides as a compact JSON query value.
- * @param settings Overrides keyed by plugin id.
- * @return JSON text, or undefined when there are none.
- */
-function encodeSettings(
-  settings:
-    Readonly<Record<string, Readonly<Record<string, unknown>>>> | undefined
-): string | undefined {
-  return settings && Object.keys(settings).length > 0
-    ? JSON.stringify(settings)
-    : undefined;
-}
-
-/**
  * Normalizes any error payload into the contract `ErrorResponse`.
  * @param payload Parsed body.
  * @param status HTTP status.
@@ -329,61 +309,6 @@ export class HttpMarketDataClient implements MarketDataClient {
     return this.http.request('GET', '/v1/market/orderbook', {
       instrument_id: instrumentId,
       depth,
-    });
-  }
-
-  /**
-   * Lists indicator plugins (`GET /v1/indicators/plugins`).
-   * @return Plugins.
-   */
-  listIndicatorPlugins(): Promise<IndicatorPluginList> {
-    return this.http.request('GET', '/v1/indicators/plugins');
-  }
-
-  /**
-   * Fetches indicator snapshots (`GET /v1/indicators/snapshot`).
-   * @param query Series, optional plugin ids, point in time and settings.
-   * @return Snapshots.
-   */
-  getIndicatorSnapshots(query: SeriesQuery): Promise<IndicatorSnapshotList> {
-    return this.http.request('GET', '/v1/indicators/snapshot', {
-      instrument_id: query.instrumentId,
-      tf: query.timeframe,
-      set: query.plugins,
-      at_ms: query.atMs,
-      settings: encodeSettings(query.settings),
-    });
-  }
-
-  /**
-   * Fetches AOIs (`GET /v1/aois`).
-   * @param query Series, optional plugin ids, point in time and settings.
-   * @return AOIs.
-   */
-  getAois(query: SeriesQuery): Promise<AoiList> {
-    return this.http.request('GET', '/v1/aois', {
-      instrument_id: query.instrumentId,
-      tf: query.timeframe,
-      set: query.plugins,
-      at_ms: query.atMs,
-      settings: encodeSettings(query.settings),
-    });
-  }
-
-  /**
-   * Fetches per-bar values of one plugin (`GET /v1/indicators/series`).
-   * @param query Series, plugin and optional start and settings.
-   * @return Indicator series.
-   */
-  getIndicatorSeries(query: IndicatorSeriesQuery): Promise<IndicatorSeries> {
-    return this.http.request('GET', '/v1/indicators/series', {
-      instrument_id: query.instrumentId,
-      tf: query.timeframe,
-      plugin: query.pluginId,
-      from_ms: query.fromMs,
-      settings: query.settings
-        ? JSON.stringify({[query.pluginId]: query.settings})
-        : undefined,
     });
   }
 

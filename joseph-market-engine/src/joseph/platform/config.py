@@ -380,22 +380,9 @@ class Settings:
             ``service_token``), ``JOSEPH_FORWARD_SIGNALS``. Default true.
         alert_interval_s: Time between alert outbox passes, in seconds,
             ``JOSEPH_ALERT_INTERVAL_S``. Default 2, at least 0.5.
-        max_anchored_bars: Hard cap of chart bars an anchored study
-            (anchored VWAP, anchored regression) computes from its anchor
-            to now, ``JOSEPH_MAX_ANCHORED_BARS``. Default 50000, at least
-            2000.
-        indicator_plugin_packages: Indicator plugin packages to load,
-            ``JOSEPH_INDICATOR_PLUGIN_PACKAGES``: ``*`` for every installed
-            entry point of the ``joseph.indicator_plugins`` group, ``none``
-            for none, or comma-separated entry-point names. Default ``*``.
-            The built-in indicators always load.
-        indicator_plugins_disabled: Indicator plugin ids to register but
-            disable, ``JOSEPH_INDICATOR_PLUGINS_DISABLED`` (built-ins
-            included); strategies that use them report the plugin as
-            unavailable. Default none.
-        indicator_plugins_required: Indicator plugin ids that must load and
-            stay enabled, else startup fails,
-            ``JOSEPH_INDICATOR_PLUGINS_REQUIRED``. Default none.
+        max_anchored_bars: Deep-history budget of one candle series: the
+            candle store keeps and refreshes this many bars plus a margin,
+            ``JOSEPH_MAX_ANCHORED_BARS``. Default 50000, at least 2000.
         script_plugin_packages: Script plugin packages to load,
             ``JOSEPH_SCRIPT_PLUGIN_PACKAGES``: ``*`` for every installed
             entry point of the ``joseph.scripts`` group, ``none`` for none,
@@ -524,9 +511,6 @@ class Settings:
     forward_signals: bool = True
     alert_interval_s: float = 2.0
     max_anchored_bars: int = 50_000
-    indicator_plugin_packages: str = "*"
-    indicator_plugins_disabled: tuple[str, ...] = ()
-    indicator_plugins_required: tuple[str, ...] = ()
     script_plugin_packages: str = "*"
     script_plugins_disabled: tuple[str, ...] = ()
     script_plugins_required: tuple[str, ...] = ()
@@ -582,7 +566,7 @@ class Settings:
             f"database_url={self.database_url!r}, "
             f"enabled_venues={[v.value for v in self.active_venues]!r}, "
             f"demo_only={self.demo_only!r}, "
-            f"indicator_plugin_packages={self.indicator_plugin_packages!r}, "
+            f"script_plugin_packages={self.script_plugin_packages!r}, "
             f"tw_data_source={self.tw_data_source!r}, "
             f"fugle_api_key={"'***'" if self.fugle_api_key else None}, "
             f"fred_api_key={"'***'" if self.fred_api_key else None})"
@@ -699,16 +683,6 @@ class Settings:
             ),
             max_anchored_bars=max(
                 2_000, int(source.get("JOSEPH_MAX_ANCHORED_BARS", "50000"))
-            ),
-            indicator_plugin_packages=(
-                source.get("JOSEPH_INDICATOR_PLUGIN_PACKAGES", "").strip()
-                or "*"
-            ),
-            indicator_plugins_disabled=_names(
-                source.get("JOSEPH_INDICATOR_PLUGINS_DISABLED", "")
-            ),
-            indicator_plugins_required=_names(
-                source.get("JOSEPH_INDICATOR_PLUGINS_REQUIRED", "")
             ),
             script_plugin_packages=(
                 source.get("JOSEPH_SCRIPT_PLUGIN_PACKAGES", "").strip() or "*"

@@ -203,7 +203,7 @@ def test_missing_history_is_unavailable_never_a_match(
     client, _, _ = app
     job = _scan(
         client,
-        {"venue": "mock", "conditions": [{"script_id": "builtin:rsi"}]},
+        {"venue": "mock", "conditions": [{"script_id": "builtin:rsi-range"}]},
     )
     assert job["status"] == "complete" and job["matches"] == []
     assert len(job["unavailable"]) == job["total"] == 4
@@ -213,7 +213,7 @@ def test_missing_history_is_unavailable_never_a_match(
         {
             "venue": "mock",
             "conditions": [
-                {"script_id": "builtin:rsi"},
+                {"script_id": "builtin:rsi-range"},
                 {
                     "script_id": "builtin:price",
                     "inputs": {"operator": "below", "value": 0},
@@ -230,7 +230,7 @@ def test_missing_history_is_unavailable_never_a_match(
             "tf": "1h",
             "conditions": [
                 {
-                    "script_id": "builtin:rsi",
+                    "script_id": "builtin:rsi-range",
                     "inputs": {
                         "operator": "between",
                         "value": 0,
@@ -304,7 +304,7 @@ def test_turnover_order_keeps_the_most_active(
         (
             {
                 "conditions": [
-                    {"script_id": "builtin:rsi", "inputs": {"length": 1}}
+                    {"script_id": "builtin:rsi-range", "inputs": {"length": 1}}
                 ]
             },
             422,

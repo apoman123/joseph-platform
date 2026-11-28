@@ -105,7 +105,7 @@ describe('DEMO scripts client', () => {
     expect(none.total).toBe(3);
     const missing = await finish(
       client,
-      await client.screen({conditions: [{script_id: 'builtin:rsi'}]})
+      await client.screen({conditions: [{script_id: 'builtin:rsi-range'}]})
     );
     expect(missing.matches).toEqual([]);
     expect(missing.unavailable?.length).toBe(missing.total);

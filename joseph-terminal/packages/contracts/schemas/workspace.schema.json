@@ -211,43 +211,64 @@
         "percent"
       ]
     },
-    "IndicatorLayerState": {
-      "title": "IndicatorLayerState",
+    "StudyState": {
+      "title": "StudyState",
+      "description": "One study on a chart: a built-in, plugin or owned script instance with its inputs. Built-in and plugin scripts use version 0; owned scripts pin an immutable version.",
       "type": "object",
       "additionalProperties": false,
       "required": [
-        "plugin_id",
-        "visible"
+        "study_id",
+        "script_id",
+        "version",
+        "kind",
+        "name",
+        "visible",
+        "inputs",
+        "colors"
       ],
       "properties": {
-        "plugin_id": {
+        "study_id": {
+          "type": "string",
+          "pattern": "^[A-Za-z0-9:_.#-]{1,160}$",
+          "description": "Unique within the chart; the script id, with a #n suffix for further instances."
+        },
+        "script_id": {
+          "type": "string",
+          "pattern": "^(?:[a-z][a-z0-9-]{0,62}|builtin:[a-z][a-z0-9_-]{0,63}|plugin:[a-z0-9_.-]{1,64}:[a-z][a-z0-9_-]{0,63})$",
+          "description": "Owned script slug, builtin:<id> or plugin:<entry>:<id>."
+        },
+        "version": {
+          "type": "integer",
+          "minimum": 0,
+          "description": "Pinned owned version; 0 for built-in and plugin scripts."
+        },
+        "kind": {
+          "enum": [
+            "indicator",
+            "strategy",
+            "alert"
+          ],
           "type": "string"
+        },
+        "name": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 120
         },
         "visible": {
           "type": "boolean"
         },
-        "kinds": {
-          "type": "array",
-          "items": {
-            "$ref": "indicators.schema.json#/$defs/AoiKind"
+        "inputs": {
+          "type": "object",
+          "description": "Input overrides validated by the engine against the script's declared inputs."
+        },
+        "colors": {
+          "type": "object",
+          "additionalProperties": {
+            "type": "string",
+            "pattern": "^#[0-9a-fA-F]{6}$"
           },
-          "description": "AOI kinds shown; all kinds when omitted."
-        },
-        "style": {
-          "type": "object",
-          "description": "Presentation only: per-kind colors, event markers, sub-pane visibility."
-        },
-        "settings": {
-          "type": "object",
-          "description": "Indicator inputs validated by the backend against the plugin's input_schema."
-        },
-        "removed": {
-          "type": "boolean",
-          "description": "True when explicitly removed; hidden layers retain their settings."
-        },
-        "present": {
-          "type": "boolean",
-          "description": "Retains the legend row when a user hides an added study."
+          "description": "Per-plot color overrides by plot name."
         }
       }
     },
@@ -262,7 +283,7 @@
         "chart_type",
         "price_scale",
         "show_volume",
-        "indicator_layers",
+        "studies",
         "feed_mode"
       ],
       "properties": {
@@ -284,11 +305,13 @@
         "show_volume": {
           "type": "boolean"
         },
-        "indicator_layers": {
+        "studies": {
           "type": "array",
+          "maxItems": 40,
           "items": {
-            "$ref": "#/$defs/IndicatorLayerState"
-          }
+            "$ref": "#/$defs/StudyState"
+          },
+          "description": "Studies in legend order."
         },
         "link_group": {
           "type": [
@@ -404,7 +427,7 @@
       ],
       "properties": {
         "schema_version": {
-          "const": 1
+          "const": 2
         },
         "workspace_id": {
           "type": "string"
@@ -489,7 +512,7 @@
     },
     "WorkspaceExport": {
       "title": "WorkspaceExport",
-      "description": "Workspace export file, format version 2: the workspace document (schema v1, unchanged) plus the drawings of its instruments. Import also accepts a plain v1 WorkspaceDocument (export format 1, no drawings) and the V4 starter shape (format 0), migrated step by step; drawings of unknown tools are kept.",
+      "description": "Workspace export file, format version 2: the workspace document plus the drawings of its instruments. Import also accepts a plain WorkspaceDocument (export format 1, no drawings) and the V4 starter shape (format 0), migrated step by step; schema v1 documents are migrated to v2 (indicator layers and attached scripts become studies); drawings of unknown tools are kept.",
       "type": "object",
       "additionalProperties": false,
       "required": [

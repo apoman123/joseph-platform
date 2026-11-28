@@ -27,11 +27,11 @@ COPY src ./src
 # copies only /app/.venv.
 RUN --mount=type=cache,target=/root/.cache/uv \
     uv sync --frozen --no-dev --no-editable ${UV_EXTRAS}
-# Optional indicator plugin packages: space-separated pip requirements
+# Optional script plugin packages (joseph.scripts entry points): pip requirements
 # (pinned git URLs, wheels or index names) installed without their
-# dependencies, so list every package a plugin needs; the discovery check
+# dependencies, so list every package a plugin needs; the catalog check
 # then fails the build if any plugin does not load. Empty (the default)
-# builds the image with the built-in indicators only. Credentials for a
+# builds the image with the built-in scripts only. Credentials for a
 # private git host never reach a layer or a git config file:
 #   --secret id=plugin_git_token,env=PLUGIN_GIT_TOKEN  rewrites
 #     https://github.com/ URLs to use the token, in this RUN only;
@@ -48,7 +48,7 @@ RUN --mount=type=cache,target=/root/.cache/uv \
           GIT_CONFIG_KEY_0="url.https://x-access-token:$(cat "${token_file}")@github.com/.insteadOf"; \
       fi; \
       uv pip install --python /app/.venv/bin/python --no-deps ${PLUGIN_REQUIREMENTS}; \
-      /app/.venv/bin/python -m joseph.indicators.discovery --check; \
+      /app/.venv/bin/python -m joseph.scripts.catalog --check; \
     fi
 
 FROM python:${PYTHON_VERSION}-slim-bookworm

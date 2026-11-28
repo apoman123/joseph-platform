@@ -10,6 +10,7 @@ import logging
 
 import httpx
 import pytest
+from fastapi import testclient
 
 from joseph import bootstrap
 from joseph.alerts.domain import model as alert_model
@@ -65,23 +66,28 @@ def test_logging_setup_redacts_every_handler(
     assert record.exc_text == "Traceback: password=***"
 
 
-async def test_signal_stack_uses_discovered_plugins_and_settings() -> None:
-    """Discovery settings shape the indicator plugin registry."""
+def test_script_catalog_follows_plugin_settings() -> None:
+    """Script plugin settings shape the catalog the API serves."""
     settings = dataclasses.replace(
         config.Settings(),
         demo_only=True,
         database_url="sqlite://",
         strategy_activations_enabled=False,
-        indicator_plugin_packages="none",
-        indicator_plugins_disabled=("rsi",),
+        script_plugin_packages="none",
+        script_plugins_disabled=("builtin:rsi",),
+        dev_tokens=config.parse_dev_tokens("wiring:tenant:user"),
     )
     container = bootstrap.build_container(
         settings, clock=clock_lib.ManualClock(1_795_132_800_000)
     )
-    try:
-        stack = container.signal_stack
-        assert stack is not None
-        assert "rsi" not in stack.plugins.ids()
-        assert "ema" in stack.plugins.ids()
-    finally:
-        await container.aclose()
+    with testclient.TestClient(
+        bootstrap.create_application(container)
+    ) as client:
+        listing = client.get(
+            "/v1/scripts/catalog",
+            params={"kind": "indicator"},
+            headers={"Authorization": "Bearer wiring"},
+        ).json()["scripts"]
+    enabled = {row["script_id"]: row["enabled"] for row in listing}
+    assert enabled["builtin:rsi"] is False
+    assert enabled["builtin:ema"] is True

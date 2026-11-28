@@ -188,9 +188,13 @@ test('backend tabs retain independent indicators and subscribe to changed feed m
   );
   await page.getByTestId('indicators-menu').click();
   const library = page.getByRole('dialog', {name: 'Indicators', exact: true});
-  await library.getByRole('textbox', {name: 'Search indicators'}).fill('RSI');
-  await library.getByRole('checkbox', {name: 'RSI', exact: true}).check();
-  await library.getByRole('button', {name: 'Collect RSI'}).click();
+  await library
+    .getByRole('textbox', {name: 'Search indicators'})
+    .fill('Relative');
+  await library.getByTestId('add-study-builtin:rsi').click();
+  await library
+    .getByRole('button', {name: 'Collect Relative Strength Index'})
+    .click();
   await page.keyboard.press('Escape');
   await page.getByRole('button', {name: 'Add chart tab'}).click();
   await page.getByRole('button', {name: 'Candlestick chart'}).click();
@@ -201,21 +205,17 @@ test('backend tabs retain independent indicators and subscribe to changed feed m
     'ETHUSD · 1h'
   );
   await page.getByTestId('indicators-menu').click();
-  await library.getByRole('textbox', {name: 'Search indicators'}).fill('RSI');
   await expect(
     library.getByRole('checkbox', {name: 'RSI', exact: true})
-  ).not.toBeChecked();
+  ).toHaveCount(0);
   await library.getByRole('tab', {name: /My collection/}).click();
-  await expect(
-    library.getByRole('checkbox', {name: 'RSI', exact: true})
-  ).toBeVisible();
+  await expect(library.getByTestId('add-study-builtin:rsi')).toBeVisible();
   await page.keyboard.press('Escape');
   await tabs.getByRole('tab', {name: 'BTCUSD · 5m'}).click();
   await expect(page.getByText('Loading candles…', {exact: true})).toHaveCount(
     0
   );
   await page.getByTestId('indicators-menu').click();
-  await library.getByRole('textbox', {name: 'Search indicators'}).fill('RSI');
   await expect(
     library.getByRole('checkbox', {name: 'RSI', exact: true})
   ).toBeChecked();

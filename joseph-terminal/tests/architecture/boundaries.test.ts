@@ -69,17 +69,6 @@ describe('module boundaries', () => {
     ]);
   });
 
-  it('indicator-viz never computes from candles (render-only)', () => {
-    const offenders = sources(
-      join(ROOT, 'packages', 'indicator-viz', 'src')
-    ).filter(file =>
-      /\b(Candle|CandleBatch|getCandles|ChartBar)\b/.test(
-        readFileSync(file, 'utf8')
-      )
-    );
-    expect(offenders).toEqual([]);
-  });
-
   it('no browser source references venue signing or secrets APIs', () => {
     const offenders = [
       ...sources(join(ROOT, 'packages')),

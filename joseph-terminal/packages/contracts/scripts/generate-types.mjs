@@ -137,7 +137,7 @@ async function main() {
     allErrors: false,
     code: {source: true},
   });
-  for (const name of ['common', 'indicators', 'workspace']) {
+  for (const name of ['common', 'workspace']) {
     validator.addSchema(
       JSON.parse(readFileSync(join(SCHEMA_DIR, `${name}.schema.json`), 'utf8'))
     );

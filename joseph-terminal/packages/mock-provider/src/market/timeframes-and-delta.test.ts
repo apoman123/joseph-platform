@@ -17,13 +17,14 @@ import addFormats from 'ajv-formats';
 import {Decimal, TIMEFRAMES, timeframeEnd} from '@joseph/contracts';
 import {describe, expect, it} from 'vitest';
 import {DemoMarketDataClient} from './demo-market-client';
-import {demoDeltaPoint} from './demo-studies';
+import {DemoStudyClient} from './demo-study-client';
 import {DEMO_INSTRUMENT_SPECS, demoCandle} from './prices';
 
 const SCHEMA_DIR = join(__dirname, '..', '..', '..', 'contracts', 'schemas');
 const BASE = 'https://schemas.joseph.local/v1/';
 const NOW = Date.UTC(2026, 10, 20, 12, 7, 31, 400);
 const client = new DemoMarketDataClient({now: () => NOW});
+const studies = new DemoStudyClient(client);
 const DAY = 86_400_000;
 
 /**
@@ -131,94 +132,85 @@ describe('DEMO seconds and monthly candles', () => {
   });
 
   it('serves 1M studies on month starts and no 1M pivot levels', async () => {
-    const list = await client.getAois({
-      instrumentId: 'mock:perp:BTCUSD',
-      timeframe: '1M',
+    const {results} = await studies.runBatch({
+      instrument_id: 'mock:perp:BTCUSD',
+      tf: '1M',
+      limit: 60,
+      runs: [
+        {script_id: 'builtin:sma', inputs: {length: 3}},
+        {script_id: 'builtin:pivot_points'},
+      ],
     });
-    expect(validator('indicators.schema.json', 'AoiList')(list)).toBe(true);
-    expect(list.as_of_ms).toBe(Date.UTC(2026, 10, 1));
+    const [sma, pivots] = results;
+    const points = sma?.result?.plots[0]?.points ?? [];
+    expect(points.at(-1)?.time_ms).toBe(Date.UTC(2026, 9, 1));
+    for (const point of points.slice(-24)) {
+      expect(new Date(point.time_ms).getUTCDate()).toBe(1);
+      expect(point.value).toEqual(expect.any(Number));
+    }
     // Pivot levels need a period above the chart bars.
-    expect(list.aois).toEqual([]);
-    const series = await client.getIndicatorSeries({
-      instrumentId: 'mock:perp:BTCUSD',
-      timeframe: '1M',
-      pluginId: 'sma',
-      settings: {length: 3},
-    });
-    expect(series.as_of_ms).toBe(Date.UTC(2026, 10, 1));
-    expect(series.points.at(-1)?.bar_start_ms).toBe(Date.UTC(2026, 9, 1));
-    for (const point of series.points.slice(-24)) {
-      expect(new Date(point.bar_start_ms).getUTCDate()).toBe(1);
-      expect(point.values.sma).toMatch(/^\d+(\.\d+)?$/);
-    }
-    const weekly = await client.getAois({
-      instrumentId: 'mock:perp:BTCUSD',
-      timeframe: '1w',
-    });
-    for (const aoi of weekly.aois) {
-      expect(aoi.confirmed_at_ms).toBe(timeframeEnd('1w', aoi.created_at_ms));
-    }
+    expect(
+      pivots?.result?.visuals?.filter(v => v.kind === 'line') ?? []
+    ).toEqual([]);
   });
 });
 
+/**
+ * Runs the volume delta built-in over DEMO candles.
+ * @param instrument Instrument id.
+ * @param tf Timeframe.
+ * @param inputs Input overrides.
+ * @return Plot values by name and the method table cell.
+ */
+async function delta(
+  instrument: string,
+  tf: '5m' | '1h' | '1M',
+  inputs: Record<string, unknown> = {}
+) {
+  const {results} = await studies.runBatch({
+    instrument_id: instrument,
+    tf,
+    limit: 200,
+    include_open: true,
+    runs: [{script_id: 'builtin:volume_delta', inputs: inputs}],
+  });
+  const result = results[0]?.result;
+  if (!result) throw new Error(results[0]?.error ?? 'no result');
+  const plots = Object.fromEntries(
+    result.plots.map(plot => [plot.name, plot.points.map(p => p.value)])
+  );
+  const table = result.visuals?.find(v => v.kind === 'table');
+  const rows = (table?.data.rows ?? []) as string[][];
+  return {plots, method: rows[0]?.[1]};
+}
+
 describe('DEMO volume delta', () => {
   it('publishes true delta with buy and sell volume from taker volume', async () => {
-    const series = await client.getIndicatorSeries({
-      instrumentId: 'mock:perp:BTCUSD',
-      timeframe: '5m',
-      pluginId: 'volume_delta',
-    });
-    expect(validator('indicators.schema.json', 'IndicatorSeries')(series)).toBe(
-      true
-    );
-    expect(series.points).toHaveLength(200);
-    for (const point of series.points) {
-      expect(point.values.method).toBe('taker_volume');
-      const buy = Number(point.values.buy_volume);
-      const sell = Number(point.values.sell_volume);
+    const {plots, method} = await delta('mock:perp:BTCUSD', '5m');
+    expect(method).toBe('Taker buy volume');
+    const pct = plots['Delta %'] ?? [];
+    expect(pct).toHaveLength(200);
+    pct.forEach((value, i) => {
+      const buy = plots['Buy volume']?.[i] ?? NaN;
+      const sell = plots['Sell volume']?.[i] ?? NaN;
       expect(buy).toBeGreaterThanOrEqual(0);
       expect(sell).toBeGreaterThanOrEqual(0);
-      const pct = Number(point.values.delta_pct);
-      expect(pct).toBeCloseTo(((buy - sell) / (buy + sell)) * 100, 1);
-      expect(Number(point.values.delta)).toBeCloseTo(buy - sell, 6);
-    }
-  });
-
-  it('falls back to the candle-direction estimate on request', async () => {
-    const series = await client.getIndicatorSeries({
-      instrumentId: 'mock:perp:BTCUSD',
-      timeframe: '1M',
-      pluginId: 'volume_delta',
-      settings: {delta_source: 'estimate'},
+      expect(value).toBeCloseTo(((buy - sell) / (buy + sell)) * 100, 6);
     });
-    expect(
-      series.points.every(p => p.values.method === 'candle_direction')
-    ).toBe(true);
-    expect(series.points.every(p => p.values.buy_volume === null)).toBe(true);
-    expect(series.as_of_ms).toBe(Date.UTC(2026, 10, 1));
   });
 
-  it('estimates when a candle has no taker volume', () => {
-    const spec = DEMO_INSTRUMENT_SPECS[1];
-    if (!spec) throw new Error('missing spec');
-    const candle = {
-      ...demoCandle(spec, '1h', Date.UTC(2026, 10, 20, 9), NOW),
-      taker_buy_base_volume: null,
-    };
-    expect(demoDeltaPoint(candle, false).values.method).toBe(
-      'candle_direction'
+  it('estimates from intrabars when venue buy volume is off', async () => {
+    const {plots, method} = await delta('mock:perp:BTCUSD', '1h', {
+      use_buy_volume: false,
+    });
+    expect(['Intrabar estimate', 'Insufficient intrabar coverage']).toContain(
+      method
     );
+    expect((plots.Intrabars ?? []).some(count => (count ?? 0) > 0)).toBe(true);
   });
 
-  it('offers the delta_source input in the plugin schema', async () => {
-    const list = await client.listIndicatorPlugins();
-    const delta = list.plugins.find(p => p.plugin_id === 'volume_delta');
-    const props = (delta?.input_schema as {properties: Record<string, unknown>})
-      .properties;
-    expect(props.delta_source).toMatchObject({
-      type: 'string',
-      enum: ['auto', 'estimate'],
-      default: 'auto',
-    });
+  it('labels classified trades on session stocks', async () => {
+    const {method} = await delta('mock:stock:ACME', '1h');
+    expect(method).toBe('Classified trades');
   });
 });

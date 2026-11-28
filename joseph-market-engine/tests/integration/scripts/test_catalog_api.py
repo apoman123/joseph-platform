@@ -52,7 +52,7 @@ def test_catalog_lists_builtins_with_public_source(
     )
     assert listing.status_code == 200
     scripts = {row["script_id"]: row for row in listing.json()["scripts"]}
-    assert scripts["builtin:ema"]["inputs"]["length"]["default"] == 9
+    assert scripts["builtin:ema"]["inputs"]["length"]["default"] == 20
     assert scripts["builtin:ema"]["source_available"] is True
     assert "source" not in scripts["builtin:ema"] or (
         scripts["builtin:ema"]["source"] is None

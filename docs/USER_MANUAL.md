@@ -53,18 +53,20 @@ cannot supply are disabled with the reason. Details:
 
 ### Indicator library
 
-Click **Indicators** to open the searchable library:
+Click **Indicators** to open the searchable picker:
 
-- **Default indicators** lists the built-in chart studies.
-- **My scripts** lists custom indicator plugins installed on the market engine.
+- **Built-ins** lists the engine's built-in indicators.
+- **Plugins** lists indicators from plugin packages the operator installed.
+- **My scripts** lists your own Python indicator, strategy and alert scripts.
 - **My collection** lists indicators saved with the star button. The collection
   is saved with the workspace and shared by its chart tabs.
 
-Select an indicator to show or hide it on the current chart. Its settings button
-opens the existing input, color and pane controls. Use the search field to match
-names or descriptions. Escape or the close button dismisses the library and
-returns focus to the toolbar. Chart options such as Volume, Session breaks and
-Data window remain available at the bottom of the dialog.
+Search matches names, categories and descriptions; with several categories a
+*Category* list narrows Built-ins or Plugins. **Add** puts a study on the
+current chart (add one more than once to compare settings). Escape or the
+close button dismisses the picker and returns focus to the toolbar. Chart
+options list the chart's studies with show/hide and settings, plus Volume,
+Session breaks and Data window.
 
 ### Data badges
 
@@ -84,7 +86,7 @@ Magenta marks are yours (drawings, draft orders); green and red show direction.
 - **Instrument:** click the symbol. Tabs: *All*, *Crypto*, *Taiwan stocks*, *US stocks*, *Bonds & rates*. Search by symbol (`BTC`, `2330`) or name (`台積電`). Each result is one venue's contract: `binance:perp:BTCUSDT` and `hyperliquid:perp:BTC` differ. *Delayed 15 min*: the deployment gets delayed data. *No API key*: the data source (Alpaca for US stocks) is not configured, so charts stay empty.
 - **Style and scale:** candles, bars, line, area, Heikin Ashi (display only, never used for signals); linear, logarithmic, percent. Hover over the right price scale and scroll to zoom prices vertically.
 - **Compare** up to 3 instruments on a left percentage axis.
-- **Bar replay:** click *Bar replay*, then a bar (or *Start 100 bars back*); step or play at 1–10 bars/s. Later bars are hidden, zones are as of the cursor bar and trading from that chart is off. *Back to live* ends it.
+- **Bar replay:** click *Bar replay*, then a bar (or *Start 100 bars back*); step or play at 1–10 bars/s. Later bars are hidden, studies show values up to the cursor bar and trading from that chart is off. *Back to live* ends it.
 - **Screenshot:** PNG with instrument, venue, timeframe, data badge and UTC time.
 
 ### Timeframes
@@ -128,31 +130,34 @@ Magenta marks are yours (drawings, draft orders); green and red show direction.
 - Click each point in order (drag for the brush); a polyline ends with a double-click or Esc. The **Objects** tab lists drawings and pattern ratios.
 - The **style bar** sets colour, width, line style, fill, extend, text, inputs, z-order, lock, hide and delete. *Magnet* snaps to OHLC (hold Ctrl to invert).
 - Drawings are saved per instrument by time and price; drawings of a removed tool are kept as unsupported.
-- **Engine studies** are computed by the engine, never the browser. *Anchored VWAP*: click one bar; *Band 1–3* add 0.5σ–3σ bands. *Regression channel*: click the first and last bar; *Deviations* 1σ–3σ, *Pearson's R*. They update on anchor moves and bar closes, follow replay and accept anchors up to 50,000 bars back; a refused anchor shows the engine's message.
+- **Engine studies** are computed by the engine, never the browser. *Anchored VWAP*: click one bar; *Band 1–3* add 0.5σ–3σ bands. *Regression channel*: click the first and last bar; *Deviations* 1σ–3σ, *Pearson's R*. They run the built-in *VWAP* and *Linear Regression Channel* scripts from the anchor bar, update on anchor moves and bar closes, follow replay and accept anchors up to 5,000 bars back; a farther anchor shows a notice instead of values drawn from the wrong bar.
 
 ## Indicators
 
-Indicators are computed by the market engine. *Indicators* lists the indicator plugins the engine serves, in its order: the built-ins first, then any plugin packages the operator installed, each drawn the way its plugin describes.
+Indicators are Python scripts run by the market engine, never by the browser: the built-ins, plugin indicators the operator installed and your own scripts all work the same way. A new chart starts with **EMA**, **Volume Delta** and **Pivot points**.
 
-| Built-in | Draws | Shown by default |
-|---|---|---|
-| EMA, SMA | Moving average line (default length 20) | EMA |
-| VWAP | Session VWAP with optional ±σ bands; also the *Anchored VWAP* drawing tool | — |
-| Bollinger Bands | Basis (SMA 20) and bands 2 standard deviations away | — |
-| RSI, ATR | Own pane; RSI with 70/50/30 lines | — |
-| Volume delta | The [*Delta %* pane](#delta) | Yes |
-| Pivot points | Floor pivots P, R1–R3 and S1–S3 from the previous day, week or month | Yes |
+| Built-in | Draws |
+|---|---|
+| EMA, SMA | Moving average line (default length 20) |
+| VWAP | VWAP restarting each session, week or month (or from a time) with optional ±σ bands; also the *Anchored VWAP* drawing tool |
+| Linear Regression Channel | Least-squares channel over the last bars or from an anchor; also the *Regression channel* drawing tool |
+| Bollinger Bands | Basis (SMA 20) and bands 2 standard deviations away, shaded between |
+| RSI, ATR | Own pane; RSI with its upper, middle and lower bands |
+| Volume Delta | The [*Delta %* pane](#delta) |
+| Pivot points | Floor pivots P, R1–R3 and S1–S3 of the previous day, week or month (*auto* picks the next period above the chart), drawn as labelled dashed lines for each period; the first touch of a level raises an alert on that bar |
 
-The regression channel is a drawing tool only.
+The **legend** at the chart's top left lists each study with its inputs (e.g. *EMA 20 close 0*):
 
-- ⚙ opens a layer's settings: engine inputs (validated by the engine), zone and level kinds, colours, markers and the plugin's panes.
-- The 4 newest zones per kind and side are drawn; *Show or hide ended zones* adds zones that have ended.
-- The same menu toggles *Volume*, *Session breaks* and the *Data window* (OHLC, change, volume, Delta %, compared closes, study values).
-- A layer from a plugin package follows that package's licence; ask your operator.
+- ⚙ opens its settings, generated from the inputs the script declares: inputs by group, then *Style* (colours and each plot's colour). *Reset to defaults* restores them. Settings apply to this chart only.
+- `{}` shows the public Python source of a built-in (plugin source stays protected) or opens your own script in the editor.
+- 👁 hides the study and keeps its settings; ✕ removes it.
+- An error (for example missing candles) is shown under the study's row.
+
+The *Data window* lists, besides OHLC, change, volume and compared closes, every visible study's values on the hovered bar, including values a script lists only there (such as the volume delta's buy and sell volume and coverage). A study from a plugin package follows that package's licence; ask your operator.
 
 ### Delta
 
-The *Delta %* pane shows each bar's buy minus sell volume as a share of its volume. Bars are **true** (solid, venue taker volume), **classified** (stocks: trades classified against the quote with Lee-Ready) or **estimate** (faint, candle direction); the data window's *Delta source* says which, and ⚙ *Volume delta* → *Delta source* can force *estimate*. Seconds bars and true delta need trade history:
+The *Delta %* pane shows each bar's buy minus sell volume as a share of its volume. Bars are **true** (solid: venue taker volume, or on stocks trades classified against the quote with Lee-Ready) or an **estimate** from lower-timeframe bars by candle direction (translucent); a table in the pane names the method and coverage of the last bar, and an estimate below the minimum intrabar count or volume coverage is left empty rather than guessed. Intrabars are fetched only for the bars on screen that need them. ⚙ *Volume Delta* → *Use venue buy volume* off forces the estimate; *Intrabar timeframe* picks its resolution. Seconds bars and true delta need trade history:
 
 | Venue | Trade history |
 |---|---|
@@ -229,7 +234,7 @@ Nothing in the browser enables live trading. The engine checks every order again
 
 - **Layout:** one chart, two side by side or stacked, four or eight; *Sync* crosshair, instrument, timeframe and viewport.
 - The workspace autosaves in the browser. ⌘K → *Export workspace as JSON* saves layout, chart settings and every instrument's drawings; *Import a workspace from a JSON file* (≤2 MB) replaces the layout and the drawings of instruments in the file. *Copy workspace share link* carries no drawings or account data.
-- **Chart templates** save style, scale, volume, layers and session breaks, never the instrument.
+- **Chart templates** save style, scale, volume, studies and session breaks, never the instrument.
 - **Pop-outs:** the window button opens a chart or the Market, Watchlist, Screener or Alerts panel in another window, which stays in sync with the main one. Closing it or *Bring back* docks it, as does a window that stops responding. Pop-outs survive a reload; after a browser restart, *Restore pop-outs* reopens them (one per click unless pop-ups are allowed) or *Keep here* docks them. Every window keeps the trading guards (Paper by default, no orders from replay).
 
 ## Keyboard shortcuts

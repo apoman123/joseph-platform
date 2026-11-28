@@ -38,11 +38,11 @@ services:
       JOSEPH_ENABLED_VENUES: ${JOSEPH_ENABLED_VENUES:-binance,bybit,okx,coinbase,kraken,deriv,twse,tpex,nasdaq,nyse,cboe,treasury}
       JOSEPH_DEMO_ONLY: ${JOSEPH_DEMO_ONLY:-false}
       JOSEPH_DATABASE_URL: ${JOSEPH_MARKET_DATABASE_URL:-sqlite:////app/var/market.db}
-      # Indicator plugins: entry points to load ("*", "none" or names),
-      # plugin ids to disable, and ids that must load or startup fails.
-      JOSEPH_INDICATOR_PLUGIN_PACKAGES: ${JOSEPH_INDICATOR_PLUGIN_PACKAGES:-*}
-      JOSEPH_INDICATOR_PLUGINS_DISABLED: ${JOSEPH_INDICATOR_PLUGINS_DISABLED:-}
-      JOSEPH_INDICATOR_PLUGINS_REQUIRED: ${JOSEPH_INDICATOR_PLUGINS_REQUIRED:-}
+      # Script plugins (joseph.scripts): entry points to load ("*", "none"
+      # or names), catalog ids to disable, ids that must load or startup fails.
+      JOSEPH_SCRIPT_PLUGIN_PACKAGES: ${JOSEPH_SCRIPT_PLUGIN_PACKAGES:-*}
+      JOSEPH_SCRIPT_PLUGINS_DISABLED: ${JOSEPH_SCRIPT_PLUGINS_DISABLED:-}
+      JOSEPH_SCRIPT_PLUGINS_REQUIRED: ${JOSEPH_SCRIPT_PLUGINS_REQUIRED:-}
       # US stocks (nasdaq/nyse/cboe) need an Alpaca market-data key.
       JOSEPH_ALPACA_KEY_ID: ${JOSEPH_ALPACA_KEY_ID:-}
       JOSEPH_ALPACA_SECRET_KEY: ${JOSEPH_ALPACA_SECRET_KEY:-}

@@ -387,7 +387,7 @@ const FILTERS: Readonly<
     );
     return inputs.position === 'below' ? price < level : price > level;
   },
-  'builtin:rsi': (ctx, inputs) => {
+  'builtin:rsi-range': (ctx, inputs) => {
     const length = Number(inputs.length);
     const bars = closed(ctx, length + 1);
     return compare(

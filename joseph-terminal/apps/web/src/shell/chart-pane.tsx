@@ -59,7 +59,7 @@ import {
   seriesAsOf,
 } from '@joseph/drawing-core';
 import {ids} from './ids';
-import {IndicatorLegend, usePythonStudies} from './python-studies';
+import {StudyLegend, useStudyRuns} from './python-studies';
 import {
   useCallback,
   useEffect,
@@ -71,12 +71,11 @@ import {
 } from 'react';
 import type {TerminalRuntime} from '../composition/runtime';
 import {toChartBar as candleToBar} from './chart-bars';
-import {
-  useCompare,
-  useDeltaPane,
-  useSessionSeparators,
-} from './chart-pane-hooks';
-import {ChartDataWindow} from './data-window';
+import {useCompare, useSessionSeparators} from './chart-pane-hooks';
+import {ChartDataWindow, studyDataRows} from './data-window';
+import {runDrawingScript} from './drawing-scripts';
+import {pythonState} from './python-state';
+import {studyName, useStudyCatalog} from './study-catalog';
 import {DrawingStyleBar} from './drawing-style-bar';
 import {
   displayTickSize,
@@ -94,7 +93,6 @@ import {useStore} from './react-bindings';
 import {ReplayBar} from './replay-bar';
 import {seriesCache, seriesKey} from './series-cache';
 import {useStrategyPreview} from './strategy-preview';
-import {useStudyLines, useStudyPanes} from './study-hooks';
 
 /** Bars requested on load. */
 const HISTORY_BARS = 500;
@@ -722,9 +720,9 @@ export function ChartPane({
         warning: t.warning,
       };
     };
-    // Engine-backed drawings request their values from the market engine.
+    // Engine-backed drawings run their built-in scripts on the engine.
     const series = new DrawingSeriesSync(store, runtime.tools, {
-      fetch: query => runtime.clients.market.getIndicatorSeries(query),
+      fetch: query => runDrawingScript(runtime, query),
       instrumentId: () => instrumentId,
       timeframe: () => timeframe,
       calendar: () => calendarRef.current,
@@ -790,18 +788,8 @@ export function ChartPane({
     };
   }, [port, instrumentId, timeframe, workspace.workspace_id, chartId, runtime]);
 
-  // Feature overlay layers. A layer is shown when its provider marks it
-  // visible and the chart has not hidden its indicator.
-  const layerVisibility = useMemo(
-    () =>
-      new Map(
-        chart.indicator_layers.map(layer => [
-          `indicator-viz:${layer.plugin_id}`,
-          layer.visible,
-        ])
-      ),
-    [chart.indicator_layers]
-  );
+  // Feature overlay layers, shown when their provider marks them visible.
+  const layerVisibility = useMemo(() => new Map<string, boolean>(), []);
   const visibilityRef = useRef(layerVisibility);
   visibilityRef.current = layerVisibility;
   const latestLayers = useRef(new Map<string, OverlayLayer>());
@@ -1020,16 +1008,17 @@ export function ChartPane({
     (id: string) => parseInstrumentId(id).venueMarketId,
     []
   );
-  const delta = useDeltaPane(port, chart, runtime, atMs);
-  const pythonErrors = usePythonStudies(
+  const studyErrors = useStudyRuns(
     port,
     chart,
     runtime,
-    shownRef.current.filter(bar => bar.final).at(-1)?.timeMs ?? null
+    shownRef.current.filter(bar => bar.final).at(-1)?.timeMs ?? null,
+    atMs,
+    barCount
   );
   useStrategyPreview(port, chart, runtime);
-  useStudyPanes(port, chart, runtime, atMs);
-  useStudyLines(port, chart, runtime, atMs);
+  const studyResults = useStore(pythonState(runtime).results);
+  const catalog = useStudyCatalog();
   const compare = useCompare(port, chart, runtime, symbolOf);
   useSessionSeparators(
     port,
@@ -1266,7 +1255,7 @@ export function ChartPane({
         data-testid="chart-canvas"
         data-replay={replay?.phase ?? 'off'}
       />
-      <IndicatorLegend chart={chart} errors={pythonErrors} />
+      <StudyLegend chart={chart} errors={studyErrors} />
       {dataWindow && status.phase === 'ready' && (
         <ChartDataWindow
           runtime={runtime}
@@ -1278,7 +1267,23 @@ export function ChartPane({
           instrument={instrument}
           previousClose={previousClose}
           tickSize={tickSize}
-          delta={delta.shown ? delta.bars : null}
+          studyRows={
+            shown
+              ? studyDataRows(
+                  chart,
+                  studyResults,
+                  shown.timeMs,
+                  id => {
+                    const study = chart.studies.find(s => s.study_id === id);
+                    return study ? studyName(catalog, study) : id;
+                  },
+                  atMs,
+                  instrument
+                    ? value => formatVolume(value, instrument)
+                    : undefined
+                )
+              : []
+          }
           compare={compare}
           label={symbolOf}
         />

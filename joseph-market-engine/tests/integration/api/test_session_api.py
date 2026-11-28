@@ -6,7 +6,6 @@
 from __future__ import annotations
 
 import datetime
-import json
 import zoneinfo
 from collections.abc import Callable
 from typing import Any
@@ -163,8 +162,8 @@ def test_demo_stock_endpoints_are_contract_valid(
     assert {c["taker_buy_method"] for c in hours["candles"]} == {"classified"}
 
 
-def test_anchored_vwap_series_over_http_reaches_far_anchors(
-    demo_client: testclient.TestClient, contract_validate: Validate
+def test_anchored_vwap_over_http_reaches_far_anchors(
+    demo_client: testclient.TestClient,
 ) -> None:
     """An ACME 5m anchored VWAP 2,500 session bars back is fully drawn."""
     batch = demo_client.get(
@@ -172,22 +171,28 @@ def test_anchored_vwap_series_over_http_reaches_far_anchors(
     ).json()
     newest = batch["candles"][-1]["start_ms"]
     anchor = sessions.XNYS.shift(timeframes.Timeframe.M5, newest, -2_500)
-    response = demo_client.get(
-        "/v1/indicators/series",
-        params={
+    response = demo_client.post(
+        "/v1/scripts/run-batch",
+        headers={"Authorization": "Bearer it-token-tenant-01"},
+        json={
             "instrument_id": ACME,
             "tf": "5m",
-            "plugin": "anchored_vwap",
             "from_ms": anchor,
-            "settings": json.dumps(
-                {"anchored_vwap": {"anchor": "time", "anchor_ms": anchor}}
-            ),
+            "limit": 5000,
+            "runs": [
+                {
+                    "script_id": "builtin:anchored_vwap",
+                    "inputs": {"anchor": "time", "anchor_ms": anchor},
+                }
+            ],
         },
     )
     assert response.status_code == 200, response.text
-    body = response.json()
-    contract_validate("indicators.schema.json", "IndicatorSeries", body)
-    points = body["points"]
-    assert len(points) >= 2_500
-    assert all(p["values"]["anchor_in_window"] for p in points)
-    assert points[0]["values"]["anchor_ms"] == points[0]["bar_start_ms"]
+    (entry,) = response.json()["results"]
+    assert entry["error"] is None, entry
+    plots = {plot["name"]: plot["points"] for plot in entry["result"]["plots"]}
+    counted = [point["value"] for point in plots["Bars"]]
+    assert counted[0] == 1
+    assert counted[-1] >= 2_500
+    assert plots["Bars"][0]["time_ms"] == anchor
+    assert all(point["value"] is not None for point in plots["VWAP"])

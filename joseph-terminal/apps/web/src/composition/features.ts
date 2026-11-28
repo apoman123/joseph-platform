@@ -17,7 +17,6 @@ import {
   drawingFeature,
   toolFeatures,
 } from '../features/drawing/drawing-feature';
-import {indicatorsFeature} from '../features/indicators/indicators-feature';
 import {marketInfoFeature} from '../features/market-info/market-info-feature';
 import {PORTFOLIO_FEATURE} from '../features/portfolio';
 import {SCREENER_FEATURE} from '../features/screener';
@@ -50,7 +49,6 @@ export function shellFeatures(runtime: TerminalRuntime): WebFeature[] {
     chartToolsFeature(runtime),
     drawingFeature(runtime),
     ...toolFeatures(runtime),
-    indicatorsFeature(runtime),
     marketInfoFeature(),
     dataHealthFeature(),
     pythonFeature(runtime),

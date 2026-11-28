@@ -20,7 +20,17 @@ import inspect
 import joseph_script
 
 MODULES: dict[str, tuple[str, ...]] = {
-    "indicators": ("sma", "ema"),
+    "indicators": (
+        "sma",
+        "ema",
+        "anchored_vwap",
+        "regression_channel",
+        "bollinger_bands",
+        "rsi",
+        "atr",
+        "volume_delta",
+        "pivot_points",
+    ),
     "strategies": (
         "ema_trend_long",
         "rsi_reversion_short",

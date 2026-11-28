@@ -26,6 +26,7 @@ import {composeFeatures} from '../composition/features';
 import {createRuntime, type TerminalRuntime} from '../composition/runtime';
 import {describeDrawing} from '../features/drawing/objects-panel';
 import {DataWindow, drawingDataRows} from './data-window';
+import {runDrawingScript} from './drawing-scripts';
 import {DrawingStyleBar} from './drawing-style-bar';
 import {RuntimeProvider} from './runtime-context';
 
@@ -92,7 +93,7 @@ async function mount(
   });
   store.execute(createCommand(doc));
   const series = new DrawingSeriesSync(store, runtime.tools, {
-    fetch: query => runtime.clients.market.getIndicatorSeries(query),
+    fetch: query => runDrawingScript(runtime, query),
     instrumentId: () => 'mock:perp:BTCUSD',
     timeframe: () => '5m',
     onChange: () => void runtime.drawing.revision.update(n => n + 1),
@@ -148,7 +149,6 @@ describe('engine-backed drawings in the shell', () => {
         timeframe="5m"
         previousClose={null}
         tickSize="0.1"
-        delta={null}
         compare={[]}
         label={id => id}
         drawingRows={rows}
@@ -159,7 +159,7 @@ describe('engine-backed drawings in the shell', () => {
     );
   });
 
-  it('draws anchors 2400 bars back (the engine computes up to 50 000)', async () => {
+  it('draws anchors 2400 bars back (a run reads up to 5 000)', async () => {
     const {runtime} = await mount('anchored-vwap', [barsBack(2400)]);
     const doc = runtime.drawing.stores.get('chart-1')?.find('d1');
     if (!doc) throw new Error('no drawing');
@@ -170,11 +170,11 @@ describe('engine-backed drawings in the shell', () => {
   });
 
   it('shows the engine message only when the engine refuses the anchor', async () => {
-    const {runtime} = await mount('anchored-vwap', [barsBack(50_000)], 'error');
+    const {runtime} = await mount('anchored-vwap', [barsBack(6000)], 'error');
     const doc = runtime.drawing.stores.get('chart-1')?.find('d1');
     if (!doc) throw new Error('no drawing');
     expect(describeDrawing(runtime, doc, 'chart-1').detail).toMatch(
-      /^The anchor is 50001 closed 5m bars back/
+      /^The anchor is before the bars the engine reads \(at most 5,000/
     );
     expect(
       drawingDataRows(runtime, 'chart-1', barsBack(1), null, null)
@@ -221,7 +221,7 @@ describe('engine-backed drawings in the shell', () => {
       target: {value: '2'},
     });
     expect(store.find(id)?.props).toMatchObject({band_1: '1', band_2: '2'});
-    expect(series.get(id)?.request.settings.band_2).toBe('2');
+    expect(series.get(id)?.request.inputs.band_2).toBe(2);
     await waitFor(() => void expect(series.get(id)?.status).toBe('ready'));
     store.undo();
     expect(store.find(id)?.props).toMatchObject({band_2: '0'});

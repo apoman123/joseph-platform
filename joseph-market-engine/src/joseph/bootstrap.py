@@ -10,10 +10,10 @@ layer and concrete adapters together. Run with::
 
 Wiring overview:
 
-* market data → ``MarketDataService`` (also the indicator ``CandleSource``);
-* indicators → ``IndicatorQueryService`` + ``/v1/indicators``, ``/v1/aois``;
-* Python scripts → ``ScriptService`` (catalog classes in process, tenant
-  source in the isolated runner); strategy backtests are script runs;
+* market data → ``MarketDataService``;
+* Python scripts → ``ScriptService`` (built-in and plugin indicators,
+  strategies, filters and alerts in process, tenant source in the isolated
+  runner); strategy backtests are script runs;
 * strategies → ``StrategyActivations`` (closed bars → Python strategy →
   signals);
 * signals → alert routing → durable outbox → ``OutboxWorker`` senders
@@ -43,7 +43,6 @@ from joseph.api import app as api_app
 from joseph.api import deps
 from joseph.api.routers import alerts as alerts_router
 from joseph.api.routers import heatmap as heatmap_router
-from joseph.api.routers import indicators as indicators_router
 from joseph.api.routers import script_jobs as script_jobs_router
 from joseph.api.routers import scripts as scripts_router
 from joseph.api.routers import signals as signals_router
@@ -52,11 +51,6 @@ from joseph.domain import clock as clock_lib
 from joseph.domain import events
 from joseph.domain import instruments
 from joseph.domain import market
-from joseph.indicators import catalog
-from joseph.indicators import discovery
-from joseph.indicators import registry_ticks
-from joseph.indicators import service as indicator_service
-from joseph.indicators.sdk import registry as plugin_registry
 from joseph.market_data.adapters import alpaca
 from joseph.market_data.adapters import bar_archive_sql
 from joseph.market_data.adapters import binance_vision
@@ -103,11 +97,9 @@ from joseph.signals.app import service as signal_service
 
 @dataclasses.dataclass
 class SignalStack:
-    """Indicator, signal and alert services.
+    """Signal and alert services.
 
     Attributes:
-        plugins: Indicator plugin registry.
-        indicator_queries: Point-in-time indicator query service.
         signals: Signal history service.
         dispatcher: Alert dispatcher (signal publisher).
         outbox_worker: Alert delivery worker.
@@ -115,8 +107,6 @@ class SignalStack:
         http_client: HTTP client used by alert senders.
     """
 
-    plugins: plugin_registry.PluginRegistry
-    indicator_queries: indicator_service.IndicatorQueryService
     signals: signal_service.SignalService
     dispatcher: alert_dispatcher.AlertDispatcher
     outbox_worker: alert_dispatcher.OutboxWorker
@@ -135,8 +125,8 @@ class Container:
         registry: Instrument registry.
         store: Candle store.
         router: Feed router.
-        market_data: Market-data service (also the indicator CandleSource).
-        stream_hub: Resumable stream hub (publish ``aois``/``signals`` here).
+        market_data: Market-data service.
+        stream_hub: Resumable stream hub (publish ``signals`` here).
         event_bus: In-process domain-event bus.
         engine: SQLAlchemy engine.
         outbox: Transactional outbox.
@@ -144,7 +134,7 @@ class Container:
         authenticator: Bearer-token authenticator.
         metrics: Metrics registry.
         replay: Optional replay source.
-        signal_stack: Indicator/strategy/signal/alert services.
+        signal_stack: Signal and alert services.
         closers: Close hooks that ``aclose`` runs last, before disposing of
             the database engine; a hook may return an awaitable, which is
             awaited.
@@ -650,7 +640,7 @@ def _senders(
 
 
 def build_signal_stack(container: Container) -> SignalStack:
-    """Wires indicators, signals and alerts.
+    """Wires signals and alerts.
 
     Creates the signal and alert tables when they are missing, and
     an HTTP client for the alert senders that ``Container.aclose`` closes.
@@ -668,13 +658,6 @@ def build_signal_stack(container: Container) -> SignalStack:
     )
     signals_sql.create_schema(engine)
     alerts_sql.create_schema(engine)
-    plugins, _ = catalog.build_registry(
-        discovery.DiscoveryConfig(
-            packages=settings.indicator_plugin_packages,
-            disabled=settings.indicator_plugins_disabled,
-            required=settings.indicator_plugins_required,
-        )
-    )
     signals = signal_service.SignalService(
         signals_sql.SqlSignalRepository(engine)
     )
@@ -698,18 +681,7 @@ def build_signal_stack(container: Container) -> SignalStack:
         senders,
         clock,
     )
-    tick_sizes = registry_ticks.RegistryTickSizes(container.registry, clock)
     return SignalStack(
-        plugins=plugins,
-        indicator_queries=indicator_service.IndicatorQueryService(
-            container.market_data,
-            plugins,
-            clock,
-            indicator_service.QueryConfig(
-                max_anchored_bars=settings.max_anchored_bars
-            ),
-            tick_sizes=tick_sizes,
-        ),
         signals=signals,
         dispatcher=dispatcher,
         outbox_worker=worker,
@@ -732,10 +704,9 @@ def signal_routers(stack: SignalStack) -> list[fastapi.APIRouter]:
         stack: Signal stack.
 
     Returns:
-        Indicator, signal and alert-subscription routers.
+        Signal and alert-subscription routers.
     """
     return [
-        indicators_router.build_router(stack.indicator_queries, stack.plugins),
         signals_router.build_router(
             signals=stack.signals, get_principal=deps.get_principal
         ),

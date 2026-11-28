@@ -5,36 +5,44 @@
  */
 
 /**
- * @fileoverview Candles first: indicator series and AOI requests wait while
- * chart candles are loading (for a bounded time), so a chart's own history
- * is not queued behind study work in the browser's connection pool or the
- * engine's venue rate limits.
+ * @fileoverview Candles first: study runs wait while chart candles are
+ * loading (for a bounded time), so a chart's own history is not queued
+ * behind study work in the browser's connection pool or the engine's venue
+ * rate limits.
  */
 
-import type {MarketDataClient} from '@joseph/contracts';
+import type {MarketDataClient, StudyClient} from '@joseph/contracts';
 
 /** Longest wait of a study request for pending candles (3 s). */
 export const HISTORY_FIRST_MAX_WAIT_MS = 3_000;
 
-/** Methods the wrapper replaces. */
-type Gated = Pick<
-  MarketDataClient,
-  'getCandles' | 'getIndicatorSeries' | 'getAois'
->;
+/** A shared gate between candle requests and study runs. */
+export interface HistoryFirst {
+  /**
+   * Wraps a market client whose candle requests hold study runs back.
+   * @param market Client to wrap; other methods are forwarded unchanged.
+   * @return Client with the same interface.
+   */
+  market(market: MarketDataClient): MarketDataClient;
+  /**
+   * Wraps a study client whose batched runs wait for pending candles.
+   * @param studies Client to wrap; the catalog calls are not delayed.
+   * @return Client with the same interface.
+   */
+  studies(studies: StudyClient): StudyClient;
+}
 
 /**
- * Wraps a market client so study requests yield to candle requests.
- * @param market Client to wrap; every other method is forwarded unchanged.
- * @param maxWaitMs Longest wait of one study request, in milliseconds.
- * @return Client with the same interface.
+ * Creates the candles-first gate.
+ * @param maxWaitMs Longest wait of one study run, in milliseconds.
+ * @return The gate's client wrappers.
  */
 export function historyFirst(
-  market: MarketDataClient,
   maxWaitMs = HISTORY_FIRST_MAX_WAIT_MS
-): MarketDataClient {
+): HistoryFirst {
   let pending = 0;
   const waiters = new Set<() => void>();
-  /** Releases the waiting study requests once no candles are pending. */
+  /** Releases the waiting study runs once no candles are pending. */
   const settle = (): void => {
     pending -= 1;
     if (pending > 0) return;
@@ -59,29 +67,35 @@ export function historyFirst(
           const timer = setTimeout(wake, maxWaitMs);
           waiters.add(wake);
         });
-  const gated: Gated = {
-    getCandles: query => {
-      pending += 1;
-      let request: Promise<Awaited<ReturnType<Gated['getCandles']>>>;
-      try {
-        request = market.getCandles(query);
-      } catch (error) {
-        settle();
-        throw error;
-      }
-      return request.finally(settle);
+  return {
+    market(market) {
+      const getCandles: MarketDataClient['getCandles'] = query => {
+        pending += 1;
+        let request: ReturnType<MarketDataClient['getCandles']>;
+        try {
+          request = market.getCandles(query);
+        } catch (error) {
+          settle();
+          throw error;
+        }
+        return request.finally(settle);
+      };
+      return new Proxy(market, {
+        get(target, property, receiver): unknown {
+          if (property === 'getCandles') return getCandles;
+          const value: unknown = Reflect.get(target, property, receiver);
+          return typeof value === 'function'
+            ? (value as (...args: unknown[]) => unknown).bind(target)
+            : value;
+        },
+      });
     },
-    getIndicatorSeries: query =>
-      idle().then(() => market.getIndicatorSeries(query)),
-    getAois: query => idle().then(() => market.getAois(query)),
+    studies(studies) {
+      return {
+        catalog: kind => studies.catalog(kind),
+        catalogScript: id => studies.catalogScript(id),
+        runBatch: body => idle().then(() => studies.runBatch(body)),
+      };
+    },
   };
-  return new Proxy(market, {
-    get(target, property, receiver): unknown {
-      if (property in gated) return gated[property as keyof Gated];
-      const value: unknown = Reflect.get(target, property, receiver);
-      return typeof value === 'function'
-        ? (value as (...args: unknown[]) => unknown).bind(target)
-        : value;
-    },
-  });
 }

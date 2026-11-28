@@ -6,23 +6,29 @@
 
 /**
  * @fileoverview Data window: values of the bar under the crosshair (OHLCV,
- * change, when the bar closes, the engine's Delta % with whether it is the
- * true delta or an estimate, and compared closes) plus the engine values of
- * engine-backed drawings (anchored VWAP, regression channel). Display only.
+ * change, when the bar closes and compared closes), the plot values of the
+ * chart's visible studies on that bar (including values scripts list only
+ * in the data window, such as the volume delta's coverage) and the engine
+ * values of engine-backed drawings (anchored VWAP, regression channel).
+ * Display only.
  */
 
 'use client';
 import type {ChartBar} from '@joseph/chart-core';
-import type {BarCalendar, Instrument, Timeframe} from '@joseph/contracts';
+import type {
+  BarCalendar,
+  ChartState,
+  Instrument,
+  ScriptResult,
+  Timeframe,
+} from '@joseph/contracts';
 import {seriesAsOf} from '@joseph/drawing-core';
-import {DELTA_METHOD_LABELS} from '@joseph/indicator-viz';
 import type {ReactElement} from 'react';
 import type {TerminalRuntime} from '../composition/runtime';
-import type {CompareEntry, DeltaByTime} from './chart-pane-hooks';
+import type {CompareEntry} from './chart-pane-hooks';
 import {
   formatBarClose,
   formatBarTime,
-  formatDecimal,
   formatInstrumentPrice,
   formatNumber,
   formatPrice,
@@ -39,6 +45,59 @@ export interface DrawingRow {
   label: string;
   /** Formatted value. */
   value: string;
+  /** Optional tone class, e.g. `j-pos`. */
+  tone?: string;
+}
+
+/**
+ * Collects the plot values of a chart's visible studies on one bar.
+ * @param chart Chart whose studies are read.
+ * @param results Latest results by `<chart id>:<study id>`.
+ * @param barTimeMs Start of the bar under the crosshair, UTC ms.
+ * @param names Legend name of each study.
+ * @param atMs Replay as-of time, or null when live.
+ * @param volume Formats volume plots (names containing "volume"), e.g. in
+ *     board lots; plain numbers when absent.
+ * @return Rows labelled `<study> <plot>` (the plot alone when they match);
+ *     signed values of percentage plots carry a tone.
+ */
+export function studyDataRows(
+  chart: ChartState,
+  results: Readonly<Record<string, ScriptResult>>,
+  barTimeMs: number,
+  names: (studyId: string) => string,
+  atMs: number | null,
+  volume?: (value: number) => string
+): DrawingRow[] {
+  const rows: DrawingRow[] = [];
+  if (atMs !== null && barTimeMs >= atMs) return rows;
+  for (const study of chart.studies) {
+    if (!study.visible) continue;
+    const result = results[`${chart.chart_id}:${study.study_id}`];
+    if (!result) continue;
+    const name = names(study.study_id);
+    for (const plot of result.plots) {
+      const point = plot.points.find(item => item.time_ms === barTimeMs);
+      if (!point) continue;
+      const value = point.value;
+      const percent = plot.name.endsWith('%');
+      const text =
+        value === null
+          ? '—'
+          : volume && /volume/i.test(plot.name)
+            ? volume(value)
+            : `${formatNumber(value, Number.isInteger(value) ? 0 : percent || Math.abs(value) >= 1000 ? 2 : 4)}${percent ? '%' : ''}`;
+      rows.push({
+        key: `study:${study.study_id}:${plot.name}`,
+        label: plot.name === name ? name : `${name} ${plot.name}`,
+        value: text,
+        ...(percent && value !== null
+          ? {tone: value >= 0 ? 'j-pos' : 'j-neg'}
+          : {}),
+      });
+    }
+  }
+  return rows;
 }
 
 /** Data window props. */
@@ -55,8 +114,8 @@ export interface DataWindowProps {
   previousClose: number | null;
   /** Tick size for price precision while the instrument is unknown. */
   tickSize: string | null;
-  /** Engine delta bars by bar start, when the pane is shown. */
-  delta: DeltaByTime | null;
+  /** Values of the chart's visible studies on the bar. */
+  studyRows?: readonly DrawingRow[];
   /** Compared instruments. */
   compare: readonly CompareEntry[];
   /** Display label per compared instrument. */
@@ -78,9 +137,9 @@ export function DataWindow({
   instrument = null,
   previousClose,
   tickSize,
-  delta,
   compare,
   label,
+  studyRows = [],
   drawingRows = [],
 }: DataWindowProps): ReactElement {
   const price = (value: number | undefined) =>
@@ -97,8 +156,6 @@ export function DataWindow({
     bar && previousClose
       ? ((bar.close - previousClose) / previousClose) * 100
       : null;
-  const deltaBar = bar ? delta?.get(bar.timeMs) : undefined;
-  const deltaValue = deltaBar?.value;
   // Rows are [label, value, tone class, React key, tooltip].
   const rows: Array<[string, string, string?, string?, string?]> = bar
     ? [
@@ -125,32 +182,6 @@ export function DataWindow({
         ['Closes', formatBarClose(timeframe, bar.timeMs, calendar)],
       ]
     : [];
-  if (bar && delta) {
-    rows.push([
-      'Delta %',
-      deltaValue === undefined ? '—' : `${formatNumber(deltaValue, 2)}%`,
-      deltaValue === undefined
-        ? undefined
-        : deltaValue >= 0
-          ? 'j-pos'
-          : 'j-neg',
-    ]);
-    if (deltaBar) {
-      rows.push([
-        'Delta source',
-        DELTA_METHOD_LABELS[deltaBar.method],
-        deltaBar.method === 'estimate' ? 'j-muted' : undefined,
-      ]);
-      if (deltaBar.buyVolume !== null && deltaBar.sellVolume !== null) {
-        const volume = (value: string) =>
-          instrument
-            ? formatVolume(Number(value), instrument)
-            : formatDecimal(value, 2);
-        rows.push(['Buy volume', volume(deltaBar.buyVolume), 'j-pos']);
-        rows.push(['Sell volume', volume(deltaBar.sellVolume), 'j-neg']);
-      }
-    }
-  }
   // Yields have no volume: their volume row has an empty label.
   const visible = rows.filter(([name]) => name !== '');
   rows.splice(0, rows.length, ...visible);
@@ -165,8 +196,8 @@ export function DataWindow({
           : formatNumber(value, 4),
     ]);
   }
-  for (const row of drawingRows) {
-    rows.push([row.label, row.value, undefined, row.key]);
+  for (const row of [...studyRows, ...drawingRows]) {
+    rows.push([row.label, row.value, row.tone, row.key]);
   }
   return (
     <aside
@@ -227,6 +258,8 @@ export interface ChartDataWindowProps extends DataWindowProps {
   chartId: string;
   /** Replay as-of time, or null when live. */
   atMs: number | null;
+  /** Rows of the chart's studies on the bar. */
+  studyRows?: readonly DrawingRow[];
 }
 
 /**

@@ -15,7 +15,7 @@ How the built platform differs from its original, unpublished design plan (V5): 
 | # | Original plan | Built | Why |
 |---|---|---|---|
 | D3 | `packages/drawing-tools/*/` as separate packages | One `@joseph/drawing-tools` package, one directory per tool; cross-tool imports forbidden | Same removability with 1 package instead of 13 |
-| D4 | `chart-indicators`, `indicator-viz-core` + `indicator-viz/*` | One `@joseph/indicator-viz` that maps backend records to declarative `OverlayLayer`s | Data-driven rendering; per-plugin modules stay separable |
+| D4 | `chart-indicators`, `indicator-viz-core` + `indicator-viz/*` | No indicator-specific renderer: every study is a script result (plots and declarative drawings) drawn by one painter ([ADR 0011](adr/0011-indicators-are-joseph-script-classes.md)) | Built-in, plugin and own indicators render the same way; nothing in the terminal names an indicator |
 | D5 | React UI inside `strategy-builder` / `chart-trading` | Framework-free packages; React views in `apps/web/src/features/*` | Logic is reusable and testable without a DOM |
 | D6 | Features draw through `ChartEngineAdapter` methods | Features publish declarative layers (`price-line`, `box`, `marker`) through `FeatureContext.chartLayers`; only `chart-core` touches Lightweight Charts | Features cannot change chart state, a rule the plan's architecture tests check |
 
@@ -41,7 +41,7 @@ How the built platform differs from its original, unpublished design plan (V5): 
 
 | # | Original plan | Built | Why |
 |---|---|---|---|
-| D13 | Indicators inside the market engine (`plugins/<id>`) | Nine generic built-ins in `joseph/indicators/builtin/` (TradingView built-in semantics); every other indicator is a plugin package discovered through the entry-point group `joseph.indicator_plugins` and described by its own metadata ([ADR 0009](adr/0009-external-indicator-library.md)) | "平台歸平台，指標歸指標" (the platform is a platform, indicators are indicators): the public platform builds and runs without private code or strategy-specific vocabulary, and indicator packages evolve and are licensed on their own |
+| D13 | Indicators inside the market engine (`plugins/<id>`) | Nine generic built-ins, `joseph_script.Indicator` classes in `joseph/scripts/builtin/indicators/` (TradingView built-in semantics); every other indicator is an `Indicator` class from a plugin package loaded through the entry-point group `joseph.scripts`, or a user's own script ([ADR 0011](adr/0011-indicators-are-joseph-script-classes.md), superseding ADR 0009) | "平台歸平台，指標歸指標" (the platform is a platform, indicators are indicators): the public platform builds and runs without private code or strategy-specific vocabulary, and indicator packages evolve and are licensed on their own |
 | D18 | CI fetches private indicator code over SSH | No private access in CI: tests use the built-ins. Images take plugin packages from the build arg `PLUGIN_REQUIREMENTS` (CI: variable `MARKET_PLUGIN_REQUIREMENTS`) with the optional BuildKit secret `plugin_git_token` (CI: secret `PLUGIN_GIT_TOKEN`, a read-only token) | Forks run every job; operators choose plugins by configuration; credentials reach only the one build step |
 
 ## Live trading

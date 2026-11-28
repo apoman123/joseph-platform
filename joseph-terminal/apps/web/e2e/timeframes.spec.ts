@@ -43,8 +43,9 @@ test('charts seconds and monthly bars with a countdown and true delta', async ({
   await hoverChart(page);
   const data = page.getByTestId('data-window');
   await expect(data).toContainText(/\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2} UTC/);
-  await expect(data).toContainText('True (taker volume)');
-  await expect(data).toContainText('Buy volume');
+  await expect(data).toContainText(/Delta %\s*[−+-]?\d/);
+  await expect(data).toContainText('Delta % Buy volume');
+  await expect(data).toContainText('Delta % Coverage %100%');
   // Let the panes repaint before the screenshot.
   await page.waitForTimeout(300);
   await page.screenshot({path: `${SHOTS}/24-seconds-true-delta.png`});

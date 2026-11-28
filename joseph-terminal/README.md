@@ -11,7 +11,7 @@ corepack enable && pnpm install
 pnpm dev          # http://localhost:3000
 ```
 
-With no backend configured, the terminal runs in **DEMO mode**: synthetic perpetuals, stocks, bond ETFs and a yield on the `mock` venue, generated in the browser, and a simulated paper broker. Every chart is labelled *Demo data*, and every panel works: drawing, indicator layers, screener, strategies, alerts, backtests, paper trading. `?demo-live-rehearsal=1` adds a simulated account to rehearse LIVE arming (code `123456`).
+With no backend configured, the terminal runs in **DEMO mode**: synthetic perpetuals, stocks, bond ETFs and a yield on the `mock` venue, generated in the browser, and a simulated paper broker. Every chart is labelled *Demo data*, and every panel works: drawing, built-in indicator studies, screener, strategies, alerts, backtests, paper trading. `?demo-live-rehearsal=1` adds a simulated account to rehearse LIVE arming (code `123456`).
 
 ## Connect to the engines
 
@@ -46,7 +46,6 @@ The `Dockerfile` builds a standalone image on port 3000; pass the same variables
 | `feature-registry` | Feature manifests, lifecycle, dependencies, the `FeatureContext` |
 | `chart-core` | `ChartPort` and the Lightweight Charts adapter (its only importer) |
 | `drawing-core`, `drawing-tools` | Anchored drawings, undo, migrations, engine-series sync; 37 tools |
-| `indicator-viz` | Render-only mapping of engine indicator outputs (zones, levels, events, lines, panes) to overlays, styled by each plugin's display metadata |
 | `terminal-shell` | Workspace, sync, sessions, persistence, hotkeys |
 | `chart-trading` | Order-ticket state machine |
 | `mock-provider` | DEMO market, broker and strategy services |

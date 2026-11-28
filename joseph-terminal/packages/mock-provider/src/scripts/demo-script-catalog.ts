@@ -423,7 +423,7 @@ export const DEMO_SCRIPT_CATALOG: readonly CatalogScript[] = [
     metrics: [],
   },
   {
-    script_id: 'builtin:rsi',
+    script_id: 'builtin:rsi-range',
     kind: 'filter',
     origin: 'builtin',
     package: null,
@@ -479,7 +479,7 @@ export const DEMO_SCRIPT_CATALOG: readonly CatalogScript[] = [
     requests: {},
     source_available: true,
     source_hash:
-      '23aaf43388c0180c62e0351dbfcc39ea52f2f1d76ea917f2f41c0a037a346d34',
+      '3052188ebab9b6d881505338543fef471ee3cfeabb47f7ccbff6b0db8ae16a1f',
     enabled: true,
     metrics: [],
   },

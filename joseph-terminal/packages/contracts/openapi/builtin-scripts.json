@@ -1,0 +1,2182 @@
+{
+  "scripts": [
+    {
+      "script_id": "builtin:sma",
+      "kind": "indicator",
+      "origin": "builtin",
+      "package": null,
+      "package_version": null,
+      "title": "Moving Average Simple",
+      "short_title": "SMA",
+      "description": "Simple moving average: the mean of the source price over the last length bars; empty until length bars exist.",
+      "category": "Moving averages",
+      "overlay": true,
+      "inputs": {
+        "length": {
+          "default": 20,
+          "title": "Length",
+          "minimum": 1.0,
+          "maximum": 5000.0,
+          "options": null,
+          "step": 1.0,
+          "group": "",
+          "tooltip": ""
+        },
+        "source": {
+          "default": "close",
+          "title": "Source",
+          "minimum": null,
+          "maximum": null,
+          "options": [
+            "open",
+            "high",
+            "low",
+            "close",
+            "hl2",
+            "hlc3",
+            "ohlc4"
+          ],
+          "step": null,
+          "group": "",
+          "tooltip": ""
+        },
+        "offset": {
+          "default": 0,
+          "title": "Offset",
+          "minimum": -500.0,
+          "maximum": 500.0,
+          "options": null,
+          "step": null,
+          "group": "",
+          "tooltip": ""
+        },
+        "color": {
+          "default": "#2962ff",
+          "title": "Color",
+          "minimum": null,
+          "maximum": null,
+          "options": null,
+          "step": null,
+          "group": "Style",
+          "tooltip": ""
+        }
+      },
+      "requests": {},
+      "source_available": true,
+      "source_hash": "b02c46663af852770256822f98deca5055bd3c93aaa2ed02fe0bc92042c8221d",
+      "enabled": true,
+      "source": null,
+      "metrics": []
+    },
+    {
+      "script_id": "builtin:ema",
+      "kind": "indicator",
+      "origin": "builtin",
+      "package": null,
+      "package_version": null,
+      "title": "Moving Average Exponential",
+      "short_title": "EMA",
+      "description": "Exponential moving average with alpha 2 / (length + 1), seeded with the first source value.",
+      "category": "Moving averages",
+      "overlay": true,
+      "inputs": {
+        "length": {
+          "default": 20,
+          "title": "Length",
+          "minimum": 1.0,
+          "maximum": 5000.0,
+          "options": null,
+          "step": 1.0,
+          "group": "",
+          "tooltip": ""
+        },
+        "source": {
+          "default": "close",
+          "title": "Source",
+          "minimum": null,
+          "maximum": null,
+          "options": [
+            "open",
+            "high",
+            "low",
+            "close",
+            "hl2",
+            "hlc3",
+            "ohlc4"
+          ],
+          "step": null,
+          "group": "",
+          "tooltip": ""
+        },
+        "offset": {
+          "default": 0,
+          "title": "Offset",
+          "minimum": -500.0,
+          "maximum": 500.0,
+          "options": null,
+          "step": null,
+          "group": "",
+          "tooltip": ""
+        },
+        "color": {
+          "default": "#2962ff",
+          "title": "Color",
+          "minimum": null,
+          "maximum": null,
+          "options": null,
+          "step": null,
+          "group": "Style",
+          "tooltip": ""
+        }
+      },
+      "requests": {},
+      "source_available": true,
+      "source_hash": "2bca8b96ddb3e3f46e504b0d8e44067e159fed881c8e1230fdd7c18ea79b171b",
+      "enabled": true,
+      "source": null,
+      "metrics": []
+    },
+    {
+      "script_id": "builtin:anchored_vwap",
+      "kind": "indicator",
+      "origin": "builtin",
+      "package": null,
+      "package_version": null,
+      "title": "Volume Weighted Average Price",
+      "short_title": "VWAP",
+      "description": "Volume-weighted average price from a session, week, month or a chosen bar, with up to three standard-deviation bands.",
+      "category": "Volume",
+      "overlay": true,
+      "inputs": {
+        "anchor": {
+          "default": "session",
+          "title": "Anchor period",
+          "minimum": null,
+          "maximum": null,
+          "options": [
+            "session",
+            "week",
+            "month",
+            "time"
+          ],
+          "step": null,
+          "group": "",
+          "tooltip": ""
+        },
+        "anchor_ms": {
+          "default": 0,
+          "title": "Anchor time",
+          "minimum": 0.0,
+          "maximum": 4102444800000.0,
+          "options": null,
+          "step": null,
+          "group": "",
+          "tooltip": "UTC milliseconds of the anchor bar when anchor is time."
+        },
+        "source": {
+          "default": "hlc3",
+          "title": "Source",
+          "minimum": null,
+          "maximum": null,
+          "options": [
+            "hlc3",
+            "close",
+            "hl2",
+            "ohlc4"
+          ],
+          "step": null,
+          "group": "",
+          "tooltip": ""
+        },
+        "band_1": {
+          "default": 1.0,
+          "title": "Band 1 multiplier",
+          "minimum": 0.0,
+          "maximum": 10.0,
+          "options": null,
+          "step": 0.5,
+          "group": "",
+          "tooltip": ""
+        },
+        "band_2": {
+          "default": 0.0,
+          "title": "Band 2 multiplier",
+          "minimum": 0.0,
+          "maximum": 10.0,
+          "options": null,
+          "step": 0.5,
+          "group": "",
+          "tooltip": ""
+        },
+        "band_3": {
+          "default": 0.0,
+          "title": "Band 3 multiplier",
+          "minimum": 0.0,
+          "maximum": 10.0,
+          "options": null,
+          "step": 0.5,
+          "group": "",
+          "tooltip": ""
+        },
+        "color": {
+          "default": "#2962ff",
+          "title": "VWAP",
+          "minimum": null,
+          "maximum": null,
+          "options": null,
+          "step": null,
+          "group": "Style",
+          "tooltip": ""
+        },
+        "band_color": {
+          "default": "#4caf50",
+          "title": "Bands",
+          "minimum": null,
+          "maximum": null,
+          "options": null,
+          "step": null,
+          "group": "Style",
+          "tooltip": ""
+        }
+      },
+      "requests": {},
+      "source_available": true,
+      "source_hash": "bd2af854a40633a82da5a685a1637e3f4379e87dbe4c4bf52e65750b210abe2f",
+      "enabled": true,
+      "source": null,
+      "metrics": []
+    },
+    {
+      "script_id": "builtin:regression_channel",
+      "kind": "indicator",
+      "origin": "builtin",
+      "package": null,
+      "package_version": null,
+      "title": "Linear Regression Channel",
+      "short_title": "LinReg",
+      "description": "Least-squares trend line with standard-deviation bands and Pearson's R, over the last bars or from an anchor bar.",
+      "category": "Trend",
+      "overlay": true,
+      "inputs": {
+        "length": {
+          "default": 100,
+          "title": "Length",
+          "minimum": 2.0,
+          "maximum": 5000.0,
+          "options": null,
+          "step": 1.0,
+          "group": "",
+          "tooltip": ""
+        },
+        "anchor_ms": {
+          "default": 0,
+          "title": "Anchor time",
+          "minimum": 0.0,
+          "maximum": 4102444800000.0,
+          "options": null,
+          "step": null,
+          "group": "",
+          "tooltip": "UTC milliseconds of the first bar; 0 uses length."
+        },
+        "end_ms": {
+          "default": 0,
+          "title": "End time",
+          "minimum": 0.0,
+          "maximum": 4102444800000.0,
+          "options": null,
+          "step": null,
+          "group": "",
+          "tooltip": "UTC milliseconds of the last bar; 0 is the latest bar."
+        },
+        "source": {
+          "default": "close",
+          "title": "Source",
+          "minimum": null,
+          "maximum": null,
+          "options": [
+            "close",
+            "hl2",
+            "hlc3",
+            "ohlc4"
+          ],
+          "step": null,
+          "group": "",
+          "tooltip": ""
+        },
+        "deviations": {
+          "default": 2.0,
+          "title": "Deviations",
+          "minimum": 0.0,
+          "maximum": 10.0,
+          "options": null,
+          "step": 0.5,
+          "group": "",
+          "tooltip": ""
+        },
+        "show_pearson": {
+          "default": true,
+          "title": "Show Pearson's R",
+          "minimum": null,
+          "maximum": null,
+          "options": null,
+          "step": null,
+          "group": "",
+          "tooltip": ""
+        },
+        "color": {
+          "default": "#2962ff",
+          "title": "Line",
+          "minimum": null,
+          "maximum": null,
+          "options": null,
+          "step": null,
+          "group": "Style",
+          "tooltip": ""
+        },
+        "band_color": {
+          "default": "#ef5350",
+          "title": "Bands",
+          "minimum": null,
+          "maximum": null,
+          "options": null,
+          "step": null,
+          "group": "Style",
+          "tooltip": ""
+        }
+      },
+      "requests": {},
+      "source_available": true,
+      "source_hash": "7c8b570b8bf1e3462d2a224e149438f5fa417e7fe9937cbff48879c35dcb5488",
+      "enabled": true,
+      "source": null,
+      "metrics": []
+    },
+    {
+      "script_id": "builtin:bollinger_bands",
+      "kind": "indicator",
+      "origin": "builtin",
+      "package": null,
+      "package_version": null,
+      "title": "Bollinger Bands",
+      "short_title": "BB",
+      "description": "Simple moving average of the source price with bands mult population standard deviations above and below it.",
+      "category": "Volatility",
+      "overlay": true,
+      "inputs": {
+        "length": {
+          "default": 20,
+          "title": "Length",
+          "minimum": 1.0,
+          "maximum": 5000.0,
+          "options": null,
+          "step": 1.0,
+          "group": "",
+          "tooltip": ""
+        },
+        "source": {
+          "default": "close",
+          "title": "Source",
+          "minimum": null,
+          "maximum": null,
+          "options": [
+            "close",
+            "open",
+            "high",
+            "low",
+            "hl2",
+            "hlc3",
+            "ohlc4"
+          ],
+          "step": null,
+          "group": "",
+          "tooltip": ""
+        },
+        "mult": {
+          "default": 2.0,
+          "title": "StdDev",
+          "minimum": 0.001,
+          "maximum": 50.0,
+          "options": null,
+          "step": 0.1,
+          "group": "",
+          "tooltip": ""
+        },
+        "offset": {
+          "default": 0,
+          "title": "Offset",
+          "minimum": -500.0,
+          "maximum": 500.0,
+          "options": null,
+          "step": null,
+          "group": "",
+          "tooltip": ""
+        },
+        "basis_color": {
+          "default": "#ff6d00",
+          "title": "Basis",
+          "minimum": null,
+          "maximum": null,
+          "options": null,
+          "step": null,
+          "group": "Style",
+          "tooltip": ""
+        },
+        "upper_color": {
+          "default": "#2962ff",
+          "title": "Upper",
+          "minimum": null,
+          "maximum": null,
+          "options": null,
+          "step": null,
+          "group": "Style",
+          "tooltip": ""
+        },
+        "lower_color": {
+          "default": "#089981",
+          "title": "Lower",
+          "minimum": null,
+          "maximum": null,
+          "options": null,
+          "step": null,
+          "group": "Style",
+          "tooltip": ""
+        },
+        "fill_color": {
+          "default": "#2196f3",
+          "title": "Background",
+          "minimum": null,
+          "maximum": null,
+          "options": null,
+          "step": null,
+          "group": "Style",
+          "tooltip": ""
+        }
+      },
+      "requests": {},
+      "source_available": true,
+      "source_hash": "e7a6b433672082fedaf4e98cce869cceb0f713bd63046ddbceb84dca1ae5b40c",
+      "enabled": true,
+      "source": null,
+      "metrics": []
+    },
+    {
+      "script_id": "builtin:rsi",
+      "kind": "indicator",
+      "origin": "builtin",
+      "package": null,
+      "package_version": null,
+      "title": "Relative Strength Index",
+      "short_title": "RSI",
+      "description": "Relative strength index from Wilder moving averages of gains and losses; 100 without losses, 0 without gains.",
+      "category": "Momentum",
+      "overlay": false,
+      "inputs": {
+        "length": {
+          "default": 14,
+          "title": "Length",
+          "minimum": 1.0,
+          "maximum": 500.0,
+          "options": null,
+          "step": 1.0,
+          "group": "",
+          "tooltip": ""
+        },
+        "source": {
+          "default": "close",
+          "title": "Source",
+          "minimum": null,
+          "maximum": null,
+          "options": [
+            "close",
+            "open",
+            "high",
+            "low",
+            "hl2",
+            "hlc3",
+            "ohlc4"
+          ],
+          "step": null,
+          "group": "",
+          "tooltip": ""
+        },
+        "upper": {
+          "default": 70,
+          "title": "Upper band",
+          "minimum": 0.0,
+          "maximum": 100.0,
+          "options": null,
+          "step": null,
+          "group": "Levels",
+          "tooltip": ""
+        },
+        "middle": {
+          "default": 50,
+          "title": "Middle band",
+          "minimum": 0.0,
+          "maximum": 100.0,
+          "options": null,
+          "step": null,
+          "group": "Levels",
+          "tooltip": ""
+        },
+        "lower": {
+          "default": 30,
+          "title": "Lower band",
+          "minimum": 0.0,
+          "maximum": 100.0,
+          "options": null,
+          "step": null,
+          "group": "Levels",
+          "tooltip": ""
+        },
+        "color": {
+          "default": "#7e57c2",
+          "title": "RSI",
+          "minimum": null,
+          "maximum": null,
+          "options": null,
+          "step": null,
+          "group": "Style",
+          "tooltip": ""
+        }
+      },
+      "requests": {},
+      "source_available": true,
+      "source_hash": "ec4b9d93ec2facff8b2d419c2751278792fa5f511d7a3e8149be580138c6a44b",
+      "enabled": true,
+      "source": null,
+      "metrics": []
+    },
+    {
+      "script_id": "builtin:atr",
+      "kind": "indicator",
+      "origin": "builtin",
+      "package": null,
+      "package_version": null,
+      "title": "Average True Range",
+      "short_title": "ATR",
+      "description": "Average true range: Wilder moving average of the true range, seeded with its simple average; the first true range is high minus low.",
+      "category": "Volatility",
+      "overlay": false,
+      "inputs": {
+        "length": {
+          "default": 14,
+          "title": "Length",
+          "minimum": 1.0,
+          "maximum": 500.0,
+          "options": null,
+          "step": 1.0,
+          "group": "",
+          "tooltip": ""
+        },
+        "color": {
+          "default": "#b71c1c",
+          "title": "ATR",
+          "minimum": null,
+          "maximum": null,
+          "options": null,
+          "step": null,
+          "group": "Style",
+          "tooltip": ""
+        }
+      },
+      "requests": {},
+      "source_available": true,
+      "source_hash": "ee4000ca33ca0bfb3ef514f5f7c8b531f4c31f9d1387eba52a66e2d5885ece73",
+      "enabled": true,
+      "source": null,
+      "metrics": []
+    },
+    {
+      "script_id": "builtin:volume_delta",
+      "kind": "indicator",
+      "origin": "builtin",
+      "package": null,
+      "package_version": null,
+      "title": "Volume Delta",
+      "short_title": "Delta %",
+      "description": "Buy minus sell volume of each bar as a percentage of its volume: venue taker volume or classified trades when available, otherwise an estimate from intrabar candle direction.",
+      "category": "Volume",
+      "overlay": false,
+      "inputs": {
+        "use_buy_volume": {
+          "default": true,
+          "title": "Use venue buy volume",
+          "minimum": null,
+          "maximum": null,
+          "options": null,
+          "step": null,
+          "group": "",
+          "tooltip": "True delta from the bar's taker buy volume when the source publishes it; off always estimates from intrabars."
+        },
+        "intrabar_tf": {
+          "default": "auto",
+          "title": "Intrabar timeframe",
+          "minimum": null,
+          "maximum": null,
+          "options": [
+            "auto",
+            "1s",
+            "5s",
+            "15s",
+            "1m",
+            "3m",
+            "5m",
+            "15m"
+          ],
+          "step": null,
+          "group": "",
+          "tooltip": ""
+        },
+        "min_intrabars": {
+          "default": 5,
+          "title": "Minimum intrabars",
+          "minimum": 1.0,
+          "maximum": 100.0,
+          "options": null,
+          "step": 1.0,
+          "group": "",
+          "tooltip": ""
+        },
+        "min_coverage": {
+          "default": 0.8,
+          "title": "Minimum coverage",
+          "minimum": 0.5,
+          "maximum": 1.0,
+          "options": null,
+          "step": 0.05,
+          "group": "",
+          "tooltip": "Share of the bar volume the intrabars must cover."
+        },
+        "up_color": {
+          "default": "#26a69a",
+          "title": "Up",
+          "minimum": null,
+          "maximum": null,
+          "options": null,
+          "step": null,
+          "group": "Style",
+          "tooltip": ""
+        },
+        "down_color": {
+          "default": "#ef5350",
+          "title": "Down",
+          "minimum": null,
+          "maximum": null,
+          "options": null,
+          "step": null,
+          "group": "Style",
+          "tooltip": ""
+        }
+      },
+      "requests": {
+        "intrabars": {
+          "tf": "auto",
+          "instrument_id": null,
+          "limit": 3000,
+          "intrabars": true,
+          "tf_input": "intrabar_tf",
+          "unless": "taker_buy_volume",
+          "unless_input": "use_buy_volume"
+        }
+      },
+      "source_available": true,
+      "source_hash": "0f58688f657ce3b6e44b25e5d0d9808fec6dc8a28997b22a61e32991c4f101a7",
+      "enabled": true,
+      "source": null,
+      "metrics": []
+    },
+    {
+      "script_id": "builtin:pivot_points",
+      "kind": "indicator",
+      "origin": "builtin",
+      "package": null,
+      "package_version": null,
+      "title": "Pivot Points Standard",
+      "short_title": "Pivots",
+      "description": "Classic floor pivot levels P, R1 to R3 and S1 to S3 from the previous period's high, low and close.",
+      "category": "Support and resistance",
+      "overlay": true,
+      "inputs": {
+        "period": {
+          "default": "auto",
+          "title": "Pivots timeframe",
+          "minimum": null,
+          "maximum": null,
+          "options": [
+            "auto",
+            "1d",
+            "1w",
+            "1M"
+          ],
+          "step": null,
+          "group": "",
+          "tooltip": ""
+        },
+        "pivots_back": {
+          "default": 15,
+          "title": "Number of pivots back",
+          "minimum": 1.0,
+          "maximum": 60.0,
+          "options": null,
+          "step": 1.0,
+          "group": "",
+          "tooltip": ""
+        },
+        "show_labels": {
+          "default": true,
+          "title": "Show labels",
+          "minimum": null,
+          "maximum": null,
+          "options": null,
+          "step": null,
+          "group": "",
+          "tooltip": ""
+        },
+        "pivot_color": {
+          "default": "#f7a600",
+          "title": "P",
+          "minimum": null,
+          "maximum": null,
+          "options": null,
+          "step": null,
+          "group": "Style",
+          "tooltip": ""
+        },
+        "resistance_color": {
+          "default": "#ef5350",
+          "title": "R levels",
+          "minimum": null,
+          "maximum": null,
+          "options": null,
+          "step": null,
+          "group": "Style",
+          "tooltip": ""
+        },
+        "support_color": {
+          "default": "#26a69a",
+          "title": "S levels",
+          "minimum": null,
+          "maximum": null,
+          "options": null,
+          "step": null,
+          "group": "Style",
+          "tooltip": ""
+        }
+      },
+      "requests": {
+        "period": {
+          "tf": "1d",
+          "instrument_id": null,
+          "limit": 100,
+          "tf_input": "period"
+        }
+      },
+      "source_available": true,
+      "source_hash": "1232adcf776e2b3b358bab688486ffd08ab11d2fb539f46710d95bf952e70ce1",
+      "enabled": true,
+      "source": null,
+      "metrics": []
+    },
+    {
+      "script_id": "builtin:ema-trend-long",
+      "kind": "strategy",
+      "origin": "builtin",
+      "package": null,
+      "package_version": null,
+      "title": "EMA Trend Long",
+      "short_title": "EMA Trend",
+      "description": "Long when the close crosses above the EMA while the one-hour RSI is above 50 and volume delta is positive; ATR stop, fixed 3R target.",
+      "category": "Trend",
+      "overlay": true,
+      "inputs": {
+        "ema_length": {
+          "default": 20,
+          "title": "EMA length",
+          "minimum": 1.0,
+          "maximum": 500.0,
+          "options": null,
+          "step": 1.0,
+          "group": "",
+          "tooltip": ""
+        },
+        "rsi_length": {
+          "default": 14,
+          "title": "1h RSI length",
+          "minimum": 2.0,
+          "maximum": 100.0,
+          "options": null,
+          "step": 1.0,
+          "group": "",
+          "tooltip": ""
+        },
+        "rsi_threshold": {
+          "default": 50,
+          "title": "1h RSI above",
+          "minimum": 0.0,
+          "maximum": 100.0,
+          "options": null,
+          "step": null,
+          "group": "",
+          "tooltip": ""
+        },
+        "require_flow": {
+          "default": true,
+          "title": "Require positive volume delta",
+          "minimum": null,
+          "maximum": null,
+          "options": null,
+          "step": null,
+          "group": "",
+          "tooltip": "Bars without venue taker buy volume never qualify."
+        },
+        "min_delta_pct": {
+          "default": 0,
+          "title": "Volume delta above (%)",
+          "minimum": -100.0,
+          "maximum": 100.0,
+          "options": null,
+          "step": null,
+          "group": "",
+          "tooltip": ""
+        },
+        "atr_length": {
+          "default": 14,
+          "title": "ATR length",
+          "minimum": 1.0,
+          "maximum": 100.0,
+          "options": null,
+          "step": 1.0,
+          "group": "Risk",
+          "tooltip": ""
+        },
+        "stop_atr": {
+          "default": 1.5,
+          "title": "Stop distance (ATR)",
+          "minimum": 0.1,
+          "maximum": 20.0,
+          "options": null,
+          "step": 0.1,
+          "group": "Risk",
+          "tooltip": ""
+        },
+        "target_r": {
+          "default": 3.0,
+          "title": "Target (R multiple)",
+          "minimum": 0.5,
+          "maximum": 20.0,
+          "options": null,
+          "step": 0.5,
+          "group": "Risk",
+          "tooltip": ""
+        },
+        "min_rr": {
+          "default": 2.0,
+          "title": "Minimum net reward/risk",
+          "minimum": 0.0,
+          "maximum": 20.0,
+          "options": null,
+          "step": 0.1,
+          "group": "Risk",
+          "tooltip": ""
+        },
+        "fee_bps": {
+          "default": 5,
+          "title": "Fee estimate (bps)",
+          "minimum": 0.0,
+          "maximum": 100.0,
+          "options": null,
+          "step": null,
+          "group": "Risk",
+          "tooltip": ""
+        },
+        "cooldown_bars": {
+          "default": 12,
+          "title": "Cooldown (bars)",
+          "minimum": 0.0,
+          "maximum": 500.0,
+          "options": null,
+          "step": 1.0,
+          "group": "",
+          "tooltip": ""
+        },
+        "position_pct": {
+          "default": 90,
+          "title": "Simulated position (% of equity)",
+          "minimum": 1.0,
+          "maximum": 100.0,
+          "options": null,
+          "step": null,
+          "group": "Simulation",
+          "tooltip": ""
+        },
+        "color": {
+          "default": "#2962ff",
+          "title": "EMA color",
+          "minimum": null,
+          "maximum": null,
+          "options": null,
+          "step": null,
+          "group": "Style",
+          "tooltip": ""
+        }
+      },
+      "requests": {
+        "htf": {
+          "tf": "1h",
+          "instrument_id": null,
+          "limit": 500
+        }
+      },
+      "source_available": true,
+      "source_hash": "728ab44d3104ab18480cef2c05e16921517cec70d6347043bbe67d3b8eb00c3c",
+      "enabled": true,
+      "source": null,
+      "metrics": []
+    },
+    {
+      "script_id": "builtin:rsi-reversion-short",
+      "kind": "strategy",
+      "origin": "builtin",
+      "package": null,
+      "package_version": null,
+      "title": "RSI Reversion Short",
+      "short_title": "RSI Reversion",
+      "description": "Short when the RSI falls back below 70 within three bars of a close above the upper Bollinger Band; swing-high stop, fixed 2R target.",
+      "category": "Mean reversion",
+      "overlay": true,
+      "inputs": {
+        "rsi_length": {
+          "default": 14,
+          "title": "RSI length",
+          "minimum": 2.0,
+          "maximum": 100.0,
+          "options": null,
+          "step": 1.0,
+          "group": "",
+          "tooltip": ""
+        },
+        "rsi_level": {
+          "default": 70,
+          "title": "RSI crosses below",
+          "minimum": 1.0,
+          "maximum": 99.0,
+          "options": null,
+          "step": null,
+          "group": "",
+          "tooltip": ""
+        },
+        "bb_length": {
+          "default": 20,
+          "title": "Bollinger length",
+          "minimum": 2.0,
+          "maximum": 500.0,
+          "options": null,
+          "step": 1.0,
+          "group": "",
+          "tooltip": ""
+        },
+        "bb_mult": {
+          "default": 2.0,
+          "title": "Bollinger multiplier",
+          "minimum": 0.1,
+          "maximum": 10.0,
+          "options": null,
+          "step": 0.1,
+          "group": "",
+          "tooltip": ""
+        },
+        "within_bars": {
+          "default": 3,
+          "title": "Band close within (bars)",
+          "minimum": 1.0,
+          "maximum": 50.0,
+          "options": null,
+          "step": 1.0,
+          "group": "",
+          "tooltip": ""
+        },
+        "swing_bars": {
+          "default": 10,
+          "title": "Swing lookback (bars)",
+          "minimum": 1.0,
+          "maximum": 200.0,
+          "options": null,
+          "step": null,
+          "group": "Risk",
+          "tooltip": ""
+        },
+        "atr_length": {
+          "default": 14,
+          "title": "ATR length",
+          "minimum": 1.0,
+          "maximum": 100.0,
+          "options": null,
+          "step": 1.0,
+          "group": "Risk",
+          "tooltip": ""
+        },
+        "stop_atr": {
+          "default": 0.5,
+          "title": "Stop buffer (ATR)",
+          "minimum": 0.0,
+          "maximum": 20.0,
+          "options": null,
+          "step": 0.1,
+          "group": "Risk",
+          "tooltip": ""
+        },
+        "target_r": {
+          "default": 2.0,
+          "title": "Target (R multiple)",
+          "minimum": 0.5,
+          "maximum": 20.0,
+          "options": null,
+          "step": 0.5,
+          "group": "Risk",
+          "tooltip": ""
+        },
+        "min_rr": {
+          "default": 1.5,
+          "title": "Minimum net reward/risk",
+          "minimum": 0.0,
+          "maximum": 20.0,
+          "options": null,
+          "step": 0.1,
+          "group": "Risk",
+          "tooltip": ""
+        },
+        "fee_bps": {
+          "default": 0,
+          "title": "Fee estimate (bps)",
+          "minimum": 0.0,
+          "maximum": 100.0,
+          "options": null,
+          "step": null,
+          "group": "Risk",
+          "tooltip": ""
+        },
+        "cooldown_bars": {
+          "default": 12,
+          "title": "Cooldown (bars)",
+          "minimum": 0.0,
+          "maximum": 500.0,
+          "options": null,
+          "step": 1.0,
+          "group": "",
+          "tooltip": ""
+        },
+        "position_pct": {
+          "default": 90,
+          "title": "Simulated position (% of equity)",
+          "minimum": 1.0,
+          "maximum": 100.0,
+          "options": null,
+          "step": null,
+          "group": "Simulation",
+          "tooltip": ""
+        },
+        "color": {
+          "default": "#ff9800",
+          "title": "Band color",
+          "minimum": null,
+          "maximum": null,
+          "options": null,
+          "step": null,
+          "group": "Style",
+          "tooltip": ""
+        }
+      },
+      "requests": {},
+      "source_available": true,
+      "source_hash": "86e504b046d3c83ac4aa5a8573338a555aca06c4ade31bcd83a33434bc8ddde2",
+      "enabled": true,
+      "source": null,
+      "metrics": []
+    },
+    {
+      "script_id": "builtin:pivot-bounce-long",
+      "kind": "strategy",
+      "origin": "builtin",
+      "package": null,
+      "package_version": null,
+      "title": "Pivot Bounce Long",
+      "short_title": "Pivot Bounce",
+      "description": "Long on a wick touch of the daily S1 or S2 pivot between 09:30 and 11:30 New York time on weekdays; stop below the level, target the nearest of P and R1.",
+      "category": "Levels",
+      "overlay": true,
+      "inputs": {
+        "supports": {
+          "default": "S1 and S2",
+          "title": "Support levels",
+          "minimum": null,
+          "maximum": null,
+          "options": [
+            "S1",
+            "S2",
+            "S1 and S2"
+          ],
+          "step": null,
+          "group": "",
+          "tooltip": ""
+        },
+        "targets": {
+          "default": "P and R1",
+          "title": "Target levels",
+          "minimum": null,
+          "maximum": null,
+          "options": [
+            "P",
+            "R1",
+            "P and R1"
+          ],
+          "step": null,
+          "group": "",
+          "tooltip": ""
+        },
+        "touch_bars": {
+          "default": 3,
+          "title": "Touch within (bars)",
+          "minimum": 1.0,
+          "maximum": 50.0,
+          "options": null,
+          "step": 1.0,
+          "group": "",
+          "tooltip": ""
+        },
+        "session_start": {
+          "default": "09:30",
+          "title": "Window start (New York)",
+          "minimum": null,
+          "maximum": null,
+          "options": null,
+          "step": null,
+          "group": "",
+          "tooltip": ""
+        },
+        "session_end": {
+          "default": "11:30",
+          "title": "Window end (New York)",
+          "minimum": null,
+          "maximum": null,
+          "options": null,
+          "step": null,
+          "group": "",
+          "tooltip": ""
+        },
+        "weekdays_only": {
+          "default": true,
+          "title": "Weekdays only",
+          "minimum": null,
+          "maximum": null,
+          "options": null,
+          "step": null,
+          "group": "",
+          "tooltip": ""
+        },
+        "require_trade_delta": {
+          "default": true,
+          "title": "Require buy volume data",
+          "minimum": null,
+          "maximum": null,
+          "options": null,
+          "step": null,
+          "group": "",
+          "tooltip": "Bars without venue or trade-classified buy volume never qualify."
+        },
+        "once_per_level": {
+          "default": true,
+          "title": "Trade each level once per day",
+          "minimum": null,
+          "maximum": null,
+          "options": null,
+          "step": null,
+          "group": "",
+          "tooltip": ""
+        },
+        "atr_length": {
+          "default": 14,
+          "title": "ATR length",
+          "minimum": 1.0,
+          "maximum": 100.0,
+          "options": null,
+          "step": 1.0,
+          "group": "Risk",
+          "tooltip": ""
+        },
+        "stop_atr": {
+          "default": 0.2,
+          "title": "Stop buffer (ATR)",
+          "minimum": 0.0,
+          "maximum": 20.0,
+          "options": null,
+          "step": 0.1,
+          "group": "Risk",
+          "tooltip": ""
+        },
+        "min_rr": {
+          "default": 1.5,
+          "title": "Minimum net reward/risk",
+          "minimum": 0.0,
+          "maximum": 20.0,
+          "options": null,
+          "step": 0.1,
+          "group": "Risk",
+          "tooltip": ""
+        },
+        "fee_bps": {
+          "default": 0,
+          "title": "Fee estimate (bps)",
+          "minimum": 0.0,
+          "maximum": 100.0,
+          "options": null,
+          "step": null,
+          "group": "Risk",
+          "tooltip": ""
+        },
+        "cooldown_bars": {
+          "default": 6,
+          "title": "Cooldown (bars)",
+          "minimum": 0.0,
+          "maximum": 500.0,
+          "options": null,
+          "step": 1.0,
+          "group": "",
+          "tooltip": ""
+        },
+        "position_pct": {
+          "default": 90,
+          "title": "Simulated position (% of equity)",
+          "minimum": 1.0,
+          "maximum": 100.0,
+          "options": null,
+          "step": null,
+          "group": "Simulation",
+          "tooltip": ""
+        }
+      },
+      "requests": {
+        "daily": {
+          "tf": "1d",
+          "instrument_id": null,
+          "limit": 60
+        }
+      },
+      "source_available": true,
+      "source_hash": "aae9a61bbbdc3508580359467f0b240806ceee9cdecbe5f11a2f79295b81eb74",
+      "enabled": true,
+      "source": null,
+      "metrics": []
+    },
+    {
+      "script_id": "builtin:liquidity-qualification",
+      "kind": "filter",
+      "origin": "builtin",
+      "package": null,
+      "package_version": null,
+      "title": "Liquidity qualification",
+      "short_title": "Liquidity",
+      "description": "Strict turnover, open-interest, spread, slippage and funding gates per asset class; missing or stale data is unavailable, never a match.",
+      "category": "Liquidity",
+      "overlay": true,
+      "inputs": {
+        "max_data_age_s": {
+          "default": 300,
+          "title": "Maximum data age (s)",
+          "minimum": 1.0,
+          "maximum": 3600.0,
+          "options": null,
+          "step": 1.0,
+          "group": "",
+          "tooltip": "Older inputs count as missing."
+        },
+        "reject_high_funding_risk": {
+          "default": true,
+          "title": "Reject high funding risk",
+          "minimum": null,
+          "maximum": null,
+          "options": null,
+          "step": null,
+          "group": "",
+          "tooltip": "|8h funding| at or above 0.30 % excludes a perpetual."
+        }
+      },
+      "requests": {},
+      "source_available": true,
+      "source_hash": "ecc3714e143f4a6cf4e4c3b2cd2edb1b58e3c556cb563c65edbb171b44c5b895",
+      "enabled": true,
+      "source": null,
+      "metrics": [
+        "order_book",
+        "open_interest",
+        "funding"
+      ]
+    },
+    {
+      "script_id": "builtin:price",
+      "kind": "filter",
+      "origin": "builtin",
+      "package": null,
+      "package_version": null,
+      "title": "Price",
+      "short_title": "Price",
+      "description": "Latest traded price, or the mark price when the venue publishes no trade, above, below or between values.",
+      "category": "Price",
+      "overlay": true,
+      "inputs": {
+        "operator": {
+          "default": "above",
+          "title": "Condition",
+          "minimum": null,
+          "maximum": null,
+          "options": [
+            "above",
+            "below",
+            "between"
+          ],
+          "step": null,
+          "group": "",
+          "tooltip": ""
+        },
+        "value": {
+          "default": 10.0,
+          "title": "Value",
+          "minimum": 0.0,
+          "maximum": null,
+          "options": null,
+          "step": null,
+          "group": "",
+          "tooltip": ""
+        },
+        "value2": {
+          "default": 1000.0,
+          "title": "Second value",
+          "minimum": 0.0,
+          "maximum": null,
+          "options": null,
+          "step": null,
+          "group": "",
+          "tooltip": "Upper or lower bound for between."
+        }
+      },
+      "requests": {},
+      "source_available": true,
+      "source_hash": "1689ba8348144750d0370f31ac034c9a92ae987e7a869be01f4f7490acd5ead5",
+      "enabled": true,
+      "source": null,
+      "metrics": []
+    },
+    {
+      "script_id": "builtin:change",
+      "kind": "filter",
+      "origin": "builtin",
+      "package": null,
+      "package_version": null,
+      "title": "Change %",
+      "short_title": "Chg%",
+      "description": "Rolling 24-hour price change in percent above, below or between values.",
+      "category": "Price",
+      "overlay": true,
+      "inputs": {
+        "operator": {
+          "default": "above",
+          "title": "Condition",
+          "minimum": null,
+          "maximum": null,
+          "options": [
+            "above",
+            "below",
+            "between"
+          ],
+          "step": null,
+          "group": "",
+          "tooltip": ""
+        },
+        "value": {
+          "default": 0.0,
+          "title": "Value",
+          "minimum": -100.0,
+          "maximum": 100000.0,
+          "options": null,
+          "step": null,
+          "group": "",
+          "tooltip": ""
+        },
+        "value2": {
+          "default": 10.0,
+          "title": "Second value",
+          "minimum": -100.0,
+          "maximum": 100000.0,
+          "options": null,
+          "step": null,
+          "group": "",
+          "tooltip": "Upper or lower bound for between."
+        }
+      },
+      "requests": {},
+      "source_available": true,
+      "source_hash": "83b6afb7c7170eec8fbba8cf62ea97604cbc9f095d93daa853d9885471b452a5",
+      "enabled": true,
+      "source": null,
+      "metrics": []
+    },
+    {
+      "script_id": "builtin:volume",
+      "kind": "filter",
+      "origin": "builtin",
+      "package": null,
+      "package_version": null,
+      "title": "Volume",
+      "short_title": "Vol",
+      "description": "Rolling 24-hour or latest-session volume in base units (shares, coins or contracts) above, below or between values.",
+      "category": "Volume",
+      "overlay": true,
+      "inputs": {
+        "operator": {
+          "default": "above",
+          "title": "Condition",
+          "minimum": null,
+          "maximum": null,
+          "options": [
+            "above",
+            "below",
+            "between"
+          ],
+          "step": null,
+          "group": "",
+          "tooltip": ""
+        },
+        "value": {
+          "default": 1000000.0,
+          "title": "Value",
+          "minimum": 0.0,
+          "maximum": null,
+          "options": null,
+          "step": null,
+          "group": "",
+          "tooltip": ""
+        },
+        "value2": {
+          "default": 1000000000.0,
+          "title": "Second value",
+          "minimum": 0.0,
+          "maximum": null,
+          "options": null,
+          "step": null,
+          "group": "",
+          "tooltip": "Upper or lower bound for between."
+        }
+      },
+      "requests": {},
+      "source_available": true,
+      "source_hash": "1c51df0886db689b3769eef6589cc80743f2276ce68af313c8a490e7b8e7a746",
+      "enabled": true,
+      "source": null,
+      "metrics": []
+    },
+    {
+      "script_id": "builtin:turnover",
+      "kind": "filter",
+      "origin": "builtin",
+      "package": null,
+      "package_version": null,
+      "title": "Turnover",
+      "short_title": "Turnover",
+      "description": "Rolling 24-hour or latest-session traded value in the quote currency above, below or between values.",
+      "category": "Volume",
+      "overlay": true,
+      "inputs": {
+        "operator": {
+          "default": "above",
+          "title": "Condition",
+          "minimum": null,
+          "maximum": null,
+          "options": [
+            "above",
+            "below",
+            "between"
+          ],
+          "step": null,
+          "group": "",
+          "tooltip": ""
+        },
+        "value": {
+          "default": 10000000.0,
+          "title": "Value",
+          "minimum": 0.0,
+          "maximum": null,
+          "options": null,
+          "step": null,
+          "group": "",
+          "tooltip": ""
+        },
+        "value2": {
+          "default": 10000000000.0,
+          "title": "Second value",
+          "minimum": 0.0,
+          "maximum": null,
+          "options": null,
+          "step": null,
+          "group": "",
+          "tooltip": "Upper or lower bound for between."
+        }
+      },
+      "requests": {},
+      "source_available": true,
+      "source_hash": "2422aeb72a7d6241fc4246fa40ddce3d15dd536f81fa586f631ebf1c3838b293",
+      "enabled": true,
+      "source": null,
+      "metrics": []
+    },
+    {
+      "script_id": "builtin:relative-volume",
+      "kind": "filter",
+      "origin": "builtin",
+      "package": null,
+      "package_version": null,
+      "title": "Relative volume",
+      "short_title": "Rel Vol",
+      "description": "Volume of the latest closed bar divided by the mean volume of the length bars before it.",
+      "category": "Volume",
+      "overlay": true,
+      "inputs": {
+        "length": {
+          "default": 10,
+          "title": "Average length",
+          "minimum": 1.0,
+          "maximum": 499.0,
+          "options": null,
+          "step": 1.0,
+          "group": "",
+          "tooltip": ""
+        },
+        "operator": {
+          "default": "above",
+          "title": "Condition",
+          "minimum": null,
+          "maximum": null,
+          "options": [
+            "above",
+            "below",
+            "between"
+          ],
+          "step": null,
+          "group": "",
+          "tooltip": ""
+        },
+        "value": {
+          "default": 2.0,
+          "title": "Value",
+          "minimum": 0.0,
+          "maximum": null,
+          "options": null,
+          "step": null,
+          "group": "",
+          "tooltip": ""
+        },
+        "value2": {
+          "default": 5.0,
+          "title": "Second value",
+          "minimum": 0.0,
+          "maximum": null,
+          "options": null,
+          "step": null,
+          "group": "",
+          "tooltip": "Upper or lower bound for between."
+        }
+      },
+      "requests": {},
+      "source_available": true,
+      "source_hash": "edcc63fdb553bb153ddbdf3545db256e946f1aab6a2eb45945084c40e2634d5a",
+      "enabled": true,
+      "source": null,
+      "metrics": []
+    },
+    {
+      "script_id": "builtin:gap",
+      "kind": "filter",
+      "origin": "builtin",
+      "package": null,
+      "package_version": null,
+      "title": "Gap %",
+      "short_title": "Gap%",
+      "description": "Opening gap of the latest closed bar in percent of the previous close, above, below or between values.",
+      "category": "Price",
+      "overlay": true,
+      "inputs": {
+        "operator": {
+          "default": "above",
+          "title": "Condition",
+          "minimum": null,
+          "maximum": null,
+          "options": [
+            "above",
+            "below",
+            "between"
+          ],
+          "step": null,
+          "group": "",
+          "tooltip": ""
+        },
+        "value": {
+          "default": 2.0,
+          "title": "Value",
+          "minimum": -100.0,
+          "maximum": 100000.0,
+          "options": null,
+          "step": null,
+          "group": "",
+          "tooltip": ""
+        },
+        "value2": {
+          "default": 10.0,
+          "title": "Second value",
+          "minimum": -100.0,
+          "maximum": 100000.0,
+          "options": null,
+          "step": null,
+          "group": "",
+          "tooltip": "Upper or lower bound for between."
+        }
+      },
+      "requests": {},
+      "source_available": true,
+      "source_hash": "c57ca15c9416bcb4191039cc22bb5fb141fff213ccfcd418135c208517a72f8f",
+      "enabled": true,
+      "source": null,
+      "metrics": []
+    },
+    {
+      "script_id": "builtin:price-vs-ma",
+      "kind": "filter",
+      "origin": "builtin",
+      "package": null,
+      "package_version": null,
+      "title": "Price vs moving average",
+      "short_title": "Price/MA",
+      "description": "Latest price above or below the simple or exponential moving average of the closed bars.",
+      "category": "Moving averages",
+      "overlay": true,
+      "inputs": {
+        "ma_type": {
+          "default": "SMA",
+          "title": "Average",
+          "minimum": null,
+          "maximum": null,
+          "options": [
+            "SMA",
+            "EMA"
+          ],
+          "step": null,
+          "group": "",
+          "tooltip": ""
+        },
+        "length": {
+          "default": 50,
+          "title": "Length",
+          "minimum": 1.0,
+          "maximum": 500.0,
+          "options": null,
+          "step": 1.0,
+          "group": "",
+          "tooltip": ""
+        },
+        "position": {
+          "default": "above",
+          "title": "Price is",
+          "minimum": null,
+          "maximum": null,
+          "options": [
+            "above",
+            "below"
+          ],
+          "step": null,
+          "group": "",
+          "tooltip": ""
+        }
+      },
+      "requests": {},
+      "source_available": true,
+      "source_hash": "9f34d51cdca72f21984511a2242d64f5e53ca823b461feeca17c25e72cedbf1b",
+      "enabled": true,
+      "source": null,
+      "metrics": []
+    },
+    {
+      "script_id": "builtin:rsi-range",
+      "kind": "filter",
+      "origin": "builtin",
+      "package": null,
+      "package_version": null,
+      "title": "Relative Strength Index",
+      "short_title": "RSI",
+      "description": "Wilder's RSI of the closed bars above, below or between values, such as below 30 for oversold markets.",
+      "category": "Oscillators",
+      "overlay": true,
+      "inputs": {
+        "length": {
+          "default": 14,
+          "title": "Length",
+          "minimum": 2.0,
+          "maximum": 499.0,
+          "options": null,
+          "step": 1.0,
+          "group": "",
+          "tooltip": ""
+        },
+        "operator": {
+          "default": "above",
+          "title": "Condition",
+          "minimum": null,
+          "maximum": null,
+          "options": [
+            "above",
+            "below",
+            "between"
+          ],
+          "step": null,
+          "group": "",
+          "tooltip": ""
+        },
+        "value": {
+          "default": 70.0,
+          "title": "Value",
+          "minimum": 0.0,
+          "maximum": 100.0,
+          "options": null,
+          "step": null,
+          "group": "",
+          "tooltip": ""
+        },
+        "value2": {
+          "default": 100.0,
+          "title": "Second value",
+          "minimum": 0.0,
+          "maximum": 100.0,
+          "options": null,
+          "step": null,
+          "group": "",
+          "tooltip": "Upper or lower bound for between."
+        }
+      },
+      "requests": {},
+      "source_available": true,
+      "source_hash": "3052188ebab9b6d881505338543fef471ee3cfeabb47f7ccbff6b0db8ae16a1f",
+      "enabled": true,
+      "source": null,
+      "metrics": []
+    },
+    {
+      "script_id": "builtin:new-high-low",
+      "kind": "filter",
+      "origin": "builtin",
+      "package": null,
+      "package_version": null,
+      "title": "New high or low",
+      "short_title": "New H/L",
+      "description": "The latest closed bar makes the highest high or lowest low of the last length bars, such as a 52-week high on weekly bars.",
+      "category": "Price",
+      "overlay": true,
+      "inputs": {
+        "length": {
+          "default": 52,
+          "title": "Bars",
+          "minimum": 2.0,
+          "maximum": 500.0,
+          "options": null,
+          "step": 1.0,
+          "group": "",
+          "tooltip": ""
+        },
+        "extreme": {
+          "default": "high",
+          "title": "Extreme",
+          "minimum": null,
+          "maximum": null,
+          "options": [
+            "high",
+            "low"
+          ],
+          "step": null,
+          "group": "",
+          "tooltip": ""
+        }
+      },
+      "requests": {},
+      "source_available": true,
+      "source_hash": "4d783f984e904247f20f9aafc14d2db9ea3f79bb8e9a11d4b5857e9ff772c5a7",
+      "enabled": true,
+      "source": null,
+      "metrics": []
+    },
+    {
+      "script_id": "builtin:price-cross",
+      "kind": "alert",
+      "origin": "builtin",
+      "package": null,
+      "package_version": null,
+      "title": "Price crossing",
+      "short_title": "Cross",
+      "description": "The closed price crosses a level: crossing in either direction, crossing up or crossing down.",
+      "category": "Price",
+      "overlay": true,
+      "inputs": {
+        "level": {
+          "default": 100.0,
+          "title": "Level",
+          "minimum": 0.0,
+          "maximum": null,
+          "options": null,
+          "step": null,
+          "group": "",
+          "tooltip": ""
+        },
+        "condition": {
+          "default": "crossing",
+          "title": "Condition",
+          "minimum": null,
+          "maximum": null,
+          "options": [
+            "crossing",
+            "crossing_up",
+            "crossing_down"
+          ],
+          "step": null,
+          "group": "",
+          "tooltip": ""
+        }
+      },
+      "requests": {},
+      "source_available": true,
+      "source_hash": "806cd1be38eff25826cab194ea113af94ffbb63d5def4479fb9b8c3e9786bee9",
+      "enabled": true,
+      "source": null,
+      "metrics": []
+    },
+    {
+      "script_id": "builtin:channel",
+      "kind": "alert",
+      "origin": "builtin",
+      "package": null,
+      "package_version": null,
+      "title": "Price channel",
+      "short_title": "Channel",
+      "description": "The closed price enters or exits a channel between two levels, or closes inside or outside it.",
+      "category": "Price",
+      "overlay": true,
+      "inputs": {
+        "upper": {
+          "default": 110.0,
+          "title": "Upper level",
+          "minimum": 0.0,
+          "maximum": null,
+          "options": null,
+          "step": null,
+          "group": "",
+          "tooltip": ""
+        },
+        "lower": {
+          "default": 90.0,
+          "title": "Lower level",
+          "minimum": 0.0,
+          "maximum": null,
+          "options": null,
+          "step": null,
+          "group": "",
+          "tooltip": ""
+        },
+        "condition": {
+          "default": "entering",
+          "title": "Condition",
+          "minimum": null,
+          "maximum": null,
+          "options": [
+            "entering",
+            "exiting",
+            "inside",
+            "outside"
+          ],
+          "step": null,
+          "group": "",
+          "tooltip": ""
+        }
+      },
+      "requests": {},
+      "source_available": true,
+      "source_hash": "34d8259ecc657e76fa8b36d06f7b8f902f54352ea3ec846541c24777da74df38",
+      "enabled": true,
+      "source": null,
+      "metrics": []
+    },
+    {
+      "script_id": "builtin:ma-cross",
+      "kind": "alert",
+      "origin": "builtin",
+      "package": null,
+      "package_version": null,
+      "title": "Moving average cross",
+      "short_title": "MA cross",
+      "description": "A fast simple or exponential moving average of the close crosses a slow one, up (golden cross) or down (death cross).",
+      "category": "Moving averages",
+      "overlay": true,
+      "inputs": {
+        "fast_length": {
+          "default": 9,
+          "title": "Fast length",
+          "minimum": 1.0,
+          "maximum": 1000.0,
+          "options": null,
+          "step": 1.0,
+          "group": "",
+          "tooltip": ""
+        },
+        "slow_length": {
+          "default": 21,
+          "title": "Slow length",
+          "minimum": 2.0,
+          "maximum": 1000.0,
+          "options": null,
+          "step": 1.0,
+          "group": "",
+          "tooltip": ""
+        },
+        "ma_type": {
+          "default": "EMA",
+          "title": "Average",
+          "minimum": null,
+          "maximum": null,
+          "options": [
+            "EMA",
+            "SMA"
+          ],
+          "step": null,
+          "group": "",
+          "tooltip": ""
+        },
+        "condition": {
+          "default": "crossing",
+          "title": "Condition",
+          "minimum": null,
+          "maximum": null,
+          "options": [
+            "crossing",
+            "crossing_up",
+            "crossing_down"
+          ],
+          "step": null,
+          "group": "",
+          "tooltip": ""
+        }
+      },
+      "requests": {},
+      "source_available": true,
+      "source_hash": "c1eb25952425d479cbde8f37e747ea68f72f3c72bbf3e570dcaa788567dd06d7",
+      "enabled": true,
+      "source": null,
+      "metrics": []
+    },
+    {
+      "script_id": "builtin:rsi-level",
+      "kind": "alert",
+      "origin": "builtin",
+      "package": null,
+      "package_version": null,
+      "title": "RSI overbought / oversold",
+      "short_title": "RSI alert",
+      "description": "Wilder's RSI of the close crosses above the overbought level or below the oversold level.",
+      "category": "Oscillators",
+      "overlay": true,
+      "inputs": {
+        "length": {
+          "default": 14,
+          "title": "Length",
+          "minimum": 2.0,
+          "maximum": 500.0,
+          "options": null,
+          "step": 1.0,
+          "group": "",
+          "tooltip": ""
+        },
+        "overbought": {
+          "default": 70.0,
+          "title": "Overbought",
+          "minimum": 0.0,
+          "maximum": 100.0,
+          "options": null,
+          "step": null,
+          "group": "",
+          "tooltip": ""
+        },
+        "oversold": {
+          "default": 30.0,
+          "title": "Oversold",
+          "minimum": 0.0,
+          "maximum": 100.0,
+          "options": null,
+          "step": null,
+          "group": "",
+          "tooltip": ""
+        },
+        "condition": {
+          "default": "both",
+          "title": "Condition",
+          "minimum": null,
+          "maximum": null,
+          "options": [
+            "both",
+            "overbought",
+            "oversold"
+          ],
+          "step": null,
+          "group": "",
+          "tooltip": ""
+        }
+      },
+      "requests": {},
+      "source_available": true,
+      "source_hash": "3413b9c3f5c9c2536805e9112fbc2ed05fccf871242e806210e8cdc3626a4ed7",
+      "enabled": true,
+      "source": null,
+      "metrics": []
+    },
+    {
+      "script_id": "builtin:volume-spike",
+      "kind": "alert",
+      "origin": "builtin",
+      "package": null,
+      "package_version": null,
+      "title": "Volume spike",
+      "short_title": "Vol spike",
+      "description": "A closed bar's volume is above a multiple of the mean volume of the bars before it.",
+      "category": "Volume",
+      "overlay": true,
+      "inputs": {
+        "length": {
+          "default": 20,
+          "title": "Average length",
+          "minimum": 1.0,
+          "maximum": 1000.0,
+          "options": null,
+          "step": 1.0,
+          "group": "",
+          "tooltip": ""
+        },
+        "multiplier": {
+          "default": 2.0,
+          "title": "Multiple of average",
+          "minimum": 1.0,
+          "maximum": 1000.0,
+          "options": null,
+          "step": null,
+          "group": "",
+          "tooltip": ""
+        }
+      },
+      "requests": {},
+      "source_available": true,
+      "source_hash": "52f0c5c6ddb9e21f73e72d890c556a256b133d71ed5fabbe0a67205a01c233ab",
+      "enabled": true,
+      "source": null,
+      "metrics": []
+    },
+    {
+      "script_id": "builtin:percent-change",
+      "kind": "alert",
+      "origin": "builtin",
+      "package": null,
+      "package_version": null,
+      "title": "Percent change",
+      "short_title": "% change",
+      "description": "The close rises or falls by at least a percentage compared with the close a number of bars earlier.",
+      "category": "Price",
+      "overlay": true,
+      "inputs": {
+        "bars": {
+          "default": 1,
+          "title": "Over bars",
+          "minimum": 1.0,
+          "maximum": 1000.0,
+          "options": null,
+          "step": 1.0,
+          "group": "",
+          "tooltip": ""
+        },
+        "threshold_pct": {
+          "default": 5.0,
+          "title": "Change at least (%)",
+          "minimum": 0.0001,
+          "maximum": 100000.0,
+          "options": null,
+          "step": null,
+          "group": "",
+          "tooltip": ""
+        },
+        "direction": {
+          "default": "either",
+          "title": "Direction",
+          "minimum": null,
+          "maximum": null,
+          "options": [
+            "up",
+            "down",
+            "either"
+          ],
+          "step": null,
+          "group": "",
+          "tooltip": ""
+        }
+      },
+      "requests": {},
+      "source_available": true,
+      "source_hash": "077ebdf246b2c46f7c9b78635af714d190b3dc46348336cbc6954ca36ed569ee",
+      "enabled": true,
+      "source": null,
+      "metrics": []
+    },
+    {
+      "script_id": "builtin:breakout",
+      "kind": "alert",
+      "origin": "builtin",
+      "package": null,
+      "package_version": null,
+      "title": "New high or low breakout",
+      "short_title": "Breakout",
+      "description": "A closed bar's high is above, or its low below, every bar of the preceding length bars.",
+      "category": "Price",
+      "overlay": true,
+      "inputs": {
+        "length": {
+          "default": 20,
+          "title": "Bars",
+          "minimum": 1.0,
+          "maximum": 1000.0,
+          "options": null,
+          "step": 1.0,
+          "group": "",
+          "tooltip": ""
+        },
+        "extreme": {
+          "default": "either",
+          "title": "Extreme",
+          "minimum": null,
+          "maximum": null,
+          "options": [
+            "high",
+            "low",
+            "either"
+          ],
+          "step": null,
+          "group": "",
+          "tooltip": ""
+        }
+      },
+      "requests": {},
+      "source_available": true,
+      "source_hash": "0f5a834adde7c846c2d48d82c6110dd45efddf56ce927f005bdaffc892a2892c",
+      "enabled": true,
+      "source": null,
+      "metrics": []
+    }
+  ],
+  "failures": []
+}

@@ -125,7 +125,7 @@ def rsi(closes: list[float], length: int) -> float:
 class RelativeStrengthRange(joseph_script.Filter):
     """Compares the RSI of the closes with one or two values."""
 
-    ID = "rsi"
+    ID = "rsi-range"
     TITLE = "Relative Strength Index"
     SHORT_TITLE = "RSI"
     DESCRIPTION = (

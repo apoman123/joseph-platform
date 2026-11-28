@@ -27,7 +27,7 @@ import {
   demoInstrument,
   DEMO_INSTRUMENT_SPECS,
 } from '@joseph/mock-provider';
-import {activeChart} from '@joseph/terminal-shell';
+import {activeChart, createChartState} from '@joseph/terminal-shell';
 import {
   fireEvent,
   render,
@@ -42,7 +42,7 @@ import {
   tickDescription,
 } from '../features/market-info/market-info-feature';
 import {createRuntime, type TerminalRuntime} from '../composition/runtime';
-import {DataWindow} from './data-window';
+import {DataWindow, studyDataRows} from './data-window';
 import {
   displayTickSize,
   formatBarClose,
@@ -338,7 +338,7 @@ describe('market status badge', () => {
 });
 
 describe('data window on session markets', () => {
-  it('shows exchange time, lots and the classified delta source', () => {
+  it('shows exchange time, lots and study values in lots', () => {
     const bar: ChartBar = {
       timeMs: zonedTimeToUtc(dayNumberOf('2026-11-23'), 9 * 60, 'Asia/Taipei'),
       open: 585,
@@ -356,20 +356,52 @@ describe('data window on session markets', () => {
         instrument={demo('mock:stock:9901')}
         previousClose={585}
         tickSize="0.01"
-        delta={
-          new Map([
-            [
-              bar.timeMs,
+        studyRows={studyDataRows(
+          {
+            ...createChartState('chart-1', 'mock:stock:9901', '1h'),
+            studies: [
               {
-                timeMs: bar.timeMs,
-                value: 8,
-                method: 'classified' as const,
-                buyVolume: '1350000',
-                sellVolume: '1150000',
+                study_id: 'builtin:volume_delta',
+                script_id: 'builtin:volume_delta',
+                version: 0,
+                kind: 'indicator',
+                name: 'Delta %',
+                visible: true,
+                inputs: {},
+                colors: {},
               },
             ],
-          ])
-        }
+          },
+          {
+            'chart-1:builtin:volume_delta': {
+              script_id: 'builtin:volume_delta',
+              version: 0,
+              kind: 'indicator',
+              source_hash: 'demo',
+              instrument_id: 'mock:stock:9901',
+              tf: '1h',
+              bars_count: 1,
+              feed_state: 'DEMO',
+              data_source: 'mock',
+              complete: true,
+              overlay: false,
+              plots: [
+                {name: 'Delta %', points: [{time_ms: bar.timeMs, value: 8}]},
+                {
+                  name: 'Buy volume',
+                  points: [{time_ms: bar.timeMs, value: 1_350_000}],
+                },
+              ],
+              fills: [],
+              equity_curve: [],
+              metrics: {},
+            },
+          },
+          bar.timeMs,
+          () => 'Delta %',
+          null,
+          value => formatVolume(value, demo('mock:stock:9901'))
+        )}
         compare={[]}
         label={id => id}
       />
@@ -379,8 +411,8 @@ describe('data window on session markets', () => {
     expect(panel).toHaveTextContent('Close588');
     expect(panel).toHaveTextContent('Volume2,500 張');
     expect(panel).toHaveTextContent('Closes10:00:00 TPE');
-    expect(panel).toHaveTextContent('Classified (Lee–Ready)');
-    expect(panel).toHaveTextContent('Buy volume1,350 張');
+    expect(panel).toHaveTextContent('Delta %8%');
+    expect(panel).toHaveTextContent('Delta % Buy volume1,350 張');
   });
 });
 

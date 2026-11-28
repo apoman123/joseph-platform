@@ -321,86 +321,6 @@ export type AccountStatus =
  */
 export type KillSwitchScope = 'GLOBAL' | 'ACCOUNT' | 'STRATEGY';
 /**
- * AOI kind, declared by the publishing plugin in `IndicatorPluginInfo.output_kinds`; unique across installed plugins.
- *
- * This interface was referenced by `JosephContracts`'s JSON-Schema
- * via the `definition` "AoiKind".
- */
-export type AoiKind = string;
-/**
- * Lifecycle of an AOI. `active` and `tested` are live; `invalidated` and `expired` have ended, optionally with a plugin-defined `end_reason`.
- *
- * This interface was referenced by `JosephContracts`'s JSON-Schema
- * via the `definition` "AoiState".
- */
-export type AoiState = 'active' | 'tested' | 'invalidated' | 'expired';
-/**
- * Plugin-defined, display-only reason why an AOI ended, labelled by the plugin's `PluginDisplay.end_reasons`.
- *
- * This interface was referenced by `JosephContracts`'s JSON-Schema
- * via the `definition` "EndReason".
- */
-export type EndReason = string;
-/**
- * `pine_parity` reproduces the reference Pine semantics; `trade` uses venue trades with a published aggressor side (true delta); `trade_classification` uses trades classified against the quote (Lee-Ready / quote rule) on stock exchanges that publish no aggressor side, an estimate distinct from true delta. Neither trade method is ever presented as parity.
- *
- * This interface was referenced by `JosephContracts`'s JSON-Schema
- * via the `definition` "IndicatorMethod".
- */
-export type IndicatorMethod = 'pine_parity' | 'trade' | 'trade_classification';
-/**
- * Event name, declared by the publishing plugin in `IndicatorPluginInfo.output_events`. `AOI_INVALIDATED` and `AOI_EXPIRED` are reserved for any plugin; several plugins may publish one name.
- *
- * This interface was referenced by `JosephContracts`'s JSON-Schema
- * via the `definition` "StructureEventName".
- */
-export type StructureEventName = string;
-/**
- * Scalar indicator output. Decimals are strings.
- *
- * This interface was referenced by `JosephContracts`'s JSON-Schema
- * via the `definition` "IndicatorValue".
- */
-export type IndicatorValue = string | number | boolean | null;
-/**
- * This interface was referenced by `JosephContracts`'s JSON-Schema
- * via the `definition` "LicensingStatus".
- */
-export type LicensingStatus =
-  'CLEAN_ROOM_FROM_SPEC' | 'PINE_PORT_REVIEWED' | 'PINE_PORT_PENDING_REVIEW';
-/**
- * This interface was referenced by `JosephContracts`'s JSON-Schema
- * via the `definition` "ParityStatus".
- */
-export type ParityStatus = 'SPEC_ONLY' | 'GOLDEN_VERIFIED';
-/**
- * Indicator plugin id: lower snake case, unique across installed plugins.
- *
- * This interface was referenced by `JosephContracts`'s JSON-Schema
- * via the `definition` "PluginId".
- */
-export type PluginId = string;
-/**
- * Colour role resolved by the terminal theme: `side` follows the AOI side, `sign` the sign of the plotted value (histograms only), `up` and `down` are the bullish and bearish colours, `accent` the user accent. Events may not use `side` or `sign`.
- *
- * This interface was referenced by `JosephContracts`'s JSON-Schema
- * via the `definition` "DisplayTone".
- */
-export type DisplayTone =
-  'side' | 'sign' | 'up' | 'down' | 'neutral' | 'accent' | 'warning' | 'muted';
-/**
- * This interface was referenced by `JosephContracts`'s JSON-Schema
- * via the `definition` "LineStyle".
- */
-export type LineStyle = 'solid' | 'dashed' | 'dotted';
-/**
- * Default colour as `#RRGGBB`; user colours take precedence.
- *
- * This interface was referenced by `JosephContracts`'s JSON-Schema
- * via the `definition` "HexColor".
- */
-export type HexColor = string;
-/**
  * This interface was referenced by `JosephContracts`'s JSON-Schema
  * via the `definition` "InstrumentStatus".
  */
@@ -558,7 +478,7 @@ export type TimeMs = number;
 export type Value = number | null;
 export type Name1 = string;
 /**
- * @maxItems 2000
+ * @maxItems 5000
  */
 export type Points = PlotPoint[];
 export type ScriptId4 = string;
@@ -672,20 +592,13 @@ export type Message = string;
 export type Name2 = string;
 export type Severity = 'INFO' | 'WARNING' | 'ENTRY' | 'CRITICAL';
 export type TimeMs1 = number;
-export type ExpectedVersion = number | null;
-export type Kind1 = 'indicator' | 'strategy' | 'library' | 'filter' | 'alert';
-export type Name3 = string;
-export type Overlay1 = boolean;
-export type InstrumentId4 = string | null;
-export type Limit1 = number;
-export type ScriptId7 = string;
-export type Source2 = string;
+export type Error2 = string | null;
 /**
  * @maxItems 2000
  */
 export type Alerts = ScriptAlertEvent[];
 export type Id3 = string;
-export type Kind2 =
+export type Kind1 =
   | 'line'
   | 'polyline'
   | 'box'
@@ -707,7 +620,7 @@ export type BarsCount = number;
 export type Complete = boolean;
 export type DataSource = string;
 /**
- * @maxItems 2000
+ * @maxItems 5000
  */
 export type EquityCurve = PlotPoint[];
 export type FeedState1 = string;
@@ -721,8 +634,8 @@ export type TimeMs2 = number;
  * @maxItems 4000
  */
 export type Fills = SimulatedFill[];
-export type InstrumentId5 = string;
-export type Kind3 = 'indicator' | 'strategy' | 'filter' | 'alert';
+export type InstrumentId4 = string;
+export type Kind2 = 'indicator' | 'strategy' | 'filter' | 'alert';
 export type Matched = boolean | null;
 export type Action = 'long' | 'short' | 'close';
 export type Comment = string;
@@ -737,13 +650,13 @@ export type TimeMs3 = number;
  * @maxItems 4000
  */
 export type Orders = StrategyOrder[];
-export type Overlay2 = boolean;
+export type Overlay1 = boolean;
 /**
  * @maxItems 64
  */
 export type Plots = PlotSeries[];
 export type PositionSize = number;
-export type ScriptId8 = string;
+export type ScriptId7 = string;
 export type SourceHash4 = string;
 export type Tf = string;
 export type Direction1 = 'LONG' | 'SHORT';
@@ -764,24 +677,211 @@ export type Version7 = number;
  * @maxItems 500
  */
 export type Visuals = ScriptVisual[];
+export type ScriptId8 = string;
+export type ScriptId9 = string;
+export type Version8 = number | null;
+export type Results = ScriptBatchEntry[];
 export type CommissionBps = number;
 export type FromMs = number | null;
 export type IncludeOpen = boolean;
 export type InitialEquity = number;
-export type InstrumentId6 = string;
-export type Limit2 = number;
+export type InstrumentId5 = string;
+export type Limit1 = number;
+/**
+ * @minItems 1
+ * @maxItems 16
+ */
+export type Runs =
+  | [ScriptBatchItem]
+  | [ScriptBatchItem, ScriptBatchItem]
+  | [ScriptBatchItem, ScriptBatchItem, ScriptBatchItem]
+  | [ScriptBatchItem, ScriptBatchItem, ScriptBatchItem, ScriptBatchItem]
+  | [
+      ScriptBatchItem,
+      ScriptBatchItem,
+      ScriptBatchItem,
+      ScriptBatchItem,
+      ScriptBatchItem,
+    ]
+  | [
+      ScriptBatchItem,
+      ScriptBatchItem,
+      ScriptBatchItem,
+      ScriptBatchItem,
+      ScriptBatchItem,
+      ScriptBatchItem,
+    ]
+  | [
+      ScriptBatchItem,
+      ScriptBatchItem,
+      ScriptBatchItem,
+      ScriptBatchItem,
+      ScriptBatchItem,
+      ScriptBatchItem,
+      ScriptBatchItem,
+    ]
+  | [
+      ScriptBatchItem,
+      ScriptBatchItem,
+      ScriptBatchItem,
+      ScriptBatchItem,
+      ScriptBatchItem,
+      ScriptBatchItem,
+      ScriptBatchItem,
+      ScriptBatchItem,
+    ]
+  | [
+      ScriptBatchItem,
+      ScriptBatchItem,
+      ScriptBatchItem,
+      ScriptBatchItem,
+      ScriptBatchItem,
+      ScriptBatchItem,
+      ScriptBatchItem,
+      ScriptBatchItem,
+      ScriptBatchItem,
+    ]
+  | [
+      ScriptBatchItem,
+      ScriptBatchItem,
+      ScriptBatchItem,
+      ScriptBatchItem,
+      ScriptBatchItem,
+      ScriptBatchItem,
+      ScriptBatchItem,
+      ScriptBatchItem,
+      ScriptBatchItem,
+      ScriptBatchItem,
+    ]
+  | [
+      ScriptBatchItem,
+      ScriptBatchItem,
+      ScriptBatchItem,
+      ScriptBatchItem,
+      ScriptBatchItem,
+      ScriptBatchItem,
+      ScriptBatchItem,
+      ScriptBatchItem,
+      ScriptBatchItem,
+      ScriptBatchItem,
+      ScriptBatchItem,
+    ]
+  | [
+      ScriptBatchItem,
+      ScriptBatchItem,
+      ScriptBatchItem,
+      ScriptBatchItem,
+      ScriptBatchItem,
+      ScriptBatchItem,
+      ScriptBatchItem,
+      ScriptBatchItem,
+      ScriptBatchItem,
+      ScriptBatchItem,
+      ScriptBatchItem,
+      ScriptBatchItem,
+    ]
+  | [
+      ScriptBatchItem,
+      ScriptBatchItem,
+      ScriptBatchItem,
+      ScriptBatchItem,
+      ScriptBatchItem,
+      ScriptBatchItem,
+      ScriptBatchItem,
+      ScriptBatchItem,
+      ScriptBatchItem,
+      ScriptBatchItem,
+      ScriptBatchItem,
+      ScriptBatchItem,
+      ScriptBatchItem,
+    ]
+  | [
+      ScriptBatchItem,
+      ScriptBatchItem,
+      ScriptBatchItem,
+      ScriptBatchItem,
+      ScriptBatchItem,
+      ScriptBatchItem,
+      ScriptBatchItem,
+      ScriptBatchItem,
+      ScriptBatchItem,
+      ScriptBatchItem,
+      ScriptBatchItem,
+      ScriptBatchItem,
+      ScriptBatchItem,
+      ScriptBatchItem,
+    ]
+  | [
+      ScriptBatchItem,
+      ScriptBatchItem,
+      ScriptBatchItem,
+      ScriptBatchItem,
+      ScriptBatchItem,
+      ScriptBatchItem,
+      ScriptBatchItem,
+      ScriptBatchItem,
+      ScriptBatchItem,
+      ScriptBatchItem,
+      ScriptBatchItem,
+      ScriptBatchItem,
+      ScriptBatchItem,
+      ScriptBatchItem,
+      ScriptBatchItem,
+    ]
+  | [
+      ScriptBatchItem,
+      ScriptBatchItem,
+      ScriptBatchItem,
+      ScriptBatchItem,
+      ScriptBatchItem,
+      ScriptBatchItem,
+      ScriptBatchItem,
+      ScriptBatchItem,
+      ScriptBatchItem,
+      ScriptBatchItem,
+      ScriptBatchItem,
+      ScriptBatchItem,
+      ScriptBatchItem,
+      ScriptBatchItem,
+      ScriptBatchItem,
+      ScriptBatchItem,
+    ];
 export type SlippageBps = number;
 export type ToMs = number | null;
-export type Version8 = number | null;
+export type Version9 = number | null;
+export type WindowFromMs = number | null;
+export type ExpectedVersion = number | null;
+export type Kind3 = 'indicator' | 'strategy' | 'library' | 'filter' | 'alert';
+export type Name3 = string;
+export type Overlay2 = boolean;
+export type InstrumentId6 = string | null;
+export type Intrabars = boolean;
+export type Limit2 = number;
+export type Tf1 = Timeframe | 'auto';
+export type TfInput = string;
+export type Unless = '' | 'quote_turnover' | 'trade_count' | 'taker_buy_volume';
+export type UnlessInput = string;
+export type ScriptId10 = string;
+export type Source2 = string;
+export type CommissionBps1 = number;
+export type FromMs1 = number | null;
+export type IncludeOpen1 = boolean;
+export type InitialEquity1 = number;
+export type InstrumentId7 = string;
+export type Limit3 = number;
+export type SlippageBps1 = number;
+export type ToMs1 = number | null;
+export type Version10 = number | null;
+export type WindowFromMs1 = number | null;
 export type CreatedAtMs2 = number;
 export type ExpectedVersion1 = number | null;
 export type Kind4 = 'indicator' | 'strategy' | 'library' | 'filter' | 'alert';
 export type Name4 = string;
 export type Overlay3 = boolean;
-export type ScriptId9 = string;
+export type ScriptId11 = string;
 export type Source3 = string;
 export type SourceHash5 = string;
-export type Version9 = number;
+export type Version11 = number;
 export type ActivationId = string;
 /**
  * @maxItems 8
@@ -1004,12 +1104,12 @@ export type LastCheckedMs1 = number | null;
 export type LastError2 = string | null;
 export type Mode = 'ALERT_ONLY' | 'PAPER' | 'SHADOW' | 'AUTO_LIVE';
 export type Name5 = string;
-export type ScriptId10 = string;
+export type ScriptId12 = string;
 export type SourceHash6 = string;
 export type State = 'ACTIVE' | 'PAUSED';
 export type StrategyVersionId = string;
 export type UpdatedAtMs = number;
-export type Version10 = number;
+export type Version12 = number;
 /**
  * @maxItems 8
  */
@@ -1226,8 +1326,8 @@ export type InstrumentIds1 =
       string,
     ];
 export type Mode1 = 'ALERT_ONLY' | 'PAPER' | 'SHADOW' | 'AUTO_LIVE';
-export type ScriptId11 = string;
-export type Version11 = number | null;
+export type ScriptId13 = string;
+export type Version13 = number | null;
 export type Activations = StrategyActivation[];
 export type ForwardingEnabled = boolean;
 export type RuntimeEnabled = boolean;
@@ -1296,7 +1396,6 @@ export type StreamEventType =
  */
 export type ChannelName =
   | 'candles'
-  | 'aois'
   | 'feed_health'
   | 'signals'
   | 'orders'
@@ -1875,350 +1974,6 @@ export interface ClosePositionRequest {
   order_type: 'market' | 'limit';
   limit_price?: DecimalString | null;
   preview_token?: string | null;
-}
-/**
- * Versioned presentation record of an area of interest. Lines use lower == upper.
- *
- * This interface was referenced by `JosephContracts`'s JSON-Schema
- * via the `definition` "AoiRecord".
- */
-export interface AoiRecord {
-  schema_version: 1;
-  type: 'aoi.updated';
-  instrument_id: InstrumentId;
-  timeframe: Timeframe;
-  aoi_id: string;
-  /**
-   * Indicator plugin id.
-   */
-  source: string;
-  kind: AoiKind;
-  side: ZoneSide;
-  state: AoiState;
-  lower: DecimalString;
-  upper: DecimalString;
-  created_at_ms: TimestampMs;
-  confirmed_at_ms: TimestampMs;
-  invalidated_at_ms?: TimestampMs | null;
-  as_of_ms: TimestampMs;
-  quality_score?: number | null;
-  /**
-   * Plugin-defined id of the structure the AOI belongs to; `IN_ZONE` groups bind on it.
-   */
-  group_id?: string | null;
-  /**
-   * Why a non-live AOI ended; null while it is live or when the plugin gives no reason.
-   */
-  end_reason?: EndReason | null;
-  indicator_version: string;
-  method: IndicatorMethod;
-  meta?: {};
-}
-/**
- * Indicator event confirmed at a closed bar.
- *
- * This interface was referenced by `JosephContracts`'s JSON-Schema
- * via the `definition` "StructureEvent".
- */
-export interface StructureEvent {
-  event_id: string;
-  instrument_id: InstrumentId;
-  timeframe: Timeframe;
-  source: string;
-  name: StructureEventName;
-  bar_start_ms: TimestampMs;
-  confirmed_at_ms: TimestampMs;
-  price?: DecimalString | null;
-  aoi_id?: string | null;
-  score?: number | null;
-  meta?: {};
-}
-/**
- * This interface was referenced by `JosephContracts`'s JSON-Schema
- * via the `definition` "DataQuality".
- */
-export interface DataQuality {
-  feed_state: FeedState;
-  missing_bars: number;
-  coverage_pct?: DecimalString | null;
-}
-/**
- * State of one indicator plugin on one instrument/timeframe as of a closed bar.
- *
- * This interface was referenced by `JosephContracts`'s JSON-Schema
- * via the `definition` "IndicatorSnapshot".
- */
-export interface IndicatorSnapshot {
-  schema_version: 1;
-  instrument_id: InstrumentId;
-  timeframe: Timeframe;
-  plugin_id: string;
-  indicator_version: string;
-  method: IndicatorMethod;
-  as_of_ms: TimestampMs;
-  bar_start_ms: TimestampMs;
-  aois: AoiRecord[];
-  events: StructureEvent[];
-  /**
-   * Published values, keyed as declared in the plugin's `output_values`.
-   */
-  values: {
-    [k: string]: IndicatorValue | undefined;
-  };
-  warmup_complete: boolean;
-  data_quality: DataQuality;
-}
-/**
- * This interface was referenced by `JosephContracts`'s JSON-Schema
- * via the `definition` "IndicatorSnapshotList".
- */
-export interface IndicatorSnapshotList {
-  snapshots: IndicatorSnapshot[];
-  as_of_ms: TimestampMs;
-}
-/**
- * This interface was referenced by `JosephContracts`'s JSON-Schema
- * via the `definition` "AoiList".
- */
-export interface AoiList {
-  instrument_id: InstrumentId;
-  timeframe: Timeframe;
-  aois: AoiRecord[];
-  events?: StructureEvent[];
-  as_of_ms: TimestampMs;
-  feed_state: FeedState;
-}
-/**
- * One value a plugin publishes in `IndicatorSnapshot.values` and `IndicatorSeriesPoint.values`. Every published value may be null (for example before warm-up). `choices` is only allowed for string values.
- *
- * This interface was referenced by `JosephContracts`'s JSON-Schema
- * via the `definition` "ValueSpec".
- */
-export interface ValueSpec {
-  key: string;
-  /**
-   * JSON form of the value: `decimal` is a decimal string, `timestamp_ms` an integer UTC ms time.
-   */
-  type: 'decimal' | 'integer' | 'boolean' | 'string' | 'timestamp_ms';
-  unit: 'price' | 'percent' | 'ratio' | 'volume' | 'bars' | 'none';
-  description: string;
-  /**
-   * Closed set of values of a string value; any string when empty or omitted.
-   *
-   * @maxItems 32
-   */
-  choices?: string[];
-}
-/**
- * How the terminal draws AOIs of one kind. `box` fills [lower, upper] from `created_at_ms`; `level` draws a line at `lower`.
- *
- * This interface was referenced by `JosephContracts`'s JSON-Schema
- * via the `definition` "KindStyle".
- */
-export interface KindStyle {
-  kind: AoiKind;
-  label: string;
-  render: 'box' | 'level';
-  tone?: DisplayTone;
-  color?: HexColor | null;
-  fill_opacity?: number | null;
-  line_style?: LineStyle | null;
-  midline?: boolean;
-  /**
-   * Draws live AOIs as pending (dashed) until they end.
-   */
-  pending_until_ended?: boolean;
-}
-/**
- * How the terminal draws events of one name: a marker on the bar, a segment at `price`, both, or nothing.
- *
- * This interface was referenced by `JosephContracts`'s JSON-Schema
- * via the `definition` "EventStyle".
- */
-export interface EventStyle {
-  name: StructureEventName;
-  label: string;
-  render: 'marker' | 'segment' | 'marker_and_segment' | 'none';
-  position?: 'above' | 'below' | 'at';
-  shape?: 'arrow-up' | 'arrow-down' | 'circle' | 'square';
-  tone?: DisplayTone;
-  color?: HexColor | null;
-  /**
-   * `meta` key holding a UTC ms time: markers sit on that bar and segments start there.
-   */
-  time_meta?: string | null;
-  line_style?: LineStyle | null;
-}
-/**
- * One published value drawn as a line or histogram, on the price pane or a pane the plugin declares.
- *
- * This interface was referenced by `JosephContracts`'s JSON-Schema
- * via the `definition` "PlotStyle".
- */
-export interface PlotStyle {
-  /**
-   * Key declared in `output_values`.
-   */
-  value: string;
-  label: string;
-  /**
-   * `price`, or the id of a declared `PaneStyle`.
-   */
-  pane: string;
-  render: 'line' | 'histogram';
-  tone?: DisplayTone;
-  color?: HexColor | null;
-  line_style?: LineStyle;
-  line_width?: number;
-}
-/**
- * Horizontal reference line in a study pane.
- *
- * This interface was referenced by `JosephContracts`'s JSON-Schema
- * via the `definition` "PaneLevel".
- */
-export interface PaneLevel {
-  value: number;
-  label: string;
-  tone?: DisplayTone;
-  line_style?: LineStyle;
-}
-/**
- * Study pane below the price pane.
- *
- * This interface was referenced by `JosephContracts`'s JSON-Schema
- * via the `definition` "PaneStyle".
- */
-export interface PaneStyle {
-  /**
-   * Pane id, unique within the plugin; `price` is reserved.
-   */
-  id: string;
-  title: string;
-  precision?: number;
-  /**
-   * @maxItems 8
-   */
-  levels?:
-    | []
-    | [PaneLevel]
-    | [PaneLevel, PaneLevel]
-    | [PaneLevel, PaneLevel, PaneLevel]
-    | [PaneLevel, PaneLevel, PaneLevel, PaneLevel]
-    | [PaneLevel, PaneLevel, PaneLevel, PaneLevel, PaneLevel]
-    | [PaneLevel, PaneLevel, PaneLevel, PaneLevel, PaneLevel, PaneLevel]
-    | [
-        PaneLevel,
-        PaneLevel,
-        PaneLevel,
-        PaneLevel,
-        PaneLevel,
-        PaneLevel,
-        PaneLevel,
-      ]
-    | [
-        PaneLevel,
-        PaneLevel,
-        PaneLevel,
-        PaneLevel,
-        PaneLevel,
-        PaneLevel,
-        PaneLevel,
-        PaneLevel,
-      ];
-}
-/**
- * Label shown for AOIs that ended with one `end_reason`.
- *
- * This interface was referenced by `JosephContracts`'s JSON-Schema
- * via the `definition` "EndReasonStyle".
- */
-export interface EndReasonStyle {
-  reason: EndReason;
-  label: string;
-}
-/**
- * Display hints the terminal renders a plugin from. Styled kinds must be declared in `output_kinds`, styled events in `output_events` (or be reserved), plotted values in `output_values`; the engine rejects a plugin that breaks these rules. Kinds and events without a style use the terminal defaults.
- *
- * This interface was referenced by `JosephContracts`'s JSON-Schema
- * via the `definition` "PluginDisplay".
- */
-export interface PluginDisplay {
-  /**
-   * Listed in the Layers menu and drawn on the chart; false for plugins used only by drawing tools or strategies.
-   */
-  layer: boolean;
-  /**
-   * Shown on charts that have no saved layer state.
-   */
-  default_visible: boolean;
-  z_index: number;
-  /**
-   * Event markers are drawn by default.
-   */
-  show_events: boolean;
-  kinds: KindStyle[];
-  events: EventStyle[];
-  plots: PlotStyle[];
-  panes: PaneStyle[];
-  end_reasons: EndReasonStyle[];
-}
-/**
- * Metadata of one installed indicator plugin: what it computes, the AOI kinds, events and values it publishes, and how the terminal displays it.
- *
- * This interface was referenced by `JosephContracts`'s JSON-Schema
- * via the `definition` "IndicatorPluginInfo".
- */
-export interface IndicatorPluginInfo {
-  plugin_id: PluginId;
-  indicator_version: string;
-  schema_version: number;
-  display_name: string;
-  description: string;
-  timeframes: Timeframe[];
-  warmup_bars: number;
-  required_streams: string[];
-  input_schema: {};
-  output_kinds: AoiKind[];
-  output_events: StructureEventName[];
-  output_values: ValueSpec[];
-  display: PluginDisplay;
-  licensing_status: LicensingStatus;
-  parity_status: ParityStatus;
-}
-/**
- * This interface was referenced by `JosephContracts`'s JSON-Schema
- * via the `definition` "IndicatorPluginList".
- */
-export interface IndicatorPluginList {
-  plugins: IndicatorPluginInfo[];
-}
-/**
- * Published values of one plugin on one closed bar.
- *
- * This interface was referenced by `JosephContracts`'s JSON-Schema
- * via the `definition` "IndicatorSeriesPoint".
- */
-export interface IndicatorSeriesPoint {
-  bar_start_ms: TimestampMs;
-  values: {
-    [k: string]: IndicatorValue | undefined;
-  };
-}
-/**
- * Per-bar values of one plugin (e.g. volume delta for a sub-pane). Values are point-in-time: each point is what the plugin published when that bar closed.
- *
- * This interface was referenced by `JosephContracts`'s JSON-Schema
- * via the `definition` "IndicatorSeries".
- */
-export interface IndicatorSeries {
-  instrument_id: InstrumentId;
-  timeframe: Timeframe;
-  plugin_id: string;
-  indicator_version: string;
-  points: IndicatorSeriesPoint[];
-  as_of_ms: TimestampMs;
-  feed_state: FeedState;
 }
 /**
  * Structured identity of a tradable contract. Never key solely on a symbol such as BTCUSDT.
@@ -2975,7 +2730,7 @@ export interface PlotPoint {
  *
  * Attributes:
  *     name: Public series name, one to sixty-four characters.
- *     points: At most two thousand chronological closed-bar values.
+ *     points: At most five thousand chronological closed-bar values.
  *
  * This interface was referenced by `JosephContracts`'s JSON-Schema
  * via the `definition` "PlotSeries".
@@ -3127,58 +2882,20 @@ export interface ScriptAlertEvent {
   time_ms: TimeMs1;
 }
 /**
- * Creates an immutable script version with explicit type and dependencies.
+ * The outcome of one study of a batched run.
  *
  * Attributes:
- *     script_id: Stable tenant-local slug; must match the path on updates.
- *     kind: One of the five script roles; immutable after creation.
- *     name: Display title, one to one hundred twenty characters.
- *     source: UTF-8 Python source, at most sixty-four KiB.
- *     overlay: Whether indicator/strategy plots share the main price pane.
- *     defaults: Default JSON input values overridden by an individual run.
- *     libraries: Python import aliases mapped to pinned library versions.
- *     expected_version: Optimistic lock for edits; required for a new version.
- *     requests: Up to four declared cross-symbol/timeframe source aliases.
+ *     script_id: Requested script id.
+ *     result: Validated result, or None when the study failed.
+ *     error: Why the study failed, otherwise None.
  *
  * This interface was referenced by `JosephContracts`'s JSON-Schema
- * via the `definition` "ScriptInput".
+ * via the `definition` "ScriptBatchEntry".
  */
-export interface ScriptInput {
-  defaults?: Defaults1;
-  expected_version?: ExpectedVersion;
-  kind: Kind1;
-  libraries?: Libraries;
-  name: Name3;
-  overlay?: Overlay1;
-  requests?: Requests1;
-  script_id: ScriptId7;
-  source: Source2;
-}
-export interface Defaults1 {
-  [k: string]: JsonValue | undefined;
-}
-export interface Libraries {
-  [k: string]: LibraryRef | undefined;
-}
-export interface Requests1 {
-  [k: string]: SeriesRequest | undefined;
-}
-/**
- * Declares another symbol/resolution before isolated indicator execution.
- *
- * Attributes:
- *     instrument_id: Optional canonical symbol; defaults to the chart symbol.
- *     tf: Requested resolution, with confirmed-bar visibility enforced by
- *         host.
- *     limit: Maximum closed source bars, one through five hundred.
- *
- * This interface was referenced by `JosephContracts`'s JSON-Schema
- * via the `definition` "SeriesRequest".
- */
-export interface SeriesRequest {
-  instrument_id?: InstrumentId4;
-  limit?: Limit1;
-  tf: Timeframe;
+export interface ScriptBatchEntry {
+  error?: Error2;
+  result?: ScriptResult | null;
+  script_id: ScriptId8;
 }
 /**
  * Reproducible plots and optional simulated strategy performance.
@@ -3228,16 +2945,16 @@ export interface ScriptResult {
   equity_curve: EquityCurve;
   feed_state: FeedState1;
   fills: Fills;
-  instrument_id: InstrumentId5;
-  kind: Kind3;
+  instrument_id: InstrumentId4;
+  kind: Kind2;
   matched?: Matched;
   metrics: Metrics3;
   orders?: Orders;
-  overlay: Overlay2;
+  overlay: Overlay1;
   plot_styles?: PlotStyles;
   plots: Plots;
   position_size?: PositionSize;
-  script_id: ScriptId8;
+  script_id: ScriptId7;
   source_hash: SourceHash4;
   tf: Tf;
   trades?: Trades;
@@ -3262,7 +2979,7 @@ export interface BarCloses {
 export interface ScriptVisual {
   data: Data;
   id: Id3;
-  kind: Kind2;
+  kind: Kind1;
 }
 export interface Data {
   [k: string]: JsonValue | undefined;
@@ -3359,15 +3076,142 @@ export interface StrategyTrade {
   return_pct?: ReturnPct;
 }
 /**
+ * One study of a batched run.
+ *
+ * Attributes:
+ *     script_id: Tenant slug, ``builtin:<id>`` or ``plugin:<entry>:<id>``.
+ *     version: Pinned tenant version, or latest when omitted.
+ *     inputs: Input overrides of this study.
+ *
+ * This interface was referenced by `JosephContracts`'s JSON-Schema
+ * via the `definition` "ScriptBatchItem".
+ */
+export interface ScriptBatchItem {
+  inputs?: Inputs6;
+  script_id: ScriptId9;
+  version?: Version8;
+}
+export interface Inputs6 {
+  [k: string]: JsonValue | undefined;
+}
+/**
+ * Per-study outcomes of a batched run, in request order.
+ *
+ * Attributes:
+ *     results: One entry per requested study.
+ *
+ * This interface was referenced by `JosephContracts`'s JSON-Schema
+ * via the `definition` "ScriptBatchResult".
+ */
+export interface ScriptBatchResult {
+  results: Results;
+}
+/**
+ * Runs several studies over one fetch of the same chart candles.
+ *
+ * The shared fields select the candles and simulation settings; top-level
+ * ``inputs`` are merged under each study's own.
+ *
+ * Attributes:
+ *     runs: One through sixteen studies, run in order.
+ *
+ * This interface was referenced by `JosephContracts`'s JSON-Schema
+ * via the `definition` "ScriptBatchRun".
+ */
+export interface ScriptBatchRun {
+  commission_bps?: CommissionBps;
+  from_ms?: FromMs;
+  include_open?: IncludeOpen;
+  initial_equity?: InitialEquity;
+  inputs?: Inputs7;
+  instrument_id: InstrumentId5;
+  limit?: Limit1;
+  runs: Runs;
+  slippage_bps?: SlippageBps;
+  tf: Timeframe;
+  to_ms?: ToMs;
+  version?: Version9;
+  window_from_ms?: WindowFromMs;
+}
+export interface Inputs7 {
+  [k: string]: JsonValue | undefined;
+}
+/**
+ * Creates an immutable script version with explicit type and dependencies.
+ *
+ * Attributes:
+ *     script_id: Stable tenant-local slug; must match the path on updates.
+ *     kind: One of the five script roles; immutable after creation.
+ *     name: Display title, one to one hundred twenty characters.
+ *     source: UTF-8 Python source, at most sixty-four KiB.
+ *     overlay: Whether indicator/strategy plots share the main price pane.
+ *     defaults: Default JSON input values overridden by an individual run.
+ *     libraries: Python import aliases mapped to pinned library versions.
+ *     expected_version: Optimistic lock for edits; required for a new version.
+ *     requests: Up to four declared cross-symbol/timeframe source aliases.
+ *
+ * This interface was referenced by `JosephContracts`'s JSON-Schema
+ * via the `definition` "ScriptInput".
+ */
+export interface ScriptInput {
+  defaults?: Defaults1;
+  expected_version?: ExpectedVersion;
+  kind: Kind3;
+  libraries?: Libraries;
+  name: Name3;
+  overlay?: Overlay2;
+  requests?: Requests1;
+  script_id: ScriptId10;
+  source: Source2;
+}
+export interface Defaults1 {
+  [k: string]: JsonValue | undefined;
+}
+export interface Libraries {
+  [k: string]: LibraryRef | undefined;
+}
+export interface Requests1 {
+  [k: string]: SeriesRequest | undefined;
+}
+/**
+ * Declares another symbol/resolution before isolated indicator execution.
+ *
+ * Attributes:
+ *     instrument_id: Optional canonical symbol; defaults to the chart symbol.
+ *     tf: Requested resolution, with confirmed-bar visibility enforced by
+ *         host; "auto" picks the chart's lower timeframe for intrabars.
+ *     limit: Maximum closed source bars, one through five hundred (five
+ *         thousand for intrabars).
+ *     intrabars: Lower-timeframe bars inside the newest chart bars.
+ *     tf_input: Input whose value, unless "auto", replaces ``tf``.
+ *     unless: Optional bar field; intrabars are fetched only for chart
+ *         bars that lack it.
+ *     unless_input: Boolean input that switches ``unless`` on.
+ *
+ * This interface was referenced by `JosephContracts`'s JSON-Schema
+ * via the `definition` "SeriesRequest".
+ */
+export interface SeriesRequest {
+  instrument_id?: InstrumentId6;
+  intrabars?: Intrabars;
+  limit?: Limit2;
+  tf: Tf1;
+  tf_input?: TfInput;
+  unless?: Unless;
+  unless_input?: UnlessInput;
+}
+/**
  * Requests a reproducible run using closed, real backend candles.
  *
  * Attributes:
  *     version: Pinned script version, or latest when omitted.
  *     instrument_id: Canonical venue:market:symbol identifier.
  *     tf: Supported chart timeframe, one second through one calendar month.
- *     limit: Maximum closed bars, from two through two thousand.
+ *     limit: Maximum closed bars, from two through five thousand.
  *     from_ms: Optional inclusive UTC epoch millisecond lower boundary.
  *     to_ms: Optional exclusive UTC epoch millisecond visibility boundary.
+ *     window_from_ms: Optional start of the displayed window; intrabar
+ *         requests then cover only chart bars from there on.
  *     include_open: Evaluate the provisional last bar for indicators only;
  *         alerts and simulated orders always require closed bars.
  *     inputs: JSON input values overriding the version's defaults.
@@ -3379,19 +3223,20 @@ export interface StrategyTrade {
  * via the `definition` "ScriptRun".
  */
 export interface ScriptRun {
-  commission_bps?: CommissionBps;
-  from_ms?: FromMs;
-  include_open?: IncludeOpen;
-  initial_equity?: InitialEquity;
-  inputs?: Inputs6;
-  instrument_id: InstrumentId6;
-  limit?: Limit2;
-  slippage_bps?: SlippageBps;
+  commission_bps?: CommissionBps1;
+  from_ms?: FromMs1;
+  include_open?: IncludeOpen1;
+  initial_equity?: InitialEquity1;
+  inputs?: Inputs8;
+  instrument_id: InstrumentId7;
+  limit?: Limit3;
+  slippage_bps?: SlippageBps1;
   tf: Timeframe;
-  to_ms?: ToMs;
-  version?: Version8;
+  to_ms?: ToMs1;
+  version?: Version10;
+  window_from_ms?: WindowFromMs1;
 }
-export interface Inputs6 {
+export interface Inputs8 {
   [k: string]: JsonValue | undefined;
 }
 /**
@@ -3414,10 +3259,10 @@ export interface ScriptVersion {
   name: Name4;
   overlay?: Overlay3;
   requests?: Requests2;
-  script_id: ScriptId9;
+  script_id: ScriptId11;
   source: Source3;
   source_hash: SourceHash5;
-  version: Version9;
+  version: Version11;
 }
 export interface Defaults2 {
   [k: string]: JsonValue | undefined;
@@ -3457,22 +3302,22 @@ export interface StrategyActivation {
   created_at_ms: CreatedAtMs3;
   emitted?: Emitted1;
   history_bars?: HistoryBars3;
-  inputs?: Inputs7;
+  inputs?: Inputs9;
   instrument_ids: InstrumentIds;
   instruments?: Instruments;
   last_checked_ms?: LastCheckedMs1;
   last_error?: LastError2;
   mode?: Mode;
   name: Name5;
-  script_id: ScriptId10;
+  script_id: ScriptId12;
   source_hash: SourceHash6;
   state: State;
   strategy_version_id: StrategyVersionId;
   tf: Timeframe;
   updated_at_ms: UpdatedAtMs;
-  version?: Version10;
+  version?: Version12;
 }
-export interface Inputs7 {
+export interface Inputs9 {
   [k: string]: JsonValue | undefined;
 }
 export interface Instruments {
@@ -3500,14 +3345,14 @@ export interface Instruments {
 export interface StrategyActivationInput {
   channels?: Channels1;
   history_bars?: HistoryBars4;
-  inputs?: Inputs8;
+  inputs?: Inputs10;
   instrument_ids: InstrumentIds1;
   mode?: Mode1;
-  script_id: ScriptId11;
+  script_id: ScriptId13;
   tf: Timeframe;
-  version?: Version11;
+  version?: Version13;
 }
-export interface Inputs8 {
+export interface Inputs10 {
   [k: string]: JsonValue | undefined;
 }
 /**
@@ -3856,32 +3701,37 @@ export interface DrawingCollection {
   drawings: DrawingDocument[];
 }
 /**
+ * One study on a chart: a built-in, plugin or owned script instance with its inputs. Built-in and plugin scripts use version 0; owned scripts pin an immutable version.
+ *
  * This interface was referenced by `JosephContracts`'s JSON-Schema
- * via the `definition` "IndicatorLayerState".
+ * via the `definition` "StudyState".
  */
-export interface IndicatorLayerState {
-  plugin_id: string;
+export interface StudyState {
+  /**
+   * Unique within the chart; the script id, with a #n suffix for further instances.
+   */
+  study_id: string;
+  /**
+   * Owned script slug, builtin:<id> or plugin:<entry>:<id>.
+   */
+  script_id: string;
+  /**
+   * Pinned owned version; 0 for built-in and plugin scripts.
+   */
+  version: number;
+  kind: 'indicator' | 'strategy' | 'alert';
+  name: string;
   visible: boolean;
   /**
-   * AOI kinds shown; all kinds when omitted.
+   * Input overrides validated by the engine against the script's declared inputs.
    */
-  kinds?: AoiKind[];
+  inputs: {};
   /**
-   * Presentation only: per-kind colors, event markers, sub-pane visibility.
+   * Per-plot color overrides by plot name.
    */
-  style?: {};
-  /**
-   * Indicator inputs validated by the backend against the plugin's input_schema.
-   */
-  settings?: {};
-  /**
-   * True when explicitly removed; hidden layers retain their settings.
-   */
-  removed?: boolean;
-  /**
-   * Retains the legend row when a user hides an added study.
-   */
-  present?: boolean;
+  colors: {
+    [k: string]: string | undefined;
+  };
 }
 /**
  * This interface was referenced by `JosephContracts`'s JSON-Schema
@@ -3894,7 +3744,12 @@ export interface ChartState {
   chart_type: ChartType;
   price_scale: PriceScaleMode;
   show_volume: boolean;
-  indicator_layers: IndicatorLayerState[];
+  /**
+   * Studies in legend order.
+   *
+   * @maxItems 40
+   */
+  studies: StudyState[];
   link_group?: 'A' | 'B' | 'C' | 'D' | null;
   feed_mode: FeedMode;
   /**
@@ -3935,7 +3790,7 @@ export interface SyncOptions {
  * via the `definition` "WorkspaceDocument".
  */
 export interface WorkspaceDocument {
-  schema_version: 1;
+  schema_version: 2;
   workspace_id: string;
   name: string;
   layout: LayoutId;
@@ -3977,7 +3832,7 @@ export interface WorkspaceExportDrawings {
   opaque?: {}[];
 }
 /**
- * Workspace export file, format version 2: the workspace document (schema v1, unchanged) plus the drawings of its instruments. Import also accepts a plain v1 WorkspaceDocument (export format 1, no drawings) and the V4 starter shape (format 0), migrated step by step; drawings of unknown tools are kept.
+ * Workspace export file, format version 2: the workspace document plus the drawings of its instruments. Import also accepts a plain WorkspaceDocument (export format 1, no drawings) and the V4 starter shape (format 0), migrated step by step; schema v1 documents are migrated to v2 (indicator layers and attached scripts become studies); drawings of unknown tools are kept.
  *
  * This interface was referenced by `JosephContracts`'s JSON-Schema
  * via the `definition` "WorkspaceExport".

@@ -6,7 +6,7 @@ The licences that cover this repository and its dependencies, and the obligation
 
 - **MIT:** the root [`LICENSE`](../../LICENSE) covers the whole repository; identical copies sit in both engines and ship in their images.
 - **Terminal:** `joseph-terminal` keeps its own MIT [`LICENSE`](../../joseph-terminal/LICENSE) and [`NOTICE`](../../joseph-terminal/NOTICE) so it can be split into its own repository.
-- **Built-in indicators:** MIT like the rest of the repository. They implement the published definitions of TradingView's built-in functions without copying TradingView or Pine code, and report licensing status `CLEAN_ROOM_FROM_SPEC` in `GET /v1/indicators/plugins`.
+- **Built-in indicators:** MIT like the rest of the repository. They implement the published definitions of TradingView's built-in functions without copying TradingView or Pine code, and their public source is readable through `GET /v1/scripts/catalog/builtin:<id>`.
 - **Not covered:** optional third-party indicator plugin packages, installed by operators at build time through `PLUGIN_REQUIREMENTS`, are not part of this repository and keep their own licences. A market image that contains one is subject to that licence; CI publishes engine images only as private packages (either may also contain SinoPac's SDK), and `MARKET_IMAGE_LICENSES` sets the market image's licence label.
 - **Checks:** on every push, `ci-cd.yml` runs `pnpm secrets:scan`, `pnpm licenses:check` (which also fails if `NOTICE` or `THIRD_PARTY_NOTICES.md` stops crediting Lightweight Charts) and dependency-cruiser (no browser code imports engine paths). Run them again before splitting the terminal out.
 

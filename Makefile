@@ -106,19 +106,20 @@ ci: lint typecheck test ## Everything CI runs
 	cd $(ME) && uv run python scripts/export_openapi.py --check
 	cd $(EE) && uv run python scripts/export_openapi.py --check
 
-# Optional indicator plugin packages: space-separated pip requirements,
+# Optional script plugin packages (joseph.scripts entry points):
+# space-separated pip requirements,
 # installed without their dependencies (list every package a plugin
 # needs). Local paths are relative to this directory, e.g.
-#   make plugins PLUGIN_REQUIREMENTS="-e ../my-indicators"
+#   make plugins PLUGIN_REQUIREMENTS="-e ../my-scripts"
 # `uv sync` (and so `make setup`) removes them again; `uv run` keeps them.
 PLUGIN_REQUIREMENTS ?=
 
-plugins: ## Install indicator plugin packages into the market engine (PLUGIN_REQUIREMENTS="...")
+plugins: ## Install script plugin packages (joseph.scripts entry points) into the market engine (PLUGIN_REQUIREMENTS="...")
 	@test -n '$(PLUGIN_REQUIREMENTS)' || { \
-	  echo 'Set PLUGIN_REQUIREMENTS, e.g. make plugins PLUGIN_REQUIREMENTS="-e ../my-indicators"' >&2; \
+	  echo 'Set PLUGIN_REQUIREMENTS, e.g. make plugins PLUGIN_REQUIREMENTS="-e ../my-scripts"' >&2; \
 	  exit 2; }
 	uv pip install --python $(ME)/.venv/bin/python --no-deps $(PLUGIN_REQUIREMENTS)
-	$(ME)/.venv/bin/python -m joseph.indicators.discovery --check
+	$(ME)/.venv/bin/python -m joseph.scripts.catalog --check
 
 # The market image takes PLUGIN_REQUIREMENTS too (git URLs or index
 # names: local paths lie outside the build context). An exported

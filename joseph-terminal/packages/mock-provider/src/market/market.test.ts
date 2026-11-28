@@ -125,22 +125,6 @@ describe('DemoMarketDataClient', () => {
     ).toEqual([]);
   });
 
-  it('serves demo AOIs', async () => {
-    const aois = await client.getAois({
-      instrumentId: 'mock:perp:ETHUSD',
-      timeframe: '15m',
-    });
-    expect(aois.feed_state).toBe('DEMO');
-    expect(
-      aois.aois.every(
-        a =>
-          a.instrument_id === 'mock:perp:ETHUSD' &&
-          Number(a.lower) <= Number(a.upper)
-      )
-    ).toBe(true);
-    expect(aois.aois.every(a => a.confirmed_at_ms <= aois.as_of_ms)).toBe(true);
-  });
-
   it('reports a snapshot with separate mark and bid/ask', async () => {
     const snap = await client.getSnapshot('mock:perp:SOLUSD');
     expect(Number(snap.best_ask)).toBeGreaterThan(Number(snap.best_bid));

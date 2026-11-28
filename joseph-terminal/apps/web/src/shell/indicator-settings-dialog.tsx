@@ -5,136 +5,174 @@
  */
 
 /**
- * @fileoverview Indicator settings dialog for one chart layer: inputs built
- * from the plugin's published `input_schema` (validated, then sent to the
- * engine with every query), per-kind visibility and colors, event markers,
- * line colors and the study pane toggles, all labelled from the plugin's
- * display metadata. Settings are saved in the workspace, so they travel
- * with templates, exports and share links.
- *
- * The dialog is modal (`aria-modal`, labelled by its title). The first
- * control takes focus on open; Escape, Cancel, the close button or a press
- * on the backdrop close it without saving. Text inputs point at their help
- * or error text with `aria-describedby` and set `aria-invalid` when
- * invalid.
+ * @fileoverview Settings dialog of one chart study, generated from the
+ * script's declared inputs: an Inputs section per input group, then the
+ * Style inputs and per-plot color overrides. Owned scripts without
+ * declared inputs edit the inputs their version stores. Saving changes this
+ * chart's study only.
  */
 
 'use client';
-import type {AoiKind, IndicatorPluginInfo} from '@joseph/contracts';
-import {
-  eventDrawn,
-  eventLabel,
-  eventStyle,
-  kindLabel,
-  panePlots,
-} from '@joseph/indicator-viz';
-import {
-  layerSettings,
-  layerStyle,
-  layerVisible,
-  paneShown,
-  type IndicatorLayerStyle,
-} from '@joseph/terminal-shell';
+import type {CatalogInput} from '@joseph/contracts';
+import type {StudyState} from '@joseph/terminal-shell';
 import {X} from 'lucide-react';
-import {useEffect, useMemo, useRef, useState, type ReactElement} from 'react';
-import {loadIndicatorPlugins} from './indicator-plugins';
-import {
-  collectOverrides,
-  fieldLabel,
-  fieldsFromSchema,
-  initialValues,
-} from './indicator-settings';
+import {useEffect, useRef, useState, type ReactElement} from 'react';
+import {pythonState} from './python-state';
+import {studyKey} from './python-studies';
 import {useStore} from './react-bindings';
 import {useRuntime} from './runtime-context';
+import {catalogEntry, studyName, useStudyCatalog} from './study-catalog';
 
-/** Color the pickers show for kinds, events and lines without a color. */
-const DEFAULT_SWATCH = '#8fa5b3';
+/** Hex colors the color inputs accept. */
+const HEX = /^#[0-9a-fA-F]{6}$/;
+
+/** One editable input. */
+export interface StudyField {
+  /** Input name. */
+  name: string;
+  /** Declared input, or a generic one for owned scripts. */
+  spec: CatalogInput;
+}
 
 /**
- * Renders the indicator settings dialog while a request is open.
- * @return Dialog, or null without a request.
+ * Builds the form fields of a study.
+ * @param inputs Declared inputs (catalog), or null for owned scripts.
+ * @param saved Saved input values (owned scripts list theirs here).
+ * @return Fields in declaration order.
+ */
+export function studyFields(
+  inputs: Readonly<Record<string, CatalogInput | undefined>> | null,
+  saved: Readonly<Record<string, unknown>>
+): StudyField[] {
+  if (inputs) {
+    return Object.entries(inputs).flatMap(([name, spec]) =>
+      spec ? [{name, spec}] : []
+    );
+  }
+  return Object.entries(saved).map(([name, value]) => ({
+    name,
+    spec: {
+      default: value,
+      title: '',
+      minimum: null,
+      maximum: null,
+      options: null,
+      step: null,
+      group: '',
+      tooltip: '',
+    },
+  }));
+}
+
+/**
+ * Validates edited values against their declarations.
+ * @param fields Form fields.
+ * @param values Edited values.
+ * @return Inputs that differ from the defaults, or per-field errors.
+ */
+export function collectInputs(
+  fields: readonly StudyField[],
+  values: Readonly<Record<string, unknown>>
+):
+  | {ok: true; inputs: Record<string, unknown>}
+  | {ok: false; errors: Record<string, string>} {
+  const inputs: Record<string, unknown> = {};
+  const errors: Record<string, string> = {};
+  for (const {name, spec} of fields) {
+    let value = values[name];
+    if (typeof spec.default === 'number') {
+      const number = Number(value);
+      if (String(value ?? '').trim() === '' || !Number.isFinite(number)) {
+        errors[name] = 'Enter a number';
+        continue;
+      }
+      if (spec.minimum !== null && number < spec.minimum) {
+        errors[name] = `At least ${spec.minimum}`;
+        continue;
+      }
+      if (spec.maximum !== null && number > spec.maximum) {
+        errors[name] = `At most ${spec.maximum}`;
+        continue;
+      }
+      value =
+        Number.isInteger(spec.default) && spec.step === 1
+          ? Math.round(number)
+          : number;
+    }
+    if (
+      typeof spec.default === 'string' &&
+      spec.default.startsWith('#') &&
+      !HEX.test(String(value))
+    ) {
+      errors[name] = 'Use a #rrggbb color';
+      continue;
+    }
+    if (value !== spec.default) inputs[name] = value;
+  }
+  return Object.keys(errors).length ? {ok: false, errors} : {ok: true, inputs};
+}
+
+/**
+ * Renders the settings dialog requested through `runtime.indicatorSettings`.
+ * @return Dialog, or null while none is requested.
  */
 export function IndicatorSettingsDialog(): ReactElement | null {
   const runtime = useRuntime();
   const request = useStore(runtime.indicatorSettings);
+  const workspace = useStore(runtime.workspace);
   if (!request) return null;
+  const study = workspace.charts
+    .find(chart => chart.chart_id === request.chartId)
+    ?.studies.find(item => item.study_id === request.studyId);
+  if (!study) return null;
   return (
     <SettingsForm
-      key={`${request.chartId}:${request.pluginId}`}
+      key={`${request.chartId}:${request.studyId}`}
       chartId={request.chartId}
-      pluginId={request.pluginId}
+      study={study}
     />
   );
 }
 
 /**
- * Renders the settings form of one chart layer.
- * @param props Chart and plugin ids.
- * @return Dialog, or an empty fragment when the chart no longer exists.
+ * Renders the form of one study.
+ * @param props Chart id and study.
+ * @return Modal dialog.
  */
 function SettingsForm({
   chartId,
-  pluginId,
+  study,
 }: {
   chartId: string;
-  pluginId: string;
+  study: StudyState;
 }): ReactElement {
   const runtime = useRuntime();
-  const workspace = useStore(runtime.workspace);
-  const chart = workspace.charts.find(c => c.chart_id === chartId);
-  const [plugin, setPlugin] = useState<IndicatorPluginInfo | null>(null);
-  const [loadError, setLoadError] = useState<string | null>(null);
-  const dialog = useRef<HTMLDivElement>(null);
-  useEffect(() => {
-    let alive = true;
-    loadIndicatorPlugins(runtime).then(
-      plugins => {
-        if (!alive) return;
-        const found = plugins.find(p => p.plugin_id === pluginId) ?? null;
-        setPlugin(found);
-        if (!found) setLoadError('The engine does not publish this indicator.');
-      },
-      (failure: unknown) => {
-        if (alive) {
-          setLoadError(
-            failure instanceof Error ? failure.message : 'Request failed'
-          );
-        }
-      }
+  const catalog = useStudyCatalog();
+  const results = useStore(pythonState(runtime).results);
+  const entry = catalogEntry(catalog, study);
+  const saved = study.inputs as Record<string, unknown>;
+  const fields = studyFields(entry?.inputs ?? null, saved);
+  const initial = () =>
+    Object.fromEntries(
+      fields.map(({name, spec}) => [name, saved[name] ?? spec.default])
     );
-    return () => {
-      alive = false;
-    };
-  }, [runtime, pluginId]);
-  const fields = useMemo(
-    () => fieldsFromSchema(plugin?.input_schema),
-    [plugin]
-  );
-  const saved = chart ? layerSettings(chart, pluginId) : null;
-  const style: IndicatorLayerStyle = chart ? layerStyle(chart, pluginId) : {};
-  const layer = chart?.indicator_layers.find(l => l.plugin_id === pluginId);
-  const [values, setValues] = useState<Record<string, string | boolean>>({});
-  const [errors, setErrors] = useState<Record<string, string>>({});
-  const [kinds, setKinds] = useState<readonly AoiKind[] | null>(
-    layer?.kinds ?? null
-  );
+  const [values, setValues] = useState<Record<string, unknown>>(initial);
   const [colors, setColors] = useState<Record<string, string>>({
-    ...(style.colors ?? {}),
+    ...(study.colors as Record<string, string>),
   });
-  // Null follows the plugin's `display.show_events`.
-  const [showEvents, setShowEvents] = useState<boolean | null>(
-    style.show_events ?? null
+  const [errors, setErrors] = useState<Record<string, string>>({});
+  const dialog = useRef<HTMLDivElement>(null);
+  const result = results[studyKey(chartId, study.study_id)];
+  const plots = (result?.plots ?? []).filter(
+    plot => result?.plot_styles?.[plot.name]?.display !== 'data_window'
   );
-  // Pane visibility starts from the saved style; toggles override it.
-  const [paneBase, setPaneBase] = useState<IndicatorLayerStyle>(style);
-  const [paneOverrides, setPaneOverrides] = useState<Record<string, boolean>>(
-    {}
-  );
-  useEffect(() => {
-    setValues(initialValues(fields, saved));
-    // eslint-disable-next-line react-hooks/exhaustive-deps -- runs only when the schema arrives; later edits stay local until saved
-  }, [fields]);
+  const name = studyName(catalog, study);
   const close = () => void runtime.indicatorSettings.set(null);
+  useEffect(() => {
+    // Declared inputs arrive with the catalog after the first render.
+    setValues(initial);
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- reinitializes only when the declarations arrive; edits stay local until saved
+  }, [entry]);
   useEffect(() => {
     dialog.current
       ?.querySelector<HTMLElement>('input, select, button')
@@ -144,78 +182,37 @@ function SettingsForm({
     };
     window.addEventListener('keydown', onKey);
     return () => void window.removeEventListener('keydown', onKey);
-    // eslint-disable-next-line react-hooks/exhaustive-deps -- focus and the Escape listener are set up once per dialog; `close` only clears a store
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- set up once per dialog; `close` only clears a store
   }, []);
-  if (!chart) return <></>;
-  const outputKinds = plugin?.output_kinds ?? [];
-  const drawnEvents = (plugin?.output_events ?? []).filter(name =>
-    eventDrawn(eventStyle(plugin ?? undefined, name), name)
-  );
-  const lines = plugin ? panePlots(plugin, 'price') : [];
-  const panes = plugin?.display.panes ?? [];
-  const eventsOn = showEvents ?? plugin?.display.show_events ?? true;
-  const shownKinds = kinds ?? outputKinds;
-  const name = plugin?.display_name ?? pluginId;
-  /**
-   * Returns whether a pane is currently toggled on.
-   * @param paneId Pane id.
-   * @return Visibility.
-   */
-  function paneOn(paneId: string): boolean {
-    return paneOverrides[paneId] ?? paneShown(paneBase, paneId);
-  }
   const save = () => {
-    const result = collectOverrides(fields, values);
-    if (!result.ok) {
-      setErrors(result.errors);
+    const collected = collectInputs(fields, values);
+    if (!collected.ok) {
+      setErrors(collected.errors);
       return;
     }
-    const allKinds =
-      kinds === null || outputKinds.every(k => kinds.includes(k));
-    // Without metadata the saved pane settings are kept as they were.
-    const hiddenPane = panes.some(pane => !paneOn(pane.id));
-    const paneStyle: IndicatorLayerStyle =
-      panes.length === 0
-        ? {
-            ...(paneBase.pane !== undefined ? {pane: paneBase.pane} : {}),
-            ...(paneBase.panes ? {panes: paneBase.panes} : {}),
-          }
-        : hiddenPane
-          ? {panes: Object.fromEntries(panes.map(p => [p.id, paneOn(p.id)]))}
-          : {};
-    const nextStyle: IndicatorLayerStyle = {
-      ...(Object.keys(colors).length > 0 ? {colors} : {}),
-      ...(showEvents !== null ? {show_events: showEvents} : {}),
-      ...paneStyle,
-    };
     runtime.dispatch({
-      type: 'setIndicatorLayerConfig',
+      type: 'updateStudy',
       chartId,
-      pluginId,
-      patch: {
-        kinds: allKinds ? null : [...(kinds ?? [])],
-        style: nextStyle,
-        settings:
-          Object.keys(result.overrides).length > 0 ? result.overrides : null,
-        visible: layerVisible(
-          chart,
-          pluginId,
-          plugin?.display.default_visible ?? true
-        ),
-      },
+      studyId: study.study_id,
+      patch: {inputs: collected.inputs, colors},
     });
     runtime.notifier.notify(`${name} settings saved for this chart`, 'success');
     close();
   };
   const reset = () => {
-    setValues(initialValues(fields, null));
-    setErrors({});
-    setKinds(null);
+    setValues(
+      Object.fromEntries(fields.map(({name: key, spec}) => [key, spec.default]))
+    );
     setColors({});
-    setShowEvents(null);
-    setPaneBase({});
-    setPaneOverrides({});
+    setErrors({});
   };
+  const groups = new Map<string, StudyField[]>();
+  for (const field of fields) {
+    const group = field.spec.group || 'Inputs';
+    groups.set(group, [...(groups.get(group) ?? []), field]);
+  }
+  const style = groups.get('Style') ?? [];
+  groups.delete('Style');
   return (
     <div className="dialog-backdrop" onPointerDown={close}>
       <div
@@ -228,7 +225,7 @@ function SettingsForm({
         onPointerDown={event => void event.stopPropagation()}
       >
         <header className="dialog__head">
-          <h2 id="indicator-dialog-title">{name}</h2>
+          <h2 id="indicator-dialog-title">{entry?.title ?? name}</h2>
           <button
             type="button"
             className="j-btn j-btn--ghost j-btn--icon j-btn--sm"
@@ -245,213 +242,59 @@ function SettingsForm({
             save();
           }}
         >
-          {loadError && (
-            <p className="j-notice j-notice--warning" role="status">
-              Inputs unavailable: {loadError}. Colors and visibility still
-              apply.
-            </p>
+          {entry?.description && (
+            <p className="indicator-dialog__help">{entry.description}</p>
           )}
-          {runtime.clients.demo && (
-            <p className="j-notice" role="note">
-              Demo studies follow their inputs; demo levels are precomputed, so
-              their inputs are saved and sent but do not move them.
-            </p>
-          )}
-          {fields.length > 0 && (
-            <fieldset className="indicator-dialog__group">
-              <legend>Inputs</legend>
-              {fields.map(field => {
-                const id = `input-${field.name}`;
-                const error = errors[field.name];
-                const value = values[field.name];
-                return (
-                  <div key={field.name} className="indicator-dialog__field">
-                    {field.kind === 'boolean' ? (
-                      <label className="j-check">
-                        <input
-                          id={id}
-                          type="checkbox"
-                          checked={value === true}
-                          onChange={event =>
-                            void setValues(v => ({
-                              ...v,
-                              [field.name]: event.target.checked,
-                            }))
-                          }
-                        />
-                        {fieldLabel(field.name)}
-                      </label>
-                    ) : (
-                      <>
-                        <label className="j-label" htmlFor={id}>
-                          {fieldLabel(field.name)}
-                        </label>
-                        {field.kind === 'enum' ? (
-                          <select
-                            id={id}
-                            className="j-select"
-                            value={String(value ?? '')}
-                            onChange={event =>
-                              void setValues(v => ({
-                                ...v,
-                                [field.name]: event.target.value,
-                              }))
-                            }
-                          >
-                            {field.choices?.map(choice => (
-                              <option key={choice} value={choice}>
-                                {choice}
-                              </option>
-                            ))}
-                          </select>
-                        ) : (
-                          <input
-                            id={id}
-                            className="j-input j-tabular"
-                            inputMode={
-                              field.kind === 'integer' ? 'numeric' : 'decimal'
-                            }
-                            value={String(value ?? '')}
-                            aria-invalid={error ? true : undefined}
-                            aria-describedby={`${id}-help`}
-                            onChange={event =>
-                              void setValues(v => ({
-                                ...v,
-                                [field.name]: event.target.value,
-                              }))
-                            }
-                          />
-                        )}
-                      </>
-                    )}
-                    <p
-                      id={`${id}-help`}
-                      className={
-                        error
-                          ? 'indicator-dialog__error'
-                          : 'indicator-dialog__help'
-                      }
-                    >
-                      {error ??
-                        `${field.description} Default ${String(field.defaultValue)}.`}
-                    </p>
-                  </div>
-                );
-              })}
-            </fieldset>
-          )}
-          {outputKinds.length > 0 && (
-            <fieldset className="indicator-dialog__group">
-              <legend>Zones and levels</legend>
-              {outputKinds.map(kind => {
-                const label = kindLabel(plugin ?? undefined, kind);
-                return (
-                  <div key={kind} className="indicator-dialog__kind">
-                    <label className="j-check" title={kind}>
-                      <input
-                        type="checkbox"
-                        checked={shownKinds.includes(kind)}
-                        onChange={event =>
-                          void setKinds(
-                            event.target.checked
-                              ? [...shownKinds, kind]
-                              : shownKinds.filter(k => k !== kind)
-                          )
-                        }
-                      />
-                      {label}
-                    </label>
-                    <input
-                      type="color"
-                      aria-label={`Color of ${label}`}
-                      value={colors[kind] ?? DEFAULT_SWATCH}
-                      onChange={event =>
-                        void setColors(c => ({
-                          ...c,
-                          [kind]: event.target.value,
-                        }))
-                      }
-                    />
-                  </div>
-                );
-              })}
-            </fieldset>
-          )}
-          {(plugin === null || plugin.output_events.length > 0) && (
-            <fieldset className="indicator-dialog__group">
-              <legend>Markers</legend>
-              <label className="j-check">
-                <input
-                  type="checkbox"
-                  checked={eventsOn}
-                  onChange={event => void setShowEvents(event.target.checked)}
+          {[...groups].map(([group, items]) => (
+            <fieldset key={group} className="indicator-dialog__group">
+              <legend>{group}</legend>
+              {items.map(field => (
+                <InputField
+                  key={field.name}
+                  field={field}
+                  value={values[field.name]}
+                  error={errors[field.name]}
+                  onChange={value =>
+                    void setValues(v => ({...v, [field.name]: value}))
+                  }
                 />
-                Show event markers
-              </label>
-              {drawnEvents.map(event => {
-                const label = eventLabel(plugin ?? undefined, event);
-                return (
-                  <div key={event} className="indicator-dialog__kind">
-                    <span>
-                      {label}{' '}
-                      {label !== event && (
-                        <span className="j-muted">
-                          {event.toLowerCase().replace(/_/g, ' ')}
-                        </span>
-                      )}
-                    </span>
-                    <input
-                      type="color"
-                      aria-label={`Color of ${label}`}
-                      value={colors[event] ?? DEFAULT_SWATCH}
-                      onChange={e =>
-                        void setColors(c => ({...c, [event]: e.target.value}))
-                      }
-                    />
-                  </div>
-                );
-              })}
+              ))}
             </fieldset>
-          )}
-          {lines.length > 0 && (
+          ))}
+          {(style.length > 0 || plots.length > 0) && (
             <fieldset className="indicator-dialog__group">
-              <legend>Lines</legend>
-              {lines.map(plot => (
-                <div key={plot.value} className="indicator-dialog__kind">
-                  <span>{plot.label}</span>
+              <legend>Style</legend>
+              {style.map(field => (
+                <InputField
+                  key={field.name}
+                  field={field}
+                  value={values[field.name]}
+                  error={errors[field.name]}
+                  onChange={value =>
+                    void setValues(v => ({...v, [field.name]: value}))
+                  }
+                />
+              ))}
+              {plots.map(plot => (
+                <div key={plot.name} className="indicator-dialog__kind">
+                  <span>{plot.name}</span>
                   <input
                     type="color"
-                    aria-label={`Color of ${plot.label}`}
-                    value={colors[plot.value] ?? plot.color ?? DEFAULT_SWATCH}
+                    aria-label={`Color of ${plot.name}`}
+                    value={
+                      colors[plot.name] ??
+                      String(
+                        result?.plot_styles?.[plot.name]?.color ?? '#5cb8e6'
+                      ).slice(0, 7)
+                    }
                     onChange={event =>
                       void setColors(c => ({
                         ...c,
-                        [plot.value]: event.target.value,
+                        [plot.name]: event.target.value,
                       }))
                     }
                   />
                 </div>
-              ))}
-            </fieldset>
-          )}
-          {panes.length > 0 && (
-            <fieldset className="indicator-dialog__group">
-              <legend>Panes</legend>
-              {panes.map(pane => (
-                <label key={pane.id} className="j-check">
-                  <input
-                    type="checkbox"
-                    checked={paneOn(pane.id)}
-                    data-testid={`indicator-pane-toggle-${pane.id}`}
-                    onChange={event =>
-                      void setPaneOverrides(p => ({
-                        ...p,
-                        [pane.id]: event.target.checked,
-                      }))
-                    }
-                  />
-                  Show the {pane.title} pane below the chart
-                </label>
               ))}
             </fieldset>
           )}
@@ -477,6 +320,103 @@ function SettingsForm({
           </footer>
         </form>
       </div>
+    </div>
+  );
+}
+
+/**
+ * Renders one input control: checkbox, choice list, color, number or text.
+ * @param props Field, current value, error and change callback.
+ * @return Field markup with its help text.
+ */
+function InputField({
+  field,
+  value,
+  error,
+  onChange,
+}: {
+  field: StudyField;
+  value: unknown;
+  error: string | undefined;
+  onChange: (value: unknown) => void;
+}): ReactElement {
+  const {name, spec} = field;
+  const id = `input-${name}`;
+  const label = spec.title || name.replace(/_/g, ' ');
+  const help =
+    error ??
+    `${spec.tooltip ? `${spec.tooltip} ` : ''}Default ${String(spec.default)}.`;
+  if (typeof spec.default === 'boolean') {
+    return (
+      <div className="indicator-dialog__field">
+        <label className="j-check">
+          <input
+            id={id}
+            type="checkbox"
+            checked={value === true}
+            onChange={event => void onChange(event.target.checked)}
+          />
+          {label}
+        </label>
+        <p className="indicator-dialog__help">{help}</p>
+      </div>
+    );
+  }
+  let control: ReactElement;
+  if (spec.options) {
+    control = (
+      <select
+        id={id}
+        className="j-select"
+        value={String(value ?? '')}
+        onChange={event => {
+          const option = spec.options?.find(
+            item => String(item) === event.target.value
+          );
+          onChange(option ?? event.target.value);
+        }}
+      >
+        {spec.options.map(option => (
+          <option key={String(option)} value={String(option)}>
+            {String(option)}
+          </option>
+        ))}
+      </select>
+    );
+  } else if (typeof spec.default === 'string' && spec.default.startsWith('#')) {
+    control = (
+      <input
+        id={id}
+        type="color"
+        value={HEX.test(String(value)) ? String(value) : spec.default}
+        onChange={event => void onChange(event.target.value)}
+      />
+    );
+  } else {
+    control = (
+      <input
+        id={id}
+        className="j-input j-tabular"
+        inputMode={typeof spec.default === 'number' ? 'decimal' : 'text'}
+        value={String(value ?? '')}
+        aria-invalid={error ? true : undefined}
+        aria-describedby={`${id}-help`}
+        onChange={event => void onChange(event.target.value)}
+      />
+    );
+  }
+  return (
+    <div className="indicator-dialog__field">
+      <label className="j-label" htmlFor={id}>
+        {label}
+      </label>
+      {control}
+      <p
+        id={`${id}-help`}
+        className={error ? 'indicator-dialog__error' : 'indicator-dialog__help'}
+      >
+        {help}
+      </p>
     </div>
   );
 }

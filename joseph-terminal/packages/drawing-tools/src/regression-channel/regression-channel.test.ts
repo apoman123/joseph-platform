@@ -11,10 +11,9 @@
  */
 
 import {
-  HttpMarketDataClient,
-  type IndicatorSeriesPoint,
-} from '@joseph/contracts';
-import {type DrawingSeriesState} from '@joseph/drawing-core';
+  type DrawingSeriesPoint,
+  type DrawingSeriesState,
+} from '@joseph/drawing-core';
 import {describe, expect, it} from 'vitest';
 import {
   STATE,
@@ -37,22 +36,22 @@ const DOC = makeDoc(tool, [
 ]);
 
 /** Channel point published at the t2 bar. */
-const CHANNEL: IndicatorSeriesPoint = {
+const CHANNEL: DrawingSeriesPoint = {
   bar_start_ms: 600_000,
   values: {
-    start_ms: 120_000,
-    start: '140',
-    end: '160',
-    upper_start: '150',
-    upper_end: '170',
-    lower_start: '130',
-    lower_end: '150',
-    slope: '2.5',
-    stdev: '5',
-    pearson_r: '0.8734',
-    max_up: '7',
-    max_down: '6',
-    bars: 9,
+    'centre.from_ms': 120_000,
+    'centre.from_price': '140',
+    'centre.to_price': '160',
+    'upper.from_price': '150',
+    'upper.to_price': '170',
+    'lower.from_price': '130',
+    'lower.to_price': '150',
+    'Slope': '2.5',
+    'Stdev': '5',
+    "Pearson's R": '0.8734',
+    'Max up': '7',
+    'Max down': '6',
+    'Bars': '9',
   },
 };
 
@@ -64,7 +63,7 @@ const CHANNEL: IndicatorSeriesPoint = {
  * @throws Error when the fixture drawing yields no series request.
  */
 function ready(
-  points: IndicatorSeriesPoint[],
+  points: DrawingSeriesPoint[],
   asOfMs = 900_000
 ): DrawingSeriesState {
   const request = regressionRequest(DOC, '1m');
@@ -109,41 +108,19 @@ describe('regression-channel', () => {
     expect(tool.manifest).toMatchObject({group: 'studies', anchorCount: 2});
   });
 
-  it('requests from the t2 bar with t1 as the anchor, in time order', () => {
+  it('runs the built-in script from t1 to t2, in time order', () => {
     expect(regressionRequest(DOC, '1m')).toEqual({
-      pluginId: 'regression_channel',
-      fromMs: 600_000,
-      settings: {anchor_ms: 120_000, source: 'close', deviations: '2'},
-    });
-    const wide = {...DOC, props: {deviations: '3', show_pearson: false}};
-    expect(regressionRequest(wide, '1m')?.settings.deviations).toBe('3');
-  });
-
-  it('sends the documented GET through the market client', async () => {
-    const urls: string[] = [];
-    const client = new HttpMarketDataClient({
-      baseUrl: 'http://engine.test',
-      fetchImpl: async url => {
-        urls.push(String(url));
-        return new Response('{"points":[]}', {status: 200});
+      scriptId: 'builtin:regression_channel',
+      fromMs: 120_000,
+      inputs: {
+        anchor_ms: 120_000,
+        end_ms: 600_000,
+        source: 'close',
+        deviations: 2,
       },
     });
-    const request = regressionRequest(DOC, '1m');
-    if (!request) throw new Error('no request');
-    await client.getIndicatorSeries({
-      instrumentId: 'mock:perp:BTCUSD',
-      timeframe: '1m',
-      pluginId: request.pluginId,
-      fromMs: request.fromMs,
-      settings: request.settings,
-    });
-    const params = Object.fromEntries(new URL(urls[0] ?? '').searchParams);
-    expect(params).toMatchObject({
-      plugin: 'regression_channel',
-      from_ms: '600000',
-      settings:
-        '{"regression_channel":{"anchor_ms":120000,"source":"close","deviations":"2"}}',
-    });
+    const wide = {...DOC, props: {deviations: '3', show_pearson: false}};
+    expect(regressionRequest(wide, '1m')?.inputs.deviations).toBe(3);
   });
 
   it('takes the point of the t2 bar and draws the channel with R', () => {
@@ -181,7 +158,12 @@ describe('regression-channel', () => {
     const nulls = ready([
       {
         bar_start_ms: 600_000,
-        values: {...CHANNEL.values, start_ms: null, start: null, end: null},
+        values: {
+          ...CHANNEL.values,
+          'centre.from_ms': null,
+          'centre.from_price': null,
+          'centre.to_price': null,
+        },
       },
     ]);
     expect(channelView(DOC, nulls)).toEqual({kind: 'notice', text});

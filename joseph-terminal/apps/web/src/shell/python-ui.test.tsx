@@ -12,11 +12,11 @@ import {
 } from '@joseph/chart-core';
 import type {ScriptResult} from '@joseph/contracts';
 import {activeChart} from '@joseph/terminal-shell';
-import {act, fireEvent, render, screen, within} from '@testing-library/react';
+import {fireEvent, render, screen, within} from '@testing-library/react';
 import {beforeEach, describe, expect, it} from 'vitest';
 import {createRuntime} from '../composition/runtime';
 import {ChartTabs} from './chart-tabs';
-import {IndicatorLegend} from './python-studies';
+import {StudyLegend, inputsSummary} from './python-studies';
 import {pythonCanvas, pythonColor} from './python-painter';
 import {applyTerminalAction, terminalSnapshot} from './mcp-control';
 import {RuntimeProvider} from './runtime-context';
@@ -33,15 +33,15 @@ const DEMO = {
 
 beforeEach(() => void localStorage.clear());
 
-describe('indicator legend semantics', () => {
-  it('hides without clearing settings, removes settings, and resets on re-add', async () => {
+describe('study legend semantics', () => {
+  it('hides without clearing inputs, removes studies and summarizes inputs', async () => {
     const runtime = createRuntime(() => [], DEMO);
     const chartId = activeChart(runtime.workspace.get()).chart_id;
     runtime.dispatch({
-      type: 'setIndicatorLayerConfig',
+      type: 'updateStudy',
       chartId,
-      pluginId: 'ema',
-      patch: {settings: {length: 42}},
+      studyId: 'builtin:ema',
+      patch: {inputs: {length: 42}},
     });
     /**
      * Renders the currently saved chart after reducer updates.
@@ -50,9 +50,9 @@ describe('indicator legend semantics', () => {
     function Legend() {
       return (
         <RuntimeProvider runtime={runtime}>
-          <IndicatorLegend
+          <StudyLegend
             chart={activeChart(runtime.workspace.get())}
-            errors={[]}
+            errors={{'builtin:volume_delta': 'No candles'}}
           />
         </RuntimeProvider>
       );
@@ -60,40 +60,52 @@ describe('indicator legend semantics', () => {
     const view = render(<Legend />);
     const legend = screen.getByLabelText('Active indicators');
     await within(legend).findByRole('button', {name: 'Hide EMA'});
+    expect(within(legend).getByTestId('legend-builtin:ema')).toHaveTextContent(
+      'EMA 42 close 0'
+    );
+    expect(within(legend).getByRole('alert')).toHaveTextContent(
+      'Delta %: No candles'
+    );
     fireEvent.click(within(legend).getByRole('button', {name: 'EMA settings'}));
-    expect(runtime.indicatorSettings.get()).toEqual({chartId, pluginId: 'ema'});
+    expect(runtime.indicatorSettings.get()).toEqual({
+      chartId,
+      studyId: 'builtin:ema',
+    });
     fireEvent.click(within(legend).getByRole('button', {name: 'Hide EMA'}));
     view.rerender(<Legend />);
     expect(
-      activeChart(runtime.workspace.get()).indicator_layers.find(
-        row => row.plugin_id === 'ema'
-      )?.settings
+      activeChart(runtime.workspace.get()).studies.find(
+        row => row.study_id === 'builtin:ema'
+      )?.inputs
     ).toEqual({length: 42});
     expect(
       within(legend).getByRole('button', {name: 'Show EMA'})
     ).toBeVisible();
+    expect(
+      within(legend).getByRole('button', {name: 'EMA source'})
+    ).toBeDisabled();
     fireEvent.click(within(legend).getByRole('button', {name: 'Remove EMA'}));
     view.rerender(<Legend />);
-    expect(within(legend).queryByText('EMA')).toBeNull();
-    expect(
-      activeChart(runtime.workspace.get()).indicator_layers.find(
-        row => row.plugin_id === 'ema'
-      )?.settings
-    ).toBeUndefined();
-    act(
-      () =>
-        void runtime.dispatch({
-          type: 'setIndicatorLayer',
-          chartId,
-          pluginId: 'ema',
-          visible: true,
-        })
-    );
-    view.rerender(<Legend />);
-    expect(
-      within(legend).getByRole('button', {name: 'Hide EMA'})
-    ).toBeVisible();
+    expect(within(legend).queryByTestId('legend-builtin:ema')).toBeNull();
     runtime.flush();
+  });
+
+  it('summarizes inputs without style values', () => {
+    expect(
+      inputsSummary(
+        {
+          study_id: 'x',
+          script_id: 'mine',
+          version: 1,
+          kind: 'indicator',
+          name: 'Mine',
+          visible: true,
+          inputs: {fast: 5, color: '#ffffff', anchor_ms: 0, on: true},
+          colors: {},
+        },
+        undefined
+      )
+    ).toBe('5');
   });
 
   it('persists the selected heatmap tab type and preserves candlestick tabs', async () => {
