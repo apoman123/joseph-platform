@@ -8,9 +8,9 @@
  * @fileoverview Browser → real engines: market data and backend AOIs (areas
  * of interest) render, seconds bars and true delta come from the engine,
  * engine-backed drawings read engine series, a paper order placed in the
- * ticket reaches the execution engine, the strategy builder validates
- * against the Python compiler, and notification subscriptions are stored
- * server-side.
+ * ticket reaches the execution engine, a built-in Python strategy
+ * backtests and activates on the engine, and notification subscriptions
+ * are stored server-side.
  *
  * Runs with `playwright.fullstack.config.ts`, which starts both engines and
  * a production build of the terminal; the test backend enables only the
@@ -302,14 +302,24 @@ test('a paper order from the ticket is created by the execution engine', async (
   await expect(page.getByText(/0\.002/).first()).toBeVisible();
 });
 
-test('strategy builder validates on the Python compiler', async ({page}) => {
+test('a built-in Python strategy backtests and activates on the engine', async ({
+  page,
+}) => {
   await loadTerminal(page);
   await openPanel(page, 'Strategy');
   await page
-    .getByRole('combobox', {name: 'Start from a template'})
-    .selectOption({label: 'RSI reversion (short)'});
-  await page.getByRole('button', {name: 'Validate'}).click();
-  await expect(page.getByText(/Valid on the server/)).toBeVisible();
+    .getByRole('combobox', {name: 'Strategy script'})
+    .selectOption('builtin:ema-trend-long');
+  await page.getByRole('tab', {name: 'Backtest'}).click();
+  await page.getByRole('button', {name: 'Run backtest'}).click();
+  const report = page.getByTestId('backtest-report');
+  await expect(report.getByText('Win rate')).toBeVisible({timeout: 30_000});
+  await expect(report.getByText(/Demo report/)).toHaveCount(0);
+  await page.getByRole('tab', {name: 'Activate'}).click();
+  await page.getByRole('button', {name: 'Activate', exact: true}).click();
+  const list = page.getByRole('list', {name: 'Activations'});
+  await expect(list.getByText(/^builtin:ema-trend-long:v/)).toBeVisible();
+  await list.getByRole('button', {name: 'Delete'}).first().click();
 });
 
 test('a notification subscription saved in the terminal is stored server-side', async ({
