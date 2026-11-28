@@ -4,7 +4,7 @@ How to use Joseph Terminal, the platform's browser app, to chart, draw, screen, 
 
 ## Orientation
 
-The terminal charts crypto perpetuals (Binance, Bitget, Hyperliquid, Lighter, MEXC), Taiwan stocks and ETFs (TWSE, TPEx), US stocks and ETFs (Nasdaq, NYSE, Cboe BZX) and US Treasury yields; futures and options are not offered. Zones, screening, signals and backtests come from the market engine; orders pass the execution engine's risk gateway.
+The terminal charts crypto perpetuals (Binance, Bitget, Hyperliquid, Lighter, MEXC), Taiwan stocks and ETFs (TWSE, TPEx), US stocks and ETFs (Nasdaq, NYSE, Cboe BZX) and US Treasury yields; futures and options are not offered. Indicators, screening, signals and backtests come from the market engine; orders pass the execution engine's risk gateway.
 
 | Mode | When | What you see |
 |---|---|---|
@@ -187,9 +187,9 @@ Strategies are Python `Strategy` scripts.
 
 An activation evaluates bars that close after it was created or resumed, never history, also not after a server restart. An order the strategy queues on a newly closed bar becomes an entry or exit signal carrying the strategy's stop and target; Paper and Shadow entries go to the execution engine, where a deployment of the activation's strategy version sizes and places them. A built-in's *Open source* shows its code; *Copy to my scripts* saves it as your own editable script. Editing a script creates a new version, which existing activations keep ignoring until you activate it again. Your own scripts run only when the server enables the isolated script runtime.
 
-- **Alerts:** kind, instrument, R:R, data source and an expandable **reason tree**; *Show on chart* jumps to the bar. *Alert log* shows the events of your alert jobs. Sort by time, R multiple, confluence or bar volume. *Acknowledge*, *Snooze* and *Dismiss* are local.
+- **Alerts:** strategy entries and exits and alert events with kind, instrument, side, R:R and data source; click the kind for the message, the alert's condition name, the entry, stop and target, the mode and the severity. *Show on chart* jumps to the bar. Filter *Entries*, *Exits* or the *Alert log* (the events of your alert jobs); sort by time or R multiple. *Acknowledge*, *Snooze* and *Dismiss* are local.
 - **Alert manager:** *Create alert* picks a condition — a built-in alert (*Price crossing*, *Price channel*, *Moving average cross*, *RSI overbought / oversold*, *Volume spike*, *Percent change*, *New high or low breakout*) or one of your alert, indicator or strategy scripts — the symbol, timeframe, inputs, history, the notification destinations and whether it is enabled. Each alert is checked on every newly closed bar; matches go to the alert log and the chosen destinations, never to trading. *Pause*, *Edit* and *Delete* manage it; errors such as missing data show in its status.
-- **Notifications:** Telegram, LINE, e-mail or an HTTPS webhook, filtered by kind and severity, with quiet hours (critical alerts still arrive). *Not delivered*: the server has no credentials for that channel.
+- **Notifications:** Telegram, LINE, e-mail or an HTTPS webhook, filtered by kind (strategy entries, strategy exits, alerts) and severity, with quiet hours (critical alerts still arrive). *Not delivered*: the server has no credentials for that channel.
 
 ## Backtests
 

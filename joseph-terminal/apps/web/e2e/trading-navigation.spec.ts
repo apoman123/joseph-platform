@@ -58,9 +58,9 @@ test('an alert focuses its instrument on the chart', async ({page}) => {
   await openPanel(page, 'Alerts');
   const row = page.getByTestId('signal-demo-signal-2');
   await expect(row).toBeVisible({timeout: 10_000});
-  await row.getByRole('button', {name: 'Entry blocked'}).click();
-  await expect(page.getByRole('list', {name: 'Why this signal'})).toContainText(
-    'Open interest snapshot missing'
+  await row.getByRole('button', {name: 'Position exited'}).click();
+  await expect(page.getByLabel('Signal details')).toContainText(
+    'RSI back below 50'
   );
   await row.getByRole('button', {name: 'Show on chart'}).click();
   await openPanel(page, 'Order ticket');

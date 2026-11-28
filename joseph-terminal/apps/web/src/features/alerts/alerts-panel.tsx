@@ -5,23 +5,20 @@
  */
 
 /**
- * @fileoverview Alerts: strategy signals and alert-job events (the alert
- * log) newest first with filters, sorting, local acknowledgment, snooze
- * and dismiss, the explanation trace (reason tree) and a jump to the exact
- * venue, instrument and bar on the chart.
+ * @fileoverview Alerts: strategy entries and exits and alert-job events
+ * (the alert log) newest first with filters, sorting, local
+ * acknowledgment, snooze and dismiss, the signal's levels and message, and
+ * a jump to the exact venue, instrument and bar on the chart.
  */
 
 'use client';
 import {formatUtcDateTime} from '@joseph/chart-trading';
-import type {ReasonNode, Severity, Signal, SignalKind} from '@joseph/contracts';
+import type {Severity, Signal, SignalKind} from '@joseph/contracts';
 import type {WritableStore} from '@joseph/feature-registry';
 import {Fragment, useEffect, useMemo, useState, type ReactNode} from 'react';
 import {
-  BAR_VOLUME_HELP,
   SIGNAL_SORTS,
   SNOOZE_MINUTES,
-  barQuoteVolumeOf,
-  confluenceOf,
   isSnoozed,
   setDismissed,
   snooze,
@@ -30,7 +27,6 @@ import {
   type SignalSort,
   type SignalTriage,
 } from './ranking';
-import {formatCompact, formatDecimal} from '../../shell/format';
 import {useStore, type WebFeatureContext} from '../../shell/react-bindings';
 import {
   EmptyState,
@@ -70,33 +66,14 @@ const FILTERS: ReadonlyArray<{
   kinds: readonly SignalKind[] | null;
 }> = [
   {id: 'all', label: 'All', kinds: null},
-  {id: 'alerts', label: 'Alert log', kinds: ['CUSTOM_ALERT']},
   {id: 'entries', label: 'Entries', kinds: ['ENTRY_CONFIRMED']},
-  {id: 'blocked', label: 'Blocked', kinds: ['ENTRY_BLOCKED']},
-  {
-    id: 'setup',
-    label: 'Setup',
-    kinds: [
-      'WATCHING_AOI',
-      'PRE_SIGNAL',
-      'AOI_INVALIDATED',
-      'SETUP_EXPIRED',
-      'QUALIFICATION_CHANGED',
-      'POSITION_EXITED',
-      'CUSTOM_ALERT',
-    ],
-  },
+  {id: 'exits', label: 'Exits', kinds: ['POSITION_EXITED']},
+  {id: 'alerts', label: 'Alert log', kinds: ['CUSTOM_ALERT']},
 ];
 
 /** Human labels of signal kinds. */
 const KIND_LABELS: Readonly<Record<SignalKind, string>> = {
-  WATCHING_AOI: 'Watching AOI',
-  PRE_SIGNAL: 'Setup forming',
   ENTRY_CONFIRMED: 'Entry',
-  ENTRY_BLOCKED: 'Entry blocked',
-  AOI_INVALIDATED: 'AOI invalidated',
-  SETUP_EXPIRED: 'Setup expired',
-  QUALIFICATION_CHANGED: 'Qualification changed',
   POSITION_EXITED: 'Position exited',
   CUSTOM_ALERT: 'Alert',
 };
@@ -104,38 +81,8 @@ const KIND_LABELS: Readonly<Record<SignalKind, string>> = {
 /** Badge class per signal kind. */
 const KIND_BADGES: Readonly<Partial<Record<SignalKind, string>>> = {
   ENTRY_CONFIRMED: 'j-badge j-badge--live',
-  ENTRY_BLOCKED: 'j-badge j-badge--stale',
-  PRE_SIGNAL: 'j-badge j-badge--sodium',
+  POSITION_EXITED: 'j-badge j-badge--muted',
 };
-
-/**
- * Renders a reason tree with TRUE / FALSE / UNKNOWN per node.
- * @param props Props with the root node.
- * @return Nested list.
- */
-export function ReasonTree({node}: {node: ReasonNode}): ReactNode {
-  const badge = {
-    TRUE: 'j-badge j-badge--live',
-    FALSE: 'j-badge j-badge--muted',
-    UNKNOWN: 'j-badge j-badge--sodium',
-  }[node.result];
-  return (
-    <li className={styles.reason} data-result={node.result}>
-      <div className={styles.reasonLine}>
-        <span className={badge}>{node.result.toLowerCase()}</span>
-        <span className={styles.op}>{node.op}</span>
-        <span>{node.detail}</span>
-      </div>
-      {node.children.length > 0 && (
-        <ul className={styles.reasonChildren}>
-          {node.children.map(child => (
-            <ReasonTree key={child.node_path} node={child} />
-          ))}
-        </ul>
-      )}
-    </li>
-  );
-}
 
 /**
  * Renders the alerts panel.
@@ -204,7 +151,6 @@ export function AlertsPanel({
       instrumentId: signal.instrument_id,
       timeframe: signal.timeframe,
       timeMs: signal.bar_start_ms,
-      aoiIds: signal.aoi_ids,
     });
   };
   // Only the newest 500 acknowledgments are kept, so settings stay bounded.
@@ -249,11 +195,7 @@ export function AlertsPanel({
             onChange={e => void setSort(e.target.value as SignalSort)}
           >
             {SIGNAL_SORTS.map(option => (
-              <option
-                key={option.id}
-                value={option.id}
-                title={option.id === 'volume' ? BAR_VOLUME_HELP : undefined}
-              >
+              <option key={option.id} value={option.id}>
                 {option.label}
               </option>
             ))}
@@ -299,15 +241,6 @@ export function AlertsPanel({
                 <th>Side</th>
                 <th>TF</th>
                 <th className="j-num">R:R</th>
-                <th
-                  className="j-num"
-                  title="Conditions satisfied in the reason tree"
-                >
-                  Conf.
-                </th>
-                <th className="j-num" title={BAR_VOLUME_HELP}>
-                  Bar vol.
-                </th>
                 <th>Strategy</th>
                 <th>Data</th>
                 <th>
@@ -364,22 +297,6 @@ export function AlertsPanel({
                       </td>
                       <td>{signal.timeframe}</td>
                       <td className="j-num">{signal.rr ?? '—'}</td>
-                      <td className="j-num">
-                        {confluenceOf(signal.reason_tree)}
-                      </td>
-                      <td
-                        className="j-num j-tabular"
-                        data-testid="signal-volume"
-                        title={
-                          signal.bar_quote_volume == null
-                            ? BAR_VOLUME_HELP
-                            : `Quote turnover of the signal bar: ${formatDecimal(signal.bar_quote_volume, 2)} (venue-published)`
-                        }
-                      >
-                        {barQuoteVolumeOf(signal) === null
-                          ? '—'
-                          : formatCompact(signal.bar_quote_volume)}
-                      </td>
                       <td
                         className={styles.strategy}
                         title={signal.strategy_version_id}
@@ -472,27 +389,39 @@ export function AlertsPanel({
                     </tr>
                     {expanded && (
                       <tr className={styles.detail}>
-                        <td colSpan={11}>
-                          {signal.message && (
-                            <p className={styles.message}>{signal.message}</p>
-                          )}
-                          {signal.entry_price && (
-                            <p className={styles.message}>
-                              Entry {signal.entry_price}, stop{' '}
-                              {signal.stop_price ?? '—'}, target{' '}
-                              {signal.target_price ?? '—'}. Risk check{' '}
-                              {signal.risk_evaluation.status
-                                .toLowerCase()
-                                .replace('_', ' ')}
-                              .
-                            </p>
-                          )}
-                          <ul
-                            className={styles.tree}
-                            aria-label="Why this signal"
-                          >
-                            <ReasonTree node={signal.reason_tree} />
-                          </ul>
+                        <td colSpan={9}>
+                          <div role="group" aria-label="Signal details">
+                            <dl className={styles.facts}>
+                              {signal.message && (
+                                <>
+                                  <dt>Message</dt>
+                                  <dd>{signal.message}</dd>
+                                </>
+                              )}
+                              {signal.condition && (
+                                <>
+                                  <dt>Condition</dt>
+                                  <dd>{signal.condition}</dd>
+                                </>
+                              )}
+                              {signal.entry_price && (
+                                <>
+                                  <dt>Levels</dt>
+                                  <dd>
+                                    Entry {signal.entry_price}, stop{' '}
+                                    {signal.stop_price ?? '—'}, target{' '}
+                                    {signal.target_price ?? '—'}
+                                  </dd>
+                                </>
+                              )}
+                              <dt>Mode</dt>
+                              <dd>
+                                {signal.mode.toLowerCase().replace('_', ' ')}
+                              </dd>
+                              <dt>Severity</dt>
+                              <dd>{signal.severity.toLowerCase()}</dd>
+                            </dl>
+                          </div>
                         </td>
                       </tr>
                     )}

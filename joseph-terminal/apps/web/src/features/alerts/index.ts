@@ -59,12 +59,11 @@ export function triageFromSettings(settings: AlertSettings): SignalTriage {
 }
 
 /**
- * Merges signals by id, keeping the highest revision, newest bar first.
- * Polls and the stream can deliver the same signal in any order; comparing
- * revisions keeps a late, older copy from replacing a newer one, and an
- * equal revision simply replaces the stored copy.
+ * Merges signals by id, newest bar first. Polls and the stream can deliver
+ * the same signal in any order; a recorded signal never changes, so any
+ * copy can replace another.
  * @param current Existing signals.
- * @param incoming New or updated signals.
+ * @param incoming New signals.
  * @return Merged list.
  */
 export function mergeSignals(
@@ -73,10 +72,7 @@ export function mergeSignals(
 ): Signal[] {
   const byId = new Map(current.map(s => [s.signal_id, s]));
   for (const signal of incoming) {
-    const existing = byId.get(signal.signal_id);
-    if (!existing || signal.revision >= existing.revision) {
-      byId.set(signal.signal_id, signal);
-    }
+    byId.set(signal.signal_id, signal);
   }
   return [...byId.values()].sort(
     (a, b) =>
@@ -144,10 +140,7 @@ export const ALERTS_FEATURE: WebFeature = {
     disposers.push(() => void clearInterval(timer));
     disposers.push(
       ctx.clients.userStream.subscribe([{channel: 'signals'}], envelope => {
-        if (
-          envelope.type === 'signal.created' ||
-          envelope.type === 'signal.updated'
-        ) {
+        if (envelope.type === 'signal.created') {
           // Signal events carry a contract `Signal` as their payload.
           state.update(s => ({
             ...s,

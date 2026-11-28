@@ -330,8 +330,9 @@ source changes, its jobs report the change and stop until saved again. UI/browse
 delivery is implicit; Telegram, WhatsApp, Web Push, and other selected
 destinations retain their existing enabled, strategy, signal-kind, severity, and
 quiet-hours filters. Select **Alerts (built-in and Python)** in destination
-filters. Their canonical kind is `CUSTOM_ALERT`, direction is `NONE`, and mode
-is always `ALERT_ONLY`; they never enter execution forwarding. The **Alert log**
+filters. Their canonical kind is `CUSTOM_ALERT`, direction is `NONE`, mode is
+always `ALERT_ONLY` and `condition` names the matched condition; they never
+enter execution forwarding. These three kinds are the whole signal contract. The **Alert log**
 filter of the Alerts panel lists them.
 
 Run one market-engine worker per database for scan ownership and scheduling.

@@ -6,13 +6,12 @@
 
 /**
  * @fileoverview Browser tests in DEMO mode for seconds and monthly bars
- * (grouped menu, typed resolutions, bar-close countdown, data window), the
- * true order-flow delta and the signal ranking by bar volume.
+ * (grouped menu, typed resolutions, bar-close countdown, data window) and
+ * the true order-flow delta.
  */
 
 import {expect, test, type Page} from '@playwright/test';
 import {firstCanvas, openTerminal, pickTimeframe} from './support';
-import {openPanel} from './trading-helpers';
 
 /** Folder of the documentation screenshots, relative to `apps/web`. */
 const SHOTS = 'e2e/screenshots';
@@ -67,25 +66,4 @@ test('charts seconds and monthly bars with a countdown and true delta', async ({
     /(Jan|Feb|Mar|Apr|May|Jun|Jul|Aug|Sep|Oct|Nov|Dec) \d{4}/
   );
   await expect(data).toContainText(/Closes\s*\d{4}-\d{2}-01 00:00 UTC/);
-});
-
-test('ranks signals by the signal bar quote turnover', async ({page}) => {
-  await openTerminal(page);
-  await openPanel(page, 'Alerts');
-  await expect(
-    page.locator('[data-testid^="signal-demo-signal-"]').first()
-  ).toBeVisible();
-  await page.getByTestId('alerts-sort').selectOption('volume');
-  const cells = page.getByTestId('signal-volume');
-  await expect(cells.first()).toHaveText(/^\d+(\.\d)?[KMB]?$/);
-  await expect(
-    page.getByRole('columnheader', {name: 'Bar vol.'})
-  ).toHaveAttribute('title', /quote-currency turnover of the signal bar/i);
-  const texts = await cells.allTextContents();
-  const scale: Record<string, number> = {K: 1e3, M: 1e6, B: 1e9};
-  const values = texts.map(text => {
-    const match = /^([\d.]+)([KMB]?)$/.exec(text);
-    return match ? Number(match[1]) * (scale[match[2] ?? ''] ?? 1) : -1;
-  });
-  expect(values).toEqual([...values].sort((a, b) => b - a));
 });

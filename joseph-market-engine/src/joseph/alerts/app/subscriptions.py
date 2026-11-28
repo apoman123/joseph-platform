@@ -24,6 +24,7 @@ from joseph.alerts.app import ports
 from joseph.alerts.domain import model
 from joseph.domain import errors
 from joseph.domain import identity
+from joseph.signals.domain import signal as signal_domain
 
 _EMAIL = re.compile(r"^[^@\s]+@[^@\s]+\.[^@\s]+$")
 # A numeric chat id (negative for groups) or a public @username.
@@ -249,14 +250,20 @@ def from_contract(
             tz=tz,
             bypass_severities=_strings(bypass),
         )
-    kinds = body.get("kinds", [])
+    kinds = _strings(body.get("kinds", []))
+    unknown = kinds - signal_domain.SIGNAL_KINDS
+    if unknown:
+        raise errors.ValidationFailedError(
+            f"unknown signal kinds {', '.join(sorted(unknown))}; use "
+            f"{', '.join(sorted(signal_domain.SIGNAL_KINDS))}"
+        )
     strategies = body.get("strategy_ids", [])
     return model.Subscription(
         subscription_id=subscription_id,
         tenant_id=tenant_id,
         channel=model.Channel(channel),
         target=target,
-        kinds=_strings(kinds),
+        kinds=kinds,
         min_severity=severity,
         strategy_ids=_strings(strategies),
         enabled=bool(body.get("enabled", True)),

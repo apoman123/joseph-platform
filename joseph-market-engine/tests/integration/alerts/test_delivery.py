@@ -46,37 +46,23 @@ def _signal(mode: str = "PAPER") -> signal_domain.Signal:
     Returns:
         The signal; equal inputs give the same ``signal_id``.
     """
-    key = "tenant-a|trend:v1|*|binance:perp:BTCUSDT|LONG|s1|ENTRY_CONFIRMED"
+    key = "tenant-a|trend:v1|binance:perp:BTCUSDT|LONG|ENTRY_CONFIRMED"
     return signal_domain.Signal(
         signal_id=signal_domain.signal_id_for(key),
         dedupe_key=key,
         tenant_id="tenant-a",
         strategy_id="trend",
         strategy_version_id="trend:v1",
-        setup_id="s1",
+        source_hash="sha256:b",
         instrument_id="binance:perp:BTCUSDT",
         direction="LONG",
         timeframe="5m",
         kind="ENTRY_CONFIRMED",
-        setup_state="FIRED",
         severity="ENTRY",
+        mode=mode,
         bar_start_ms=1_795_132_800_000,
         bar_close_ms=1_795_133_100_000,
         evaluated_at_ms=1_795_133_100_100,
-        inputs_snapshot_hash="sha256:a",
-        rule_version="sha256:b",
-        evaluator_version="1.0.0",
-        indicator_versions={"pivot_points": "1.0.0"},
-        reason_tree={"op": "ALL", "result": "TRUE"},
-        aoi_ids=("zone-1",),
-        group_ids=(),
-        entry_price=None,
-        stop_price=None,
-        target_price=None,
-        rr=None,
-        risk_status="PASS",
-        risk_reasons=(),
-        mode=mode,
         data_source="LIVE",
     )
 
@@ -563,3 +549,122 @@ def test_sql_subscriptions_round_trip(engine: sa.Engine) -> None:
     repo.upsert(sub)
     assert repo.list_for_tenant("tenant-a") == [sub]
     assert repo.list_for_tenant("tenant-b") == []
+
+
+def _stored_subscription(sub_id: str, kinds: list[str]) -> dict[str, object]:
+    """Builds a subscription body as an older engine stored it.
+
+    Args:
+        sub_id: Subscription id (also the storage key).
+        kinds: Stored kinds filter.
+
+    Returns:
+        The stored JSON object.
+    """
+    return {
+        "subscription_id": sub_id,
+        "tenant_id": "tenant-a",
+        "channel": "TELEGRAM",
+        "target": "123456789",
+        "kinds": kinds,
+        "min_severity": "INFO",
+        "strategy_ids": [],
+        "enabled": True,
+        "quiet_hours": None,
+        "web_push": None,
+    }
+
+
+def _legacy_payload(kind: str) -> dict[str, object]:
+    """Builds a pending payload in the declarative-strategy contract shape.
+
+    Args:
+        kind: Signal kind.
+
+    Returns:
+        The current test signal's contract with the removed fields added.
+    """
+    body = _signal().to_contract()
+    del body["source_hash"], body["condition"]
+    body.update(
+        kind=kind,
+        rule_version="sha256:b",
+        setup_id="s1",
+        setup_state="FIRED",
+        reason_tree={"op": "ALL", "result": "TRUE"},
+        aoi_ids=["zone-1"],
+        risk_evaluation={"status": "PASS", "reasons": []},
+    )
+    return body
+
+
+def test_sql_migration_of_retired_kinds(engine: sa.Engine) -> None:
+    """Stored kinds filters and pending payloads lose the retired kinds.
+
+    A filter of only retired kinds becomes every current kind; pending
+    deliveries of a retired kind are dead-lettered and other legacy
+    payloads take the current contract shape.
+    """
+    sql.METADATA.create_all(engine)
+    stored = {
+        "sub-all": [],
+        "sub-mixed": ["ENTRY_BLOCKED", "ENTRY_CONFIRMED", "PRE_SIGNAL"],
+        "sub-retired": ["SETUP_EXPIRED", "WATCHING_AOI"],
+        "sub-current": ["CUSTOM_ALERT"],
+    }
+    legacy = {
+        "dlv-entry": ("PENDING", _legacy_payload("ENTRY_CONFIRMED")),
+        "dlv-blocked": ("PENDING", _legacy_payload("ENTRY_BLOCKED")),
+        "dlv-done": ("DELIVERED", _legacy_payload("PRE_SIGNAL")),
+    }
+    with engine.begin() as conn:
+        for sub_id, kinds in stored.items():
+            conn.execute(
+                sql.SUBSCRIPTIONS.insert().values(
+                    subscription_id=sub_id,
+                    tenant_id="tenant-a",
+                    body_json=json.dumps(_stored_subscription(sub_id, kinds)),
+                )
+            )
+        for delivery_id, (status, payload) in legacy.items():
+            conn.execute(
+                sql.OUTBOX.insert().values(
+                    delivery_id=delivery_id,
+                    idempotency_key=delivery_id,
+                    tenant_id="tenant-a",
+                    channel="WEBHOOK",
+                    target="https://hooks.example.com/joseph",
+                    payload_json=json.dumps(payload, sort_keys=True),
+                    status=status,
+                    attempts=0,
+                    next_attempt_ms=0,
+                    created_at_ms=0,
+                )
+            )
+    assert sql.migrate_legacy_kinds(engine) == 4
+    assert sql.migrate_legacy_kinds(engine) == 0
+    sql.create_schema(engine)
+    subs = {
+        s.subscription_id: s.kinds
+        for s in sql.SqlSubscriptionRepository(engine).list_for_tenant(
+            "tenant-a"
+        )
+    }
+    assert subs == {
+        "sub-all": frozenset(),
+        "sub-mixed": frozenset({"ENTRY_CONFIRMED"}),
+        "sub-retired": signal_domain.SIGNAL_KINDS,
+        "sub-current": frozenset({"CUSTOM_ALERT"}),
+    }
+    outbox = sql.SqlOutbox(engine)
+    entry = outbox.get("dlv-entry")
+    blocked = outbox.get("dlv-blocked")
+    done = outbox.get("dlv-done")
+    assert entry is not None and blocked is not None and done is not None
+    assert entry.status is model.DeliveryStatus.PENDING
+    assert dict(entry.payload) == _signal().to_contract()
+    assert blocked.status is model.DeliveryStatus.DEAD
+    assert blocked.last_error == (
+        "signal kind retired with the declarative strategies"
+    )
+    assert done.payload == legacy["dlv-done"][1]

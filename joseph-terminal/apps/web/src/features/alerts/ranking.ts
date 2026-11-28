@@ -6,25 +6,22 @@
 
 /**
  * @fileoverview Signal dashboard ranking and triage (pure): sort keys
- * (newest, R multiple, confluence, bar volume, age), confluence counts from
- * the reason tree and local snooze/dismiss. The R multiple is reward
- * divided by risk.
+ * (newest, R multiple, age) and local snooze/dismiss. The R multiple is
+ * reward divided by risk.
  *
  * Display only: nothing here changes what the engine decided. Decimal
  * strings become numbers here only to rank and measure, never to show.
  */
 
-import type {ReasonNode, Signal} from '@joseph/contracts';
+import type {Signal} from '@joseph/contracts';
 
 /** Sort keys offered by the alerts panel. */
-export type SignalSort = 'newest' | 'rr' | 'confluence' | 'volume' | 'age';
+export type SignalSort = 'newest' | 'rr' | 'age';
 
 /** Sort labels in menu order. */
 export const SIGNAL_SORTS: ReadonlyArray<{id: SignalSort; label: string}> = [
   {id: 'newest', label: 'Newest'},
   {id: 'rr', label: 'R multiple'},
-  {id: 'confluence', label: 'Confluence'},
-  {id: 'volume', label: 'Bar volume'},
   {id: 'age', label: 'Oldest first'},
 ];
 
@@ -40,16 +37,6 @@ export interface SignalTriage {
 }
 
 /**
- * Counts satisfied leaf conditions in a reason tree.
- * @param node Root node.
- * @return Number of TRUE leaves.
- */
-export function confluenceOf(node: ReasonNode): number {
-  if (node.children.length === 0) return node.result === 'TRUE' ? 1 : 0;
-  return node.children.reduce((sum, child) => sum + confluenceOf(child), 0);
-}
-
-/**
  * Returns a signal's R multiple as a number, for ranking.
  * @param signal Signal.
  * @return Number, or null when absent or not a finite number.
@@ -57,23 +44,6 @@ export function confluenceOf(node: ReasonNode): number {
 function rrOf(signal: Signal): number | null {
   const value = signal.rr == null ? NaN : Number(signal.rr);
   return Number.isFinite(value) ? value : null;
-}
-
-/** Tooltip of the bar volume column and sort. */
-export const BAR_VOLUME_HELP =
-  "Quote-currency turnover of the signal bar, as published by the venue (never estimated). Blank when the venue doesn't publish turnover.";
-
-/**
- * Reads the signal bar's quote turnover (comparable across instruments,
- * unlike base volume).
- * @param signal Signal.
- * @return Turnover, or null when the venue publishes none.
- */
-export function barQuoteVolumeOf(signal: Signal): number | null {
-  const raw = signal.bar_quote_volume;
-  if (raw == null || raw === '') return null;
-  const value = Number(raw);
-  return Number.isFinite(value) && value >= 0 ? value : null;
 }
 
 /**
@@ -95,8 +65,8 @@ function byNumber(
 }
 
 /**
- * Sorts signals for display; ties fall back to newest first. Missing
- * values (R multiple, volume) sort last.
+ * Sorts signals for display; ties fall back to newest first. Signals
+ * without an R multiple sort last.
  * @param signals Signals.
  * @param sort Sort key.
  * @return Sorted copy.
@@ -110,11 +80,7 @@ export function sortSignals(
   return [...signals].sort((a, b) => {
     let result = 0;
     if (sort === 'rr') result = byNumber(rrOf(a), rrOf(b), true);
-    else if (sort === 'confluence') {
-      result = confluenceOf(b.reason_tree) - confluenceOf(a.reason_tree);
-    } else if (sort === 'volume') {
-      result = byNumber(barQuoteVolumeOf(a), barQuoteVolumeOf(b), true);
-    } else if (sort === 'age') result = a.bar_close_ms - b.bar_close_ms;
+    else if (sort === 'age') result = a.bar_close_ms - b.bar_close_ms;
     return result || newest(a, b);
   });
 }

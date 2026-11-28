@@ -5,7 +5,8 @@
 
 Provides RFC 9562 UUIDv7 (time ordered) identifiers for server-generated
 entities and deterministic content-derived identifiers for structures that
-must stay stable across batch, streaming and replay runs (AOIs, events).
+must stay stable across batch, streaming and replay runs (signals,
+deliveries).
 """
 
 from __future__ import annotations

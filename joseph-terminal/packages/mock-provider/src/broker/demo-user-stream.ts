@@ -42,7 +42,6 @@ const CHANNEL_OF: Readonly<Partial<Record<StreamEventType, ChannelName>>> = {
   'risk.kill_switch': 'risk',
   'account.updated': 'account',
   'signal.created': 'signals',
-  'signal.updated': 'signals',
 };
 
 /**

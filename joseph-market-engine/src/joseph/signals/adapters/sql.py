@@ -35,12 +35,54 @@ SIGNALS = sa.Table(
 
 
 def create_schema(engine: sa.Engine) -> None:
-    """Creates the signals table if missing.
+    """Creates the signals table if missing and migrates legacy rows.
 
     Args:
         engine: SQLAlchemy engine.
     """
     METADATA.create_all(engine)
+    migrate_legacy_signals(engine)
+
+
+def migrate_legacy_signals(engine: sa.Engine) -> int:
+    """Brings rows of the removed declarative strategies to the contract.
+
+    Rows of retired kinds (``WATCHING_AOI``, ``PRE_SIGNAL`` and the other
+    setup lifecycle kinds) are deleted: nothing emits or reads them any
+    more. Bodies of the remaining kinds that still carry setup, AOI, reason
+    tree and risk fields are rewritten to the current contract shape. The
+    migration is idempotent; a migrated table is left unchanged.
+
+    Args:
+        engine: SQLAlchemy engine; the table must exist.
+
+    Returns:
+        Number of rows deleted or rewritten.
+    """
+    changed = 0
+    with engine.begin() as conn:
+        changed += conn.execute(
+            SIGNALS.delete().where(
+                SIGNALS.c.kind.in_(sorted(signal_domain.RETIRED_KINDS))
+            )
+        ).rowcount
+        rows = conn.execute(
+            sa.select(SIGNALS.c.signal_id, SIGNALS.c.body_json).where(
+                SIGNALS.c.body_json.not_like('%"source_hash":%')
+            )
+        ).all()
+        for signal_id, body_json in rows:
+            body = json.loads(str(body_json))
+            if not signal_domain.is_legacy_body(body):
+                continue
+            migrated = signal_domain.Signal.from_contract(body).to_contract()
+            conn.execute(
+                SIGNALS.update()
+                .where(SIGNALS.c.signal_id == signal_id)
+                .values(body_json=json.dumps(migrated, sort_keys=True))
+            )
+            changed += 1
+    return changed
 
 
 class SqlSignalRepository:

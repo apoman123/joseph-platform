@@ -15,6 +15,7 @@ from typing import Any
 import sqlalchemy as sa
 
 from joseph.alerts.domain import model
+from joseph.signals.domain import signal as signal_domain
 
 METADATA = sa.MetaData()
 """Schema of the alerts context."""
@@ -49,12 +50,87 @@ SUBSCRIPTIONS = sa.Table(
 
 
 def create_schema(engine: sa.Engine) -> None:
-    """Creates the alert tables if missing.
+    """Creates the alert tables if missing and migrates legacy rows.
 
     Args:
         engine: SQLAlchemy engine.
     """
     METADATA.create_all(engine)
+    migrate_legacy_kinds(engine)
+
+
+_RETIRED_ERROR = "signal kind retired with the declarative strategies"
+"""Dead-letter reason of pending deliveries of a retired signal kind."""
+
+
+def migrate_legacy_kinds(engine: sa.Engine) -> int:
+    """Removes the declarative-strategy signal kinds from stored rows.
+
+    Subscription ``kinds`` filters drop retired kinds (see
+    ``model.current_kinds``). Pending deliveries of a retired kind are
+    dead-lettered; other pending payloads stored in the old contract
+    shape are rewritten to the current one, so senders and the execution
+    engine receive current signals. Delivered and dead rows stay as they
+    were. The migration is idempotent.
+
+    Args:
+        engine: SQLAlchemy engine; the tables must exist.
+
+    Returns:
+        Number of rows changed.
+    """
+    changed = 0
+    with engine.begin() as conn:
+        for sub_id, body_json in conn.execute(
+            sa.select(
+                SUBSCRIPTIONS.c.subscription_id, SUBSCRIPTIONS.c.body_json
+            )
+        ).all():
+            body = json.loads(str(body_json))
+            kinds = frozenset(str(k) for k in body.get("kinds", []))
+            migrated = model.current_kinds(kinds)
+            if migrated == kinds:
+                continue
+            body["kinds"] = sorted(migrated)
+            conn.execute(
+                SUBSCRIPTIONS.update()
+                .where(SUBSCRIPTIONS.c.subscription_id == sub_id)
+                .values(body_json=json.dumps(body, sort_keys=True))
+            )
+            changed += 1
+        pending = conn.execute(
+            sa.select(OUTBOX.c.delivery_id, OUTBOX.c.payload_json).where(
+                OUTBOX.c.status == model.DeliveryStatus.PENDING.value,
+                OUTBOX.c.payload_json.like('%"rule_version":%'),
+            )
+        ).all()
+        for delivery_id, payload_json in pending:
+            payload = json.loads(str(payload_json))
+            if not signal_domain.is_legacy_body(payload):
+                continue
+            where = OUTBOX.c.delivery_id == delivery_id
+            if payload.get("kind") in signal_domain.RETIRED_KINDS:
+                conn.execute(
+                    OUTBOX.update()
+                    .where(where)
+                    .values(
+                        status=model.DeliveryStatus.DEAD.value,
+                        last_error=_RETIRED_ERROR,
+                    )
+                )
+            else:
+                current = signal_domain.Signal.from_contract(payload)
+                conn.execute(
+                    OUTBOX.update()
+                    .where(where)
+                    .values(
+                        payload_json=json.dumps(
+                            current.to_contract(), sort_keys=True
+                        )
+                    )
+                )
+            changed += 1
+    return changed
 
 
 def _to_record(row: sa.Row[tuple[object, ...]]) -> model.DeliveryRecord:
@@ -357,7 +433,7 @@ def _subscription_from_json(text: str) -> model.Subscription:
         tenant_id=data["tenant_id"],
         channel=model.Channel(data["channel"]),
         target=data["target"],
-        kinds=frozenset(data.get("kinds", [])),
+        kinds=model.current_kinds(frozenset(data.get("kinds", []))),
         min_severity=data.get("min_severity", "INFO"),
         strategy_ids=frozenset(data.get("strategy_ids", [])),
         enabled=bool(data.get("enabled", True)),

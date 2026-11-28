@@ -160,8 +160,8 @@ def test_signal_edge_cases(
     assert _post(client, _signal(h), token="wrong")["status"] == 401
     assert _post(client, _signal(h))["results"] == []
     _deploy(h)
-    watching = _post(client, _signal(h, kind="WATCHING_AOI", signal_id="w1"))
-    assert watching["results"] == []
+    exited = _post(client, _signal(h, kind="POSITION_EXITED", signal_id="x1"))
+    assert exited["results"] == []
     stale = _post(
         client,
         _signal(h, signal_id="old", bar_close_ms=h.clock.now_ms() - 600_000),

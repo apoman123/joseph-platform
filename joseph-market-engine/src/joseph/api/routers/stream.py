@@ -8,8 +8,7 @@ Protocol:
 * client → ``ClientMessage`` ``{"action": "subscribe" | "unsubscribe" |
   "ping", "channels": [ChannelSpec], "last_sequence": int | null}``;
 * server → ``StreamEnvelope``: ``subscribed``, ``candle.updated``,
-  ``aoi.updated``, ``feed.health``,
-  ``signal.created``/``signal.updated`` (tenant-scoped, requires
+  ``feed.health``, ``signal.created`` (tenant-scoped, requires
   ``?token=``), ``heartbeat``, ``error`` and ``snapshot_required`` (when
   ``last_sequence`` is older than the retention ring, when it is newer than
   the newest buffered sequence, or when the client fell behind; refetch REST
