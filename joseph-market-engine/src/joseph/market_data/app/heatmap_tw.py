@@ -24,6 +24,7 @@ from joseph.market_data.app import heatmap_cache
 from joseph.market_data.app import heatmap_catalog as catalog
 from joseph.market_data.app import heatmap_models as models
 from joseph.market_data.app import heatmap_parts as parts
+from joseph.market_data.app import ports
 from joseph.market_data.app import universe as universe_lib
 from joseph.market_data.domain import heatmap_metrics as rules
 
@@ -190,7 +191,8 @@ class TaiwanEquities:
             part: Result collecting errors.
 
         Returns:
-            Listings and live snapshots by code (empty without the venue).
+            Listings and live snapshots by code (no snapshots without the
+            venue or when its feed has no selected-symbol bulk quotes).
         """
         venue = _VENUES[market_name]
         rows = await self._index.rows(budget, [venue])
@@ -199,7 +201,11 @@ class TaiwanEquities:
             return {}, {}
         listings = {row.instrument_id.venue_market_id: row for row in rows}
         selected = [listings[code] for code in codes if code in listings]
-        if not selected:
+        if not selected or not isinstance(
+            self._universe.market_data.adapter(venue), ports.SnapshotBatchPort
+        ):
+            # A per-symbol feed (Fugle) would spend its chart budget on a
+            # whole market; the official end-of-day files serve instead.
             return listings, {}
         quotes, failures = await self._universe.quotes(
             selected, budget_s=min(LIVE_BUDGET_S, budget.left())

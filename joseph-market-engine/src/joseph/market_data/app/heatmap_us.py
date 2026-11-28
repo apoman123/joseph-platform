@@ -41,6 +41,8 @@ FALLBACK_TTL_MS = 10 * 60_000
 """Screener lifetime while it is also the quote source (delayed quotes)."""
 QUOTE_TTL_MS = 15_000
 """Lifetime of Alpaca session quotes."""
+ETF_SWEEP_TTL_MS = 60_000
+"""Lifetime of quotes refreshed for ranking every listed ETF."""
 HISTORY_DAYS = 400
 """Calendar days of daily bars read (one year plus the YTD margin)."""
 US_VENUES = (
@@ -284,6 +286,7 @@ class UsEquities:
         budget: parts.Budget,
         *,
         history: Sequence[instruments.InstrumentId],
+        ttl_ms: int = QUOTE_TTL_MS,
     ) -> bool:
         """Refreshes quotes and history in the background within a budget.
 
@@ -291,6 +294,7 @@ class UsEquities:
             ids: Instruments needing session quotes.
             budget: Request budget.
             history: Instruments needing daily bars.
+            ttl_ms: Age at which a session quote is refreshed.
 
         Returns:
             True while a load is still running for instruments without data.
@@ -299,8 +303,7 @@ class UsEquities:
         stale = [
             item
             for item in ids
-            if now - self._quotes.get(item, (-QUOTE_TTL_MS, None))[0]
-            >= QUOTE_TTL_MS
+            if now - self._quotes.get(item, (-ttl_ms, None))[0] >= ttl_ms
         ]
         missing = [item for item in ids if item not in self._quotes]
         if stale and not self._running("quotes"):
@@ -624,7 +627,9 @@ class UsEquities:
         part.universe_count = len(funds)
         ids = [row.instrument_id for row in funds]
         if ids:
-            part.pending |= await self._alpaca(ids, budget, history=[])
+            part.pending |= await self._alpaca(
+                ids, budget, history=[], ttl_ms=ETF_SWEEP_TTL_MS
+            )
         tiles = []
         for row in funds:
             values, price, as_of = self._alpaca_metrics(row.instrument_id)
