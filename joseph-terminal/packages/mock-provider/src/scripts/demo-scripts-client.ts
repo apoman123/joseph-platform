@@ -19,6 +19,7 @@ import type {
   CatalogScript,
   Instrument,
   JsonValue,
+  MarketDataClient,
   MarketSnapshot,
   PythonCatalog,
   ScanConditionPin,
@@ -27,7 +28,7 @@ import type {
   ScriptsClient,
   Signal,
 } from '@joseph/contracts';
-import {demoInstrument, type DemoMarketDataClient} from '../market';
+import {demoInstrument} from '../market';
 import {DEMO_INSTRUMENT_SPECS} from '../market/prices';
 import {demoAlertEvents, hasDemoAlert} from './demo-alerts';
 import {
@@ -38,10 +39,16 @@ import {
 } from './demo-filters';
 import {DEMO_SCRIPT_CATALOG} from './demo-script-catalog';
 
+/** DEMO market reads a scan or alert job needs. */
+export type DemoScriptsMarket = Pick<
+  MarketDataClient,
+  'getSnapshot' | 'getCandles' | 'getOrderBook'
+>;
+
 /** Options of the DEMO scripts client. */
 export interface DemoScriptsOptions {
   /** DEMO market data source. */
-  market: DemoMarketDataClient;
+  market: DemoScriptsMarket;
   /** Injectable clock (UTC ms). */
   now?: () => number;
 }
@@ -87,7 +94,7 @@ function effectiveInputs(
 
 /** In-memory DEMO scans and alert jobs; nothing leaves the browser. */
 export class DemoScriptsClient implements ScriptsClient {
-  private readonly market: DemoMarketDataClient;
+  private readonly market: DemoScriptsMarket;
   private readonly now: () => number;
   private readonly scans = new Map<string, ScanJob>();
   private readonly jobs = new Map<string, AlertJob>();

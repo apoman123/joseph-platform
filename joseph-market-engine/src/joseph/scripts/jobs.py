@@ -27,6 +27,7 @@ from joseph.domain import errors
 from joseph.domain import identity
 from joseph.domain import instruments
 from joseph.domain import market
+from joseph.market_data.adapters import http as venue_http
 from joseph.market_data.app import universe
 from joseph.scripts import catalog
 from joseph.scripts import models
@@ -340,7 +341,12 @@ class ScriptJobs:
             conditions=pins,
         )
         self._insert(principal, job, "scan")
-        task = asyncio.create_task(self._scan(principal, job, request, filters))
+        # Scan requests yield the venue rate limit to waiting chart loads;
+        # the task inherits the background mark.
+        with venue_http.background():
+            task = asyncio.create_task(
+                self._scan(principal, job, request, filters)
+            )
         self._tasks[job.job_id] = task
         task.add_done_callback(lambda _: self._tasks.pop(job.job_id, None))
         return job
@@ -976,7 +982,8 @@ class ScriptJobs:
         """
         if self._loop_task is None:
             self._stopping.clear()
-            self._loop_task = asyncio.create_task(self._loop())
+            with venue_http.background():
+                self._loop_task = asyncio.create_task(self._loop())
 
     async def stop(self) -> None:
         """Stops script producers before the outbox, adapters.
