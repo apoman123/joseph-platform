@@ -440,6 +440,8 @@ export type FundingKind = 'PREDICTED' | 'SETTLED';
  * via the `definition` "Transport".
  */
 export type Transport = 'NATIVE_WS' | 'REST_POLL' | 'REPLAY' | 'MOCK' | 'NONE';
+export type LastError = string | null;
+export type LastProcessedMs = number;
 export type CreatedAtMs = number;
 export type Emitted = number;
 export type Enabled = boolean;
@@ -452,8 +454,8 @@ export type JsonValue = unknown;
 export type InstrumentId1 = string;
 export type JobId = string;
 export type LastCheckedMs = number | null;
-export type LastError = string | null;
-export type LastProcessedMs = number;
+export type LastError1 = string | null;
+export type LastProcessedMs1 = number;
 export type ScriptId = string;
 /**
  * @maxItems 50
@@ -469,6 +471,31 @@ export type ScriptId1 = string;
  */
 export type SubscriptionIds1 = string[];
 export type Version1 = number;
+export type Group = string;
+export type Maximum = number | null;
+export type Minimum = number | null;
+export type Options = JsonValue[] | null;
+export type Step = number | null;
+export type Title = string;
+export type Tooltip = string;
+export type Failures = {
+  [k: string]: string | null | undefined;
+}[];
+export type Category = string;
+export type Description = string;
+export type Enabled2 = boolean;
+export type Kind = 'indicator' | 'strategy' | 'library' | 'filter' | 'alert';
+export type Origin = 'builtin' | 'plugin';
+export type Overlay = boolean;
+export type Package = string | null;
+export type PackageVersion = string | null;
+export type ScriptId2 = string;
+export type ShortTitle = string;
+export type Source = string | null;
+export type SourceAvailable = boolean;
+export type SourceHash = string;
+export type Title1 = string;
+export type Scripts = CatalogScript[];
 export type Available = boolean;
 export type Currency = string;
 export type DefaultLimit = number;
@@ -491,7 +518,7 @@ export type Scale = ('diverging' | 'sequential') | null;
 export type AsOfMs = number | null;
 export type Field = string;
 export type Note = string | null;
-export type Source = string;
+export type Source1 = string;
 export type ColorMetrics = HeatmapMetric[];
 export type Currency1 = string;
 export type Dataset = string;
@@ -511,7 +538,7 @@ export type AsOfMs1 = number | null;
 export type ChartUnavailableReason = string | null;
 export type Error = string | null;
 export type Exchange = string | null;
-export type Group = string | null;
+export type Group1 = string | null;
 export type Industry = string | null;
 export type InstrumentId3 = string | null;
 export type Key = string;
@@ -521,7 +548,7 @@ export type Symbol = string;
 export type Tiles = HeatmapTile[];
 export type Type1 = 'stocks' | 'etfs' | 'crypto';
 export type UniverseCount = number;
-export type ScriptId2 = string;
+export type ScriptId3 = string;
 export type Version2 = number;
 export type Color = string | null;
 export type TimeMs = number;
@@ -545,8 +572,8 @@ export type Matches = {
   [k: string]: JsonValue | undefined;
 }[];
 export type Scanned = number;
-export type ScriptId3 = string;
-export type SourceHash = string;
+export type ScriptId4 = string;
+export type SourceHash1 = string;
 export type Status =
   'pending' | 'running' | 'complete' | 'failed' | 'cancelled';
 export type Total = number;
@@ -557,19 +584,19 @@ export type Name2 = string;
 export type Severity = 'INFO' | 'WARNING' | 'ENTRY' | 'CRITICAL';
 export type TimeMs1 = number;
 export type ExpectedVersion = number | null;
-export type Kind = 'indicator' | 'strategy' | 'library' | 'filter' | 'alert';
+export type Kind1 = 'indicator' | 'strategy' | 'library' | 'filter' | 'alert';
 export type Name3 = string;
-export type Overlay = boolean;
+export type Overlay1 = boolean;
 export type InstrumentId4 = string | null;
 export type Limit1 = number;
-export type ScriptId4 = string;
-export type Source1 = string;
+export type ScriptId5 = string;
+export type Source2 = string;
 /**
  * @maxItems 2000
  */
 export type Alerts = ScriptAlertEvent[];
 export type Id3 = string;
-export type Kind1 =
+export type Kind2 =
   | 'line'
   | 'polyline'
   | 'box'
@@ -606,16 +633,43 @@ export type TimeMs2 = number;
  */
 export type Fills = SimulatedFill[];
 export type InstrumentId5 = string;
-export type Kind2 = 'indicator' | 'strategy' | 'filter' | 'alert';
+export type Kind3 = 'indicator' | 'strategy' | 'filter' | 'alert';
 export type Matched = boolean | null;
-export type Overlay1 = boolean;
+export type Action = 'long' | 'short' | 'close';
+export type Comment = string;
+export type FillTimeMs = number | null;
+export type Quantity1 = number;
+export type Reference = number;
+export type Status1 = 'pending' | 'filled' | 'rejected' | 'unchanged';
+export type Stop = number | null;
+export type Target = number | null;
+export type TimeMs3 = number;
+/**
+ * @maxItems 4000
+ */
+export type Orders = StrategyOrder[];
+export type Overlay2 = boolean;
 /**
  * @maxItems 64
  */
 export type Plots = PlotSeries[];
-export type ScriptId5 = string;
-export type SourceHash1 = string;
+export type PositionSize = number;
+export type ScriptId6 = string;
+export type SourceHash2 = string;
 export type Tf = string;
+export type Direction1 = 'LONG' | 'SHORT';
+export type EntryPrice = number;
+export type EntryTimeMs = number;
+export type ExitPrice = number | null;
+export type ExitTimeMs = number | null;
+export type Fees = number;
+export type Pnl = number | null;
+export type Quantity2 = number;
+export type ReturnPct = number | null;
+/**
+ * @maxItems 4000
+ */
+export type Trades = StrategyTrade[];
 export type Version5 = number;
 /**
  * @maxItems 500
@@ -632,13 +686,462 @@ export type ToMs = number | null;
 export type Version6 = number | null;
 export type CreatedAtMs2 = number;
 export type ExpectedVersion1 = number | null;
-export type Kind3 = 'indicator' | 'strategy' | 'library' | 'filter' | 'alert';
+export type Kind4 = 'indicator' | 'strategy' | 'library' | 'filter' | 'alert';
 export type Name4 = string;
-export type Overlay2 = boolean;
-export type ScriptId6 = string;
-export type Source2 = string;
-export type SourceHash2 = string;
+export type Overlay3 = boolean;
+export type ScriptId7 = string;
+export type Source3 = string;
+export type SourceHash3 = string;
 export type Version7 = number;
+export type ActivationId = string;
+/**
+ * @maxItems 8
+ */
+export type Channels =
+  | []
+  | [string]
+  | [string, string]
+  | [string, string, string]
+  | [string, string, string, string]
+  | [string, string, string, string, string]
+  | [string, string, string, string, string, string]
+  | [string, string, string, string, string, string, string]
+  | [string, string, string, string, string, string, string, string];
+export type CreatedAtMs3 = number;
+export type Emitted1 = number;
+export type HistoryBars3 = number;
+/**
+ * @minItems 1
+ * @maxItems 20
+ */
+export type InstrumentIds =
+  | [string]
+  | [string, string]
+  | [string, string, string]
+  | [string, string, string, string]
+  | [string, string, string, string, string]
+  | [string, string, string, string, string, string]
+  | [string, string, string, string, string, string, string]
+  | [string, string, string, string, string, string, string, string]
+  | [string, string, string, string, string, string, string, string, string]
+  | [
+      string,
+      string,
+      string,
+      string,
+      string,
+      string,
+      string,
+      string,
+      string,
+      string,
+    ]
+  | [
+      string,
+      string,
+      string,
+      string,
+      string,
+      string,
+      string,
+      string,
+      string,
+      string,
+      string,
+    ]
+  | [
+      string,
+      string,
+      string,
+      string,
+      string,
+      string,
+      string,
+      string,
+      string,
+      string,
+      string,
+      string,
+    ]
+  | [
+      string,
+      string,
+      string,
+      string,
+      string,
+      string,
+      string,
+      string,
+      string,
+      string,
+      string,
+      string,
+      string,
+    ]
+  | [
+      string,
+      string,
+      string,
+      string,
+      string,
+      string,
+      string,
+      string,
+      string,
+      string,
+      string,
+      string,
+      string,
+      string,
+    ]
+  | [
+      string,
+      string,
+      string,
+      string,
+      string,
+      string,
+      string,
+      string,
+      string,
+      string,
+      string,
+      string,
+      string,
+      string,
+      string,
+    ]
+  | [
+      string,
+      string,
+      string,
+      string,
+      string,
+      string,
+      string,
+      string,
+      string,
+      string,
+      string,
+      string,
+      string,
+      string,
+      string,
+      string,
+    ]
+  | [
+      string,
+      string,
+      string,
+      string,
+      string,
+      string,
+      string,
+      string,
+      string,
+      string,
+      string,
+      string,
+      string,
+      string,
+      string,
+      string,
+      string,
+    ]
+  | [
+      string,
+      string,
+      string,
+      string,
+      string,
+      string,
+      string,
+      string,
+      string,
+      string,
+      string,
+      string,
+      string,
+      string,
+      string,
+      string,
+      string,
+      string,
+    ]
+  | [
+      string,
+      string,
+      string,
+      string,
+      string,
+      string,
+      string,
+      string,
+      string,
+      string,
+      string,
+      string,
+      string,
+      string,
+      string,
+      string,
+      string,
+      string,
+      string,
+    ]
+  | [
+      string,
+      string,
+      string,
+      string,
+      string,
+      string,
+      string,
+      string,
+      string,
+      string,
+      string,
+      string,
+      string,
+      string,
+      string,
+      string,
+      string,
+      string,
+      string,
+      string,
+    ];
+export type LastCheckedMs1 = number | null;
+export type LastError2 = string | null;
+export type Mode = 'ALERT_ONLY' | 'PAPER' | 'SHADOW' | 'AUTO_LIVE';
+export type Name5 = string;
+export type ScriptId8 = string;
+export type SourceHash4 = string;
+export type State = 'ACTIVE' | 'PAUSED';
+export type StrategyVersionId = string;
+export type UpdatedAtMs = number;
+export type Version8 = number;
+/**
+ * @maxItems 8
+ */
+export type Channels1 =
+  | []
+  | [string]
+  | [string, string]
+  | [string, string, string]
+  | [string, string, string, string]
+  | [string, string, string, string, string]
+  | [string, string, string, string, string, string]
+  | [string, string, string, string, string, string, string]
+  | [string, string, string, string, string, string, string, string];
+export type HistoryBars4 = number;
+/**
+ * @minItems 1
+ * @maxItems 20
+ */
+export type InstrumentIds1 =
+  | [string]
+  | [string, string]
+  | [string, string, string]
+  | [string, string, string, string]
+  | [string, string, string, string, string]
+  | [string, string, string, string, string, string]
+  | [string, string, string, string, string, string, string]
+  | [string, string, string, string, string, string, string, string]
+  | [string, string, string, string, string, string, string, string, string]
+  | [
+      string,
+      string,
+      string,
+      string,
+      string,
+      string,
+      string,
+      string,
+      string,
+      string,
+    ]
+  | [
+      string,
+      string,
+      string,
+      string,
+      string,
+      string,
+      string,
+      string,
+      string,
+      string,
+      string,
+    ]
+  | [
+      string,
+      string,
+      string,
+      string,
+      string,
+      string,
+      string,
+      string,
+      string,
+      string,
+      string,
+      string,
+    ]
+  | [
+      string,
+      string,
+      string,
+      string,
+      string,
+      string,
+      string,
+      string,
+      string,
+      string,
+      string,
+      string,
+      string,
+    ]
+  | [
+      string,
+      string,
+      string,
+      string,
+      string,
+      string,
+      string,
+      string,
+      string,
+      string,
+      string,
+      string,
+      string,
+      string,
+    ]
+  | [
+      string,
+      string,
+      string,
+      string,
+      string,
+      string,
+      string,
+      string,
+      string,
+      string,
+      string,
+      string,
+      string,
+      string,
+      string,
+    ]
+  | [
+      string,
+      string,
+      string,
+      string,
+      string,
+      string,
+      string,
+      string,
+      string,
+      string,
+      string,
+      string,
+      string,
+      string,
+      string,
+      string,
+    ]
+  | [
+      string,
+      string,
+      string,
+      string,
+      string,
+      string,
+      string,
+      string,
+      string,
+      string,
+      string,
+      string,
+      string,
+      string,
+      string,
+      string,
+      string,
+    ]
+  | [
+      string,
+      string,
+      string,
+      string,
+      string,
+      string,
+      string,
+      string,
+      string,
+      string,
+      string,
+      string,
+      string,
+      string,
+      string,
+      string,
+      string,
+      string,
+    ]
+  | [
+      string,
+      string,
+      string,
+      string,
+      string,
+      string,
+      string,
+      string,
+      string,
+      string,
+      string,
+      string,
+      string,
+      string,
+      string,
+      string,
+      string,
+      string,
+      string,
+    ]
+  | [
+      string,
+      string,
+      string,
+      string,
+      string,
+      string,
+      string,
+      string,
+      string,
+      string,
+      string,
+      string,
+      string,
+      string,
+      string,
+      string,
+      string,
+      string,
+      string,
+      string,
+    ];
+export type Mode1 = 'ALERT_ONLY' | 'PAPER' | 'SHADOW' | 'AUTO_LIVE';
+export type ScriptId9 = string;
+export type Version9 = number | null;
+export type Activations = StrategyActivation[];
+export type ForwardingEnabled = boolean;
+export type RuntimeEnabled = boolean;
 /**
  * This interface was referenced by `JosephContracts`'s JSON-Schema
  * via the `definition` "QualificationStatus".
@@ -706,41 +1209,6 @@ export type SignalKind =
   | 'QUALIFICATION_CHANGED'
   | 'POSITION_EXITED'
   | 'CUSTOM_ALERT';
-/**
- * Discriminated union on `op`.
- *
- * This interface was referenced by `JosephContracts`'s JSON-Schema
- * via the `definition` "RuleNode".
- */
-export type RuleNode =
-  | AllNode
-  | AnyNode
-  | NotNode
-  | StateNode
-  | InZoneNode
-  | AoiTouchNode
-  | AoiOverlapNode
-  | EventNode
-  | SequenceNode
-  | CompareNode
-  | InRangeNode
-  | CrossesNode
-  | PersistForNode
-  | WithinBarsNode
-  | TimeWindowNode
-  | RiskRewardNode;
-/**
- * This interface was referenced by `JosephContracts`'s JSON-Schema
- * via the `definition` "Operand".
- */
-export type Operand =
-  ConstOperand | CandleOperand | IndicatorOperand | MarketOperand;
-/**
- * This interface was referenced by `JosephContracts`'s JSON-Schema
- * via the `definition` "StrategyState".
- */
-export type StrategyState =
-  'DRAFT' | 'VALIDATED' | 'ACTIVE' | 'PAUSED' | 'ARCHIVED' | 'UNSUPPORTED';
 /**
  * This interface was referenced by `JosephContracts`'s JSON-Schema
  * via the `definition` "StreamEventType".
@@ -2038,6 +2506,21 @@ export interface VenueStatusList {
   as_of_ms: TimestampMs;
 }
 /**
+ * Evaluation progress of one activated instrument.
+ *
+ * Attributes:
+ *     last_processed_ms: Newest bar close already turned into signals or
+ *         skipped; bars at or before it are never signalled.
+ *     last_error: Last evaluation error, None after a clean pass.
+ *
+ * This interface was referenced by `JosephContracts`'s JSON-Schema
+ * via the `definition` "ActivationInstrumentStatus".
+ */
+export interface ActivationInstrumentStatus {
+  last_error?: LastError;
+  last_processed_ms: LastProcessedMs;
+}
+/**
  * Persistent Python alert evaluation state and visible diagnostics.
  *
  * Attributes:
@@ -2060,8 +2543,8 @@ export interface AlertJob {
   instrument_id: InstrumentId1;
   job_id: JobId;
   last_checked_ms?: LastCheckedMs;
-  last_error?: LastError;
-  last_processed_ms: LastProcessedMs;
+  last_error?: LastError1;
+  last_processed_ms: LastProcessedMs1;
   script_id: ScriptId;
   subscription_ids?: SubscriptionIds;
   tf: Timeframe;
@@ -2103,6 +2586,98 @@ export interface AlertJobInput {
 }
 export interface Inputs1 {
   [k: string]: JsonValue | undefined;
+}
+/**
+ * A declared input of a built-in or plugin script.
+ *
+ * Attributes:
+ *     default: JSON default value.
+ *     title: Settings label.
+ *     minimum: Optional inclusive numeric lower bound.
+ *     maximum: Optional inclusive numeric upper bound.
+ *     options: Optional accepted values.
+ *     step: Optional numeric step.
+ *     group: Optional settings section.
+ *     tooltip: Optional help text.
+ *
+ * This interface was referenced by `JosephContracts`'s JSON-Schema
+ * via the `definition` "CatalogInput".
+ */
+export interface CatalogInput {
+  default: JsonValue;
+  group: Group;
+  maximum: Maximum;
+  minimum: Minimum;
+  options: Options;
+  step: Step;
+  title: Title;
+  tooltip: Tooltip;
+}
+/**
+ * Installed built-in and plugin scripts and skipped plugin packages.
+ *
+ * Attributes:
+ *     scripts: Scripts in catalog order.
+ *     failures: Plugin entry points that failed to load, with reasons.
+ *
+ * This interface was referenced by `JosephContracts`'s JSON-Schema
+ * via the `definition` "CatalogList".
+ */
+export interface CatalogList {
+  failures: Failures;
+  scripts: Scripts;
+}
+/**
+ * A built-in or installed plugin script that the engine runs in process.
+ *
+ * Attributes:
+ *     script_id: ``builtin:<id>`` or ``plugin:<entry point>:<id>``.
+ *     kind: indicator, strategy, library, filter or alert.
+ *     origin: builtin or plugin.
+ *     package: Providing distribution of a plugin.
+ *     package_version: That distribution's version.
+ *     title: Display name.
+ *     short_title: Compact legend name.
+ *     description: Catalog description.
+ *     category: Catalog section.
+ *     overlay: Whether plots share the price pane.
+ *     inputs: Declared inputs in display order.
+ *     requests: Declared additional series by alias.
+ *     source_available: Whether the public source can be read.
+ *     source_hash: Identity of the installed code.
+ *     enabled: False when disabled by configuration.
+ *     source: Public source text on the single-script route, else None.
+ *
+ * This interface was referenced by `JosephContracts`'s JSON-Schema
+ * via the `definition` "CatalogScript".
+ */
+export interface CatalogScript {
+  category: Category;
+  description: Description;
+  enabled: Enabled2;
+  inputs: Inputs2;
+  kind: Kind;
+  origin: Origin;
+  overlay: Overlay;
+  package: Package;
+  package_version: PackageVersion;
+  requests: Requests;
+  script_id: ScriptId2;
+  short_title: ShortTitle;
+  source?: Source;
+  source_available: SourceAvailable;
+  source_hash: SourceHash;
+  title: Title1;
+}
+export interface Inputs2 {
+  [k: string]: CatalogInput | undefined;
+}
+export interface Requests {
+  [k: string]:
+    | {
+        [k: string]: JsonValue | undefined;
+      }
+    | undefined;
 }
 /**
  * Every data set and the default per heatmap family.
@@ -2207,7 +2782,7 @@ export interface HeatmapProvenance {
   as_of_ms?: AsOfMs;
   field: Field;
   note?: Note;
-  source: Source;
+  source: Source1;
 }
 /**
  * A heatmap of one data set with metric availability and provenance.
@@ -2288,7 +2863,7 @@ export interface HeatmapTile {
   chart_unavailable_reason?: ChartUnavailableReason;
   error?: Error;
   exchange?: Exchange;
-  group?: Group;
+  group?: Group1;
   industry?: Industry;
   instrument_id?: InstrumentId3;
   key: Key;
@@ -2311,7 +2886,7 @@ export interface Metrics {
  * via the `definition` "LibraryRef".
  */
 export interface LibraryRef {
-  script_id: ScriptId2;
+  script_id: ScriptId3;
   version: Version2;
 }
 /**
@@ -2362,7 +2937,7 @@ export interface PlotSeries {
  */
 export interface ScanInput {
   history_bars?: HistoryBars2;
-  inputs?: Inputs2;
+  inputs?: Inputs3;
   market_type?: MarketType | null;
   max_symbols?: MaxSymbols;
   query?: Query;
@@ -2370,7 +2945,7 @@ export interface ScanInput {
   venue?: Venue | null;
   version?: Version3;
 }
-export interface Inputs2 {
+export interface Inputs3 {
   [k: string]: JsonValue | undefined;
 }
 /**
@@ -2401,8 +2976,8 @@ export interface ScanJob {
   job_id: JobId1;
   matches?: Matches;
   scanned?: Scanned;
-  script_id: ScriptId3;
-  source_hash: SourceHash;
+  script_id: ScriptId4;
+  source_hash: SourceHash1;
   status: Status;
   total?: Total;
   universe_count?: UniverseCount1;
@@ -2447,13 +3022,13 @@ export interface ScriptAlertEvent {
 export interface ScriptInput {
   defaults?: Defaults1;
   expected_version?: ExpectedVersion;
-  kind: Kind;
+  kind: Kind1;
   libraries?: Libraries;
   name: Name3;
-  overlay?: Overlay;
-  requests?: Requests;
-  script_id: ScriptId4;
-  source: Source1;
+  overlay?: Overlay1;
+  requests?: Requests1;
+  script_id: ScriptId5;
+  source: Source2;
 }
 export interface Defaults1 {
   [k: string]: JsonValue | undefined;
@@ -2461,7 +3036,7 @@ export interface Defaults1 {
 export interface Libraries {
   [k: string]: LibraryRef | undefined;
 }
-export interface Requests {
+export interface Requests1 {
   [k: string]: SeriesRequest | undefined;
 }
 /**
@@ -2499,6 +3074,10 @@ export interface SeriesRequest {
  *     overlay: Whether plots share the main price pane.
  *     plots: At most sixty-four scalar output series.
  *     fills: Simulated next-bar-open fills; empty for indicators.
+ *     orders: Queued strategy orders and their simulated outcomes; empty
+ *         for other roles.
+ *     trades: Round trips reconstructed by the host from verified fills.
+ *     position_size: Signed simulated position after the last bar.
  *     equity_curve: Marked simulated quote equity; empty for indicators.
  *     metrics: Finite numeric simulation statistics, including fees and
  *         unfilled final-bar intents; no performance is fabricated.
@@ -2526,15 +3105,18 @@ export interface ScriptResult {
   feed_state: FeedState1;
   fills: Fills;
   instrument_id: InstrumentId5;
-  kind: Kind2;
+  kind: Kind3;
   matched?: Matched;
   metrics: Metrics1;
-  overlay: Overlay1;
+  orders?: Orders;
+  overlay: Overlay2;
   plot_styles?: PlotStyles;
   plots: Plots;
-  script_id: ScriptId5;
-  source_hash: SourceHash1;
+  position_size?: PositionSize;
+  script_id: ScriptId6;
+  source_hash: SourceHash2;
   tf: Tf;
+  trades?: Trades;
   version: Version5;
   visuals?: Visuals;
 }
@@ -2556,7 +3138,7 @@ export interface BarCloses {
 export interface ScriptVisual {
   data: Data;
   id: Id3;
-  kind: Kind1;
+  kind: Kind2;
 }
 export interface Data {
   [k: string]: JsonValue | undefined;
@@ -2586,12 +3168,71 @@ export interface SimulatedFill {
 export interface Metrics1 {
   [k: string]: number | undefined;
 }
+/**
+ * A strategy order queued on a closed bar and its simulated outcome.
+ *
+ * Attributes:
+ *     time_ms: Start of the closed bar on which the order was queued.
+ *     action: long or short entry target, or close.
+ *     quantity: Target absolute base quantity; zero for close.
+ *     reference: Close of the bar the order was queued on, the planned
+ *         entry of live signals.
+ *     stop: Protective stop declared with an entry, if any.
+ *     target: Profit target declared with an entry, if any.
+ *     comment: Plain-text reason given by the strategy.
+ *     status: pending (no later bar yet), filled, rejected for
+ *         insufficient simulated equity, or unchanged (the position
+ *         already matched).
+ *     fill_time_ms: Start of the bar whose open filled the order.
+ *
+ * This interface was referenced by `JosephContracts`'s JSON-Schema
+ * via the `definition` "StrategyOrder".
+ */
+export interface StrategyOrder {
+  action: Action;
+  comment?: Comment;
+  fill_time_ms?: FillTimeMs;
+  quantity: Quantity1;
+  reference: Reference;
+  status: Status1;
+  stop?: Stop;
+  target?: Target;
+  time_ms: TimeMs3;
+}
 export interface PlotStyles {
   [k: string]:
     | {
         [k: string]: JsonValue | undefined;
       }
     | undefined;
+}
+/**
+ * A simulated round trip reconstructed from verified fills.
+ *
+ * Attributes:
+ *     direction: LONG or SHORT.
+ *     entry_time_ms: Start of the bar of the opening fill.
+ *     exit_time_ms: Start of the bar of the closing fill; None while open.
+ *     quantity: Largest absolute base quantity held.
+ *     entry_price: Quantity-weighted average opening price.
+ *     exit_price: Quantity-weighted average closing price; None while open.
+ *     fees: Commissions of every fill of the trade.
+ *     pnl: Realized profit after fees; None while open.
+ *     return_pct: pnl relative to the opening notional; None while open.
+ *
+ * This interface was referenced by `JosephContracts`'s JSON-Schema
+ * via the `definition` "StrategyTrade".
+ */
+export interface StrategyTrade {
+  direction: Direction1;
+  entry_price: EntryPrice;
+  entry_time_ms: EntryTimeMs;
+  exit_price?: ExitPrice;
+  exit_time_ms?: ExitTimeMs;
+  fees?: Fees;
+  pnl?: Pnl;
+  quantity: Quantity2;
+  return_pct?: ReturnPct;
 }
 /**
  * Requests a reproducible run using closed, real backend candles.
@@ -2618,7 +3259,7 @@ export interface ScriptRun {
   from_ms?: FromMs;
   include_open?: IncludeOpen;
   initial_equity?: InitialEquity;
-  inputs?: Inputs3;
+  inputs?: Inputs4;
   instrument_id: InstrumentId6;
   limit?: Limit2;
   slippage_bps?: SlippageBps;
@@ -2626,7 +3267,7 @@ export interface ScriptRun {
   to_ms?: ToMs;
   version?: Version6;
 }
-export interface Inputs3 {
+export interface Inputs4 {
   [k: string]: JsonValue | undefined;
 }
 /**
@@ -2644,14 +3285,14 @@ export interface ScriptVersion {
   created_at_ms: CreatedAtMs2;
   defaults?: Defaults2;
   expected_version?: ExpectedVersion1;
-  kind: Kind3;
+  kind: Kind4;
   libraries?: Libraries1;
   name: Name4;
-  overlay?: Overlay2;
-  requests?: Requests1;
-  script_id: ScriptId6;
-  source: Source2;
-  source_hash: SourceHash2;
+  overlay?: Overlay3;
+  requests?: Requests2;
+  script_id: ScriptId7;
+  source: Source3;
+  source_hash: SourceHash3;
   version: Version7;
 }
 export interface Defaults2 {
@@ -2660,8 +3301,107 @@ export interface Defaults2 {
 export interface Libraries1 {
   [k: string]: LibraryRef | undefined;
 }
-export interface Requests1 {
+export interface Requests2 {
   [k: string]: SeriesRequest | undefined;
+}
+/**
+ * A persisted activation and its evaluation state.
+ *
+ * Attributes:
+ *     activation_id: Opaque identifier.
+ *     version: Pinned tenant version, or 0 for catalog strategies.
+ *     name: Strategy display title.
+ *     source_hash: Pinned exact source identity.
+ *     strategy_version_id: Identity execution deployments bind:
+ *         ``<script_id>:v<version>`` for tenant versions and
+ *         ``<catalog id>:v<first 12 hash digits>`` for catalog classes.
+ *     state: ACTIVE or PAUSED.
+ *     created_at_ms: Creation time.
+ *     updated_at_ms: Last configuration or state change.
+ *     last_checked_ms: Last evaluation pass, None before one.
+ *     last_error: Activation-wide error (such as a changed built-in or a
+ *         disabled runtime), None when evaluation works.
+ *     emitted: Number of new signals recorded.
+ *     instruments: Progress per instrument id.
+ *
+ * This interface was referenced by `JosephContracts`'s JSON-Schema
+ * via the `definition` "StrategyActivation".
+ */
+export interface StrategyActivation {
+  activation_id: ActivationId;
+  channels?: Channels;
+  created_at_ms: CreatedAtMs3;
+  emitted?: Emitted1;
+  history_bars?: HistoryBars3;
+  inputs?: Inputs5;
+  instrument_ids: InstrumentIds;
+  instruments?: Instruments;
+  last_checked_ms?: LastCheckedMs1;
+  last_error?: LastError2;
+  mode?: Mode;
+  name: Name5;
+  script_id: ScriptId8;
+  source_hash: SourceHash4;
+  state: State;
+  strategy_version_id: StrategyVersionId;
+  tf: Timeframe;
+  updated_at_ms: UpdatedAtMs;
+  version?: Version8;
+}
+export interface Inputs5 {
+  [k: string]: JsonValue | undefined;
+}
+export interface Instruments {
+  [k: string]: ActivationInstrumentStatus | undefined;
+}
+/**
+ * A request to evaluate a Python strategy live on closed bars.
+ *
+ * Attributes:
+ *     script_id: Tenant strategy slug, ``builtin:<id>`` or
+ *         ``plugin:<entry>:<id>``.
+ *     version: Tenant version to pin; the latest when None. Ignored for
+ *         catalog strategies, which pin their installed source hash.
+ *     instrument_ids: Canonical instruments, one through twenty.
+ *     tf: Signal timeframe.
+ *     inputs: Input overrides on top of the declared defaults.
+ *     mode: ALERT_ONLY, PAPER or SHADOW; AUTO_LIVE is refused with
+ *         TRADE_MODE_DISABLED.
+ *     channels: Notification channels (UI and external subscriptions).
+ *     history_bars: Closed bars evaluated per pass, the strategy's warmup.
+ *
+ * This interface was referenced by `JosephContracts`'s JSON-Schema
+ * via the `definition` "StrategyActivationInput".
+ */
+export interface StrategyActivationInput {
+  channels?: Channels1;
+  history_bars?: HistoryBars4;
+  inputs?: Inputs6;
+  instrument_ids: InstrumentIds1;
+  mode?: Mode1;
+  script_id: ScriptId9;
+  tf: Timeframe;
+  version?: Version9;
+}
+export interface Inputs6 {
+  [k: string]: JsonValue | undefined;
+}
+/**
+ * Owned activations.
+ *
+ * Attributes:
+ *     activations: Activations, newest first.
+ *     runtime_enabled: Whether tenant source can execute (Docker runner).
+ *     forwarding_enabled: Whether PAPER/SHADOW entries reach the execution
+ *         engine in this deployment.
+ *
+ * This interface was referenced by `JosephContracts`'s JSON-Schema
+ * via the `definition` "StrategyActivationList".
+ */
+export interface StrategyActivationList {
+  activations: Activations;
+  forwarding_enabled: ForwardingEnabled;
+  runtime_enabled: RuntimeEnabled;
 }
 /**
  * One hard gate with the observed value, threshold and outcome. passed=null means the value was missing or stale.
@@ -2927,841 +3667,6 @@ export interface AlertDelivery {
    * Redacted last failure, if any.
    */
   last_error: string | null;
-}
-/**
- * TRUE when every child is TRUE; FALSE when any child is FALSE; otherwise UNKNOWN.
- *
- * This interface was referenced by `JosephContracts`'s JSON-Schema
- * via the `definition` "AllNode".
- */
-export interface AllNode {
-  op: 'ALL';
-  id?: string;
-  label?: string;
-  /**
-   * @minItems 1
-   * @maxItems 32
-   */
-  children: [RuleNode, ...RuleNode[]];
-}
-/**
- * TRUE when any child is TRUE; FALSE when every child is FALSE; otherwise UNKNOWN.
- *
- * This interface was referenced by `JosephContracts`'s JSON-Schema
- * via the `definition` "AnyNode".
- */
-export interface AnyNode {
-  op: 'ANY';
-  id?: string;
-  label?: string;
-  /**
-   * @minItems 1
-   * @maxItems 32
-   */
-  children: [RuleNode, ...RuleNode[]];
-}
-/**
- * Negation; NOT UNKNOWN is UNKNOWN.
- *
- * This interface was referenced by `JosephContracts`'s JSON-Schema
- * via the `definition` "NotNode".
- */
-export interface NotNode {
-  op: 'NOT';
-  id?: string;
-  label?: string;
-  child: RuleNode;
-}
-/**
- * Indicator state on one or more timeframes, read only from bars closed at or before the evaluated bar close. A timeframe counts when every `where` clause matches the latest warm snapshot of `plugin_id`; a null or missing value does not match, and a missing snapshot is UNKNOWN. match=ALL requires every timeframe; K_OF_N requires k of them.
- *
- * This interface was referenced by `JosephContracts`'s JSON-Schema
- * via the `definition` "StateNode".
- */
-export interface StateNode {
-  op: 'STATE';
-  id?: string;
-  label?: string;
-  plugin_id: PluginId;
-  /**
-   * @minItems 1
-   * @maxItems 6
-   */
-  timeframes:
-    | [Timeframe]
-    | [Timeframe, Timeframe]
-    | [Timeframe, Timeframe, Timeframe]
-    | [Timeframe, Timeframe, Timeframe, Timeframe]
-    | [Timeframe, Timeframe, Timeframe, Timeframe, Timeframe]
-    | [Timeframe, Timeframe, Timeframe, Timeframe, Timeframe, Timeframe];
-  /**
-   * @minItems 1
-   * @maxItems 8
-   */
-  where:
-    | [ValueMatch]
-    | [ValueMatch, ValueMatch]
-    | [ValueMatch, ValueMatch, ValueMatch]
-    | [ValueMatch, ValueMatch, ValueMatch, ValueMatch]
-    | [ValueMatch, ValueMatch, ValueMatch, ValueMatch, ValueMatch]
-    | [ValueMatch, ValueMatch, ValueMatch, ValueMatch, ValueMatch, ValueMatch]
-    | [
-        ValueMatch,
-        ValueMatch,
-        ValueMatch,
-        ValueMatch,
-        ValueMatch,
-        ValueMatch,
-        ValueMatch,
-      ]
-    | [
-        ValueMatch,
-        ValueMatch,
-        ValueMatch,
-        ValueMatch,
-        ValueMatch,
-        ValueMatch,
-        ValueMatch,
-        ValueMatch,
-      ];
-  match?: 'ALL' | 'K_OF_N';
-  k?: number;
-}
-/**
- * One STATE clause: the published value `field` equals one of `any_of`, compared with the same JSON type (a string never equals a boolean).
- *
- * This interface was referenced by `JosephContracts`'s JSON-Schema
- * via the `definition` "ValueMatch".
- */
-export interface ValueMatch {
-  field: string;
-  /**
-   * @minItems 1
-   * @maxItems 16
-   */
-  any_of:
-    | [string | boolean]
-    | [string | boolean, string | boolean]
-    | [string | boolean, string | boolean, string | boolean]
-    | [string | boolean, string | boolean, string | boolean, string | boolean]
-    | [
-        string | boolean,
-        string | boolean,
-        string | boolean,
-        string | boolean,
-        string | boolean,
-      ]
-    | [
-        string | boolean,
-        string | boolean,
-        string | boolean,
-        string | boolean,
-        string | boolean,
-        string | boolean,
-      ]
-    | [
-        string | boolean,
-        string | boolean,
-        string | boolean,
-        string | boolean,
-        string | boolean,
-        string | boolean,
-        string | boolean,
-      ]
-    | [
-        string | boolean,
-        string | boolean,
-        string | boolean,
-        string | boolean,
-        string | boolean,
-        string | boolean,
-        string | boolean,
-        string | boolean,
-      ]
-    | [
-        string | boolean,
-        string | boolean,
-        string | boolean,
-        string | boolean,
-        string | boolean,
-        string | boolean,
-        string | boolean,
-        string | boolean,
-        string | boolean,
-      ]
-    | [
-        string | boolean,
-        string | boolean,
-        string | boolean,
-        string | boolean,
-        string | boolean,
-        string | boolean,
-        string | boolean,
-        string | boolean,
-        string | boolean,
-        string | boolean,
-      ]
-    | [
-        string | boolean,
-        string | boolean,
-        string | boolean,
-        string | boolean,
-        string | boolean,
-        string | boolean,
-        string | boolean,
-        string | boolean,
-        string | boolean,
-        string | boolean,
-        string | boolean,
-      ]
-    | [
-        string | boolean,
-        string | boolean,
-        string | boolean,
-        string | boolean,
-        string | boolean,
-        string | boolean,
-        string | boolean,
-        string | boolean,
-        string | boolean,
-        string | boolean,
-        string | boolean,
-        string | boolean,
-      ]
-    | [
-        string | boolean,
-        string | boolean,
-        string | boolean,
-        string | boolean,
-        string | boolean,
-        string | boolean,
-        string | boolean,
-        string | boolean,
-        string | boolean,
-        string | boolean,
-        string | boolean,
-        string | boolean,
-        string | boolean,
-      ]
-    | [
-        string | boolean,
-        string | boolean,
-        string | boolean,
-        string | boolean,
-        string | boolean,
-        string | boolean,
-        string | boolean,
-        string | boolean,
-        string | boolean,
-        string | boolean,
-        string | boolean,
-        string | boolean,
-        string | boolean,
-        string | boolean,
-      ]
-    | [
-        string | boolean,
-        string | boolean,
-        string | boolean,
-        string | boolean,
-        string | boolean,
-        string | boolean,
-        string | boolean,
-        string | boolean,
-        string | boolean,
-        string | boolean,
-        string | boolean,
-        string | boolean,
-        string | boolean,
-        string | boolean,
-        string | boolean,
-      ]
-    | [
-        string | boolean,
-        string | boolean,
-        string | boolean,
-        string | boolean,
-        string | boolean,
-        string | boolean,
-        string | boolean,
-        string | boolean,
-        string | boolean,
-        string | boolean,
-        string | boolean,
-        string | boolean,
-        string | boolean,
-        string | boolean,
-        string | boolean,
-        string | boolean,
-      ];
-}
-/**
- * The price is inside [lower, upper] of a live AOI of `kinds` (and `side`, when given) detected on `tf`, read from the snapshots of the plugins that publish those kinds. Nodes sharing a `group` must agree on the AOI `group_id`: the binding is the intersection of the group ids among each member's live candidate AOIs, and a member is TRUE only when a containing AOI's group id is in the binding. A missing member snapshot makes the binding UNKNOWN.
- *
- * This interface was referenced by `JosephContracts`'s JSON-Schema
- * via the `definition` "InZoneNode".
- */
-export interface InZoneNode {
-  op: 'IN_ZONE';
-  id?: string;
-  label?: string;
-  /**
-   * @minItems 1
-   * @maxItems 8
-   */
-  kinds:
-    | [AoiKind]
-    | [AoiKind, AoiKind]
-    | [AoiKind, AoiKind, AoiKind]
-    | [AoiKind, AoiKind, AoiKind, AoiKind]
-    | [AoiKind, AoiKind, AoiKind, AoiKind, AoiKind]
-    | [AoiKind, AoiKind, AoiKind, AoiKind, AoiKind, AoiKind]
-    | [AoiKind, AoiKind, AoiKind, AoiKind, AoiKind, AoiKind, AoiKind]
-    | [AoiKind, AoiKind, AoiKind, AoiKind, AoiKind, AoiKind, AoiKind, AoiKind];
-  side?: 'bullish' | 'bearish';
-  tf: Timeframe;
-  price_source?: 'close' | 'high' | 'low' | 'hl2';
-  group?: string;
-}
-/**
- * A closed signal-timeframe bar within the last `within_bars` bars (0 = current bar only) touched an AOI that was already confirmed before that bar. touch=WICK uses high/low intersection, BODY uses open/close, CLOSE uses close inside the zone.
- *
- * This interface was referenced by `JosephContracts`'s JSON-Schema
- * via the `definition` "AoiTouchNode".
- */
-export interface AoiTouchNode {
-  op: 'AOI_TOUCH';
-  id?: string;
-  label?: string;
-  /**
-   * @minItems 1
-   * @maxItems 8
-   */
-  kinds:
-    | [AoiKind]
-    | [AoiKind, AoiKind]
-    | [AoiKind, AoiKind, AoiKind]
-    | [AoiKind, AoiKind, AoiKind, AoiKind]
-    | [AoiKind, AoiKind, AoiKind, AoiKind, AoiKind]
-    | [AoiKind, AoiKind, AoiKind, AoiKind, AoiKind, AoiKind]
-    | [AoiKind, AoiKind, AoiKind, AoiKind, AoiKind, AoiKind, AoiKind]
-    | [AoiKind, AoiKind, AoiKind, AoiKind, AoiKind, AoiKind, AoiKind, AoiKind];
-  side: 'bullish' | 'bearish';
-  tf?: Timeframe;
-  within_bars: number;
-  touch?: 'WICK' | 'BODY' | 'CLOSE';
-  require_active?: boolean;
-  min_quality?: number;
-}
-/**
- * An active AOI of kinds_a overlaps an active AOI of kinds_b by at least min_overlap_pct of the smaller zone.
- *
- * This interface was referenced by `JosephContracts`'s JSON-Schema
- * via the `definition` "AoiOverlapNode".
- */
-export interface AoiOverlapNode {
-  op: 'AOI_OVERLAP';
-  id?: string;
-  label?: string;
-  /**
-   * @minItems 1
-   */
-  kinds_a: [AoiKind, ...AoiKind[]];
-  /**
-   * @minItems 1
-   */
-  kinds_b: [AoiKind, ...AoiKind[]];
-  side: 'bullish' | 'bearish';
-  tf?: Timeframe;
-  min_overlap_pct?: NonNegativeDecimalString;
-}
-/**
- * An indicator event confirmed within the last `within_bars` closed bars (0 = current bar).
- *
- * This interface was referenced by `JosephContracts`'s JSON-Schema
- * via the `definition` "EventNode".
- */
-export interface EventNode {
-  op: 'EVENT';
-  id?: string;
-  label?: string;
-  name: StructureEventName;
-  source?: PluginId;
-  tf?: Timeframe;
-  within_bars: number;
-}
-/**
- * Ordered events on distinct closed bars inside a window of `within_bars` bars. The final step must occur on the evaluated bar, so a completed sequence fires once.
- *
- * This interface was referenced by `JosephContracts`'s JSON-Schema
- * via the `definition` "SequenceNode".
- */
-export interface SequenceNode {
-  op: 'SEQUENCE';
-  id?: string;
-  label?: string;
-  within_bars: number;
-  /**
-   * @minItems 2
-   * @maxItems 8
-   */
-  steps:
-    | [EventRef, EventRef]
-    | [EventRef, EventRef, EventRef]
-    | [EventRef, EventRef, EventRef, EventRef]
-    | [EventRef, EventRef, EventRef, EventRef, EventRef]
-    | [EventRef, EventRef, EventRef, EventRef, EventRef, EventRef]
-    | [EventRef, EventRef, EventRef, EventRef, EventRef, EventRef, EventRef]
-    | [
-        EventRef,
-        EventRef,
-        EventRef,
-        EventRef,
-        EventRef,
-        EventRef,
-        EventRef,
-        EventRef,
-      ];
-}
-/**
- * This interface was referenced by `JosephContracts`'s JSON-Schema
- * via the `definition` "EventRef".
- */
-export interface EventRef {
-  name: StructureEventName;
-  source?: PluginId;
-  tf?: Timeframe;
-}
-/**
- * This interface was referenced by `JosephContracts`'s JSON-Schema
- * via the `definition` "CompareNode".
- */
-export interface CompareNode {
-  op: 'COMPARE';
-  id?: string;
-  label?: string;
-  left: Operand;
-  cmp: 'gt' | 'gte' | 'lt' | 'lte' | 'eq' | 'neq';
-  right: Operand;
-}
-/**
- * This interface was referenced by `JosephContracts`'s JSON-Schema
- * via the `definition` "ConstOperand".
- */
-export interface ConstOperand {
-  kind: 'const';
-  value: DecimalString;
-}
-/**
- * This interface was referenced by `JosephContracts`'s JSON-Schema
- * via the `definition` "CandleOperand".
- */
-export interface CandleOperand {
-  kind: 'candle';
-  tf?: Timeframe;
-  field: 'open' | 'high' | 'low' | 'close' | 'base_volume';
-  bars_ago?: number;
-}
-/**
- * This interface was referenced by `JosephContracts`'s JSON-Schema
- * via the `definition` "IndicatorOperand".
- */
-export interface IndicatorOperand {
-  kind: 'indicator';
-  plugin_id: string;
-  tf?: Timeframe;
-  field: string;
-  bars_ago?: number;
-}
-/**
- * This interface was referenced by `JosephContracts`'s JSON-Schema
- * via the `definition` "MarketOperand".
- */
-export interface MarketOperand {
-  kind: 'market';
-  field:
-    | 'funding_8h_pct'
-    | 'open_interest_usd'
-    | 'oi_change_pct'
-    | 'spread_pct'
-    | 'turnover_24h_quote';
-}
-/**
- * This interface was referenced by `JosephContracts`'s JSON-Schema
- * via the `definition` "InRangeNode".
- */
-export interface InRangeNode {
-  op: 'IN_RANGE';
-  id?: string;
-  label?: string;
-  value: Operand;
-  low: Operand;
-  high: Operand;
-  inclusive?: boolean;
-}
-/**
- * left crossed right between the previous and the evaluated closed bar.
- *
- * This interface was referenced by `JosephContracts`'s JSON-Schema
- * via the `definition` "CrossesNode".
- */
-export interface CrossesNode {
-  op: 'CROSSES';
-  id?: string;
-  label?: string;
-  left: Operand;
-  right: Operand;
-  direction: 'ABOVE' | 'BELOW';
-}
-/**
- * child is TRUE on each of the last `bars` closed bars including the evaluated bar.
- *
- * This interface was referenced by `JosephContracts`'s JSON-Schema
- * via the `definition` "PersistForNode".
- */
-export interface PersistForNode {
-  op: 'PERSIST_FOR';
-  id?: string;
-  label?: string;
-  bars: number;
-  child: RuleNode;
-}
-/**
- * child is TRUE on at least one of the last `bars` + 1 closed bars.
- *
- * This interface was referenced by `JosephContracts`'s JSON-Schema
- * via the `definition` "WithinBarsNode".
- */
-export interface WithinBarsNode {
-  op: 'WITHIN_BARS';
-  id?: string;
-  label?: string;
-  bars: number;
-  child: RuleNode;
-}
-/**
- * The evaluated bar starts, in `time_zone` local time, inside one of `windows`, on one of `weekdays` (ISO local weekday, 1 = Monday; every day when omitted).
- *
- * This interface was referenced by `JosephContracts`'s JSON-Schema
- * via the `definition` "TimeWindowNode".
- */
-export interface TimeWindowNode {
-  op: 'TIME_WINDOW';
-  id?: string;
-  label?: string;
-  /**
-   * IANA time zone, e.g. America/New_York.
-   */
-  time_zone: string;
-  /**
-   * @minItems 1
-   * @maxItems 8
-   */
-  windows:
-    | [LocalTimeWindow]
-    | [LocalTimeWindow, LocalTimeWindow]
-    | [LocalTimeWindow, LocalTimeWindow, LocalTimeWindow]
-    | [LocalTimeWindow, LocalTimeWindow, LocalTimeWindow, LocalTimeWindow]
-    | [
-        LocalTimeWindow,
-        LocalTimeWindow,
-        LocalTimeWindow,
-        LocalTimeWindow,
-        LocalTimeWindow,
-      ]
-    | [
-        LocalTimeWindow,
-        LocalTimeWindow,
-        LocalTimeWindow,
-        LocalTimeWindow,
-        LocalTimeWindow,
-        LocalTimeWindow,
-      ]
-    | [
-        LocalTimeWindow,
-        LocalTimeWindow,
-        LocalTimeWindow,
-        LocalTimeWindow,
-        LocalTimeWindow,
-        LocalTimeWindow,
-        LocalTimeWindow,
-      ]
-    | [
-        LocalTimeWindow,
-        LocalTimeWindow,
-        LocalTimeWindow,
-        LocalTimeWindow,
-        LocalTimeWindow,
-        LocalTimeWindow,
-        LocalTimeWindow,
-        LocalTimeWindow,
-      ];
-  /**
-   * @minItems 1
-   * @maxItems 7
-   */
-  weekdays?:
-    | [number]
-    | [number, number]
-    | [number, number, number]
-    | [number, number, number, number]
-    | [number, number, number, number, number]
-    | [number, number, number, number, number, number]
-    | [number, number, number, number, number, number, number];
-}
-/**
- * Local-time window [start, end); an end at or before the start wraps past midnight.
- *
- * This interface was referenced by `JosephContracts`'s JSON-Schema
- * via the `definition` "LocalTimeWindow".
- */
-export interface LocalTimeWindow {
-  start: string;
-  end: string;
-}
-/**
- * Projected reward/risk net of estimated costs from the strategy risk model is at least min_rr.
- *
- * This interface was referenced by `JosephContracts`'s JSON-Schema
- * via the `definition` "RiskRewardNode".
- */
-export interface RiskRewardNode {
-  op: 'RISK_REWARD';
-  id?: string;
-  label?: string;
-  min_rr: NonNegativeDecimalString;
-}
-/**
- * This interface was referenced by `JosephContracts`'s JSON-Schema
- * via the `definition` "Universe".
- */
-export interface Universe {
-  qualification: 'QUALIFIED_ONLY' | 'ANY';
-  /**
-   * @minItems 1
-   */
-  venues: [Venue, ...Venue[]];
-  whitelist?: InstrumentId[];
-  blacklist?: InstrumentId[];
-  min_qualified_minutes?: number;
-}
-/**
- * This interface was referenced by `JosephContracts`'s JSON-Schema
- * via the `definition` "RiskModel".
- */
-export interface RiskModel {
-  min_rr: NonNegativeDecimalString;
-  stop_model: 'AOI_INVALIDATION' | 'SWING' | 'ATR';
-  stop_buffer_atr?: NonNegativeDecimalString;
-  /**
-   * NEAREST_AOI targets the nearest live AOI of `target_kinds` beyond the entry (its lower bound above a LONG entry, its upper bound below a SHORT entry); FIXED_R targets `fixed_r` times the risk.
-   */
-  target_model: 'NEAREST_AOI' | 'FIXED_R';
-  /**
-   * AOI kinds NEAREST_AOI may target.
-   *
-   * @minItems 1
-   * @maxItems 8
-   */
-  target_kinds?:
-    | [AoiKind]
-    | [AoiKind, AoiKind]
-    | [AoiKind, AoiKind, AoiKind]
-    | [AoiKind, AoiKind, AoiKind, AoiKind]
-    | [AoiKind, AoiKind, AoiKind, AoiKind, AoiKind]
-    | [AoiKind, AoiKind, AoiKind, AoiKind, AoiKind, AoiKind]
-    | [AoiKind, AoiKind, AoiKind, AoiKind, AoiKind, AoiKind, AoiKind]
-    | [AoiKind, AoiKind, AoiKind, AoiKind, AoiKind, AoiKind, AoiKind, AoiKind];
-  fixed_r?: NonNegativeDecimalString;
-  fee_bps_estimate?: NonNegativeDecimalString;
-  max_risk_pct_equity?: NonNegativeDecimalString;
-}
-/**
- * This interface was referenced by `JosephContracts`'s JSON-Schema
- * via the `definition` "NotificationPolicy".
- */
-export interface NotificationPolicy {
-  cooldown_bars: number;
-  once_per_aoi: boolean;
-  emit?: SignalKind[];
-  channels?: (
-    'UI' | 'TELEGRAM' | 'LINE' | 'EMAIL' | 'WEBHOOK' | 'WHATSAPP' | 'WEB_PUSH'
-  )[];
-}
-/**
- * This interface was referenced by `JosephContracts`'s JSON-Schema
- * via the `definition` "SetupPolicy".
- */
-export interface SetupPolicy {
-  expire_after_bars?: number;
-}
-/**
- * This interface was referenced by `JosephContracts`'s JSON-Schema
- * via the `definition` "DataPolicy".
- */
-export interface DataPolicy {
-  max_data_age_ms?: number;
-  allow_rest_poll?: boolean;
-}
-/**
- * User-authored strategy. Immutable once stored as a StrategyVersion.
- *
- * This interface was referenced by `JosephContracts`'s JSON-Schema
- * via the `definition` "StrategyDefinition".
- */
-export interface StrategyDefinition {
-  schema_version: 2;
-  strategy_id: string;
-  name: string;
-  description?: string;
-  direction: Direction;
-  signal_timeframe: Timeframe;
-  universe: Universe;
-  when: RuleNode;
-  risk: RiskModel;
-  notification: NotificationPolicy;
-  setup?: SetupPolicy;
-  data_policy?: DataPolicy;
-  execution_mode: ExecutionMode;
-}
-/**
- * This interface was referenced by `JosephContracts`'s JSON-Schema
- * via the `definition` "Activation".
- */
-export interface Activation {
-  mode: ExecutionMode;
-  activated_at_ms: TimestampMs;
-  instruments?: InstrumentId[];
-}
-/**
- * Immutable stored version. Editing creates a new version; live permissions never carry over.
- *
- * This interface was referenced by `JosephContracts`'s JSON-Schema
- * via the `definition` "StrategyVersion".
- */
-export interface StrategyVersion {
-  strategy_version_id: string;
-  strategy_id: string;
-  version: number;
-  tenant_id: string;
-  author_user_id: string;
-  created_at_ms: TimestampMs;
-  definition: StrategyDefinition;
-  definition_hash: string;
-  compiler_version: string;
-  evaluator_version: string;
-  state: StrategyState;
-  activation?: Activation | null;
-}
-/**
- * This interface was referenced by `JosephContracts`'s JSON-Schema
- * via the `definition` "StrategyVersionList".
- */
-export interface StrategyVersionList {
-  versions: StrategyVersion[];
-}
-/**
- * This interface was referenced by `JosephContracts`'s JSON-Schema
- * via the `definition` "ValidationIssue".
- */
-export interface ValidationIssue {
-  /**
-   * JSON pointer into the definition.
-   */
-  path: string;
-  code: string;
-  message: string;
-}
-/**
- * This interface was referenced by `JosephContracts`'s JSON-Schema
- * via the `definition` "ValidationResult".
- */
-export interface ValidationResult {
-  valid: boolean;
-  errors: ValidationIssue[];
-  warnings: ValidationIssue[];
-  required_plugins: string[];
-  required_timeframes: Timeframe[];
-  node_count: number;
-  max_depth: number;
-  definition_hash?: string | null;
-}
-/**
- * This interface was referenced by `JosephContracts`'s JSON-Schema
- * via the `definition` "ActivateRequest".
- */
-export interface ActivateRequest {
-  version: number;
-  /**
-   * AUTO_LIVE cannot be activated here; it requires an execution-engine deployment with consent.
-   */
-  mode: 'ALERT_ONLY' | 'PAPER' | 'SHADOW';
-  instruments?: InstrumentId[];
-}
-/**
- * This interface was referenced by `JosephContracts`'s JSON-Schema
- * via the `definition` "BacktestRequest".
- */
-export interface BacktestRequest {
-  version: number;
-  instrument_id: InstrumentId;
-  from_ms: TimestampMs;
-  to_ms: TimestampMs;
-  fee_bps?: NonNegativeDecimalString;
-  slippage_bps?: NonNegativeDecimalString;
-  max_hold_bars?: number;
-}
-/**
- * This interface was referenced by `JosephContracts`'s JSON-Schema
- * via the `definition` "BacktestTrade".
- */
-export interface BacktestTrade {
-  signal_id: string;
-  direction: Direction;
-  entry_ms: TimestampMs;
-  entry_price: DecimalString;
-  stop_price: DecimalString;
-  target_price: DecimalString;
-  exit_ms: TimestampMs;
-  exit_price: DecimalString;
-  exit_reason: 'STOP' | 'TARGET' | 'TIMEOUT' | 'END_OF_DATA';
-  r_multiple: DecimalString;
-  fees_r: DecimalString;
-  hold_bars: number;
-}
-/**
- * This interface was referenced by `JosephContracts`'s JSON-Schema
- * via the `definition` "BacktestMetrics".
- */
-export interface BacktestMetrics {
-  trades: number;
-  wins: number;
-  losses: number;
-  win_rate: DecimalString | null;
-  expectancy_r: DecimalString | null;
-  profit_factor: DecimalString | null;
-  max_drawdown_r: DecimalString;
-  avg_r: DecimalString | null;
-  avg_hold_bars: DecimalString | null;
-}
-/**
- * This interface was referenced by `JosephContracts`'s JSON-Schema
- * via the `definition` "BacktestReport".
- */
-export interface BacktestReport {
-  backtest_id: string;
-  strategy_version_id: string;
-  instrument_id: InstrumentId;
-  from_ms: TimestampMs;
-  to_ms: TimestampMs;
-  bars_evaluated: number;
-  signals: Signal[];
-  trades: BacktestTrade[];
-  metrics: BacktestMetrics;
-  missing_bars: number;
-  feed_state: FeedState;
-  assumptions: string[];
-  evaluator_version: string;
 }
 /**
  * This interface was referenced by `JosephContracts`'s JSON-Schema

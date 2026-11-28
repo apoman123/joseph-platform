@@ -15,7 +15,8 @@ Without arguments the OpenAPI and built-in catalog are written to
 * ``builtin-indicator-plugins.json``, the contract ``IndicatorPluginList``
   of the built-in indicators, which the terminal's DEMO mode mirrors.
 
-Managed Python/heatmap model schemas are also regenerated in
+Managed Python script, catalog, strategy activation and heatmap model
+schemas are also regenerated in
 ``joseph-terminal/packages/contracts/schemas/python-scripts.schema.json``.
 
 With ``--check`` nothing is written and the exit status is 1 when a
@@ -32,9 +33,11 @@ import sys
 import pydantic
 
 from joseph import bootstrap
+from joseph.api.routers import scripts as script_routes
 from joseph.indicators import catalog
 from joseph.market_data.app import heatmap_models
 from joseph.platform import config
+from joseph.scripts import activations
 from joseph.scripts import models as scripts
 
 _DIR = (
@@ -64,6 +67,11 @@ def _script_contracts() -> str:
         scripts.ScanJob,
         scripts.AlertJobInput,
         scripts.AlertJob,
+        script_routes.CatalogScript,
+        script_routes.CatalogList,
+        activations.StrategyActivationInput,
+        activations.StrategyActivation,
+        activations.StrategyActivationList,
         heatmap_models.HeatmapSnapshot,
         heatmap_models.HeatmapCatalog,
     ]
@@ -101,7 +109,7 @@ def _openapi() -> str:
         config.Settings(),
         demo_only=True,
         database_url="sqlite://",
-        pipeline_enabled=False,
+        strategy_activations_enabled=False,
         indicator_plugin_packages="none",
     )
     app = bootstrap.create_application(bootstrap.build_container(settings))

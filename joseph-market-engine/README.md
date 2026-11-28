@@ -1,6 +1,6 @@
 # Joseph market engine
 
-The market engine serves market data, perpetual screening, indicators, strategies, signals, alerts and backtests over HTTP and WebSocket (FastAPI, port 8000). This page is for developers; settings are in the [operations runbook](../docs/OPERATIONS.md#market-engine).
+The market engine serves market data, perpetual screening, indicators, Python scripts and strategy activations, signals, alerts and backtests over HTTP and WebSocket (FastAPI, port 8000). This page is for developers; settings are in the [operations runbook](../docs/OPERATIONS.md#market-engine).
 
 ## Run and test
 
@@ -24,9 +24,8 @@ Indicator plugin packages install into this environment with `make plugins` from
 | `market_data/` | Venue adapters, seconds bars, trade recorder and archives, aggregated timeframes, feed router (AUTO / NATIVE_WS / REST_POLL / REPLAY), candle store, order books |
 | `screening/` | Five strict gates, funding risk, three-state qualification with reasons |
 | `indicators/` | Plugin SDK and metadata, nine built-in indicators, plugin discovery (entry points `joseph.indicator_plugins`), multi-timeframe engine ([README](src/joseph/indicators/README.md)) |
-| `strategy/` | Rule AST v2, compiler, tri-state evaluator, setup state machine, immutable versions |
 | `signals/`, `alerts/` | Deduplicated signals; durable outbox to the UI, Telegram, LINE, e-mail, webhooks and the execution engine |
-| `pipeline/`, `backtest/` | Live loop over closed candles (history warms up without firing); backtests on the same evaluator |
+| `scripts/` | Python script roles: immutable tenant versions, isolated runner, built-in and plugin catalog (`builtin/`, entry points `joseph.scripts`), simulator and backtests (`/v1/scripts/{id}/run`), scans, alert jobs and strategy activations (closed bars → signals, no history replay; [ADR 0010](../docs/adr/0010-python-strategy-scripts.md)) |
 | `api/`, `bootstrap.py` | FastAPI routers; composition root |
 
 ## Venues

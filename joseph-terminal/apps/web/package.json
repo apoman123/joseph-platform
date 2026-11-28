@@ -22,7 +22,6 @@
     "@joseph/indicator-viz": "workspace:*",
     "@joseph/terminal-shell": "workspace:*",
     "@joseph/chart-trading": "workspace:*",
-    "@joseph/strategy-builder": "workspace:*",
     "@joseph/mock-provider": "workspace:*",
     "next": "16.4.6",
     "react": "19.3.1",

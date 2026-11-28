@@ -57,6 +57,19 @@ class ValidationFailedError(JosephError):
     code = "VALIDATION_FAILED"
 
 
+class TradeModeDisabledError(JosephError):
+    """The requested execution mode cannot be enabled from this service.
+
+    AUTO_LIVE requires an execution-engine deployment with explicit scoped
+    consent; the market engine never enables live trading.
+
+    Attributes:
+        code: Default contract error code, ``"TRADE_MODE_DISABLED"``.
+    """
+
+    code = "TRADE_MODE_DISABLED"
+
+
 class NotFoundError(JosephError):
     """A requested entity does not exist or is not visible to the tenant.
 

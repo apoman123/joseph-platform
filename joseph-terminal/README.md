@@ -48,7 +48,7 @@ The `Dockerfile` builds a standalone image on port 3000; pass the same variables
 | `drawing-core`, `drawing-tools` | Anchored drawings, undo, migrations, engine-series sync; 37 tools |
 | `indicator-viz` | Render-only mapping of engine indicator outputs (zones, levels, events, lines, panes) to overlays, styled by each plugin's display metadata |
 | `terminal-shell` | Workspace, sync, sessions, persistence, hotkeys |
-| `chart-trading`, `strategy-builder` | Order-ticket state machine; rule-AST editing models |
+| `chart-trading` | Order-ticket state machine |
 | `mock-provider` | DEMO market, broker and strategy services |
 | `apps/web` | Next.js app, composition root, React features |
 

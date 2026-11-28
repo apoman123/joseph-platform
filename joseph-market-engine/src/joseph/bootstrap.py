@@ -12,11 +12,12 @@ Wiring overview:
 
 * market data → ``MarketDataService`` (also the indicator ``CandleSource``);
 * indicators → ``IndicatorQueryService`` + ``/v1/indicators``, ``/v1/aois``;
-* strategies → ``StrategyVersionService`` (SQL) + ``StrategyRuntime``;
-* live path → ``LiveSignalPipeline`` (closed candles → engine → runtime);
-* signals → ``AlertDispatcher`` → durable outbox → ``OutboxWorker`` senders
-  (UI stream, Telegram, LINE, e-mail, webhook, execution forwarder);
-* backtests → ``EngineFrameProvider`` (same engine and evaluator as live).
+* Python scripts → ``ScriptService`` (catalog classes in process, tenant
+  source in the isolated runner); strategy backtests are script runs;
+* strategies → ``StrategyActivations`` (closed bars → Python strategy →
+  signals);
+* signals → alert routing → durable outbox → ``OutboxWorker`` senders
+  (UI stream, Telegram, LINE, e-mail, webhook, execution forwarder).
 """
 
 from __future__ import annotations
@@ -41,21 +42,19 @@ from joseph.alerts.domain import model as alert_model
 from joseph.api import app as api_app
 from joseph.api import deps
 from joseph.api.routers import alerts as alerts_router
-from joseph.api.routers import backtests as backtests_router
 from joseph.api.routers import heatmap as heatmap_router
 from joseph.api.routers import indicators as indicators_router
 from joseph.api.routers import script_jobs as script_jobs_router
 from joseph.api.routers import scripts as scripts_router
 from joseph.api.routers import signals as signals_router
-from joseph.api.routers import strategies as strategies_router
-from joseph.backtest import runner as backtest_runner
-from joseph.backtest import service as backtest_service
+from joseph.api.routers import strategy_activations as activations_router
 from joseph.domain import clock as clock_lib
 from joseph.domain import events
 from joseph.domain import instruments
 from joseph.domain import market
 from joseph.indicators import catalog
 from joseph.indicators import discovery
+from joseph.indicators import registry_ticks
 from joseph.indicators import service as indicator_service
 from joseph.indicators.sdk import registry as plugin_registry
 from joseph.market_data.adapters import alpaca
@@ -85,11 +84,6 @@ from joseph.market_data.domain import candles as candle_rules
 from joseph.market_data.domain import health
 from joseph.mcp import application as mcp_application
 from joseph.mcp import terminal as terminal_control
-from joseph.pipeline import frames as pipeline_frames
-from joseph.pipeline import live as pipeline_live
-from joseph.pipeline import market_context
-from joseph.pipeline import qualification as pipeline_qualification
-from joseph.pipeline import ticks as pipeline_ticks
 from joseph.platform import auth
 from joseph.platform import bus
 from joseph.platform import config
@@ -99,6 +93,7 @@ from joseph.platform import redaction
 from joseph.platform import streaming
 from joseph.screening.adapters import coingecko
 from joseph.screening.app import service as screening_service
+from joseph.scripts import activations as strategy_activations
 from joseph.scripts import catalog as script_catalog
 from joseph.scripts import jobs as script_jobs
 from joseph.scripts import repository as script_repository
@@ -106,46 +101,28 @@ from joseph.scripts import runner as script_runner
 from joseph.scripts import service as script_service
 from joseph.signals.adapters import sql as signals_sql
 from joseph.signals.app import service as signal_service
-from joseph.strategy.adapters import sql as strategy_sql
-from joseph.strategy.app import runtime as strategy_runtime
-from joseph.strategy.app import version_service
-from joseph.strategy.domain import catalog as strategy_catalog
 
 
 @dataclasses.dataclass
 class SignalStack:
-    """Indicator, strategy, signal, alert and backtest services.
+    """Indicator, signal and alert services.
 
     Attributes:
         plugins: Indicator plugin registry.
         indicator_queries: Point-in-time indicator query service.
-        versions: Strategy version service.
         signals: Signal history service.
-        runtime: Strategy runtime.
-        gate: Qualification gate shared by runtime and pipeline.
-        market_context: Market context recorder.
-        frame_provider: Engine-backed frame provider.
-        backtests: Backtest service.
-        dispatcher: Alert dispatcher (runtime publisher).
+        dispatcher: Alert dispatcher (signal publisher).
         outbox_worker: Alert delivery worker.
         subscriptions: Alert subscription service.
-        pipeline: Live signal pipeline.
         http_client: HTTP client used by alert senders.
     """
 
     plugins: plugin_registry.PluginRegistry
     indicator_queries: indicator_service.IndicatorQueryService
-    versions: version_service.StrategyVersionService
     signals: signal_service.SignalService
-    runtime: strategy_runtime.StrategyRuntime
-    gate: pipeline_qualification.CachedQualificationGate
-    market_context: market_context.SnapshotMarketContext
-    frame_provider: pipeline_frames.EngineFrameProvider
-    backtests: backtest_service.BacktestService
     dispatcher: alert_dispatcher.AlertDispatcher
     outbox_worker: alert_dispatcher.OutboxWorker
     subscriptions: alert_subscriptions.SubscriptionService
-    pipeline: pipeline_live.LiveSignalPipeline
     http_client: httpx.AsyncClient
 
 
@@ -213,10 +190,10 @@ class Container:
         """Starts the background workers.
 
         Starts provider metadata warmup, the trade recorder, the alert
-        outbox worker and, when
-        ``pipeline_enabled`` is set, the live signal pipeline. Each creates
-        asyncio tasks, so this runs inside the app's event loop (the
-        FastAPI lifespan). Feed sessions are not started here: the feed
+        outbox worker and the registered producers (such as the strategy
+        activation loop and Python alert jobs). Each creates asyncio
+        tasks, so this runs inside the app's event loop (the FastAPI
+        lifespan). Feed sessions are not started here: the feed
         router opens them on demand (``FeedRouter.acquire``).
         """
         self.registry.start_warmup()
@@ -226,19 +203,17 @@ class Container:
         if stack is None:
             return
         stack.outbox_worker.start(self.settings.alert_interval_s)
-        if self.settings.pipeline_enabled:
-            stack.pipeline.start()
         for starter in self.starters:
             starter()
 
     async def aclose(self) -> None:
         """Stops workers and feeds and closes network resources.
 
-        Producers stop before what they use: the pipeline (which queues
-        alerts) before the outbox worker that delivers them, the worker
-        before the HTTP client of its senders, the feed sessions and the
-        trade recorder before the adapters they read from, and the database
-        engine last.
+        Producers stop before what they use: the registered producers
+        (which queue alerts) before the outbox worker that delivers them,
+        the worker before the HTTP client of its senders, the feed sessions
+        and the trade recorder before the adapters they read from, and the
+        database engine last.
         """
         for stopper in self.stoppers:
             result = stopper()
@@ -246,7 +221,6 @@ class Container:
                 await result
         stack = self.signal_stack
         if stack is not None:
-            await stack.pipeline.stop()
             await stack.outbox_worker.stop()
             await stack.http_client.aclose()
         await self.router.close()
@@ -595,44 +569,6 @@ def _trade_recorder(
     )
 
 
-def _channel_policy(
-    repository: strategy_sql.SqlStrategyRepository,
-) -> Callable[[str, str], frozenset[str]]:
-    """Builds the per-version channel policy from stored definitions.
-
-    Args:
-        repository: Strategy repository.
-
-    Returns:
-        Policy returning the channels a strategy version opted into.
-    """
-
-    def policy(tenant_id: str, strategy_version_id: str) -> frozenset[str]:
-        """Returns the version's notification channels (UI by default).
-
-        Args:
-            tenant_id: Owning tenant.
-            strategy_version_id: ``<strategy_id>:v<n>``.
-
-        Returns:
-            Channel names.
-        """
-        strategy_id, _, number = strategy_version_id.rpartition(":v")
-        # A malformed id or an unknown version still gets UI delivery.
-        try:
-            version = repository.get(tenant_id, strategy_id, int(number))
-        except (ValueError, LookupError):
-            return frozenset({"UI"})
-        if version is None:
-            return frozenset({"UI"})
-        chosen = version.definition.notification.channels
-        # Accepts enum members as well as plain channel names.
-        names = {str(getattr(c, "value", c)) for c in chosen or ()}
-        return frozenset(names or {"UI"})
-
-    return policy
-
-
 def _senders(
     settings: config.Settings,
     hub: streaming.StreamHub,
@@ -730,9 +666,9 @@ def _senders(
 
 
 def build_signal_stack(container: Container) -> SignalStack:
-    """Wires indicators, strategies, signals, alerts and backtests.
+    """Wires indicators, signals and alerts.
 
-    Creates the strategy, signal and alert tables when they are missing, and
+    Creates the signal and alert tables when they are missing, and
     an HTTP client for the alert senders that ``Container.aclose`` closes.
 
     Args:
@@ -746,7 +682,6 @@ def build_signal_stack(container: Container) -> SignalStack:
         container.clock,
         container.engine,
     )
-    strategy_sql.create_schema(engine)
     signals_sql.create_schema(engine)
     alerts_sql.create_schema(engine)
     plugins, _ = catalog.build_registry(
@@ -755,13 +690,6 @@ def build_signal_stack(container: Container) -> SignalStack:
             disabled=settings.indicator_plugins_disabled,
             required=settings.indicator_plugins_required,
         )
-    )
-    vocabulary = strategy_catalog.Vocabulary.from_plugin_infos(
-        plugins.infos(include_unavailable=True), plugins.ids()
-    )
-    repository = strategy_sql.SqlStrategyRepository(engine)
-    versions = version_service.StrategyVersionService(
-        repository, clock, vocabulary=vocabulary
     )
     signals = signal_service.SignalService(
         signals_sql.SqlSignalRepository(engine)
@@ -776,7 +704,6 @@ def build_signal_stack(container: Container) -> SignalStack:
         outbox,
         subscription_repo,
         clock,
-        strategy_channels=_channel_policy(repository),
         ui_enabled=True,
         forward_execution=bool(
             settings.forward_signals and settings.service_token
@@ -787,38 +714,7 @@ def build_signal_stack(container: Container) -> SignalStack:
         senders,
         clock,
     )
-    gate = pipeline_qualification.CachedQualificationGate(
-        container.qualification, clock
-    )
-    context = market_context.SnapshotMarketContext()
-    runtime = strategy_runtime.StrategyRuntime(
-        repository=repository,
-        signals=signals,
-        checkpoints=strategy_sql.SqlCheckpointRepository(engine),
-        clock=clock,
-        publisher=dispatcher,
-        qualification=gate,
-        market=context,
-        vocabulary=vocabulary,
-    )
-    tick_sizes = pipeline_ticks.RegistryTickSizes(container.registry, clock)
-    provider = pipeline_frames.EngineFrameProvider(
-        container.market_data, plugins, tick_sizes=tick_sizes
-    )
-    pipeline = pipeline_live.LiveSignalPipeline(
-        runtime,
-        provider,
-        container.market_data,
-        gate=gate,
-        context=context,
-        clock=clock,
-        interval_s=settings.pipeline_interval_s,
-        max_instruments_per_venue=settings.pipeline_max_instruments,
-    )
-    backtests = backtest_service.BacktestService(
-        versions,
-        backtest_runner.BacktestRunner(provider, vocabulary=vocabulary),
-    )
+    tick_sizes = registry_ticks.RegistryTickSizes(container.registry, clock)
     return SignalStack(
         plugins=plugins,
         indicator_queries=indicator_service.IndicatorQueryService(
@@ -830,13 +726,7 @@ def build_signal_stack(container: Container) -> SignalStack:
             ),
             tick_sizes=tick_sizes,
         ),
-        versions=versions,
         signals=signals,
-        runtime=runtime,
-        gate=gate,
-        market_context=context,
-        frame_provider=provider,
-        backtests=backtests,
         dispatcher=dispatcher,
         outbox_worker=worker,
         subscriptions=alert_subscriptions.SubscriptionService(
@@ -847,7 +737,6 @@ def build_signal_stack(container: Container) -> SignalStack:
             if alert_model.Channel.WEB_PUSH in senders
             else None,
         ),
-        pipeline=pipeline,
         http_client=http_client,
     )
 
@@ -859,18 +748,12 @@ def signal_routers(stack: SignalStack) -> list[fastapi.APIRouter]:
         stack: Signal stack.
 
     Returns:
-        Indicator, strategy, signal, backtest and alert-subscription routers.
+        Indicator, signal and alert-subscription routers.
     """
     return [
         indicators_router.build_router(stack.indicator_queries, stack.plugins),
-        strategies_router.build_router(
-            versions=stack.versions, get_principal=deps.get_principal
-        ),
         signals_router.build_router(
             signals=stack.signals, get_principal=deps.get_principal
-        ),
-        backtests_router.build_router(
-            backtests=stack.backtests, get_principal=deps.get_principal
         ),
         alerts_router.build_router(
             service=stack.subscriptions, get_principal=deps.get_principal
@@ -935,6 +818,23 @@ def create_application(
         routers.append(
             script_jobs_router.build_router(jobs, deps.get_principal)
         )
+        activations = strategy_activations.StrategyActivations(
+            scripts,
+            built.engine,
+            history=built.signal_stack.signals,
+            subscriptions=alerts_sql.SqlSubscriptionRepository(built.engine),
+            outbox=alerts_sql.SqlOutbox(built.engine),
+            forward_execution=bool(
+                built.settings.forward_signals and built.settings.service_token
+            ),
+            interval_s=built.settings.strategy_interval_s,
+        )
+        if built.settings.strategy_activations_enabled:
+            built.starters.append(activations.start)
+        built.stoppers.append(activations.stop)
+        routers.append(
+            activations_router.build_router(activations, deps.get_principal)
+        )
         routers = signal_routers(built.signal_stack) + routers
     terminal = terminal_control.TerminalHub(
         built.authenticator, built.settings.cors_origins
@@ -945,6 +845,7 @@ def create_application(
     app.state.terminal_hub = terminal
     if built.signal_stack is not None:
         app.state.script_jobs = jobs
+        app.state.strategy_activations = activations
     mcp_application.install(
         app,
         engine=built.engine,

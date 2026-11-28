@@ -15,10 +15,8 @@ forbidden_modules =
     joseph.market_data
     joseph.screening
     joseph.indicators
-    joseph.strategy
     joseph.signals
     joseph.alerts
-    joseph.backtest
     joseph.api
     fastapi
     pydantic
@@ -34,7 +32,6 @@ type = forbidden
 source_modules =
     joseph.market_data.domain
     joseph.screening.domain
-    joseph.strategy.domain
     joseph.signals.domain
     joseph.alerts.domain
 forbidden_modules =
@@ -56,8 +53,6 @@ forbidden_modules =
     joseph.platform
     joseph.market_data
     joseph.api
-    joseph.pipeline
-    joseph.strategy
     fastapi
     sqlalchemy
     httpx
@@ -73,35 +68,30 @@ source_modules =
 forbidden_modules =
     joseph.screening
     joseph.indicators
-    joseph.strategy
     joseph.signals
     joseph.alerts
-    joseph.backtest
     joseph.api
 
-[importlinter:contract:indicators-upstream-of-strategy]
-name = Indicators do not depend on strategy, signals, alerts, adapters or API
+[importlinter:contract:indicators-upstream-of-signals]
+name = Indicators do not depend on scripts, signals, alerts, adapters or API
 type = forbidden
 source_modules =
     joseph.indicators
 forbidden_modules =
     joseph.market_data.adapters
     joseph.screening
-    joseph.strategy
+    joseph.scripts
     joseph.signals
     joseph.alerts
-    joseph.backtest
     joseph.api
 
-[importlinter:contract:strategy-no-adapters]
-name = Strategy, signals and alerts core never import venue adapters or the API
+[importlinter:contract:signals-no-adapters]
+name = Signals and alerts core never import venue adapters or the API
 type = forbidden
 source_modules =
-    joseph.strategy
     joseph.signals
     joseph.alerts.domain
     joseph.alerts.app
-    joseph.backtest
 forbidden_modules =
     joseph.market_data.adapters
     joseph.api
@@ -115,26 +105,9 @@ source_modules =
     joseph.market_data
     joseph.screening
     joseph.indicators
-    joseph.strategy
+    joseph.scripts
     joseph.signals
     joseph.alerts
-    joseph.backtest
-    joseph.pipeline
 forbidden_modules =
     joseph.api
     joseph.bootstrap
-
-# Direct imports only: application services the pipeline calls (such as
-# market_data.app.service) import adapters themselves.
-[importlinter:contract:pipeline-uses-ports]
-name = The signal pipeline orchestrates through application ports, not adapters
-type = forbidden
-allow_indirect_imports = True
-source_modules =
-    joseph.pipeline
-forbidden_modules =
-    joseph.market_data.adapters
-    joseph.screening.adapters
-    joseph.alerts.adapters
-    joseph.strategy.adapters
-    joseph.signals.adapters

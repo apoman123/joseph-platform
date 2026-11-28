@@ -182,8 +182,8 @@ def test_every_private_endpoint_requires_auth(
         ("execution", "POST", "/v1/orders/intents"),
         ("execution", "GET", "/v1/audit/events"),
         ("execution", "POST", "/v1/risk/kill-switch"),
-        ("market", "GET", "/v1/strategies"),
-        ("market", "POST", "/v1/strategies"),
+        ("market", "GET", "/v1/strategy-activations"),
+        ("market", "POST", "/v1/strategy-activations"),
         ("market", "GET", "/v1/signals"),
     ]
     for service, method, path in probes:

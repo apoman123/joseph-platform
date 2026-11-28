@@ -44,6 +44,11 @@ export interface PythonState {
   editing: WritableStore<ScriptVersion | null>;
   /** Last validated run by chart/attachment; never persisted into exports. */
   results: WritableStore<Readonly<Record<string, ScriptResult>>>;
+  /**
+   * Strategy backtest the Strategy panel shows on charts of its instrument
+   * and timeframe, or null; never persisted.
+   */
+  strategyPreview: WritableStore<ScriptResult | null>;
 }
 
 /** Runtime-specific state keeps separate accounts and windows isolated. */
@@ -65,6 +70,7 @@ export function pythonState(runtime: TerminalRuntime): PythonState {
       catalog: createStore<PythonCatalog | null>(null),
       editing: createStore<ScriptVersion | null>(null),
       results: createStore<Readonly<Record<string, ScriptResult>>>({}),
+      strategyPreview: createStore<ScriptResult | null>(null),
     };
     states.set(runtime, state);
   }

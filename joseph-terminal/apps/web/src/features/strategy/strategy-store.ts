@@ -5,331 +5,322 @@
  */
 
 /**
- * @fileoverview Editor state for the strategy feature: the working
- * definition, server validation, saved versions and activation actions.
+ * @fileoverview State of the Python strategy panel: the selected Strategy
+ * script and its inputs, backtests, activations, signals and source.
  */
 
-import {
-  ApiError,
-  type ActivateRequest,
-  type StrategyDefinition,
-  type StrategyVersion,
-  type ValidationIssue,
+import type {
+  ScriptResult,
+  Signal,
+  StrategyActivation,
+  StrategyActivationInput,
+  StrategyScript,
+  Timeframe,
 } from '@joseph/contracts';
 import {createStore, type WritableStore} from '@joseph/feature-registry';
-import {
-  STRATEGY_TEMPLATES,
-  ensureIds,
-  validateDefinition,
-  type ClientValidation,
-  type Vocabulary,
-} from '@joseph/strategy-builder';
 import type {WebFeatureContext} from '../../shell/react-bindings';
 import {errorMessage} from '../trading/ui/hooks';
 
-/** Persisted draft settings (schema version 1). */
-export interface StrategyDraftSettings {
-  /** Working definition. */
-  definition: StrategyDefinition;
-}
+/** Request in flight. */
+export type StrategyBusy =
+  'load' | 'backtest' | 'activate' | 'activation' | 'source' | 'copy';
 
-/** Editor state. */
-export interface StrategyEditorState {
-  /** Working definition (every node has an id). */
-  definition: StrategyDefinition;
-  /**
-   * Client validation of the working definition, against `vocabulary` when
-   * it is known.
-   */
-  validation: ClientValidation;
-  /** Vocabulary of the installed indicator plugins, or null until known. */
-  vocabulary: Vocabulary | null;
-  /** Issues returned by the server for the last validated/saved draft. */
-  serverIssues: ValidationIssue[];
-  /** Versions of the strategy known on the server, newest first. */
-  versions: StrategyVersion[];
-  /** Whether the draft differs from the latest saved version. */
-  dirty: boolean;
+/** Modes an activation can request (AUTO_LIVE is refused by the engine). */
+export type ActivationMode = NonNullable<StrategyActivationInput['mode']>;
+
+/** Panel state. */
+export interface StrategyState {
+  /** Built-in, plugin and owned strategies. */
+  scripts: StrategyScript[];
+  /** Whether owned source can execute on the server. */
+  runtimeEnabled: boolean;
+  /** Selected strategy id, or null before loading. */
+  selectedId: string | null;
+  /** Input values, starting from the selected strategy's defaults. */
+  inputs: Record<string, unknown>;
+  /** Closed bars per backtest run and activation pass. */
+  bars: number;
+  /** Last backtest of the selected strategy, or null. */
+  backtest: ScriptResult | null;
+  /** The tenant's activations, newest first. */
+  activations: StrategyActivation[];
+  /** Whether PAPER/SHADOW entries reach the execution engine. */
+  forwardingEnabled: boolean;
+  /** Recent signals of the selected strategy. */
+  signals: Signal[];
+  /** Source of the selected strategy once loaded, or null. */
+  source: string | null;
   /** Request in flight, or null. */
-  busy: 'validate' | 'save' | 'activate' | 'pause' | 'load' | null;
+  busy: StrategyBusy | null;
   /** Last status message, or null. */
   message: {tone: 'info' | 'warning' | 'danger'; text: string} | null;
 }
 
-/** Editor store and actions. */
-export interface StrategyEditor {
+/** Store and actions of the panel. */
+export interface StrategyController {
   /** State store. */
-  state: WritableStore<StrategyEditorState>;
+  state: WritableStore<StrategyState>;
   /**
-   * Replaces the working definition.
-   * @param definition New definition.
+   * Loads strategies, activations and signals.
+   * @return Promise that never rejects; errors become `message`.
    */
-  setDefinition(definition: StrategyDefinition): void;
+  load(): Promise<void>;
   /**
-   * Sets the vocabulary of the installed indicator plugins and validates
-   * the draft against it.
-   * @param vocabulary Vocabulary, or null to check the structure only.
+   * Selects a strategy and resets the inputs to its defaults.
+   * @param scriptId Strategy id.
    */
-  setVocabulary(vocabulary: Vocabulary | null): void;
+  select(scriptId: string): void;
   /**
-   * Starts from a template.
-   * @param templateId Template id.
+   * Sets one input value.
+   * @param name Input name.
+   * @param value JSON value; undefined restores the declared default.
    */
-  applyTemplate(templateId: string): void;
+  setInput(name: string, value: unknown): void;
+  /** Restores the selected strategy's default inputs. */
+  resetInputs(): void;
   /**
-   * Validates the draft on the server.
-   * @return Promise resolving when done. It never rejects: the outcome or
-   *     the error becomes `message`, issues become `serverIssues`.
+   * Sets the bars per run.
+   * @param bars Closed bars, 50 to 2000.
    */
-  validateOnServer(): Promise<void>;
+  setBars(bars: number): void;
   /**
-   * Saves the draft as a new immutable version; refused locally while the
-   * client validation fails.
-   * @return Promise resolving when done. It never rejects: the outcome or
-   *     the error becomes `message`, field errors become `serverIssues`.
+   * Backtests the selected strategy on closed bars.
+   * @param instrumentId Instrument.
+   * @param tf Timeframe.
+   * @return Promise that never rejects.
    */
-  save(): Promise<void>;
+  runBacktest(instrumentId: string, tf: Timeframe): Promise<void>;
   /**
-   * Reloads versions from the server.
-   * @return Promise resolving when done. It never rejects: on failure the
-   *     strategy counts as unsaved (no versions, dirty).
+   * Activates the selected strategy on future closed bars.
+   * @param request Instrument, timeframe, mode and channels.
+   * @return Promise that never rejects.
    */
-  loadVersions(): Promise<void>;
+  activate(request: {
+    instrumentId: string;
+    tf: Timeframe;
+    mode: ActivationMode;
+    channels: string[];
+  }): Promise<void>;
   /**
-   * Activates a version.
-   * @param request Version and mode.
-   * @return Promise resolving when done. It never rejects: the outcome or
-   *     the error becomes `message`.
+   * Pauses, resumes or deletes an activation.
+   * @param activationId Activation id.
+   * @param action What to do.
+   * @return Promise that never rejects.
    */
-  activate(request: ActivateRequest): Promise<void>;
+  change(
+    activationId: string,
+    action: 'pause' | 'resume' | 'delete'
+  ): Promise<void>;
   /**
-   * Pauses the active version.
-   * @return Promise resolving when done. It never rejects: the outcome or
-   *     the error becomes `message`.
+   * Loads the selected strategy's source.
+   * @return Promise that never rejects.
    */
-  pause(): Promise<void>;
+  loadSource(): Promise<void>;
+  /**
+   * Copies the selected strategy into an owned script.
+   * @param newId New owned slug.
+   * @return Promise that never rejects.
+   */
+  copy(newId: string): Promise<void>;
 }
 
 /**
- * Canonical JSON used to compare drafts with saved versions: the server may
- * return object keys in another order than the draft has them.
- * @param value JSON value.
- * @return JSON text with every object's keys sorted.
+ * Reads the default input values of a strategy.
+ * @param script Strategy, or undefined.
+ * @return Defaults by input name.
  */
-function canonical(value: unknown): string {
-  return JSON.stringify(value, (_key, v: unknown) =>
-    v && typeof v === 'object' && !Array.isArray(v)
-      ? Object.fromEntries(
-          Object.entries(v as Record<string, unknown>).sort(([a], [b]) =>
-            a.localeCompare(b)
-          )
-        )
-      : v
+export function defaultInputs(
+  script: StrategyScript | undefined
+): Record<string, unknown> {
+  return Object.fromEntries(
+    Object.entries(script?.inputs ?? {}).map(([name, spec]) => [
+      name,
+      spec?.default ?? null,
+    ])
   );
 }
 
 /**
- * Creates the strategy editor, starting from the stored draft or, when none
- * is stored in schema version 2, from the first template.
- * @param ctx Feature context.
- * @return Editor.
- * @throws `Error` when the template list is empty (a build defect).
+ * Creates the panel controller.
+ * @param ctx Feature context with the strategy client.
+ * @return Controller.
  */
-export function createStrategyEditor(ctx: WebFeatureContext): StrategyEditor {
-  const fallback = STRATEGY_TEMPLATES[0]?.create();
-  if (!fallback) throw new Error('Strategy templates are missing.');
-  const stored = ctx.settings.read<StrategyDraftSettings>({
-    definition: fallback,
-  });
-  const initial =
-    stored.definition?.schema_version === 2 ? stored.definition : fallback;
-  const definition = {...initial, when: ensureIds(initial.when)};
-  const state = createStore<StrategyEditorState>({
-    definition,
-    validation: validateDefinition(definition),
-    vocabulary: null,
-    serverIssues: [],
-    versions: [],
-    dirty: true,
+export function createStrategyController(
+  ctx: WebFeatureContext
+): StrategyController {
+  const state = createStore<StrategyState>({
+    scripts: [],
+    runtimeEnabled: false,
+    selectedId: null,
+    inputs: {},
+    bars: 500,
+    backtest: null,
+    activations: [],
+    forwardingEnabled: false,
+    signals: [],
+    source: null,
     busy: null,
     message: null,
   });
-  const patch = (update: Partial<StrategyEditorState>) =>
-    void state.update(current => ({...current, ...update}));
-  const isDirty = (def: StrategyDefinition, versions: StrategyVersion[]) => {
-    const latest = versions[0];
-    return !latest || canonical(latest.definition) !== canonical(def);
+  const client = ctx.clients.strategy;
+  const patch = (next: Partial<StrategyState>) =>
+    void state.update(s => ({...s, ...next}));
+  const fail = (err: unknown) =>
+    void patch({
+      busy: null,
+      message: {tone: 'danger', text: errorMessage(err)},
+    });
+  const selected = () => {
+    const s = state.get();
+    return s.scripts.find(row => row.script_id === s.selectedId);
   };
-
-  const editor: StrategyEditor = {
+  const refreshActivity = async () => {
+    const id = state.get().selectedId;
+    const [list, signals] = await Promise.all([
+      client.listActivations(),
+      id
+        ? client.listSignals({strategyId: id, limit: 20})
+        : Promise.resolve({signals: []}),
+    ]);
+    patch({
+      activations: list.activations,
+      forwardingEnabled: list.forwarding_enabled,
+      signals: signals.signals,
+    });
+  };
+  return {
     state,
-    setDefinition(next) {
-      const withIds = {...next, when: ensureIds(next.when)};
-      ctx.settings.write<StrategyDraftSettings>({definition: withIds});
+    async load() {
+      patch({busy: 'load', message: null});
+      try {
+        const list = await client.listStrategyScripts();
+        const current = state.get().selectedId;
+        const keep = list.scripts.find(row => row.script_id === current);
+        const first = keep ?? list.scripts[0];
+        patch({
+          scripts: list.scripts,
+          runtimeEnabled: list.runtime_enabled,
+          selectedId: first?.script_id ?? null,
+          inputs: keep ? state.get().inputs : defaultInputs(first),
+        });
+        await refreshActivity();
+        patch({busy: null});
+      } catch (err) {
+        fail(err);
+      }
+    },
+    select(scriptId) {
+      const script = state.get().scripts.find(r => r.script_id === scriptId);
       patch({
-        definition: withIds,
-        validation: validateDefinition(
-          withIds,
-          state.get().vocabulary ?? undefined
-        ),
-        serverIssues: [],
-        dirty: isDirty(withIds, state.get().versions),
+        selectedId: scriptId,
+        inputs: defaultInputs(script),
+        backtest: null,
+        source: null,
         message: null,
       });
+      void refreshActivity().catch(fail);
     },
-    setVocabulary(vocabulary) {
-      if (state.get().vocabulary === vocabulary) return;
-      patch({
-        vocabulary,
-        validation: validateDefinition(
-          state.get().definition,
-          vocabulary ?? undefined
-        ),
-      });
+    setInput(name, value) {
+      const inputs = {...state.get().inputs};
+      // A cleared field falls back to the declared default on the server.
+      if (value === undefined) delete inputs[name];
+      else inputs[name] = value;
+      patch({inputs});
     },
-    applyTemplate(templateId) {
-      const template = STRATEGY_TEMPLATES.find(t => t.id === templateId);
-      if (!template) return;
-      editor.setDefinition(template.create());
-      void editor.loadVersions();
+    resetInputs() {
+      patch({inputs: defaultInputs(selected())});
     },
-    async validateOnServer() {
-      patch({busy: 'validate', message: null});
+    setBars(bars) {
+      patch({bars: Math.min(2000, Math.max(50, Math.round(bars) || 500))});
+    },
+    async runBacktest(instrumentId, tf) {
+      const script = selected();
+      if (!script) return;
+      patch({busy: 'backtest', message: null});
       try {
-        const result = await ctx.clients.strategy.validate(
-          state.get().definition
-        );
-        patch({
-          serverIssues: [...result.errors, ...result.warnings],
-          message: result.valid
-            ? {
-                tone: 'info',
-                text: `Valid on the server. Needs ${result.required_plugins.join(', ') || 'no indicators'} on ${result.required_timeframes.join(', ')}.`,
-              }
-            : {
-                tone: 'danger',
-                text: `The server found ${result.errors.length} problem${result.errors.length === 1 ? '' : 's'}. They are marked on the conditions below.`,
-              },
+        const result = await client.backtestStrategy(script.script_id, {
+          version: script.version || undefined,
+          instrument_id: instrumentId,
+          tf,
+          limit: state.get().bars,
+          inputs: state.get().inputs,
         });
+        patch({backtest: result, busy: null});
       } catch (err) {
-        patch({message: {tone: 'danger', text: errorMessage(err)}});
-      } finally {
-        patch({busy: null});
+        fail(err);
       }
     },
-    async save() {
-      const {definition: def, validation, versions} = state.get();
-      if (!validation.valid) {
-        patch({
-          message: {
-            tone: 'danger',
-            text: 'Fix the marked problems before saving.',
-          },
-        });
-        return;
-      }
-      patch({busy: 'save', message: null});
-      try {
-        let saved: StrategyVersion;
-        if (versions.length === 0) {
-          try {
-            saved = await ctx.clients.strategy.createStrategy(def);
-          } catch (err) {
-            // The strategy already exists on the server (its versions were
-            // not loaded here): save the draft as its next version.
-            if (err instanceof ApiError && err.body.code === 'CONFLICT') {
-              saved = await ctx.clients.strategy.createVersion(
-                def.strategy_id,
-                def
-              );
-            } else {
-              throw err;
-            }
-          }
-        } else {
-          saved = await ctx.clients.strategy.createVersion(
-            def.strategy_id,
-            def
-          );
-        }
-        const list = await ctx.clients.strategy.getStrategy(saved.strategy_id);
-        patch({
-          versions: list.versions,
-          dirty: false,
-          message: {
-            tone: 'info',
-            text: `Saved as version ${saved.version}. Saved versions never change; editing creates a new one.`,
-          },
-        });
-      } catch (err) {
-        const issues =
-          err instanceof ApiError
-            ? err.body.field_errors.map(f => ({
-                path: f.field,
-                code: 'server',
-                message: f.message,
-              }))
-            : [];
-        patch({
-          serverIssues: issues,
-          message: {tone: 'danger', text: errorMessage(err)},
-        });
-      } finally {
-        patch({busy: null});
-      }
-    },
-    async loadVersions() {
-      const id = state.get().definition.strategy_id;
-      try {
-        const list = await ctx.clients.strategy.getStrategy(id);
-        patch({
-          versions: list.versions,
-          dirty: isDirty(state.get().definition, list.versions),
-        });
-      } catch {
-        patch({versions: [], dirty: true});
-      }
-    },
-    async activate(request) {
+    async activate({instrumentId, tf, mode, channels}) {
+      const script = selected();
+      if (!script) return;
       patch({busy: 'activate', message: null});
       try {
-        const version = await ctx.clients.strategy.activate(
-          state.get().definition.strategy_id,
-          request
-        );
-        await editor.loadVersions();
+        const created = await client.createActivation({
+          script_id: script.script_id,
+          version: script.version || undefined,
+          instrument_ids: [instrumentId],
+          tf,
+          inputs: state.get().inputs,
+          mode,
+          channels: channels.slice(0, 8) as StrategyActivationInput['channels'],
+          history_bars: state.get().bars,
+        });
+        await refreshActivity();
         patch({
+          busy: null,
           message: {
             tone: 'info',
-            text: `Version ${version.version} is active in ${request.mode.replace('_', ' ').toLowerCase()} mode.`,
+            text: `Activated ${created.name} in ${mode.replace('_', ' ').toLowerCase()} mode from the next closed bar. Deployments bind ${created.strategy_version_id}.`,
           },
         });
       } catch (err) {
-        patch({message: {tone: 'danger', text: errorMessage(err)}});
-      } finally {
-        patch({busy: null});
+        fail(err);
       }
     },
-    async pause() {
-      patch({busy: 'pause', message: null});
+    async change(activationId, action) {
+      patch({busy: 'activation', message: null});
       try {
-        const version = await ctx.clients.strategy.pause(
-          state.get().definition.strategy_id
-        );
-        await editor.loadVersions();
+        if (action === 'pause') await client.pauseActivation(activationId);
+        else if (action === 'resume') {
+          await client.resumeActivation(activationId);
+        } else await client.deleteActivation(activationId);
+        await refreshActivity();
+        patch({busy: null});
+      } catch (err) {
+        fail(err);
+      }
+    },
+    async loadSource() {
+      const script = selected();
+      if (!script) return;
+      patch({busy: 'source', message: null});
+      try {
         patch({
+          source: await client.getStrategySource(script.script_id),
+          busy: null,
+        });
+      } catch (err) {
+        fail(err);
+      }
+    },
+    async copy(newId) {
+      const script = selected();
+      if (!script) return;
+      patch({busy: 'copy', message: null});
+      try {
+        const saved = await client.copyStrategy(script.script_id, newId);
+        const list = await client.listStrategyScripts();
+        patch({
+          scripts: list.scripts,
+          busy: null,
           message: {
             tone: 'info',
-            text: `Version ${version.version} is paused. No new signals are evaluated.`,
+            text: `Copied to your script ${saved.script_id} (version ${saved.version}). Edit it in the Python editor.`,
           },
         });
       } catch (err) {
-        patch({message: {tone: 'danger', text: errorMessage(err)}});
-      } finally {
-        patch({busy: null});
+        fail(err);
       }
     },
   };
-  void editor.loadVersions();
-  return editor;
 }
