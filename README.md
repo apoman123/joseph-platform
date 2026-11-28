@@ -152,6 +152,7 @@ These come from venues, data plans or law; code cannot remove them.
 
 - **Users:** [User manual](docs/USER_MANUAL.md) · [Heatmaps](docs/HEATMAPS.md)
 - **Operators:** [Operations runbook](docs/OPERATIONS.md) · [Brokers](docs/BROKERS.md) · [CI/CD](docs/CI_CD.md)
+- **Script developers:** [Script development guides](docs/scripting/README.md): [indicators](docs/scripting/INDICATORS.md) · [strategies](docs/scripting/STRATEGIES.md) · [alerts](docs/scripting/ALERTS.md) · [filters](docs/scripting/FILTERS.md) · [plugin packages](docs/scripting/PLUGIN_PACKAGES.md)
 - **Contributors:** [Architecture](docs/architecture/INDEX.md) · [ADRs](docs/adr/) · [Extending](docs/EXTENDING.md) · [Coding standards](docs/standards/CODING_STANDARDS.md) · [Design decisions](docs/DESIGN_DECISIONS.md) · [Feature status](docs/FEATURE_STATUS.md)
 - **Components:** [Market engine](joseph-market-engine/README.md) · [Execution engine](joseph-execution-engine/README.md) · [Terminal](joseph-terminal/README.md)
 - **Reports:** [Threat model](docs/reports/THREAT_MODEL.md) · [Licensing](docs/reports/LICENSING_REPORT.md) · [TradingView use-case audit](docs/reports/TRADINGVIEW_USE_CASE_AUDIT.md) · [Tests](docs/reports/TEST_REPORT.md)
@@ -161,7 +162,7 @@ These come from venues, data plans or law; code cannot remove them.
 
 - **Integrated application: AGPL-3.0-only** ([LICENSE](LICENSE)); original MIT file notices are retained.
 - **Terminal:** `joseph-terminal/` keeps its own AGPL [LICENSE](joseph-terminal/LICENSE) and [NOTICE](joseph-terminal/NOTICE) so it can become a separate repository. Charts use TradingView's Lightweight Charts (Apache-2.0); Joseph is not affiliated with TradingView.
-- **Plugin packages:** indicator plugin packages you install are not covered by this licence; check their terms before using or redistributing an image that contains one.
+- **Plugin packages:** script plugin packages you install are not covered by this licence; check their terms before using or redistributing an image that contains one.
 
 Third-party components and obligations: [licensing report](docs/reports/LICENSING_REPORT.md).
 

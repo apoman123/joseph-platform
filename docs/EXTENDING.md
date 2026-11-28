@@ -20,6 +20,8 @@ Never change indicators, strategies or the risk gateway for a venue.
 
 ## Add or change an indicator (Python)
 
+Writing the script itself (context API, inputs, drawings, testing) is covered in the [script development guides](scripting/README.md); this section covers shipping it with the platform.
+
 An indicator is a concrete `joseph_script.Indicator` subclass ([ADR 0011](adr/0011-indicators-are-joseph-script-classes.md)); there is no other indicator format. Generic indicators can become built-ins; anything else, strategy-specific indicators included, goes into a separate plugin package that the engine loads at startup. The platform never names a plugin package or its ids.
 
 1. **Implement** `on_bar(ctx)`: read the current bar (`ctx.bar`, including optional fields such as `taker_buy_volume`), declared inputs and series, and keep state incrementally on the instance (one pass per run, O(n)). Publish through the context only: `ctx.plot(name, value, color=, style=, width=, offset=, display=)` (`display="data_window"` lists a value without drawing it), drawings (`line`, `label`, `box`, `fill`, `hline`, `linefill`, `table`, ...) and `ctx.alert` conditions on confirmed bars.

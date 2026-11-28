@@ -36,6 +36,12 @@ installed by user source.
 
 ## Five independent script classes
 
+Step-by-step development guides with worked examples:
+[script development guides](scripting/README.md) for
+[indicators](scripting/INDICATORS.md), [strategies](scripting/STRATEGIES.md),
+[alerts](scripting/ALERTS.md), [filters](scripting/FILTERS.md) and
+[plugin packages](scripting/PLUGIN_PACKAGES.md).
+
 Every source file declares exactly one concrete class that inherits its role's
 abstract base from `joseph_script`. A function-only declaration is rejected.
 
