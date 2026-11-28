@@ -338,7 +338,12 @@ def gate(
     passed = value > threshold if comparator == "gt" else value < threshold
     symbol = ">" if comparator == "gt" else "<"
     verdict = "passes" if passed else "fails"
-    return passed, f"{name} {value:f} {verdict} {symbol} {threshold:f}"
+    try:
+        shown = value.quantize(D("0.000001")).normalize()
+    except decimal.InvalidOperation:
+        shown = value
+    limit = threshold.normalize()
+    return passed, f"{name} {shown:f} {verdict} {symbol} {limit:f}"
 
 
 def qualify(
@@ -483,7 +488,11 @@ def eligible(instrument: Mapping[str, Any]) -> bool:
 
 
 class LiquidityQualification(joseph_script.Filter):
-    """Matches instruments that pass every liquidity gate."""
+    """Matches instruments that pass every liquidity gate.
+
+    Attributes:
+        METRICS: The order book, open interest and funding it reads.
+    """
 
     ID = "liquidity-qualification"
     TITLE = "Liquidity qualification"

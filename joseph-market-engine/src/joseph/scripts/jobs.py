@@ -862,13 +862,13 @@ class ScriptJobs:
             script = self.scripts.resolve(
                 principal.tenant_id, job.script_id, job.version or None
             )
-            if job.source_hash is not None and (
-                script.source_hash != job.source_hash
-            ):
-                raise errors.ConflictError(
+            if job.source_hash not in {None, script.source_hash}:
+                job.last_error = (
                     "the installed script changed since this alert was "
                     "saved; save the alert again to accept the new version"
                 )
+                self._replace(principal, job, previous)
+                return
             result = await self.scripts.run(
                 principal,
                 job.script_id,
