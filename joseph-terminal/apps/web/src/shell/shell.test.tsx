@@ -72,6 +72,16 @@ describe('provenance', () => {
     expect(worstFeedState({a: 'LIVE', b: 'STALE'})).toBe('STALE');
     expect(worstFeedState({a: 'LIVE', b: 'DEMO'})).toBe('DEMO');
     expect(worstFeedState({})).toBe('CONNECTING');
+    expect(worstFeedState({a: 'CLOSED', b: 'LIVE'})).toBe('LIVE');
+    expect(worstFeedState({a: 'CLOSED'})).toBe('CLOSED');
+    expect(worstFeedState({a: 'CLOSED', b: 'STALE'})).toBe('STALE');
+  });
+
+  it('labels an expected closed session without a stale-price warning', () => {
+    render(<ProvenanceBadge state="CLOSED" ageMs={25_200_000} />);
+    const badge = screen.getByTestId('provenance-badge');
+    expect(badge).toHaveTextContent('Market closed');
+    expect(badge).not.toHaveTextContent(/stale|blocked/i);
   });
 });
 
@@ -297,6 +307,12 @@ describe('chrome', () => {
     expect(
       screen.getByRole('link', {name: /Lightweight Charts/})
     ).toHaveAttribute('href', expect.stringContaining('tradingview'));
+    expect(
+      screen.getByRole('link', {name: 'TradeX · Saifullah Shafin'})
+    ).toHaveAttribute(
+      'href',
+      'https://github.com/saifullahshafin/open-source-tradingview'
+    );
     act(() => void runtime.notifier.notify('Saved', 'success'));
     expect(screen.getByText('Saved')).toBeInTheDocument();
   });

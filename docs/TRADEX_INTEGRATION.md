@@ -115,7 +115,10 @@ history as every other drawing operation.
 
 The integrated application is AGPL-3.0-only, as approved for this integration.
 Original MIT file notices remain intact, and original Joseph license texts are
-preserved. The license page includes:
+preserved. The terminal footer links visibly to TradeX by Saifullah Shafin. The license
+page also credits [lightweight-charts-drawing by deepentropy](https://github.com/deepentropy/lightweight-charts-drawing)
+for drawing geometry and retains the TradingView Lightweight Charts attribution.
+The license page includes:
 
 > Based on TradeX by Saifullah Shafin - https://github.com/saifullahshafin/open-source-tradingview
 

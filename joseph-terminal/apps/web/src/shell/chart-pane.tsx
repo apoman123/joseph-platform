@@ -83,7 +83,9 @@ import {
   formatAge,
   formatInstrumentPrice,
   formatUtcTime,
+  formatVolume,
 } from './format';
+import {chartFeedState} from './feed-status';
 import {MarketStatusBadge, useBarCalendar} from './market-status';
 import {isRateInstrument, venueAccess} from './markets';
 import {useVenueCapabilities} from './venue-capabilities';
@@ -96,8 +98,6 @@ import {useStudyLines, useStudyPanes} from './study-hooks';
 const HISTORY_BARS = 500;
 /** Bars shown when a chart opens without a saved viewport. */
 const INITIAL_VISIBLE_BARS = 140;
-/** Age after which a live feed counts as stale (60 s). */
-const STALE_AFTER_MS = 60_000;
 /** Feed modes offered per chart (REPLAY is entered with bar replay). */
 const FEED_MODES: ReadonlyArray<[FeedMode, string]> = [
   ['AUTO', 'Auto feed'],
@@ -421,6 +421,7 @@ export function ChartPane({
     };
     loadEarlierRef.current = loadEarlier;
     setLastBar(null);
+    setHover(null);
     let batchState: FeedState = 'CONNECTING';
     let liveState: FeedState | null = null;
     /** Fetches one snapshot at a time, preserving any newer socket bars. */
@@ -585,13 +586,14 @@ export function ChartPane({
     return () => void clearInterval(timer);
   }, []);
   const ageMs = status.lastUpdateMs === null ? 0 : now - status.lastUpdateMs;
-  const effectiveState: FeedState = replay
-    ? 'REPLAY'
-    : status.feedState !== 'DEMO' &&
-        status.phase === 'ready' &&
-        ageMs > STALE_AFTER_MS
-      ? 'STALE'
-      : status.feedState;
+  const effectiveState = chartFeedState({
+    feedState: status.feedState,
+    calendar,
+    nowMs: now,
+    lastUpdateMs: status.lastUpdateMs,
+    ready: status.phase === 'ready',
+    replaying: replay !== null,
+  });
   useEffect(() => {
     runtime.feedStates.update(states =>
       states[chartId] === effectiveState
@@ -1128,7 +1130,11 @@ export function ChartPane({
         </div>
         <dl
           className="pane__ohlc j-tabular"
-          aria-label="Open, high, low, close"
+          aria-label={
+            rate
+              ? 'Open, high, low, close'
+              : 'Open, high, low, close and volume'
+          }
         >
           {(['open', 'high', 'low', 'close'] as const).map(key => (
             <div key={key}>
@@ -1140,6 +1146,17 @@ export function ChartPane({
               </dd>
             </div>
           ))}
+          {!rate && (
+            <div
+              data-testid="bar-volume"
+              title="Volume of the selected bar; follows the crosshair and replay cursor"
+            >
+              <dt>V</dt>
+              <dd aria-label="Bar volume">
+                {formatVolume(shown?.volume, instrument)}
+              </dd>
+            </div>
+          )}
         </dl>
         <div className="pane__meta">
           {headerActions}

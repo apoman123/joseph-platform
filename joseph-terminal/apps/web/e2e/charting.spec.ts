@@ -53,8 +53,19 @@ test('shows volume, Delta % and study panes and the data window', async ({
   await expect
     .poll(() => canvasCount(page), {timeout: 30_000})
     .toBeGreaterThanOrEqual(9);
+  const credit = page.getByRole('link', {name: 'TradeX · Saifullah Shafin'});
+  await expect(credit).toBeVisible();
+  await expect(credit).toHaveAttribute(
+    'href',
+    'https://github.com/saifullahshafin/open-source-tradingview'
+  );
   const withPanes = await canvasCount(page);
   await openLayers(page);
+  const volume = page.getByRole('checkbox', {name: 'Volume', exact: true});
+  await volume.uncheck();
+  await expect.poll(() => canvasCount(page)).toBeLessThan(withPanes);
+  await volume.check();
+  await expect.poll(() => canvasCount(page)).toBe(withPanes);
   await page.getByTestId('delta-pane-toggle').click();
   await expect.poll(() => canvasCount(page)).toBeLessThan(withPanes);
   await page.getByTestId('delta-pane-toggle').click();
@@ -73,6 +84,13 @@ test('shows volume, Delta % and study panes and the data window', async ({
   await page.mouse.move(box.x + box.width * 0.7, box.y + box.height * 0.3);
   const data = page.getByTestId('data-window');
   await expect(data).toContainText('Open');
+  await expect(page.getByTestId('bar-volume')).toContainText(/\d/);
+  const selectedVolume = await data
+    .getByText('Volume', {exact: true})
+    .locator('..')
+    .locator('dd')
+    .innerText();
+  await expect(page.getByTestId('bar-volume')).toContainText(selectedVolume);
   await expect(data).toContainText(/Delta %\s*[−+-]?\d/);
   // Let the canvases repaint before the screenshot.
   await page.waitForTimeout(400);

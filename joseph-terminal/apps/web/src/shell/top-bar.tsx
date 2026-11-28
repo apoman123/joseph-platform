@@ -19,7 +19,6 @@
 import type {ReactElement} from 'react';
 import {
   type ChartType,
-  type FeedState,
   type LayoutId,
   type PriceScaleMode,
 } from '@joseph/contracts';
@@ -42,6 +41,7 @@ import {CompareMenu} from './compare-menu';
 import {InstrumentSelector} from './instrument-selector';
 import {IndicatorsButton} from './indicator-library';
 import {Popover} from './popover';
+import type {ChartFeedState} from './feed-status';
 import {ProvenanceBadge} from './provenance';
 import {useStore} from './react-bindings';
 import {useRuntime} from './runtime-context';
@@ -75,7 +75,7 @@ const LAYOUTS: ReadonlyArray<[LayoutId, string, typeof Square]> = [
 ];
 
 /** Feed states from worst to best, to summarize provenance across panes. */
-const SEVERITY: readonly FeedState[] = [
+const SEVERITY: readonly ChartFeedState[] = [
   'UNAVAILABLE',
   'STALE',
   'CONNECTING',
@@ -83,6 +83,7 @@ const SEVERITY: readonly FeedState[] = [
   'POLL',
   'DEMO',
   'LIVE',
+  'CLOSED',
 ];
 
 /**
@@ -91,8 +92,8 @@ const SEVERITY: readonly FeedState[] = [
  * @return Worst state; `CONNECTING` when no pane reported one.
  */
 export function worstFeedState(
-  states: Readonly<Record<string, FeedState>>
-): FeedState {
+  states: Readonly<Record<string, ChartFeedState>>
+): ChartFeedState {
   const values = Object.values(states);
   for (const state of SEVERITY) {
     if (values.includes(state)) return state;

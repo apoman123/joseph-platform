@@ -56,6 +56,15 @@ export function StatusBar(): ReactElement {
       <span className="statusbar__grow" />
       <UtcClock />
       <a
+        className="statusbar__item statusbar__credit"
+        href="https://github.com/saifullahshafin/open-source-tradingview"
+        target="_blank"
+        rel="noreferrer"
+        title="Based on TradeX by Saifullah Shafin"
+      >
+        TradeX · Saifullah Shafin
+      </a>
+      <a
         className="statusbar__item"
         href="https://www.tradingview.com/lightweight-charts/"
         target="_blank"

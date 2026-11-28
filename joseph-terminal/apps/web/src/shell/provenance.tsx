@@ -14,11 +14,12 @@
  */
 
 import type {ReactElement} from 'react';
-import type {FeedState} from '@joseph/contracts';
+import type {ChartFeedState} from './feed-status';
 import {formatAge} from './format';
 
 /** Badge labels per feed state. */
-const LABELS: Readonly<Record<FeedState, string>> = {
+const LABELS: Readonly<Record<ChartFeedState, string>> = {
+  CLOSED: 'Market closed',
   LIVE: 'Live',
   POLL: 'Polled',
   REPLAY: 'Replay',
@@ -29,7 +30,9 @@ const LABELS: Readonly<Record<FeedState, string>> = {
 };
 
 /** Explanations for tooltips and screen readers. */
-const DESCRIPTIONS: Readonly<Record<FeedState, string>> = {
+const DESCRIPTIONS: Readonly<Record<ChartFeedState, string>> = {
+  CLOSED:
+    'Market closed. Showing last available prices; updates resume during scheduled trading sessions.',
   LIVE: 'Native venue stream, confirmed bars only drive signals.',
   POLL: 'REST polling fallback. Fine for charts, not for order flow or fast automation.',
   REPLAY: 'Recorded history being replayed. Orders cannot be sent from replay.',
@@ -45,7 +48,7 @@ const DESCRIPTIONS: Readonly<Record<FeedState, string>> = {
  * @param ageMs Data age in ms, shown when stale.
  * @return Label such as `Live` or `Stale for 3 min`.
  */
-export function provenanceLabel(state: FeedState, ageMs?: number): string {
+export function provenanceLabel(state: ChartFeedState, ageMs?: number): string {
   return state === 'STALE' && ageMs !== undefined
     ? `Stale for ${formatAge(ageMs)}`
     : LABELS[state];
@@ -57,7 +60,11 @@ export function provenanceLabel(state: FeedState, ageMs?: number): string {
  * @param props Feed state.
  * @return Ribbon element.
  */
-export function ProvenanceRibbon({state}: {state: FeedState}): ReactElement {
+export function ProvenanceRibbon({
+  state,
+}: {
+  state: ChartFeedState;
+}): ReactElement {
   return (
     <div
       className={`ribbon ribbon--${state.toLowerCase()}`}
@@ -77,7 +84,7 @@ export function ProvenanceBadge({
   state,
   ageMs,
 }: {
-  state: FeedState;
+  state: ChartFeedState;
   ageMs?: number;
 }): ReactElement {
   return (

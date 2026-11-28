@@ -34,8 +34,12 @@ export default function NoticesPage(): ReactElement {
         </a>
       </p>
       <p>
-        Drawing geometry uses lightweight-charts-drawing (MIT). No TradingView
-        Advanced Charts or Trading Platform code or assets are included.
+        Drawing geometry uses{' '}
+        <a href="https://github.com/deepentropy/lightweight-charts-drawing">
+          lightweight-charts-drawing by deepentropy
+        </a>{' '}
+        (MIT, version 0.6.2). No TradingView Advanced Charts or Trading Platform
+        code or assets are included.
       </p>
       <h2>TradeX integration</h2>
       <p>

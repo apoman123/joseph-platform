@@ -27,6 +27,26 @@ by the market engine. The market engine no longer installs its SDK extra or
 reads its data-feed credentials. Its trading adapter remains in the execution
 engine.
 
+## Closed-market display and chart volume
+
+A loaded chart uses its instrument's exchange calendar to distinguish expected
+silence from missing updates. After a session closes, its provenance badge and
+market panel show **Market closed**, and the chart suppresses the elapsed-time
+stale-data banner. This includes weekends, fetched holiday closures, and early
+closes. The first minute after the next session opens allows the feed to resume;
+after that, missing updates show the stale warning again. Continuous markets
+retain stale-data detection throughout weekends. Unavailable feeds, failed
+history loads, synthetic data, and replay retain their own status.
+
+This is a display policy. It does not refresh an old quote or relax execution
+risk checks. The backend continues to reject new exposure using stale quotes.
+
+The chart header shows **V** for the latest candle or the candle selected by the
+crosshair or replay cursor. Taiwan volume uses board lots; other equities use
+shares. The **Volume** control in the Indicators dialog toggles the separate
+histogram without hiding the numeric value. Rates have no traded volume, and
+providers that report no volume retain their disclosed zero value.
+
 ## Timeframe policy
 
 The new reference's timeframe list is a product target, not a claim that all

@@ -24,6 +24,9 @@ import {
 } from '@joseph/contracts';
 import {useEffect, useState} from 'react';
 import {useStore, type WebFeature} from '../../shell/react-bindings';
+import {useRuntime} from '../../shell/runtime-context';
+import {useBarCalendar} from '../../shell/market-status';
+import {chartFeedState} from '../../shell/feed-status';
 import {
   formatAge,
   formatDecimal,
@@ -144,6 +147,7 @@ export function marketInfoFeature(): WebFeature {
        * @return Panel.
        */
       function MarketPanel() {
+        const runtime = useRuntime();
         const selection = useStore(ctx.selection);
         const [data, setData] = useState<MarketData>({
           snapshot: null,
@@ -251,6 +255,18 @@ export function marketInfoFeature(): WebFeature {
           selection.instrumentId,
           instrument
         );
+        const calendar = useBarCalendar(runtime, calendarId);
+        const nowMs = Date.now();
+        const feedState = snapshot
+          ? chartFeedState({
+              feedState: snapshot.stale ? 'STALE' : snapshot.feed_state,
+              calendar,
+              nowMs,
+              lastUpdateMs: nowMs - snapshot.data_age_ms,
+              ready: true,
+              replaying: false,
+            })
+          : null;
         const hours = isExchangeCalendar(calendarId)
           ? EXCHANGE_HOURS[calendarId]
           : null;
@@ -277,13 +293,15 @@ export function marketInfoFeature(): WebFeature {
               </div>
               {snapshot && (
                 <span
-                  className={`j-badge j-badge--${snapshot.stale ? 'stale' : snapshot.feed_state.toLowerCase()}`}
+                  className={`j-badge j-badge--${feedState?.toLowerCase()}`}
                 >
-                  {snapshot.stale
-                    ? `Stale ${formatAge(snapshot.data_age_ms)}`
-                    : snapshot.feed_state === 'DEMO'
-                      ? 'Demo data'
-                      : snapshot.feed_state}
+                  {feedState === 'CLOSED'
+                    ? 'Market closed'
+                    : feedState === 'STALE'
+                      ? `Stale ${formatAge(snapshot.data_age_ms)}`
+                      : feedState === 'DEMO'
+                        ? 'Demo data'
+                        : feedState}
                 </span>
               )}
             </header>

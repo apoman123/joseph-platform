@@ -15,11 +15,11 @@
 import {
   SessionCalendarCache,
   type BackendClients,
-  type FeedState,
   type InstrumentId,
   type OrderMode,
   type WorkspaceDocument,
 } from '@joseph/contracts';
+import type {ChartFeedState} from '../shell/feed-status';
 import type {ChartPort} from '@joseph/chart-core';
 import {
   ToolRegistry,
@@ -271,7 +271,7 @@ export interface TerminalRuntime {
   /** Crosshair sync channel. */
   crosshair: Broadcast<SyncedPoint>;
   /** Provenance reported by each chart pane. */
-  feedStates: WritableStore<Readonly<Record<string, FeedState>>>;
+  feedStates: WritableStore<Readonly<Record<string, ChartFeedState>>>;
   /**
    * Latest request to reveal a panel tab (`shell.showPanel`); slot hosts
    * select and expand the tab when its slot matches.
@@ -481,7 +481,7 @@ export function createRuntime(
     theme,
     palette: createStore<PaletteState>({open: false, query: '', index: 0}),
     crosshair: createBroadcast<SyncedPoint>(),
-    feedStates: createStore<Readonly<Record<string, FeedState>>>({}),
+    feedStates: createStore<Readonly<Record<string, ChartFeedState>>>({}),
     replay,
     charts: new Map(),
     dataWindow: createStore(storage.getItem('joseph.dataWindow') === 'on'),

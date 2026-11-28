@@ -14,7 +14,6 @@ import {
   VENUE_NAMES,
   parseInstrumentId,
   type ChartState,
-  type FeedState,
 } from '@joseph/contracts';
 import {DrawingRepository, readImportedDrawings} from '@joseph/drawing-core';
 import {
@@ -24,6 +23,7 @@ import {
   startReplay,
   type WorkspaceFileParseResult,
 } from '@joseph/terminal-shell';
+import type {ChartFeedState} from '../../shell/feed-status';
 import type {TerminalRuntime} from '../../composition/runtime';
 import type {WebFeature} from '../../shell/react-bindings';
 import {shellManifest} from './manifest';
@@ -103,7 +103,8 @@ export function importWorkspaceFile(
 const HEADER_PX = 28;
 
 /** Provenance words used in screenshot headers. */
-const FEED_WORDS: Readonly<Record<FeedState, string>> = {
+const FEED_WORDS: Readonly<Record<ChartFeedState, string>> = {
+  CLOSED: 'Market closed · last available prices',
   LIVE: 'Live data',
   POLL: 'Polled data',
   REPLAY: 'Bar replay',
@@ -123,7 +124,7 @@ const FEED_WORDS: Readonly<Record<FeedState, string>> = {
  */
 export function screenshotCaption(
   chart: ChartState,
-  feedState: FeedState,
+  feedState: ChartFeedState,
   nowMs: number
 ): string {
   const {venue, venueMarketId} = parseInstrumentId(chart.instrument_id);
