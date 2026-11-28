@@ -626,7 +626,13 @@ def heatmap_bar(row: Mapping[str, Any]) -> heatmap_metrics.DailyBar | None:
     except (KeyError, ValueError, TypeError, decimal.InvalidOperation):
         return None
     return heatmap_metrics.DailyBar(
-        day, *values, vwap=base.opt_dec(row.get("vw"))
+        day,
+        open=values[0],
+        high=values[1],
+        low=values[2],
+        close=values[3],
+        volume=values[4],
+        vwap=base.opt_dec(row.get("vw")),
     )
 
 

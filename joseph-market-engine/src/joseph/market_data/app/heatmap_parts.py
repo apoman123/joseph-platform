@@ -10,6 +10,7 @@ import dataclasses
 import decimal
 from collections.abc import Mapping
 from collections.abc import Sequence
+from typing import Any
 
 from joseph.domain import clock as clock_lib
 from joseph.domain import instruments
@@ -70,7 +71,7 @@ class Part:
     reasons: dict[str, str] = dataclasses.field(default_factory=dict)
 
     def note_cache(
-        self, label: str, cache: heatmap_cache.SourceCache[object]
+        self, label: str, cache: heatmap_cache.SourceCache[Any]
     ) -> None:
         """Records a cache's failure and loading state.
 
@@ -148,10 +149,10 @@ class InstrumentIndex:
             clock: Time source.
         """
         self.registry = registry
-        self._cache: heatmap_cache.SourceCache[
-            list[instruments.Instrument]
-        ] = heatmap_cache.SourceCache(
-            "instrument registry", clock, INSTRUMENTS_TTL_MS
+        self._cache: heatmap_cache.SourceCache[list[instruments.Instrument]] = (
+            heatmap_cache.SourceCache(
+                "instrument registry", clock, INSTRUMENTS_TTL_MS
+            )
         )
 
     def has_venue(self, venue: instruments.Venue) -> bool:
