@@ -96,33 +96,63 @@ describe('watchlist', () => {
 });
 
 describe('screener', () => {
-  it('renders gates and never shows missing data as a pass', async () => {
-    rendered = await renderFeature(SCREENER_FEATURE, 'side-panel');
-    const row = await screen.findByTestId('screener-row-mock:perp:SOLUSD');
-    expect(within(row).getByText('Missing data')).toBeInTheDocument();
-    const missing = row.querySelectorAll('[data-gate-state="missing"]');
-    expect(missing).toHaveLength(2);
-    missing.forEach(cell => void expect(cell).toHaveTextContent('Missing'));
-    expect(row.querySelector('[data-gate-state="fail"]')).toHaveTextContent(
-      '0.120%'
-    );
-    expect(within(row).getByText('Watch')).toBeInTheDocument();
-  });
-
-  it('filters by status and selects on click', async () => {
+  it('scans the built-in Liquidity qualification filter by default', async () => {
     rendered = await renderFeature(SCREENER_FEATURE, 'side-panel');
     const user = userEvent.setup();
-    await screen.findByTestId('screener-row-mock:perp:BTCUSD');
-    await user.click(screen.getByRole('button', {name: 'Qualified'}));
+    const run = await screen.findByTestId('screener-run');
+    await waitFor(() => void expect(run).toBeEnabled());
+    expect(screen.getByLabelText('Filter 1')).toHaveValue(
+      'builtin:liquidity-qualification'
+    );
+    await user.click(run);
+    const row = await screen.findByTestId(
+      'screener-row-mock:perp:BTCUSD',
+      {},
+      {timeout: 5000}
+    );
     await waitFor(
       () =>
-        void expect(
-          screen.queryByTestId('screener-row-mock:perp:SOLUSD')
-        ).not.toBeInTheDocument()
+        void expect(screen.getByTestId('screener-progress')).toHaveTextContent(
+          /complete/
+        ),
+      {timeout: 5000}
     );
-    await user.click(screen.getByTestId('screener-row-mock:perp:BTCUSD'));
+    expect(
+      screen.queryByTestId('screener-row-mock:rate:UST10Y')
+    ).not.toBeInTheDocument();
+    await user.click(row);
     expect(rendered.ctx.selection.get().instrumentId).toBe('mock:perp:BTCUSD');
-    expect(screen.getByText(/Open interest in USD:/)).toBeInTheDocument();
-    expect(screen.getByText(/Policy demo-policy-1/)).toBeInTheDocument();
+    expect(screen.getByText(/Missing data is reported as unavailable/)).toBe(
+      screen.getByText(/Filters: Liquidity qualification\./)
+    );
+  });
+
+  it('combines filters with AND and lists missing data separately', async () => {
+    rendered = await renderFeature(SCREENER_FEATURE, 'side-panel');
+    const user = userEvent.setup();
+    const add = await screen.findByTestId('screener-add-filter');
+    await waitFor(() => void expect(add).toBeEnabled());
+    await user.selectOptions(screen.getByLabelText('Filter 1'), 'builtin:rsi');
+    await user.click(add);
+    await user.selectOptions(
+      screen.getByLabelText('Filter 2'),
+      'builtin:price'
+    );
+    const value = screen.getByLabelText('Value', {
+      selector: '#screener-1-value',
+    });
+    await user.clear(value);
+    await user.type(value, '1000000000');
+    await user.click(screen.getByTestId('screener-run'));
+    await waitFor(
+      () =>
+        void expect(screen.getByTestId('screener-progress')).toHaveTextContent(
+          /complete .* 0 matches/
+        ),
+      {timeout: 5000}
+    );
+    expect(
+      screen.getByText('No instrument matched every filter.')
+    ).toBeVisible();
   });
 });

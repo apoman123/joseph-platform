@@ -15,7 +15,7 @@ same tenant.
 
 Channel keys:
     ``candles:{instrument_id}:{timeframe}``, ``aois:{instrument_id}:{tf}``,
-    ``feed_health``, ``qualification``, ``signals``.
+    ``feed_health``, ``signals``.
 """
 
 from __future__ import annotations
@@ -61,7 +61,7 @@ def channel_key(spec: Mapping[str, object]) -> str:
         if not instrument or not timeframe:
             raise ValueError(f"{channel} requires instrument_id and timeframe")
         return f"{channel}:{instrument}:{timeframe}"
-    if channel in ("feed_health", "qualification", "signals"):
+    if channel in ("feed_health", "signals"):
         return channel
     raise ValueError(f"unsupported market channel: {channel!r}")
 

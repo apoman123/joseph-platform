@@ -79,7 +79,6 @@ Crypto, TWSE/TPEx official data and Treasury yields need no keys.
 | `JOSEPH_REPLAY_DIR`† | unset | JSONL candles for the replay adapter |
 | `JOSEPH_HTTP_TIMEOUT_S`†, `JOSEPH_POLL_INTERVAL_S`† | `10`, `5` (≥1) | Venue HTTP timeout; REST polling |
 | `JOSEPH_SNAPSHOT_STALE_AFTER_MS`†, `JOSEPH_STREAM_RETENTION`† | `30000`, `2000` | Stale age; envelopes kept per stream for resume |
-| `JOSEPH_QUALIFICATION_TOP_N`†, `JOSEPH_COINGECKO_ENABLED`† | `50`, `false` | Binance screening preselection; trending heat bonus |
 | `JOSEPH_MAX_ANCHORED_BARS`† | `50000` (≥2000) | Anchored-study reach |
 | `JOSEPH_INDICATOR_PLUGIN_PACKAGES` | `*` | [Plugin](#indicator-plugins) entry points to load: `*` (all), `none`, or comma-separated entry-point names; built-ins always load |
 | `JOSEPH_INDICATOR_PLUGINS_DISABLED` | empty | Comma-separated plugin ids, built-ins included, registered but disabled |

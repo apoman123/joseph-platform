@@ -66,7 +66,7 @@ const KINDS: ReadonlyArray<{kind: SignalKind; label: string}> = [
   {kind: 'PRE_SIGNAL', label: 'Setups forming'},
   {kind: 'AOI_INVALIDATED', label: 'Zones invalidated'},
   {kind: 'SETUP_EXPIRED', label: 'Setups expired'},
-  {kind: 'CUSTOM_ALERT', label: 'Python alerts'},
+  {kind: 'CUSTOM_ALERT', label: 'Alerts (built-in and Python)'},
 ];
 
 /** Severities, lowest first. */

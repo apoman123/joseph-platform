@@ -28,7 +28,7 @@
     },
     "AlertJob": {
       "additionalProperties": false,
-      "description": "Persistent Python alert evaluation state and visible diagnostics.\n\nAttributes:\n    job_id: Opaque tenant-owned alert identifier.\n    created_at_ms: Creation time in UTC epoch milliseconds.\n    last_processed_ms: Latest successfully evaluated bar close/checkpoint.\n    last_error: Visible missing-data, provider or user-code failure, if any.\n    last_checked_ms: Last evaluation attempt in UTC epoch milliseconds.\n    emitted: Number of distinct conditions recorded for this job.",
+      "description": "Persistent Python alert evaluation state and visible diagnostics.\n\nAttributes:\n    job_id: Opaque tenant-owned alert identifier.\n    created_at_ms: Creation time in UTC epoch milliseconds.\n    last_processed_ms: Latest successfully evaluated bar close/checkpoint.\n    last_error: Visible missing-data, provider or user-code failure, if any.\n    last_checked_ms: Last evaluation attempt in UTC epoch milliseconds.\n    emitted: Number of distinct conditions recorded for this job.\n    source_hash: Source identity pinned at save; a catalog script whose\n        installed source changed is not evaluated until saved again.\n    title: Display name of the condition script at save.",
       "properties": {
         "created_at_ms": {
           "title": "Created At Ms",
@@ -100,6 +100,18 @@
           "title": "Script Id",
           "type": "string"
         },
+        "source_hash": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Source Hash"
+        },
         "subscription_ids": {
           "items": {
             "type": "string"
@@ -110,6 +122,11 @@
         },
         "tf": {
           "$ref": "common.schema.json#/$defs/Timeframe"
+        },
+        "title": {
+          "default": "",
+          "title": "Title",
+          "type": "string"
         },
         "version": {
           "minimum": 0,
@@ -303,7 +320,7 @@
       "type": "object"
     },
     "CatalogScript": {
-      "description": "A built-in or installed plugin script that the engine runs in process.\n\nAttributes:\n    script_id: ``builtin:<id>`` or ``plugin:<entry point>:<id>``.\n    kind: indicator, strategy, library, filter or alert.\n    origin: builtin or plugin.\n    package: Providing distribution of a plugin.\n    package_version: That distribution's version.\n    title: Display name.\n    short_title: Compact legend name.\n    description: Catalog description.\n    category: Catalog section.\n    overlay: Whether plots share the price pane.\n    inputs: Declared inputs in display order.\n    requests: Declared additional series by alias.\n    source_available: Whether the public source can be read.\n    source_hash: Identity of the installed code.\n    enabled: False when disabled by configuration.\n    source: Public source text on the single-script route, else None.",
+      "description": "A built-in or installed plugin script that the engine runs in process.\n\nAttributes:\n    script_id: ``builtin:<id>`` or ``plugin:<entry point>:<id>``.\n    kind: indicator, strategy, library, filter or alert.\n    origin: builtin or plugin.\n    package: Providing distribution of a plugin.\n    package_version: That distribution's version.\n    title: Display name.\n    short_title: Compact legend name.\n    description: Catalog description.\n    category: Catalog section.\n    overlay: Whether plots share the price pane.\n    inputs: Declared inputs in display order.\n    requests: Declared additional series by alias.\n    source_available: Whether the public source can be read.\n    source_hash: Identity of the installed code.\n    enabled: False when disabled by configuration.\n    source: Public source text on the single-script route, else None.\n    metrics: Market data a filter loads beyond the snapshot.",
       "properties": {
         "category": {
           "title": "Category",
@@ -334,6 +351,13 @@
           ],
           "title": "Kind",
           "type": "string"
+        },
+        "metrics": {
+          "items": {
+            "type": "string"
+          },
+          "title": "Metrics",
+          "type": "array"
         },
         "origin": {
           "enum": [
@@ -1019,10 +1043,91 @@
       "title": "PlotSeries",
       "type": "object"
     },
+    "ScanCondition": {
+      "additionalProperties": false,
+      "description": "One filter of a composed scan; an instrument must match every one.\n\nAttributes:\n    script_id: Owned Filter slug, ``builtin:<id>`` or a plugin id.\n    version: Tenant version, latest when omitted; catalog scripts pin\n        their installed source hash instead.\n    inputs: JSON values overriding the filter's defaults.",
+      "properties": {
+        "inputs": {
+          "additionalProperties": {
+            "$ref": "#/$defs/JsonValue"
+          },
+          "title": "Inputs",
+          "type": "object"
+        },
+        "script_id": {
+          "pattern": "^(?:[a-z][a-z0-9-]{0,62}|builtin:[a-z][a-z0-9_-]{0,63}|plugin:[a-z0-9_.-]{1,64}:[a-z][a-z0-9_-]{0,63})$",
+          "title": "Script Id",
+          "type": "string"
+        },
+        "version": {
+          "anyOf": [
+            {
+              "minimum": 1,
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Version"
+        }
+      },
+      "required": [
+        "script_id"
+      ],
+      "title": "ScanCondition",
+      "type": "object"
+    },
+    "ScanConditionPin": {
+      "additionalProperties": false,
+      "description": "A scan condition resolved and pinned at submission.\n\nAttributes:\n    script_id: Filter identifier.\n    version: Tenant version, or 0 for a catalog script.\n    source_hash: Exact source identity evaluated.\n    title: Display name of the filter.\n    inputs: Effective inputs (defaults plus overrides).",
+      "properties": {
+        "inputs": {
+          "additionalProperties": {
+            "$ref": "#/$defs/JsonValue"
+          },
+          "title": "Inputs",
+          "type": "object"
+        },
+        "script_id": {
+          "title": "Script Id",
+          "type": "string"
+        },
+        "source_hash": {
+          "title": "Source Hash",
+          "type": "string"
+        },
+        "title": {
+          "title": "Title",
+          "type": "string"
+        },
+        "version": {
+          "title": "Version",
+          "type": "integer"
+        }
+      },
+      "required": [
+        "script_id",
+        "version",
+        "source_hash",
+        "title"
+      ],
+      "title": "ScanConditionPin",
+      "type": "object"
+    },
     "ScanInput": {
       "additionalProperties": false,
-      "description": "Selects a real market universe for an isolated Python filter job.\n\nAttributes:\n    version: Optional immutable filter version; defaults to the latest.\n    venue: Exchange/market venue to scan, or all enabled venues.\n    market_type: Optional instrument market category, such as stock or perp.\n    query: Optional symbol/name search within that market.\n    max_symbols: Explicit maximum instruments, one through ten thousand.\n    history_bars: Closed bars per instrument; zero uses snapshots only.\n    tf: Resolution used when historical bars are requested.\n    inputs: JSON values overriding the pinned filter's defaults.",
+      "description": "Selects a real market universe for an isolated Python filter job.\n\nAttributes:\n    version: Optional immutable filter version; defaults to the latest.\n    venue: Exchange/market venue to scan, or all enabled venues.\n    market_type: Optional instrument market category, such as stock or perp.\n    query: Optional symbol/name search within that market.\n    max_symbols: Explicit maximum instruments, one through ten thousand.\n    history_bars: Closed bars per instrument; zero uses snapshots only.\n    tf: Resolution used when historical bars are requested.\n    inputs: JSON values overriding the pinned filter's defaults.\n    conditions: Further filters an instrument must also match (AND);\n        the only filters of a scan submitted without a path script.\n    metrics: Data to load beyond the snapshot; catalog filters add the\n        metrics they declare.\n    order_by: \"symbol\" scans instruments by id; \"turnover\" loads every\n        quote first and scans the highest 24h turnover first, so\n        max_symbols keeps the most active instruments.",
       "properties": {
+        "conditions": {
+          "items": {
+            "$ref": "#/$defs/ScanCondition"
+          },
+          "maxItems": 10,
+          "title": "Conditions",
+          "type": "array"
+        },
         "history_bars": {
           "default": 0,
           "maximum": 500,
@@ -1054,6 +1159,28 @@
           "minimum": 1,
           "title": "Max Symbols",
           "type": "integer"
+        },
+        "metrics": {
+          "items": {
+            "enum": [
+              "order_book",
+              "open_interest",
+              "funding"
+            ],
+            "type": "string"
+          },
+          "maxItems": 3,
+          "title": "Metrics",
+          "type": "array"
+        },
+        "order_by": {
+          "default": "symbol",
+          "enum": [
+            "symbol",
+            "turnover"
+          ],
+          "title": "Order By",
+          "type": "string"
         },
         "query": {
           "default": "",
@@ -1095,8 +1222,15 @@
     },
     "ScanJob": {
       "additionalProperties": false,
-      "description": "Progress and reproducible results for an asynchronous market scan.\n\nAttributes:\n    job_id: Opaque tenant-owned scan identifier.\n    script_id: Filter script slug.\n    version: Immutable filter version pinned at submission.\n    status: Pending, running, complete, failed or cancelled job state.\n    created_at_ms: Submission time, UTC epoch milliseconds.\n    total: Number of eligible instruments selected by the explicit scan\n        bound.\n    scanned: Instruments evaluated or reported unavailable so far.\n    matches: Matching instrument records with real source snapshots.\n    errors: Per-instrument missing-data or user-code errors.\n    error: Job-level error, otherwise None.\n    source_hash: Immutable source/dependency configuration hash.\n    universe_count: Total eligible market instruments before max_symbols.",
+      "description": "Progress and reproducible results for an asynchronous market scan.\n\nAttributes:\n    job_id: Opaque tenant-owned scan identifier.\n    script_id: Filter script slug.\n    version: Immutable filter version pinned at submission.\n    status: Pending, running, complete, failed or cancelled job state.\n    created_at_ms: Submission time, UTC epoch milliseconds.\n    total: Number of eligible instruments selected by the explicit scan\n        bound.\n    scanned: Instruments evaluated or reported unavailable so far.\n    matches: Matching instrument records with real source snapshots.\n    errors: Per-instrument filter failures (script errors).\n    error: Job-level error, otherwise None.\n    source_hash: Immutable source/dependency configuration hash.\n    universe_count: Total eligible market instruments before max_symbols.\n    conditions: Every pinned filter, in evaluation order; the first is\n        also described by script_id, version and source_hash.\n    unavailable: Instruments without the data a filter needs (missing\n        quote, history or metric), with the reason; never matches.",
       "properties": {
+        "conditions": {
+          "items": {
+            "$ref": "#/$defs/ScanConditionPin"
+          },
+          "title": "Conditions",
+          "type": "array"
+        },
         "created_at_ms": {
           "title": "Created At Ms",
           "type": "integer"
@@ -1165,6 +1299,16 @@
           "default": 0,
           "title": "Total",
           "type": "integer"
+        },
+        "unavailable": {
+          "items": {
+            "additionalProperties": {
+              "type": "string"
+            },
+            "type": "object"
+          },
+          "title": "Unavailable",
+          "type": "array"
         },
         "universe_count": {
           "default": 0,

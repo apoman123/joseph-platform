@@ -17,8 +17,11 @@ test('clicking a screener row selects that exact instrument', async ({
 }) => {
   await loadTerminal(page);
   await openPanel(page, 'Screener');
+  const run = page.getByTestId('screener-run');
+  await expect(run).toBeEnabled({timeout: 10_000});
+  await run.click();
   const rows = page
-    .getByRole('table', {name: 'Qualification results'})
+    .getByRole('table', {name: 'Screener results'})
     .locator('tbody tr[data-testid^="screener-row-"]');
   await expect(rows.first()).toBeVisible({timeout: 10_000});
   const testId = (await rows.last().getAttribute('data-testid')) ?? '';
@@ -29,6 +32,25 @@ test('clicking a screener row selects that exact instrument', async ({
   await expect(
     ticket(page).locator(`[title="${instrumentId}"]`).first()
   ).toBeVisible();
+});
+
+test('a built-in alert created in the alert manager is listed', async ({
+  page,
+}) => {
+  await loadTerminal(page);
+  await openPanel(page, 'Alert manager');
+  const create = page.getByTestId('alert-create');
+  await expect(create).toBeEnabled({timeout: 10_000});
+  await create.click();
+  const dialog = page.getByRole('dialog', {name: 'Create alert'});
+  await dialog
+    .getByTestId('alert-condition')
+    .selectOption('builtin:price-cross@0');
+  await dialog.getByLabel('Level').fill('50000');
+  await dialog.getByTestId('alert-save').click();
+  const jobs = page.getByRole('table', {name: 'Alert jobs'});
+  await expect(jobs).toContainText('Price crossing');
+  await expect(jobs).toContainText('Active');
 });
 
 test('an alert focuses its instrument on the chart', async ({page}) => {

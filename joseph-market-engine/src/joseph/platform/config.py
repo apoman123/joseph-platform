@@ -370,10 +370,6 @@ class Settings:
         stream_retention: Envelopes the stream hub keeps, across all
             channels, for clients resuming with ``last_sequence``,
             ``JOSEPH_STREAM_RETENTION``. Default 2000.
-        top_n: Qualification candidates per venue, ranked by 24h quote
-            turnover, ``JOSEPH_QUALIFICATION_TOP_N``. Default 50.
-        coingecko_enabled: Whether CoinGecko trending heat bonuses are
-            fetched, ``JOSEPH_COINGECKO_ENABLED``. Default false.
         strategy_activations_enabled: Whether active Python strategy
             activations are evaluated on closed bars,
             ``JOSEPH_STRATEGY_ACTIVATIONS_ENABLED``. Default true.
@@ -523,8 +519,6 @@ class Settings:
     poll_interval_s: float = 5.0
     snapshot_stale_after_ms: int = 30_000
     stream_retention: int = 2_000
-    top_n: int = 50
-    coingecko_enabled: bool = False
     strategy_activations_enabled: bool = True
     strategy_interval_s: float = 10.0
     forward_signals: bool = True
@@ -693,10 +687,6 @@ class Settings:
                 source.get("JOSEPH_SNAPSHOT_STALE_AFTER_MS", "30000")
             ),
             stream_retention=int(source.get("JOSEPH_STREAM_RETENTION", "2000")),
-            top_n=int(source.get("JOSEPH_QUALIFICATION_TOP_N", "50")),
-            coingecko_enabled=_bool(
-                source.get("JOSEPH_COINGECKO_ENABLED"), False
-            ),
             strategy_activations_enabled=_bool(
                 source.get("JOSEPH_STRATEGY_ACTIVATIONS_ENABLED"), True
             ),

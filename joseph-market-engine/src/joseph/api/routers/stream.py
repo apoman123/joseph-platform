@@ -8,7 +8,7 @@ Protocol:
 * client → ``ClientMessage`` ``{"action": "subscribe" | "unsubscribe" |
   "ping", "channels": [ChannelSpec], "last_sequence": int | null}``;
 * server → ``StreamEnvelope``: ``subscribed``, ``candle.updated``,
-  ``aoi.updated``, ``feed.health``, ``qualification.changed``,
+  ``aoi.updated``, ``feed.health``,
   ``signal.created``/``signal.updated`` (tenant-scoped, requires
   ``?token=``), ``heartbeat``, ``error`` and ``snapshot_required`` (when
   ``last_sequence`` is older than the retention ring, when it is newer than

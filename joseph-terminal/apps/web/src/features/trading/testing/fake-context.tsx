@@ -19,6 +19,8 @@ import {
   DEMO_BROKER_INSTRUMENTS,
   DEMO_MARKS,
   DemoExecutionClient,
+  DemoMarketDataClient,
+  DemoScriptsClient,
   DemoStrategyClient,
   DemoUserStream,
 } from '@joseph/mock-provider';
@@ -26,7 +28,6 @@ import {
   SessionCalendarCache,
   type BackendClients,
   type MarketDataClient,
-  type QualificationReport,
   type StreamClient,
 } from '@joseph/contracts';
 import {
@@ -84,137 +85,6 @@ export interface FakeContext extends WebFeatureContext {
    */
   contributions(slot: UiSlot): ReadonlyArray<SlotContribution<WebView>>;
 }
-
-/** Static DEMO qualification report used by screener tests. */
-export const FAKE_QUALIFICATION: QualificationReport = {
-  policy_version: 'demo-policy-1',
-  as_of_ms: 1_800_000_000_000,
-  venue: null,
-  records: [
-    {
-      instrument_id: 'mock:perp:BTCUSD',
-      venue: 'mock',
-      display_symbol: 'BTCUSD',
-      status: 'QUALIFIED',
-      risk_tags: [],
-      gates: [
-        {
-          gate: 'TURNOVER_24H',
-          observed: '820000000',
-          threshold: '50000000',
-          comparator: 'gt',
-          passed: true,
-          unit: 'USD',
-          reason: 'Above threshold',
-        },
-        {
-          gate: 'OPEN_INTEREST_USD',
-          observed: '410000000',
-          threshold: '10000000',
-          comparator: 'gt',
-          passed: true,
-          unit: 'USD',
-          reason: 'Above threshold',
-        },
-        {
-          gate: 'TURNOVER_OI_RATIO',
-          observed: '2',
-          threshold: '0.2',
-          comparator: 'gt',
-          passed: true,
-          unit: 'ratio',
-          reason: 'Above threshold',
-        },
-        {
-          gate: 'SPREAD_PCT',
-          observed: '0.001',
-          threshold: '0.1',
-          comparator: 'lt',
-          passed: true,
-          unit: 'pct',
-          reason: 'Below threshold',
-        },
-        {
-          gate: 'SLIPPAGE_50K_PCT',
-          observed: '0.01',
-          threshold: '0.25',
-          comparator: 'lt',
-          passed: true,
-          unit: 'pct',
-          reason: 'Below threshold',
-        },
-      ],
-      funding: {normalized_8h_pct: '0.01', interval_hours: 8, risk: 'NORMAL'},
-      asset_class: 'CRYPTO',
-      heat_score: 92,
-      rank: 1,
-      policy_version: 'demo-policy-1',
-      as_of_ms: 1_800_000_000_000,
-      reasons: ['All five gates passed; funding normal.'],
-    },
-    {
-      instrument_id: 'mock:perp:SOLUSD',
-      venue: 'mock',
-      display_symbol: 'SOLUSD',
-      status: 'INSUFFICIENT_DATA',
-      risk_tags: ['WATCH'],
-      gates: [
-        {
-          gate: 'TURNOVER_24H',
-          observed: '61000000',
-          threshold: '50000000',
-          comparator: 'gt',
-          passed: true,
-          unit: 'USD',
-          reason: 'Above threshold',
-        },
-        {
-          gate: 'OPEN_INTEREST_USD',
-          observed: null,
-          threshold: '10000000',
-          comparator: 'gt',
-          passed: null,
-          unit: 'USD',
-          reason: 'Open interest is missing',
-        },
-        {
-          gate: 'TURNOVER_OI_RATIO',
-          observed: null,
-          threshold: '0.2',
-          comparator: 'gt',
-          passed: null,
-          unit: 'ratio',
-          reason: 'Needs open interest',
-        },
-        {
-          gate: 'SPREAD_PCT',
-          observed: '0.12',
-          threshold: '0.1',
-          comparator: 'lt',
-          passed: false,
-          unit: 'pct',
-          reason: 'Spread too wide',
-        },
-        {
-          gate: 'SLIPPAGE_50K_PCT',
-          observed: '0.1',
-          threshold: '0.25',
-          comparator: 'lt',
-          passed: true,
-          unit: 'pct',
-          reason: 'Below threshold',
-        },
-      ],
-      funding: {normalized_8h_pct: '0.15', interval_hours: 8, risk: 'WATCH'},
-      asset_class: 'CRYPTO',
-      heat_score: null,
-      rank: null,
-      policy_version: 'demo-policy-1',
-      as_of_ms: 1_800_000_000_000,
-      reasons: ['Open interest unavailable; status cannot be qualified.'],
-    },
-  ],
-};
 
 /**
  * Creates a minimal DEMO market client for tests.
@@ -284,12 +154,6 @@ export function fakeMarketClient(): MarketDataClient {
       stale: false,
     }),
     getOrderBook: unsupported,
-    getQualification: async (venue, status) => ({
-      ...FAKE_QUALIFICATION,
-      records: FAKE_QUALIFICATION.records.filter(
-        r => (!venue || r.venue === venue) && (!status || r.status === status)
-      ),
-    }),
     listIndicatorPlugins: unsupported,
     getIndicatorSnapshots: unsupported,
     getAois: unsupported,
@@ -351,6 +215,7 @@ export function createFakeContext(
     strategy,
     execution: broker,
     userStream: new DemoUserStream(broker, strategy),
+    scripts: new DemoScriptsClient({market: new DemoMarketDataClient()}),
     demo: true,
     ...options.clients,
   };

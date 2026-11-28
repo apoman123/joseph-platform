@@ -38,9 +38,6 @@ import {
   type MarketDataClient,
   type MarketSnapshot,
   type OrderBook,
-  type QualificationRecord,
-  type QualificationReport,
-  type QualificationStatus,
   type SeriesQuery,
   type SessionList,
   type SessionQuery,
@@ -48,7 +45,6 @@ import {
   type StreamEnvelope,
   type StreamHandler,
   type StreamStatus,
-  type Venue,
   type VenueStatusList,
 } from '@joseph/contracts';
 import {DEMO_AOIS} from './demo-indicators';
@@ -450,30 +446,6 @@ export class DemoMarketDataClient implements MarketDataClient {
   }
 
   /**
-   * Returns the DEMO qualification report.
-   * @param venue When set, only records of this venue.
-   * @param status When set, only records with this status.
-   * @return Report of the static DEMO records that pass the filters.
-   */
-  async getQualification(
-    venue?: Venue,
-    status?: QualificationStatus
-  ): Promise<QualificationReport> {
-    const now = this.now();
-    const records = demoQualification(now).filter(
-      record =>
-        (!venue || record.venue === venue) &&
-        (!status || record.status === status)
-    );
-    return {
-      policy_version: 'demo-1',
-      as_of_ms: now,
-      venue: venue ?? null,
-      records,
-    };
-  }
-
-  /**
    * Lists indicator plugin descriptors.
    * @return Mirrors of the engine's built-in plugins, in load order.
    */
@@ -708,106 +680,6 @@ function demoPivotValues(
       live.find(a => a.kind === `PIVOT_${level.toUpperCase()}`)?.lower ?? null;
   }
   return values;
-}
-
-/**
- * Builds the static DEMO qualification records with strict gates.
- * @param now Current time in epoch ms.
- * @return Records for the three DEMO perpetuals.
- */
-function demoQualification(now: number): QualificationRecord[] {
-  // A gate without an observed value is never treated as passing.
-  const gate = (
-    id: QualificationRecord['gates'][number]['gate'],
-    observed: string | null,
-    threshold: string,
-    comparator: 'gt' | 'lt',
-    unit: 'USD' | 'ratio' | 'pct'
-  ) => {
-    const passed =
-      observed === null
-        ? null
-        : comparator === 'gt'
-          ? Decimal.parse(observed).cmp(Decimal.parse(threshold)) > 0
-          : Decimal.parse(observed).cmp(Decimal.parse(threshold)) < 0;
-    return {
-      gate: id,
-      observed,
-      threshold,
-      comparator,
-      passed,
-      unit,
-      as_of_ms: observed === null ? null : now,
-      reason:
-        observed === null
-          ? 'No data; never treated as passing'
-          : passed
-            ? 'Passes'
-            : `Needs ${comparator === 'gt' ? 'more than' : 'less than'} ${threshold}`,
-    };
-  };
-  const base = {
-    venue: 'mock' as const,
-    asset_class: 'CRYPTO' as const,
-    policy_version: 'demo-1',
-    as_of_ms: now,
-  };
-  return [
-    {
-      ...base,
-      instrument_id: 'mock:perp:BTCUSD',
-      display_symbol: 'BTCUSD',
-      status: 'QUALIFIED',
-      risk_tags: [],
-      gates: [
-        gate('TURNOVER_24H', '5745600000', '50000000', 'gt', 'USD'),
-        gate('OPEN_INTEREST_USD', '3591000000', '10000000', 'gt', 'USD'),
-        gate('TURNOVER_OI_RATIO', '1.6', '0.2', 'gt', 'ratio'),
-        gate('SPREAD_PCT', '0.0002', '0.1', 'lt', 'pct'),
-        gate('SLIPPAGE_50K_PCT', '0.004', '0.25', 'lt', 'pct'),
-      ],
-      funding: {normalized_8h_pct: '0.01', interval_hours: 8, risk: 'NORMAL'},
-      heat_score: 92,
-      rank: 1,
-      reasons: ['All five gates pass; funding normal'],
-    },
-    {
-      ...base,
-      instrument_id: 'mock:perp:ETHUSD',
-      display_symbol: 'ETHUSD',
-      status: 'QUALIFIED',
-      risk_tags: ['WATCH'],
-      gates: [
-        gate('TURNOVER_24H', '2986560000', '50000000', 'gt', 'USD'),
-        gate('OPEN_INTEREST_USD', '1866600000', '10000000', 'gt', 'USD'),
-        gate('TURNOVER_OI_RATIO', '1.6', '0.2', 'gt', 'ratio'),
-        gate('SPREAD_PCT', '0.0006', '0.1', 'lt', 'pct'),
-        gate('SLIPPAGE_50K_PCT', '0.011', '0.25', 'lt', 'pct'),
-      ],
-      funding: {normalized_8h_pct: '0.12', interval_hours: 8, risk: 'WATCH'},
-      heat_score: 77,
-      rank: 2,
-      reasons: ['All five gates pass', 'Funding 0.12%/8h is at watch level'],
-    },
-    {
-      ...base,
-      instrument_id: 'mock:perp:SOLUSD',
-      display_symbol: 'SOLUSD',
-      status: 'INSUFFICIENT_DATA',
-      risk_tags: [],
-      gates: [
-        gate('TURNOVER_24H', '2540160000', '50000000', 'gt', 'USD'),
-        gate('OPEN_INTEREST_USD', '1587600000', '10000000', 'gt', 'USD'),
-        gate('TURNOVER_OI_RATIO', '1.6', '0.2', 'gt', 'ratio'),
-        gate('SPREAD_PCT', '0.0011', '0.1', 'lt', 'pct'),
-        gate('SLIPPAGE_50K_PCT', null, '0.25', 'lt', 'pct'),
-      ],
-      funding: {normalized_8h_pct: null, interval_hours: null, risk: 'UNKNOWN'},
-      heat_score: null,
-      rank: null,
-      reasons: ['Order book unavailable, so 50K slippage is unknown'],
-    },
-  ];
 }
 
 /** Options for the DEMO stream. */

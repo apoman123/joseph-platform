@@ -6,20 +6,18 @@
 
 /**
  * @fileoverview Signal dashboard ranking and triage (pure): sort keys
- * (newest, R multiple, confluence, bar volume, age, distance to the AOI),
- * confluence counts from the reason tree, AOI distance and local
- * snooze/dismiss. The R multiple is reward divided by risk; an AOI is an
- * area of interest (a zone the engine tracks).
+ * (newest, R multiple, confluence, bar volume, age), confluence counts from
+ * the reason tree and local snooze/dismiss. The R multiple is reward
+ * divided by risk.
  *
  * Display only: nothing here changes what the engine decided. Decimal
  * strings become numbers here only to rank and measure, never to show.
  */
 
-import type {AoiRecord, ReasonNode, Signal} from '@joseph/contracts';
+import type {ReasonNode, Signal} from '@joseph/contracts';
 
 /** Sort keys offered by the alerts panel. */
-export type SignalSort =
-  'newest' | 'rr' | 'confluence' | 'volume' | 'age' | 'distance';
+export type SignalSort = 'newest' | 'rr' | 'confluence' | 'volume' | 'age';
 
 /** Sort labels in menu order. */
 export const SIGNAL_SORTS: ReadonlyArray<{id: SignalSort; label: string}> = [
@@ -27,7 +25,6 @@ export const SIGNAL_SORTS: ReadonlyArray<{id: SignalSort; label: string}> = [
   {id: 'rr', label: 'R multiple'},
   {id: 'confluence', label: 'Confluence'},
   {id: 'volume', label: 'Bar volume'},
-  {id: 'distance', label: 'Distance to AOI'},
   {id: 'age', label: 'Oldest first'},
 ];
 
@@ -50,33 +47,6 @@ export interface SignalTriage {
 export function confluenceOf(node: ReasonNode): number {
   if (node.children.length === 0) return node.result === 'TRUE' ? 1 : 0;
   return node.children.reduce((sum, child) => sum + confluenceOf(child), 0);
-}
-
-/**
- * Distance from a price to the nearest of the given AOIs, in percent of
- * the price; zero when the price is inside one.
- * @param price Latest price.
- * @param aois AOIs referenced by the signal.
- * @return Percent distance, or null without price or AOIs.
- */
-export function aoiDistancePct(
-  price: number | null,
-  aois: ReadonlyArray<Pick<AoiRecord, 'lower' | 'upper'>>
-): number | null {
-  if (price === null || !Number.isFinite(price) || price <= 0) return null;
-  let best: number | null = null;
-  for (const aoi of aois) {
-    const lower = Number(aoi.lower);
-    const upper = Number(aoi.upper);
-    if (!Number.isFinite(lower) || !Number.isFinite(upper)) continue;
-    const distance =
-      price >= lower && price <= upper
-        ? 0
-        : Math.min(Math.abs(price - lower), Math.abs(price - upper));
-    const pct = (distance / price) * 100;
-    best = best === null ? pct : Math.min(best, pct);
-  }
-  return best;
 }
 
 /**
@@ -126,17 +96,14 @@ function byNumber(
 
 /**
  * Sorts signals for display; ties fall back to newest first. Missing
- * values (R multiple, volume, distance) sort last; distance sorts nearest
- * first.
+ * values (R multiple, volume) sort last.
  * @param signals Signals.
  * @param sort Sort key.
- * @param distances Distance to AOI by signal id (percent).
  * @return Sorted copy.
  */
 export function sortSignals(
   signals: readonly Signal[],
-  sort: SignalSort,
-  distances: Readonly<Record<string, number | null>> = {}
+  sort: SignalSort
 ): Signal[] {
   const newest = (a: Signal, b: Signal) =>
     b.bar_close_ms - a.bar_close_ms || b.evaluated_at_ms - a.evaluated_at_ms;
@@ -148,13 +115,6 @@ export function sortSignals(
     } else if (sort === 'volume') {
       result = byNumber(barQuoteVolumeOf(a), barQuoteVolumeOf(b), true);
     } else if (sort === 'age') result = a.bar_close_ms - b.bar_close_ms;
-    else if (sort === 'distance') {
-      result = byNumber(
-        distances[a.signal_id] ?? null,
-        distances[b.signal_id] ?? null,
-        false
-      );
-    }
     return result || newest(a, b);
   });
 }

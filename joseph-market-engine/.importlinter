@@ -13,7 +13,7 @@ source_modules =
 forbidden_modules =
     joseph.platform
     joseph.market_data
-    joseph.screening
+    joseph.scripts
     joseph.indicators
     joseph.signals
     joseph.alerts
@@ -31,7 +31,6 @@ name = Bounded-context domain layers never import frameworks or infrastructure
 type = forbidden
 source_modules =
     joseph.market_data.domain
-    joseph.screening.domain
     joseph.signals.domain
     joseph.alerts.domain
 forbidden_modules =
@@ -66,11 +65,32 @@ type = forbidden
 source_modules =
     joseph.market_data
 forbidden_modules =
-    joseph.screening
+    joseph.scripts
     joseph.indicators
     joseph.signals
     joseph.alerts
     joseph.api
+
+[importlinter:contract:builtin-scripts-pure]
+name = Built-in scripts depend only on the joseph_script SDK and the stdlib
+type = forbidden
+source_modules =
+    joseph.scripts.builtin
+forbidden_modules =
+    joseph.domain
+    joseph.platform
+    joseph.market_data
+    joseph.indicators
+    joseph.signals
+    joseph.alerts
+    joseph.api
+    fastapi
+    pydantic
+    sqlalchemy
+    httpx
+    websockets
+    uvicorn
+    pyarrow
 
 [importlinter:contract:indicators-upstream-of-signals]
 name = Indicators do not depend on scripts, signals, alerts, adapters or API
@@ -79,7 +99,6 @@ source_modules =
     joseph.indicators
 forbidden_modules =
     joseph.market_data.adapters
-    joseph.screening
     joseph.scripts
     joseph.signals
     joseph.alerts
@@ -103,7 +122,6 @@ source_modules =
     joseph.domain
     joseph.platform
     joseph.market_data
-    joseph.screening
     joseph.indicators
     joseph.scripts
     joseph.signals

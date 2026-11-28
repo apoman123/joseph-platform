@@ -5,6 +5,7 @@
 
 from __future__ import annotations
 
+import time
 from collections.abc import Callable
 from typing import TypeAlias
 
@@ -72,10 +73,10 @@ def test_candles_have_provenance_and_finality(
     assert all(c["is_final"] for c in candles[:-1])
 
 
-def test_snapshot_orderbook_and_qualification(
+def test_snapshot_orderbook_and_builtin_filter_scan(
     market: httpx.Client, validate: _Validate
 ) -> None:
-    """Snapshot, order book and qualification conform to contracts."""
+    """Snapshot and order book conform; built-in filters scan in process."""
     snap = market.get(
         "/v1/market/snapshot", params={"instrument_id": MOCK_BTC}
     ).json()
@@ -85,8 +86,32 @@ def test_snapshot_orderbook_and_qualification(
         params={"instrument_id": MOCK_BTC, "depth": 20},
     ).json()
     validate("market.schema.json", "OrderBook", book)
-    report = market.get("/v1/market/qualification").json()
-    validate("qualification.schema.json", "QualificationReport", report)
+    submitted = market.post(
+        "/v1/script-scans",
+        json={
+            "venue": "mock",
+            "market_type": "perp",
+            "conditions": [
+                {"script_id": "builtin:liquidity-qualification"},
+                {
+                    "script_id": "builtin:price",
+                    "inputs": {"operator": "above", "value": 0},
+                },
+            ],
+        },
+    )
+    assert submitted.status_code == 202, submitted.text
+    job = submitted.json()
+    for _ in range(200):
+        job = market.get(f"/v1/script-scans/{job['job_id']}").json()
+        if job["status"] not in {"pending", "running"}:
+            break
+        time.sleep(0.05)
+    assert job["status"] == "complete", job
+    matched = {row["instrument_id"] for row in job["matches"]}
+    assert MOCK_BTC in matched
+    for row in job["matches"]:
+        validate("market.schema.json", "MarketSnapshot", row["snapshot"])
 
 
 def test_unknown_instrument_returns_contract_error(

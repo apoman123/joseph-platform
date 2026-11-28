@@ -37,7 +37,6 @@ import {
 } from '@testing-library/react';
 import {describe, expect, it, vi} from 'vitest';
 import {composeFeatures} from '../composition/features';
-import {formatGateValue} from '../features/screener/screener-panel';
 import {
   formatMoneyCompact,
   tickDescription,
@@ -503,22 +502,5 @@ describe('market panel helpers', () => {
     expect(screen.getByText('±10% of the reference price')).toBeVisible();
     expect(screen.getByText(/09:00–13:30 Asia\/Taipei/)).toBeVisible();
     expect(screen.queryByText('Funding (8h)')).toBeNull();
-  });
-});
-
-describe('screener gates of listed securities', () => {
-  it('formats TWD turnover compactly', () => {
-    const gate = {
-      gate: 'TURNOVER_24H',
-      observed: '2310000000',
-      threshold: '50000000',
-      comparator: 'gt',
-      passed: true,
-      unit: 'TWD',
-      as_of_ms: 0,
-      reason: 'Passes',
-    } as const;
-    expect(formatGateValue(gate, '2310000000')).toBe('NT$2.3B');
-    expect(formatGateValue({...gate, unit: 'USD'}, '2310000000')).toBe('$2.3B');
   });
 });

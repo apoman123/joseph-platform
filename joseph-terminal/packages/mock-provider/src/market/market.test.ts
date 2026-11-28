@@ -125,7 +125,7 @@ describe('DemoMarketDataClient', () => {
     ).toEqual([]);
   });
 
-  it('serves demo AOIs and qualification', async () => {
+  it('serves demo AOIs', async () => {
     const aois = await client.getAois({
       instrumentId: 'mock:perp:ETHUSD',
       timeframe: '15m',
@@ -139,17 +139,6 @@ describe('DemoMarketDataClient', () => {
       )
     ).toBe(true);
     expect(aois.aois.every(a => a.confirmed_at_ms <= aois.as_of_ms)).toBe(true);
-    const report = await client.getQualification(undefined, 'QUALIFIED');
-    expect(report.records.map(r => r.instrument_id)).toEqual([
-      'mock:perp:BTCUSD',
-      'mock:perp:ETHUSD',
-    ]);
-    const sol = (await client.getQualification()).records.find(
-      r => r.instrument_id === 'mock:perp:SOLUSD'
-    );
-    expect(
-      sol?.gates.find(g => g.gate === 'SLIPPAGE_50K_PCT')?.passed
-    ).toBeNull();
   });
 
   it('reports a snapshot with separate mark and bid/ask', async () => {

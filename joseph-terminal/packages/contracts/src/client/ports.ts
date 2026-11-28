@@ -15,6 +15,11 @@
  */
 
 import type {
+  AlertJob,
+  AlertJobInput,
+  ScanInput,
+  ScanJob,
+  Signal,
   AccountList,
   AccountLiveConsentRequest,
   AlertSubscription,
@@ -25,6 +30,7 @@ import type {
   AoiList,
   AuditEventList,
   CandleBatch,
+  CatalogList,
   CatalogScript,
   ChannelSpec,
   ClosePositionRequest,
@@ -48,8 +54,6 @@ import type {
   OrderPreview,
   OrderState,
   PositionList,
-  QualificationReport,
-  QualificationStatus,
   SessionList,
   SignalKind,
   ScriptResult,
@@ -66,6 +70,78 @@ import type {
   VenueStatusList,
 } from '../generated/contracts';
 import type {ExchangeCalendarId} from '../sessions';
+
+/** A private source catalog with explicit runtime availability. */
+export interface PythonCatalog {
+  /** Latest immutable versions visible to the authenticated tenant. */
+  scripts: ScriptVersion[];
+  /** Whether the operator enabled the isolated container runtime. */
+  runtime_enabled: boolean;
+  /** Next bounded catalog window, or null at the end. */
+  next_offset?: number | null;
+}
+
+/**
+ * Market filters (scans) and alert conditions over built-in, plugin and
+ * owned scripts. The HTTP implementation is `PythonClient`; DEMO mode has
+ * an offline implementation.
+ */
+export interface ScriptsClient {
+  /**
+   * Lists built-in and plugin scripts.
+   * @param kind Optional role filter.
+   * @return Catalog listing.
+   */
+  catalog(kind?: CatalogScript['kind']): Promise<CatalogList>;
+  /**
+   * Lists the caller's own scripts.
+   * @param offset Nonnegative offset.
+   * @return Owned latest versions and runtime availability.
+   */
+  list(offset?: number): Promise<PythonCatalog>;
+  /**
+   * Starts a scan of conditions combined with AND.
+   * @param body Market, bounds and conditions.
+   * @return Pending job.
+   */
+  screen(body: ScanInput): Promise<ScanJob>;
+  /**
+   * Reads scan progress and results.
+   * @param id Job id.
+   * @return Current job state.
+   */
+  scanStatus(id: string): Promise<ScanJob>;
+  /**
+   * Cancels a scan, keeping partial results.
+   * @param id Job id.
+   * @return Job state.
+   */
+  cancelScan(id: string): Promise<ScanJob>;
+  /**
+   * Lists alert jobs.
+   * @return Owned alert jobs.
+   */
+  alerts(): Promise<AlertJob[]>;
+  /**
+   * Creates or replaces an alert job.
+   * @param body Condition script, symbol, inputs and destinations.
+   * @param id Job to replace, when editing.
+   * @return Saved job.
+   */
+  saveAlert(body: AlertJobInput, id?: string): Promise<AlertJob>;
+  /**
+   * Deletes an alert job, keeping its log.
+   * @param id Job id.
+   * @return Resolves after removal.
+   */
+  deleteAlert(id: string): Promise<void>;
+  /**
+   * Lists the alert log: signals of kind `CUSTOM_ALERT`, newest first.
+   * @param limit Maximum rows.
+   * @return Alert signals.
+   */
+  alertLog(limit?: number): Promise<Signal[]>;
+}
 
 /** Query for the instrument registry. */
 export interface InstrumentQuery {
@@ -184,16 +260,6 @@ export interface MarketDataClient {
    * @return Order book.
    */
   getOrderBook(instrumentId: string, depth?: number): Promise<OrderBook>;
-  /**
-   * Fetches qualification results.
-   * @param venue Optional venue filter.
-   * @param status Optional status filter.
-   * @return Qualification report.
-   */
-  getQualification(
-    venue?: Venue,
-    status?: QualificationStatus
-  ): Promise<QualificationReport>;
   /**
    * Lists indicator plugins exposed by the backend.
    * @return Plugin descriptors.
@@ -549,6 +615,8 @@ export interface BackendClients {
   execution: ExecutionClient;
   /** Authenticated user stream (orders, fills, positions, signals). */
   userStream: StreamClient;
+  /** Market filter scans and alert jobs over built-in and owned scripts. */
+  scripts: ScriptsClient;
   /** Whether these clients serve synthetic DEMO data. */
   demo: boolean;
 }

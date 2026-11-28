@@ -10,6 +10,7 @@ boundaries are checked against the engine's own sessions endpoint.
 
 from __future__ import annotations
 
+import time
 from collections.abc import Callable
 from typing import Any
 from typing import TypeAlias
@@ -235,22 +236,32 @@ def test_volume_delta_on_acme_is_trade_classification(
 
 
 def test_acme_is_screened_with_listed_security_thresholds(
-    market: httpx.Client, validate: _Validate
+    market: httpx.Client,
 ) -> None:
-    """ACME skips the OI and funding gates and uses the US equity bar."""
-    report = market.get("/v1/market/qualification").json()
-    validate("qualification.schema.json", "QualificationReport", report)
-    records = {r["instrument_id"]: r for r in report["records"]}
-    acme, btc = records[ACME], records[MOCK_BTC]
-    gates = {g["gate"]: g for g in acme["gates"]}
-    assert set(gates) == {"TURNOVER_24H", "SPREAD_PCT", "SLIPPAGE_50K_PCT"}
-    assert gates["TURNOVER_24H"]["threshold"] == "20000000"
-    assert gates["TURNOVER_24H"]["unit"] == "USD"
-    assert acme["funding"]["risk"] == "NOT_APPLICABLE"
-    assert acme["funding"]["normalized_8h_pct"] is None
-    assert acme["asset_class"] == "EQUITY"
-    # Missing funding/OI never counts as missing data for a listed stock.
-    assert acme["status"] != "INSUFFICIENT_DATA"
-    perp_gates = {g["gate"]: g for g in btc["gates"]}
-    assert "OPEN_INTEREST_USD" in perp_gates
-    assert perp_gates["TURNOVER_24H"]["threshold"] == "50000000"
+    """ACME qualifies without the open-interest and funding gates.
+
+    The built-in Liquidity qualification filter applies the US equity set
+    to the DEMO stock: missing funding and open interest never make it
+    unavailable, while the perpetuals still need both.
+
+    Args:
+        market: Authenticated market-engine client.
+    """
+    submitted = market.post(
+        "/v1/script-scans",
+        json={
+            "venue": "mock",
+            "conditions": [{"script_id": "builtin:liquidity-qualification"}],
+        },
+    )
+    assert submitted.status_code == 202, submitted.text
+    job = submitted.json()
+    for _ in range(200):
+        job = market.get(f"/v1/script-scans/{job['job_id']}").json()
+        if job["status"] not in {"pending", "running"}:
+            break
+        time.sleep(0.05)
+    assert job["status"] == "complete", job
+    matched = {row["instrument_id"] for row in job["matches"]}
+    assert {ACME, MOCK_BTC} <= matched
+    assert ACME not in {row["instrument_id"] for row in job["unavailable"]}
