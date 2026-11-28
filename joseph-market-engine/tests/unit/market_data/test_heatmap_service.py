@@ -47,7 +47,7 @@ def _settings(**changes: object) -> config.Settings:
     base = dataclasses.replace(
         config.Settings(),
         database_url="sqlite://",
-        pipeline_enabled=False,
+        strategy_activations_enabled=False,
         indicator_plugin_packages="none",
     )
     return dataclasses.replace(base, **changes)  # type: ignore[arg-type]  # overrides are per-field values
