@@ -126,6 +126,13 @@ default starting with `#` a colour picker, a number a numeric field checked
 against `minimum`/`maximum`, and anything else a text field. Inputs in the
 same `group` share a section.
 
+For built-in and plugin scripts the dialog comes from `INPUTS`. For your own
+scripts, the host does not run the source to read declarations: the dialog
+edits the inputs stored in the version's **Default inputs (JSON)** field in
+the Python editor (the templates fill it in, for example `{"length": 20}`),
+and each `ctx.input(name, default, ...)` call supplies the default and the
+bounds at run time.
+
 Read a value with `ctx.input("length")`. The host merges the declared defaults
 with the user's chart, alert or activation settings before the run starts.
 `ctx.input(name, default, minimum=..., maximum=..., options=...)` also checks

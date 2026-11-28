@@ -43,6 +43,23 @@ export const PYTHON_KINDS = [
 type Kind = (typeof PYTHON_KINDS)[number];
 
 /**
+ * Returns the default inputs stored with a new template, so the chart's
+ * settings dialog can edit the inputs the template reads.
+ * @param kind Indicator, strategy, library, filter or alert role.
+ * @return Pretty-printed JSON object of input defaults.
+ */
+export function templateDefaults(kind: Kind): string {
+  const defaults: Record<Kind, Record<string, number>> = {
+    indicator: {length: 20},
+    strategy: {},
+    library: {},
+    filter: {minimum_price: 10},
+    alert: {threshold: 200},
+  };
+  return JSON.stringify(defaults[kind], null, 2);
+}
+
+/**
  * Creates a concrete, executable example inheriting the role's own abstract base.
  * @param kind Indicator, strategy, library, filter or alert role.
  * @return Python source with one concrete class and the required override.
@@ -97,7 +114,7 @@ export function PythonEditor({
   const [slug, setSlug] = useState('my-indicator');
   const [name, setName] = useState('My indicator');
   const [source, setSource] = useState(pythonTemplate('indicator'));
-  const [defaults, setDefaults] = useState('{}');
+  const [defaults, setDefaults] = useState(templateDefaults('indicator'));
   const [libraries, setLibraries] = useState('{}');
   const [requests, setRequests] = useState('{}');
   const [overlay, setOverlay] = useState(true);
@@ -195,7 +212,7 @@ export function PythonEditor({
     setSlug(`my-${role}`);
     setName(`My ${role}`);
     setSource(pythonTemplate(role));
-    setDefaults('{}');
+    setDefaults(templateDefaults(role));
     setLibraries('{}');
     setRequests('{}');
     setOverlay(true);

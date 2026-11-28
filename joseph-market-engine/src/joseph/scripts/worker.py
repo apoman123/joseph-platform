@@ -383,12 +383,17 @@ class Context:
             Mean, or None while fewer than length bars are available.
 
         Raises:
-            ValueError: If the length is outside the supported bounds.
+            ValueError: If the length is outside the supported bounds or the
+                field is not an OHLCV series.
         """
         if not isinstance(length, int) or not 1 <= length <= 2000:
             raise ValueError("length must be an integer between 1 and 2000")
-        values = self.series(field)
-        return sum(values[-length:]) / length if len(values) >= length else None
+        if field not in {"open", "high", "low", "close", "volume"}:
+            raise ValueError("unknown OHLCV field")
+        if len(self.history) < length:
+            return None
+        # Only the last ``length`` bars: O(length) per call, not O(history).
+        return sum(float(bar[field]) for bar in self.history[-length:]) / length
 
     def plot(
         self,
