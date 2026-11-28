@@ -41,6 +41,7 @@ from joseph.domain import market
 from joseph.domain import quality
 from joseph.domain import sessions
 from joseph.domain import timeframes
+from joseph.market_data.adapters import http
 from joseph.market_data.adapters import replay as replay_lib
 from joseph.market_data.app import candle_store
 from joseph.market_data.app import feed_router
@@ -906,11 +907,15 @@ class MarketDataService:
             today = price_adjustments.today_start(calendar, now_ms)
             if basis is None:
                 self._invalidate_adjusted(instrument, adapter)
-                pending = asyncio.ensure_future(
-                    self._read_basis(
-                        adapter, instrument, today - _BASIS_WINDOW_MS, today
+                with http.background():
+                    pending = asyncio.ensure_future(
+                        self._read_basis(
+                            adapter,
+                            instrument,
+                            today - _BASIS_WINDOW_MS,
+                            today,
+                        )
                     )
-                )
                 pending.add_done_callback(_retrieve)
                 self._bases[instrument] = _Basis(
                     epoch,
@@ -969,9 +974,12 @@ class MarketDataService:
         """
         instrument = as_instrument_id(instrument_id)
         tf = as_timeframe(timeframe)
-        await self._refresh(
-            instrument, tf, start_ms, end_ms, self._max_refresh_bars
-        )
+        # Studies, scans and strategies read through here; their venue
+        # requests yield the rate limit to waiting chart batches.
+        with http.background():
+            await self._refresh(
+                instrument, tf, start_ms, end_ms, self._max_refresh_bars
+            )
         return candle_rules.finals_only(
             self._enrich(self._store.range(instrument, tf, start_ms, end_ms))
         )

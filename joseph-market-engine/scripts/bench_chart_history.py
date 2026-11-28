@@ -282,7 +282,7 @@ def _bar(ts_ms: int) -> dict[str, Any]:
         The bar in Alpaca's REST shape.
     """
     return {
-        "t": alpaca.rfc3339(ts_ms),
+        "t": alpaca.rfc3339(ts_ms).replace(".000Z", "Z"),
         "o": 100,
         "h": 101,
         "l": 99,

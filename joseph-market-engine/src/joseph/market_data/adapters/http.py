@@ -13,9 +13,12 @@ within public API budgets.
 from __future__ import annotations
 
 import asyncio
+import contextlib
+import contextvars
 import time
 from collections.abc import Awaitable
 from collections.abc import Callable
+from collections.abc import Iterator
 from typing import Any
 
 import httpx
@@ -24,6 +27,29 @@ from joseph.domain import errors
 from joseph.domain import instruments
 
 USER_AGENT = "joseph-market-engine/0.5"
+_BACKGROUND: contextvars.ContextVar[bool] = contextvars.ContextVar(
+    "joseph_http_background", default=False
+)
+"""Whether venue requests of the current context are background work."""
+
+
+@contextlib.contextmanager
+def background() -> Iterator[None]:
+    """Marks the venue requests made in this context as background work.
+
+    A background request takes a rate-limit token only while no foreground
+    request (a chart's own history) is waiting for one, so study and scan
+    loads never delay the candles a user is waiting for. Tasks created in
+    the context inherit the mark.
+
+    Yields:
+        Nothing; the mark is removed on exit.
+    """
+    token = _BACKGROUND.set(True)
+    try:
+        yield
+    finally:
+        _BACKGROUND.reset(token)
 
 
 class HttpStatusError(errors.VenueUnavailableError):
@@ -75,6 +101,9 @@ class RateLimiter:
         self._sleep = sleep
         self._tokens = float(burst)
         self._updated = monotonic()
+        self._foreground = 0
+        self._calm = asyncio.Event()
+        self._calm.set()
 
     async def acquire(self) -> None:
         """Waits until a token is available and consumes it.
@@ -84,7 +113,25 @@ class RateLimiter:
         happens without holding any lock, so concurrent callers sleep in
         parallel instead of one after another, and the sustained rate and
         burst are those of a plain token bucket. A caller cancelled while
-        waiting returns its reservation.
+        waiting returns its reservation. Inside ``background()`` a caller
+        first waits until no foreground caller is waiting.
+        """
+        if _BACKGROUND.get():
+            while self._foreground:
+                await self._calm.wait()
+            await self._reserve()
+            return
+        self._foreground += 1
+        self._calm.clear()
+        try:
+            await self._reserve()
+        finally:
+            self._foreground -= 1
+            if not self._foreground:
+                self._calm.set()
+
+    async def _reserve(self) -> None:
+        """Reserves a token and waits until it is due.
 
         Raises:
             asyncio.CancelledError: If cancelled while waiting; the

@@ -123,6 +123,7 @@ _INTRADAY = tuple(
 )
 _TF = (*timeframes.SECONDS, *timeframes.MINUTE_AND_ABOVE)
 _PAGE_LIMIT = 10_000
+_PLAIN_STAMP_LEN = len("2026-11-20T14:30:00Z")
 MAX_PAGES = 20
 """REST pages per call (the oldest data is kept when the cap truncates)."""
 _BAR_SETTLE_MS = 60_000
@@ -293,6 +294,12 @@ def rfc3339_ms(text: str) -> int:
     Raises:
         ValueError: For malformed text.
     """
+    if len(text) == _PLAIN_STAMP_LEN and text[-1] == "Z" and text[10] == "T":
+        # Fast path for bar stamps such as ``2026-11-20T14:30:00Z``.
+        with contextlib.suppress(ValueError):
+            moment = datetime.datetime.fromisoformat(text)
+            if moment.tzinfo is not None:
+                return int(moment.timestamp()) * 1000
     match = re.match(
         r"^(\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2})(\.(\d+))?(Z|[+-]\d{2}:\d{2})$",
         text.strip(),
@@ -1565,9 +1572,12 @@ class AlpacaSource:  # noqa: DOC302 - Document constructor mutation.
         if not payload.get("next_page_token") or not rows:
             return rows, not payload.get("next_page_token")
         resume = rfc3339_ms(str(rows[-1]["t"])) + 1
-        width = max(60_000, (resume - start_ms) // 60_000 * 60_000)
+        # Ranges of about 4/5 of the first page's span, each allowed two
+        # pages, so uneven density rarely truncates one; a longer remainder
+        # is left to the caller's next round (``complete`` is then False).
+        width = max(60_000, (resume - start_ms) * 4 // 5 // 60_000 * 60_000)
         budget = MAX_PAGES - 1
-        count = min(budget, -(-(stop_ms - resume) // width))
+        count = min(budget // 2, -(-(stop_ms - resume) // width))
         bounds = [resume + i * width for i in range(count)]
         bounds = [b - b % 60_000 if i else b for i, b in enumerate(bounds)]
         last = min(stop_ms, resume + count * width)
