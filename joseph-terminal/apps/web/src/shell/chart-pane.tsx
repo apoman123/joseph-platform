@@ -92,6 +92,7 @@ import {useVenueCapabilities} from './venue-capabilities';
 import {ProvenanceBadge, ProvenanceRibbon} from './provenance';
 import {useStore} from './react-bindings';
 import {ReplayBar} from './replay-bar';
+import {seriesCache, seriesKey} from './series-cache';
 import {useStudyLines, useStudyPanes} from './study-hooks';
 
 /** Bars requested on load. */
@@ -337,10 +338,32 @@ export function ChartPane({
     port?.invalidate();
   }, [calendar, port, runtime, chartId]);
 
+  // The first candle request starts at once, in parallel with the chart
+  // library import; the history effect below adopts it once the port is up.
+  useEffect(() => {
+    if (replayRef.current) return;
+    const cache = seriesCache(runtime);
+    const key = seriesKey(instrumentId, timeframe, feedMode);
+    cache.prefetch(key, signal =>
+      runtime.clients.market.getCandles({
+        instrumentId,
+        timeframe,
+        limit: HISTORY_BARS,
+        signal,
+      })
+    );
+    // Changing the series cancels a request its pane did not adopt.
+    return () => void cache.drop(key);
+  }, [instrumentId, timeframe, feedMode, runtime]);
+
   // History and stream. A backend failure never falls back to synthetic data.
   useEffect(() => {
     if (!port) return;
     let alive = true;
+    const cache = seriesCache(runtime);
+    const cacheKey = seriesKey(instrumentId, timeframe, feedMode);
+    let adoptable = true;
+    let keepRange = false;
     const historyController = new AbortController();
     let loadingHistory = false;
     let loadingEarlier = false;
@@ -360,6 +383,55 @@ export function ChartPane({
     shownRef.current = [];
     setBarCount(0);
     port.setBars([]);
+    let lastAdjustment: PriceAdjustment | null = null;
+    /**
+     * Records what the pane shows, for an instant redraw on a later visit.
+     * @param feedState Feed state of the bars.
+     */
+    const remember = (feedState: FeedState): void => {
+      if (priceBasis === null) return;
+      cache.set(cacheKey, {
+        bars: barsRef.current,
+        basis: priceBasis,
+        priceAdjustment: lastAdjustment,
+        feedState,
+        refreshAfterMs: basisRefreshAfter,
+        savedAtMs: Date.now(),
+      });
+    };
+    // A recently viewed series is drawn at once; the batch below revalidates.
+    const cached = replayRef.current ? undefined : cache.get(cacheKey);
+    if (cached && cached.bars.length > 0) {
+      priceBasis = cached.basis;
+      basisRefreshAfter = cached.refreshAfterMs;
+      lastAdjustment = cached.priceAdjustment;
+      setPriceAdjustment(cached.priceAdjustment);
+      barsRef.current = [...cached.bars];
+      shownRef.current = barsRef.current;
+      setBarCount(barsRef.current.length);
+      port.setBars(barsRef.current);
+      const saved = chartRef.current.visible_range;
+      const lastStart = barsRef.current.at(-1)?.timeMs;
+      const first =
+        barsRef.current[
+          Math.max(0, barsRef.current.length - INITIAL_VISIBLE_BARS)
+        ];
+      if (saved) {
+        port.setVisibleRange({fromMs: saved.from_ms, toMs: saved.to_ms});
+      } else if (first && lastStart !== undefined) {
+        port.setVisibleRange({
+          fromMs: first.timeMs,
+          toMs: calendarRef.current.shift(timeframe, lastStart, 6),
+        });
+      }
+      keepRange = true;
+      setStatus({
+        phase: 'ready',
+        feedState: cached.feedState,
+        error: null,
+        lastUpdateMs: cached.savedAtMs,
+      });
+    }
     /** Loads the next page when the viewport reaches the first loaded bars. */
     const loadEarlier = (fromMs: number): void => {
       const bars = barsRef.current;
@@ -411,6 +483,7 @@ export function ChartPane({
           setBarCount(barsRef.current.length);
           port.setBars(barsRef.current);
           if (visible) port.setVisibleRange(visible);
+          remember(liveState ?? batchState);
         })
         .catch(() => {
           if (alive) retryAfterMs = Date.now() + 5_000;
@@ -420,7 +493,7 @@ export function ChartPane({
         });
     };
     loadEarlierRef.current = loadEarlier;
-    setLastBar(null);
+    setLastBar(barsRef.current.at(-1) ?? null);
     setHover(null);
     let batchState: FeedState = 'CONNECTING';
     let liveState: FeedState | null = null;
@@ -429,13 +502,24 @@ export function ChartPane({
       if (loadingHistory || !alive) return;
       loadingHistory = true;
       snapshotUpdates.clear();
-      void runtime.clients.market
-        .getCandles({
+      const adopted = adoptable ? cache.adopt(cacheKey) : undefined;
+      adoptable = false;
+      if (adopted) {
+        historyController.signal.addEventListener(
+          'abort',
+          () => void adopted.controller.abort(),
+          {once: true}
+        );
+      }
+      void (
+        adopted?.batch ??
+        runtime.clients.market.getCandles({
           instrumentId,
           timeframe,
           limit: HISTORY_BARS,
           signal: historyController.signal,
         })
+      )
         .then(batch => {
           if (!alive) return;
           const incomingBasis = `${batch.price_adjustment ?? 'unknown'}:${batch.price_adjustment_epoch_ms ?? ''}`;
@@ -451,7 +535,8 @@ export function ChartPane({
           }
           priceBasis = incomingBasis;
           basisRefreshAfter = batch.price_adjustment_refresh_after_ms;
-          setPriceAdjustment(batch.price_adjustment ?? null);
+          lastAdjustment = batch.price_adjustment ?? null;
+          setPriceAdjustment(lastAdjustment);
           const bars = [...merged.values()].sort((a, b) => a.timeMs - b.timeMs);
           barsRef.current = bars;
           const shown = replayVisibleBars(bars, replayRef.current);
@@ -469,7 +554,11 @@ export function ChartPane({
               lastStart
             );
           }
-          if (saved) {
+          if (keepRange) {
+            // Revalidating a series drawn from the cache: the user may
+            // already have scrolled it.
+            keepRange = false;
+          } else if (saved) {
             port.setVisibleRange({fromMs: saved.from_ms, toMs: saved.to_ms});
           } else if (first && lastStart !== undefined) {
             port.setVisibleRange({
@@ -481,6 +570,7 @@ export function ChartPane({
           }
           setLastBar(bars.at(-1) ?? null);
           batchState = batch.feed_state;
+          remember(liveState ?? batch.feed_state);
           setStatus({
             phase: bars.length ? 'ready' : 'empty',
             feedState: liveState ?? batch.feed_state,

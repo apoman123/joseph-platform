@@ -29,6 +29,7 @@ import {
 } from '@joseph/mock-provider';
 import {toValidationResult} from '@joseph/strategy-builder';
 import type {TerminalConfig} from './env';
+import {historyFirst} from './history-first';
 
 /** Clients plus the capability names they provide. */
 export interface ClientBundle {
@@ -105,7 +106,8 @@ export function demoLiveRehearsalRequested(search?: string): boolean {
 }
 
 /**
- * Builds DEMO or HTTP clients from configuration. Without an execution
+ * Builds DEMO or HTTP clients from configuration. Study requests of the
+ * market client yield to pending candle requests (`historyFirst`). Without an execution
  * engine URL, trading calls reject (`unavailableExecutionClient`); without
  * its WebSocket URL, the user stream stays closed.
  * @param config Terminal configuration.
@@ -113,7 +115,7 @@ export function demoLiveRehearsalRequested(search?: string): boolean {
  */
 export function buildClients(config: TerminalConfig): ClientBundle {
   if (config.demo) {
-    const market = new DemoMarketDataClient();
+    const market = historyFirst(new DemoMarketDataClient());
     const execution = new DemoExecutionClient({
       markPrice: demoMark,
       liveRehearsal: demoLiveRehearsalRequested(),
@@ -161,7 +163,9 @@ export function buildClients(config: TerminalConfig): ClientBundle {
   if (config.executionWsUrl) capabilities.push('user-stream');
   return {
     clients: {
-      market: new HttpMarketDataClient({baseUrl: marketBase, getToken: token}),
+      market: historyFirst(
+        new HttpMarketDataClient({baseUrl: marketBase, getToken: token})
+      ),
       marketStream: new WebSocketStreamClient({
         url: `${config.marketWsUrl ?? ''}/v1/stream/market`,
       }),

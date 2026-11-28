@@ -61,6 +61,7 @@ feed carries no closing cross for these listings and reads nothing.
 from __future__ import annotations
 
 import asyncio
+import bisect
 import collections
 import contextlib
 import dataclasses
@@ -2314,7 +2315,22 @@ class AlpacaAdapter(base.BaseVenueAdapter):
         )
         settled = self._settled_before()
         out = []
+        # Extended-hours rows (about 60% of them) are skipped by a bisect
+        # over the range's session spans before the full conversion.
+        try:
+            spans = [
+                (s.open_ms, s.close_ms)
+                for s in sessions.XNYS.sessions(start_ms - 86_400_000, stop)
+            ]
+        except ValueError:
+            spans = []
+        opens = [low for low, _ in spans]
         for row in rows:
+            if spans:
+                stamp = rfc3339_ms(str(row["t"]))
+                at = bisect.bisect_right(opens, stamp) - 1
+                if at < 0 or stamp >= spans[at][1]:
+                    continue
             bar = minute_bar(
                 row,
                 instrument,
