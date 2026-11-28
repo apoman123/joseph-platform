@@ -42,7 +42,6 @@ import {
   type TerminalSelection,
   type UiSlot,
 } from '@joseph/feature-registry';
-import {toValidationResult} from '@joseph/strategy-builder';
 import {render, type RenderResult} from '@testing-library/react';
 import type {ReactNode} from 'react';
 import type {
@@ -209,9 +208,7 @@ export function createFakeContext(
       fillDelayMs: delay,
       partialFills: false,
     });
-  const strategy = new DemoStrategyClient({
-    validate: def => toValidationResult(def),
-  });
+  const strategy = new DemoStrategyClient();
   const clients: BackendClients = {
     market: fakeMarketClient(),
     marketStream: silentStream(),

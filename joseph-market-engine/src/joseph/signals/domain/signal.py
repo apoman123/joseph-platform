@@ -1,7 +1,7 @@
 # Copyright 2026 apoman123
 # SPDX-License-Identifier: MIT
 
-"""Signal records: immutable lifecycle notifications of strategy setups.
+"""Signal records: immutable notifications of strategies and alerts.
 
 A fired signal is never rewritten. Its ``dedupe_key`` is unique per tenant,
 so replaying the same bars cannot create a second record, and its id is
@@ -12,13 +12,10 @@ from __future__ import annotations
 
 import dataclasses
 import decimal
-import json
 from collections.abc import Mapping
-from collections.abc import Sequence
 
 from joseph.domain import decimals
 from joseph.domain import ids
-from joseph.domain import structures
 
 SEVERITY_BY_KIND: Mapping[str, str] = {
     "WATCHING_AOI": "INFO",
@@ -54,43 +51,6 @@ def severity_rank(severity: str) -> int:
     return _SEVERITY_RANK.get(severity, 0)
 
 
-def dedupe_key(
-    *,
-    tenant_id: str,
-    strategy_version_id: str,
-    account_scope: str,
-    instrument_id: str,
-    direction: str,
-    setup_id: str,
-    kind: str,
-) -> str:
-    """Builds the signal de-duplication key.
-
-    Args:
-        tenant_id: Owning tenant.
-        strategy_version_id: Immutable version id.
-        account_scope: Account scope (``*`` = any account).
-        instrument_id: Canonical instrument id.
-        direction: ``LONG`` or ``SHORT``.
-        setup_id: Setup id.
-        kind: Signal kind.
-
-    Returns:
-        The parts joined with ``|`` in argument order.
-    """
-    return "|".join(
-        (
-            tenant_id,
-            strategy_version_id,
-            account_scope,
-            instrument_id,
-            direction,
-            setup_id,
-            kind,
-        )
-    )
-
-
 def signal_id_for(key: str) -> str:
     """Derives a deterministic signal id from a dedupe key.
 
@@ -101,74 +61,6 @@ def signal_id_for(key: str) -> str:
         ``sig-`` plus 32 hex characters.
     """
     return "sig-" + ids.sha256_hex(key.encode("utf-8"))[:32]
-
-
-def _strip(
-    mapping: Mapping[str, object], drop: frozenset[str]
-) -> dict[str, object]:
-    """Copies a mapping without provenance-only keys.
-
-    Args:
-        mapping: Source mapping.
-        drop: Keys to remove.
-
-    Returns:
-        Filtered copy.
-    """
-    return {k: v for k, v in mapping.items() if k not in drop}
-
-
-# Candle fields that say how a bar arrived, not what it is.
-_CANDLE_PROVENANCE = frozenset(
-    {"received_at_ms", "feed_state", "source", "event_ts_ms"}
-)
-
-
-def inputs_snapshot_hash(frames: Sequence[structures.BarFrame]) -> str:
-    """Hashes the market inputs of an evaluation.
-
-    Provenance (receipt and event times, feed state, source, and the
-    snapshots' data quality) is excluded, so live and replayed copies of the
-    same confirmed bars hash identically.
-
-    Args:
-        frames: Evaluated frames, oldest first.
-
-    Returns:
-        ``sha256:<hex>``.
-    """
-    payload: list[dict[str, object]] = []
-    for frame in frames:
-        snapshots = []
-        for key in sorted(frame.snapshots, key=lambda k: (k[0], k[1].value)):
-            snapshot = frame.snapshots[key].to_contract()
-            snapshots.append(_strip(snapshot, frozenset({"data_quality"})))
-        payload.append(
-            {
-                "candle": _strip(
-                    frame.candle.to_contract(), _CANDLE_PROVENANCE
-                ),
-                "events": [
-                    event.to_contract()
-                    for event in sorted(frame.events, key=_event_id)
-                ],
-                "snapshots": snapshots,
-            }
-        )
-    text = json.dumps(payload, sort_keys=True, separators=(",", ":"))
-    return "sha256:" + ids.sha256_hex(text.encode("utf-8"))
-
-
-def _event_id(event: structures.StructureEvent) -> str:
-    """Returns an event's id, which orders the events before hashing.
-
-    Args:
-        event: Structure event.
-
-    Returns:
-        The event id.
-    """
-    return event.event_id
 
 
 @dataclasses.dataclass(frozen=True, slots=True)

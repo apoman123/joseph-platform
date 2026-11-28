@@ -5,10 +5,10 @@
  */
 
 /**
- * @fileoverview Strategy feature: visual builder for the rule AST (abstract
- * syntax tree) with server validation, immutable versions, backtests and
- * activation in alert, paper or shadow mode. Automatic live trading cannot
- * be enabled from here.
+ * @fileoverview Strategy feature: Python Strategy scripts (built-in, plugin
+ * or owned) with declared inputs, closed-bar backtests and activation in
+ * alert, paper or shadow mode. Automatic live trading cannot be enabled
+ * from here.
  */
 
 import {createElement} from 'react';
@@ -18,17 +18,17 @@ import type {
   WebView,
 } from '../../shell/react-bindings';
 import {StrategyPanel} from './strategy-panel';
-import {createStrategyEditor} from './strategy-store';
+import {createStrategyController} from './strategy-store';
 
 /** The strategy feature. */
 export const STRATEGY_FEATURE: WebFeature = {
   manifest: {
     id: 'strategy',
-    version: '1.0.0',
+    version: '2.0.0',
     owner: 'terminal-strategy',
-    displayName: 'Strategy builder',
+    displayName: 'Strategies',
     description:
-      'Build typed entry rules, validate them on the server, save versions, backtest and activate without code.',
+      'Backtest and activate Python Strategy scripts: the built-ins, installed plugins and your own scripts.',
     uiSlots: ['side-panel'],
     requiredCapabilities: ['strategy'],
     permissions: ['strategy:read', 'strategy:write'],
@@ -36,18 +36,18 @@ export const STRATEGY_FEATURE: WebFeature = {
     contractVersion: 1,
     removal: {
       notes:
-        'Saved strategies live on the server and keep running according to their activation; the local draft stays in feature settings.',
+        'Activations live on the server and keep running until paused or deleted.',
     },
   },
   activate(ctx) {
-    const editor = createStrategyEditor(ctx);
+    const controller = createStrategyController(ctx);
     /**
-     * Renders the strategy panel bound to the feature's editor.
+     * Renders the strategy panel bound to the feature's controller.
      * @param props Slot props.
      * @return Element.
      */
     function StrategySlot(props: WebSlotProps) {
-      return createElement(StrategyPanel, {ctx: props.ctx, editor});
+      return createElement(StrategyPanel, {ctx: props.ctx, controller});
     }
     const view: WebView = StrategySlot;
     return ctx.slots.contribute('side-panel', {

@@ -798,7 +798,11 @@ class ScriptJobs:
             dedupe_key=key,
             tenant_id=principal.tenant_id,
             strategy_id=job.script_id,
-            strategy_version_id=f"{job.script_id}:v{job.version}",
+            strategy_version_id=(
+                f"{job.script_id}:v{result.source_hash[:12]}"
+                if catalog.is_catalog_id(job.script_id)
+                else f"{job.script_id}:v{job.version}"
+            ),
             setup_id=None,
             instrument_id=job.instrument_id,
             direction="NONE",
@@ -993,16 +997,18 @@ class ScriptJobs:
 
 
 def _summary(snapshot: dict[str, Any]) -> dict[str, Any]:
-    """Drops bulky loaded metrics from a persisted match snapshot.
+    """Reduces an evaluated snapshot to the contract ``MarketSnapshot``.
 
     Args:
         snapshot: Snapshot record evaluated by the filters.
 
     Returns:
-        The snapshot contract without the order book.
+        The snapshot without the loaded order book and evaluation time.
     """
     return {
-        key: value for key, value in snapshot.items() if key != "order_book"
+        key: value
+        for key, value in snapshot.items()
+        if key not in {"order_book", "evaluated_at_ms"}
     }
 
 

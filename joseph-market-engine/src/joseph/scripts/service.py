@@ -520,7 +520,9 @@ class ScriptService:
             }
         )
         result = await self.execute(principal.tenant_id, script, data)
-        if script.kind != "strategy" and result.get("fills"):
+        if script.kind != "strategy" and (
+            result.get("fills") or result.get("orders")
+        ):
             raise errors.ValidationFailedError(
                 "only strategies can publish simulated fills"
             )
@@ -530,7 +532,7 @@ class ScriptService:
             for event in result.get("alerts", [])
         ) or any(
             fill.get("time_ms") not in starts
-            for fill in result.get("fills", [])
+            for fill in (*result.get("fills", []), *result.get("orders", []))
         ):
             raise errors.ValidationFailedError(
                 "script events must reference actual evaluated source bars"

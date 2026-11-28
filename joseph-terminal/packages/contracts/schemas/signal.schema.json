@@ -177,7 +177,7 @@
           "$ref": "common.schema.json#/$defs/Timeframe"
         },
         "kind": {
-          "$ref": "strategy.schema.json#/$defs/SignalKind"
+          "$ref": "#/$defs/SignalKind"
         },
         "setup_state": {
           "$ref": "#/$defs/SetupState"
@@ -400,7 +400,7 @@
         "kinds": {
           "type": "array",
           "items": {
-            "$ref": "strategy.schema.json#/$defs/SignalKind"
+            "$ref": "#/$defs/SignalKind"
           },
           "description": "Empty means every kind."
         },
@@ -548,6 +548,21 @@
           "description": "Redacted last failure, if any."
         }
       }
+    },
+    "SignalKind": {
+      "title": "SignalKind",
+      "type": "string",
+      "enum": [
+        "WATCHING_AOI",
+        "PRE_SIGNAL",
+        "ENTRY_CONFIRMED",
+        "ENTRY_BLOCKED",
+        "AOI_INVALIDATED",
+        "SETUP_EXPIRED",
+        "QUALIFICATION_CHANGED",
+        "POSITION_EXITED",
+        "CUSTOM_ALERT"
+      ]
     }
   }
 }

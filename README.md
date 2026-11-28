@@ -1,6 +1,6 @@
 # Joseph trading platform
 
-Joseph is a self-hosted platform for charting, researching and trading crypto perpetuals, Taiwan and US stocks and ETFs, with US Treasury yields as reference data. It has three parts: a browser charting terminal, a market engine (data, screening, indicator plugins, strategies, alerts, backtests) and an execution engine (risk gateway, order management, paper, shadow and live trading, audit, kill switch).
+Joseph is a self-hosted platform for charting, researching and trading crypto perpetuals, Taiwan and US stocks and ETFs, with US Treasury yields as reference data. It has three parts: a browser charting terminal, a market engine (data, screener filters, indicator plugins, strategies, alerts, backtests) and an execution engine (risk gateway, order management, paper, shadow and live trading, audit, kill switch).
 
 > **Risk disclaimer.** Joseph is research software, provided as is under the AGPL-3.0-only licence with no warranty. Live trading can lose money. The LIVE adapters are tested only against mocked venues and fake broker clients, never with real orders. Nothing in this repository is financial advice.
 
@@ -22,8 +22,8 @@ Futures and options are not supported.
 
 | Path | Port | What it is |
 |---|---|---|
-| `joseph-terminal/` | 3000 | Next.js terminal: charts, drawing tools, screener, strategy builder, order tickets. Renders engine outputs; holds only a session token. Own licence; can become a separate repository |
-| `joseph-market-engine/` | 8000 | FastAPI service: market data, screening, indicators (built-ins and plugin packages), strategy evaluation, signals, alerts, backtests. Holds no trading credentials |
+| `joseph-terminal/` | 3000 | Next.js terminal: charts, drawing tools, screener, Python strategy panel, order tickets. Renders engine outputs; holds only a session token. Own licence; can become a separate repository |
+| `joseph-market-engine/` | 8000 | FastAPI service: market data, screener filters and alert conditions, indicators (built-ins and plugin packages), Python scripts and strategy activations, signals, alerts, backtests. Holds no trading credentials |
 | `joseph-execution-engine/` | 8100 | FastAPI service: accounts and an encrypted credential vault, risk gateway, order management system (OMS), reconciliation, audit log, kill switch. The only holder of trading credentials |
 | `system-tests/` | | Cross-service tests that boot both engines |
 | `deploy/` | | Docker Compose stack for the three services (plus optional IB Gateway) |
@@ -216,10 +216,10 @@ service window. No unofficial WhatsApp Web session or personal-account automatio
 is used. See [WebKit's Web Push requirements](https://webkit.org/blog/13878/) for
 Apple mobile devices.
 
-**Strategy routing:** destination registration does not override a strategy's
-notification policy. Include `TELEGRAM`, `WHATSAPP` and/or `WEB_PUSH` in the
-strategy definition's `notification.channels`, then save/activate that version.
-Existing strategies retain their current channel policy. Push follows the same
+**Strategy routing:** destination registration does not override a strategy
+activation's notification policy. Include `TELEGRAM`, `WHATSAPP` and/or
+`WEB_PUSH` in the activation's `channels` when creating it
+(`POST /v1/strategy-activations`). Existing activations retain their channels. Push follows the same
 quiet hours, severity, signal-kind and strategy filters as other channels. Python price/indicator conditions are also available through the five-kind
 script editor described below. Native drawing-attached alert controls remain
 a separate roadmap item.

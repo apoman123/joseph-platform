@@ -5,21 +5,13 @@
 
 from __future__ import annotations
 
-import json
-import pathlib
+import time
 from collections.abc import Callable
 from typing import TypeAlias
 
 import httpx
 
 MOCK_BTC = "mock:perp:BTCUSD"
-_FIXTURES = (
-    pathlib.Path(__file__).resolve().parents[2]
-    / "joseph-terminal"
-    / "packages"
-    / "contracts"
-    / "fixtures"
-)
 _Validate: TypeAlias = Callable[[str, str, object], None]
 BUILTIN_PLUGINS = (
     "sma",
@@ -81,10 +73,10 @@ def test_candles_have_provenance_and_finality(
     assert all(c["is_final"] for c in candles[:-1])
 
 
-def test_snapshot_orderbook_and_qualification(
+def test_snapshot_orderbook_and_builtin_filter_scan(
     market: httpx.Client, validate: _Validate
 ) -> None:
-    """Snapshot, order book and qualification conform to contracts."""
+    """Snapshot and order book conform; built-in filters scan in process."""
     snap = market.get(
         "/v1/market/snapshot", params={"instrument_id": MOCK_BTC}
     ).json()
@@ -94,8 +86,32 @@ def test_snapshot_orderbook_and_qualification(
         params={"instrument_id": MOCK_BTC, "depth": 20},
     ).json()
     validate("market.schema.json", "OrderBook", book)
-    report = market.get("/v1/market/qualification").json()
-    validate("qualification.schema.json", "QualificationReport", report)
+    submitted = market.post(
+        "/v1/script-scans",
+        json={
+            "venue": "mock",
+            "market_type": "perp",
+            "conditions": [
+                {"script_id": "builtin:liquidity-qualification"},
+                {
+                    "script_id": "builtin:price",
+                    "inputs": {"operator": "above", "value": 0},
+                },
+            ],
+        },
+    )
+    assert submitted.status_code == 202, submitted.text
+    job = submitted.json()
+    for _ in range(200):
+        job = market.get(f"/v1/script-scans/{job['job_id']}").json()
+        if job["status"] not in {"pending", "running"}:
+            break
+        time.sleep(0.05)
+    assert job["status"] == "complete", job
+    matched = {row["instrument_id"] for row in job["matches"]}
+    assert MOCK_BTC in matched
+    for row in job["matches"]:
+        validate("market.schema.json", "MarketSnapshot", row["snapshot"])
 
 
 def test_unknown_instrument_returns_contract_error(
@@ -128,79 +144,67 @@ def test_indicator_plugins_and_snapshots(
     validate("indicators.schema.json", "AoiList", aois)
 
 
-def _demo_strategy(strategy_id: str) -> dict[str, object]:
-    """Builds the EMA trend template retargeted to the DEMO venue.
-
-    Args:
-        strategy_id: Strategy id (slug) to use.
-
-    Returns:
-        The fixture's first valid definition on the DEMO venue, in the
-        ``ALERT_ONLY`` execution mode.
-    """
-    body = json.loads(
-        (_FIXTURES / "strategy.fixture.json").read_text(encoding="utf-8")
-    )
-    definition = dict(body["valid"][0])
-    definition["strategy_id"] = strategy_id
-    definition["universe"] = {"qualification": "ANY", "venues": ["mock"]}
-    definition["execution_mode"] = "ALERT_ONLY"
-    return definition
-
-
-def test_strategy_lifecycle_and_backtest(
+def test_strategy_backtest_and_activation_lifecycle(
     market: httpx.Client, validate: _Validate
 ) -> None:
-    """A strategy validates, saves, versions, backtests, activates, pauses."""
-    definition = _demo_strategy("system-ema-trend")
-    result = market.post("/v1/strategies/validate", json=definition).json()
-    validate("strategy.schema.json", "ValidationResult", result)
-    assert result["valid"], result
-    created = market.post("/v1/strategies", json=definition)
-    assert created.status_code in (200, 201), created.text
-    v1 = created.json()
-    validate("strategy.schema.json", "StrategyVersion", v1)
-    assert v1["version"] == 1
-    definition["name"] = "EMA trend (edited)"
-    v2 = market.post(
-        "/v1/strategies/system-ema-trend/versions", json=definition
-    ).json()
-    assert v2["version"] == 2
-    assert v2["definition_hash"] != v1["definition_hash"]
-    candles = market.get(
-        "/v1/candles",
-        params={"instrument_id": MOCK_BTC, "tf": "5m", "limit": 500},
-    ).json()["candles"]
+    """A built-in strategy backtests, activates, pauses, resumes, deletes."""
     report = market.post(
-        "/v1/strategies/system-ema-trend/backtests",
+        "/v1/scripts/builtin:ema-trend-long/run",
         json={
-            "version": 2,
             "instrument_id": MOCK_BTC,
-            "from_ms": candles[0]["start_ms"],
-            "to_ms": candles[-1]["end_ms"],
+            "tf": "5m",
+            "limit": 500,
+            "inputs": {"require_flow": False},
         },
     )
     assert report.status_code == 200, report.text
-    validate("strategy.schema.json", "BacktestReport", report.json())
-    activated = market.post(
-        "/v1/strategies/system-ema-trend/activate",
-        json={"version": 2, "mode": "PAPER"},
-    ).json()
-    assert activated["state"] == "ACTIVE"
-    paused = market.post("/v1/strategies/system-ema-trend/pause", json={})
+    body = report.json()
+    validate("python-scripts.schema.json", "ScriptResult", body)
+    assert body["kind"] == "strategy"
+    assert body["version"] == 0
+    assert "trade_count" in body["metrics"]
+    assert len(body["trades"]) >= body["metrics"]["trade_count"]
+    assert all(o["action"] in {"long", "close"} for o in body["orders"])
+    created = market.post(
+        "/v1/strategy-activations",
+        json={
+            "script_id": "builtin:ema-trend-long",
+            "instrument_ids": [MOCK_BTC],
+            "tf": "5m",
+            "mode": "ALERT_ONLY",
+        },
+    )
+    assert created.status_code == 201, created.text
+    activation = created.json()
+    validate("python-scripts.schema.json", "StrategyActivation", activation)
+    assert activation["state"] == "ACTIVE"
+    activation_id = activation["activation_id"]
+    paused = market.post(f"/v1/strategy-activations/{activation_id}/pause")
     assert paused.json()["state"] == "PAUSED"
+    resumed = market.post(f"/v1/strategy-activations/{activation_id}/resume")
+    assert resumed.json()["state"] == "ACTIVE"
+    deleted = market.delete(f"/v1/strategy-activations/{activation_id}")
+    assert deleted.status_code == 204
 
 
 def test_auto_live_cannot_be_activated_from_market_engine(
-    market: httpx.Client,
+    market: httpx.Client, validate: _Validate
 ) -> None:
-    """AUTO_LIVE activation is refused with a 409 or a 422."""
-    market.post("/v1/strategies", json=_demo_strategy("system-no-live"))
+    """AUTO_LIVE activation is refused with 409 TRADE_MODE_DISABLED."""
     response = market.post(
-        "/v1/strategies/system-no-live/activate",
-        json={"version": 1, "mode": "AUTO_LIVE"},
+        "/v1/strategy-activations",
+        json={
+            "script_id": "builtin:ema-trend-long",
+            "instrument_ids": [MOCK_BTC],
+            "tf": "5m",
+            "mode": "AUTO_LIVE",
+        },
     )
-    assert response.status_code in (409, 422)
+    assert response.status_code == 409, response.text
+    validate("common.schema.json", "ErrorResponse", response.json())
+    assert response.json()["code"] == "TRADE_MODE_DISABLED"
+    activations = market.get("/v1/strategy-activations").json()
+    assert all(a["mode"] != "AUTO_LIVE" for a in activations["activations"])
 
 
 def test_signals_are_tenant_scoped(

@@ -5,28 +5,45 @@
  */
 
 /**
- * @fileoverview End-to-end: strategy template → validate → save version,
- * with automatic live trading visibly locked (DEMO mode).
+ * @fileoverview End-to-end: built-in Python strategy → inputs → DEMO
+ * backtest → paper activation, with automatic live trading visibly locked
+ * (DEMO mode).
  */
 
 import {expect, test} from '@playwright/test';
 import {loadTerminal, openPanel} from './trading-helpers';
 
-test('builds, validates and saves a strategy version', async ({page}) => {
+test('backtests and activates a built-in strategy', async ({page}) => {
   await loadTerminal(page);
   await openPanel(page, 'Strategy');
-  await page
-    .getByRole('combobox', {name: 'Start from a template'})
-    .selectOption({label: 'RSI reversion (short)'});
+  const picker = page.getByRole('combobox', {name: 'Strategy script'});
+  await picker.selectOption('builtin:rsi-reversion-short');
   await expect(
-    page.locator('[data-testid^="node-"]').getByText('RSI crosses below 70')
+    page.getByRole('spinbutton', {name: 'RSI crosses below'})
+  ).toHaveValue('70');
+  await page.getByRole('tab', {name: 'Backtest'}).click();
+  await page.getByRole('button', {name: 'Run backtest'}).click();
+  const report = page.getByTestId('backtest-report');
+  await expect(report.getByText(/Demo report/)).toBeVisible();
+  await expect(
+    report.getByRole('table', {name: 'Backtest trades'})
   ).toBeVisible();
-  await page.getByRole('button', {name: 'Validate'}).click();
-  await expect(page.getByText(/Valid on the server/)).toBeVisible();
-  await page.getByRole('button', {name: 'Save strategy'}).click();
-  await expect(page.getByTestId('strategy-version')).toHaveText('Version 1');
-  await page.getByRole('tab', {name: 'Versions'}).click();
+  await page.getByRole('button', {name: 'Show on chart'}).click();
+  await expect(
+    page.getByRole('button', {name: 'Hide from chart'})
+  ).toBeVisible();
+  await page.getByRole('tab', {name: 'Activate'}).click();
   await expect(page.getByTestId('auto-live-lock')).toContainText(
     'Automatic live trading is locked'
   );
+  await page
+    .getByRole('combobox', {name: 'Activation mode'})
+    .selectOption('PAPER');
+  await page.getByRole('button', {name: 'Activate', exact: true}).click();
+  const list = page.getByRole('list', {name: 'Activations'});
+  await expect(
+    list.getByText('builtin:rsi-reversion-short:vdemo')
+  ).toBeVisible();
+  await list.getByRole('button', {name: 'Pause'}).click();
+  await expect(list.getByText('paused')).toBeVisible();
 });

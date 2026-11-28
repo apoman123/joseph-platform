@@ -53,7 +53,7 @@ export interface AlertCondition {
   /** Description for the choice list. */
   description: string;
   /** Declared inputs (owned scripts: their default values). */
-  inputs: Record<string, CatalogInput>;
+  inputs: Record<string, CatalogInput | undefined>;
 }
 
 /**

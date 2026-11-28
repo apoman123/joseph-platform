@@ -20,8 +20,6 @@ from joseph.domain import errors
 from joseph.domain import instruments
 from joseph.domain import quality
 from joseph.market_data.app import service as market_service
-from joseph.screening.app import service as screening_service
-from joseph.screening.domain import policy as policy_lib
 
 
 def _enum[EnumType: enum.Enum](
@@ -52,13 +50,11 @@ def _enum[EnumType: enum.Enum](
 
 def build_router(
     market_data: market_service.MarketDataService,
-    qualification: screening_service.QualificationService,
 ) -> fastapi.APIRouter:
     """Builds the market-data router.
 
     Args:
         market_data: Market-data service.
-        qualification: Qualification service.
 
     Returns:
         Router mounted at ``/v1``.
@@ -221,34 +217,6 @@ def build_router(
         """
         book = await market_data.get_order_book(instrument_id, depth)
         return book.to_contract()
-
-    @router.get("/market/qualification")
-    async def qualification_report(
-        venue: str | None = None,
-        status: str | None = None,
-        refresh: bool = False,
-    ) -> dict[str, object]:
-        """Returns qualification results with every gate's evidence.
-
-        Args:
-            venue: Optional contract ``Venue`` filter.
-            status: Optional qualification status filter.
-            refresh: Whether to scan again instead of using records
-                cached within the service's time to live.
-
-        Returns:
-            Contract ``QualificationReport``.
-
-        Raises:
-            errors.ValidationFailedError: On an unknown ``venue`` or
-                ``status`` (422).
-        """
-        report = await qualification.report(
-            _enum(instruments.Venue, venue, "venue"),
-            _enum(policy_lib.Status, status, "status"),
-            refresh=refresh,
-        )
-        return report.to_contract()
 
     return router
 

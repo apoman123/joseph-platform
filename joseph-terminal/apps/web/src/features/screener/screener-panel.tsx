@@ -275,21 +275,22 @@ function ConditionRow({
 }: ConditionRowProps): ReactNode {
   const entry = filters.find(f => f.script_id === condition.script_id);
   const own = owned.find(s => s.script_id === condition.script_id);
-  const ownInputs: Record<string, CatalogInput> = Object.fromEntries(
-    Object.entries(own?.defaults ?? {}).map(([name, value]) => [
-      name,
-      {
-        default: value,
-        title: name,
-        minimum: null,
-        maximum: null,
-        options: null,
-        step: null,
-        group: '',
-        tooltip: '',
-      },
-    ])
-  );
+  const ownInputs: Record<string, CatalogInput | undefined> =
+    Object.fromEntries(
+      Object.entries(own?.defaults ?? {}).map(([name, value]) => [
+        name,
+        {
+          default: value,
+          title: name,
+          minimum: null,
+          maximum: null,
+          options: null,
+          step: null,
+          group: '',
+          tooltip: '',
+        },
+      ])
+    );
   return (
     <fieldset
       className={styles.condition}

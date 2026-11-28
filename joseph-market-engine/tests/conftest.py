@@ -465,7 +465,7 @@ def exchange_routes() -> Callable[[respx.Router], None]:
 
 
 # Crypto venues -------------------------------------------------------------
-# Shared by the API, screening and market-data contract suites. With
+# Shared by the API, script and market-data contract suites. With
 # ``history`` a handler also serves monthly bars and trade history, which
 # only the contract suite reads (``crypto_history_routes``); the other
 # suites see those paths as unknown (``crypto_routes``).

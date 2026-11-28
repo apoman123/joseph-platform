@@ -51,3 +51,11 @@ export function useRuntime(): TerminalRuntime {
   }
   return runtime;
 }
+
+/**
+ * Returns the runtime of the nearest `RuntimeProvider`, if any.
+ * @return Runtime, or null outside a provider (isolated feature tests).
+ */
+export function useOptionalRuntime(): TerminalRuntime | null {
+  return useContext(RuntimeContext);
+}

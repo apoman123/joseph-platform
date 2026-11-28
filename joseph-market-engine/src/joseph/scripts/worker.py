@@ -33,6 +33,18 @@ OPTIONAL_FIELDS = frozenset(
 """Optional numeric bar fields; absent values stay None, never zero."""
 
 
+def _sign(value: float) -> int:
+    """Classifies a signed position.
+
+    Args:
+        value: Signed quantity.
+
+    Returns:
+        1 for long, -1 for short and 0 for flat.
+    """
+    return (value > 0) - (value < 0)
+
+
 class Context:
     """Exposes closed-bar history, plots, state.
 
@@ -49,6 +61,14 @@ class Context:
         position_size: Signed simulated base-asset quantity.
         cash: Simulated quote-asset cash balance.
         pending: Pending side/quantity intents filled on the next bar's open.
+        orders: Every queued strategy order in bar order, with its protective
+            stop/target, comment and outcome (pending, filled, rejected or
+            unchanged); the host turns orders queued on the latest closed
+            bar of an activation into live signals.
+        position_stop: Protective stop of the open simulated position, if
+            its entry declared one.
+        position_target: Profit target of the open simulated position, if
+            its entry declared one.
         commission_bps: Per-fill commission in basis points.
         slippage_bps: Adverse per-fill price adjustment in basis points.
         overlay: Whether plots belong on the price pane.
@@ -87,6 +107,9 @@ class Context:
         self.position_size = 0.0
         self.cash = float(bundle.get("initial_equity", 10000))
         self.pending: list[tuple[str, float]] = []
+        self.orders: list[dict[str, Any]] = []
+        self.position_stop: float | None = None
+        self.position_target: float | None = None
         self.commission_bps = float(bundle.get("commission_bps", 0))
         self.slippage_bps = float(bundle.get("slippage_bps", 0))
         self.overlay = bool(bundle.get("overlay", True))
@@ -961,38 +984,125 @@ class Context:
         if condition:
             self.alert(message, name=title, severity=severity)
 
-    def entry(self, side: str, quantity: float = 1.0) -> None:
+    def entry(
+        self,
+        side: str,
+        quantity: float = 1.0,
+        *,
+        stop: float | None = None,
+        target: float | None = None,
+        comment: str = "",
+    ) -> None:
         """Queues a simulated order for the following bar's opening price.
+
+        The stop and target are protective levels: live activations forward
+        them with entry signals (the execution engine places them as
+        venue-held stop-loss and take-profit orders), while the simulation
+        leaves exits to the strategy, which reads them back through
+        ``position_stop`` and ``position_target``.
 
         Args:
             side: long or short; any other value is rejected.
             quantity: Positive finite base-asset quantity, maximum one billion.
+            stop: Optional protective stop, below the current close for a
+                long entry and above it for a short entry.
+            target: Optional profit target, above the current close for a
+                long entry and below it for a short entry.
+            comment: Optional plain-text reason, at most 120 characters.
 
         Returns:
             None after replacing this bar's pending intent.
 
         Raises:
-            ValueError: If used by an indicator or with invalid side/quantity.
+            ValueError: If used by an indicator or with an invalid side,
+                quantity, stop, target or comment.
         """
         if self.kind != "strategy" or side not in {"long", "short"}:
             raise ValueError("only strategy scripts can enter long or short")
         quantity = float(quantity)
         if not math.isfinite(quantity) or not 0 < quantity <= 1e9:
             raise ValueError("quantity must be finite and positive")
-        self.pending = [(side, quantity)]
+        close = float(self.bar["close"])
+        sign = 1 if side == "long" else -1
+        levels: dict[str, float | None] = {}
+        for name, given, direction in (
+            ("stop", stop, -sign),
+            ("target", target, sign),
+        ):
+            if given is None:
+                levels[name] = None
+                continue
+            value = float(given)
+            if not math.isfinite(value) or value <= 0:
+                raise ValueError(f"{name} must be a finite positive price")
+            if (value - close) * direction <= 0:
+                raise ValueError(
+                    f"{name} is on the wrong side of the close for a "
+                    f"{side} entry"
+                )
+            levels[name] = value
+        self._queue(
+            side, quantity, levels["stop"], levels["target"], str(comment)
+        )
 
-    def close(self) -> None:
+    def close(self, comment: str = "") -> None:
         """Queues closing the simulated position on the next bar's open.
+
+        Args:
+            comment: Optional plain-text reason, at most 120 characters.
 
         Returns:
             None after replacing the pending intent with a simulated close.
 
         Raises:
-            ValueError: If called from an indicator script.
+            ValueError: If called from an indicator script or with an
+                overlong comment.
         """
         if self.kind != "strategy":
             raise ValueError("only strategy scripts can close positions")
-        self.pending = [("flat", 0.0)]
+        self._queue("flat", 0.0, None, None, str(comment))
+
+    def _queue(
+        self,
+        side: str,
+        quantity: float,
+        stop: float | None,
+        target: float | None,
+        comment: str,
+    ) -> None:
+        """Replaces this bar's pending intent and records the order.
+
+        Args:
+            side: long, short or flat.
+            quantity: Target absolute quantity; zero when flat.
+            stop: Protective stop, if any.
+            target: Profit target, if any.
+            comment: Plain-text reason.
+
+        Returns:
+            None after queuing the intent.
+
+        Raises:
+            ValueError: If the comment exceeds 120 characters.
+        """
+        if len(comment) > 120:
+            raise ValueError("order comments are limited to 120 characters")
+        order = {
+            "time_ms": self.bar["time_ms"],
+            "action": "close" if side == "flat" else side,
+            "reference": float(self.bar["close"]),
+            "quantity": quantity,
+            "stop": stop,
+            "target": target,
+            "comment": comment,
+            "status": "pending",
+            "fill_time_ms": None,
+        }
+        if self.orders and self.orders[-1]["time_ms"] == order["time_ms"]:
+            self.orders[-1] = order
+        else:
+            self.orders.append(order)
+        self.pending = [(side, quantity)]
 
     def advance(self, bar: dict[str, Any]) -> None:
         """Fills prior-bar intents.
@@ -1005,11 +1115,14 @@ class Context:
         Returns:
             None after accounting for adverse slippage and per-fill fees.
         """
+        order = self.orders[-1] if self.pending and self.orders else None
         for side, quantity in self.pending:
             desired = quantity if side == "long" else -quantity
             if side == "flat":
                 desired = 0.0
             change = desired - self.position_size
+            if order is not None:
+                order["status"] = "unchanged"
             if not change:
                 continue
             price = float(bar["open"]) * (
@@ -1020,7 +1133,19 @@ class Context:
             marked = self.cash + previous * float(bar["open"])
             if desired and abs(desired) * price + fee > max(0, marked):
                 self.rejected_orders += 1
+                if order is not None:
+                    order["status"] = "rejected"
                 continue
+            if order is not None:
+                order["status"] = "filled"
+                order["fill_time_ms"] = bar["time_ms"]
+            if desired == 0:
+                self.position_stop = self.position_target = None
+            elif order is not None and _sign(self.position_size) != _sign(
+                desired
+            ):
+                self.position_stop = order["stop"]
+                self.position_target = order["target"]
             self.cash -= change * price + fee
             self.position_size = desired
             effect = "entry"
@@ -1315,6 +1440,8 @@ def run_instance(instance: Any, bundle: dict[str, Any]) -> dict[str, Any]:
             for name, points in context.plots.items()
         ],
         "fills": context.fills,
+        "orders": context.orders if context.kind == "strategy" else [],
+        "position_size": context.position_size,
         "matched": matched,
         "alerts": context.alerts,
         "visuals": list(context.visuals.values()),

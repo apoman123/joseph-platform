@@ -81,6 +81,11 @@ describe('alert manager', () => {
       inputs: {},
       source_hash: 'x',
       enabled: true,
+      overlay: true,
+      package: null,
+      package_version: null,
+      requests: {},
+      source_available: true,
     });
     expect(condition).toEqual({
       scriptId: 'builtin:price-cross',

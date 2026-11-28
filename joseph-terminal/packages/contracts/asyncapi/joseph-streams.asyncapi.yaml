@@ -41,12 +41,12 @@ operations:
   subscribeMarket:
     action: send
     channel: {$ref: '#/channels/market'}
-    summary: Subscribe to candles, aois, feed_health, qualification or signals.
+    summary: Subscribe to candles, aois, feed_health or signals.
     messages: [{$ref: '#/channels/market/messages/clientMessage'}]
   receiveMarket:
     action: receive
     channel: {$ref: '#/channels/market'}
-    summary: candle.updated (Candle), aoi.updated (AoiRecord), feed.health (FeedHealth), qualification.changed, signal.created (Signal).
+    summary: candle.updated (Candle), aoi.updated (AoiRecord), feed.health (FeedHealth), signal.created (Signal).
     messages: [{$ref: '#/channels/market/messages/envelope'}]
   subscribeUser:
     action: send

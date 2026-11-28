@@ -1,7 +1,7 @@
 [project]
 name = "joseph-market-engine"
 version = "0.6.0"
-description = "Joseph market engine: venue market data, qualification filter, indicator plugins, strategy AST evaluation, signals, alerts and backtests."
+description = "Joseph market engine: venue market data, built-in and plugin Python scripts (indicators, strategies, filters, alerts), indicator plugins, signals and alerts."
 readme = "README.md"
 requires-python = ">=3.12"
 license = { text = "AGPL-3.0-only" }

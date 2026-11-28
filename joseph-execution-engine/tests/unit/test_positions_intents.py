@@ -235,6 +235,9 @@ def test_kill_switch_scopes() -> None:
     strategy_switch = _switch(enums.KillSwitchScope.STRATEGY, "my-strat")
     assert strategy_switch.applies_to("a", "my-strat:v3")
     assert not strategy_switch.applies_to("a", "other:v1")
+    builtin = _switch(enums.KillSwitchScope.STRATEGY, "builtin:vwap-band")
+    assert builtin.applies_to("a", "builtin:vwap-band:v0123456789ab")
+    assert not builtin.applies_to("a", "builtin:other:v0123456789ab")
     assert not strategy_switch.applies_to("a", None)
     assert not _switch(
         enums.KillSwitchScope.GLOBAL, None, engaged=False

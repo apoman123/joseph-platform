@@ -1,6 +1,6 @@
 # Joseph market engine
 
-The market engine serves market data, perpetual screening, indicators, strategies, signals, alerts and backtests over HTTP and WebSocket (FastAPI, port 8000). This page is for developers; settings are in the [operations runbook](../docs/OPERATIONS.md#market-engine).
+The market engine serves market data, indicators, Python scripts and strategy activations, signals, alerts and backtests over HTTP and WebSocket (FastAPI, port 8000). This page is for developers; settings are in the [operations runbook](../docs/OPERATIONS.md#market-engine).
 
 ## Run and test
 
@@ -22,11 +22,9 @@ Indicator plugin packages install into this environment with `make plugins` from
 |---|---|
 | `domain/` | Standard-library kernel: ids, decimals, timeframes, instruments, session calendars, candles, areas of interest (AOIs), `BarFrame` |
 | `market_data/` | Venue adapters, seconds bars, trade recorder and archives, aggregated timeframes, feed router (AUTO / NATIVE_WS / REST_POLL / REPLAY), candle store, order books |
-| `screening/` | Five strict gates, funding risk, three-state qualification with reasons |
 | `indicators/` | Plugin SDK and metadata, nine built-in indicators, plugin discovery (entry points `joseph.indicator_plugins`), multi-timeframe engine ([README](src/joseph/indicators/README.md)) |
-| `strategy/` | Rule AST v2, compiler, tri-state evaluator, setup state machine, immutable versions |
 | `signals/`, `alerts/` | Deduplicated signals; durable outbox to the UI, Telegram, LINE, e-mail, webhooks and the execution engine |
-| `pipeline/`, `backtest/` | Live loop over closed candles (history warms up without firing); backtests on the same evaluator |
+| `scripts/` | Python script roles: immutable tenant versions, isolated runner, built-in and plugin catalog (`builtin/`: indicators, strategies, filters such as liquidity qualification, alerts; entry points `joseph.scripts`), simulator and backtests (`/v1/scripts/{id}/run`), scans composing filters with AND (`/v1/script-scans`), alert jobs and strategy activations (closed bars → signals, no history replay; [ADR 0010](../docs/adr/0010-python-strategy-scripts.md)) |
 | `api/`, `bootstrap.py` | FastAPI routers; composition root |
 
 ## Venues
@@ -93,8 +91,8 @@ Trade streams and their aggressor side (checked against the best bid and ask):
 
 - **Rate limits:** MIS responses are cached server-side (data advances every 4–120 s); TWSE blocks clients above about 3 requests per 5 s, so www.twse.com.tw, openapi.twse.com.tw and MIS (shared by TWSE and TPEx) are each paced at 1 request per 2 s without bursts. www.tpex.org.tw is paced at 1 request per 2 s.
 - **TPEx listings** come from the OpenAPI datasets `tpex_mainboard_quotes`, `mopsfin_t187ap03_O`, `tpex_ipo_no_limit` and `tpex_cmode`: stocks and ETFs, including bond ETFs (sixth character `B`, or `D` for active; asset class `BOND`). Not served: 興櫃 (emerging board), foreign-currency counters (`K`/`C`), preferreds, ETNs, warrants. Suspended companies are `HALTED`.
-- **TPEx history** goes back to 1994 with volume exact to 1,000 shares, including odd-lot and after-hours trades but not block trades; prices are unadjusted. TPEx uses the XTAI calendar (its daily index history has exactly the XTAI sessions in every month 2005–2026); new closures are added to XTAI at runtime. Screening uses TWD thresholds (`tpex_equity`, `tpex_bond` in `screening/domain/policy.py`).
-- **Fugle free tier** (`JOSEPH_TW_DATA_SOURCE=fugle`, `JOSEPH_FUGLE_API_KEY`): per-symbol 1m history from 2023-05-23, daily history from 2010, and current-session 1m candles/quotes by REST polling. Longer periods are aggregated on XTAI; seconds bars, bulk Fugle snapshots and Taiwan futures/options are unavailable on this free integration. Official lists, screening snapshots and MIS books remain separate sources.
+- **TPEx history** goes back to 1994 with volume exact to 1,000 shares, including odd-lot and after-hours trades but not block trades; prices are unadjusted. TPEx uses the XTAI calendar (its daily index history has exactly the XTAI sessions in every month 2005–2026); new closures are added to XTAI at runtime. The built-in liquidity qualification filter uses TWSE's TWD thresholds for TPEx (`scripts/builtin/filters/liquidity_qualification.py`).
+- **Fugle free tier** (`JOSEPH_TW_DATA_SOURCE=fugle`, `JOSEPH_FUGLE_API_KEY`): per-symbol 1m history from 2023-05-23, daily history from 2010, and current-session 1m candles/quotes by REST polling. Longer periods are aggregated on XTAI; seconds bars, bulk Fugle snapshots and Taiwan futures/options are unavailable on this free integration. Official lists, bulk snapshots for scans and MIS books remain separate sources.
 
 #### United States
 

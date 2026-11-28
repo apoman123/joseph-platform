@@ -18,7 +18,10 @@ same market engine:
   a step-up TOTP secret and no venue or broker credentials.
 
 The market engine caps anchored studies at ``MAX_ANCHORED_BARS`` (the
-smallest value it accepts) so the cap is cheap to exceed.
+smallest value it accepts) so the cap is cheap to exceed. It also loads
+the ``PROBE_ID`` plugin strategy (``PROBE_SOURCE``) through the
+``joseph.scripts`` entry-point group: an installed-package stand-in on its
+``PYTHONPATH`` whose single deterministic entry drives the signal chain.
 
 Engines run inside their own uv projects (``uv run --frozen``). Set
 ``JOSEPH_SYSTEM_ENGINE_VENVS`` to a checkout whose ``<engine>/.venv``
@@ -66,6 +69,40 @@ MARKET = "joseph-market-engine"
 EXECUTION = "joseph-execution-engine"
 EXECUTION_APP = "joseph_execution.bootstrap:create_application"
 NEW_YORK = zoneinfo.ZoneInfo("America/New_York")
+PROBE_ID = "plugin:system-probe:probe-long"
+"""Catalog id of the system-test plugin strategy."""
+PROBE_SOURCE = '''"""System-test plugin strategy with one fixed entry."""
+
+import joseph_script
+
+
+class ProbeLong(joseph_script.Strategy):
+    """Buys once, on the first bar starting at or after after_ms."""
+
+    ID = "probe-long"
+    TITLE = "System probe long"
+    DESCRIPTION = "Queues one long entry at the first bar after after_ms."
+    INPUTS = {"after_ms": joseph_script.Input(0, title="First bar (ms)")}
+
+    def __init__(self):
+        self.done = False
+
+    def on_bar(self, ctx):
+        if self.done or ctx.position_size:
+            return
+        if ctx.bar["time_ms"] < int(ctx.input("after_ms")):
+            return
+        close = float(ctx.bar["close"])
+        ctx.entry(
+            "long",
+            0.001,
+            stop=close * 0.99,
+            target=close * 1.02,
+            comment="system probe",
+        )
+        self.done = True
+'''
+"""Module source of the probe plugin, run in process by the market engine."""
 
 
 def _free_port() -> int:
@@ -242,6 +279,32 @@ def _serving(
             process.kill()
 
 
+def _install_probe(directory: pathlib.Path) -> str:
+    """Writes the probe plugin module and its distribution metadata.
+
+    Args:
+        directory: Empty directory that goes on the engine's ``PYTHONPATH``.
+
+    Returns:
+        The directory as a ``PYTHONPATH`` entry; ``importlib.metadata`` finds
+        the ``.dist-info`` there like an installed package's.
+    """
+    (directory / "joseph_system_probe.py").write_text(
+        PROBE_SOURCE, encoding="utf-8"
+    )
+    info = directory / "joseph_system_probe-1.0.dist-info"
+    info.mkdir()
+    (info / "METADATA").write_text(
+        "Metadata-Version: 2.1\nName: joseph-system-probe\nVersion: 1.0\n",
+        encoding="utf-8",
+    )
+    (info / "entry_points.txt").write_text(
+        "[joseph.scripts]\nsystem-probe = joseph_system_probe:ProbeLong\n",
+        encoding="utf-8",
+    )
+    return str(directory)
+
+
 def _common_env() -> dict[str, str]:
     """Returns the environment shared by every engine instance.
 
@@ -302,13 +365,18 @@ def services(
     market_port, exec_port = _free_port(), _free_port()
     market_url = f"http://127.0.0.1:{market_port}"
     exec_url = f"http://127.0.0.1:{exec_port}"
+    probe = tmp_path_factory.mktemp("probe-plugin")
+    base_env = _common_env()
     market_env = {
-        **_common_env(),
+        **base_env,
+        "PYTHONPATH": os.pathsep.join(
+            filter(None, (_install_probe(probe), base_env.get("PYTHONPATH")))
+        ),
         "JOSEPH_DATABASE_URL": f"sqlite:///{work / 'market.db'}",
         "JOSEPH_EXECUTION_URL": exec_url,
         "JOSEPH_ENABLED_VENUES": "mock",
         "JOSEPH_DEMO_ONLY": "true",
-        "JOSEPH_PIPELINE_INTERVAL_S": "2",
+        "JOSEPH_STRATEGY_INTERVAL_S": "2",
         "JOSEPH_MAX_ANCHORED_BARS": str(MAX_ANCHORED_BARS),
     }
     exec_env = _execution_env(work / "execution.db", market_url)
@@ -603,8 +671,13 @@ def validate() -> Callable[[str, str, object], None]:
     resources = []
     for path in sorted(SCHEMAS.glob("*.schema.json")):
         contents = json.loads(path.read_text(encoding="utf-8"))
+        # Generated schemas carry a relative $id; serve every file under
+        # BASE_URI so relative references between files resolve.
         resources.append(
-            (contents["$id"], referencing.Resource.from_contents(contents))
+            (
+                f"{BASE_URI}{path.name}",
+                referencing.Resource.from_contents(contents),
+            )
         )
     registry = referencing.Registry().with_resources(resources)
 

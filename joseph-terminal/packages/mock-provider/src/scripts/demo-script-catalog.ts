@@ -18,11 +18,14 @@ export const DEMO_SCRIPT_CATALOG: readonly CatalogScript[] = [
     script_id: 'builtin:liquidity-qualification',
     kind: 'filter',
     origin: 'builtin',
+    package: null,
+    package_version: null,
     title: 'Liquidity qualification',
     short_title: 'Liquidity',
     description:
       'Strict turnover, open-interest, spread, slippage and funding gates per asset class; missing or stale data is unavailable, never a match.',
     category: 'Liquidity',
+    overlay: true,
     inputs: {
       max_data_age_s: {
         default: 300,
@@ -45,6 +48,8 @@ export const DEMO_SCRIPT_CATALOG: readonly CatalogScript[] = [
         tooltip: '|8h funding| at or above 0.30 % excludes a perpetual.',
       },
     },
+    requests: {},
+    source_available: true,
     source_hash:
       'ecc3714e143f4a6cf4e4c3b2cd2edb1b58e3c556cb563c65edbb171b44c5b895',
     enabled: true,
@@ -54,11 +59,14 @@ export const DEMO_SCRIPT_CATALOG: readonly CatalogScript[] = [
     script_id: 'builtin:price',
     kind: 'filter',
     origin: 'builtin',
+    package: null,
+    package_version: null,
     title: 'Price',
     short_title: 'Price',
     description:
       'Latest traded price, or the mark price when the venue publishes no trade, above, below or between values.',
     category: 'Price',
+    overlay: true,
     inputs: {
       operator: {
         default: 'above',
@@ -91,6 +99,8 @@ export const DEMO_SCRIPT_CATALOG: readonly CatalogScript[] = [
         tooltip: 'Upper or lower bound for between.',
       },
     },
+    requests: {},
+    source_available: true,
     source_hash:
       '1689ba8348144750d0370f31ac034c9a92ae987e7a869be01f4f7490acd5ead5',
     enabled: true,
@@ -100,11 +110,14 @@ export const DEMO_SCRIPT_CATALOG: readonly CatalogScript[] = [
     script_id: 'builtin:change',
     kind: 'filter',
     origin: 'builtin',
+    package: null,
+    package_version: null,
     title: 'Change %',
     short_title: 'Chg%',
     description:
       'Rolling 24-hour price change in percent above, below or between values.',
     category: 'Price',
+    overlay: true,
     inputs: {
       operator: {
         default: 'above',
@@ -137,6 +150,8 @@ export const DEMO_SCRIPT_CATALOG: readonly CatalogScript[] = [
         tooltip: 'Upper or lower bound for between.',
       },
     },
+    requests: {},
+    source_available: true,
     source_hash:
       '83b6afb7c7170eec8fbba8cf62ea97604cbc9f095d93daa853d9885471b452a5',
     enabled: true,
@@ -146,11 +161,14 @@ export const DEMO_SCRIPT_CATALOG: readonly CatalogScript[] = [
     script_id: 'builtin:volume',
     kind: 'filter',
     origin: 'builtin',
+    package: null,
+    package_version: null,
     title: 'Volume',
     short_title: 'Vol',
     description:
       'Rolling 24-hour or latest-session volume in base units (shares, coins or contracts) above, below or between values.',
     category: 'Volume',
+    overlay: true,
     inputs: {
       operator: {
         default: 'above',
@@ -183,6 +201,8 @@ export const DEMO_SCRIPT_CATALOG: readonly CatalogScript[] = [
         tooltip: 'Upper or lower bound for between.',
       },
     },
+    requests: {},
+    source_available: true,
     source_hash:
       '1c51df0886db689b3769eef6589cc80743f2276ce68af313c8a490e7b8e7a746',
     enabled: true,
@@ -192,11 +212,14 @@ export const DEMO_SCRIPT_CATALOG: readonly CatalogScript[] = [
     script_id: 'builtin:turnover',
     kind: 'filter',
     origin: 'builtin',
+    package: null,
+    package_version: null,
     title: 'Turnover',
     short_title: 'Turnover',
     description:
       'Rolling 24-hour or latest-session traded value in the quote currency above, below or between values.',
     category: 'Volume',
+    overlay: true,
     inputs: {
       operator: {
         default: 'above',
@@ -229,6 +252,8 @@ export const DEMO_SCRIPT_CATALOG: readonly CatalogScript[] = [
         tooltip: 'Upper or lower bound for between.',
       },
     },
+    requests: {},
+    source_available: true,
     source_hash:
       '2422aeb72a7d6241fc4246fa40ddce3d15dd536f81fa586f631ebf1c3838b293',
     enabled: true,
@@ -238,11 +263,14 @@ export const DEMO_SCRIPT_CATALOG: readonly CatalogScript[] = [
     script_id: 'builtin:relative-volume',
     kind: 'filter',
     origin: 'builtin',
+    package: null,
+    package_version: null,
     title: 'Relative volume',
     short_title: 'Rel Vol',
     description:
       'Volume of the latest closed bar divided by the mean volume of the length bars before it.',
     category: 'Volume',
+    overlay: true,
     inputs: {
       length: {
         default: 10,
@@ -285,6 +313,8 @@ export const DEMO_SCRIPT_CATALOG: readonly CatalogScript[] = [
         tooltip: 'Upper or lower bound for between.',
       },
     },
+    requests: {},
+    source_available: true,
     source_hash:
       'edcc63fdb553bb153ddbdf3545db256e946f1aab6a2eb45945084c40e2634d5a',
     enabled: true,
@@ -294,11 +324,14 @@ export const DEMO_SCRIPT_CATALOG: readonly CatalogScript[] = [
     script_id: 'builtin:gap',
     kind: 'filter',
     origin: 'builtin',
+    package: null,
+    package_version: null,
     title: 'Gap %',
     short_title: 'Gap%',
     description:
       'Opening gap of the latest closed bar in percent of the previous close, above, below or between values.',
     category: 'Price',
+    overlay: true,
     inputs: {
       operator: {
         default: 'above',
@@ -331,6 +364,8 @@ export const DEMO_SCRIPT_CATALOG: readonly CatalogScript[] = [
         tooltip: 'Upper or lower bound for between.',
       },
     },
+    requests: {},
+    source_available: true,
     source_hash:
       'c57ca15c9416bcb4191039cc22bb5fb141fff213ccfcd418135c208517a72f8f',
     enabled: true,
@@ -340,11 +375,14 @@ export const DEMO_SCRIPT_CATALOG: readonly CatalogScript[] = [
     script_id: 'builtin:price-vs-ma',
     kind: 'filter',
     origin: 'builtin',
+    package: null,
+    package_version: null,
     title: 'Price vs moving average',
     short_title: 'Price/MA',
     description:
       'Latest price above or below the simple or exponential moving average of the closed bars.',
     category: 'Moving averages',
+    overlay: true,
     inputs: {
       ma_type: {
         default: 'SMA',
@@ -377,6 +415,8 @@ export const DEMO_SCRIPT_CATALOG: readonly CatalogScript[] = [
         tooltip: '',
       },
     },
+    requests: {},
+    source_available: true,
     source_hash:
       '9f34d51cdca72f21984511a2242d64f5e53ca823b461feeca17c25e72cedbf1b',
     enabled: true,
@@ -386,11 +426,14 @@ export const DEMO_SCRIPT_CATALOG: readonly CatalogScript[] = [
     script_id: 'builtin:rsi',
     kind: 'filter',
     origin: 'builtin',
+    package: null,
+    package_version: null,
     title: 'Relative Strength Index',
     short_title: 'RSI',
     description:
       "Wilder's RSI of the closed bars above, below or between values, such as below 30 for oversold markets.",
     category: 'Oscillators',
+    overlay: true,
     inputs: {
       length: {
         default: 14,
@@ -433,6 +476,8 @@ export const DEMO_SCRIPT_CATALOG: readonly CatalogScript[] = [
         tooltip: 'Upper or lower bound for between.',
       },
     },
+    requests: {},
+    source_available: true,
     source_hash:
       '23aaf43388c0180c62e0351dbfcc39ea52f2f1d76ea917f2f41c0a037a346d34',
     enabled: true,
@@ -442,11 +487,14 @@ export const DEMO_SCRIPT_CATALOG: readonly CatalogScript[] = [
     script_id: 'builtin:new-high-low',
     kind: 'filter',
     origin: 'builtin',
+    package: null,
+    package_version: null,
     title: 'New high or low',
     short_title: 'New H/L',
     description:
       'The latest closed bar makes the highest high or lowest low of the last length bars, such as a 52-week high on weekly bars.',
     category: 'Price',
+    overlay: true,
     inputs: {
       length: {
         default: 52,
@@ -469,6 +517,8 @@ export const DEMO_SCRIPT_CATALOG: readonly CatalogScript[] = [
         tooltip: '',
       },
     },
+    requests: {},
+    source_available: true,
     source_hash:
       '4d783f984e904247f20f9aafc14d2db9ea3f79bb8e9a11d4b5857e9ff772c5a7',
     enabled: true,
@@ -478,11 +528,14 @@ export const DEMO_SCRIPT_CATALOG: readonly CatalogScript[] = [
     script_id: 'builtin:price-cross',
     kind: 'alert',
     origin: 'builtin',
+    package: null,
+    package_version: null,
     title: 'Price crossing',
     short_title: 'Cross',
     description:
       'The closed price crosses a level: crossing in either direction, crossing up or crossing down.',
     category: 'Price',
+    overlay: true,
     inputs: {
       level: {
         default: 100,
@@ -505,6 +558,8 @@ export const DEMO_SCRIPT_CATALOG: readonly CatalogScript[] = [
         tooltip: '',
       },
     },
+    requests: {},
+    source_available: true,
     source_hash:
       '806cd1be38eff25826cab194ea113af94ffbb63d5def4479fb9b8c3e9786bee9',
     enabled: true,
@@ -514,11 +569,14 @@ export const DEMO_SCRIPT_CATALOG: readonly CatalogScript[] = [
     script_id: 'builtin:channel',
     kind: 'alert',
     origin: 'builtin',
+    package: null,
+    package_version: null,
     title: 'Price channel',
     short_title: 'Channel',
     description:
       'The closed price enters or exits a channel between two levels, or closes inside or outside it.',
     category: 'Price',
+    overlay: true,
     inputs: {
       upper: {
         default: 110,
@@ -551,6 +609,8 @@ export const DEMO_SCRIPT_CATALOG: readonly CatalogScript[] = [
         tooltip: '',
       },
     },
+    requests: {},
+    source_available: true,
     source_hash:
       '34d8259ecc657e76fa8b36d06f7b8f902f54352ea3ec846541c24777da74df38',
     enabled: true,
@@ -560,11 +620,14 @@ export const DEMO_SCRIPT_CATALOG: readonly CatalogScript[] = [
     script_id: 'builtin:ma-cross',
     kind: 'alert',
     origin: 'builtin',
+    package: null,
+    package_version: null,
     title: 'Moving average cross',
     short_title: 'MA cross',
     description:
       'A fast simple or exponential moving average of the close crosses a slow one, up (golden cross) or down (death cross).',
     category: 'Moving averages',
+    overlay: true,
     inputs: {
       fast_length: {
         default: 9,
@@ -607,6 +670,8 @@ export const DEMO_SCRIPT_CATALOG: readonly CatalogScript[] = [
         tooltip: '',
       },
     },
+    requests: {},
+    source_available: true,
     source_hash:
       'c1eb25952425d479cbde8f37e747ea68f72f3c72bbf3e570dcaa788567dd06d7',
     enabled: true,
@@ -616,11 +681,14 @@ export const DEMO_SCRIPT_CATALOG: readonly CatalogScript[] = [
     script_id: 'builtin:rsi-level',
     kind: 'alert',
     origin: 'builtin',
+    package: null,
+    package_version: null,
     title: 'RSI overbought / oversold',
     short_title: 'RSI alert',
     description:
       "Wilder's RSI of the close crosses above the overbought level or below the oversold level.",
     category: 'Oscillators',
+    overlay: true,
     inputs: {
       length: {
         default: 14,
@@ -663,6 +731,8 @@ export const DEMO_SCRIPT_CATALOG: readonly CatalogScript[] = [
         tooltip: '',
       },
     },
+    requests: {},
+    source_available: true,
     source_hash:
       '3413b9c3f5c9c2536805e9112fbc2ed05fccf871242e806210e8cdc3626a4ed7',
     enabled: true,
@@ -672,11 +742,14 @@ export const DEMO_SCRIPT_CATALOG: readonly CatalogScript[] = [
     script_id: 'builtin:volume-spike',
     kind: 'alert',
     origin: 'builtin',
+    package: null,
+    package_version: null,
     title: 'Volume spike',
     short_title: 'Vol spike',
     description:
       "A closed bar's volume is above a multiple of the mean volume of the bars before it.",
     category: 'Volume',
+    overlay: true,
     inputs: {
       length: {
         default: 20,
@@ -699,6 +772,8 @@ export const DEMO_SCRIPT_CATALOG: readonly CatalogScript[] = [
         tooltip: '',
       },
     },
+    requests: {},
+    source_available: true,
     source_hash:
       '52f0c5c6ddb9e21f73e72d890c556a256b133d71ed5fabbe0a67205a01c233ab',
     enabled: true,
@@ -708,11 +783,14 @@ export const DEMO_SCRIPT_CATALOG: readonly CatalogScript[] = [
     script_id: 'builtin:percent-change',
     kind: 'alert',
     origin: 'builtin',
+    package: null,
+    package_version: null,
     title: 'Percent change',
     short_title: '% change',
     description:
       'The close rises or falls by at least a percentage compared with the close a number of bars earlier.',
     category: 'Price',
+    overlay: true,
     inputs: {
       bars: {
         default: 1,
@@ -745,6 +823,8 @@ export const DEMO_SCRIPT_CATALOG: readonly CatalogScript[] = [
         tooltip: '',
       },
     },
+    requests: {},
+    source_available: true,
     source_hash:
       '077ebdf246b2c46f7c9b78635af714d190b3dc46348336cbc6954ca36ed569ee',
     enabled: true,
@@ -754,11 +834,14 @@ export const DEMO_SCRIPT_CATALOG: readonly CatalogScript[] = [
     script_id: 'builtin:breakout',
     kind: 'alert',
     origin: 'builtin',
+    package: null,
+    package_version: null,
     title: 'New high or low breakout',
     short_title: 'Breakout',
     description:
       "A closed bar's high is above, or its low below, every bar of the preceding length bars.",
     category: 'Price',
+    overlay: true,
     inputs: {
       length: {
         default: 20,
@@ -781,6 +864,8 @@ export const DEMO_SCRIPT_CATALOG: readonly CatalogScript[] = [
         tooltip: '',
       },
     },
+    requests: {},
+    source_available: true,
     source_hash:
       '0f5a834adde7c846c2d48d82c6110dd45efddf56ce927f005bdaffc892a2892c',
     enabled: true,

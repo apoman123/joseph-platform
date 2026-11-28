@@ -27,8 +27,8 @@ The market engine always loads its nine built-in indicators: SMA, EMA, VWAP, reg
 
 - Requirements are space-separated pip requirements, installed **without their dependencies**: list every package a plugin needs and pin git URLs to a commit. `make plugins` and image builds then run `python -m joseph.indicators.discovery --check`, which prints the loaded plugin ids and fails if an entry point or plugin does not load.
 - At startup the built-ins register first, then entry points sorted by name. A failing entry point or plugin is logged and skipped, and the engine still starts. A plugin is rejected when its id or an AOI kind is already taken (so no package replaces a built-in), when its `schema_version` is unsupported or when its metadata is invalid.
-- Plugin code runs inside the market engine with its full trust, like any installed package. In production, allowlist entry points with `JOSEPH_INDICATOR_PLUGIN_PACKAGES` and list the plugins your strategies need in `JOSEPH_INDICATOR_PLUGINS_REQUIRED`, so a broken install fails startup instead of leaving those strategies unsupported ([settings](#market-engine)).
-- Disabling or removing a plugin keeps saved strategies and workspaces: its conditions report the plugin as unavailable and block entries until it is back.
+- Plugin code runs inside the market engine with its full trust, like any installed package. In production, allowlist entry points with `JOSEPH_INDICATOR_PLUGIN_PACKAGES` and list the plugins you need in `JOSEPH_INDICATOR_PLUGINS_REQUIRED`, so a broken install fails startup instead of leaving them unavailable ([settings](#market-engine)).
+- Disabling or removing a plugin keeps saved workspaces: its layers report the plugin as unavailable until it is back.
 - A plugin package keeps its own licence; check it before you use or redistribute an image that contains it ([licensing](reports/LICENSING_REPORT.md)).
 
 ### Local
@@ -79,12 +79,11 @@ Crypto, TWSE/TPEx official data and Treasury yields need no keys.
 | `JOSEPH_REPLAY_DIR`† | unset | JSONL candles for the replay adapter |
 | `JOSEPH_HTTP_TIMEOUT_S`†, `JOSEPH_POLL_INTERVAL_S`† | `10`, `5` (≥1) | Venue HTTP timeout; REST polling |
 | `JOSEPH_SNAPSHOT_STALE_AFTER_MS`†, `JOSEPH_STREAM_RETENTION`† | `30000`, `2000` | Stale age; envelopes kept per stream for resume |
-| `JOSEPH_QUALIFICATION_TOP_N`†, `JOSEPH_COINGECKO_ENABLED`† | `50`, `false` | Binance screening preselection; trending heat bonus |
 | `JOSEPH_MAX_ANCHORED_BARS`† | `50000` (≥2000) | Anchored-study reach |
 | `JOSEPH_INDICATOR_PLUGIN_PACKAGES` | `*` | [Plugin](#indicator-plugins) entry points to load: `*` (all), `none`, or comma-separated entry-point names; built-ins always load |
-| `JOSEPH_INDICATOR_PLUGINS_DISABLED` | empty | Comma-separated plugin ids, built-ins included, registered but disabled; strategies using them report `PLUGIN_UNAVAILABLE` |
+| `JOSEPH_INDICATOR_PLUGINS_DISABLED` | empty | Comma-separated plugin ids, built-ins included, registered but disabled |
 | `JOSEPH_INDICATOR_PLUGINS_REQUIRED` | empty | Comma-separated plugin ids that must load enabled, else startup fails |
-| `JOSEPH_PIPELINE_ENABLED`†, `_INTERVAL_S`†, `_MAX_INSTRUMENTS`† | `true`, `10` (≥1), `10` | Live signal pipeline |
+| `JOSEPH_STRATEGY_ACTIVATIONS_ENABLED`†, `JOSEPH_STRATEGY_INTERVAL_S`† | `true`, `10` (≥1) | Strategy activation loop (closed bars → signals) |
 | `JOSEPH_FORWARD_SIGNALS`†, `JOSEPH_ALERT_INTERVAL_S`† | `true`, `2` (≥0.5) | Forward PAPER/SHADOW/AUTO_LIVE entries; alert outbox pass |
 | `JOSEPH_TELEGRAM_BOT_TOKEN`, `JOSEPH_LINE_CHANNEL_TOKEN`, `JOSEPH_WEBHOOK_SECRET`, `JOSEPH_SMTP_HOST`, `_PORT`† (`587`), `_FROM`, `_USERNAME`, `_PASSWORD` | unset | Notification channels |
 | `JOSEPH_ALPACA_KEY_ID`, `JOSEPH_ALPACA_SECRET_KEY` | unset | [US data](#market-data-setup) |
@@ -158,7 +157,7 @@ Crypto, TWSE/TPEx official data and Treasury yields need no keys.
 | Feed STALE or gaps | Check *Data health* and `probe_venues.py`; new exposure is already blocked |
 | `ORDER_UNKNOWN` / `UNKNOWN_RECONCILING` | Do **not** resubmit. The reconciler queries by client order id; if it cannot, the order is flagged for manual intervention: check the venue, then cancel or confirm |
 | Position mismatch blocks an account | A holding Joseph did not open, or a missed fill. Resolve it at the venue, or use a dedicated account |
-| Runaway strategy or unexpected exposure | Kill switch (*Risk controls* or `POST /v1/risk/kill-switch`, GLOBAL) blocks new opening orders; tick *Cancel open orders* / *Close positions* only if intended. Then disable the deployment and pause the strategy |
+| Runaway strategy or unexpected exposure | Kill switch (*Risk controls* or `POST /v1/risk/kill-switch`, GLOBAL) blocks new opening orders; tick *Cancel open orders* / *Close positions* only if intended. Then disable the deployment and pause the strategy activation |
 | Audit `chain_valid: false` | Treat as tampering: freeze writes, restore from backup, compare chains |
 | Alerts not arriving | Dead letters in `alert_deliveries`, channel credentials, quiet hours |
 

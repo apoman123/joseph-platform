@@ -86,9 +86,9 @@ async def test_slow_subscriber_overflows_to_snapshot_required() -> None:
     """Backpressure marks a slow client instead of buffering forever."""
     hub = _hub(max_queue=2)
     sub = hub.open(None)
-    await hub.add_channels(sub, ["qualification"])
+    await hub.add_channels(sub, ["feed_health"])
     for i in range(3):
-        hub.publish("qualification", "qualification.changed", {"i": i})
+        hub.publish("feed_health", "feed.health", {"i": i})
     assert sub.overflowed
 
 

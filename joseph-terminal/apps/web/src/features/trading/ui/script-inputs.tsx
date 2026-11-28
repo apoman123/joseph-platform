@@ -21,12 +21,12 @@ import {useEffect, useState, type ReactNode} from 'react';
  * @return Effective values.
  */
 export function effectiveInputs(
-  inputs: Readonly<Record<string, CatalogInput>>,
+  inputs: Readonly<Record<string, CatalogInput | undefined>>,
   values: Readonly<Record<string, JsonValue | undefined>>
 ): Record<string, JsonValue> {
   const merged: Record<string, JsonValue> = {};
   for (const [name, spec] of Object.entries(inputs)) {
-    merged[name] = values[name] ?? spec.default;
+    if (spec) merged[name] = values[name] ?? spec.default;
   }
   return merged;
 }
@@ -78,7 +78,7 @@ function NumberField({id, value, spec, onChange}: NumberFieldProps): ReactNode {
 /** Props of `ScriptInputs`. */
 export interface ScriptInputsProps {
   /** Declared inputs in display order. */
-  inputs: Readonly<Record<string, CatalogInput>>;
+  inputs: Readonly<Record<string, CatalogInput | undefined>>;
   /** Current values (overrides of the defaults). */
   values: Readonly<Record<string, JsonValue | undefined>>;
   /**
@@ -104,6 +104,7 @@ export function ScriptInputs({
 }: ScriptInputsProps): ReactNode {
   const merged = effectiveInputs(inputs, values);
   return Object.entries(inputs).map(([name, spec]) => {
+    if (!spec) return null;
     const id = `${idPrefix}-${name}`;
     const value = merged[name];
     const label = spec.title || name;

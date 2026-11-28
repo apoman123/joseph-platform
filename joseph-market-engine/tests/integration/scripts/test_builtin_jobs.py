@@ -46,7 +46,7 @@ def app() -> Iterator[
         config.Settings(),
         demo_only=True,
         database_url="sqlite://",
-        pipeline_enabled=False,
+        strategy_activations_enabled=False,
         script_runtime="disabled",
         dev_tokens=config.parse_dev_tokens(
             "jobs-a:tenant-a:user-a,jobs-b:tenant-b:user-b"
@@ -135,6 +135,7 @@ def test_liquidity_qualification_scan_needs_no_docker(
         "mock:stock:ACME",
     }
     assert all("order_book" not in m["snapshot"] for m in job["matches"])
+    assert all("evaluated_at_ms" not in m["snapshot"] for m in job["matches"])
     assert job["conditions"][0]["version"] == 0
     assert job["conditions"][0]["inputs"]["max_data_age_s"] == 300
     assert client.get(

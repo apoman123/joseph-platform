@@ -1,33 +1,29 @@
 {
   "components": {
     "schemas": {
-      "ActivateBody": {
-        "additionalProperties": false,
-        "description": "Body of ``POST /{strategy_id}/activate`` (contract ActivateRequest).\n\n``mode`` is accepted as text so AUTO_LIVE gets an explicit\nTRADE_MODE_DISABLED explanation instead of a generic schema error.\n\nAttributes:\n    version: Version to activate.\n    mode: ``ALERT_ONLY``, ``PAPER`` or ``SHADOW``.\n    instruments: Optional explicit instruments.",
+      "ActivationInstrumentStatus": {
+        "description": "Evaluation progress of one activated instrument.\n\nAttributes:\n    last_processed_ms: Newest bar close already turned into signals or\n        skipped; bars at or before it are never signalled.\n    last_error: Last evaluation error, None after a clean pass.",
         "properties": {
-          "instruments": {
-            "items": {
-              "pattern": "^(bybit|okx|coinbase|kraken|deriv|binance|hyperliquid|lighter|bitget|mexc|twse|tpex|nasdaq|nyse|cboe|treasury|mock):(perp|spot|future|stock|etf|rate):[A-Za-z0-9._/-]{1,64}$",
-              "type": "string"
-            },
-            "title": "Instruments",
-            "type": "array"
+          "last_error": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Last Error"
           },
-          "mode": {
-            "title": "Mode",
-            "type": "string"
-          },
-          "version": {
-            "minimum": 1.0,
-            "title": "Version",
+          "last_processed_ms": {
+            "title": "Last Processed Ms",
             "type": "integer"
           }
         },
         "required": [
-          "version",
-          "mode"
+          "last_processed_ms"
         ],
-        "title": "ActivateBody",
+        "title": "ActivationInstrumentStatus",
         "type": "object"
       },
       "AlertJob": {
@@ -204,564 +200,6 @@
           "tf"
         ],
         "title": "AlertJobInput",
-        "type": "object"
-      },
-      "AllNode": {
-        "additionalProperties": false,
-        "description": "TRUE when every child is TRUE (Kleene conjunction).\n\nAttributes:\n    op: Discriminator ``ALL``.\n    id: Stable editor id echoed in the reason tree.\n    label: Optional display label.\n    children: 1-32 child nodes.",
-        "properties": {
-          "children": {
-            "items": {
-              "discriminator": {
-                "mapping": {
-                  "ALL": "#/components/schemas/AllNode",
-                  "ANY": "#/components/schemas/AnyNode",
-                  "AOI_OVERLAP": "#/components/schemas/AoiOverlapNode",
-                  "AOI_TOUCH": "#/components/schemas/AoiTouchNode",
-                  "COMPARE": "#/components/schemas/CompareNode",
-                  "CROSSES": "#/components/schemas/CrossesNode",
-                  "EVENT": "#/components/schemas/EventNode",
-                  "IN_RANGE": "#/components/schemas/InRangeNode",
-                  "IN_ZONE": "#/components/schemas/InZoneNode",
-                  "NOT": "#/components/schemas/NotNode",
-                  "PERSIST_FOR": "#/components/schemas/PersistForNode",
-                  "RISK_REWARD": "#/components/schemas/RiskRewardNode",
-                  "SEQUENCE": "#/components/schemas/SequenceNode",
-                  "STATE": "#/components/schemas/StateNode",
-                  "TIME_WINDOW": "#/components/schemas/TimeWindowNode",
-                  "WITHIN_BARS": "#/components/schemas/WithinBarsNode"
-                },
-                "propertyName": "op"
-              },
-              "oneOf": [
-                {
-                  "$ref": "#/components/schemas/AllNode"
-                },
-                {
-                  "$ref": "#/components/schemas/AnyNode"
-                },
-                {
-                  "$ref": "#/components/schemas/NotNode"
-                },
-                {
-                  "$ref": "#/components/schemas/StateNode"
-                },
-                {
-                  "$ref": "#/components/schemas/InZoneNode"
-                },
-                {
-                  "$ref": "#/components/schemas/AoiTouchNode"
-                },
-                {
-                  "$ref": "#/components/schemas/AoiOverlapNode"
-                },
-                {
-                  "$ref": "#/components/schemas/EventNode"
-                },
-                {
-                  "$ref": "#/components/schemas/SequenceNode"
-                },
-                {
-                  "$ref": "#/components/schemas/CompareNode"
-                },
-                {
-                  "$ref": "#/components/schemas/InRangeNode"
-                },
-                {
-                  "$ref": "#/components/schemas/CrossesNode"
-                },
-                {
-                  "$ref": "#/components/schemas/PersistForNode"
-                },
-                {
-                  "$ref": "#/components/schemas/WithinBarsNode"
-                },
-                {
-                  "$ref": "#/components/schemas/TimeWindowNode"
-                },
-                {
-                  "$ref": "#/components/schemas/RiskRewardNode"
-                }
-              ]
-            },
-            "maxItems": 32,
-            "minItems": 1,
-            "title": "Children",
-            "type": "array"
-          },
-          "id": {
-            "anyOf": [
-              {
-                "maxLength": 64,
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Id"
-          },
-          "label": {
-            "anyOf": [
-              {
-                "maxLength": 200,
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Label"
-          },
-          "op": {
-            "const": "ALL",
-            "title": "Op",
-            "type": "string"
-          }
-        },
-        "required": [
-          "op",
-          "children"
-        ],
-        "title": "AllNode",
-        "type": "object"
-      },
-      "AnyNode": {
-        "additionalProperties": false,
-        "description": "TRUE when any child is TRUE (Kleene disjunction).\n\nAttributes:\n    op: Discriminator ``ANY``.\n    id: Stable editor id.\n    label: Optional display label.\n    children: 1-32 child nodes.",
-        "properties": {
-          "children": {
-            "items": {
-              "discriminator": {
-                "mapping": {
-                  "ALL": "#/components/schemas/AllNode",
-                  "ANY": "#/components/schemas/AnyNode",
-                  "AOI_OVERLAP": "#/components/schemas/AoiOverlapNode",
-                  "AOI_TOUCH": "#/components/schemas/AoiTouchNode",
-                  "COMPARE": "#/components/schemas/CompareNode",
-                  "CROSSES": "#/components/schemas/CrossesNode",
-                  "EVENT": "#/components/schemas/EventNode",
-                  "IN_RANGE": "#/components/schemas/InRangeNode",
-                  "IN_ZONE": "#/components/schemas/InZoneNode",
-                  "NOT": "#/components/schemas/NotNode",
-                  "PERSIST_FOR": "#/components/schemas/PersistForNode",
-                  "RISK_REWARD": "#/components/schemas/RiskRewardNode",
-                  "SEQUENCE": "#/components/schemas/SequenceNode",
-                  "STATE": "#/components/schemas/StateNode",
-                  "TIME_WINDOW": "#/components/schemas/TimeWindowNode",
-                  "WITHIN_BARS": "#/components/schemas/WithinBarsNode"
-                },
-                "propertyName": "op"
-              },
-              "oneOf": [
-                {
-                  "$ref": "#/components/schemas/AllNode"
-                },
-                {
-                  "$ref": "#/components/schemas/AnyNode"
-                },
-                {
-                  "$ref": "#/components/schemas/NotNode"
-                },
-                {
-                  "$ref": "#/components/schemas/StateNode"
-                },
-                {
-                  "$ref": "#/components/schemas/InZoneNode"
-                },
-                {
-                  "$ref": "#/components/schemas/AoiTouchNode"
-                },
-                {
-                  "$ref": "#/components/schemas/AoiOverlapNode"
-                },
-                {
-                  "$ref": "#/components/schemas/EventNode"
-                },
-                {
-                  "$ref": "#/components/schemas/SequenceNode"
-                },
-                {
-                  "$ref": "#/components/schemas/CompareNode"
-                },
-                {
-                  "$ref": "#/components/schemas/InRangeNode"
-                },
-                {
-                  "$ref": "#/components/schemas/CrossesNode"
-                },
-                {
-                  "$ref": "#/components/schemas/PersistForNode"
-                },
-                {
-                  "$ref": "#/components/schemas/WithinBarsNode"
-                },
-                {
-                  "$ref": "#/components/schemas/TimeWindowNode"
-                },
-                {
-                  "$ref": "#/components/schemas/RiskRewardNode"
-                }
-              ]
-            },
-            "maxItems": 32,
-            "minItems": 1,
-            "title": "Children",
-            "type": "array"
-          },
-          "id": {
-            "anyOf": [
-              {
-                "maxLength": 64,
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Id"
-          },
-          "label": {
-            "anyOf": [
-              {
-                "maxLength": 200,
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Label"
-          },
-          "op": {
-            "const": "ANY",
-            "title": "Op",
-            "type": "string"
-          }
-        },
-        "required": [
-          "op",
-          "children"
-        ],
-        "title": "AnyNode",
-        "type": "object"
-      },
-      "AoiOverlapNode": {
-        "additionalProperties": false,
-        "description": "Two live AOIs of different kind sets overlap.\n\nAttributes:\n    op: Discriminator ``AOI_OVERLAP``.\n    id: Stable editor id.\n    label: Optional display label.\n    kinds_a: First kind set.\n    kinds_b: Second kind set.\n    side: Required side for both AOIs.\n    tf: Detection timeframe (defaults to the signal timeframe).\n    min_overlap_pct: Minimum overlap as percent of the smaller zone.",
-        "properties": {
-          "id": {
-            "anyOf": [
-              {
-                "maxLength": 64,
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Id"
-          },
-          "kinds_a": {
-            "items": {
-              "pattern": "^[A-Z][A-Z0-9_]{0,47}$",
-              "type": "string"
-            },
-            "minItems": 1,
-            "title": "Kinds A",
-            "type": "array"
-          },
-          "kinds_b": {
-            "items": {
-              "pattern": "^[A-Z][A-Z0-9_]{0,47}$",
-              "type": "string"
-            },
-            "minItems": 1,
-            "title": "Kinds B",
-            "type": "array"
-          },
-          "label": {
-            "anyOf": [
-              {
-                "maxLength": 200,
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Label"
-          },
-          "min_overlap_pct": {
-            "anyOf": [
-              {
-                "type": "number"
-              },
-              {
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Min Overlap Pct"
-          },
-          "op": {
-            "const": "AOI_OVERLAP",
-            "title": "Op",
-            "type": "string"
-          },
-          "side": {
-            "enum": [
-              "bullish",
-              "bearish"
-            ],
-            "title": "Side",
-            "type": "string"
-          },
-          "tf": {
-            "anyOf": [
-              {
-                "$ref": "#/components/schemas/Timeframe"
-              },
-              {
-                "type": "null"
-              }
-            ]
-          }
-        },
-        "required": [
-          "op",
-          "kinds_a",
-          "kinds_b",
-          "side"
-        ],
-        "title": "AoiOverlapNode",
-        "type": "object"
-      },
-      "AoiTouchNode": {
-        "additionalProperties": false,
-        "description": "A recent closed bar touched a previously confirmed AOI.\n\nAttributes:\n    op: Discriminator ``AOI_TOUCH``.\n    id: Stable editor id.\n    label: Optional display label.\n    kinds: Acceptable AOI kinds.\n    side: Required AOI side.\n    tf: AOI detection timeframe (defaults to the signal timeframe).\n    within_bars: Lookback in closed signal bars (0 = current bar).\n    touch: Intersection rule.\n    require_active: AOI must still be live at evaluation time.\n    min_quality: Minimum plugin quality score.",
-        "properties": {
-          "id": {
-            "anyOf": [
-              {
-                "maxLength": 64,
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Id"
-          },
-          "kinds": {
-            "items": {
-              "pattern": "^[A-Z][A-Z0-9_]{0,47}$",
-              "type": "string"
-            },
-            "maxItems": 8,
-            "minItems": 1,
-            "title": "Kinds",
-            "type": "array"
-          },
-          "label": {
-            "anyOf": [
-              {
-                "maxLength": 200,
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Label"
-          },
-          "min_quality": {
-            "anyOf": [
-              {
-                "maximum": 100.0,
-                "minimum": 0.0,
-                "type": "integer"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Min Quality"
-          },
-          "op": {
-            "const": "AOI_TOUCH",
-            "title": "Op",
-            "type": "string"
-          },
-          "require_active": {
-            "default": true,
-            "title": "Require Active",
-            "type": "boolean"
-          },
-          "side": {
-            "enum": [
-              "bullish",
-              "bearish"
-            ],
-            "title": "Side",
-            "type": "string"
-          },
-          "tf": {
-            "anyOf": [
-              {
-                "$ref": "#/components/schemas/Timeframe"
-              },
-              {
-                "type": "null"
-              }
-            ]
-          },
-          "touch": {
-            "default": "WICK",
-            "enum": [
-              "WICK",
-              "BODY",
-              "CLOSE"
-            ],
-            "title": "Touch",
-            "type": "string"
-          },
-          "within_bars": {
-            "maximum": 200.0,
-            "minimum": 0.0,
-            "title": "Within Bars",
-            "type": "integer"
-          }
-        },
-        "required": [
-          "op",
-          "kinds",
-          "side",
-          "within_bars"
-        ],
-        "title": "AoiTouchNode",
-        "type": "object"
-      },
-      "BacktestBody": {
-        "additionalProperties": false,
-        "description": "Body mirroring the contract ``BacktestRequest``.\n\nUnknown fields are rejected (422).\n\nAttributes:\n    version: Strategy version number to evaluate.\n    instrument_id: Canonical instrument id.\n    from_ms: Inclusive start, UTC epoch milliseconds.\n    to_ms: Exclusive end, UTC epoch milliseconds.\n    fee_bps: Fee per side in basis points; when omitted, the\n        strategy's fee estimate or 0.\n    slippage_bps: Slippage on market fills in basis points; the\n        runner's default when omitted.\n    max_hold_bars: Bars before a timeout exit (1..10000); the runner's\n        default when omitted.",
-        "properties": {
-          "fee_bps": {
-            "anyOf": [
-              {
-                "type": "number"
-              },
-              {
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Fee Bps"
-          },
-          "from_ms": {
-            "minimum": 0.0,
-            "title": "From Ms",
-            "type": "integer"
-          },
-          "instrument_id": {
-            "pattern": "^(bybit|okx|coinbase|kraken|deriv|binance|hyperliquid|lighter|bitget|mexc|twse|tpex|nasdaq|nyse|cboe|treasury|mock):(perp|spot|future|stock|etf|rate):[A-Za-z0-9._/-]{1,64}$",
-            "title": "Instrument Id",
-            "type": "string"
-          },
-          "max_hold_bars": {
-            "anyOf": [
-              {
-                "maximum": 10000.0,
-                "minimum": 1.0,
-                "type": "integer"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Max Hold Bars"
-          },
-          "slippage_bps": {
-            "anyOf": [
-              {
-                "type": "number"
-              },
-              {
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Slippage Bps"
-          },
-          "to_ms": {
-            "minimum": 0.0,
-            "title": "To Ms",
-            "type": "integer"
-          },
-          "version": {
-            "minimum": 1.0,
-            "title": "Version",
-            "type": "integer"
-          }
-        },
-        "required": [
-          "version",
-          "instrument_id",
-          "from_ms",
-          "to_ms"
-        ],
-        "title": "BacktestBody",
-        "type": "object"
-      },
-      "CandleOperand": {
-        "additionalProperties": false,
-        "description": "Signal-candle field operand.\n\nAttributes:\n    kind: Discriminator ``candle``.\n    tf: Candle timeframe (signal timeframe only in this version).\n    field: OHLCV field.\n    bars_ago: Offset in closed signal bars.",
-        "properties": {
-          "bars_ago": {
-            "default": 0,
-            "maximum": 200.0,
-            "minimum": 0.0,
-            "title": "Bars Ago",
-            "type": "integer"
-          },
-          "field": {
-            "enum": [
-              "open",
-              "high",
-              "low",
-              "close",
-              "base_volume"
-            ],
-            "title": "Field",
-            "type": "string"
-          },
-          "kind": {
-            "const": "candle",
-            "title": "Kind",
-            "type": "string"
-          },
-          "tf": {
-            "anyOf": [
-              {
-                "$ref": "#/components/schemas/Timeframe"
-              },
-              {
-                "type": "null"
-              }
-            ]
-          }
-        },
-        "required": [
-          "kind",
-          "field"
-        ],
-        "title": "CandleOperand",
         "type": "object"
       },
       "CatalogInput": {
@@ -1014,113 +452,6 @@
         "title": "CatalogScript",
         "type": "object"
       },
-      "CompareNode": {
-        "additionalProperties": false,
-        "description": "Binary comparison of two operands.\n\nAttributes:\n    op: Discriminator ``COMPARE``.\n    id: Stable editor id.\n    label: Optional display label.\n    left: Left operand.\n    cmp: Comparator.\n    right: Right operand.",
-        "properties": {
-          "cmp": {
-            "enum": [
-              "gt",
-              "gte",
-              "lt",
-              "lte",
-              "eq",
-              "neq"
-            ],
-            "title": "Cmp",
-            "type": "string"
-          },
-          "id": {
-            "anyOf": [
-              {
-                "maxLength": 64,
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Id"
-          },
-          "label": {
-            "anyOf": [
-              {
-                "maxLength": 200,
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Label"
-          },
-          "left": {
-            "discriminator": {
-              "mapping": {
-                "candle": "#/components/schemas/CandleOperand",
-                "const": "#/components/schemas/ConstOperand",
-                "indicator": "#/components/schemas/IndicatorOperand",
-                "market": "#/components/schemas/MarketOperand"
-              },
-              "propertyName": "kind"
-            },
-            "oneOf": [
-              {
-                "$ref": "#/components/schemas/ConstOperand"
-              },
-              {
-                "$ref": "#/components/schemas/CandleOperand"
-              },
-              {
-                "$ref": "#/components/schemas/IndicatorOperand"
-              },
-              {
-                "$ref": "#/components/schemas/MarketOperand"
-              }
-            ],
-            "title": "Left"
-          },
-          "op": {
-            "const": "COMPARE",
-            "title": "Op",
-            "type": "string"
-          },
-          "right": {
-            "discriminator": {
-              "mapping": {
-                "candle": "#/components/schemas/CandleOperand",
-                "const": "#/components/schemas/ConstOperand",
-                "indicator": "#/components/schemas/IndicatorOperand",
-                "market": "#/components/schemas/MarketOperand"
-              },
-              "propertyName": "kind"
-            },
-            "oneOf": [
-              {
-                "$ref": "#/components/schemas/ConstOperand"
-              },
-              {
-                "$ref": "#/components/schemas/CandleOperand"
-              },
-              {
-                "$ref": "#/components/schemas/IndicatorOperand"
-              },
-              {
-                "$ref": "#/components/schemas/MarketOperand"
-              }
-            ],
-            "title": "Right"
-          }
-        },
-        "required": [
-          "op",
-          "left",
-          "cmp",
-          "right"
-        ],
-        "title": "CompareNode",
-        "type": "object"
-      },
       "ConnectionGrant": {
         "description": "A newly issued connection credential shown once.\n\nA newly issued connection credential shown once to its authenticated owner.\n\nAttributes:\n    connection_id: Opaque revocation identifier.\n    url: Public MCP endpoint URL to configure in the client.\n    token: Secret resource-bound bearer credential, returned only at\n        creation.\n    scopes: Explicit read/write/trade permissions.\n    expires_at: Expiration as UTC epoch seconds.",
         "properties": {
@@ -1190,269 +521,6 @@
           "name"
         ],
         "title": "ConnectionInput",
-        "type": "object"
-      },
-      "ConstOperand": {
-        "additionalProperties": false,
-        "description": "Constant decimal operand.\n\nAttributes:\n    kind: Discriminator ``const``.\n    value: The constant.",
-        "properties": {
-          "kind": {
-            "const": "const",
-            "title": "Kind",
-            "type": "string"
-          },
-          "value": {
-            "anyOf": [
-              {
-                "type": "number"
-              },
-              {
-                "type": "string"
-              }
-            ],
-            "title": "Value"
-          }
-        },
-        "required": [
-          "kind",
-          "value"
-        ],
-        "title": "ConstOperand",
-        "type": "object"
-      },
-      "CrossesNode": {
-        "additionalProperties": false,
-        "description": "``left`` crossed ``right`` between the previous and current bar.\n\n``ABOVE``: at or below on the previous bar, above on the current one;\n``BELOW`` mirrors it.\n\nAttributes:\n    op: Discriminator ``CROSSES``.\n    id: Stable editor id.\n    label: Optional display label.\n    left: Moving operand.\n    right: Reference operand.\n    direction: ``ABOVE`` or ``BELOW``.",
-        "properties": {
-          "direction": {
-            "enum": [
-              "ABOVE",
-              "BELOW"
-            ],
-            "title": "Direction",
-            "type": "string"
-          },
-          "id": {
-            "anyOf": [
-              {
-                "maxLength": 64,
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Id"
-          },
-          "label": {
-            "anyOf": [
-              {
-                "maxLength": 200,
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Label"
-          },
-          "left": {
-            "discriminator": {
-              "mapping": {
-                "candle": "#/components/schemas/CandleOperand",
-                "const": "#/components/schemas/ConstOperand",
-                "indicator": "#/components/schemas/IndicatorOperand",
-                "market": "#/components/schemas/MarketOperand"
-              },
-              "propertyName": "kind"
-            },
-            "oneOf": [
-              {
-                "$ref": "#/components/schemas/ConstOperand"
-              },
-              {
-                "$ref": "#/components/schemas/CandleOperand"
-              },
-              {
-                "$ref": "#/components/schemas/IndicatorOperand"
-              },
-              {
-                "$ref": "#/components/schemas/MarketOperand"
-              }
-            ],
-            "title": "Left"
-          },
-          "op": {
-            "const": "CROSSES",
-            "title": "Op",
-            "type": "string"
-          },
-          "right": {
-            "discriminator": {
-              "mapping": {
-                "candle": "#/components/schemas/CandleOperand",
-                "const": "#/components/schemas/ConstOperand",
-                "indicator": "#/components/schemas/IndicatorOperand",
-                "market": "#/components/schemas/MarketOperand"
-              },
-              "propertyName": "kind"
-            },
-            "oneOf": [
-              {
-                "$ref": "#/components/schemas/ConstOperand"
-              },
-              {
-                "$ref": "#/components/schemas/CandleOperand"
-              },
-              {
-                "$ref": "#/components/schemas/IndicatorOperand"
-              },
-              {
-                "$ref": "#/components/schemas/MarketOperand"
-              }
-            ],
-            "title": "Right"
-          }
-        },
-        "required": [
-          "op",
-          "left",
-          "right",
-          "direction"
-        ],
-        "title": "CrossesNode",
-        "type": "object"
-      },
-      "DataPolicy": {
-        "additionalProperties": false,
-        "description": "Input freshness policy.\n\nAttributes:\n    max_data_age_ms: Maximum time from the evaluated bar's close to the\n        evaluation; an older bar evaluates to UNKNOWN.\n    allow_rest_poll: Whether polled (POLL) candles are acceptable.",
-        "properties": {
-          "allow_rest_poll": {
-            "default": true,
-            "title": "Allow Rest Poll",
-            "type": "boolean"
-          },
-          "max_data_age_ms": {
-            "default": 120000,
-            "minimum": 0.0,
-            "title": "Max Data Age Ms",
-            "type": "integer"
-          }
-        },
-        "title": "DataPolicy",
-        "type": "object"
-      },
-      "EventNode": {
-        "additionalProperties": false,
-        "description": "An indicator event confirmed within the lookback.\n\nAttributes:\n    op: Discriminator ``EVENT``.\n    id: Stable editor id.\n    label: Optional display label.\n    name: Event name.\n    source: Plugin that must publish the event; any plugin's events of\n        that name count when omitted.\n    tf: Event timeframe (defaults to the signal timeframe).\n    within_bars: Lookback in closed signal bars (0 = current bar).",
-        "properties": {
-          "id": {
-            "anyOf": [
-              {
-                "maxLength": 64,
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Id"
-          },
-          "label": {
-            "anyOf": [
-              {
-                "maxLength": 200,
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Label"
-          },
-          "name": {
-            "pattern": "^[A-Z][A-Z0-9_]{0,47}$",
-            "title": "Name",
-            "type": "string"
-          },
-          "op": {
-            "const": "EVENT",
-            "title": "Op",
-            "type": "string"
-          },
-          "source": {
-            "anyOf": [
-              {
-                "pattern": "^[a-z][a-z0-9_]{0,63}$",
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Source"
-          },
-          "tf": {
-            "anyOf": [
-              {
-                "$ref": "#/components/schemas/Timeframe"
-              },
-              {
-                "type": "null"
-              }
-            ]
-          },
-          "within_bars": {
-            "maximum": 200.0,
-            "minimum": 0.0,
-            "title": "Within Bars",
-            "type": "integer"
-          }
-        },
-        "required": [
-          "op",
-          "name",
-          "within_bars"
-        ],
-        "title": "EventNode",
-        "type": "object"
-      },
-      "EventRef": {
-        "additionalProperties": false,
-        "description": "Reference to an indicator event on a timeframe.\n\nAttributes:\n    name: Event name.\n    source: Plugin that must publish the event; any plugin's events of\n        that name count when omitted.\n    tf: Event timeframe (defaults to the signal timeframe).",
-        "properties": {
-          "name": {
-            "pattern": "^[A-Z][A-Z0-9_]{0,47}$",
-            "title": "Name",
-            "type": "string"
-          },
-          "source": {
-            "anyOf": [
-              {
-                "pattern": "^[a-z][a-z0-9_]{0,63}$",
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Source"
-          },
-          "tf": {
-            "anyOf": [
-              {
-                "$ref": "#/components/schemas/Timeframe"
-              },
-              {
-                "type": "null"
-              }
-            ]
-          }
-        },
-        "required": [
-          "name"
-        ],
-        "title": "EventRef",
         "type": "object"
       },
       "HTTPValidationError": {
@@ -1951,269 +1019,6 @@
         "title": "HeatmapTile",
         "type": "object"
       },
-      "InRangeNode": {
-        "additionalProperties": false,
-        "description": "Operand inside ``[low, high]`` (or open interval when exclusive).\n\nAttributes:\n    op: Discriminator ``IN_RANGE``.\n    id: Stable editor id.\n    label: Optional display label.\n    value: Tested operand.\n    low: Lower bound operand.\n    high: Upper bound operand.\n    inclusive: Whether bounds are inclusive.",
-        "properties": {
-          "high": {
-            "discriminator": {
-              "mapping": {
-                "candle": "#/components/schemas/CandleOperand",
-                "const": "#/components/schemas/ConstOperand",
-                "indicator": "#/components/schemas/IndicatorOperand",
-                "market": "#/components/schemas/MarketOperand"
-              },
-              "propertyName": "kind"
-            },
-            "oneOf": [
-              {
-                "$ref": "#/components/schemas/ConstOperand"
-              },
-              {
-                "$ref": "#/components/schemas/CandleOperand"
-              },
-              {
-                "$ref": "#/components/schemas/IndicatorOperand"
-              },
-              {
-                "$ref": "#/components/schemas/MarketOperand"
-              }
-            ],
-            "title": "High"
-          },
-          "id": {
-            "anyOf": [
-              {
-                "maxLength": 64,
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Id"
-          },
-          "inclusive": {
-            "default": true,
-            "title": "Inclusive",
-            "type": "boolean"
-          },
-          "label": {
-            "anyOf": [
-              {
-                "maxLength": 200,
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Label"
-          },
-          "low": {
-            "discriminator": {
-              "mapping": {
-                "candle": "#/components/schemas/CandleOperand",
-                "const": "#/components/schemas/ConstOperand",
-                "indicator": "#/components/schemas/IndicatorOperand",
-                "market": "#/components/schemas/MarketOperand"
-              },
-              "propertyName": "kind"
-            },
-            "oneOf": [
-              {
-                "$ref": "#/components/schemas/ConstOperand"
-              },
-              {
-                "$ref": "#/components/schemas/CandleOperand"
-              },
-              {
-                "$ref": "#/components/schemas/IndicatorOperand"
-              },
-              {
-                "$ref": "#/components/schemas/MarketOperand"
-              }
-            ],
-            "title": "Low"
-          },
-          "op": {
-            "const": "IN_RANGE",
-            "title": "Op",
-            "type": "string"
-          },
-          "value": {
-            "discriminator": {
-              "mapping": {
-                "candle": "#/components/schemas/CandleOperand",
-                "const": "#/components/schemas/ConstOperand",
-                "indicator": "#/components/schemas/IndicatorOperand",
-                "market": "#/components/schemas/MarketOperand"
-              },
-              "propertyName": "kind"
-            },
-            "oneOf": [
-              {
-                "$ref": "#/components/schemas/ConstOperand"
-              },
-              {
-                "$ref": "#/components/schemas/CandleOperand"
-              },
-              {
-                "$ref": "#/components/schemas/IndicatorOperand"
-              },
-              {
-                "$ref": "#/components/schemas/MarketOperand"
-              }
-            ],
-            "title": "Value"
-          }
-        },
-        "required": [
-          "op",
-          "value",
-          "low",
-          "high"
-        ],
-        "title": "InRangeNode",
-        "type": "object"
-      },
-      "InZoneNode": {
-        "additionalProperties": false,
-        "description": "Price inside a live AOI of the given kinds on ``tf``.\n\nAttributes:\n    op: Discriminator ``IN_ZONE``.\n    id: Stable editor id.\n    label: Optional display label.\n    kinds: Acceptable AOI kinds.\n    side: Required AOI side, if any.\n    tf: AOI detection timeframe.\n    price_source: Candle price compared with the zone.\n    group: Nodes sharing a group must agree on the AOI ``group_id``.",
-        "properties": {
-          "group": {
-            "anyOf": [
-              {
-                "maxLength": 32,
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Group"
-          },
-          "id": {
-            "anyOf": [
-              {
-                "maxLength": 64,
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Id"
-          },
-          "kinds": {
-            "items": {
-              "pattern": "^[A-Z][A-Z0-9_]{0,47}$",
-              "type": "string"
-            },
-            "maxItems": 8,
-            "minItems": 1,
-            "title": "Kinds",
-            "type": "array"
-          },
-          "label": {
-            "anyOf": [
-              {
-                "maxLength": 200,
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Label"
-          },
-          "op": {
-            "const": "IN_ZONE",
-            "title": "Op",
-            "type": "string"
-          },
-          "price_source": {
-            "default": "close",
-            "enum": [
-              "close",
-              "high",
-              "low",
-              "hl2"
-            ],
-            "title": "Price Source",
-            "type": "string"
-          },
-          "side": {
-            "anyOf": [
-              {
-                "enum": [
-                  "bullish",
-                  "bearish"
-                ],
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Side"
-          },
-          "tf": {
-            "$ref": "#/components/schemas/Timeframe"
-          }
-        },
-        "required": [
-          "op",
-          "kinds",
-          "tf"
-        ],
-        "title": "InZoneNode",
-        "type": "object"
-      },
-      "IndicatorOperand": {
-        "additionalProperties": false,
-        "description": "Published indicator value operand.\n\nAttributes:\n    kind: Discriminator ``indicator``.\n    plugin_id: Producing plugin.\n    tf: Series timeframe (defaults to the signal timeframe).\n    field: Published value key.\n    bars_ago: Offset in closed signal bars.",
-        "properties": {
-          "bars_ago": {
-            "default": 0,
-            "maximum": 200.0,
-            "minimum": 0.0,
-            "title": "Bars Ago",
-            "type": "integer"
-          },
-          "field": {
-            "maxLength": 64,
-            "title": "Field",
-            "type": "string"
-          },
-          "kind": {
-            "const": "indicator",
-            "title": "Kind",
-            "type": "string"
-          },
-          "plugin_id": {
-            "title": "Plugin Id",
-            "type": "string"
-          },
-          "tf": {
-            "anyOf": [
-              {
-                "$ref": "#/components/schemas/Timeframe"
-              },
-              {
-                "type": "null"
-              }
-            ]
-          }
-        },
-        "required": [
-          "kind",
-          "plugin_id",
-          "field"
-        ],
-        "title": "IndicatorOperand",
-        "type": "object"
-      },
       "JsonValue": {},
       "LibraryRef": {
         "additionalProperties": false,
@@ -2237,56 +1042,6 @@
         "title": "LibraryRef",
         "type": "object"
       },
-      "LocalTimeWindow": {
-        "additionalProperties": false,
-        "description": "Local-time window ``[start, end)``; ``end <= start`` wraps midnight.\n\nAttributes:\n    start: Inclusive start ``HH:MM``.\n    end: Exclusive end ``HH:MM``.",
-        "properties": {
-          "end": {
-            "pattern": "^([01][0-9]|2[0-3]):[0-5][0-9]$",
-            "title": "End",
-            "type": "string"
-          },
-          "start": {
-            "pattern": "^([01][0-9]|2[0-3]):[0-5][0-9]$",
-            "title": "Start",
-            "type": "string"
-          }
-        },
-        "required": [
-          "start",
-          "end"
-        ],
-        "title": "LocalTimeWindow",
-        "type": "object"
-      },
-      "MarketOperand": {
-        "additionalProperties": false,
-        "description": "Market context operand (funding, open interest, spread, turnover).\n\nAttributes:\n    kind: Discriminator ``market``.\n    field: Market field.",
-        "properties": {
-          "field": {
-            "enum": [
-              "funding_8h_pct",
-              "open_interest_usd",
-              "oi_change_pct",
-              "spread_pct",
-              "turnover_24h_quote"
-            ],
-            "title": "Field",
-            "type": "string"
-          },
-          "kind": {
-            "const": "market",
-            "title": "Kind",
-            "type": "string"
-          }
-        },
-        "required": [
-          "kind",
-          "field"
-        ],
-        "title": "MarketOperand",
-        "type": "object"
-      },
       "MarketType": {
         "description": "Product type at a venue (contract ``MarketType``).\n\n``stock`` and ``etf`` are exchange-listed cash securities; ``rate`` is a\npublished, non-tradable rate series such as a Treasury par yield.",
         "enum": [
@@ -2299,299 +1054,6 @@
         ],
         "title": "MarketType",
         "type": "string"
-      },
-      "NotNode": {
-        "additionalProperties": false,
-        "description": "Kleene negation of one child.\n\nAttributes:\n    op: Discriminator ``NOT``.\n    id: Stable editor id.\n    label: Optional display label.\n    child: Negated node.",
-        "properties": {
-          "child": {
-            "discriminator": {
-              "mapping": {
-                "ALL": "#/components/schemas/AllNode",
-                "ANY": "#/components/schemas/AnyNode",
-                "AOI_OVERLAP": "#/components/schemas/AoiOverlapNode",
-                "AOI_TOUCH": "#/components/schemas/AoiTouchNode",
-                "COMPARE": "#/components/schemas/CompareNode",
-                "CROSSES": "#/components/schemas/CrossesNode",
-                "EVENT": "#/components/schemas/EventNode",
-                "IN_RANGE": "#/components/schemas/InRangeNode",
-                "IN_ZONE": "#/components/schemas/InZoneNode",
-                "NOT": "#/components/schemas/NotNode",
-                "PERSIST_FOR": "#/components/schemas/PersistForNode",
-                "RISK_REWARD": "#/components/schemas/RiskRewardNode",
-                "SEQUENCE": "#/components/schemas/SequenceNode",
-                "STATE": "#/components/schemas/StateNode",
-                "TIME_WINDOW": "#/components/schemas/TimeWindowNode",
-                "WITHIN_BARS": "#/components/schemas/WithinBarsNode"
-              },
-              "propertyName": "op"
-            },
-            "oneOf": [
-              {
-                "$ref": "#/components/schemas/AllNode"
-              },
-              {
-                "$ref": "#/components/schemas/AnyNode"
-              },
-              {
-                "$ref": "#/components/schemas/NotNode"
-              },
-              {
-                "$ref": "#/components/schemas/StateNode"
-              },
-              {
-                "$ref": "#/components/schemas/InZoneNode"
-              },
-              {
-                "$ref": "#/components/schemas/AoiTouchNode"
-              },
-              {
-                "$ref": "#/components/schemas/AoiOverlapNode"
-              },
-              {
-                "$ref": "#/components/schemas/EventNode"
-              },
-              {
-                "$ref": "#/components/schemas/SequenceNode"
-              },
-              {
-                "$ref": "#/components/schemas/CompareNode"
-              },
-              {
-                "$ref": "#/components/schemas/InRangeNode"
-              },
-              {
-                "$ref": "#/components/schemas/CrossesNode"
-              },
-              {
-                "$ref": "#/components/schemas/PersistForNode"
-              },
-              {
-                "$ref": "#/components/schemas/WithinBarsNode"
-              },
-              {
-                "$ref": "#/components/schemas/TimeWindowNode"
-              },
-              {
-                "$ref": "#/components/schemas/RiskRewardNode"
-              }
-            ],
-            "title": "Child"
-          },
-          "id": {
-            "anyOf": [
-              {
-                "maxLength": 64,
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Id"
-          },
-          "label": {
-            "anyOf": [
-              {
-                "maxLength": 200,
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Label"
-          },
-          "op": {
-            "const": "NOT",
-            "title": "Op",
-            "type": "string"
-          }
-        },
-        "required": [
-          "op",
-          "child"
-        ],
-        "title": "NotNode",
-        "type": "object"
-      },
-      "NotificationPolicy": {
-        "additionalProperties": false,
-        "description": "Notification and de-duplication policy.\n\nAttributes:\n    cooldown_bars: Bars after a fired entry during which new entries\n        on the same instrument/direction are blocked.\n    once_per_aoi: Fire at most once per AOI.\n    emit: Signal kinds the user wants to receive.\n    channels: Notification channels allowed for this strategy.",
-        "properties": {
-          "channels": {
-            "items": {
-              "enum": [
-                "UI",
-                "TELEGRAM",
-                "WHATSAPP",
-                "WEB_PUSH",
-                "LINE",
-                "EMAIL",
-                "WEBHOOK"
-              ],
-              "type": "string"
-            },
-            "title": "Channels",
-            "type": "array"
-          },
-          "cooldown_bars": {
-            "maximum": 10000.0,
-            "minimum": 0.0,
-            "title": "Cooldown Bars",
-            "type": "integer"
-          },
-          "emit": {
-            "items": {
-              "enum": [
-                "WATCHING_AOI",
-                "PRE_SIGNAL",
-                "ENTRY_CONFIRMED",
-                "ENTRY_BLOCKED",
-                "AOI_INVALIDATED",
-                "SETUP_EXPIRED",
-                "QUALIFICATION_CHANGED",
-                "POSITION_EXITED",
-                "CUSTOM_ALERT"
-              ],
-              "type": "string"
-            },
-            "title": "Emit",
-            "type": "array"
-          },
-          "once_per_aoi": {
-            "title": "Once Per Aoi",
-            "type": "boolean"
-          }
-        },
-        "required": [
-          "cooldown_bars",
-          "once_per_aoi"
-        ],
-        "title": "NotificationPolicy",
-        "type": "object"
-      },
-      "PersistForNode": {
-        "additionalProperties": false,
-        "description": "Child TRUE on each of the last ``bars`` closed bars.\n\nAttributes:\n    op: Discriminator ``PERSIST_FOR``.\n    id: Stable editor id.\n    label: Optional display label.\n    bars: Number of consecutive bars.\n    child: Persisting node.",
-        "properties": {
-          "bars": {
-            "maximum": 200.0,
-            "minimum": 1.0,
-            "title": "Bars",
-            "type": "integer"
-          },
-          "child": {
-            "discriminator": {
-              "mapping": {
-                "ALL": "#/components/schemas/AllNode",
-                "ANY": "#/components/schemas/AnyNode",
-                "AOI_OVERLAP": "#/components/schemas/AoiOverlapNode",
-                "AOI_TOUCH": "#/components/schemas/AoiTouchNode",
-                "COMPARE": "#/components/schemas/CompareNode",
-                "CROSSES": "#/components/schemas/CrossesNode",
-                "EVENT": "#/components/schemas/EventNode",
-                "IN_RANGE": "#/components/schemas/InRangeNode",
-                "IN_ZONE": "#/components/schemas/InZoneNode",
-                "NOT": "#/components/schemas/NotNode",
-                "PERSIST_FOR": "#/components/schemas/PersistForNode",
-                "RISK_REWARD": "#/components/schemas/RiskRewardNode",
-                "SEQUENCE": "#/components/schemas/SequenceNode",
-                "STATE": "#/components/schemas/StateNode",
-                "TIME_WINDOW": "#/components/schemas/TimeWindowNode",
-                "WITHIN_BARS": "#/components/schemas/WithinBarsNode"
-              },
-              "propertyName": "op"
-            },
-            "oneOf": [
-              {
-                "$ref": "#/components/schemas/AllNode"
-              },
-              {
-                "$ref": "#/components/schemas/AnyNode"
-              },
-              {
-                "$ref": "#/components/schemas/NotNode"
-              },
-              {
-                "$ref": "#/components/schemas/StateNode"
-              },
-              {
-                "$ref": "#/components/schemas/InZoneNode"
-              },
-              {
-                "$ref": "#/components/schemas/AoiTouchNode"
-              },
-              {
-                "$ref": "#/components/schemas/AoiOverlapNode"
-              },
-              {
-                "$ref": "#/components/schemas/EventNode"
-              },
-              {
-                "$ref": "#/components/schemas/SequenceNode"
-              },
-              {
-                "$ref": "#/components/schemas/CompareNode"
-              },
-              {
-                "$ref": "#/components/schemas/InRangeNode"
-              },
-              {
-                "$ref": "#/components/schemas/CrossesNode"
-              },
-              {
-                "$ref": "#/components/schemas/PersistForNode"
-              },
-              {
-                "$ref": "#/components/schemas/WithinBarsNode"
-              },
-              {
-                "$ref": "#/components/schemas/TimeWindowNode"
-              },
-              {
-                "$ref": "#/components/schemas/RiskRewardNode"
-              }
-            ],
-            "title": "Child"
-          },
-          "id": {
-            "anyOf": [
-              {
-                "maxLength": 64,
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Id"
-          },
-          "label": {
-            "anyOf": [
-              {
-                "maxLength": 200,
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Label"
-          },
-          "op": {
-            "const": "PERSIST_FOR",
-            "title": "Op",
-            "type": "string"
-          }
-        },
-        "required": [
-          "op",
-          "bars",
-          "child"
-        ],
-        "title": "PersistForNode",
-        "type": "object"
       },
       "PlotPoint": {
         "additionalProperties": false,
@@ -2656,192 +1118,6 @@
           "points"
         ],
         "title": "PlotSeries",
-        "type": "object"
-      },
-      "RevalidateBody": {
-        "additionalProperties": false,
-        "description": "Optional body of ``POST /{strategy_id}/validate``.\n\nAttributes:\n    version: Version to re-validate (latest when omitted).",
-        "properties": {
-          "version": {
-            "anyOf": [
-              {
-                "minimum": 1.0,
-                "type": "integer"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Version"
-          }
-        },
-        "title": "RevalidateBody",
-        "type": "object"
-      },
-      "RiskModel": {
-        "additionalProperties": false,
-        "description": "Stop, target and minimum reward/risk policy.\n\nAttributes:\n    min_rr: Strategy-level floor for net reward/risk on every entry.\n    stop_model: How the protective stop is placed.\n    stop_buffer_atr: Stop buffer in ATR(14) multiples.\n    target_model: How the target is placed.\n    target_kinds: AOI kinds ``NEAREST_AOI`` may target.\n    fixed_r: Reward multiple for ``FIXED_R`` targets.\n    fee_bps_estimate: Estimated cost per side in basis points.\n    max_risk_pct_equity: Sizing hint for the execution engine.",
-        "properties": {
-          "fee_bps_estimate": {
-            "anyOf": [
-              {
-                "type": "number"
-              },
-              {
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Fee Bps Estimate"
-          },
-          "fixed_r": {
-            "anyOf": [
-              {
-                "type": "number"
-              },
-              {
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Fixed R"
-          },
-          "max_risk_pct_equity": {
-            "anyOf": [
-              {
-                "type": "number"
-              },
-              {
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Max Risk Pct Equity"
-          },
-          "min_rr": {
-            "anyOf": [
-              {
-                "type": "number"
-              },
-              {
-                "type": "string"
-              }
-            ],
-            "title": "Min Rr"
-          },
-          "stop_buffer_atr": {
-            "anyOf": [
-              {
-                "type": "number"
-              },
-              {
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Stop Buffer Atr"
-          },
-          "stop_model": {
-            "enum": [
-              "AOI_INVALIDATION",
-              "SWING",
-              "ATR"
-            ],
-            "title": "Stop Model",
-            "type": "string"
-          },
-          "target_kinds": {
-            "anyOf": [
-              {
-                "items": {
-                  "pattern": "^[A-Z][A-Z0-9_]{0,47}$",
-                  "type": "string"
-                },
-                "maxItems": 8,
-                "minItems": 1,
-                "type": "array"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Target Kinds"
-          },
-          "target_model": {
-            "enum": [
-              "NEAREST_AOI",
-              "FIXED_R"
-            ],
-            "title": "Target Model",
-            "type": "string"
-          }
-        },
-        "required": [
-          "min_rr",
-          "stop_model",
-          "target_model"
-        ],
-        "title": "RiskModel",
-        "type": "object"
-      },
-      "RiskRewardNode": {
-        "additionalProperties": false,
-        "description": "Projected net reward/risk is at least ``min_rr``.\n\nAttributes:\n    op: Discriminator ``RISK_REWARD``.\n    id: Stable editor id.\n    label: Optional display label.\n    min_rr: Minimum net reward/risk.",
-        "properties": {
-          "id": {
-            "anyOf": [
-              {
-                "maxLength": 64,
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Id"
-          },
-          "label": {
-            "anyOf": [
-              {
-                "maxLength": 200,
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Label"
-          },
-          "min_rr": {
-            "anyOf": [
-              {
-                "type": "number"
-              },
-              {
-                "type": "string"
-              }
-            ],
-            "title": "Min Rr"
-          },
-          "op": {
-            "const": "RISK_REWARD",
-            "title": "Op",
-            "type": "string"
-          }
-        },
-        "required": [
-          "op",
-          "min_rr"
-        ],
-        "title": "RiskRewardNode",
         "type": "object"
       },
       "ScanCondition": {
@@ -3283,7 +1559,7 @@
       },
       "ScriptResult": {
         "additionalProperties": false,
-        "description": "Reproducible plots and optional simulated strategy performance.\n\nAttributes:\n    script_id: Tenant-owned script slug.\n    version: Immutable script version evaluated.\n    kind: Indicator, strategy, filter or alert; libraries are import-only.\n    source_hash: Content hash including default inputs and dependency pins.\n    instrument_id: Canonical source instrument identifier.\n    tf: Source bar resolution.\n    bars_count: Number of source bars evaluated, including provisional bars\n        only when explicitly requested for an indicator.\n    feed_state: Source provenance; DEMO data remains explicitly marked.\n    data_source: Upstream provider provenance label.\n    complete: Whether the requested history has no closed-bar gaps.\n    overlay: Whether plots share the main price pane.\n    plots: At most sixty-four scalar output series.\n    fills: Simulated next-bar-open fills; empty for indicators.\n    equity_curve: Marked simulated quote equity; empty for indicators.\n    metrics: Finite numeric simulation statistics, including fees and\n        unfilled final-bar intents; no performance is fabricated.\n    matched: Boolean decision for a filter, otherwise None.\n    alerts: Previewed alert events; delivery requires an enabled alert job.\n    visuals: Bounded declarative drawings, fills, coloring and tables.\n    bar_closes: Confirmed source bar starts mapped to actual evaluated\n        closes;\n        alert checkpoints never consult a later, different market window.\n    plot_styles: Per-series input/style settings used by the renderer.\n    bar_visuals: Per-bar colors, symbols and custom OHLC series, separately\n        bounded from persistent drawing objects.",
+        "description": "Reproducible plots and optional simulated strategy performance.\n\nAttributes:\n    script_id: Tenant-owned script slug.\n    version: Immutable script version evaluated.\n    kind: Indicator, strategy, filter or alert; libraries are import-only.\n    source_hash: Content hash including default inputs and dependency pins.\n    instrument_id: Canonical source instrument identifier.\n    tf: Source bar resolution.\n    bars_count: Number of source bars evaluated, including provisional bars\n        only when explicitly requested for an indicator.\n    feed_state: Source provenance; DEMO data remains explicitly marked.\n    data_source: Upstream provider provenance label.\n    complete: Whether the requested history has no closed-bar gaps.\n    overlay: Whether plots share the main price pane.\n    plots: At most sixty-four scalar output series.\n    fills: Simulated next-bar-open fills; empty for indicators.\n    orders: Queued strategy orders and their simulated outcomes; empty\n        for other roles.\n    trades: Round trips reconstructed by the host from verified fills.\n    position_size: Signed simulated position after the last bar.\n    equity_curve: Marked simulated quote equity; empty for indicators.\n    metrics: Finite numeric simulation statistics, including fees and\n        unfilled final-bar intents; no performance is fabricated.\n    matched: Boolean decision for a filter, otherwise None.\n    alerts: Previewed alert events; delivery requires an enabled alert job.\n    visuals: Bounded declarative drawings, fills, coloring and tables.\n    bar_closes: Confirmed source bar starts mapped to actual evaluated\n        closes;\n        alert checkpoints never consult a later, different market window.\n    plot_styles: Per-series input/style settings used by the renderer.\n    bar_visuals: Per-bar colors, symbols and custom OHLC series, separately\n        bounded from persistent drawing objects.",
         "properties": {
           "alerts": {
             "items": {
@@ -3372,6 +1648,14 @@
             "title": "Metrics",
             "type": "object"
           },
+          "orders": {
+            "items": {
+              "$ref": "#/components/schemas/StrategyOrder"
+            },
+            "maxItems": 4000,
+            "title": "Orders",
+            "type": "array"
+          },
           "overlay": {
             "title": "Overlay",
             "type": "boolean"
@@ -3394,6 +1678,11 @@
             "title": "Plots",
             "type": "array"
           },
+          "position_size": {
+            "default": 0.0,
+            "title": "Position Size",
+            "type": "number"
+          },
           "script_id": {
             "title": "Script Id",
             "type": "string"
@@ -3405,6 +1694,14 @@
           "tf": {
             "title": "Tf",
             "type": "string"
+          },
+          "trades": {
+            "items": {
+              "$ref": "#/components/schemas/StrategyTrade"
+            },
+            "maxItems": 4000,
+            "title": "Trades",
+            "type": "array"
           },
           "version": {
             "title": "Version",
@@ -3676,63 +1973,6 @@
         "title": "ScriptVisual",
         "type": "object"
       },
-      "SequenceNode": {
-        "additionalProperties": false,
-        "description": "Ordered events on distinct bars ending on the evaluated bar.\n\nAttributes:\n    op: Discriminator ``SEQUENCE``.\n    id: Stable editor id.\n    label: Optional display label.\n    within_bars: Window length in bars, including the evaluated bar.\n    steps: 2-8 ordered event references.",
-        "properties": {
-          "id": {
-            "anyOf": [
-              {
-                "maxLength": 64,
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Id"
-          },
-          "label": {
-            "anyOf": [
-              {
-                "maxLength": 200,
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Label"
-          },
-          "op": {
-            "const": "SEQUENCE",
-            "title": "Op",
-            "type": "string"
-          },
-          "steps": {
-            "items": {
-              "$ref": "#/components/schemas/EventRef"
-            },
-            "maxItems": 8,
-            "minItems": 2,
-            "title": "Steps",
-            "type": "array"
-          },
-          "within_bars": {
-            "maximum": 200.0,
-            "minimum": 1.0,
-            "title": "Within Bars",
-            "type": "integer"
-          }
-        },
-        "required": [
-          "op",
-          "within_bars",
-          "steps"
-        ],
-        "title": "SequenceNode",
-        "type": "object"
-      },
       "SeriesRequest": {
         "additionalProperties": false,
         "description": "Declares another symbol/resolution before isolated indicator execution.\n\nAttributes:\n    instrument_id: Optional canonical symbol; defaults to the chart symbol.\n    tf: Requested resolution, with confirmed-bar visibility enforced by\n        host.\n    limit: Maximum closed source bars, one through five hundred.",
@@ -3764,21 +2004,6 @@
           "tf"
         ],
         "title": "SeriesRequest",
-        "type": "object"
-      },
-      "SetupPolicy": {
-        "additionalProperties": false,
-        "description": "Setup lifetime policy.\n\nAttributes:\n    expire_after_bars: Bars after which an unfired setup expires.",
-        "properties": {
-          "expire_after_bars": {
-            "default": 24,
-            "maximum": 1000.0,
-            "minimum": 1.0,
-            "title": "Expire After Bars",
-            "type": "integer"
-          }
-        },
-        "title": "SetupPolicy",
         "type": "object"
       },
       "SimulatedFill": {
@@ -3833,26 +2058,206 @@
         "title": "SimulatedFill",
         "type": "object"
       },
-      "StateNode": {
+      "StrategyActivation": {
         "additionalProperties": false,
-        "description": "Published indicator state on one or more timeframes.\n\nAttributes:\n    op: Discriminator ``STATE``.\n    id: Stable editor id.\n    label: Optional display label.\n    plugin_id: Plugin whose latest warm snapshot is read.\n    timeframes: Timeframes checked.\n    where: Clauses that must all match on a timeframe.\n    match: ``ALL`` or ``K_OF_N``.\n    k: Threshold for ``K_OF_N``.",
+        "description": "A persisted activation and its evaluation state.\n\nAttributes:\n    activation_id: Opaque identifier.\n    version: Pinned tenant version, or 0 for catalog strategies.\n    name: Strategy display title.\n    source_hash: Pinned exact source identity.\n    strategy_version_id: Identity execution deployments bind:\n        ``<script_id>:v<version>`` for tenant versions and\n        ``<catalog id>:v<first 12 hash digits>`` for catalog classes.\n    state: ACTIVE or PAUSED.\n    created_at_ms: Creation time.\n    updated_at_ms: Last configuration or state change.\n    last_checked_ms: Last evaluation pass, None before one.\n    last_error: Activation-wide error (such as a changed built-in or a\n        disabled runtime), None when evaluation works.\n    emitted: Number of new signals recorded.\n    instruments: Progress per instrument id.",
         "properties": {
-          "id": {
+          "activation_id": {
+            "title": "Activation Id",
+            "type": "string"
+          },
+          "channels": {
+            "items": {
+              "type": "string"
+            },
+            "maxItems": 8,
+            "title": "Channels",
+            "type": "array"
+          },
+          "created_at_ms": {
+            "title": "Created At Ms",
+            "type": "integer"
+          },
+          "emitted": {
+            "default": 0,
+            "title": "Emitted",
+            "type": "integer"
+          },
+          "history_bars": {
+            "default": 500,
+            "maximum": 2000.0,
+            "minimum": 50.0,
+            "title": "History Bars",
+            "type": "integer"
+          },
+          "inputs": {
+            "additionalProperties": {
+              "$ref": "#/components/schemas/JsonValue"
+            },
+            "title": "Inputs",
+            "type": "object"
+          },
+          "instrument_ids": {
+            "items": {
+              "pattern": "^(bybit|okx|coinbase|kraken|deriv|binance|hyperliquid|lighter|bitget|mexc|twse|tpex|nasdaq|nyse|cboe|treasury|mock):(perp|spot|future|stock|etf|rate):[A-Za-z0-9._/-]{1,64}$",
+              "type": "string"
+            },
+            "maxItems": 20,
+            "minItems": 1,
+            "title": "Instrument Ids",
+            "type": "array"
+          },
+          "instruments": {
+            "additionalProperties": {
+              "$ref": "#/components/schemas/ActivationInstrumentStatus"
+            },
+            "title": "Instruments",
+            "type": "object"
+          },
+          "last_checked_ms": {
             "anyOf": [
               {
-                "maxLength": 64,
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Last Checked Ms"
+          },
+          "last_error": {
+            "anyOf": [
+              {
                 "type": "string"
               },
               {
                 "type": "null"
               }
             ],
-            "title": "Id"
+            "title": "Last Error"
           },
-          "k": {
+          "mode": {
+            "default": "ALERT_ONLY",
+            "enum": [
+              "ALERT_ONLY",
+              "PAPER",
+              "SHADOW",
+              "AUTO_LIVE"
+            ],
+            "title": "Mode",
+            "type": "string"
+          },
+          "name": {
+            "title": "Name",
+            "type": "string"
+          },
+          "script_id": {
+            "pattern": "^(?:[a-z][a-z0-9-]{0,62}|builtin:[a-z][a-z0-9_-]{0,63}|plugin:[a-z0-9_.-]{1,64}:[a-z][a-z0-9_-]{0,63})$",
+            "title": "Script Id",
+            "type": "string"
+          },
+          "source_hash": {
+            "title": "Source Hash",
+            "type": "string"
+          },
+          "state": {
+            "enum": [
+              "ACTIVE",
+              "PAUSED"
+            ],
+            "title": "State",
+            "type": "string"
+          },
+          "strategy_version_id": {
+            "title": "Strategy Version Id",
+            "type": "string"
+          },
+          "tf": {
+            "$ref": "#/components/schemas/Timeframe"
+          },
+          "updated_at_ms": {
+            "title": "Updated At Ms",
+            "type": "integer"
+          },
+          "version": {
+            "default": 0,
+            "title": "Version",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "script_id",
+          "instrument_ids",
+          "tf",
+          "activation_id",
+          "name",
+          "source_hash",
+          "strategy_version_id",
+          "state",
+          "created_at_ms",
+          "updated_at_ms"
+        ],
+        "title": "StrategyActivation",
+        "type": "object"
+      },
+      "StrategyActivationInput": {
+        "additionalProperties": false,
+        "description": "A request to evaluate a Python strategy live on closed bars.\n\nAttributes:\n    script_id: Tenant strategy slug, ``builtin:<id>`` or\n        ``plugin:<entry>:<id>``.\n    version: Tenant version to pin; the latest when None. Ignored for\n        catalog strategies, which pin their installed source hash.\n    instrument_ids: Canonical instruments, one through twenty.\n    tf: Signal timeframe.\n    inputs: Input overrides on top of the declared defaults.\n    mode: ALERT_ONLY, PAPER or SHADOW; AUTO_LIVE is refused with\n        TRADE_MODE_DISABLED.\n    channels: Notification channels (UI and external subscriptions).\n    history_bars: Closed bars evaluated per pass, the strategy's warmup.",
+        "properties": {
+          "channels": {
+            "items": {
+              "type": "string"
+            },
+            "maxItems": 8,
+            "title": "Channels",
+            "type": "array"
+          },
+          "history_bars": {
+            "default": 500,
+            "maximum": 2000.0,
+            "minimum": 50.0,
+            "title": "History Bars",
+            "type": "integer"
+          },
+          "inputs": {
+            "additionalProperties": {
+              "$ref": "#/components/schemas/JsonValue"
+            },
+            "title": "Inputs",
+            "type": "object"
+          },
+          "instrument_ids": {
+            "items": {
+              "pattern": "^(bybit|okx|coinbase|kraken|deriv|binance|hyperliquid|lighter|bitget|mexc|twse|tpex|nasdaq|nyse|cboe|treasury|mock):(perp|spot|future|stock|etf|rate):[A-Za-z0-9._/-]{1,64}$",
+              "type": "string"
+            },
+            "maxItems": 20,
+            "minItems": 1,
+            "title": "Instrument Ids",
+            "type": "array"
+          },
+          "mode": {
+            "default": "ALERT_ONLY",
+            "enum": [
+              "ALERT_ONLY",
+              "PAPER",
+              "SHADOW",
+              "AUTO_LIVE"
+            ],
+            "title": "Mode",
+            "type": "string"
+          },
+          "script_id": {
+            "pattern": "^(?:[a-z][a-z0-9-]{0,62}|builtin:[a-z][a-z0-9_-]{0,63}|plugin:[a-z0-9_.-]{1,64}:[a-z][a-z0-9_-]{0,63})$",
+            "title": "Script Id",
+            "type": "string"
+          },
+          "tf": {
+            "$ref": "#/components/schemas/Timeframe"
+          },
+          "version": {
             "anyOf": [
               {
-                "maximum": 6.0,
                 "minimum": 1.0,
                 "type": "integer"
               },
@@ -3860,86 +2265,137 @@
                 "type": "null"
               }
             ],
-            "title": "K"
-          },
-          "label": {
-            "anyOf": [
-              {
-                "maxLength": 200,
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Label"
-          },
-          "match": {
-            "default": "ALL",
-            "enum": [
-              "ALL",
-              "K_OF_N"
-            ],
-            "title": "Match",
-            "type": "string"
-          },
-          "op": {
-            "const": "STATE",
-            "title": "Op",
-            "type": "string"
-          },
-          "plugin_id": {
-            "pattern": "^[a-z][a-z0-9_]{0,63}$",
-            "title": "Plugin Id",
-            "type": "string"
-          },
-          "timeframes": {
-            "items": {
-              "$ref": "#/components/schemas/Timeframe"
-            },
-            "maxItems": 6,
-            "minItems": 1,
-            "title": "Timeframes",
-            "type": "array"
-          },
-          "where": {
-            "items": {
-              "$ref": "#/components/schemas/ValueMatch"
-            },
-            "maxItems": 8,
-            "minItems": 1,
-            "title": "Where",
-            "type": "array"
+            "title": "Version"
           }
         },
         "required": [
-          "op",
-          "plugin_id",
-          "timeframes",
-          "where"
+          "script_id",
+          "instrument_ids",
+          "tf"
         ],
-        "title": "StateNode",
+        "title": "StrategyActivationInput",
         "type": "object"
       },
-      "StrategyDefinition": {
-        "additionalProperties": false,
-        "description": "User-authored strategy (Rule AST v2).\n\nAttributes:\n    schema_version: Always 2.\n    strategy_id: Slug unique per tenant.\n    name: Display name.\n    description: Optional description.\n    direction: ``LONG`` or ``SHORT``.\n    signal_timeframe: Timeframe whose closed bars trigger evaluation.\n    universe: Instrument universe.\n    when: Root rule node.\n    risk: Risk model.\n    notification: Notification policy.\n    setup: Setup policy.\n    data_policy: Freshness policy.\n    execution_mode: Requested mode (AUTO_LIVE additionally needs an\n        execution-engine deployment with consent).",
+      "StrategyActivationList": {
+        "description": "Owned activations.\n\nAttributes:\n    activations: Activations, newest first.\n    runtime_enabled: Whether tenant source can execute (Docker runner).\n    forwarding_enabled: Whether PAPER/SHADOW entries reach the execution\n        engine in this deployment.",
         "properties": {
-          "data_policy": {
-            "$ref": "#/components/schemas/DataPolicy"
+          "activations": {
+            "items": {
+              "$ref": "#/components/schemas/StrategyActivation"
+            },
+            "title": "Activations",
+            "type": "array"
           },
-          "description": {
+          "forwarding_enabled": {
+            "title": "Forwarding Enabled",
+            "type": "boolean"
+          },
+          "runtime_enabled": {
+            "title": "Runtime Enabled",
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "activations",
+          "runtime_enabled",
+          "forwarding_enabled"
+        ],
+        "title": "StrategyActivationList",
+        "type": "object"
+      },
+      "StrategyOrder": {
+        "additionalProperties": false,
+        "description": "A strategy order queued on a closed bar and its simulated outcome.\n\nAttributes:\n    time_ms: Start of the closed bar on which the order was queued.\n    action: long or short entry target, or close.\n    quantity: Target absolute base quantity; zero for close.\n    reference: Close of the bar the order was queued on, the planned\n        entry of live signals.\n    stop: Protective stop declared with an entry, if any.\n    target: Profit target declared with an entry, if any.\n    comment: Plain-text reason given by the strategy.\n    status: pending (no later bar yet), filled, rejected for\n        insufficient simulated equity, or unchanged (the position\n        already matched).\n    fill_time_ms: Start of the bar whose open filled the order.",
+        "properties": {
+          "action": {
+            "enum": [
+              "long",
+              "short",
+              "close"
+            ],
+            "title": "Action",
+            "type": "string"
+          },
+          "comment": {
+            "default": "",
+            "maxLength": 120,
+            "title": "Comment",
+            "type": "string"
+          },
+          "fill_time_ms": {
             "anyOf": [
               {
-                "maxLength": 2000,
-                "type": "string"
+                "type": "integer"
               },
               {
                 "type": "null"
               }
             ],
-            "title": "Description"
+            "title": "Fill Time Ms"
           },
+          "quantity": {
+            "minimum": 0.0,
+            "title": "Quantity",
+            "type": "number"
+          },
+          "reference": {
+            "exclusiveMinimum": 0.0,
+            "title": "Reference",
+            "type": "number"
+          },
+          "status": {
+            "enum": [
+              "pending",
+              "filled",
+              "rejected",
+              "unchanged"
+            ],
+            "title": "Status",
+            "type": "string"
+          },
+          "stop": {
+            "anyOf": [
+              {
+                "exclusiveMinimum": 0.0,
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Stop"
+          },
+          "target": {
+            "anyOf": [
+              {
+                "exclusiveMinimum": 0.0,
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Target"
+          },
+          "time_ms": {
+            "title": "Time Ms",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "time_ms",
+          "action",
+          "quantity",
+          "reference",
+          "status"
+        ],
+        "title": "StrategyOrder",
+        "type": "object"
+      },
+      "StrategyTrade": {
+        "additionalProperties": false,
+        "description": "A simulated round trip reconstructed from verified fills.\n\nAttributes:\n    direction: LONG or SHORT.\n    entry_time_ms: Start of the bar of the opening fill.\n    exit_time_ms: Start of the bar of the closing fill; None while open.\n    quantity: Largest absolute base quantity held.\n    entry_price: Quantity-weighted average opening price.\n    exit_price: Quantity-weighted average closing price; None while open.\n    fees: Commissions of every fill of the trade.\n    pnl: Realized profit after fees; None while open.\n    return_pct: pnl relative to the opening notional; None while open.",
+        "properties": {
           "direction": {
             "enum": [
               "LONG",
@@ -3948,135 +2404,79 @@
             "title": "Direction",
             "type": "string"
           },
-          "execution_mode": {
-            "enum": [
-              "ALERT_ONLY",
-              "PAPER",
-              "SHADOW",
-              "AUTO_LIVE"
-            ],
-            "title": "Execution Mode",
-            "type": "string"
+          "entry_price": {
+            "exclusiveMinimum": 0.0,
+            "title": "Entry Price",
+            "type": "number"
           },
-          "name": {
-            "maxLength": 200,
-            "minLength": 1,
-            "title": "Name",
-            "type": "string"
-          },
-          "notification": {
-            "$ref": "#/components/schemas/NotificationPolicy"
-          },
-          "risk": {
-            "$ref": "#/components/schemas/RiskModel"
-          },
-          "schema_version": {
-            "const": 2,
-            "title": "Schema Version",
+          "entry_time_ms": {
+            "title": "Entry Time Ms",
             "type": "integer"
           },
-          "setup": {
-            "$ref": "#/components/schemas/SetupPolicy"
-          },
-          "signal_timeframe": {
-            "$ref": "#/components/schemas/Timeframe"
-          },
-          "strategy_id": {
-            "pattern": "^[a-z0-9][a-z0-9-]{0,62}$",
-            "title": "Strategy Id",
-            "type": "string"
-          },
-          "universe": {
-            "$ref": "#/components/schemas/Universe"
-          },
-          "when": {
-            "discriminator": {
-              "mapping": {
-                "ALL": "#/components/schemas/AllNode",
-                "ANY": "#/components/schemas/AnyNode",
-                "AOI_OVERLAP": "#/components/schemas/AoiOverlapNode",
-                "AOI_TOUCH": "#/components/schemas/AoiTouchNode",
-                "COMPARE": "#/components/schemas/CompareNode",
-                "CROSSES": "#/components/schemas/CrossesNode",
-                "EVENT": "#/components/schemas/EventNode",
-                "IN_RANGE": "#/components/schemas/InRangeNode",
-                "IN_ZONE": "#/components/schemas/InZoneNode",
-                "NOT": "#/components/schemas/NotNode",
-                "PERSIST_FOR": "#/components/schemas/PersistForNode",
-                "RISK_REWARD": "#/components/schemas/RiskRewardNode",
-                "SEQUENCE": "#/components/schemas/SequenceNode",
-                "STATE": "#/components/schemas/StateNode",
-                "TIME_WINDOW": "#/components/schemas/TimeWindowNode",
-                "WITHIN_BARS": "#/components/schemas/WithinBarsNode"
-              },
-              "propertyName": "op"
-            },
-            "oneOf": [
+          "exit_price": {
+            "anyOf": [
               {
-                "$ref": "#/components/schemas/AllNode"
+                "exclusiveMinimum": 0.0,
+                "type": "number"
               },
               {
-                "$ref": "#/components/schemas/AnyNode"
-              },
-              {
-                "$ref": "#/components/schemas/NotNode"
-              },
-              {
-                "$ref": "#/components/schemas/StateNode"
-              },
-              {
-                "$ref": "#/components/schemas/InZoneNode"
-              },
-              {
-                "$ref": "#/components/schemas/AoiTouchNode"
-              },
-              {
-                "$ref": "#/components/schemas/AoiOverlapNode"
-              },
-              {
-                "$ref": "#/components/schemas/EventNode"
-              },
-              {
-                "$ref": "#/components/schemas/SequenceNode"
-              },
-              {
-                "$ref": "#/components/schemas/CompareNode"
-              },
-              {
-                "$ref": "#/components/schemas/InRangeNode"
-              },
-              {
-                "$ref": "#/components/schemas/CrossesNode"
-              },
-              {
-                "$ref": "#/components/schemas/PersistForNode"
-              },
-              {
-                "$ref": "#/components/schemas/WithinBarsNode"
-              },
-              {
-                "$ref": "#/components/schemas/TimeWindowNode"
-              },
-              {
-                "$ref": "#/components/schemas/RiskRewardNode"
+                "type": "null"
               }
             ],
-            "title": "When"
+            "title": "Exit Price"
+          },
+          "exit_time_ms": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Exit Time Ms"
+          },
+          "fees": {
+            "default": 0.0,
+            "minimum": 0.0,
+            "title": "Fees",
+            "type": "number"
+          },
+          "pnl": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Pnl"
+          },
+          "quantity": {
+            "exclusiveMinimum": 0.0,
+            "title": "Quantity",
+            "type": "number"
+          },
+          "return_pct": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Return Pct"
           }
         },
         "required": [
-          "schema_version",
-          "strategy_id",
-          "name",
           "direction",
-          "signal_timeframe",
-          "universe",
-          "when",
-          "risk",
-          "notification",
-          "execution_mode"
+          "entry_time_ms",
+          "quantity",
+          "entry_price"
         ],
-        "title": "StrategyDefinition",
+        "title": "StrategyTrade",
         "type": "object"
       },
       "TerminalAction": {
@@ -4123,81 +2523,6 @@
         "title": "TerminalAction",
         "type": "object"
       },
-      "TimeWindowNode": {
-        "additionalProperties": false,
-        "description": "Evaluated bar starts inside a local-time window.\n\nAttributes:\n    op: Discriminator ``TIME_WINDOW``.\n    id: Stable editor id.\n    label: Optional display label.\n    time_zone: IANA time zone of the windows.\n    windows: Accepted windows.\n    weekdays: Accepted ISO local weekdays (1 = Monday); every day when\n        omitted.",
-        "properties": {
-          "id": {
-            "anyOf": [
-              {
-                "maxLength": 64,
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Id"
-          },
-          "label": {
-            "anyOf": [
-              {
-                "maxLength": 200,
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Label"
-          },
-          "op": {
-            "const": "TIME_WINDOW",
-            "title": "Op",
-            "type": "string"
-          },
-          "time_zone": {
-            "maxLength": 64,
-            "minLength": 1,
-            "title": "Time Zone",
-            "type": "string"
-          },
-          "weekdays": {
-            "anyOf": [
-              {
-                "items": {
-                  "maximum": 7.0,
-                  "minimum": 1.0,
-                  "type": "integer"
-                },
-                "maxItems": 7,
-                "minItems": 1,
-                "type": "array"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Weekdays"
-          },
-          "windows": {
-            "items": {
-              "$ref": "#/components/schemas/LocalTimeWindow"
-            },
-            "maxItems": 8,
-            "minItems": 1,
-            "title": "Windows",
-            "type": "array"
-          }
-        },
-        "required": [
-          "op",
-          "time_zone",
-          "windows"
-        ],
-        "title": "TimeWindowNode",
-        "type": "object"
-      },
       "Timeframe": {
         "description": "Supported candle resolutions (contract ``Timeframe``).",
         "enum": [
@@ -4224,56 +2549,6 @@
         ],
         "title": "Timeframe",
         "type": "string"
-      },
-      "Universe": {
-        "additionalProperties": false,
-        "description": "Instruments a strategy may evaluate.\n\nAttributes:\n    qualification: ``QUALIFIED_ONLY`` or ``ANY``.\n    venues: Allowed venues.\n    whitelist: If non-empty, only these instruments.\n    blacklist: Excluded instruments.\n    min_qualified_minutes: Minimum continuous qualification time.",
-        "properties": {
-          "blacklist": {
-            "items": {
-              "pattern": "^(bybit|okx|coinbase|kraken|deriv|binance|hyperliquid|lighter|bitget|mexc|twse|tpex|nasdaq|nyse|cboe|treasury|mock):(perp|spot|future|stock|etf|rate):[A-Za-z0-9._/-]{1,64}$",
-              "type": "string"
-            },
-            "title": "Blacklist",
-            "type": "array"
-          },
-          "min_qualified_minutes": {
-            "default": 0,
-            "minimum": 0.0,
-            "title": "Min Qualified Minutes",
-            "type": "integer"
-          },
-          "qualification": {
-            "enum": [
-              "QUALIFIED_ONLY",
-              "ANY"
-            ],
-            "title": "Qualification",
-            "type": "string"
-          },
-          "venues": {
-            "items": {
-              "$ref": "#/components/schemas/Venue"
-            },
-            "minItems": 1,
-            "title": "Venues",
-            "type": "array"
-          },
-          "whitelist": {
-            "items": {
-              "pattern": "^(bybit|okx|coinbase|kraken|deriv|binance|hyperliquid|lighter|bitget|mexc|twse|tpex|nasdaq|nyse|cboe|treasury|mock):(perp|spot|future|stock|etf|rate):[A-Za-z0-9._/-]{1,64}$",
-              "type": "string"
-            },
-            "title": "Whitelist",
-            "type": "array"
-          }
-        },
-        "required": [
-          "qualification",
-          "venues"
-        ],
-        "title": "Universe",
-        "type": "object"
       },
       "ValidationError": {
         "properties": {
@@ -4315,39 +2590,6 @@
         "title": "ValidationError",
         "type": "object"
       },
-      "ValueMatch": {
-        "additionalProperties": false,
-        "description": "One STATE clause: a published value equals one of ``any_of``.\n\nValues compare with the same JSON type, so a string never equals a\nboolean.\n\nAttributes:\n    field: Published value key.\n    any_of: Accepted values.",
-        "properties": {
-          "any_of": {
-            "items": {
-              "anyOf": [
-                {
-                  "type": "string"
-                },
-                {
-                  "type": "boolean"
-                }
-              ]
-            },
-            "maxItems": 16,
-            "minItems": 1,
-            "title": "Any Of",
-            "type": "array"
-          },
-          "field": {
-            "maxLength": 64,
-            "title": "Field",
-            "type": "string"
-          }
-        },
-        "required": [
-          "field",
-          "any_of"
-        ],
-        "title": "ValueMatch",
-        "type": "object"
-      },
       "Venue": {
         "description": "Supported venues (contract ``Venue``). ``MOCK`` is DEMO-only.",
         "enum": [
@@ -4371,133 +2613,11 @@
         ],
         "title": "Venue",
         "type": "string"
-      },
-      "WithinBarsNode": {
-        "additionalProperties": false,
-        "description": "Child TRUE on at least one of the last ``bars`` + 1 bars.\n\nAttributes:\n    op: Discriminator ``WITHIN_BARS``.\n    id: Stable editor id.\n    label: Optional display label.\n    bars: Lookback in bars.\n    child: Tested node.",
-        "properties": {
-          "bars": {
-            "maximum": 200.0,
-            "minimum": 0.0,
-            "title": "Bars",
-            "type": "integer"
-          },
-          "child": {
-            "discriminator": {
-              "mapping": {
-                "ALL": "#/components/schemas/AllNode",
-                "ANY": "#/components/schemas/AnyNode",
-                "AOI_OVERLAP": "#/components/schemas/AoiOverlapNode",
-                "AOI_TOUCH": "#/components/schemas/AoiTouchNode",
-                "COMPARE": "#/components/schemas/CompareNode",
-                "CROSSES": "#/components/schemas/CrossesNode",
-                "EVENT": "#/components/schemas/EventNode",
-                "IN_RANGE": "#/components/schemas/InRangeNode",
-                "IN_ZONE": "#/components/schemas/InZoneNode",
-                "NOT": "#/components/schemas/NotNode",
-                "PERSIST_FOR": "#/components/schemas/PersistForNode",
-                "RISK_REWARD": "#/components/schemas/RiskRewardNode",
-                "SEQUENCE": "#/components/schemas/SequenceNode",
-                "STATE": "#/components/schemas/StateNode",
-                "TIME_WINDOW": "#/components/schemas/TimeWindowNode",
-                "WITHIN_BARS": "#/components/schemas/WithinBarsNode"
-              },
-              "propertyName": "op"
-            },
-            "oneOf": [
-              {
-                "$ref": "#/components/schemas/AllNode"
-              },
-              {
-                "$ref": "#/components/schemas/AnyNode"
-              },
-              {
-                "$ref": "#/components/schemas/NotNode"
-              },
-              {
-                "$ref": "#/components/schemas/StateNode"
-              },
-              {
-                "$ref": "#/components/schemas/InZoneNode"
-              },
-              {
-                "$ref": "#/components/schemas/AoiTouchNode"
-              },
-              {
-                "$ref": "#/components/schemas/AoiOverlapNode"
-              },
-              {
-                "$ref": "#/components/schemas/EventNode"
-              },
-              {
-                "$ref": "#/components/schemas/SequenceNode"
-              },
-              {
-                "$ref": "#/components/schemas/CompareNode"
-              },
-              {
-                "$ref": "#/components/schemas/InRangeNode"
-              },
-              {
-                "$ref": "#/components/schemas/CrossesNode"
-              },
-              {
-                "$ref": "#/components/schemas/PersistForNode"
-              },
-              {
-                "$ref": "#/components/schemas/WithinBarsNode"
-              },
-              {
-                "$ref": "#/components/schemas/TimeWindowNode"
-              },
-              {
-                "$ref": "#/components/schemas/RiskRewardNode"
-              }
-            ],
-            "title": "Child"
-          },
-          "id": {
-            "anyOf": [
-              {
-                "maxLength": 64,
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Id"
-          },
-          "label": {
-            "anyOf": [
-              {
-                "maxLength": 200,
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Label"
-          },
-          "op": {
-            "const": "WITHIN_BARS",
-            "title": "Op",
-            "type": "string"
-          }
-        },
-        "required": [
-          "op",
-          "bars",
-          "child"
-        ],
-        "title": "WithinBarsNode",
-        "type": "object"
       }
     }
   },
   "info": {
-    "description": "Python-authoritative market data, qualification, indicators, strategies and signals. Contracts: joseph-terminal/packages/contracts/schemas.",
+    "description": "Python-authoritative market data, script filters, indicators, strategies and signals. Contracts: joseph-terminal/packages/contracts/schemas.",
     "title": "Joseph Market Engine",
     "version": "0.5.0"
   },
@@ -5565,84 +3685,6 @@
           }
         },
         "summary": "Orderbook",
-        "tags": [
-          "market"
-        ]
-      }
-    },
-    "/v1/market/qualification": {
-      "get": {
-        "description": "Returns qualification results with every gate's evidence.\n\nArgs:\n    venue: Optional contract ``Venue`` filter.\n    status: Optional qualification status filter.\n    refresh: Whether to scan again instead of using records\n        cached within the service's time to live.\n\nReturns:\n    Contract ``QualificationReport``.\n\nRaises:\n    errors.ValidationFailedError: On an unknown ``venue`` or\n        ``status`` (422).",
-        "operationId": "qualification_report_v1_market_qualification_get",
-        "parameters": [
-          {
-            "in": "query",
-            "name": "venue",
-            "required": false,
-            "schema": {
-              "anyOf": [
-                {
-                  "type": "string"
-                },
-                {
-                  "type": "null"
-                }
-              ],
-              "title": "Venue"
-            }
-          },
-          {
-            "in": "query",
-            "name": "status",
-            "required": false,
-            "schema": {
-              "anyOf": [
-                {
-                  "type": "string"
-                },
-                {
-                  "type": "null"
-                }
-              ],
-              "title": "Status"
-            }
-          },
-          {
-            "in": "query",
-            "name": "refresh",
-            "required": false,
-            "schema": {
-              "default": false,
-              "title": "Refresh",
-              "type": "boolean"
-            }
-          }
-        ],
-        "responses": {
-          "200": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "additionalProperties": true,
-                  "title": "Response Qualification Report V1 Market Qualification Get",
-                  "type": "object"
-                }
-              }
-            },
-            "description": "Successful Response"
-          },
-          "422": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/HTTPValidationError"
-                }
-              }
-            },
-            "description": "Validation Error"
-          }
-        },
-        "summary": "Qualification Report",
         "tags": [
           "market"
         ]
@@ -6798,37 +4840,35 @@
         ]
       }
     },
-    "/v1/strategies": {
+    "/v1/strategy-activations": {
       "get": {
-        "description": "Lists the latest version of each strategy.\n\nArgs:\n    principal: Caller; only their tenant's strategies are listed.\n\nReturns:\n    Contract ``StrategyVersionList``.",
-        "operationId": "list_strategies_v1_strategies_get",
+        "description": "Lists the caller's activations, newest first.\n\nArgs:\n    principal: Authenticated owner.\n\nReturns:\n    Activations with runtime and forwarding availability.",
+        "operationId": "list_activations_v1_strategy_activations_get",
         "responses": {
           "200": {
             "content": {
               "application/json": {
                 "schema": {
-                  "additionalProperties": true,
-                  "title": "Response List Strategies V1 Strategies Get",
-                  "type": "object"
+                  "$ref": "#/components/schemas/StrategyActivationList"
                 }
               }
             },
             "description": "Successful Response"
           }
         },
-        "summary": "List Strategies",
+        "summary": "List Activations",
         "tags": [
-          "strategies"
+          "strategy-activations"
         ]
       },
       "post": {
-        "description": "Stores a new strategy as version 1 (201).\n\nA semantically invalid definition is still stored, as a DRAFT.\n\nArgs:\n    definition: Rule AST v2 definition.\n    principal: Caller; needs the ``strategy:write`` scope.\n\nReturns:\n    Contract ``StrategyVersion``.\n\nRaises:\n    errors.ConflictError: If the strategy id already exists (409).\n    errors.ForbiddenError: If the caller may not write (403).",
-        "operationId": "create_strategy_v1_strategies_post",
+        "description": "Activates a strategy on future closed bars.\n\nAUTO_LIVE is refused with 409 TRADE_MODE_DISABLED: live trading\nexists only as an execution-engine deployment with scoped consent.\n\nArgs:\n    body: Strategy, instruments, timeframe, inputs, mode, channels.\n    principal: Authenticated author.\n\nReturns:\n    The ACTIVE activation.",
+        "operationId": "create_activation_v1_strategy_activations_post",
         "requestBody": {
           "content": {
             "application/json": {
               "schema": {
-                "$ref": "#/components/schemas/StrategyDefinition"
+                "$ref": "#/components/schemas/StrategyActivationInput"
               }
             }
           },
@@ -6839,9 +4879,7 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "additionalProperties": true,
-                  "title": "Response Create Strategy V1 Strategies Post",
-                  "type": "object"
+                  "$ref": "#/components/schemas/StrategyActivation"
                 }
               }
             },
@@ -6858,37 +4896,29 @@
             "description": "Validation Error"
           }
         },
-        "summary": "Create Strategy",
+        "summary": "Create Activation",
         "tags": [
-          "strategies"
+          "strategy-activations"
         ]
       }
     },
-    "/v1/strategies/validate": {
-      "post": {
-        "description": "Validates a definition without storing it.\n\nArgs:\n    definition: Rule AST v2 definition.\n    principal: Caller.\n\nReturns:\n    Contract ``ValidationResult``; an invalid definition is a 200\n    response with ``valid`` false, not an error.",
-        "operationId": "validate_definition_v1_strategies_validate_post",
-        "requestBody": {
-          "content": {
-            "application/json": {
-              "schema": {
-                "$ref": "#/components/schemas/StrategyDefinition"
-              }
+    "/v1/strategy-activations/{activation_id}": {
+      "delete": {
+        "description": "Deletes an activation; recorded signals remain.\n\nArgs:\n    activation_id: Activation id.\n    principal: Authenticated author.\n\nReturns:\n    Empty 204 response.",
+        "operationId": "delete_activation_v1_strategy_activations__activation_id__delete",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "activation_id",
+            "required": true,
+            "schema": {
+              "title": "Activation Id",
+              "type": "string"
             }
-          },
-          "required": true
-        },
+          }
+        ],
         "responses": {
-          "200": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "additionalProperties": true,
-                  "title": "Response Validate Definition V1 Strategies Validate Post",
-                  "type": "object"
-                }
-              }
-            },
+          "204": {
             "description": "Successful Response"
           },
           "422": {
@@ -6902,24 +4932,21 @@
             "description": "Validation Error"
           }
         },
-        "summary": "Validate Definition",
+        "summary": "Delete Activation",
         "tags": [
-          "strategies"
+          "strategy-activations"
         ]
-      }
-    },
-    "/v1/strategies/{strategy_id}": {
+      },
       "get": {
-        "description": "Lists every version of one strategy.\n\nArgs:\n    strategy_id: Strategy slug.\n    principal: Caller.\n\nReturns:\n    Contract ``StrategyVersionList``.\n\nRaises:\n    errors.NotFoundError: If the caller's tenant has no such\n        strategy (404).",
-        "operationId": "get_strategy_v1_strategies__strategy_id__get",
+        "description": "Reads one activation with its per-instrument progress.\n\nArgs:\n    activation_id: Activation id.\n    principal: Authenticated owner.\n\nReturns:\n    The activation.",
+        "operationId": "get_activation_v1_strategy_activations__activation_id__get",
         "parameters": [
           {
             "in": "path",
-            "name": "strategy_id",
+            "name": "activation_id",
             "required": true,
             "schema": {
-              "pattern": "^[a-z0-9][a-z0-9-]{0,62}$",
-              "title": "Strategy Id",
+              "title": "Activation Id",
               "type": "string"
             }
           }
@@ -6929,9 +4956,7 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "additionalProperties": true,
-                  "title": "Response Get Strategy V1 Strategies  Strategy Id  Get",
-                  "type": "object"
+                  "$ref": "#/components/schemas/StrategyActivation"
                 }
               }
             },
@@ -6948,136 +4973,23 @@
             "description": "Validation Error"
           }
         },
-        "summary": "Get Strategy",
+        "summary": "Get Activation",
         "tags": [
-          "strategies"
+          "strategy-activations"
         ]
       }
     },
-    "/v1/strategies/{strategy_id}/activate": {
+    "/v1/strategy-activations/{activation_id}/pause": {
       "post": {
-        "description": "Activates a version in ALERT_ONLY, PAPER or SHADOW mode.\n\nArgs:\n    strategy_id: Strategy slug.\n    body: Version, mode and optional instruments.\n    principal: Caller; needs the ``strategy:write`` scope.\n\nReturns:\n    Contract ``StrategyVersion``.\n\nRaises:\n    strategy_errors.TradeModeDisabledError: For ``AUTO_LIVE`` (409\n        ``TRADE_MODE_DISABLED``).\n    errors.ValidationFailedError: For an unknown mode or instrument,\n        or a version invalid against the current catalog (422).\n    errors.NotFoundError: If the version does not exist (404).\n    errors.ForbiddenError: If the caller may not write (403).",
-        "operationId": "activate_v1_strategies__strategy_id__activate_post",
+        "description": "Stops evaluating an activation.\n\nArgs:\n    activation_id: Activation id.\n    principal: Authenticated author.\n\nReturns:\n    The PAUSED activation.",
+        "operationId": "pause_activation_v1_strategy_activations__activation_id__pause_post",
         "parameters": [
           {
             "in": "path",
-            "name": "strategy_id",
+            "name": "activation_id",
             "required": true,
             "schema": {
-              "pattern": "^[a-z0-9][a-z0-9-]{0,62}$",
-              "title": "Strategy Id",
-              "type": "string"
-            }
-          }
-        ],
-        "requestBody": {
-          "content": {
-            "application/json": {
-              "schema": {
-                "$ref": "#/components/schemas/ActivateBody"
-              }
-            }
-          },
-          "required": true
-        },
-        "responses": {
-          "200": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "additionalProperties": true,
-                  "title": "Response Activate V1 Strategies  Strategy Id  Activate Post",
-                  "type": "object"
-                }
-              }
-            },
-            "description": "Successful Response"
-          },
-          "422": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/HTTPValidationError"
-                }
-              }
-            },
-            "description": "Validation Error"
-          }
-        },
-        "summary": "Activate",
-        "tags": [
-          "strategies"
-        ]
-      }
-    },
-    "/v1/strategies/{strategy_id}/backtests": {
-      "post": {
-        "description": "Runs a backtest with the production evaluator.\n\nArgs:\n    strategy_id: Strategy slug.\n    body: Parameters; omitted options take the runner's defaults.\n    principal: Caller; only their own versions can be run.\n\nReturns:\n    Contract ``BacktestReport``.\n\nRaises:\n    errors.NotFoundError: If the version is not the caller's (404).\n    errors.ValidationFailedError: If the range or the strategy is\n        invalid for a backtest (422).",
-        "operationId": "run_backtest_v1_strategies__strategy_id__backtests_post",
-        "parameters": [
-          {
-            "in": "path",
-            "name": "strategy_id",
-            "required": true,
-            "schema": {
-              "pattern": "^[a-z0-9][a-z0-9-]{0,62}$",
-              "title": "Strategy Id",
-              "type": "string"
-            }
-          }
-        ],
-        "requestBody": {
-          "content": {
-            "application/json": {
-              "schema": {
-                "$ref": "#/components/schemas/BacktestBody"
-              }
-            }
-          },
-          "required": true
-        },
-        "responses": {
-          "200": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "additionalProperties": true,
-                  "title": "Response Run Backtest V1 Strategies  Strategy Id  Backtests Post",
-                  "type": "object"
-                }
-              }
-            },
-            "description": "Successful Response"
-          },
-          "422": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/HTTPValidationError"
-                }
-              }
-            },
-            "description": "Validation Error"
-          }
-        },
-        "summary": "Run Backtest",
-        "tags": [
-          "backtests"
-        ]
-      }
-    },
-    "/v1/strategies/{strategy_id}/pause": {
-      "post": {
-        "description": "Pauses the active version.\n\nArgs:\n    strategy_id: Strategy slug.\n    principal: Caller; needs the ``strategy:write`` scope.\n\nReturns:\n    Contract ``StrategyVersion``.\n\nRaises:\n    errors.ConflictError: If no version is active (409).\n    errors.ForbiddenError: If the caller may not write (403).",
-        "operationId": "pause_v1_strategies__strategy_id__pause_post",
-        "parameters": [
-          {
-            "in": "path",
-            "name": "strategy_id",
-            "required": true,
-            "schema": {
-              "pattern": "^[a-z0-9][a-z0-9-]{0,62}$",
-              "title": "Strategy Id",
+              "title": "Activation Id",
               "type": "string"
             }
           }
@@ -7087,9 +4999,7 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "additionalProperties": true,
-                  "title": "Response Pause V1 Strategies  Strategy Id  Pause Post",
-                  "type": "object"
+                  "$ref": "#/components/schemas/StrategyActivation"
                 }
               }
             },
@@ -7106,53 +5016,33 @@
             "description": "Validation Error"
           }
         },
-        "summary": "Pause",
+        "summary": "Pause Activation",
         "tags": [
-          "strategies"
+          "strategy-activations"
         ]
       }
     },
-    "/v1/strategies/{strategy_id}/validate": {
+    "/v1/strategy-activations/{activation_id}/resume": {
       "post": {
-        "description": "Re-validates a stored version against the current catalog.\n\nA version that no longer validates becomes UNSUPPORTED and is\ndeactivated.\n\nArgs:\n    strategy_id: Strategy slug.\n    principal: Caller.\n    body: Optional version selector; the latest version when\n        omitted.\n\nReturns:\n    Contract ``ValidationResult``.\n\nRaises:\n    errors.NotFoundError: If the strategy or version does not exist\n        (404).",
-        "operationId": "revalidate_v1_strategies__strategy_id__validate_post",
+        "description": "Resumes an activation from the next closed bar on.\n\nArgs:\n    activation_id: Activation id.\n    principal: Authenticated author.\n\nReturns:\n    The ACTIVE activation; bars closed while paused never signal.",
+        "operationId": "resume_activation_v1_strategy_activations__activation_id__resume_post",
         "parameters": [
           {
             "in": "path",
-            "name": "strategy_id",
+            "name": "activation_id",
             "required": true,
             "schema": {
-              "pattern": "^[a-z0-9][a-z0-9-]{0,62}$",
-              "title": "Strategy Id",
+              "title": "Activation Id",
               "type": "string"
             }
           }
         ],
-        "requestBody": {
-          "content": {
-            "application/json": {
-              "schema": {
-                "anyOf": [
-                  {
-                    "$ref": "#/components/schemas/RevalidateBody"
-                  },
-                  {
-                    "type": "null"
-                  }
-                ],
-                "title": "Body"
-              }
-            }
-          }
-        },
         "responses": {
           "200": {
             "content": {
               "application/json": {
                 "schema": {
-                  "additionalProperties": true,
-                  "title": "Response Revalidate V1 Strategies  Strategy Id  Validate Post",
-                  "type": "object"
+                  "$ref": "#/components/schemas/StrategyActivation"
                 }
               }
             },
@@ -7169,65 +5059,9 @@
             "description": "Validation Error"
           }
         },
-        "summary": "Revalidate",
+        "summary": "Resume Activation",
         "tags": [
-          "strategies"
-        ]
-      }
-    },
-    "/v1/strategies/{strategy_id}/versions": {
-      "post": {
-        "description": "Stores a new immutable version (201).\n\nA definition identical to the latest version returns that version\ninstead of creating a duplicate.\n\nArgs:\n    strategy_id: Strategy slug.\n    definition: Edited definition; its ``strategy_id`` must match\n        the path.\n    principal: Caller; needs the ``strategy:write`` scope.\n\nReturns:\n    Contract ``StrategyVersion``.\n\nRaises:\n    errors.ValidationFailedError: If the definition's id differs\n        from the path (422).\n    errors.NotFoundError: If the strategy does not exist (404).\n    errors.ForbiddenError: If the caller may not write (403).",
-        "operationId": "create_version_v1_strategies__strategy_id__versions_post",
-        "parameters": [
-          {
-            "in": "path",
-            "name": "strategy_id",
-            "required": true,
-            "schema": {
-              "pattern": "^[a-z0-9][a-z0-9-]{0,62}$",
-              "title": "Strategy Id",
-              "type": "string"
-            }
-          }
-        ],
-        "requestBody": {
-          "content": {
-            "application/json": {
-              "schema": {
-                "$ref": "#/components/schemas/StrategyDefinition"
-              }
-            }
-          },
-          "required": true
-        },
-        "responses": {
-          "201": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "additionalProperties": true,
-                  "title": "Response Create Version V1 Strategies  Strategy Id  Versions Post",
-                  "type": "object"
-                }
-              }
-            },
-            "description": "Successful Response"
-          },
-          "422": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/HTTPValidationError"
-                }
-              }
-            },
-            "description": "Validation Error"
-          }
-        },
-        "summary": "Create Version",
-        "tags": [
-          "strategies"
+          "strategy-activations"
         ]
       }
     },

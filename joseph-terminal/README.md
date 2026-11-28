@@ -19,7 +19,7 @@ Two external services do the work over HTTP and WebSocket, following the version
 
 | Service | Provides |
 |---|---|
-| Market engine | Instruments, candles, indicators, screening, strategies, signals, backtests |
+| Market engine | Instruments, candles, indicators, screener scans, alert jobs, strategies, signals, backtests |
 | Execution engine | Accounts, orders, risk gateway, positions, kill switch, audit |
 
 Set their URLs at build time (Next.js inlines them; see `apps/web/.env.example`):
@@ -48,7 +48,7 @@ The `Dockerfile` builds a standalone image on port 3000; pass the same variables
 | `drawing-core`, `drawing-tools` | Anchored drawings, undo, migrations, engine-series sync; 37 tools |
 | `indicator-viz` | Render-only mapping of engine indicator outputs (zones, levels, events, lines, panes) to overlays, styled by each plugin's display metadata |
 | `terminal-shell` | Workspace, sync, sessions, persistence, hotkeys |
-| `chart-trading`, `strategy-builder` | Order-ticket state machine; rule-AST editing models |
+| `chart-trading` | Order-ticket state machine |
 | `mock-provider` | DEMO market, broker and strategy services |
 | `apps/web` | Next.js app, composition root, React features |
 

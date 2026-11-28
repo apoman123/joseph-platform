@@ -370,17 +370,11 @@ class Settings:
         stream_retention: Envelopes the stream hub keeps, across all
             channels, for clients resuming with ``last_sequence``,
             ``JOSEPH_STREAM_RETENTION``. Default 2000.
-        top_n: Qualification candidates per venue, ranked by 24h quote
-            turnover, ``JOSEPH_QUALIFICATION_TOP_N``. Default 50.
-        coingecko_enabled: Whether CoinGecko trending heat bonuses are
-            fetched, ``JOSEPH_COINGECKO_ENABLED``. Default false.
-        pipeline_enabled: Whether the live signal pipeline runs,
-            ``JOSEPH_PIPELINE_ENABLED``. Default true.
-        pipeline_interval_s: Time between live pipeline passes, in seconds,
-            ``JOSEPH_PIPELINE_INTERVAL_S``. Default 10, at least 1.
-        pipeline_max_instruments: Instruments per venue for universes
-            without explicit instruments,
-            ``JOSEPH_PIPELINE_MAX_INSTRUMENTS``. Default 10.
+        strategy_activations_enabled: Whether active Python strategy
+            activations are evaluated on closed bars,
+            ``JOSEPH_STRATEGY_ACTIVATIONS_ENABLED``. Default true.
+        strategy_interval_s: Time between strategy activation passes, in
+            seconds, ``JOSEPH_STRATEGY_INTERVAL_S``. Default 10, at least 1.
         forward_signals: Whether entry signals of PAPER/SHADOW/AUTO_LIVE
             strategies are forwarded to the execution engine (also needs
             ``service_token``), ``JOSEPH_FORWARD_SIGNALS``. Default true.
@@ -525,11 +519,8 @@ class Settings:
     poll_interval_s: float = 5.0
     snapshot_stale_after_ms: int = 30_000
     stream_retention: int = 2_000
-    top_n: int = 50
-    coingecko_enabled: bool = False
-    pipeline_enabled: bool = True
-    pipeline_interval_s: float = 10.0
-    pipeline_max_instruments: int = 10
+    strategy_activations_enabled: bool = True
+    strategy_interval_s: float = 10.0
     forward_signals: bool = True
     alert_interval_s: float = 2.0
     max_anchored_bars: int = 50_000
@@ -696,16 +687,11 @@ class Settings:
                 source.get("JOSEPH_SNAPSHOT_STALE_AFTER_MS", "30000")
             ),
             stream_retention=int(source.get("JOSEPH_STREAM_RETENTION", "2000")),
-            top_n=int(source.get("JOSEPH_QUALIFICATION_TOP_N", "50")),
-            coingecko_enabled=_bool(
-                source.get("JOSEPH_COINGECKO_ENABLED"), False
+            strategy_activations_enabled=_bool(
+                source.get("JOSEPH_STRATEGY_ACTIVATIONS_ENABLED"), True
             ),
-            pipeline_enabled=_bool(source.get("JOSEPH_PIPELINE_ENABLED"), True),
-            pipeline_interval_s=max(
-                1.0, float(source.get("JOSEPH_PIPELINE_INTERVAL_S", "10"))
-            ),
-            pipeline_max_instruments=int(
-                source.get("JOSEPH_PIPELINE_MAX_INSTRUMENTS", "10")
+            strategy_interval_s=max(
+                1.0, float(source.get("JOSEPH_STRATEGY_INTERVAL_S", "10"))
             ),
             forward_signals=_bool(source.get("JOSEPH_FORWARD_SIGNALS"), True),
             alert_interval_s=max(

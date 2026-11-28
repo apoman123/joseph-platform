@@ -18,14 +18,11 @@ import type {
   HeatmapCatalog,
   HeatmapSnapshot,
   Signal,
-} from '../generated/contracts';
-import {HttpTransport, type HttpClientOptions} from './http';
-import type {
   CatalogList,
   CatalogScript,
-  PythonCatalog,
-  ScriptsClient,
-} from './ports';
+} from '../generated/contracts';
+import {HttpTransport, type HttpClientOptions} from './http';
+import type {PythonCatalog, ScriptsClient} from './ports';
 
 /** Heatmap request: family, optional data set and optional tile limit. */
 export interface HeatmapQuery {

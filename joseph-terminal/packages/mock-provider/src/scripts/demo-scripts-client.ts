@@ -72,7 +72,7 @@ function effectiveInputs(
 ): Record<string, JsonValue> {
   const merged: Record<string, JsonValue> = {};
   for (const [name, spec] of Object.entries(entry.inputs)) {
-    merged[name] = spec.default;
+    if (spec) merged[name] = spec.default;
   }
   for (const [name, value] of Object.entries(inputs)) {
     const spec = entry.inputs[name];
@@ -111,6 +111,7 @@ export class DemoScriptsClient implements ScriptsClient {
   async catalog(kind?: CatalogScript['kind']): Promise<CatalogList> {
     return {
       scripts: DEMO_SCRIPT_CATALOG.filter(s => !kind || s.kind === kind),
+      failures: [],
     };
   }
 
