@@ -27,6 +27,11 @@ from typing import Any
 
 import joseph_script
 
+OPTIONAL_FIELDS = frozenset(
+    {"quote_turnover", "trade_count", "taker_buy_volume"}
+)
+"""Optional numeric bar fields; absent values stay None, never zero."""
+
 
 class Context:
     """Exposes closed-bar history, plots, state.
@@ -239,6 +244,26 @@ class Context:
         if field not in {"open", "high", "low", "close", "volume"}:
             raise ValueError("unknown OHLCV field")
         return [float(bar[field]) for bar in self.history]
+
+    def optional_series(self, field: str) -> list[float | None]:
+        """Reads an optional provider field through the current closed bar.
+
+        Args:
+            field: quote_turnover, trade_count or taker_buy_volume.
+
+        Returns:
+            Visible values in chronological order; None where the source
+            published no value for that bar.
+
+        Raises:
+            ValueError: If the field is not an optional bar field.
+        """
+        if field not in OPTIONAL_FIELDS:
+            raise ValueError("unknown optional bar field")
+        return [
+            None if bar.get(field) is None else float(bar[field])
+            for bar in self.history
+        ]
 
     def sma(self, field: str = "close", length: int = 20) -> float | None:
         """Computes a simple moving average using visible closed bars only.
@@ -1174,8 +1199,79 @@ def evaluate(bundle: dict[str, Any]) -> dict[str, Any]:
                 )
         return {"results": results}
     module = _load(bundle, {})
+    return run_instance(module.__dict__["__script_instance__"], bundle)
+
+
+def run_class(cls: type, bundle: dict[str, Any]) -> dict[str, Any]:
+    """Runs a trusted, already imported script class on one bundle.
+
+    The host uses this for built-in and operator-installed plugin scripts,
+    which are platform code rather than tenant source; it never executes
+    source text.
+
+    Args:
+        cls: Concrete subclass of the bundle's joseph_script role.
+        bundle: Kind, closed bars, inputs and simulation settings.
+
+    Returns:
+        The same result mapping as an isolated container run.
+
+    Raises:
+        ValueError: If the class does not implement the bundle's role.
+    """
+    base = getattr(joseph_script, str(bundle["kind"]).title())
+    if (
+        not isinstance(cls, type)
+        or not issubclass(cls, base)
+        or inspect.isabstract(cls)
+    ):
+        raise ValueError("script class does not implement the selected role")
+    if "symbols" in bundle:
+        results = []
+        for symbol in bundle["symbols"]:
+            try:
+                result = run_class(
+                    cls,
+                    {
+                        key: value
+                        for key, value in bundle.items()
+                        if key != "symbols"
+                    }
+                    | symbol,
+                )
+                results.append(
+                    {
+                        "instrument_id": symbol["instrument_id"],
+                        "matched": result["matched"],
+                        "error": None,
+                    }
+                )
+            except Exception as exc:  # noqa: BLE001 - One filter failure must not discard other symbols.
+                results.append(
+                    {
+                        "instrument_id": symbol["instrument_id"],
+                        "matched": False,
+                        "error": f"{type(exc).__name__}: {str(exc)[:300]}",
+                    }
+                )
+        return {"results": results}
+    return run_instance(cls(), bundle)
+
+
+def run_instance(instance: Any, bundle: dict[str, Any]) -> dict[str, Any]:
+    """Evaluates one script instance over the bundle's bars in order.
+
+    Args:
+        instance: Fresh script instance for this run.
+        bundle: Kind, closed bars, inputs and simulation settings.
+
+    Returns:
+        Plot series, simulated fills/equity and reproducibility statistics.
+
+    Raises:
+        ValueError: If a filter returns a non-boolean or equity is not finite.
+    """
     context = Context(bundle)
-    instance = module.__dict__["__script_instance__"]
     run: Callable[[Context], None] = getattr(instance, "on_bar", lambda _: None)
     peak = context.cash
     drawdown = 0.0

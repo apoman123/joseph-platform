@@ -95,6 +95,7 @@ from joseph.platform import redaction
 from joseph.platform import streaming
 from joseph.screening.adapters import coingecko
 from joseph.screening.app import service as screening_service
+from joseph.scripts import catalog as script_catalog
 from joseph.scripts import jobs as script_jobs
 from joseph.scripts import repository as script_repository
 from joseph.scripts import runner as script_runner
@@ -810,6 +811,13 @@ def create_application(
             timeout_s=built.settings.script_timeout_s,
         ),
         built.market_data,
+        script_catalog.build(
+            script_catalog.CatalogConfig(
+                packages=built.settings.script_plugin_packages,
+                disabled=built.settings.script_plugins_disabled,
+                required=built.settings.script_plugins_required,
+            )
+        ),
     )
     routers.append(scripts_router.build_router(scripts, deps.get_principal))
     universe = market_universe.UniverseService(built.market_data)

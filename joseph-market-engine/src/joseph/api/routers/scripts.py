@@ -8,6 +8,7 @@ Authenticated authoring and isolated execution of five Python script kinds.
 
 from collections.abc import Callable
 from typing import Annotated
+from typing import Literal
 
 import fastapi
 import pydantic
@@ -31,6 +32,82 @@ class ScriptList(pydantic.BaseModel):
     scripts: list[models.ScriptVersion]
     runtime_enabled: bool
     next_offset: int | None = None
+
+
+class CatalogInput(pydantic.BaseModel):
+    """A declared input of a built-in or plugin script.
+
+    Attributes:
+        default: JSON default value.
+        title: Settings label.
+        minimum: Optional inclusive numeric lower bound.
+        maximum: Optional inclusive numeric upper bound.
+        options: Optional accepted values.
+        step: Optional numeric step.
+        group: Optional settings section.
+        tooltip: Optional help text.
+    """
+
+    default: pydantic.JsonValue
+    title: str
+    minimum: float | None
+    maximum: float | None
+    options: list[pydantic.JsonValue] | None
+    step: float | None
+    group: str
+    tooltip: str
+
+
+class CatalogScript(pydantic.BaseModel):
+    """A built-in or installed plugin script that the engine runs in process.
+
+    Attributes:
+        script_id: ``builtin:<id>`` or ``plugin:<entry point>:<id>``.
+        kind: indicator, strategy, library, filter or alert.
+        origin: builtin or plugin.
+        package: Providing distribution of a plugin.
+        package_version: That distribution's version.
+        title: Display name.
+        short_title: Compact legend name.
+        description: Catalog description.
+        category: Catalog section.
+        overlay: Whether plots share the price pane.
+        inputs: Declared inputs in display order.
+        requests: Declared additional series by alias.
+        source_available: Whether the public source can be read.
+        source_hash: Identity of the installed code.
+        enabled: False when disabled by configuration.
+        source: Public source text on the single-script route, else None.
+    """
+
+    script_id: str
+    kind: models.ScriptKind
+    origin: Literal["builtin", "plugin"]
+    package: str | None
+    package_version: str | None
+    title: str
+    short_title: str
+    description: str
+    category: str
+    overlay: bool
+    inputs: dict[str, CatalogInput]
+    requests: dict[str, dict[str, pydantic.JsonValue]]
+    source_available: bool
+    source_hash: str
+    enabled: bool
+    source: str | None = None
+
+
+class CatalogList(pydantic.BaseModel):
+    """Installed built-in and plugin scripts and skipped plugin packages.
+
+    Attributes:
+        scripts: Scripts in catalog order.
+        failures: Plugin entry points that failed to load, with reasons.
+    """
+
+    scripts: list[CatalogScript]
+    failures: list[dict[str, str | None]]
 
 
 def build_router(
@@ -96,6 +173,64 @@ def build_router(
                 conflict.
         """
         return service.save(principal, body, create=True)
+
+    @router.get("/catalog")
+    def list_catalog(
+        principal: principal_dep,
+        kind: models.ScriptKind | None = None,
+    ) -> CatalogList:
+        """Lists the built-in and installed plugin scripts.
+
+        Args:
+            principal: Authenticated caller.
+            kind: Optional role filter.
+
+        Returns:
+            Catalog scripts without source text, and skipped plugins.
+        """
+        del principal
+        return CatalogList(
+            scripts=[
+                CatalogScript.model_validate(entry.describe())
+                for entry in service.catalog.entries(kind)
+            ],
+            failures=[
+                {
+                    "entry_point": failure.entry_point,
+                    "distribution": failure.distribution,
+                    "reason": failure.reason,
+                }
+                for failure in service.catalog.report.failures
+            ],
+        )
+
+    @router.get("/catalog/{script_id}")
+    def get_catalog_script(
+        script_id: str, principal: principal_dep
+    ) -> CatalogScript:
+        """Reads one catalog script, with source when it is public.
+
+        Args:
+            script_id: Catalog id.
+            principal: Authenticated caller.
+
+        Returns:
+            The script; plugin source stays protected (None).
+
+        Raises:
+            errors.NotFoundError: If the script is not installed.
+        """
+        del principal
+        if script_id not in service.catalog:
+            raise errors.NotFoundError(f"script {script_id} is not installed")
+        entry = next(
+            item
+            for item in service.catalog.entries()
+            if item.script_id == script_id
+        )
+        return CatalogScript.model_validate(
+            {**entry.describe(), "source": entry.source}
+        )
 
     @router.post("/validate")
     def validate_script(
@@ -234,7 +369,7 @@ def build_router(
         """Calculates plots or simulates a strategy without placing real orders.
 
         Args:
-            script_id: Tenant-local indicator or strategy slug.
+            script_id: Tenant slug, or a built-in/plugin catalog id.
             body: Version, closed-bar range, inputs and simulation costs.
             principal: Authenticated tenant owner.
 

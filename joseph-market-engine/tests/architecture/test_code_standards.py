@@ -179,6 +179,22 @@ _KNOWN_BASES = frozenset(
     | _ENUM_BASES
 )
 _NOT_ATTRIBUTES = frozenset({"model_config"})
+# joseph_script.Script documents these declarations once for every script.
+_SCRIPT_DECLARATIONS = frozenset(
+    {
+        "ID",
+        "TITLE",
+        "SHORT_TITLE",
+        "DESCRIPTION",
+        "CATEGORY",
+        "OVERLAY",
+        "INPUTS",
+        "REQUESTS",
+    }
+)
+_SCRIPT_ROLES = frozenset(
+    {"Indicator", "Strategy", "Library", "Filter", "Alert"}
+)
 _PROPERTY_DECORATORS = frozenset({"property", "cached_property"})
 _ALLOWED_METACLASSES = frozenset({"ABCMeta", "EnumMeta", "EnumType"})
 _TYPE_VAR_FACTORIES = frozenset({"TypeVar", "ParamSpec", "TypeVarTuple"})
@@ -962,6 +978,12 @@ def _check_class_attributes(source: _Source) -> Iterator[_Finding]:
         documented = set(_sections(docstring).get("Attributes", []))
         # Enum members are the enum's values, not attributes to list.
         candidates = found.instance | (set() if _is_enum(node) else found.body)
+        if any(
+            _final_name(base.value if isinstance(base, ast.Subscript) else base)
+            in _SCRIPT_ROLES
+            for base in node.bases
+        ):
+            candidates -= _SCRIPT_DECLARATIONS
         public = {
             name
             for name in candidates - found.properties - found.methods

@@ -8,6 +8,10 @@ Authoring, library pin resolution and closed-candle Python script execution.
 
 from __future__ import annotations
 
+import asyncio
+import collections
+import dataclasses
+import json
 from collections.abc import Mapping
 from typing import Any
 
@@ -16,11 +20,78 @@ import pydantic
 from joseph.domain import errors
 from joseph.domain import identity
 from joseph.domain import instruments
+from joseph.domain import market
 from joseph.market_data.app import service as market_service
 from joseph.scripts import accounting
+from joseph.scripts import catalog as catalog_lib
 from joseph.scripts import models
 from joseph.scripts import repository
 from joseph.scripts import runner
+from joseph.scripts import worker
+
+_RESULT_CACHE_SIZE = 512
+"""Cached catalog-script results keyed by exact inputs and bars."""
+
+
+@dataclasses.dataclass(frozen=True, slots=True)
+class ResolvedScript:
+    """A runnable script: a tenant version or a trusted catalog class.
+
+    Attributes:
+        script_id: Tenant slug or catalog id.
+        version: Tenant version, or 0 for catalog scripts.
+        kind: Script role.
+        name: Display title.
+        overlay: Whether plots share the price pane.
+        defaults: Default input values.
+        requests: Declared additional series.
+        source_hash: Exact source/configuration identity.
+        entry: Catalog entry for built-in and plugin scripts, else None.
+        tenant: Tenant version for tenant source, else None.
+    """
+
+    script_id: str
+    version: int
+    kind: str
+    name: str
+    overlay: bool
+    defaults: dict[str, Any]
+    requests: dict[str, models.SeriesRequest]
+    source_hash: str
+    entry: catalog_lib.CatalogEntry | None
+    tenant: models.ScriptVersion | None
+
+
+def bar_record(bar: market.Candle) -> dict[str, Any]:
+    """Converts a candle to the JSON bar shape scripts read.
+
+    Args:
+        bar: Source candle.
+
+    Returns:
+        time_ms/end_ms/is_final/OHLCV plus optional provider fields, which
+        stay None when the source did not publish them.
+    """
+    return {
+        "time_ms": bar.start_ms,
+        "end_ms": bar.end_ms,
+        "is_final": bar.is_final,
+        "open": float(bar.open),
+        "high": float(bar.high),
+        "low": float(bar.low),
+        "close": float(bar.close),
+        "volume": float(bar.base_volume),
+        "quote_turnover": None
+        if bar.quote_turnover is None
+        else float(bar.quote_turnover),
+        "trade_count": bar.trade_count,
+        "taker_buy_volume": None
+        if bar.taker_buy_base_volume is None
+        else float(bar.taker_buy_base_volume),
+        "taker_buy_method": None
+        if bar.taker_buy_method is None
+        else str(bar.taker_buy_method.value),
+    }
 
 
 def require_write(principal: identity.Principal) -> None:
@@ -48,6 +119,7 @@ class ScriptService:
         repository: Tenant-scoped immutable source repository.
         runner: Network-isolated user-code executor.
         market_data: Authoritative backend candle service, including provenance.
+        catalog: Built-in and installed plugin scripts, run in process.
     """
 
     def __init__(
@@ -55,6 +127,7 @@ class ScriptService:
         store: repository.ScriptRepository,
         runtime: runner.DockerRunner,
         market_data: market_service.MarketDataService,
+        catalog: catalog_lib.ScriptCatalog | None = None,
     ) -> None:
         """Connects authoring, data and execution.
 
@@ -65,10 +138,148 @@ class ScriptService:
             store: Tenant-isolated immutable script source store.
             runtime: Explicitly configured isolated runtime.
             market_data: Backend data source used to fetch real closed bars.
+            catalog: Built-in and plugin scripts; the built-ins only when
+                omitted.
         """
         self.repository = store
         self.runner = runtime
         self.market_data = market_data
+        self.catalog = catalog or catalog_lib.build(
+            catalog_lib.CatalogConfig(packages=catalog_lib.NO_PACKAGES)
+        )
+        self._slots = asyncio.Semaphore(4)
+        self._results: collections.OrderedDict[str, dict[str, Any]] = (
+            collections.OrderedDict()
+        )
+
+    def resolve(
+        self, tenant_id: str, script_id: str, version: int | None = None
+    ) -> ResolvedScript:
+        """Finds a runnable tenant version or catalog script.
+
+        Args:
+            tenant_id: Owner of tenant scripts.
+            script_id: Tenant slug or catalog id.
+            version: Tenant version, latest when None; ignored for catalog
+                scripts.
+
+        Returns:
+            The resolved script.
+
+        Raises:
+            errors.NotFoundError: If no such script or version exists.
+            errors.UnsupportedError: If a catalog script is disabled.
+        """
+        if catalog_lib.is_catalog_id(script_id):
+            entry = self.catalog.get(script_id)
+            return ResolvedScript(
+                script_id=entry.script_id,
+                version=0,
+                kind=entry.kind,
+                name=entry.title,
+                overlay=entry.overlay,
+                defaults=entry.defaults,
+                requests={
+                    alias: models.SeriesRequest.model_validate(
+                        spec, strict=False
+                    )
+                    for alias, spec in entry.requests.items()
+                },
+                source_hash=entry.source_hash,
+                entry=entry,
+                tenant=None,
+            )
+        script = self.repository.get(tenant_id, script_id, version)
+        return ResolvedScript(
+            script_id=script.script_id,
+            version=script.version,
+            kind=script.kind,
+            name=script.name,
+            overlay=script.overlay,
+            defaults=dict(script.defaults),
+            requests=dict(script.requests),
+            source_hash=script.source_hash,
+            entry=None,
+            tenant=script,
+        )
+
+    def runnable(self, script: ResolvedScript) -> bool:
+        """Tells whether a script can execute in this deployment.
+
+        Args:
+            script: Resolved script.
+
+        Returns:
+            True for catalog scripts, and for tenant source when the isolated
+            runtime is enabled.
+        """
+        return script.entry is not None or self.runner.enabled
+
+    async def execute(
+        self,
+        tenant_id: str,
+        script: ResolvedScript,
+        data: Mapping[str, Any],
+    ) -> dict[str, Any]:
+        """Executes a resolved script on prepared bars and inputs.
+
+        Catalog classes run in process on a worker thread (they are trusted
+        platform or operator-installed code); tenant source runs only in the
+        isolated runner. Catalog results are cached by exact input, so polls
+        over unchanged bars cost nothing.
+
+        Args:
+            tenant_id: Owner of tenant library pins.
+            script: Resolved script.
+            data: Bundle fields besides the source: bars, inputs, kind,
+                instrument and simulation settings (or ``symbols`` for scans).
+
+        Returns:
+            The raw worker result mapping.
+
+        Raises:
+            errors.NotFoundError: If tenant source is missing.
+            errors.UnsupportedError: If tenant source must run while the
+                isolated runtime is disabled.
+            errors.ValidationFailedError: If the script fails.
+        """
+        if script.entry is None:
+            if script.tenant is None:
+                raise errors.NotFoundError("script source is unavailable")
+            if not self.runner.enabled:
+                raise errors.UnsupportedError(
+                    "enable JOSEPH_SCRIPT_RUNTIME=docker and build the "
+                    "runner image; see README"
+                )
+            bundle = self.bundle(tenant_id, script.tenant)
+            bundle.update(data)
+            return await self.runner.run(bundle)
+        payload = {**data, "kind": script.kind}
+        try:
+            key = script.source_hash + json.dumps(
+                payload, sort_keys=True, allow_nan=False, default=str
+            )
+        except ValueError:
+            raise errors.ValidationFailedError(
+                "script input is not finite JSON"
+            ) from None
+        cached = self._results.get(key)
+        if cached is not None:
+            self._results.move_to_end(key)
+            return cached
+        cls = script.entry.cls
+        async with self._slots:
+            try:
+                result = await asyncio.to_thread(worker.run_class, cls, payload)
+            except Exception as exc:  # noqa: BLE001 - Script failures become bounded validation errors.
+                raise errors.ValidationFailedError(
+                    f"{script.script_id} failed: {type(exc).__name__}: "
+                    f"{str(exc)[:300]}"
+                ) from None
+        self._results[key] = result
+        while len(self._results) > _RESULT_CACHE_SIZE:
+            self._results.popitem(last=False)
+        return result
 
     def bundle(
         self,
@@ -212,15 +423,13 @@ class ScriptService:
             errors.ValidationFailedError: On invalid data, user-code failure or
                 resource limits; malformed worker output is never trusted.
         """
-        script = self.repository.get(
-            principal.tenant_id, script_id, request.version
-        )
+        script = self.resolve(principal.tenant_id, script_id, request.version)
         if script.kind == "library":
             raise errors.UnsupportedError(
                 "libraries export reusable code; run an importing "
                 "indicator or strategy"
             )
-        if not self.runner.enabled:
+        if not self.runnable(script):
             raise errors.UnsupportedError(
                 "enable JOSEPH_SCRIPT_RUNTIME=docker and build the "
                 "runner image; see README"
@@ -237,16 +446,7 @@ class ScriptService:
             limit=request.limit,
         )
         bars = [
-            {
-                "time_ms": bar.start_ms,
-                "end_ms": bar.end_ms,
-                "is_final": bar.is_final,
-                "open": float(bar.open),
-                "high": float(bar.high),
-                "low": float(bar.low),
-                "close": float(bar.close),
-                "volume": float(bar.base_volume),
-            }
+            bar_record(bar)
             for bar in batch.candles
             if (bar.is_final or request.include_open)
             and (request.to_ms is None or bar.end_ms <= request.to_ms)
@@ -255,16 +455,18 @@ class ScriptService:
             raise errors.MissingDataError(
                 "no closed candles are available for this script run"
             )
-        bundle = self.bundle(principal.tenant_id, script)
         instrument = await self.market_data.registry.get(
             instruments.InstrumentId.parse(request.instrument_id)
         )
-        bundle["instrument"] = instrument.to_contract()
+        data: dict[str, Any] = {
+            "kind": script.kind,
+            "instrument": instrument.to_contract(),
+        }
         if script.kind == "filter":
             snapshot = await self.market_data.get_snapshot(
                 instrument.instrument_id
             )
-            bundle["snapshot"] = snapshot.to_contract(
+            data["snapshot"] = snapshot.to_contract(
                 self.market_data.now_ms(), 60000
             )
         additional = {}
@@ -276,19 +478,9 @@ class ScriptService:
                 limit=declared.limit,
             )
             additional[alias] = [
-                {
-                    "time_ms": bar.start_ms,
-                    "end_ms": bar.end_ms,
-                    "open": float(bar.open),
-                    "high": float(bar.high),
-                    "low": float(bar.low),
-                    "close": float(bar.close),
-                    "volume": float(bar.base_volume),
-                }
-                for bar in extra.candles
-                if bar.is_final
+                bar_record(bar) for bar in extra.candles if bar.is_final
             ]
-        bundle.update(
+        data.update(
             {
                 "bars": bars,
                 "instrument_id": request.instrument_id,
@@ -298,9 +490,10 @@ class ScriptService:
                 "initial_equity": request.initial_equity,
                 "commission_bps": request.commission_bps,
                 "slippage_bps": request.slippage_bps,
+                "overlay": script.overlay,
             }
         )
-        result = await self.runner.run(bundle)
+        result = await self.execute(principal.tenant_id, script, data)
         if script.kind != "strategy" and result.get("fills"):
             raise errors.ValidationFailedError(
                 "only strategies can publish simulated fills"
