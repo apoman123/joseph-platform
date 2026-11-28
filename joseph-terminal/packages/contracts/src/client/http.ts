@@ -46,8 +46,6 @@ import type {
   OrderPreview,
   OrderState,
   PositionList,
-  QualificationReport,
-  QualificationStatus,
   SessionList,
   SignalList,
   StrategyDefinition,
@@ -55,7 +53,6 @@ import type {
   StrategyVersionList,
   SubmitIntentResponse,
   ValidationResult,
-  Venue,
   VenueStatusList,
 } from '../generated/contracts';
 import type {
@@ -329,22 +326,6 @@ export class HttpMarketDataClient implements MarketDataClient {
     return this.http.request('GET', '/v1/market/orderbook', {
       instrument_id: instrumentId,
       depth,
-    });
-  }
-
-  /**
-   * Fetches qualification results (`GET /v1/market/qualification`).
-   * @param venue Optional venue filter.
-   * @param status Optional status filter.
-   * @return Qualification report.
-   */
-  getQualification(
-    venue?: Venue,
-    status?: QualificationStatus
-  ): Promise<QualificationReport> {
-    return this.http.request('GET', '/v1/market/qualification', {
-      venue,
-      status,
     });
   }
 

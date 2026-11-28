@@ -56,8 +56,6 @@ import type {
   OrderPreview,
   OrderState,
   PositionList,
-  QualificationReport,
-  QualificationStatus,
   SessionList,
   SignalKind,
   SignalList,
@@ -314,16 +312,6 @@ export interface MarketDataClient {
    * @return Order book.
    */
   getOrderBook(instrumentId: string, depth?: number): Promise<OrderBook>;
-  /**
-   * Fetches qualification results.
-   * @param venue Optional venue filter.
-   * @param status Optional status filter.
-   * @return Qualification report.
-   */
-  getQualification(
-    venue?: Venue,
-    status?: QualificationStatus
-  ): Promise<QualificationReport>;
   /**
    * Lists indicator plugins exposed by the backend.
    * @return Plugin descriptors.
