@@ -364,6 +364,45 @@ class ScriptResult(pydantic.BaseModel):
     ] = pydantic.Field(default_factory=list)
 
 
+FilterMetric: TypeAlias = Literal["order_book", "open_interest", "funding"]
+"""Market data a scan loads beyond the snapshot (``ctx.snapshot`` keys)."""
+
+
+class ScanCondition(pydantic.BaseModel):
+    """One filter of a composed scan; an instrument must match every one.
+
+    Attributes:
+        script_id: Owned Filter slug, ``builtin:<id>`` or a plugin id.
+        version: Tenant version, latest when omitted; catalog scripts pin
+            their installed source hash instead.
+        inputs: JSON values overriding the filter's defaults.
+    """
+
+    model_config = pydantic.ConfigDict(extra="forbid", strict=True)
+    script_id: ScriptRef
+    version: Annotated[int, pydantic.Field(ge=1)] | None = None
+    inputs: JsonInputs = pydantic.Field(default_factory=dict)
+
+
+class ScanConditionPin(pydantic.BaseModel):
+    """A scan condition resolved and pinned at submission.
+
+    Attributes:
+        script_id: Filter identifier.
+        version: Tenant version, or 0 for a catalog script.
+        source_hash: Exact source identity evaluated.
+        title: Display name of the filter.
+        inputs: Effective inputs (defaults plus overrides).
+    """
+
+    model_config = pydantic.ConfigDict(extra="forbid")
+    script_id: str
+    version: int
+    source_hash: str
+    title: str
+    inputs: dict[str, pydantic.JsonValue] = pydantic.Field(default_factory=dict)
+
+
 class ScanInput(pydantic.BaseModel):
     """Selects a real market universe for an isolated Python filter job.
 
@@ -376,6 +415,13 @@ class ScanInput(pydantic.BaseModel):
         history_bars: Closed bars per instrument; zero uses snapshots only.
         tf: Resolution used when historical bars are requested.
         inputs: JSON values overriding the pinned filter's defaults.
+        conditions: Further filters an instrument must also match (AND);
+            the only filters of a scan submitted without a path script.
+        metrics: Data to load beyond the snapshot; catalog filters add the
+            metrics they declare.
+        order_by: "symbol" scans instruments by id; "turnover" loads every
+            quote first and scans the highest 24h turnover first, so
+            max_symbols keeps the most active instruments.
     """
 
     model_config = pydantic.ConfigDict(extra="forbid", strict=True)
@@ -393,6 +439,13 @@ class ScanInput(pydantic.BaseModel):
         default=timeframes.Timeframe.D1, strict=False
     )
     inputs: JsonInputs = pydantic.Field(default_factory=dict)
+    conditions: Annotated[
+        list[ScanCondition], pydantic.Field(max_length=10)
+    ] = pydantic.Field(default_factory=list)
+    metrics: Annotated[list[FilterMetric], pydantic.Field(max_length=3)] = (
+        pydantic.Field(default_factory=list)
+    )
+    order_by: Literal["symbol", "turnover"] = "symbol"
 
 
 class ScanJob(pydantic.BaseModel):
@@ -408,10 +461,14 @@ class ScanJob(pydantic.BaseModel):
             bound.
         scanned: Instruments evaluated or reported unavailable so far.
         matches: Matching instrument records with real source snapshots.
-        errors: Per-instrument missing-data or user-code errors.
+        errors: Per-instrument filter failures (script errors).
         error: Job-level error, otherwise None.
         source_hash: Immutable source/dependency configuration hash.
         universe_count: Total eligible market instruments before max_symbols.
+        conditions: Every pinned filter, in evaluation order; the first is
+            also described by script_id, version and source_hash.
+        unavailable: Instruments without the data a filter needs (missing
+            quote, history or metric), with the reason; never matches.
     """
 
     model_config = pydantic.ConfigDict(extra="forbid")
@@ -429,6 +486,8 @@ class ScanJob(pydantic.BaseModel):
     error: str | None = None
     source_hash: str
     universe_count: int = 0
+    conditions: list[ScanConditionPin] = pydantic.Field(default_factory=list)
+    unavailable: list[dict[str, str]] = pydantic.Field(default_factory=list)
 
 
 class AlertJobInput(pydantic.BaseModel):
@@ -473,6 +532,9 @@ class AlertJob(AlertJobInput):
         last_error: Visible missing-data, provider or user-code failure, if any.
         last_checked_ms: Last evaluation attempt in UTC epoch milliseconds.
         emitted: Number of distinct conditions recorded for this job.
+        source_hash: Source identity pinned at save; a catalog script whose
+            installed source changed is not evaluated until saved again.
+        title: Display name of the condition script at save.
     """
 
     job_id: str
@@ -481,6 +543,8 @@ class AlertJob(AlertJobInput):
     last_error: str | None = None
     last_checked_ms: int | None = None
     emitted: int = 0
+    source_hash: str | None = None
+    title: str = ""
 
 
 def _base_name(base: ast.expr) -> str:

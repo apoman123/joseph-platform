@@ -22,8 +22,27 @@ import joseph_script
 MODULES: dict[str, tuple[str, ...]] = {
     "indicators": ("sma", "ema"),
     "strategies": (),
-    "filters": (),
-    "alerts": (),
+    "filters": (
+        "liquidity_qualification",
+        "price",
+        "change",
+        "volume",
+        "turnover",
+        "relative_volume",
+        "gap",
+        "price_vs_ma",
+        "rsi",
+        "new_high_low",
+    ),
+    "alerts": (
+        "price_cross",
+        "channel",
+        "ma_cross",
+        "rsi_level",
+        "volume_spike",
+        "percent_change",
+        "breakout",
+    ),
 }
 """Built-in module names per role package, in catalog order."""
 

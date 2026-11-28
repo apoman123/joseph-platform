@@ -39,14 +39,33 @@ def build_router(
         """Submits a bounded real-market filter scan without blocking HTTP.
 
         Args:
-            script_id: Owned Filter script slug.
-            body: Market universe and execution bounds.
+            script_id: Owned Filter slug or ``builtin:``/``plugin:`` id;
+                body conditions must match too.
+            body: Market universe, execution bounds and extra conditions.
             principal: Authenticated author.
 
         Returns:
             Pending job and immutable source provenance.
         """
         return service.submit_scan(principal, script_id, body)
+
+    @router.post("/v1/script-scans", status_code=202)
+    async def screen(
+        body: models.ScanInput, principal: owner
+    ) -> models.ScanJob:
+        """Submits a scan of the body's conditions combined with AND.
+
+        Built-in and plugin filters run in process, so composing them
+        needs no isolated runtime.
+
+        Args:
+            body: Market universe, bounds and one to ten conditions.
+            principal: Authenticated author.
+
+        Returns:
+            Pending job with every filter pinned.
+        """
+        return service.submit_scan(principal, None, body)
 
     @router.get("/v1/script-scans/{job_id}")
     def progress(job_id: str, principal: owner) -> models.ScanJob:
