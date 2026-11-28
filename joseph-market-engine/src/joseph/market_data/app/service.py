@@ -48,8 +48,9 @@ from joseph.market_data.app import trade_archive
 from joseph.market_data.domain import candles as candle_rules
 from joseph.market_data.domain import capabilities
 from joseph.market_data.domain import health
+from joseph.market_data.domain import price_adjustments
 
-ADJUSTMENT_REFRESH_MS = 900_000
+ADJUSTMENT_REFRESH_MS = price_adjustments.REFRESH_MS
 """Fifteen-minute bound on cached corporate-action normalized history."""
 
 DEFAULT_LIMIT = 500
@@ -458,6 +459,13 @@ class MarketDataService:
             start_ms: Inclusive start, epoch milliseconds.
             end_ms: Exclusive end, epoch milliseconds.
             max_bars: Bars after which no further round is started.
+
+        Returns:
+            None; updates normalized candle-store entries and coverage spans.
+
+        Raises:
+            errors.JosephError: If provider data or required corporate-action
+                evidence cannot be read safely.
         """
         now = self._clock.now_ms()
         adapter = self.adapter(instrument.venue)
@@ -476,11 +484,19 @@ class MarketDataService:
         closed_end = min(end_ms, current)
         if self._recorded is not None and timeframe.is_seconds:
             # Recorded seconds (earlier sessions, restarts, archives) first.
-            self._store.upsert_many(
-                await self._recorded.seconds_bars(
-                    instrument, timeframe, start_ms, closed_end
-                )
+            archived = await self._recorded.seconds_bars(
+                instrument, timeframe, start_ms, closed_end
             )
+            if (
+                isinstance(adapter, ports.PriceAdjustmentPort)
+                and adapter.price_adjustment(timeframe)
+                is not market.PriceAdjustment.RAW
+            ):
+                if isinstance(adapter, ports.HistoricalPriceNormalizationPort):
+                    archived = await adapter.adjust_historical_prices(archived)
+                else:
+                    archived = []
+            self._store.upsert_many(archived)
         caps = self.adapter(instrument.venue).capabilities()
         if caps.is_trade_built(timeframe) and (
             not caps.market_data.trades_history

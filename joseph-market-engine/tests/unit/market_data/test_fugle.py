@@ -170,10 +170,7 @@ async def test_0050_split_uses_confirmed_provider_adjustment(
     )
     assert source.price_adjustment(timeframes.Timeframe.D1) is expected
     assert source.price_adjustment(timeframes.Timeframe.W1) is expected
-    assert (
-        source.price_adjustment(timeframes.Timeframe.M1)
-        is market.PriceAdjustment.RAW
-    )
+    assert source.price_adjustment(timeframes.Timeframe.M1) is expected
     assert before.source == (
         "fugle.rest.adjusted" if adjusted else fugle.SOURCE
     )
@@ -255,3 +252,151 @@ async def test_long_history_fetches_newest_ranges_first() -> None:
     assert requests[0].url.params["to"] == "2026-11-24"
     assert len(requests) == 12
     await source.close()
+
+
+@pytest.mark.parametrize(
+    "tf", [tf for tf in timeframes.Timeframe if not tf.is_seconds]
+)
+@pytest.mark.parametrize(
+    "symbol,factor",
+    [
+        ("twse:etf:0050", "0.25"),
+        ("twse:stock:2330", "0.98"),
+        ("tpex:stock:6488", "4"),
+    ],
+)
+async def test_all_timeframes_share_evidenced_prices_before_aggregation(
+    tf: timeframes.Timeframe,
+    symbol: str,
+    factor: str,
+) -> None:
+    """Normalize split, dividend and reverse-split examples on every interval.
+
+    Args:
+        tf: Every minute-or-longer interval supported by the Taiwan adapter.
+        symbol: ETF, listed stock or OTC stock without symbol-specific rules.
+        factor: Provider's pre-action adjusted/raw daily close ratio.
+
+    Returns:
+        None after verifying consistent OHLC, unchanged volume and provenance.
+    """
+    instrument = instruments.InstrumentId.parse(symbol)
+    ratio = decimal.Decimal(factor)
+    queries: list[dict[str, str]] = []
+
+    def respond(request: httpx.Request) -> httpx.Response:
+        """Serve matched raw minutes, raw days and confirmed adjusted days.
+
+        Args:
+            request: Authenticated candle request on the requested exchange.
+
+        Returns:
+            Provider-shaped observations spanning the known action date.
+        """
+        params = dict(request.url.params)
+        queries.append(params)
+        daily = params["timeframe"] == "D"
+        adjusted = params.get("adjusted") == "true"
+        rows = []
+        for index, day in enumerate(["2025-06-10", "2025-06-18"]):
+            price = decimal.Decimal(100 if index == 0 else 102)
+            if index == 1 or adjusted:
+                price *= ratio
+            rows.append(
+                {
+                    "date": day if daily else f"{day}T09:00:00+08:00",
+                    "open": str(price),
+                    "high": str(price),
+                    "low": str(price),
+                    "close": str(price),
+                    "volume": 2000 if daily else 2,
+                }
+            )
+        return httpx.Response(
+            200,
+            json={
+                "symbol": instrument.venue_market_id,
+                "exchange": instrument.venue.value.upper(),
+                "adjusted": adjusted,
+                "data": rows,
+            },
+        )
+
+    client = httpx.AsyncClient(transport=httpx.MockTransport(respond))
+    source = fugle.FugleSource(
+        "free-key",
+        http.VenueHttp(instrument.venue, fugle.REST_URL, client=client),
+        clock_lib.ManualClock(_ms(25, 13, 35)),
+    )
+    start = int(datetime.datetime(2025, 6, 1, tzinfo=_TPE).timestamp() * 1000)
+    end = int(datetime.datetime(2025, 7, 1, tzinfo=_TPE).timestamp() * 1000)
+    try:
+        fetched = await source.fetch_candle_coverage(instrument, tf, start, end)
+        assert fetched.candles
+        assert min(bar.low for bar in fetched.candles) == 100 * ratio
+        assert max(bar.high for bar in fetched.candles) == 102 * ratio
+        assert sum(bar.base_volume for bar in fetched.candles) == 4000
+        assert all(bar.source.endswith(".adjusted") for bar in fetched.candles)
+        assert source.price_adjustment(tf) is market.PriceAdjustment.ALL
+        if tf.duration_ms < timeframes.Timeframe.D1.duration_ms:
+            daily = [q for q in queries if q["timeframe"] == "D"]
+            assert {q["adjusted"] for q in daily} == {"true", "false"}
+    finally:
+        await source.close()
+
+
+def _minute_without_daily_evidence(request: httpx.Request) -> httpx.Response:
+    """Serve one historical minute but no daily adjustment observations.
+
+    Args:
+        request: Minute history or daily evidence request.
+
+    Returns:
+        Raw minute or the documented missing-data status.
+    """
+    if request.url.params["timeframe"] == "D":
+        return httpx.Response(404)
+    return httpx.Response(
+        200,
+        json={
+            "exchange": "TWSE",
+            "data": [
+                {
+                    "date": "2026-11-24T09:00:00+08:00",
+                    "open": 100,
+                    "high": 100,
+                    "low": 100,
+                    "close": 100,
+                    "volume": 1,
+                }
+            ],
+        },
+    )
+
+
+async def test_intraday_missing_daily_evidence_fails_without_guessing() -> None:
+    """Require daily evidence before bridging a historical split.
+
+    Returns:
+        None after checking the explicit provider failure.
+    """
+    source = fugle.FugleSource(
+        "free-key",
+        http.VenueHttp(
+            _ID.venue,
+            fugle.REST_URL,
+            client=httpx.AsyncClient(
+                transport=httpx.MockTransport(_minute_without_daily_evidence)
+            ),
+        ),
+        clock_lib.ManualClock(_ms(25, 13, 35)),
+    )
+    try:
+        with pytest.raises(
+            errors.VenueUnavailableError, match="evidence is unavailable"
+        ):
+            await source.fetch_candle_coverage(
+                _ID, timeframes.Timeframe.H1, _ms(24, 9, 0), _ms(24, 13, 30)
+            )
+    finally:
+        await source.close()

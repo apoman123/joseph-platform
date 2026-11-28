@@ -991,7 +991,7 @@ export function ChartPane({
                 priceAdjustment === 'ALL'
                   ? 'Provider-adjusted historical OHLC for splits, dividends and other corporate actions. Volume stays as reported. History can change after later actions; this is not point-in-time data.'
                   : priceAdjustment === 'SPLIT'
-                    ? 'Historical OHLC adjusted for stock splits by the provider.'
+                    ? 'Historical OHLC normalized for stock splits using provider data. Current quotes and order prices remain native.'
                     : 'Unadjusted prices. Corporate actions may create visible price gaps.'
               }
             >

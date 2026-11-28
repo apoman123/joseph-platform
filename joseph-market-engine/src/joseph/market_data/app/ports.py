@@ -76,6 +76,29 @@ class PriceAdjustmentPort(Protocol):
         ...
 
 
+@runtime_checkable
+class HistoricalPriceNormalizationPort(Protocol):
+    """Normalize raw archive prices before using adjusted history."""
+
+    async def adjust_historical_prices(
+        self, bars: Sequence[market.Candle]
+    ) -> list[market.Candle]:
+        """Converts native constituents using verified provider action evidence.
+
+        Args:
+            bars: Raw archived constituents for one exchange instrument.
+
+        Returns:
+            Candles in the provider's historical price/quantity basis; an empty
+            list when an adjusted source cannot safely use the archive.
+            Native archived observations are never mutated.
+
+        Raises:
+            errors.VenueUnavailableError: If required evidence cannot be read.
+        """
+        ...
+
+
 class MarketDataPort(Protocol):
     """Venue market-data adapter."""
 

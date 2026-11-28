@@ -162,6 +162,31 @@ class DerivedBarsAdapter:
             return self.inner.price_adjustment(timeframe)
         return market.PriceAdjustment.RAW
 
+    async def adjust_historical_prices(
+        self, bars: Sequence[market.Candle]
+    ) -> list[market.Candle]:
+        """Preserve the inner provider's archive normalization boundary.
+
+        Args:
+            bars: Native archive constituents for exactly one instrument.
+
+        Returns:
+            Normalized constituents, unchanged raw-provider constituents, or
+            no archive bars if an adjusted source cannot normalize them safely.
+
+        Raises:
+            errors.VenueUnavailableError: If provider evidence is unavailable.
+        """
+        if isinstance(self.inner, ports.HistoricalPriceNormalizationPort):
+            return await self.inner.adjust_historical_prices(bars)
+        if (
+            bars
+            and self.price_adjustment(bars[0].timeframe)
+            is not market.PriceAdjustment.RAW
+        ):
+            return []
+        return list(bars)
+
     def capabilities(self) -> capabilities_lib.VenueCapabilities:
         """Returns the venue's capabilities plus what the engine derives.
 

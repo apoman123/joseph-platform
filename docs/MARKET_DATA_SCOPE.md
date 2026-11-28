@@ -126,18 +126,38 @@ where chart bars carry the necessary source data.
 
 ## Corporate-action price basis
 
-Taiwan daily, weekly and monthly historical OHLC use Fugle's confirmed
-`adjusted=true` response by default. This removes price-scale discontinuities
-caused by events such as 0050's June 18, 2025 one-to-four split. Fugle also
-adjusts for dividends and other capital changes; its figures can therefore
-differ from a chart that adjusts only for splits. Reported volume and turnover
-remain unchanged. Alpaca REST bars retain their existing split adjustment;
-seconds assembled from actual trades retain raw prices and are labeled raw.
+Taiwan historical OHLC use Fugle's corporate-action adjustment at **every
+supported timeframe**, including minutes, hours, days, weeks and months. Daily
+observations come from confirmed `adjusted=true` responses. Fugle does not
+provide adjusted minute candles, so the engine reads raw and adjusted daily
+closes of the same symbol and session, divides adjusted by raw close, and applies
+the ratio to that session's minute OHLC **before** aggregating any longer bar.
+This is provider-evidenced normalization, without a hardcoded 0050 rule.
 
-Set `JOSEPH_FUGLE_ADJUSTED_DAILY=false` and restart the market engine to request
-raw Taiwan daily history. Fugle does not offer adjusted minute candles: minute
-and derived intraday charts remain raw and disclose that price basis. Quotes
-and order prices always retain actual quoted prices.
+The policy covers forward/reverse splits, dividends and the capital changes
+supported by Fugle. Its daily adjusted prices are rounded to two decimals;
+derived intraday factors inherit that small precision limit. Volume, turnover,
+trade counts and aggressor quantities remain as reported. Missing, mismatched
+or unconfirmed daily evidence produces a data error rather than a guessed
+factor or a silently raw segment. See [Fugle's price-adjustment documentation](https://developer.fugle.tw/docs/data/http-api/historical/candles/).
+
+Alpaca REST bars use split adjustment at every supported native interval.
+Historical trade-built seconds, recorded seconds loaded after a restart, and
+historical closing-print prices now use ratios from paired raw/split daily
+bars on the same feed. This prevents raw closing prints from producing a spike
+inside an adjusted minute or hour bar. Alpaca split adjustment also rescales
+historical shares by the inverse price factor: seconds, archived constituents
+and closing prints match the REST bar volume convention. Public tape endpoints,
+current-session quotes, trades and order prices remain native. Live
+weekly/monthly aggregates refresh their constituent days on every adjustment
+epoch; cached closing prints stay native and are normalized afresh when folded.
+Exchange-local dates distinguish live prices from yesterday's history even
+before the next open and on weekends. See
+[Alpaca's historical-bar adjustment policy](https://docs.alpaca.markets/us/reference/stockbarsingle-1).
+
+`JOSEPH_FUGLE_ADJUSTED_DAILY=true` retains its legacy name but now controls all
+Taiwan historical resolutions. Set it to `false` and restart the market engine
+only when explicitly requesting raw historical prices with their action gaps.
 
 `CandleBatch.price_adjustment` identifies `RAW`, `SPLIT` or `ALL`; adjusted
 batches also declare a fifteen-minute UTC cache epoch and refresh deadline. The chart discards incompatible
@@ -151,4 +171,5 @@ Open adjusted charts refresh automatically after the server-provided deadline.
 Changing the adjustment epoch replaces earlier pages rather than splicing
 newly normalized prices into old history. Ordinary session gaps remain; missing
 closed bars use the existing bounded source-repair path. An unconfirmed provider
-adjustment fails visibly, and raw minute candles are never smoothed by inference.
+adjustment fails visibly. Genuine market jumps and missing observations are
+retained; apparent discontinuities alone never trigger smoothing.

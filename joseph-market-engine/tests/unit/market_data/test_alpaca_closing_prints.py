@@ -462,12 +462,27 @@ def _serve_sessions(api: _Api, days: list[sessions.Session]) -> None:
     ``200 + i``.
 
     Args:
-        api: Endpoints whose AAPL minutes and trades are replaced.
+        api: Endpoints whose AAPL minute, daily and trade fixtures are replaced.
         days: Sessions to serve, oldest first.
     """
     api.minutes["AAPL"] = []
+    api.days["AAPL"] = []
     api.trades["AAPL"] = []
     for i, day in enumerate(days):
+        midnight = datetime.datetime.combine(
+            alpaca.ny_date(day.open_ms), datetime.time(0), tzinfo=alpaca._NY
+        )
+        api.days["AAPL"].append(
+            {
+                "t": midnight.isoformat(),
+                "o": 100 + i,
+                "h": 101 + i,
+                "l": 99 + i,
+                "c": 100.5 + i,
+                "v": 1100,
+                "n": 2,
+            }
+        )
         for start, price in (
             (day.close_ms - _MINUTE, 100 + i),
             (day.close_ms, 200 + i),

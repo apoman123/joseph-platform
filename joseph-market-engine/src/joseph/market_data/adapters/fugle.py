@@ -26,6 +26,7 @@ from joseph.domain import timeframes
 from joseph.market_data.adapters import base
 from joseph.market_data.adapters import http
 from joseph.market_data.domain import candles as candle_rules
+from joseph.market_data.domain import price_adjustments
 from joseph.market_data.domain import session_bars
 
 REST_URL = "https://api.fugle.tw"
@@ -103,17 +104,18 @@ def _check_exchange(
         )
 
 
-class FugleSource:
+class FugleSource:  # noqa: DOC302 - Document constructor mutation.
     """Read free-tier stock data through a paced Fugle HTTP client.
 
     Attributes:
         api_key: Fugle market-data API key; never written to logs.
         http: Rate-limited client for Fugle REST.
         clock: Clock used to mark unfinished candles and receipt times.
-        adjusted_daily: Whether daily and longer historical OHLC are adjusted.
+        adjusted_daily: Whether all historical resolutions use adjusted OHLC.
+        _normalizer: Source-local daily factor cache shared across timeframes.
     """
 
-    def __init__(
+    def __init__(  # noqa: DOC303 - Document None after mutation.
         self,
         api_key: str,
         http: http.VenueHttp,
@@ -127,8 +129,12 @@ class FugleSource:
             api_key: Nonempty Fugle API key.
             http: Rate-limited Fugle REST client.
             clock: Time source.
-            adjusted_daily: Normalize daily history for corporate actions.
-                Intraday prices and quoted prices remain native.
+            adjusted_daily: Normalize all historical resolutions for corporate
+                actions; the legacy setting name remains compatible. Current
+                quotes and reported volume remain native.
+
+        Returns:
+            None; factor cache and authenticated client state are initialized.
 
         Raises:
             ValueError: If the API key is empty.
@@ -139,20 +145,22 @@ class FugleSource:
         self.http = http
         self.clock = clock
         self.adjusted_daily = adjusted_daily
+        self._normalizer = price_adjustments.DailyPriceNormalizer(clock)
 
     def price_adjustment(
         self,
         timeframe: timeframes.Timeframe,
     ) -> market.PriceAdjustment:
-        """Reports adjusted daily history and raw intraday/quote prices.
+        """Reports the common adjusted basis of every historical resolution.
 
         Args:
             timeframe: Requested candle interval, including derived resolutions.
 
         Returns:
-            ALL for adjusted daily and longer history; RAW for intraday bars.
+            ALL when normalization is enabled, otherwise RAW. Quotes stay raw.
         """
-        if self.adjusted_daily and timeframe.duration_ms >= _D1.duration_ms:
+        del timeframe  # All supported historical resolutions share one basis.
+        if self.adjusted_daily:
             return market.PriceAdjustment.ALL
         return market.PriceAdjustment.RAW
 
@@ -332,6 +340,7 @@ class FugleSource:
             calls += 1
         complete = day < first_day
         ordered = candle_rules.sort_unique(bars)
+        ordered = await self._adjust_minutes(instrument, ordered, source_tf)
         if timeframe is not source_tf:
             aggregate_source = SOURCE
             if self.price_adjustment(timeframe) is market.PriceAdjustment.ALL:
@@ -348,6 +357,97 @@ class FugleSource:
         return base.candle_coverage(
             ordered, start_ms, end_ms, limit, covered, complete=complete
         )
+
+    async def _adjust_minutes(
+        self,
+        instrument: instruments.InstrumentId,
+        bars: list[market.Candle],
+        source_tf: timeframes.Timeframe,
+    ) -> list[market.Candle]:
+        """Normalize minute constituents before any derived aggregation.
+
+        Args:
+            instrument: Exact TWSE or TPEx stock/ETF identity.
+            bars: Raw minute or already adjusted native daily candles.
+            source_tf: Native source interval, either one minute or one day.
+
+        Returns:
+            Normalized minute bars, or unchanged daily/raw-mode candles.
+
+        Raises:
+            errors.VenueUnavailableError: If daily evidence is missing.
+        """
+        if source_tf is not _M1 or not self.adjusted_daily:
+            return bars
+
+        async def load_factors(
+            start: int, end: int
+        ) -> Mapping[int, decimal.Decimal]:
+            """Load same-symbol daily evidence for raw minute constituents.
+
+            Args:
+                start: Inclusive UTC session start in milliseconds.
+                end: Exclusive UTC session end in milliseconds.
+
+            Returns:
+                Confirmed daily adjusted/raw close factors.
+            """
+            return await self._daily_factors(instrument, start, end)
+
+        return await self._normalizer.adjust(bars, load_factors)
+
+    async def _daily_factors(
+        self, instrument: instruments.InstrumentId, start_ms: int, end_ms: int
+    ) -> Mapping[int, decimal.Decimal]:
+        """Read paired daily prices to normalize historical minute candles.
+
+        Fugle's daily ratio includes splits, dividends and capital changes;
+        its two-decimal provider rounding limits factor precision. No symbol
+        list, fixed split ratio or jump-size heuristic is used.
+
+        Args:
+            instrument: Exact TWSE or TPEx stock/ETF identity.
+            start_ms: Inclusive UTC start of sessions needing evidence.
+            end_ms: Exclusive UTC end of sessions needing evidence.
+
+        Returns:
+            Confirmed daily session start milliseconds mapped to price ratios.
+
+        Raises:
+            errors.VenueUnavailableError: If either daily basis is unavailable,
+                unconfirmed or for a different symbol/session set.
+        """
+        first = _date(start_ms)
+        last = _date(end_ms - 1)
+        factors: dict[int, decimal.Decimal] = {}
+        while first <= last:
+            stop = min(last, first + datetime.timedelta(days=299))
+            responses = []
+            for adjusted in (False, True):
+                body = await self._request(
+                    f"historical/candles/{instrument.venue_market_id}",
+                    {
+                        "from": first.isoformat(),
+                        "to": stop.isoformat(),
+                        "timeframe": "D",
+                        "sort": "asc",
+                        "adjusted": str(adjusted).lower(),
+                    },
+                )
+                if body is None:
+                    raise errors.VenueUnavailableError(
+                        "Fugle daily adjustment evidence is unavailable"
+                    )
+                if adjusted:
+                    self._check_adjustment(body, _D1)
+                elif body.get("adjusted") is True:
+                    raise errors.VenueUnavailableError(
+                        "Fugle returned adjusted prices for the raw basis"
+                    )
+                responses.append(self._bars(body, instrument, _D1))
+            factors.update(price_adjustments.daily_factors(*responses))
+            first = stop + datetime.timedelta(days=1)
+        return factors
 
     def _check_adjustment(
         self, body: Mapping[str, Any], timeframe: timeframes.Timeframe
@@ -397,6 +497,10 @@ class FugleSource:
         if not isinstance(data, list):
             raise errors.VenueUnavailableError("fugle candles lack data array")
         _check_exchange(body, instrument)
+        if body.get("symbol") not in (None, instrument.venue_market_id):
+            raise errors.VenueUnavailableError(
+                "fugle response symbol differs from request"
+            )
         if not all(isinstance(row, dict) and "date" in row for row in data):
             raise errors.VenueUnavailableError("fugle candle is not an object")
         by_start: dict[int, market.Candle] = {}

@@ -113,7 +113,7 @@ def build_adapters(  # noqa: PLR0912 - explicit venue dispatch remains legible
         mexc_ws_format: Push format of the MEXC futures WebSocket.
         fugle_api_key: Fugle free-tier market-data key; ``None`` uses only
             the official TWSE/TPEx sources.
-        fugle_adjusted_daily: Normalize daily Fugle OHLC for corporate actions.
+        fugle_adjusted_daily: Normalize all Fugle historical OHLC for actions.
         fred_api_key: Optional FRED key for distinct daily rate series.
         bar_archive: Durable store of the TWSE/TPEx recorded minutes.
         crypto_source: ``native`` for exchange APIs and public WebSockets

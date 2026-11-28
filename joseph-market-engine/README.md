@@ -45,8 +45,10 @@ remain available. The existing execution engine and its five crypto trading adap
 are unchanged. CCXT is retained only as an explicit adapter-factory compatibility
 choice; it is not selected by the running application.
 
-Taiwan daily and longer candles default to Fugle corporate-action adjusted
-OHLC (`JOSEPH_FUGLE_ADJUSTED_DAILY=true`); intraday and actual quotes stay raw.
+Taiwan candles at every supported timeframe default to corporate-action adjusted
+OHLC (`JOSEPH_FUGLE_ADJUSTED_DAILY=true`, legacy setting name). Intraday prices
+use matched Fugle daily adjusted/raw close ratios before aggregation. Current
+quotes and order prices stay native. Missing factor evidence causes a data error.
 The chart labels the price basis. See [adjustment limits](../docs/MARKET_DATA_SCOPE.md#corporate-action-price-basis).
 
 Default native feeds and key setup: [integration guide](../docs/TRADEX_INTEGRATION.md).

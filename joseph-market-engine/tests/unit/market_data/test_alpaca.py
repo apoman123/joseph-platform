@@ -14,6 +14,7 @@ import pathlib
 import random
 from collections.abc import AsyncIterator
 from collections.abc import Callable
+from collections.abc import Iterable
 from collections.abc import Iterator
 from typing import Any
 
@@ -37,8 +38,11 @@ from joseph.market_data.app import candle_store
 from joseph.market_data.app import feed_router
 from joseph.market_data.app import registry
 from joseph.market_data.app import service as service_lib
+from joseph.market_data.app import trade_archive
+from joseph.market_data.domain import candles as candle_rules
 from joseph.market_data.domain import classification
 from joseph.market_data.domain import health
+from joseph.market_data.domain import session_bars
 from joseph.platform import config
 
 _D = decimal.Decimal
@@ -966,13 +970,16 @@ def quiet_api(
 
 
 def _market_data(
-    adapter: alpaca.AlpacaAdapter, clock: clock_lib.Clock
+    adapter: alpaca.AlpacaAdapter,
+    clock: clock_lib.Clock,
+    recorded: trade_archive.RecordedTrades | None = None,
 ) -> service_lib.MarketDataService:
     """Builds the market-data service over one Alpaca adapter.
 
     Args:
         adapter: Nasdaq adapter.
         clock: Clock shared by the router and the service.
+        recorded: Optional native-tape archive reader used after restarts.
 
     Returns:
         The service with a fresh candle store.
@@ -985,6 +992,7 @@ def _market_data(
         store,
         feed_router.FeedRouter(adapters, store, clock),
         clock,
+        recorded=recorded,
     )
 
 
@@ -1126,8 +1134,8 @@ async def test_seconds_history_reads_the_closing_print(
     window = (_US_CLOSE - 2_000, _US_CLOSE)
     done = await adapter.fetch_candle_coverage(_AAPL, s1, *window)
     last = done.candles[-1]
-    # Trade-derived seconds must not claim the adjustment of REST bar history.
-    assert adapter.price_adjustment(s1) is market.PriceAdjustment.RAW
+    # Trade-built seconds now use matched provider daily split factors.
+    assert adapter.price_adjustment(s1) is market.PriceAdjustment.SPLIT
     assert (
         adapter.price_adjustment(timeframes.Timeframe.M1)
         is market.PriceAdjustment.SPLIT
@@ -1285,3 +1293,293 @@ def test_trade_previews_update_close_before_the_minute_bar() -> None:
     )
     assert oddlot is not None and oddlot.close == 202
     assert oddlot.base_volume == 30
+
+
+@pytest.mark.parametrize("recorded", [False, True])
+@pytest.mark.parametrize(
+    "tf", [tf for tf in timeframes.Timeframe if tf.is_seconds]
+)
+async def test_seconds_normalize_prices_without_changing_trades(
+    quiet_api: Callable[[clock_lib.ManualClock], _QuietApi],
+    monkeypatch: pytest.MonkeyPatch,
+    tf: timeframes.Timeframe,
+    recorded: bool,
+) -> None:
+    """Give all seconds resolutions the same split basis as REST candles.
+
+    Args:
+        quiet_api: Real adapter's provider-shaped HTTP fixture factory.
+        monkeypatch: Fixture replacing daily response values for a known split.
+        tf: Each supported seconds interval.
+        recorded: Whether native history comes from the persisted tape archive.
+
+    Returns:
+        None after checking normalized history, raw tape and paired requests.
+    """
+    clock = clock_lib.ManualClock(_US_OPEN + 4 * 86_400_000)
+    api = quiet_api(clock)
+
+    def daily(start: str, last: int) -> list[dict[str, Any]]:
+        """Serves a confirmed four-to-one split through raw/adjusted daily bars.
+
+        Args:
+            start: Inclusive New York date requested by the adapter.
+            last: Unused inclusive UTC end in milliseconds.
+
+        Returns:
+            One daily observation with provider-selected raw or split prices.
+        """
+        del last
+        midnight = int(
+            datetime.datetime.combine(
+                datetime.date.fromisoformat(start),
+                datetime.time(0),
+                tzinfo=alpaca._NY,
+            ).timestamp()
+            * 1000
+        )
+        price = 25 if api.bars[-1][1]["adjustment"] == "split" else 100
+        return [
+            {
+                **_rest_bar(midnight),
+                "o": price,
+                "h": price,
+                "l": price,
+                "c": price,
+            }
+        ]
+
+    monkeypatch.setattr(api, "_days", daily)
+    api.trades.append(_trade(1, 100, ["@"]))
+    adapter = _nasdaq(clock)
+    try:
+        history: service_lib.CandleBatchResult | candle_rules.CandleCoverage
+        if recorded:
+            archive = trade_archive.MemoryTradeArchive()
+            native = session_bars.candle(
+                instrument_id=_AAPL,
+                timeframe=timeframes.Timeframe.S1,
+                start_ms=_US_OPEN,
+                open_=_D(100),
+                high=_D(100),
+                low=_D(100),
+                close=_D(100),
+                base_volume=_D(1),
+                now_ms=clock.now_ms(),
+                source="alpaca.trades.recorded",
+            )
+            archive.put(_AAPL, [native], [(_US_OPEN, _US_OPEN + 60_000)])
+            reader = trade_archive.ArchiveReader(archive, clock)
+            service = _market_data(adapter, clock, recorded=reader)
+            history = await service.get_batch(
+                _AAPL, tf, from_ms=_US_OPEN, to_ms=_US_OPEN + 60_000
+            )
+        else:
+            history = await adapter.fetch_candle_coverage(
+                _AAPL, tf, _US_OPEN, _US_OPEN + 60_000
+            )
+        assert history.candles and history.candles[0].close == 25
+        assert history.candles[0].base_volume == 4
+        assert adapter.price_adjustment(tf) is market.PriceAdjustment.SPLIT
+        tape = await adapter.fetch_trades(_AAPL, _US_OPEN, _US_OPEN + 60_000)
+        assert tape and tape[0].price == 100 and tape[0].base_quantity == 1
+        assert {p["adjustment"] for _, p in api.bars} == {"raw", "split"}
+    finally:
+        await adapter.close()
+
+
+def _split_adjusted_closing_minute(
+    start: int, last: int
+) -> list[dict[str, Any]]:
+    """Serves one already split-adjusted minute from the historical session.
+
+    Args:
+        start: Unused inclusive UTC start in milliseconds.
+        last: Unused inclusive UTC end in milliseconds.
+
+    Returns:
+        Native adjusted minute immediately preceding the closing cross.
+    """
+    del start, last
+    return [
+        {
+            **_rest_bar(_US_CLOSE - 60_000),
+            "o": 24.5,
+            "h": 24.5,
+            "l": 24.5,
+            "c": 24.5,
+        }
+    ]
+
+
+async def test_historical_closing_print_is_normalized_before_minute_aggregation(
+    quiet_api: Callable[[clock_lib.ManualClock], _QuietApi],
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Matches historical closing prints to split-adjusted REST minutes.
+
+    Args:
+        quiet_api: Provider-shaped HTTP fixture factory for the real adapter.
+        monkeypatch: Replaces daily/minute observations with a known split case.
+
+    Returns:
+        None after verifying the resulting aggregate has no split spike.
+    """
+    clock = clock_lib.ManualClock(_US_OPEN + 4 * 86_400_000)
+    api = quiet_api(clock)
+
+    def daily(start: str, last: int) -> list[dict[str, Any]]:
+        """Serves raw and adjusted daily prices of the same historical session.
+
+        Args:
+            start: New York date of the historical session.
+            last: Unused inclusive end in UTC milliseconds.
+
+        Returns:
+            Daily price evidence with a confirmed quarter-price split ratio.
+        """
+        del last
+        midnight = int(
+            datetime.datetime.combine(
+                datetime.date.fromisoformat(start),
+                datetime.time(0),
+                tzinfo=alpaca._NY,
+            ).timestamp()
+            * 1000
+        )
+        price = 25 if api.bars[-1][1]["adjustment"] == "split" else 100
+        return [
+            {
+                **_rest_bar(midnight),
+                "o": price,
+                "h": price,
+                "l": price,
+                "c": price,
+            }
+        ]
+
+    monkeypatch.setattr(api, "_days", daily)
+    monkeypatch.setattr(api, "_minutes", _split_adjusted_closing_minute)
+    api.trades.append(
+        {
+            "i": 100,
+            "x": "Q",
+            "p": 100,
+            "s": 500,
+            "c": ["@", "6"],
+            "t": alpaca.rfc3339(_US_CLOSE + 350),
+            "z": "C",
+        }
+    )
+    adapter = _nasdaq(
+        clock,
+        cfg=alpaca.AlpacaConfig(
+            key_id="kid", secret_key="sek", feed=alpaca.Feed.SIP
+        ),
+    )
+    try:
+        history = await adapter.fetch_candle_coverage(
+            _AAPL, timeframes.Timeframe.H1, _US_CLOSE - 60 * 60_000, _US_CLOSE
+        )
+        assert history.candles and history.candles[-1].close == 25
+        assert history.candles[-1].high == 25
+        assert history.candles[-1].base_volume == 2100
+    finally:
+        await adapter.close()
+
+
+@pytest.mark.parametrize(
+    "tf", [timeframes.Timeframe.W1, timeframes.Timeframe.MN1]
+)
+async def test_open_aggregate_rebases_cached_days_after_a_new_split(
+    quiet_api: Callable[[clock_lib.ManualClock], _QuietApi],
+    monkeypatch: pytest.MonkeyPatch,
+    tf: timeframes.Timeframe,
+) -> None:
+    """Replaces cached pre-action prices during an already open live aggregate.
+
+    Args:
+        quiet_api: Provider-shaped HTTP fixture factory.
+        monkeypatch: Injects action-aware daily data and two websocket frames.
+        tf: Weekly or monthly interval spanning the overnight action.
+
+    Returns:
+        None after verifying the next live bar contains no cached split spike.
+    """
+    first = _US_OPEN + 3 * 86_400_000 + 60_000
+    reopened = _US_OPEN + 4 * 86_400_000 + 60_000
+    clock = clock_lib.ManualClock(first)
+    api = quiet_api(clock)
+    original = api._days
+
+    def daily(start: str, last: int) -> list[dict[str, Any]]:
+        """Serves provider-rebased daily OHLC after the next session opens.
+
+        Args:
+            start: Inclusive New York date of the aggregate period.
+            last: Inclusive UTC end in milliseconds.
+
+        Returns:
+            Raw-scale observations initially and quarter-scale observations
+            after the simulated overnight action.
+        """
+        rows = original(start, last)
+        price = 25 if clock.now_ms() >= reopened else 100
+        return [
+            {**row, "o": price, "h": price, "l": price, "c": price}
+            for row in rows
+        ]
+
+    async def events(
+        instrument: instruments.InstrumentId,
+        channels: Iterable[str],
+        tracker: health.FeedHealthTracker | None,
+        timeout_s: float | None = None,
+    ) -> AsyncIterator[tuple[str, Any]]:
+        """Yields native daily frames on either side of an overnight action.
+
+        Args:
+            instrument: Unused requested stock identity.
+            channels: Unused channel selection.
+            tracker: Unused health tracker.
+            timeout_s: Unused optional idle timeout in seconds.
+
+        Yields:
+            Message label and a native daily frame; the second frame advances
+            the shared clock to the next trading day.
+        """
+        del instrument, channels, tracker, timeout_s
+        for now, price in [(first, 100), (reopened, 25)]:
+            clock.current_ms = now
+            midnight = int(
+                datetime.datetime.combine(
+                    alpaca.ny_date(now), datetime.time(0), tzinfo=alpaca._NY
+                ).timestamp()
+                * 1000
+            )
+            yield (
+                "msg",
+                {
+                    **_rest_bar(midnight),
+                    "T": "d",
+                    "S": "AAPL",
+                    "o": price,
+                    "h": price,
+                    "l": price,
+                    "c": price,
+                },
+            )
+
+    monkeypatch.setattr(api, "_days", daily)
+    adapter = _nasdaq(clock)
+    monkeypatch.setattr(adapter, "_events", events)
+    stream = adapter.stream_candles(_AAPL, tf)
+    try:
+        before = await anext(stream)
+        after = await anext(stream)
+        assert before.high == before.close == 100
+        assert after.high == after.close == 25
+        assert len(api.bars) == 2
+    finally:
+        await stream.aclose()  # type: ignore[attr-defined]  # The port returns AsyncIterator; this implementation is an async generator.
+        await adapter.close()

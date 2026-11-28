@@ -100,6 +100,7 @@ from joseph.market_data.domain import candles as candle_rules
 from joseph.market_data.domain import capabilities
 from joseph.market_data.domain import classification
 from joseph.market_data.domain import health
+from joseph.market_data.domain import price_adjustments
 from joseph.market_data.domain import session_bars
 from joseph.market_data.domain import us_trade_bars
 
@@ -688,12 +689,16 @@ def trade_preview(
         now_ms: Receipt time in epoch milliseconds.
 
     Returns:
-        Live unfinished preview, or the previous bar for an out-of-session
-        or out-of-order trade. Authoritative bar messages replace previews.
+        Live unfinished preview, or the previous bar for an out-of-session,
+        earlier-session or out-of-order trade. Only current-session trades
+        form previews; older authoritative corrections are normalized
+        separately.
     """
     trade = parse_trade(payload, market.AggressorSide.UNKNOWN)
     calendar = sessions.XNYS
-    if not calendar.is_open(trade.ts_ms):
+    if not calendar.is_open(trade.ts_ms) or ny_date(trade.ts_ms) != ny_date(
+        now_ms
+    ):
         return previous
     start = calendar.floor(timeframe, trade.ts_ms)
     if previous is not None and previous.start_ms != start:
@@ -1233,7 +1238,7 @@ def unsettled(
     return reopened
 
 
-class AlpacaSource:
+class AlpacaSource:  # noqa: DOC302 - Document constructor mutation.
     """State shared by the US exchange adapters (one key, one budget).
 
     Attributes:
@@ -1243,9 +1248,10 @@ class AlpacaSource:
         clock: Time source.
         stream: The shared stream connection.
         closing_budget: Budget of closing-window requests.
+        _normalizer: Source-local daily price-factor cache for historical tape.
     """
 
-    def __init__(
+    def __init__(  # noqa: DOC303 - Document None after mutation.
         self,
         config: AlpacaConfig,
         data_http: http.VenueHttp,
@@ -1261,6 +1267,9 @@ class AlpacaSource:
             directory_http: Client for ``SYMDIR_URL``.
             clock: Time source.
             connect: WebSocket connector.
+
+        Returns:
+            None; clients, stream and daily-factor cache are initialized.
         """
         self.config = config
         self.data = data_http
@@ -1276,7 +1285,141 @@ class AlpacaSource:
         ] = {}
         self._directory_ms: int | None = None
         self._lock = asyncio.Lock()
+        self._normalizer = price_adjustments.DailyPriceNormalizer(clock)
         self._users = 0
+
+    async def _daily_price_factors(
+        self, instrument: instruments.InstrumentId, start_ms: int, end_ms: int
+    ) -> Mapping[int, decimal.Decimal]:
+        """Reads matching raw and split-adjusted daily bars from the same feed.
+
+        Args:
+            instrument: Exact Alpaca stock or ETF identity.
+            start_ms: Inclusive UTC session start requiring a factor.
+            end_ms: Exclusive UTC session end requiring a factor.
+
+        Returns:
+            Session start milliseconds mapped to split price factors.
+
+        Raises:
+            errors.VenueUnavailableError: If paired daily evidence disagrees.
+        """
+        paired = []
+        for adjustment in ("raw", "split"):
+            rows = await self.paged(
+                f"/v2/stocks/{instrument.venue_market_id}/bars",
+                {
+                    "timeframe": "1Day",
+                    "start": ny_date(start_ms).isoformat(),
+                    "end": rfc3339(end_ms - 1),
+                    "adjustment": adjustment,
+                    "feed": self.config.rest_feed,
+                    "limit": _PAGE_LIMIT,
+                    "sort": "asc",
+                },
+                "bars",
+            )
+            parsed = []
+            for row in rows:
+                bar = daily_bar(
+                    row,
+                    instrument,
+                    self.clock.now_ms(),
+                    delay_ms=self.config.delay_ms,
+                    source=SOURCE,
+                )
+                if bar is not None:
+                    parsed.append(bar)
+            paired.append(parsed)
+        return price_adjustments.daily_factors(*paired)
+
+    async def adjusted_prices(
+        self, bars: Sequence[market.Candle]
+    ) -> list[market.Candle]:
+        """Normalizes constituents to Alpaca's split-adjusted OHLCV basis.
+
+        Args:
+            bars: Raw constituents of one instrument, before aggregation.
+
+        Returns:
+            Split-normalized candles, with shares inverse-scaled to match REST
+            bars. Current-session values and public tape endpoints stay native.
+
+        Raises:
+            errors.VenueUnavailableError: When historical adjustment evidence
+                is missing. Raw trades and order prices are never modified.
+        """
+        if not bars:
+            return []
+
+        async def load(start: int, end: int) -> Mapping[int, decimal.Decimal]:
+            """Loads daily evidence for this constituent series.
+
+            Args:
+                start: Inclusive UTC session start, milliseconds.
+                end: Exclusive UTC session end, milliseconds.
+
+            Returns:
+                Confirmed daily split ratios.
+            """
+            return await self._daily_price_factors(
+                bars[0].instrument_id, start, end
+            )
+
+        return await self._normalizer.adjust(bars, load, split_volume=True)
+
+    async def adjusted_closing_prices(
+        self,
+        instrument: instruments.InstrumentId,
+        prints: Mapping[int, tuple[us_trade_bars.TapeTrade, ...]],
+    ) -> dict[int, tuple[us_trade_bars.TapeTrade, ...]]:
+        """Matches closing prints to split-adjusted REST prices and shares.
+
+        Args:
+            instrument: Exact stock/ETF identity.
+            prints: Session close UTC milliseconds mapped to native tape trades.
+
+        Returns:
+            Copies with prices scaled by the split ratio and shares scaled by
+            its inverse, matching REST bars. The raw cached tape is unchanged.
+
+        Raises:
+            errors.VenueUnavailableError: If past-session evidence is missing.
+        """
+        if not any(prints.values()):
+            return dict(prints)
+
+        async def load(start: int, end: int) -> Mapping[int, decimal.Decimal]:
+            """Loads confirmed factors for sessions containing closing prints.
+
+            Args:
+                start: Inclusive UTC session start, milliseconds.
+                end: Exclusive UTC session end, milliseconds.
+
+            Returns:
+                Confirmed daily split ratios.
+            """
+            return await self._daily_price_factors(instrument, start, end)
+
+        starts = {
+            sessions.XNYS.floor(_D1, close - 1)
+            for close, trades in prints.items()
+            if trades
+        }
+        ratios = await self._normalizer.ratios(instrument, starts, load)
+        return {
+            close: tuple(
+                dataclasses.replace(
+                    trade,
+                    price=trade.price
+                    * ratios[sessions.XNYS.floor(_D1, close - 1)],
+                    size=trade.size
+                    / ratios[sessions.XNYS.floor(_D1, close - 1)],
+                )
+                for trade in trades
+            )
+            for close, trades in prints.items()
+        }
 
     def acquire(self) -> None:
         """Registers one more adapter using the source."""
@@ -1505,7 +1648,12 @@ class _Fetched:
         return [us_trade_bars.closing_slot(instrument, c) for c in self.pending]
 
     def minutes(
-        self, instrument: instruments.InstrumentId, now_ms: int, settled: int
+        self,
+        instrument: instruments.InstrumentId,
+        now_ms: int,
+        settled: int,
+        *,
+        prints: Mapping[int, tuple[us_trade_bars.TapeTrade, ...]] | None = None,
     ) -> list[market.Candle]:
         """Returns the minute bars with the known closing prints folded in.
 
@@ -1513,6 +1661,8 @@ class _Fetched:
             instrument: Instrument.
             now_ms: Receipt time.
             settled: Bars ending by then are final.
+            prints: Optional price-normalized copies of the raw closing tape;
+                defaults to native prints for consumers using raw bars.
 
         Returns:
             Ascending minute bars (pending sessions' last minutes open).
@@ -1520,7 +1670,7 @@ class _Fetched:
         return us_trade_bars.with_closing_prints(
             self.rows,
             instrument,
-            prints=self.prints,
+            prints=self.prints if prints is None else prints,
             pending=self.pending,
             now_ms=now_ms,
             settled_before_ms=settled,
@@ -1650,7 +1800,7 @@ class _LiveCloses:
             for close in proven
         )
 
-    def fold(
+    async def fold(
         self, bars: Iterable[market.Candle], now_ms: int
     ) -> list[market.Candle]:
         """Folds the known prints into the streamed minutes.
@@ -1661,11 +1811,17 @@ class _LiveCloses:
 
         Returns:
             Ascending minute bars (pending last minutes not final).
+
+        Raises:
+            errors.VenueUnavailableError: If historical factor evidence is
+                unavailable; raw cached prints are never mixed with REST prices.
         """
         return us_trade_bars.with_closing_prints(
             bars,
             self._instrument,
-            prints=self._prints,
+            prints=await self._source.adjusted_closing_prices(
+                self._instrument, self._prints
+            ),
             pending=self.pending(),
             now_ms=now_ms,
             settled_before_ms=now_ms - self._delay,
@@ -1764,18 +1920,33 @@ class AlpacaAdapter(base.BaseVenueAdapter):
         self,
         timeframe: timeframes.Timeframe,
     ) -> market.PriceAdjustment:
-        """Reports split-adjusted bars and unadjusted trade-built seconds.
+        """Reports a common split-normalized price basis at every interval.
 
         Args:
             timeframe: Native or derived stock/ETF candle interval.
 
         Returns:
-            RAW for seconds assembled from actual trades; SPLIT for REST bars
-            and their aggregates. Current quotes and orders are not transformed.
+            SPLIT for REST bars and trade-built seconds. Current quotes, orders
+            and public tape quantities are not transformed.
         """
-        if timeframe.is_seconds:
-            return market.PriceAdjustment.RAW
+        del timeframe  # All supported intervals use the same price basis.
         return market.PriceAdjustment.SPLIT
+
+    async def adjust_historical_prices(
+        self, bars: Sequence[market.Candle]
+    ) -> list[market.Candle]:
+        """Rebases raw archived constituents before serving adjusted history.
+
+        Args:
+            bars: Raw archived candles of one Alpaca stock or ETF.
+
+        Returns:
+            Split-normalized OHLCV matching REST bars; raw archives stay native.
+
+        Raises:
+            errors.VenueUnavailableError: If daily factor evidence is missing.
+        """
+        return await self._source.adjusted_prices(bars)
 
     def capabilities(self) -> capabilities.VenueCapabilities:
         """Returns capabilities (data needs a configured key).
@@ -2171,7 +2342,14 @@ class AlpacaAdapter(base.BaseVenueAdapter):
         if timeframe in _INTRADAY:
             fetched = await self._minutes(instrument, first, end_ms)
             settled = self._settled_before()
-            rows = fetched.minutes(instrument, now, settled)
+            rows = fetched.minutes(
+                instrument,
+                now,
+                settled,
+                prints=await self._source.adjusted_closing_prices(
+                    instrument, fetched.prints
+                ),
+            )
             holes = fetched.holes(instrument)
             if timeframe is not _M1:
                 rows = unsettled(
@@ -2292,6 +2470,7 @@ class AlpacaAdapter(base.BaseVenueAdapter):
             source=f"{SOURCE}.trades.rest",
             now_ms=now,
         )
+        bars = await self._source.adjusted_prices(bars)
         settled = us_trade_bars.settled_until(instrument, timeframe, covered)
         return base.candle_coverage(
             bars,
@@ -2745,6 +2924,7 @@ class AlpacaAdapter(base.BaseVenueAdapter):
                     ):
                         covered, proven_to = (span,), span[1]
                 if candles or covered:
+                    candles = await self._source.adjusted_prices(candles)
                     yield candle_rules.CandleCoverage(tuple(candles), covered)
 
     async def _minute_stream(  # noqa: PLR0912, PLR0915 - explicit stream message state machine
@@ -2766,7 +2946,8 @@ class AlpacaAdapter(base.BaseVenueAdapter):
         over it) stays open until its closing window has passed and its
         closing prints were read over REST (once per session, within the
         shared budget, retried while unanswered); the prints then fold into
-        it and its slot is proven.
+        it and its slot is proven. REST seeds refresh every price-adjustment
+        epoch so cached constituents never cross a corporate-action basis.
 
         Args:
             instrument: Instrument.
@@ -2775,6 +2956,10 @@ class AlpacaAdapter(base.BaseVenueAdapter):
 
         Yields:
             Candle updates with newly proven spans.
+
+        Raises:
+            errors.JosephError: If a seed cannot establish its price basis.
+            ValueError: If the exchange calendar cannot align the seed range.
         """
         calendar = sessions.XNYS
         minutes: dict[int, market.Candle] = {}
@@ -2783,20 +2968,23 @@ class AlpacaAdapter(base.BaseVenueAdapter):
         delay = self.config.delay_ms
         closes = _LiveCloses(instrument, self._source)
 
-        def current(now_ms: int) -> list[market.Candle]:
-            """Recomputes the aggregates touched by stored minutes.
+        async def current(now_ms: int) -> list[market.Candle]:
+            """Recomputes aggregates using price-normalized closing prints.
 
             Args:
-                now_ms: Receipt time.
+                now_ms: Receipt timestamp in UTC epoch milliseconds.
 
             Returns:
-                Changed aggregates.
+                Changed aggregates with a consistent historical price basis.
+
+            Raises:
+                errors.VenueUnavailableError: If daily evidence is missing.
             """
             rows = [
                 dataclasses.replace(bar, is_final=False)
                 if bar.start_ms in previews
                 else bar
-                for bar in closes.fold(minutes.values(), now_ms)
+                for bar in await closes.fold(minutes.values(), now_ms)
             ]
             if timeframe is not _M1:
                 rows = unsettled(
@@ -2823,22 +3011,25 @@ class AlpacaAdapter(base.BaseVenueAdapter):
         )
         chain = candle_rules.StreamCoverage()
         async with contextlib.aclosing(events):
-            seeded = False
+            seed_epoch: int | None = None
             async for kind, payload in events:
                 now = self._clock.now_ms()
                 covered: tuple[candle_rules.Span, ...] = ()
                 if kind == "reset":
                     chain.restart()
-                if not seeded or kind == "reset":
-                    seeded = True
+                epoch = now // price_adjustments.REFRESH_MS
+                if seed_epoch != epoch or kind == "reset":
                     try:
                         start = calendar.floor(timeframe, now - delay)
                         seed = await self._minutes(instrument, start, now)
-                        for bar in seed.rows:
-                            minutes[bar.start_ms] = bar
+                        minutes = {bar.start_ms: bar for bar in seed.rows}
+                        previews.clear()
+                        closes = _LiveCloses(instrument, self._source)
                         closes.seed(seed)
+                        seed_epoch = epoch
                     except (errors.JosephError, ValueError) as err:
                         _LOG.warning("alpaca seed failed: %s", err)
+                        raise
                 if kind == "msg" and payload.get("T") in ("b", "u"):
                     update = minute_bar(
                         payload,
@@ -2848,6 +3039,9 @@ class AlpacaAdapter(base.BaseVenueAdapter):
                         source=f"{SOURCE}.ws",
                     )
                     if update is not None:
+                        update = (await self._source.adjusted_prices([update]))[
+                            0
+                        ]
                         minutes[update.start_ms] = update
                         previews.discard(update.start_ms)
                         closes.note(update.start_ms)
@@ -2871,7 +3065,7 @@ class AlpacaAdapter(base.BaseVenueAdapter):
                                 minutes[start] = preview
                                 previews.add(start)
                 covered += await closes.learn(now)
-                changed = current(now)
+                changed = await current(now)
                 if changed or covered:
                     yield candle_rules.CandleCoverage(tuple(changed), covered)
                 cutoff = now - 2 * timeframe.duration_ms - _D1.duration_ms
@@ -2882,13 +3076,17 @@ class AlpacaAdapter(base.BaseVenueAdapter):
                     del emitted[start]
                 closes.prune(cutoff)
 
-    async def _daily_stream(  # noqa: PLR0912 - explicit stream message state machine
+    async def _daily_stream(
         self,
         instrument: instruments.InstrumentId,
         timeframe: timeframes.Timeframe,
         tracker: health.FeedHealthTracker | None,
     ) -> AsyncGenerator[candle_rules.CandleCoverage, None]:
-        """Streams trade-driven daily previews and authoritative daily bars.
+        """Streams daily previews with refreshed weekly/monthly constituents.
+
+        Each price-adjustment epoch replaces historical seed bars while keeping
+        current-day native previews. Cached pre-action daily prices cannot be
+        combined with a new session's post-action quotes.
 
         Args:
             instrument: Instrument.
@@ -2898,6 +3096,10 @@ class AlpacaAdapter(base.BaseVenueAdapter):
         Yields:
             Candle updates (non-final until the New York day ended), with
             no coverage.
+
+        Raises:
+            errors.JosephError: If a seed cannot establish its price basis.
+            ValueError: If the exchange calendar cannot align the seed range.
         """
         days: dict[int, market.Candle] = {}
         last: market.Candle | None = None
@@ -2905,18 +3107,26 @@ class AlpacaAdapter(base.BaseVenueAdapter):
             instrument, ("dailyBars", "statuses", "trades"), tracker, 1.0
         )
         async with contextlib.aclosing(events):
-            seeded = False
+            seed_epoch: int | None = None
             async for kind, payload in events:
                 now = self._clock.now_ms()
-                if not seeded or kind == "reset":
-                    seeded = True
+                epoch = now // price_adjustments.REFRESH_MS
+                if seed_epoch != epoch or kind == "reset":
                     try:
                         start = sessions.XNYS.floor(timeframe, now)
                         seed = await self._days(instrument, start, now + 1)
-                        for bar in seed.rows:
-                            days[bar.start_ms] = bar
+                        current_day = {
+                            start: bar
+                            for start, bar in days.items()
+                            if ny_date(start) == ny_date(now)
+                            and not bar.is_final
+                        }
+                        days = {bar.start_ms: bar for bar in seed.rows}
+                        days.update(current_day)
+                        seed_epoch = epoch
                     except (errors.JosephError, ValueError) as err:
                         _LOG.warning("alpaca seed failed: %s", err)
+                        raise
                 if kind == "msg" and payload.get("T") == "d":
                     update = daily_bar(
                         payload,
@@ -2926,6 +3136,9 @@ class AlpacaAdapter(base.BaseVenueAdapter):
                         source=f"{SOURCE}.ws",
                     )
                     if update is not None:
+                        update = (await self._source.adjusted_prices([update]))[
+                            0
+                        ]
                         days[update.start_ms] = dataclasses.replace(
                             update, is_final=False
                         )

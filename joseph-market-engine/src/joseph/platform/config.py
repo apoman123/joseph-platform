@@ -491,9 +491,9 @@ class Settings:
             enables only ``fugle`` with a configured key; ``twse`` is a
             legacy setting that leaves Taiwan data disabled. Default
             ``fugle``.
-        fugle_adjusted_daily: Normalize daily Fugle history;
+        fugle_adjusted_daily: Normalize every historical Fugle interval;
             ``JOSEPH_FUGLE_ADJUSTED_DAILY`` defaults to true.
-            Intraday prices stay raw.
+            Current quotes and order prices stay native.
         fugle_api_key: Fugle market-data API key (secret),
             ``JOSEPH_FUGLE_API_KEY`` or its ``_FILE`` path. Required when
             ``tw_data_source`` is ``fugle``.

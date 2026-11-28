@@ -29,7 +29,8 @@ The quantization uses the current decimal context, which rounds half-even.
 class PriceAdjustment(enum.StrEnum):
     """Documents the corporate-action normalization of historical OHLC.
 
-    Snapshot quotes, order prices and reported trading volume are not altered.
+    Snapshot quotes and order prices stay native. Historical volume follows the
+    provider's convention; raw public tape endpoints are never rebased.
     """
 
     RAW = "RAW"

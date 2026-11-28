@@ -2001,8 +2001,9 @@ class TaiwanExchangeAdapter(base.BaseVenueAdapter):
                 "history begins in 2010; longer bars are aggregated on "
                 "the XTAI session calendar. Today's minute candles and "
                 "quotes use Fugle REST polling, not a WebSocket stream.",
-                "Daily and longer history uses the configured corporate-action "
-                "adjustment policy; intraday prices stay raw. "
+                "All historical intervals use the configured corporate-action "
+                "policy. Minute prices use confirmed daily adjusted/raw "
+                "ratios before aggregation; daily prices come from Fugle. "
                 "Volume and turnover "
                 "remain reported values.",
                 "Fugle's 13:30 closing auction is folded into the final "
