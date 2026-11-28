@@ -2076,7 +2076,9 @@ export interface Inputs {
  * Attributes:
  *     script_id: Owned alert, indicator or strategy script publishing
  *         conditions.
- *     version: Positive immutable version, pinned rather than following edits.
+ *     version: Positive immutable tenant version, pinned rather than
+ *         following edits; 0 for a built-in or plugin script, whose
+ *         installed source hash is pinned instead.
  *     instrument_id: Canonical instrument whose new closed bars are evaluated.
  *     tf: Source resolution, one second through one calendar month.
  *     inputs: JSON values overriding the pinned version's defaults.

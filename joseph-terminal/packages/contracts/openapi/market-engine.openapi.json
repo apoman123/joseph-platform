@@ -98,7 +98,7 @@
             "type": "integer"
           },
           "script_id": {
-            "pattern": "^[a-z][a-z0-9-]{0,62}$",
+            "pattern": "^(?:[a-z][a-z0-9-]{0,62}|builtin:[a-z][a-z0-9_-]{0,63}|plugin:[a-z0-9_.-]{1,64}:[a-z][a-z0-9_-]{0,63})$",
             "title": "Script Id",
             "type": "string"
           },
@@ -114,7 +114,7 @@
             "$ref": "#/components/schemas/Timeframe"
           },
           "version": {
-            "minimum": 1.0,
+            "minimum": 0.0,
             "title": "Version",
             "type": "integer"
           }
@@ -133,7 +133,7 @@
       },
       "AlertJobInput": {
         "additionalProperties": false,
-        "description": "Explicitly enables a pinned Python condition on future closed bars.\n\nAttributes:\n    script_id: Owned alert, indicator or strategy script publishing\n        conditions.\n    version: Positive immutable version, pinned rather than following edits.\n    instrument_id: Canonical instrument whose new closed bars are evaluated.\n    tf: Source resolution, one second through one calendar month.\n    inputs: JSON values overriding the pinned version's defaults.\n    subscription_ids: Explicit owned notification destinations; UI is\n        implicit.\n    enabled: Whether evaluation and external notification routing are\n        active.\n    history_bars: Context depth, two through two thousand closed bars.",
+        "description": "Explicitly enables a pinned Python condition on future closed bars.\n\nAttributes:\n    script_id: Owned alert, indicator or strategy script publishing\n        conditions.\n    version: Positive immutable tenant version, pinned rather than\n        following edits; 0 for a built-in or plugin script, whose\n        installed source hash is pinned instead.\n    instrument_id: Canonical instrument whose new closed bars are evaluated.\n    tf: Source resolution, one second through one calendar month.\n    inputs: JSON values overriding the pinned version's defaults.\n    subscription_ids: Explicit owned notification destinations; UI is\n        implicit.\n    enabled: Whether evaluation and external notification routing are\n        active.\n    history_bars: Context depth, two through two thousand closed bars.",
         "properties": {
           "enabled": {
             "default": false,
@@ -160,7 +160,7 @@
             "type": "string"
           },
           "script_id": {
-            "pattern": "^[a-z][a-z0-9-]{0,62}$",
+            "pattern": "^(?:[a-z][a-z0-9-]{0,62}|builtin:[a-z][a-z0-9_-]{0,63}|plugin:[a-z0-9_.-]{1,64}:[a-z][a-z0-9_-]{0,63})$",
             "title": "Script Id",
             "type": "string"
           },
@@ -176,7 +176,7 @@
             "$ref": "#/components/schemas/Timeframe"
           },
           "version": {
-            "minimum": 1.0,
+            "minimum": 0.0,
             "title": "Version",
             "type": "integer"
           }
@@ -746,6 +746,249 @@
           "field"
         ],
         "title": "CandleOperand",
+        "type": "object"
+      },
+      "CatalogInput": {
+        "description": "A declared input of a built-in or plugin script.\n\nAttributes:\n    default: JSON default value.\n    title: Settings label.\n    minimum: Optional inclusive numeric lower bound.\n    maximum: Optional inclusive numeric upper bound.\n    options: Optional accepted values.\n    step: Optional numeric step.\n    group: Optional settings section.\n    tooltip: Optional help text.",
+        "properties": {
+          "default": {
+            "$ref": "#/components/schemas/JsonValue"
+          },
+          "group": {
+            "title": "Group",
+            "type": "string"
+          },
+          "maximum": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Maximum"
+          },
+          "minimum": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Minimum"
+          },
+          "options": {
+            "anyOf": [
+              {
+                "items": {
+                  "$ref": "#/components/schemas/JsonValue"
+                },
+                "type": "array"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Options"
+          },
+          "step": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Step"
+          },
+          "title": {
+            "title": "Title",
+            "type": "string"
+          },
+          "tooltip": {
+            "title": "Tooltip",
+            "type": "string"
+          }
+        },
+        "required": [
+          "default",
+          "title",
+          "minimum",
+          "maximum",
+          "options",
+          "step",
+          "group",
+          "tooltip"
+        ],
+        "title": "CatalogInput",
+        "type": "object"
+      },
+      "CatalogList": {
+        "description": "Installed built-in and plugin scripts and skipped plugin packages.\n\nAttributes:\n    scripts: Scripts in catalog order.\n    failures: Plugin entry points that failed to load, with reasons.",
+        "properties": {
+          "failures": {
+            "items": {
+              "additionalProperties": {
+                "anyOf": [
+                  {
+                    "type": "string"
+                  },
+                  {
+                    "type": "null"
+                  }
+                ]
+              },
+              "type": "object"
+            },
+            "title": "Failures",
+            "type": "array"
+          },
+          "scripts": {
+            "items": {
+              "$ref": "#/components/schemas/CatalogScript"
+            },
+            "title": "Scripts",
+            "type": "array"
+          }
+        },
+        "required": [
+          "scripts",
+          "failures"
+        ],
+        "title": "CatalogList",
+        "type": "object"
+      },
+      "CatalogScript": {
+        "description": "A built-in or installed plugin script that the engine runs in process.\n\nAttributes:\n    script_id: ``builtin:<id>`` or ``plugin:<entry point>:<id>``.\n    kind: indicator, strategy, library, filter or alert.\n    origin: builtin or plugin.\n    package: Providing distribution of a plugin.\n    package_version: That distribution's version.\n    title: Display name.\n    short_title: Compact legend name.\n    description: Catalog description.\n    category: Catalog section.\n    overlay: Whether plots share the price pane.\n    inputs: Declared inputs in display order.\n    requests: Declared additional series by alias.\n    source_available: Whether the public source can be read.\n    source_hash: Identity of the installed code.\n    enabled: False when disabled by configuration.\n    source: Public source text on the single-script route, else None.",
+        "properties": {
+          "category": {
+            "title": "Category",
+            "type": "string"
+          },
+          "description": {
+            "title": "Description",
+            "type": "string"
+          },
+          "enabled": {
+            "title": "Enabled",
+            "type": "boolean"
+          },
+          "inputs": {
+            "additionalProperties": {
+              "$ref": "#/components/schemas/CatalogInput"
+            },
+            "title": "Inputs",
+            "type": "object"
+          },
+          "kind": {
+            "enum": [
+              "indicator",
+              "strategy",
+              "library",
+              "filter",
+              "alert"
+            ],
+            "title": "Kind",
+            "type": "string"
+          },
+          "origin": {
+            "enum": [
+              "builtin",
+              "plugin"
+            ],
+            "title": "Origin",
+            "type": "string"
+          },
+          "overlay": {
+            "title": "Overlay",
+            "type": "boolean"
+          },
+          "package": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Package"
+          },
+          "package_version": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Package Version"
+          },
+          "requests": {
+            "additionalProperties": {
+              "additionalProperties": {
+                "$ref": "#/components/schemas/JsonValue"
+              },
+              "type": "object"
+            },
+            "title": "Requests",
+            "type": "object"
+          },
+          "script_id": {
+            "title": "Script Id",
+            "type": "string"
+          },
+          "short_title": {
+            "title": "Short Title",
+            "type": "string"
+          },
+          "source": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Source"
+          },
+          "source_available": {
+            "title": "Source Available",
+            "type": "boolean"
+          },
+          "source_hash": {
+            "title": "Source Hash",
+            "type": "string"
+          },
+          "title": {
+            "title": "Title",
+            "type": "string"
+          }
+        },
+        "required": [
+          "script_id",
+          "kind",
+          "origin",
+          "package",
+          "package_version",
+          "title",
+          "short_title",
+          "description",
+          "category",
+          "overlay",
+          "inputs",
+          "requests",
+          "source_available",
+          "source_hash",
+          "enabled"
+        ],
+        "title": "CatalogScript",
         "type": "object"
       },
       "CompareNode": {
@@ -5744,6 +5987,106 @@
         ]
       }
     },
+    "/v1/scripts/catalog": {
+      "get": {
+        "description": "Lists the built-in and installed plugin scripts.\n\nArgs:\n    principal: Authenticated caller.\n    kind: Optional role filter.\n\nReturns:\n    Catalog scripts without source text, and skipped plugins.",
+        "operationId": "list_catalog_v1_scripts_catalog_get",
+        "parameters": [
+          {
+            "in": "query",
+            "name": "kind",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "enum": [
+                    "indicator",
+                    "strategy",
+                    "library",
+                    "filter",
+                    "alert"
+                  ],
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Kind"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/CatalogList"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "List Catalog",
+        "tags": [
+          "python-scripts"
+        ]
+      }
+    },
+    "/v1/scripts/catalog/{script_id}": {
+      "get": {
+        "description": "Reads one catalog script, with source when it is public.\n\nArgs:\n    script_id: Catalog id.\n    principal: Authenticated caller.\n\nReturns:\n    The script; plugin source stays protected (None).\n\nRaises:\n    errors.NotFoundError: If the script is not installed.",
+        "operationId": "get_catalog_script_v1_scripts_catalog__script_id__get",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "script_id",
+            "required": true,
+            "schema": {
+              "title": "Script Id",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/CatalogScript"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Get Catalog Script",
+        "tags": [
+          "python-scripts"
+        ]
+      }
+    },
     "/v1/scripts/validate": {
       "post": {
         "description": "Validates source structure and imports without running user code.\n\nArgs:\n    body: Script source, declaration and owned dependency pins.\n    principal: Authenticated tenant owner.\n\nReturns:\n    Validity, kind and executed false; invalid input returns HTTP 422.\n\nRaises:\n    errors.JosephError: If source or an owned pinned import is invalid.",
@@ -5867,7 +6210,7 @@
     },
     "/v1/scripts/{script_id}/run": {
       "post": {
-        "description": "Calculates plots or simulates a strategy without placing real orders.\n\nArgs:\n    script_id: Tenant-local indicator or strategy slug.\n    body: Version, closed-bar range, inputs and simulation costs.\n    principal: Authenticated tenant owner.\n\nReturns:\n    Validated plots, provenance and optional simulation\n    fills/performance.\n\nRaises:\n    errors.JosephError: For absent data, invalid source/output, disabled\n        runtime, resource limits or standalone library execution.",
+        "description": "Calculates plots or simulates a strategy without placing real orders.\n\nArgs:\n    script_id: Tenant slug, or a built-in/plugin catalog id.\n    body: Version, closed-bar range, inputs and simulation costs.\n    principal: Authenticated tenant owner.\n\nReturns:\n    Validated plots, provenance and optional simulation\n    fills/performance.\n\nRaises:\n    errors.JosephError: For absent data, invalid source/output, disabled\n        runtime, resource limits or standalone library execution.",
         "operationId": "run_script_v1_scripts__script_id__run_post",
         "parameters": [
           {
