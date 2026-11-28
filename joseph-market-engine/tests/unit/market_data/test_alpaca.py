@@ -923,6 +923,18 @@ class _QuietApi:
         )
 
 
+def _minute_requests(api: _QuietApi) -> list[tuple[int, dict[str, str]]]:
+    """Lists an API's minute-bar requests (not the daily price-basis reads).
+
+    Args:
+        api: Quiet API that recorded the bar requests.
+
+    Returns:
+        ``(request time, params)`` of every ``1Min`` bar request.
+    """
+    return [(at, p) for at, p in api.bars if p["timeframe"] == "1Min"]
+
+
 @pytest.fixture
 def quiet_api(
     exchange_routes: Callable[[respx.Router], None],
@@ -1011,7 +1023,9 @@ async def test_quiet_minutes_cost_no_repeat_requests(
         )
         assert batch.complete and len(batch.candles) == 260
         await svc.get_candles(_AAPL, _M1, _US_OPEN, _US_CLOSE)
-    assert len(api.bars) == 1
+    assert len(_minute_requests(api)) == 1
+    # Besides it, only the price-basis baseline: one raw/split daily pair.
+    assert len(api.bars) == 3
     # With dense-bar handling (SPARSE_BARS off) the same burst re-requests
     # from the first quiet minute on every call.
     monkeypatch.setattr(alpaca.AlpacaAdapter, "SPARSE_BARS", False)
@@ -1039,8 +1053,9 @@ async def test_live_repairs_ask_once_and_only_for_unsettled_minutes(
         closed = clock.current_ms - clock.current_ms % 60_000
         rows = await svc.get_candles(_AAPL, _M1, _US_OPEN, closed)
         assert rows and rows[-1].end_ms <= closed
-    assert len(api.bars) <= calls
-    first, *later = api.bars
+    minutes = _minute_requests(api)
+    assert len(minutes) <= calls
+    first, *later = minutes
     assert alpaca.rfc3339_ms(first[1]["start"]) == _US_OPEN
     for asked_at, params in later:
         assert alpaca.rfc3339_ms(params["start"]) >= asked_at - 3 * 60_000

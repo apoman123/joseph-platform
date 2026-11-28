@@ -833,3 +833,42 @@ async def test_archive_failures_never_stop_the_recorder(
     assert "archiving recorded bars failed" in caplog.text
     assert "bar archive prune failed" in caplog.text
     assert "bar archive read failed" in caplog.text
+
+
+async def test_cold_daily_history_reads_a_few_months_per_call() -> None:
+    """A cold call reads the newest months within budget; repeats go older.
+
+    Concurrent reads of the same month share one request, so two charts
+    opening together cost no more than one.
+    """
+    # A Saturday: no session today, so no live daily bar is asked for.
+    clock = clock_lib.ManualClock(_tpe_ms(datetime.date(2026, 11, 28), 15))
+    reads: list[str] = []
+
+    def answer(params: dict[str, Any]) -> dict[str, Any]:
+        """Records each read of the monthly report in ``reads``.
+
+        Args:
+            params: Query parameters; ``date`` names the month.
+
+        Returns:
+            An empty month.
+        """
+        reads.append(str(params["date"]))
+        return {"stat": "OK", "data": []}
+
+    adapter = _adapter(clock, www={"/rwd/zh/afterTrading/STOCK_DAY": answer})
+    start = _tpe_ms(datetime.date(2024, 11, 1), 0)
+    end = clock.now_ms()
+    budget = twse.COLD_MONTHS_PER_DAILY_CALL
+    first, second = await asyncio.gather(
+        adapter._daily(_ID, start, end, None, budget),
+        adapter._daily(_ID, start, end, None, budget),
+    )
+    assert reads == ["20261101", "20261001", "20260901", "20260801"]
+    assert not first[2] and not second[2]
+    assert first[1][-1][0] == _tpe_ms(datetime.date(2026, 8, 1), 0)
+    _, covered, complete = await adapter._daily(_ID, start, end, None, budget)
+    assert len(reads) == 2 * budget and not complete
+    assert covered[-1][0] == _tpe_ms(datetime.date(2026, 4, 1), 0)
+    await adapter.close()

@@ -508,11 +508,16 @@ export class LwcChartPort implements ChartPort {
       this.rebuildSeries();
     } else {
       this.applySeriesOptions();
-      if (switched || previous.showVolume !== config.showVolume) {
+      const dataChanged = switched || previous.showVolume !== config.showVolume;
+      if (dataChanged) {
         this.rebuildAux();
         this.buildCompareSeries();
+        this.renderData();
+      } else {
+        // Same bars: a new session calendar (sessions load in chunks), tick
+        // size or scale needs no redraw of every bar, only a repaint.
+        this.invalidate();
       }
-      this.renderData();
     }
   }
 

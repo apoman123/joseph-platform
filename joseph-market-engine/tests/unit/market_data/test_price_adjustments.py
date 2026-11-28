@@ -220,31 +220,40 @@ async def test_cache_refreshes_actions_and_rejects_missing_evidence() -> None:
         await normalizer.adjust([_bar(_AFTER)], load)
 
 
-async def test_epoch_change_during_evidence_load_requires_retry() -> None:
-    """Refuse evidence loaded across a cache epoch instead of mixing pages.
+async def test_epoch_change_during_evidence_load_never_fails_or_mixes() -> None:
+    """Crossing a cache epoch reloads what the new epoch lacks, never fails.
 
     Returns:
-        None after checking the explicit retryable data failure.
+        None after checking that one call uses only fresh evidence.
     """
     clock = clock_lib.ManualClock(_NOW)
     normalizer = price_adjustments.DailyPriceNormalizer(clock)
+    loads: list[tuple[int, int]] = []
+    ratios = {_BEFORE: _D("0.25"), _AFTER: _D("0.5")}
 
     async def load(start: int, end: int) -> Mapping[int, decimal.Decimal]:
-        """Advance the clock while the provider reads its observations.
+        """Advance the clock past an epoch during the first read only.
 
         Args:
-            start: Unused inclusive UTC milliseconds.
-            end: Unused exclusive UTC milliseconds.
+            start: Inclusive UTC milliseconds.
+            end: Exclusive UTC milliseconds.
 
         Returns:
-            A ratio that became obsolete while being loaded.
+            The ratios of the sessions in the window.
         """
-        del start, end
-        clock.current_ms += price_adjustments.REFRESH_MS
-        return {_BEFORE: _D("0.25")}
+        loads.append((start, end))
+        if len(loads) == 2:
+            clock.current_ms += price_adjustments.REFRESH_MS
+        return {s: r for s, r in ratios.items() if start <= s < end}
 
-    with pytest.raises(errors.VenueUnavailableError, match="epoch changed"):
-        await normalizer.adjust([_bar(_BEFORE)], load)
+    first = await normalizer.adjust([_bar(_BEFORE)], load)
+    assert first[0].close == _D("25.00")
+    ratios[_BEFORE] = _D("0.125")
+    both = await normalizer.adjust([_bar(_BEFORE), _bar(_AFTER)], load)
+    # The second read crossed the epoch: the session cached in the old epoch
+    # was read again in the new one instead of mixing the two.
+    assert len(loads) == 3
+    assert [bar.close for bar in both] == [_D("12.5"), _D("50")]
 
 
 def test_fixture_timestamps_are_actual_xtai_session_opens() -> None:
