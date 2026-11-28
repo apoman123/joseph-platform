@@ -162,7 +162,7 @@ async def test_running_market_engine_defaults_to_native_crypto_sources() -> (
     settings = config.Settings(
         database_url="sqlite://",
         enabled_venues=tuple(ccxt.EXCHANGES),
-        pipeline_enabled=False,
+        strategy_activations_enabled=False,
         trade_recording=False,
     )
     container = bootstrap.build_container(settings)

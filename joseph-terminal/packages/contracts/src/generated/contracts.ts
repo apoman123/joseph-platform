@@ -587,14 +587,41 @@ export type Fills = SimulatedFill[];
 export type InstrumentId6 = string;
 export type Kind2 = 'indicator' | 'strategy' | 'filter' | 'alert';
 export type Matched = boolean | null;
+export type Action = 'long' | 'short' | 'close';
+export type Comment = string;
+export type FillTimeMs = number | null;
+export type Quantity1 = number;
+export type Reference = number;
+export type Status1 = 'pending' | 'filled' | 'rejected' | 'unchanged';
+export type Stop = number | null;
+export type Target = number | null;
+export type TimeMs3 = number;
+/**
+ * @maxItems 4000
+ */
+export type Orders = StrategyOrder[];
 export type Overlay1 = boolean;
 /**
  * @maxItems 64
  */
 export type Plots = PlotSeries[];
+export type PositionSize = number;
 export type ScriptId5 = string;
 export type SourceHash1 = string;
 export type Tf = string;
+export type Direction1 = 'LONG' | 'SHORT';
+export type EntryPrice = number;
+export type EntryTimeMs = number;
+export type ExitPrice = number | null;
+export type ExitTimeMs = number | null;
+export type Fees = number;
+export type Pnl = number | null;
+export type Quantity2 = number;
+export type ReturnPct = number | null;
+/**
+ * @maxItems 4000
+ */
+export type Trades = StrategyTrade[];
 export type Version5 = number;
 /**
  * @maxItems 500
@@ -2055,7 +2082,9 @@ export interface Inputs {
  * Attributes:
  *     script_id: Owned alert, indicator or strategy script publishing
  *         conditions.
- *     version: Positive immutable version, pinned rather than following edits.
+ *     version: Positive immutable tenant version, pinned rather than
+ *         following edits; 0 for a built-in or plugin script, whose
+ *         installed source hash is pinned instead.
  *     instrument_id: Canonical instrument whose new closed bars are evaluated.
  *     tf: Source resolution, one second through one calendar month.
  *     inputs: JSON values overriding the pinned version's defaults.
@@ -2388,6 +2417,10 @@ export interface SeriesRequest {
  *     overlay: Whether plots share the main price pane.
  *     plots: At most sixty-four scalar output series.
  *     fills: Simulated next-bar-open fills; empty for indicators.
+ *     orders: Queued strategy orders and their simulated outcomes; empty
+ *         for other roles.
+ *     trades: Round trips reconstructed by the host from verified fills.
+ *     position_size: Signed simulated position after the last bar.
  *     equity_curve: Marked simulated quote equity; empty for indicators.
  *     metrics: Finite numeric simulation statistics, including fees and
  *         unfilled final-bar intents; no performance is fabricated.
@@ -2418,12 +2451,15 @@ export interface ScriptResult {
   kind: Kind2;
   matched?: Matched;
   metrics: Metrics;
+  orders?: Orders;
   overlay: Overlay1;
   plot_styles?: PlotStyles;
   plots: Plots;
+  position_size?: PositionSize;
   script_id: ScriptId5;
   source_hash: SourceHash1;
   tf: Tf;
+  trades?: Trades;
   version: Version5;
   visuals?: Visuals;
 }
@@ -2475,12 +2511,71 @@ export interface SimulatedFill {
 export interface Metrics {
   [k: string]: number | undefined;
 }
+/**
+ * A strategy order queued on a closed bar and its simulated outcome.
+ *
+ * Attributes:
+ *     time_ms: Start of the closed bar on which the order was queued.
+ *     action: long or short entry target, or close.
+ *     quantity: Target absolute base quantity; zero for close.
+ *     reference: Close of the bar the order was queued on, the planned
+ *         entry of live signals.
+ *     stop: Protective stop declared with an entry, if any.
+ *     target: Profit target declared with an entry, if any.
+ *     comment: Plain-text reason given by the strategy.
+ *     status: pending (no later bar yet), filled, rejected for
+ *         insufficient simulated equity, or unchanged (the position
+ *         already matched).
+ *     fill_time_ms: Start of the bar whose open filled the order.
+ *
+ * This interface was referenced by `JosephContracts`'s JSON-Schema
+ * via the `definition` "StrategyOrder".
+ */
+export interface StrategyOrder {
+  action: Action;
+  comment?: Comment;
+  fill_time_ms?: FillTimeMs;
+  quantity: Quantity1;
+  reference: Reference;
+  status: Status1;
+  stop?: Stop;
+  target?: Target;
+  time_ms: TimeMs3;
+}
 export interface PlotStyles {
   [k: string]:
     | {
         [k: string]: JsonValue | undefined;
       }
     | undefined;
+}
+/**
+ * A simulated round trip reconstructed from verified fills.
+ *
+ * Attributes:
+ *     direction: LONG or SHORT.
+ *     entry_time_ms: Start of the bar of the opening fill.
+ *     exit_time_ms: Start of the bar of the closing fill; None while open.
+ *     quantity: Largest absolute base quantity held.
+ *     entry_price: Quantity-weighted average opening price.
+ *     exit_price: Quantity-weighted average closing price; None while open.
+ *     fees: Commissions of every fill of the trade.
+ *     pnl: Realized profit after fees; None while open.
+ *     return_pct: pnl relative to the opening notional; None while open.
+ *
+ * This interface was referenced by `JosephContracts`'s JSON-Schema
+ * via the `definition` "StrategyTrade".
+ */
+export interface StrategyTrade {
+  direction: Direction1;
+  entry_price: EntryPrice;
+  entry_time_ms: EntryTimeMs;
+  exit_price?: ExitPrice;
+  exit_time_ms?: ExitTimeMs;
+  fees?: Fees;
+  pnl?: Pnl;
+  quantity: Quantity2;
+  return_pct?: ReturnPct;
 }
 /**
  * Requests a reproducible run using closed, real backend candles.

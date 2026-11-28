@@ -54,7 +54,8 @@ class KillSwitch:
         A released switch covers nothing. GLOBAL covers every order, ACCOUNT
         the orders of ``target_id``, and STRATEGY the orders whose strategy
         version equals ``target_id`` or whose strategy id (the part before
-        ``:v``) does, so ``my-strategy`` covers ``my-strategy:v3``. The
+        the last ``:v``) does, so ``my-strategy`` covers ``my-strategy:v3``
+        and ``builtin:vwap-band`` covers ``builtin:vwap-band:v1a2b3c``. The
         tenant is not compared: callers pass only the tenant's switches.
 
         Args:
@@ -74,7 +75,7 @@ class KillSwitch:
         if strategy_version_id is None or self.target_id is None:
             return False
         return strategy_version_id == self.target_id or (
-            strategy_version_id.split(":v")[0] == self.target_id
+            strategy_version_id.rsplit(":v", 1)[0] == self.target_id
         )
 
     def to_contract(self) -> dict[str, object]:

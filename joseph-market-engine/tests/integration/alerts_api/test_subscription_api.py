@@ -137,7 +137,7 @@ def client() -> Iterator[testclient.TestClient]:
         config.Settings(),
         demo_only=True,
         database_url="sqlite://",
-        pipeline_enabled=False,
+        strategy_activations_enabled=False,
         telegram_bot_token="123:secret-bot-token",
         dev_tokens=config.parse_dev_tokens(
             "token-a:tenant-a:user-a,token-b:tenant-b:user-b"

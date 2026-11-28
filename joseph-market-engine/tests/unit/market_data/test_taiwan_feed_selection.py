@@ -52,7 +52,7 @@ async def test_legacy_official_selection_does_not_start_taiwan_feeds() -> None:
     settings = config.Settings(
         database_url="sqlite://",
         enabled_venues=(instruments.Venue.TWSE, instruments.Venue.TPEX),
-        pipeline_enabled=False,
+        strategy_activations_enabled=False,
         trade_recording=False,
         tw_data_source="twse",
     )
@@ -68,7 +68,7 @@ async def test_fugle_selection_wires_both_taiwan_venues() -> None:
     settings = config.Settings(
         database_url="sqlite://",
         enabled_venues=(instruments.Venue.TWSE, instruments.Venue.TPEX),
-        pipeline_enabled=False,
+        strategy_activations_enabled=False,
         trade_recording=False,
         tw_data_source="fugle",
         fugle_api_key="free-key",

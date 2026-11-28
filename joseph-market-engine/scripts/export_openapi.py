@@ -101,7 +101,7 @@ def _openapi() -> str:
         config.Settings(),
         demo_only=True,
         database_url="sqlite://",
-        pipeline_enabled=False,
+        strategy_activations_enabled=False,
         indicator_plugin_packages="none",
     )
     app = bootstrap.create_application(bootstrap.build_container(settings))

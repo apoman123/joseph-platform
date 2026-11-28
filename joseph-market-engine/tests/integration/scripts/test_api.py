@@ -46,7 +46,7 @@ def _application(
         config.Settings(),
         demo_only=True,
         database_url="sqlite://",
-        pipeline_enabled=False,
+        strategy_activations_enabled=False,
         script_runtime="docker" if docker else "disabled",
         dev_tokens=config.parse_dev_tokens(
             "scripts-a:tenant-a:user-a,scripts-b:tenant-b:user-b"

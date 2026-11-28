@@ -374,13 +374,11 @@ class Settings:
             turnover, ``JOSEPH_QUALIFICATION_TOP_N``. Default 50.
         coingecko_enabled: Whether CoinGecko trending heat bonuses are
             fetched, ``JOSEPH_COINGECKO_ENABLED``. Default false.
-        pipeline_enabled: Whether the live signal pipeline runs,
-            ``JOSEPH_PIPELINE_ENABLED``. Default true.
-        pipeline_interval_s: Time between live pipeline passes, in seconds,
-            ``JOSEPH_PIPELINE_INTERVAL_S``. Default 10, at least 1.
-        pipeline_max_instruments: Instruments per venue for universes
-            without explicit instruments,
-            ``JOSEPH_PIPELINE_MAX_INSTRUMENTS``. Default 10.
+        strategy_activations_enabled: Whether active Python strategy
+            activations are evaluated on closed bars,
+            ``JOSEPH_STRATEGY_ACTIVATIONS_ENABLED``. Default true.
+        strategy_interval_s: Time between strategy activation passes, in
+            seconds, ``JOSEPH_STRATEGY_INTERVAL_S``. Default 10, at least 1.
         forward_signals: Whether entry signals of PAPER/SHADOW/AUTO_LIVE
             strategies are forwarded to the execution engine (also needs
             ``service_token``), ``JOSEPH_FORWARD_SIGNALS``. Default true.
@@ -527,9 +525,8 @@ class Settings:
     stream_retention: int = 2_000
     top_n: int = 50
     coingecko_enabled: bool = False
-    pipeline_enabled: bool = True
-    pipeline_interval_s: float = 10.0
-    pipeline_max_instruments: int = 10
+    strategy_activations_enabled: bool = True
+    strategy_interval_s: float = 10.0
     forward_signals: bool = True
     alert_interval_s: float = 2.0
     max_anchored_bars: int = 50_000
@@ -700,12 +697,11 @@ class Settings:
             coingecko_enabled=_bool(
                 source.get("JOSEPH_COINGECKO_ENABLED"), False
             ),
-            pipeline_enabled=_bool(source.get("JOSEPH_PIPELINE_ENABLED"), True),
-            pipeline_interval_s=max(
-                1.0, float(source.get("JOSEPH_PIPELINE_INTERVAL_S", "10"))
+            strategy_activations_enabled=_bool(
+                source.get("JOSEPH_STRATEGY_ACTIVATIONS_ENABLED"), True
             ),
-            pipeline_max_instruments=int(
-                source.get("JOSEPH_PIPELINE_MAX_INSTRUMENTS", "10")
+            strategy_interval_s=max(
+                1.0, float(source.get("JOSEPH_STRATEGY_INTERVAL_S", "10"))
             ),
             forward_signals=_bool(source.get("JOSEPH_FORWARD_SIGNALS"), True),
             alert_interval_s=max(

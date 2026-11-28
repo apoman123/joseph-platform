@@ -21,7 +21,11 @@ import joseph_script
 
 MODULES: dict[str, tuple[str, ...]] = {
     "indicators": ("sma", "ema"),
-    "strategies": (),
+    "strategies": (
+        "ema_trend_long",
+        "rsi_reversion_short",
+        "pivot_bounce_long",
+    ),
     "filters": (),
     "alerts": (),
 }

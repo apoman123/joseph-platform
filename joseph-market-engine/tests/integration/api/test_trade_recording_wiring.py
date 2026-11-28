@@ -44,7 +44,7 @@ def _settings(tmp_path: pathlib.Path, **overrides: Any) -> config.Settings:
             instruments.Venue.HYPERLIQUID,
             instruments.Venue.MOCK,
         ),
-        pipeline_enabled=False,
+        strategy_activations_enabled=False,
         binance_archive_dir=str(tmp_path / "vision"),
         bitget_archive_dir=str(tmp_path / "bitget"),
     )
