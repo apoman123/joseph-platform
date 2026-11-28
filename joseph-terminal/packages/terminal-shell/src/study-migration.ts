@@ -15,12 +15,26 @@
  *   are dropped. Its settings become script inputs (`tick_size` is gone;
  *   `delta_source: 'estimate'` turns `use_buy_volume` off) and its value
  *   colors become plot colors.
- * - Layers of other plugin packages are dropped: their ids are not catalog
- *   ids, and the packages publish their scripts under new ids.
+ * - A shown or added layer of another plugin package becomes a placeholder
+ *   study `plugin:*:<old id>` (see `LEGACY_PLUGIN_PREFIX`). Once the
+ *   catalog loads, the terminal resolves it to the one installed plugin
+ *   script whose `ID` equals the old id; until then, or when no or several
+ *   plugins match, it stays in the legend as not installed. Its settings
+ *   become inputs by the same rules (decimal strings become numbers);
+ *   value colors are dropped because plot names are the plugin's own.
  * - Attached owned scripts keep their pinned version, inputs and colors.
  */
 
 import type {StudyState} from './workspace';
+
+/** Script-id prefix of a migrated plugin layer awaiting catalog lookup. */
+export const LEGACY_PLUGIN_PREFIX = 'plugin:*:';
+
+/** Plugin ids of schema v1 (`plugin_id` of an indicator layer). */
+const V1_PLUGIN_ID = /^[a-z][a-z0-9_]{0,63}$/;
+
+/** A decimal string of a v1 numeric setting. */
+const DECIMAL_TEXT = /^-?\d+(?:\.\d+)?$/;
 
 /** Built-in plugin ids of schema v1 and their legend names. */
 const BUILTIN_NAMES: Readonly<Record<string, string>> = {
@@ -87,11 +101,15 @@ export function inputsFromLayerSettings(
   const inputs: Record<string, unknown> = {};
   for (const [key, value] of Object.entries(record(settings) ?? {})) {
     if (key === 'tick_size') continue;
-    if (pluginId === 'volume_delta' && key === 'delta_source') {
+    if (key === 'delta_source') {
       inputs.use_buy_volume = value !== 'estimate';
       continue;
     }
-    if (DECIMAL_SETTINGS.has(key) && typeof value === 'string') {
+    const builtin = pluginId in BUILTIN_NAMES;
+    if (
+      typeof value === 'string' &&
+      (builtin ? DECIMAL_SETTINGS.has(key) : DECIMAL_TEXT.test(value))
+    ) {
       const number = Number(value);
       if (Number.isFinite(number)) inputs[key] = number;
       continue;
@@ -122,7 +140,8 @@ function colorsFromStyle(style: unknown): Record<string, string> {
 /**
  * Converts the v1 indicator layers of one chart to studies.
  * @param layers v1 `indicator_layers`.
- * @return Studies of the built-in layers that were shown or added.
+ * @return Studies of the layers that were shown or added: built-ins, and
+ *     placeholders for other plugin packages.
  */
 export function studiesFromLayers(layers: unknown): StudyState[] {
   if (!Array.isArray(layers)) return [];
@@ -130,13 +149,16 @@ export function studiesFromLayers(layers: unknown): StudyState[] {
   for (const raw of layers) {
     const layer = record(raw);
     const pluginId = layer?.plugin_id;
-    if (typeof pluginId !== 'string' || !(pluginId in BUILTIN_NAMES)) {
+    if (typeof pluginId !== 'string' || !V1_PLUGIN_ID.test(pluginId)) {
       continue;
     }
     if (layer?.removed === true) continue;
     const visible = layer?.visible === true;
     if (!visible && layer?.present !== true) continue;
-    const scriptId = `builtin:${pluginId}`;
+    const builtin = pluginId in BUILTIN_NAMES;
+    const scriptId = builtin
+      ? `builtin:${pluginId}`
+      : `${LEGACY_PLUGIN_PREFIX}${pluginId}`;
     if (studies.some(study => study.study_id === scriptId)) continue;
     studies.push({
       study_id: scriptId,
@@ -146,7 +168,7 @@ export function studiesFromLayers(layers: unknown): StudyState[] {
       name: BUILTIN_NAMES[pluginId] ?? pluginId,
       visible,
       inputs: inputsFromLayerSettings(pluginId, layer?.settings),
-      colors: colorsFromStyle(layer?.style),
+      colors: builtin ? colorsFromStyle(layer?.style) : {},
     });
   }
   return studies;

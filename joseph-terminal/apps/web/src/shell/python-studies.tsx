@@ -33,7 +33,14 @@ import {useStore} from './react-bindings';
 import {ScriptDialog} from './script-dialog';
 import {useRuntime} from './runtime-context';
 import styles from './script-ui.module.css';
-import {catalogEntry, studyName, useStudyCatalog} from './study-catalog';
+import {
+  catalogEntry,
+  isLegacyPlaceholder,
+  legacyPluginEntry,
+  studyCatalog,
+  studyName,
+  useStudyCatalog,
+} from './study-catalog';
 
 /** Refresh interval of live indicator studies (5 s). */
 const LIVE_REFRESH_MS = 5000;
@@ -246,6 +253,21 @@ export function useStudyRuns(
   const live = atMs === null && rows.some(row => row.kind === 'indicator');
   const {chart_id: chartId, instrument_id: instrumentId, timeframe} = chart;
   const limit = Math.min(MAX_STUDY_BARS, Math.max(STUDY_BARS, loadedBars));
+  const catalog = useStore(studyCatalog(runtime));
+  // Migrated plugin layers become the installed plugin script with the same
+  // ID once the catalog is known; the replacement keeps the study id.
+  useEffect(() => {
+    if (!catalog) return;
+    for (const study of chart.studies) {
+      const entry = legacyPluginEntry(catalog, study);
+      if (!entry) continue;
+      runtime.dispatch({
+        type: 'addStudy',
+        chartId,
+        study: {...study, script_id: entry.script_id, name: entry.short_title},
+      });
+    }
+  }, [catalog, chart.studies, chartId, runtime]);
   useEffect(() => {
     if (!live || !port) return;
     const timer = setInterval(
@@ -278,9 +300,15 @@ export function useStudyRuns(
   );
   useEffect(() => {
     if (!port || closedBarMs === null) return;
-    const studies = JSON.parse(fingerprint) as StudyState[];
+    const failures: Record<string, string> = {};
+    const studies = (JSON.parse(fingerprint) as StudyState[]).filter(row => {
+      if (!isLegacyPlaceholder(row)) return true;
+      failures[row.study_id] =
+        `Plugin script "${row.name}" is not installed on the market engine`;
+      return false;
+    });
     if (studies.length === 0) {
-      setErrors({});
+      setErrors({...failures});
       return;
     }
     let disposed = false;
@@ -294,7 +322,6 @@ export function useStudyRuns(
         groups.push(group.slice(start, start + BATCH_SIZE));
       }
     }
-    const failures: Record<string, string> = {};
     const apply = (row: StudyState, result: ScriptResult) => {
       state.results.update(all => ({
         ...all,

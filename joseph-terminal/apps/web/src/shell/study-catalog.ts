@@ -15,7 +15,11 @@
 'use client';
 import type {CatalogScript, ChartState, ScriptVersion} from '@joseph/contracts';
 import {createStore, type ReadableStore} from '@joseph/feature-registry';
-import {nextStudyId, type StudyState} from '@joseph/terminal-shell';
+import {
+  LEGACY_PLUGIN_PREFIX,
+  nextStudyId,
+  type StudyState,
+} from '@joseph/terminal-shell';
 import type {TerminalRuntime} from '../composition/runtime';
 import {useStore} from './react-bindings';
 import {useRuntime} from './runtime-context';
@@ -100,6 +104,38 @@ export function catalogEntry(
   study: Pick<StudyState, 'script_id'>
 ): CatalogScript | undefined {
   return catalog?.find(script => script.script_id === study.script_id);
+}
+
+/**
+ * Finds the installed plugin script that a migrated plugin layer
+ * (`plugin:*:<old id>`) stands for: the one plugin entry whose `ID` is the
+ * old id. Nothing is named here; the catalog decides.
+ * @param catalog Loaded catalog, or null.
+ * @param study Chart study.
+ * @return That entry; undefined for other studies, before the catalog
+ *     loads, or when zero or several plugins match.
+ */
+export function legacyPluginEntry(
+  catalog: readonly CatalogScript[] | null,
+  study: Pick<StudyState, 'script_id'>
+): CatalogScript | undefined {
+  if (!catalog || !isLegacyPlaceholder(study)) return undefined;
+  const id = study.script_id.slice(LEGACY_PLUGIN_PREFIX.length);
+  const found = catalog.filter(
+    script => script.origin === 'plugin' && script.script_id.endsWith(`:${id}`)
+  );
+  return found.length === 1 ? found[0] : undefined;
+}
+
+/**
+ * Tells whether a study is a migrated plugin layer awaiting catalog lookup.
+ * @param study Chart study.
+ * @return True for `plugin:*:<old id>` script ids.
+ */
+export function isLegacyPlaceholder(
+  study: Pick<StudyState, 'script_id'>
+): boolean {
+  return study.script_id.startsWith(LEGACY_PLUGIN_PREFIX);
 }
 
 /**

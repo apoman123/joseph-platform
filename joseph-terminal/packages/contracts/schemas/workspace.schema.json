@@ -234,8 +234,8 @@
         },
         "script_id": {
           "type": "string",
-          "pattern": "^(?:[a-z][a-z0-9-]{0,62}|builtin:[a-z][a-z0-9_-]{0,63}|plugin:[a-z0-9_.-]{1,64}:[a-z][a-z0-9_-]{0,63})$",
-          "description": "Owned script slug, builtin:<id> or plugin:<entry>:<id>."
+          "pattern": "^(?:[a-z][a-z0-9-]{0,62}|builtin:[a-z][a-z0-9_-]{0,63}|plugin:[a-z0-9_.-]{1,64}:[a-z][a-z0-9_-]{0,63}|plugin:\\*:[a-z][a-z0-9_]{0,63})$",
+          "description": "Owned script slug, builtin:<id>, plugin:<entry>:<id>, or plugin:*:<v1 plugin id> for a migrated plugin layer awaiting catalog lookup."
         },
         "version": {
           "type": "integer",

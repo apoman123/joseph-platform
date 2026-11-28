@@ -42,6 +42,7 @@ import {
   migrateWorkspaceV1,
   studiesFromAttachments,
   studiesFromLayers,
+  LEGACY_PLUGIN_PREFIX,
 } from './study-migration';
 import {
   activeChart,
@@ -174,7 +175,6 @@ describe('schema v1 migration', () => {
         style: {colors: {delta_pct: '#00ff00', other: '#ffffff'}},
       },
       {plugin_id: 'bollinger_bands', visible: true, settings: {mult: '2.5'}},
-      {plugin_id: 'private_zones', visible: true},
     ]);
     expect(
       studies.map(study => [study.script_id, study.visible, study.inputs])
@@ -189,6 +189,44 @@ describe('schema v1 migration', () => {
       ['builtin:bollinger_bands', true, {mult: 2.5}],
     ]);
     expect(studies[2]?.colors).toEqual({'Delta %': '#00ff00'});
+  });
+
+  it('keeps other plugin layers as placeholders for the catalog', () => {
+    const studies = studiesFromLayers([
+      {
+        plugin_id: 'zones',
+        visible: true,
+        settings: {lookback: '20', tick_size: '0.1', mode: 'auto'},
+        style: {colors: {ema: '#ffffff'}},
+      },
+      {plugin_id: 'hidden_default', visible: false},
+      {
+        plugin_id: 'flow',
+        visible: false,
+        present: true,
+        settings: {delta_source: 'estimate'},
+      },
+      {plugin_id: 'Not An Id', visible: true},
+    ]);
+    expect(
+      studies.map(study => [
+        study.study_id,
+        study.script_id,
+        study.visible,
+        study.inputs,
+        study.colors,
+      ])
+    ).toEqual([
+      [
+        'plugin:*:zones',
+        'plugin:*:zones',
+        true,
+        {lookback: 20, mode: 'auto'},
+        {},
+      ],
+      ['plugin:*:flow', 'plugin:*:flow', false, {use_buy_volume: false}, {}],
+    ]);
+    expect(LEGACY_PLUGIN_PREFIX).toBe('plugin:*:');
   });
 
   it('keeps attached owned scripts and drops malformed ones', () => {

@@ -3712,7 +3712,7 @@ export interface StudyState {
    */
   study_id: string;
   /**
-   * Owned script slug, builtin:<id> or plugin:<entry>:<id>.
+   * Owned script slug, builtin:<id>, plugin:<entry>:<id>, or plugin:*:<v1 plugin id> for a migrated plugin layer awaiting catalog lookup.
    */
   script_id: string;
   /**
