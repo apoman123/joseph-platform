@@ -13,6 +13,7 @@ import {
   HttpExecutionClient,
   HttpMarketDataClient,
   HttpStrategyClient,
+  PythonClient,
   WebSocketStreamClient,
   type BackendClients,
   type ExecutionClient,
@@ -24,6 +25,7 @@ import {
   DemoMarketDataClient,
   DemoMarketStream,
   DemoStrategyClient,
+  DemoStudyClient,
   DemoUserStream,
   demoLastPrice,
 } from '@joseph/mock-provider';
@@ -128,6 +130,7 @@ export function buildClients(config: TerminalConfig): ClientBundle {
         strategy,
         execution,
         userStream: new DemoUserStream(execution, strategy),
+        studies: new DemoStudyClient(market),
         demo: true,
       },
       capabilities: [
@@ -168,6 +171,7 @@ export function buildClients(config: TerminalConfig): ClientBundle {
       strategy: new HttpStrategyClient({baseUrl: marketBase, getToken: token}),
       execution,
       userStream,
+      studies: new PythonClient({baseUrl: marketBase, getToken: token}),
       demo: false,
     },
     capabilities,

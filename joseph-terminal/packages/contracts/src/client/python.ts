@@ -7,6 +7,10 @@
 /** @fileoverview Typed managed Python scripts, scans, alerts and heatmaps. */
 
 import type {
+  CatalogList,
+  CatalogScript,
+  ScriptBatchResult,
+  ScriptBatchRun,
   ScriptInput,
   ScriptVersion,
   ScriptRun,
@@ -19,6 +23,7 @@ import type {
   CompanyMetadataBatch,
 } from '../generated/contracts';
 import {HttpTransport, type HttpClientOptions} from './http';
+import type {CatalogKind, StudyClient} from './ports';
 
 /** A private source catalog with explicit runtime availability. */
 export interface PythonCatalog {
@@ -31,7 +36,7 @@ export interface PythonCatalog {
 }
 
 /** Authenticated managed-code workflows; never sends broker credentials. */
-export class PythonClient {
+export class PythonClient implements StudyClient {
   private readonly http: HttpTransport;
 
   /**
@@ -221,14 +226,55 @@ export class PythonClient {
   }
 
   /**
-   * Reads public built-in indicator source; external protected code is refused.
-   * @param id Registered built-in identifier.
-   * @return Read-only Python source and public availability label.
+   * Lists the built-in and installed plugin scripts.
+   * @param kind Optional role filter, such as `indicator`.
+   * @return Scripts in catalog order (without source) and skipped plugins.
    */
-  source(id: string): Promise<{source: string; availability: string}> {
+  catalog(kind?: CatalogKind): Promise<CatalogList> {
     return this.http.request(
       'GET',
-      `/v1/indicators/plugins/${encodeURIComponent(id)}/source`
+      '/v1/scripts/catalog',
+      kind ? {kind} : undefined
     );
+  }
+
+  /**
+   * Reads one catalog script with its public source, when it has one.
+   * @param scriptId Catalog id such as `builtin:ema`.
+   * @return The script; protected plugin source is null.
+   */
+  catalogScript(scriptId: string): Promise<CatalogScript> {
+    return this.http.request(
+      'GET',
+      `/v1/scripts/catalog/${encodeURIComponent(scriptId)}`
+    );
+  }
+
+  /**
+   * Runs several studies over one fetch of the same chart candles.
+   * @param body Shared candle range plus one entry per study.
+   * @return One result or error per study, in request order.
+   */
+  runBatch(body: ScriptBatchRun): Promise<ScriptBatchResult> {
+    return this.http.request(
+      'POST',
+      '/v1/scripts/run-batch',
+      undefined,
+      body
+    );
+  }
+
+  /**
+   * Reads public built-in script source; protected plugin code is refused.
+   * @param id Catalog id such as `builtin:ema`.
+   * @return Read-only Python source and its availability label.
+   * @throws `Error` when the script has no public source.
+   */
+  async source(id: string): Promise<{source: string; availability: string}> {
+    const script = await this.catalogScript(id);
+    if (typeof script.source !== 'string') {
+      throw new Error('Source unavailable for this plugin');
+    }
+    return {source: script.source, availability: script.origin};
   }
 }

@@ -9,12 +9,12 @@
  * engine-backed drawing on one chart up to date.
  *
  * It watches the drawing store, asks each tool for the request its anchors
- * imply (`ToolPlugin.seriesRequest`) and fetches it through the injected
- * `getIndicatorSeries` client. A request is re-sent when it changes (the
+ * imply (`ToolPlugin.seriesRequest`) and runs it through the injected
+ * `fetch` (the host's built-in script runner). A request is re-sent when it changes (the
  * anchor moved, an input changed; debounced so a drag sends one request)
  * and on `refresh()`, which the host calls when a bar closes. Responses
  * for superseded requests are dropped. A failed refresh keeps the last
- * good values (they stay correct as of their `as_of_ms`); a failed first
+ * good values (they stay correct as of their last closed bar); a failed first
  * request is reported as an error. When the engine refuses a request (a
  * 4xx answer, e.g. an anchor beyond the bars it computes from) its own
  * message is kept so the drawing shows exactly what the engine said.
@@ -23,13 +23,13 @@
 import {
   ApiError,
   type BarCalendar,
-  type IndicatorSeries,
-  type IndicatorSeriesQuery,
   type InstrumentId,
+  type ScriptResult,
   type Timeframe,
 } from '@joseph/contracts';
 import {appliesToTimeframe} from './document';
 import {
+  seriesPointsFromResult,
   seriesRequestKey,
   type DrawingSeriesRequest,
   type DrawingSeriesState,
@@ -37,10 +37,24 @@ import {
 import type {DrawingStore} from './store';
 import type {ToolRegistry} from './tool';
 
+/** One script run a drawing needs. */
+export interface DrawingSeriesQuery {
+  /** Instrument shown on the chart. */
+  instrumentId: InstrumentId;
+  /** Chart timeframe. */
+  timeframe: Timeframe;
+  /** Built-in script id. */
+  scriptId: string;
+  /** Inclusive first bar start, epoch ms UTC. */
+  fromMs: number;
+  /** Script inputs. */
+  inputs: Readonly<Record<string, string | number | boolean>>;
+}
+
 /** Environment of the sync. */
 export interface DrawingSeriesSyncOptions {
-  /** Market client call (`MarketDataClient.getIndicatorSeries`). */
-  fetch: (query: IndicatorSeriesQuery) => Promise<IndicatorSeries>;
+  /** Runs a drawing's script (the host's study client). */
+  fetch: (query: DrawingSeriesQuery) => Promise<ScriptResult>;
   /** Instrument shown on the chart. */
   instrumentId: () => InstrumentId;
   /** Timeframe shown on the chart. */
@@ -209,19 +223,20 @@ export class DrawingSeriesSync {
       .fetch({
         instrumentId: this.options.instrumentId(),
         timeframe,
-        pluginId: request.pluginId,
+        scriptId: request.scriptId,
         fromMs: request.fromMs,
-        settings: request.settings,
+        inputs: request.inputs,
       })
-      .then(series => {
+      .then(result => {
         if (!current()) return;
+        const closes = Object.values(result.bar_closes ?? {}).filter(
+          (close): close is number => typeof close === 'number'
+        );
         entry.state = {
           ...entry.state,
           status: 'ready',
-          points: [...series.points].sort(
-            (a, b) => a.bar_start_ms - b.bar_start_ms
-          ),
-          asOfMs: series.as_of_ms,
+          points: seriesPointsFromResult(result),
+          asOfMs: closes.length ? Math.max(...closes) : null,
           error: null,
           refusal: null,
         };

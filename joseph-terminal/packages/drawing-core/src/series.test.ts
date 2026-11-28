@@ -10,7 +10,7 @@
  * refresh on closed bars, errors and point-in-time (replay) filtering.
  */
 
-import type {IndicatorSeries, IndicatorSeriesQuery} from '@joseph/contracts';
+import type {ScriptResult} from '@joseph/contracts';
 import {afterEach, beforeEach, describe, expect, it, vi} from 'vitest';
 import {createDrawing} from './document';
 import {setDrawingFlags} from './editing';
@@ -24,7 +24,7 @@ import {
   seriesStatusMessage,
   type DrawingSeriesState,
 } from './series';
-import {DrawingSeriesSync} from './series-sync';
+import {DrawingSeriesSync, type DrawingSeriesQuery} from './series-sync';
 import {DrawingStore, createCommand} from './store';
 import {ToolRegistry, type ToolPlugin} from './tool';
 
@@ -49,7 +49,7 @@ const TOOL: ToolPlugin = {
     const anchor = doc.anchors[0];
     if (!anchor) return null;
     const bar = barStartAt(anchor.time_ms, timeframe);
-    return {pluginId: 'engine_line', fromMs: bar, settings: {anchor_ms: bar}};
+    return {scriptId: 'builtin:engine_line', fromMs: bar, inputs: {anchor_ms: bar}};
   },
 };
 
@@ -74,22 +74,46 @@ function drawing(id: string, timeMs: number) {
 }
 
 /**
- * Builds a series response.
+ * Builds a script run result.
  * @param query Query.
- * @return Series with one point at `fromMs`.
+ * @return Result with a `v` plot on two bars from `fromMs`, an `n` plot on
+ *     the first and a line ending on the second.
  */
-function response(query: IndicatorSeriesQuery): IndicatorSeries {
+function response(query: DrawingSeriesQuery): ScriptResult {
+  const from = query.fromMs;
   return {
+    script_id: query.scriptId,
+    version: 0,
+    kind: 'indicator',
+    source_hash: 'test',
     instrument_id: query.instrumentId,
-    timeframe: query.timeframe,
-    plugin_id: query.pluginId,
-    indicator_version: 'test',
-    points: [
-      {bar_start_ms: (query.fromMs ?? 0) + 60_000, values: {v: '2'}},
-      {bar_start_ms: query.fromMs ?? 0, values: {v: '1', n: 3}},
-    ],
-    as_of_ms: (query.fromMs ?? 0) + 120_000,
+    tf: query.timeframe,
+    bars_count: 2,
     feed_state: 'DEMO',
+    data_source: 'mock',
+    complete: true,
+    overlay: true,
+    plots: [
+      {
+        name: 'v',
+        points: [
+          {time_ms: from + 60_000, value: 2},
+          {time_ms: from, value: 1},
+        ],
+      },
+      {name: 'n', points: [{time_ms: from, value: 3}]},
+    ],
+    fills: [],
+    equity_curve: [],
+    metrics: {},
+    visuals: [
+      {
+        id: 'centre',
+        kind: 'line',
+        data: {from_ms: from, from_price: 1.5, to_ms: from + 60_000, to_price: 2.5},
+      },
+    ],
+    bar_closes: {[from]: from + 60_000, [from + 60_000]: from + 120_000},
   };
 }
 
@@ -104,8 +128,8 @@ describe('series helpers', () => {
   });
 
   it('keys requests independently of settings order', () => {
-    const a = {pluginId: 'p', fromMs: 1, settings: {a: '1', b: 2}};
-    const b = {pluginId: 'p', fromMs: 1, settings: {b: 2, a: '1'}};
+    const a = {scriptId: 'p', fromMs: 1, inputs: {a: '1', b: 2}};
+    const b = {scriptId: 'p', fromMs: 1, inputs: {b: 2, a: '1'}};
     expect(seriesRequestKey(a, '5m')).toBe(seriesRequestKey(b, '5m'));
     expect(seriesRequestKey(a, '5m')).not.toBe(seriesRequestKey(a, '1h'));
   });
@@ -126,7 +150,7 @@ describe('series helpers', () => {
   it('filters to bars closed before the replay cursor', () => {
     const state: DrawingSeriesState = {
       status: 'ready',
-      request: {pluginId: 'p', fromMs: 0, settings: {}},
+      request: {scriptId: 'p', fromMs: 0, inputs: {}},
       timeframe: '1m',
       points: [0, 60_000, 120_000].map(t => ({bar_start_ms: t, values: {}})),
       asOfMs: 180_000,
@@ -148,7 +172,7 @@ describe('DrawingSeriesSync', () => {
   let store: DrawingStore;
   let tools: ToolRegistry;
   let fetch: ReturnType<
-    typeof vi.fn<(q: IndicatorSeriesQuery) => Promise<IndicatorSeries>>
+    typeof vi.fn<(q: DrawingSeriesQuery) => Promise<ScriptResult>>
   >;
   let changes: number;
 
@@ -157,7 +181,7 @@ describe('DrawingSeriesSync', () => {
     store = new DrawingStore();
     tools = new ToolRegistry();
     tools.register(TOOL);
-    fetch = vi.fn(async (query: IndicatorSeriesQuery) => response(query));
+    fetch = vi.fn(async (query: DrawingSeriesQuery) => response(query));
     changes = 0;
   });
   afterEach(() => vi.useRealTimers());
@@ -186,13 +210,20 @@ describe('DrawingSeriesSync', () => {
     expect(fetch.mock.calls[0]?.[0]).toEqual({
       instrumentId: 'mock:perp:BTCUSD',
       timeframe: '1m',
-      pluginId: 'engine_line',
+      scriptId: 'builtin:engine_line',
       fromMs: 120_000,
-      settings: {anchor_ms: 120_000},
+      inputs: {anchor_ms: 120_000},
     });
     const state = s.get('a');
     expect(state?.status).toBe('ready');
     expect(state?.points.map(p => p.bar_start_ms)).toEqual([120_000, 180_000]);
+    expect(state?.points[0]?.values).toEqual({v: '1', n: '3'});
+    expect(state?.points[1]?.values).toEqual({
+      v: '2',
+      'centre.from_price': '1.5',
+      'centre.to_price': '2.5',
+      'centre.from_ms': 120_000,
+    });
     expect(state?.asOfMs).toBe(240_000);
     expect(changes).toBeGreaterThanOrEqual(2);
     s.dispose();
@@ -215,7 +246,7 @@ describe('DrawingSeriesSync', () => {
     expect(fetch).toHaveBeenCalledTimes(1);
     expect(fetch.mock.calls[0]?.[0].fromMs).toBe(180_000);
     // A slow response for an old anchor never overwrites the newer one.
-    let release: (value: IndicatorSeries) => void = () => undefined;
+    let release: (value: ScriptResult) => void = () => undefined;
     fetch.mockImplementationOnce(
       query =>
         new Promise(resolve => {
@@ -234,7 +265,7 @@ describe('DrawingSeriesSync', () => {
       'Move'
     );
     await vi.runAllTimersAsync();
-    release(response({...(fetch.mock.calls[1]?.[0] as IndicatorSeriesQuery)}));
+    release(response({...(fetch.mock.calls[1]?.[0] as DrawingSeriesQuery)}));
     await vi.runAllTimersAsync();
     expect(s.get('a')?.request.fromMs).toBe(300_000);
     expect(s.get('a')?.points[0]?.bar_start_ms).toBe(300_000);

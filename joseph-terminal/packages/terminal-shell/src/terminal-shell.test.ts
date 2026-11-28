@@ -123,17 +123,16 @@ describe('workspaceReducer', () => {
     doc = workspaceReducer(
       doc,
       {
-        type: 'setIndicatorLayer',
+        type: 'updateStudy',
         chartId: 'chart-1',
-        pluginId: 'rsi',
-        visible: true,
+        studyId: 'builtin:ema',
+        patch: {visible: false},
       },
       3
     );
     expect(
-      activeChart(doc).indicator_layers.find(l => l.plugin_id === 'rsi')
-        ?.visible
-    ).toBe(true);
+      activeChart(doc).studies.find(s => s.study_id === 'builtin:ema')?.visible
+    ).toBe(false);
     doc = workspaceReducer(doc, {type: 'toggleVolume', chartId: 'chart-1'}, 4);
     expect(activeChart(doc).show_volume).toBe(false);
   });

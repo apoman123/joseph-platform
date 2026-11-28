@@ -127,6 +127,13 @@ def test_auto_timeframes() -> None:
     assert service.request_tf(declared, tf.H1, {}) is tf.M1
     with pytest.raises(errors.ValidationFailedError):
         service.request_tf(declared, tf.H1, {"intrabar_tf": "bogus"})
+    period = models.SeriesRequest.model_validate(
+        {"tf": "1d", "tf_input": "period"}, strict=False
+    )
+    assert service.request_tf(period, tf.D1, {"period": "auto"}) is tf.W1
+    assert service.request_tf(period, tf.W1, {}) is tf.MN1
+    assert service.request_tf(period, tf.MN1, {"period": "auto"}) is None
+    assert service.request_tf(period, tf.M5, {"period": "1w"}) is tf.W1
 
 
 def test_only_intrabar_requests_may_be_large() -> None:

@@ -15,6 +15,10 @@
  */
 
 import type {
+  CatalogList,
+  CatalogScript,
+  ScriptBatchResult,
+  ScriptBatchRun,
   AccountList,
   AccountLiveConsentRequest,
   AlertSubscription,
@@ -502,6 +506,34 @@ export interface StreamClient {
   close(): void;
 }
 
+/** Script role names of the engine catalog. */
+export type CatalogKind = CatalogScript['kind'];
+
+/**
+ * Chart studies: the engine's built-in and plugin script catalog and
+ * batched script runs (`/v1/scripts/catalog`, `/v1/scripts/run-batch`).
+ */
+export interface StudyClient {
+  /**
+   * Lists the built-in and installed plugin scripts.
+   * @param kind Optional role filter, such as `indicator`.
+   * @return Scripts in catalog order (without source) and skipped plugins.
+   */
+  catalog(kind?: CatalogKind): Promise<CatalogList>;
+  /**
+   * Reads one catalog script with its public source, when it has one.
+   * @param scriptId Catalog id such as `builtin:ema`.
+   * @return The script; protected plugin source is null.
+   */
+  catalogScript(scriptId: string): Promise<CatalogScript>;
+  /**
+   * Runs several studies over one fetch of the same chart candles.
+   * @param body Shared candle range plus one entry per study.
+   * @return One result or error per study, in request order.
+   */
+  runBatch(body: ScriptBatchRun): Promise<ScriptBatchResult>;
+}
+
 /** All backend clients injected into features. */
 export interface BackendClients {
   /** Public market data. */
@@ -514,6 +546,8 @@ export interface BackendClients {
   execution: ExecutionClient;
   /** Authenticated user stream (orders, fills, positions, signals). */
   userStream: StreamClient;
+  /** Chart study catalog and runs. */
+  studies: StudyClient;
   /** Whether these clients serve synthetic DEMO data. */
   demo: boolean;
 }

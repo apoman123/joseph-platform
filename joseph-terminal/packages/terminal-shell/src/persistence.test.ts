@@ -188,7 +188,7 @@ describe('workspace export files', () => {
         }),
         /more than 500 instruments/,
       ],
-      [JSON.stringify({...BASE, schema_version: 2}), /Unsupported workspace/],
+      [JSON.stringify({...BASE, schema_version: 3}), /Unsupported workspace/],
     ];
     for (const [text, error] of cases) {
       const parsed = parseWorkspaceFile(text, 1);

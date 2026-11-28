@@ -7,7 +7,7 @@
       "schema_version": 2,
       "exported_at_ms": 1795260000000,
       "workspace": {
-        "schema_version": 1,
+        "schema_version": 2,
         "workspace_id": "default",
         "name": "My workspace",
         "layout": "1",
@@ -26,19 +26,26 @@
             "chart_type": "candles",
             "price_scale": "linear",
             "show_volume": true,
-            "indicator_layers": [
+            "studies": [
               {
-                "plugin_id": "ema",
-                "visible": true
+                "study_id": "builtin:ema",
+                "script_id": "builtin:ema",
+                "version": 0,
+                "kind": "indicator",
+                "name": "ema",
+                "visible": true,
+                "inputs": {},
+                "colors": {}
               },
               {
-                "plugin_id": "pivot_points",
+                "study_id": "builtin:pivot_points",
+                "script_id": "builtin:pivot_points",
+                "version": 0,
+                "kind": "indicator",
+                "name": "pivot_points",
                 "visible": true,
-                "kinds": [
-                  "PIVOT_P",
-                  "PIVOT_R1",
-                  "PIVOT_S1"
-                ]
+                "inputs": {},
+                "colors": {}
               }
             ],
             "link_group": null,
@@ -136,7 +143,7 @@
       "schema_version": 2,
       "exported_at_ms": 1795260000000,
       "workspace": {
-        "schema_version": 1,
+        "schema_version": 2,
         "workspace_id": "default",
         "name": "My workspace",
         "layout": "1",
@@ -155,19 +162,26 @@
             "chart_type": "candles",
             "price_scale": "linear",
             "show_volume": true,
-            "indicator_layers": [
+            "studies": [
               {
-                "plugin_id": "ema",
-                "visible": true
+                "study_id": "builtin:ema",
+                "script_id": "builtin:ema",
+                "version": 0,
+                "kind": "indicator",
+                "name": "ema",
+                "visible": true,
+                "inputs": {},
+                "colors": {}
               },
               {
-                "plugin_id": "pivot_points",
+                "study_id": "builtin:pivot_points",
+                "script_id": "builtin:pivot_points",
+                "version": 0,
+                "kind": "indicator",
+                "name": "pivot_points",
                 "visible": true,
-                "kinds": [
-                  "PIVOT_P",
-                  "PIVOT_R1",
-                  "PIVOT_S1"
-                ]
+                "inputs": {},
+                "colors": {}
               }
             ],
             "link_group": null,
@@ -194,7 +208,7 @@
       "schema_version": 1,
       "exported_at_ms": 1795260000000,
       "workspace": {
-        "schema_version": 1,
+        "schema_version": 2,
         "workspace_id": "default",
         "name": "My workspace",
         "layout": "1",
@@ -213,19 +227,26 @@
             "chart_type": "candles",
             "price_scale": "linear",
             "show_volume": true,
-            "indicator_layers": [
+            "studies": [
               {
-                "plugin_id": "ema",
-                "visible": true
+                "study_id": "builtin:ema",
+                "script_id": "builtin:ema",
+                "version": 0,
+                "kind": "indicator",
+                "name": "ema",
+                "visible": true,
+                "inputs": {},
+                "colors": {}
               },
               {
-                "plugin_id": "pivot_points",
+                "study_id": "builtin:pivot_points",
+                "script_id": "builtin:pivot_points",
+                "version": 0,
+                "kind": "indicator",
+                "name": "pivot_points",
                 "visible": true,
-                "kinds": [
-                  "PIVOT_P",
-                  "PIVOT_R1",
-                  "PIVOT_S1"
-                ]
+                "inputs": {},
+                "colors": {}
               }
             ],
             "link_group": null,
@@ -250,7 +271,7 @@
       "schema_version": 2,
       "exported_at_ms": 1795260000000,
       "workspace": {
-        "schema_version": 1,
+        "schema_version": 2,
         "workspace_id": "default",
         "name": "My workspace",
         "layout": "1",
@@ -269,19 +290,26 @@
             "chart_type": "candles",
             "price_scale": "linear",
             "show_volume": true,
-            "indicator_layers": [
+            "studies": [
               {
-                "plugin_id": "ema",
-                "visible": true
+                "study_id": "builtin:ema",
+                "script_id": "builtin:ema",
+                "version": 0,
+                "kind": "indicator",
+                "name": "ema",
+                "visible": true,
+                "inputs": {},
+                "colors": {}
               },
               {
-                "plugin_id": "pivot_points",
+                "study_id": "builtin:pivot_points",
+                "script_id": "builtin:pivot_points",
+                "version": 0,
+                "kind": "indicator",
+                "name": "pivot_points",
                 "visible": true,
-                "kinds": [
-                  "PIVOT_P",
-                  "PIVOT_R1",
-                  "PIVOT_S1"
-                ]
+                "inputs": {},
+                "colors": {}
               }
             ],
             "link_group": null,
@@ -312,7 +340,7 @@
       "schema_version": 2,
       "exported_at_ms": 1795260000000,
       "workspace": {
-        "schema_version": 1,
+        "schema_version": 2,
         "workspace_id": "default",
         "name": "My workspace",
         "layout": "1",
@@ -331,19 +359,26 @@
             "chart_type": "candles",
             "price_scale": "linear",
             "show_volume": true,
-            "indicator_layers": [
+            "studies": [
               {
-                "plugin_id": "ema",
-                "visible": true
+                "study_id": "builtin:ema",
+                "script_id": "builtin:ema",
+                "version": 0,
+                "kind": "indicator",
+                "name": "ema",
+                "visible": true,
+                "inputs": {},
+                "colors": {}
               },
               {
-                "plugin_id": "pivot_points",
+                "study_id": "builtin:pivot_points",
+                "script_id": "builtin:pivot_points",
+                "version": 0,
+                "kind": "indicator",
+                "name": "pivot_points",
                 "visible": true,
-                "kinds": [
-                  "PIVOT_P",
-                  "PIVOT_R1",
-                  "PIVOT_S1"
-                ]
+                "inputs": {},
+                "colors": {}
               }
             ],
             "link_group": null,
@@ -404,7 +439,7 @@
       "schema_version": 2,
       "exported_at_ms": 1795260000000,
       "workspace": {
-        "schema_version": 1,
+        "schema_version": 2,
         "workspace_id": "default",
         "name": "My workspace",
         "layout": "1",
@@ -423,19 +458,26 @@
             "chart_type": "candles",
             "price_scale": "linear",
             "show_volume": true,
-            "indicator_layers": [
+            "studies": [
               {
-                "plugin_id": "ema",
-                "visible": true
+                "study_id": "builtin:ema",
+                "script_id": "builtin:ema",
+                "version": 0,
+                "kind": "indicator",
+                "name": "ema",
+                "visible": true,
+                "inputs": {},
+                "colors": {}
               },
               {
-                "plugin_id": "pivot_points",
+                "study_id": "builtin:pivot_points",
+                "script_id": "builtin:pivot_points",
+                "version": 0,
+                "kind": "indicator",
+                "name": "pivot_points",
                 "visible": true,
-                "kinds": [
-                  "PIVOT_P",
-                  "PIVOT_R1",
-                  "PIVOT_S1"
-                ]
+                "inputs": {},
+                "colors": {}
               }
             ],
             "link_group": null,
@@ -471,7 +513,7 @@
       "schema_version": 2,
       "exported_at_ms": 1795260000000,
       "workspace": {
-        "schema_version": 1,
+        "schema_version": 2,
         "workspace_id": "default",
         "name": "My workspace",
         "layout": "1",
@@ -490,19 +532,26 @@
             "chart_type": "candles",
             "price_scale": "linear",
             "show_volume": true,
-            "indicator_layers": [
+            "studies": [
               {
-                "plugin_id": "ema",
-                "visible": true
+                "study_id": "builtin:ema",
+                "script_id": "builtin:ema",
+                "version": 0,
+                "kind": "indicator",
+                "name": "ema",
+                "visible": true,
+                "inputs": {},
+                "colors": {}
               },
               {
-                "plugin_id": "pivot_points",
+                "study_id": "builtin:pivot_points",
+                "script_id": "builtin:pivot_points",
+                "version": 0,
+                "kind": "indicator",
+                "name": "pivot_points",
                 "visible": true,
-                "kinds": [
-                  "PIVOT_P",
-                  "PIVOT_R1",
-                  "PIVOT_S1"
-                ]
+                "inputs": {},
+                "colors": {}
               }
             ],
             "link_group": null,
@@ -535,7 +584,7 @@
       "schema_version": 2,
       "exported_at_ms": 1795260000000,
       "workspace": {
-        "schema_version": 1,
+        "schema_version": 2,
         "workspace_id": "default",
         "name": "My workspace",
         "layout": "1",
@@ -554,17 +603,26 @@
             "chart_type": "candles",
             "price_scale": "linear",
             "show_volume": true,
-            "indicator_layers": [
+            "studies": [
               {
-                "plugin_id": "ema",
-                "visible": true
+                "study_id": "builtin:ema",
+                "script_id": "builtin:ema",
+                "version": 0,
+                "kind": "indicator",
+                "name": "ema",
+                "visible": true,
+                "inputs": {},
+                "colors": {}
               },
               {
-                "plugin_id": "pivot_points",
+                "study_id": "builtin:pivot_points",
+                "script_id": "builtin:pivot_points",
+                "version": 0,
+                "kind": "indicator",
+                "name": "pivot_points",
                 "visible": true,
-                "kinds": [
-                  "pivot_p"
-                ]
+                "inputs": {},
+                "colors": {}
               }
             ],
             "link_group": null,

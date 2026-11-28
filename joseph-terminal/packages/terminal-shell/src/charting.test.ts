@@ -19,6 +19,7 @@ import {
   resizeTracks,
   tracksToTemplate,
 } from './layout-sizes';
+import {parseWorkspace} from './persistence';
 import {
   DEFAULT_REPLAY_LOOKBACK,
   chooseReplayStart,
@@ -38,13 +39,16 @@ import {
 } from './templates';
 import {parseTimeframeInput} from './timeframes';
 import {
+  migrateWorkspaceV1,
+  studiesFromAttachments,
+  studiesFromLayers,
+} from './study-migration';
+import {
   activeChart,
   createDefaultWorkspace,
-  layerSettings,
-  layerStyle,
-  layerVisible,
-  paneShown,
+  nextStudyId,
   workspaceReducer,
+  type StudyState,
 } from './workspace';
 
 /**
@@ -83,102 +87,200 @@ class MapStorage {
   }
 }
 
-describe('indicator layer configuration', () => {
-  it('stores kinds, style and inputs without touching visibility', () => {
-    let doc = workspace();
-    doc = workspaceReducer(
-      doc,
-      {
-        type: 'setIndicatorLayerConfig',
-        chartId: 'chart-1',
-        pluginId: 'pivot_points',
-        patch: {
-          kinds: ['PIVOT_S1'],
-          style: {colors: {PIVOT_S1: '#112233'}, show_events: false},
-          settings: {period: '1w'},
-        },
-      },
-      2
-    );
-    const chart = activeChart(doc);
-    const layer = chart.indicator_layers.find(
-      l => l.plugin_id === 'pivot_points'
-    );
-    expect(layer?.visible).toBe(true);
-    expect(layer?.kinds).toEqual(['PIVOT_S1']);
-    expect(layerStyle(chart, 'pivot_points').colors).toEqual({
-      PIVOT_S1: '#112233',
-    });
-    expect(layerSettings(chart, 'pivot_points')).toEqual({period: '1w'});
-    doc = workspaceReducer(
-      doc,
-      {
-        type: 'setIndicatorLayerConfig',
-        chartId: 'chart-1',
-        pluginId: 'pivot_points',
-        patch: {kinds: null, settings: null},
-      },
-      3
-    );
-    const reset = activeChart(doc).indicator_layers.find(
-      l => l.plugin_id === 'pivot_points'
-    );
-    expect(reset?.kinds).toBeUndefined();
-    expect(layerSettings(activeChart(doc), 'pivot_points')).toBeNull();
+/** A built-in RSI study. */
+const RSI: StudyState = {
+  study_id: 'builtin:rsi',
+  script_id: 'builtin:rsi',
+  version: 0,
+  kind: 'indicator',
+  name: 'RSI',
+  visible: true,
+  inputs: {},
+  colors: {},
+};
+
+describe('studies', () => {
+  it('ships EMA, volume delta and pivot points on new charts', () => {
+    const chart = activeChart(workspace());
+    expect(chart.studies.map(study => study.script_id)).toEqual([
+      'builtin:ema',
+      'builtin:volume_delta',
+      'builtin:pivot_points',
+    ]);
+    expect(chart.studies.every(study => study.visible)).toBe(true);
+    expect(chart.studies.every(study => study.version === 0)).toBe(true);
   });
 
-  it('adds a missing layer and falls back for unknown layers', () => {
+  it('adds, updates and removes studies by study id', () => {
     let doc = workspaceReducer(
       workspace(),
-      {
-        type: 'setIndicatorLayerConfig',
-        chartId: 'chart-1',
-        pluginId: 'future_plugin',
-        patch: {style: {pane: false}},
-      },
+      {type: 'addStudy', chartId: 'chart-1', study: RSI},
       2
+    );
+    const second = nextStudyId(activeChart(doc), 'builtin:rsi');
+    expect(second).toBe('builtin:rsi#2');
+    doc = workspaceReducer(
+      doc,
+      {
+        type: 'addStudy',
+        chartId: 'chart-1',
+        study: {...RSI, study_id: second, inputs: {length: 7}},
+      },
+      3
     );
     doc = workspaceReducer(
       doc,
       {
-        type: 'setIndicatorLayerConfig',
+        type: 'updateStudy',
         chartId: 'chart-1',
-        pluginId: 'hidden_plugin',
-        patch: {settings: {length: 5}, visible: false},
+        studyId: 'builtin:rsi',
+        patch: {visible: false, inputs: {length: 21}, colors: {RSI: '#112233'}},
       },
-      3
+      4
     );
-    const chart = activeChart(doc);
-    expect(layerStyle(chart, 'future_plugin')).toEqual({pane: false});
-    expect(layerVisible(chart, 'future_plugin')).toBe(true);
-    expect(layerVisible(chart, 'hidden_plugin')).toBe(false);
-    expect(layerVisible(chart, 'another_plugin')).toBe(true);
-    expect(layerVisible(chart, 'another_plugin', false)).toBe(false);
-    expect(layerVisible(chart, 'rsi', true)).toBe(false);
+    const rsi = activeChart(doc).studies.filter(
+      study => study.script_id === 'builtin:rsi'
+    );
+    expect(rsi.map(study => [study.visible, study.inputs])).toEqual([
+      [false, {length: 21}],
+      [true, {length: 7}],
+    ]);
+    expect(rsi[0]?.colors).toEqual({RSI: '#112233'});
+    doc = workspaceReducer(
+      doc,
+      {type: 'removeStudy', chartId: 'chart-1', studyId: 'builtin:rsi'},
+      5
+    );
+    expect(activeChart(doc).studies.map(study => study.study_id)).toEqual([
+      'builtin:ema',
+      'builtin:volume_delta',
+      'builtin:pivot_points',
+      'builtin:rsi#2',
+    ]);
   });
+});
 
-  it('resolves sub-pane visibility per pane, then per layer', () => {
-    expect(paneShown({}, 'delta')).toBe(true);
-    expect(paneShown({pane: false}, 'delta')).toBe(false);
-    expect(paneShown({pane: false, panes: {delta: true}}, 'delta')).toBe(true);
-    expect(paneShown({panes: {other: false}}, 'delta')).toBe(true);
-  });
-
-  it('ships the built-in layers on new charts', () => {
-    const chart = activeChart(workspace());
-    expect(chart.indicator_layers.map(l => l.plugin_id)).toEqual([
-      'ema',
-      'volume_delta',
-      'pivot_points',
-      'anchored_vwap',
-      'sma',
-      'bollinger_bands',
-      'rsi',
-      'atr',
+describe('schema v1 migration', () => {
+  it('turns shown and added built-in layers into studies', () => {
+    const studies = studiesFromLayers([
+      {plugin_id: 'ema', visible: true, settings: {length: 9, tick_size: '1'}},
+      {plugin_id: 'sma', visible: false},
+      {plugin_id: 'rsi', visible: false, present: true},
+      {plugin_id: 'atr', visible: false, removed: true},
+      {
+        plugin_id: 'volume_delta',
+        visible: true,
+        settings: {delta_source: 'estimate', min_coverage: '0.9'},
+        style: {colors: {delta_pct: '#00ff00', other: '#ffffff'}},
+      },
+      {plugin_id: 'bollinger_bands', visible: true, settings: {mult: '2.5'}},
+      {plugin_id: 'private_zones', visible: true},
     ]);
     expect(
-      chart.indicator_layers.filter(l => l.visible).map(l => l.plugin_id)
-    ).toEqual(['ema', 'volume_delta', 'pivot_points']);
+      studies.map(study => [study.script_id, study.visible, study.inputs])
+    ).toEqual([
+      ['builtin:ema', true, {length: 9}],
+      ['builtin:rsi', false, {}],
+      [
+        'builtin:volume_delta',
+        true,
+        {use_buy_volume: false, min_coverage: 0.9},
+      ],
+      ['builtin:bollinger_bands', true, {mult: 2.5}],
+    ]);
+    expect(studies[2]?.colors).toEqual({'Delta %': '#00ff00'});
+  });
+
+  it('keeps attached owned scripts and drops malformed ones', () => {
+    expect(
+      studiesFromAttachments([
+        {
+          script_id: 'my-trend',
+          kind: 'strategy',
+          version: 3,
+          name: 'My trend',
+          visible: false,
+          inputs: {fast: 5},
+          colors: {Fast: '#abcdef', Bad: 'red'},
+        },
+        {script_id: 'Bad Id', version: 1, name: 'x'},
+        {script_id: 'no-version', name: 'x'},
+      ])
+    ).toEqual([
+      {
+        study_id: 'my-trend',
+        script_id: 'my-trend',
+        version: 3,
+        kind: 'strategy',
+        name: 'My trend',
+        visible: false,
+        inputs: {fast: 5},
+        colors: {Fast: '#abcdef'},
+      },
+    ]);
+  });
+
+  it('migrates stored v1 workspaces, layers and attachments', () => {
+    const current = workspace();
+    const {studies: _studies, ...chart} = current.charts[0]!;
+    const v1 = {
+      ...current,
+      schema_version: 1,
+      charts: [
+        {
+          ...chart,
+          indicator_layers: [
+            {plugin_id: 'ema', visible: true},
+            {plugin_id: 'pivot_points', visible: false, present: true},
+          ],
+        },
+      ],
+      panels: {
+        'python.chart-1': [
+          {script_id: 'mine', version: 2, name: 'Mine', visible: true, inputs: {}, colors: {}},
+        ],
+        other: {kept: true},
+      },
+    };
+    const migrated = migrateWorkspaceV1(v1) as typeof current;
+    expect(migrated.schema_version).toBe(2);
+    expect(migrated.panels).toEqual({other: {kept: true}});
+    expect(
+      migrated.charts[0]?.studies.map(study => [study.study_id, study.visible])
+    ).toEqual([
+      ['builtin:ema', true],
+      ['builtin:pivot_points', false],
+      ['mine', true],
+    ]);
+    const parsed = parseWorkspace(JSON.stringify(v1), 5);
+    expect(parsed.ok && parsed.migrated).toBe(true);
+    expect(parsed.ok && parsed.workspace.charts[0]?.studies.length).toBe(3);
+  });
+
+  it('migrates v1 templates when loading them', () => {
+    const storage = new MapStorage();
+    storage.setItem(
+      TEMPLATE_STORAGE_KEY,
+      JSON.stringify([
+        {
+          schema_version: 1,
+          template_id: 't1',
+          name: 'Old',
+          created_at_ms: 1,
+          presentation: {
+            chart_type: 'candles',
+            price_scale: 'linear',
+            show_volume: true,
+            indicator_layers: [{plugin_id: 'rsi', visible: true}],
+          },
+        },
+      ])
+    );
+    const [template] = new TemplateRepository(storage).list();
+    expect(template?.schema_version).toBe(2);
+    expect(template?.presentation.studies.map(study => study.script_id)).toEqual(
+      ['builtin:rsi']
+    );
   });
 });
 

@@ -469,6 +469,31 @@ export type ScriptId1 = string;
  */
 export type SubscriptionIds1 = string[];
 export type Version1 = number;
+export type Group = string;
+export type Maximum = number | null;
+export type Minimum = number | null;
+export type Options = JsonValue[] | null;
+export type Step = number | null;
+export type Title = string;
+export type Tooltip = string;
+export type Failures = {
+  [k: string]: string | null | undefined;
+}[];
+export type Category = string;
+export type Description = string;
+export type Enabled2 = boolean;
+export type Kind = 'indicator' | 'strategy' | 'library' | 'filter' | 'alert';
+export type Origin = 'builtin' | 'plugin';
+export type Overlay = boolean;
+export type Package = string | null;
+export type PackageVersion = string | null;
+export type ScriptId2 = string;
+export type ShortTitle = string;
+export type Source = string | null;
+export type SourceAvailable = boolean;
+export type SourceHash = string;
+export type Title1 = string;
+export type Scripts = CatalogScript[];
 export type AsOfMs = number;
 export type InstrumentId3 = string;
 export type MarketCap = string | null;
@@ -494,20 +519,20 @@ export type MarketCap1 = string | null;
 export type MetadataAsOfMs = number | null;
 export type Name = string | null;
 export type Sector1 = string | null;
-export type Source = string | null;
+export type Source1 = string | null;
 export type Symbol = string;
 export type Turnover = string | null;
 export type Volume = string | null;
 export type Tiles = HeatmapTile[];
 export type UniverseCount = number;
-export type ScriptId2 = string;
+export type ScriptId3 = string;
 export type Version2 = number;
 export type Color = string | null;
 export type TimeMs = number;
 export type Value = number | null;
 export type Name1 = string;
 /**
- * @maxItems 2000
+ * @maxItems 5000
  */
 export type Points = PlotPoint[];
 export type HistoryBars2 = number;
@@ -524,8 +549,8 @@ export type Matches = {
   [k: string]: JsonValue | undefined;
 }[];
 export type Scanned = number;
-export type ScriptId3 = string;
-export type SourceHash = string;
+export type ScriptId4 = string;
+export type SourceHash1 = string;
 export type Status =
   'pending' | 'running' | 'complete' | 'failed' | 'cancelled';
 export type Total = number;
@@ -535,14 +560,7 @@ export type Message = string;
 export type Name2 = string;
 export type Severity = 'INFO' | 'WARNING' | 'ENTRY' | 'CRITICAL';
 export type TimeMs1 = number;
-export type ExpectedVersion = number | null;
-export type Kind = 'indicator' | 'strategy' | 'library' | 'filter' | 'alert';
-export type Name3 = string;
-export type Overlay = boolean;
-export type InstrumentId5 = string | null;
-export type Limit = number;
-export type ScriptId4 = string;
-export type Source1 = string;
+export type Error2 = string | null;
 /**
  * @maxItems 2000
  */
@@ -570,7 +588,7 @@ export type BarsCount = number;
 export type Complete = boolean;
 export type DataSource = string;
 /**
- * @maxItems 2000
+ * @maxItems 5000
  */
 export type EquityCurve = PlotPoint[];
 export type FeedState2 = string;
@@ -584,7 +602,7 @@ export type TimeMs2 = number;
  * @maxItems 4000
  */
 export type Fills = SimulatedFill[];
-export type InstrumentId6 = string;
+export type InstrumentId5 = string;
 export type Kind2 = 'indicator' | 'strategy' | 'filter' | 'alert';
 export type Matched = boolean | null;
 export type Overlay1 = boolean;
@@ -593,31 +611,218 @@ export type Overlay1 = boolean;
  */
 export type Plots = PlotSeries[];
 export type ScriptId5 = string;
-export type SourceHash1 = string;
+export type SourceHash2 = string;
 export type Tf = string;
 export type Version5 = number;
 /**
  * @maxItems 500
  */
 export type Visuals = ScriptVisual[];
+export type ScriptId6 = string;
+export type ScriptId7 = string;
+export type Version6 = number | null;
+export type Results = ScriptBatchEntry[];
 export type CommissionBps = number;
 export type FromMs = number | null;
 export type IncludeOpen = boolean;
 export type InitialEquity = number;
-export type InstrumentId7 = string;
-export type Limit1 = number;
+export type InstrumentId6 = string;
+export type Limit = number;
+/**
+ * @minItems 1
+ * @maxItems 16
+ */
+export type Runs =
+  | [ScriptBatchItem]
+  | [ScriptBatchItem, ScriptBatchItem]
+  | [ScriptBatchItem, ScriptBatchItem, ScriptBatchItem]
+  | [ScriptBatchItem, ScriptBatchItem, ScriptBatchItem, ScriptBatchItem]
+  | [
+      ScriptBatchItem,
+      ScriptBatchItem,
+      ScriptBatchItem,
+      ScriptBatchItem,
+      ScriptBatchItem,
+    ]
+  | [
+      ScriptBatchItem,
+      ScriptBatchItem,
+      ScriptBatchItem,
+      ScriptBatchItem,
+      ScriptBatchItem,
+      ScriptBatchItem,
+    ]
+  | [
+      ScriptBatchItem,
+      ScriptBatchItem,
+      ScriptBatchItem,
+      ScriptBatchItem,
+      ScriptBatchItem,
+      ScriptBatchItem,
+      ScriptBatchItem,
+    ]
+  | [
+      ScriptBatchItem,
+      ScriptBatchItem,
+      ScriptBatchItem,
+      ScriptBatchItem,
+      ScriptBatchItem,
+      ScriptBatchItem,
+      ScriptBatchItem,
+      ScriptBatchItem,
+    ]
+  | [
+      ScriptBatchItem,
+      ScriptBatchItem,
+      ScriptBatchItem,
+      ScriptBatchItem,
+      ScriptBatchItem,
+      ScriptBatchItem,
+      ScriptBatchItem,
+      ScriptBatchItem,
+      ScriptBatchItem,
+    ]
+  | [
+      ScriptBatchItem,
+      ScriptBatchItem,
+      ScriptBatchItem,
+      ScriptBatchItem,
+      ScriptBatchItem,
+      ScriptBatchItem,
+      ScriptBatchItem,
+      ScriptBatchItem,
+      ScriptBatchItem,
+      ScriptBatchItem,
+    ]
+  | [
+      ScriptBatchItem,
+      ScriptBatchItem,
+      ScriptBatchItem,
+      ScriptBatchItem,
+      ScriptBatchItem,
+      ScriptBatchItem,
+      ScriptBatchItem,
+      ScriptBatchItem,
+      ScriptBatchItem,
+      ScriptBatchItem,
+      ScriptBatchItem,
+    ]
+  | [
+      ScriptBatchItem,
+      ScriptBatchItem,
+      ScriptBatchItem,
+      ScriptBatchItem,
+      ScriptBatchItem,
+      ScriptBatchItem,
+      ScriptBatchItem,
+      ScriptBatchItem,
+      ScriptBatchItem,
+      ScriptBatchItem,
+      ScriptBatchItem,
+      ScriptBatchItem,
+    ]
+  | [
+      ScriptBatchItem,
+      ScriptBatchItem,
+      ScriptBatchItem,
+      ScriptBatchItem,
+      ScriptBatchItem,
+      ScriptBatchItem,
+      ScriptBatchItem,
+      ScriptBatchItem,
+      ScriptBatchItem,
+      ScriptBatchItem,
+      ScriptBatchItem,
+      ScriptBatchItem,
+      ScriptBatchItem,
+    ]
+  | [
+      ScriptBatchItem,
+      ScriptBatchItem,
+      ScriptBatchItem,
+      ScriptBatchItem,
+      ScriptBatchItem,
+      ScriptBatchItem,
+      ScriptBatchItem,
+      ScriptBatchItem,
+      ScriptBatchItem,
+      ScriptBatchItem,
+      ScriptBatchItem,
+      ScriptBatchItem,
+      ScriptBatchItem,
+      ScriptBatchItem,
+    ]
+  | [
+      ScriptBatchItem,
+      ScriptBatchItem,
+      ScriptBatchItem,
+      ScriptBatchItem,
+      ScriptBatchItem,
+      ScriptBatchItem,
+      ScriptBatchItem,
+      ScriptBatchItem,
+      ScriptBatchItem,
+      ScriptBatchItem,
+      ScriptBatchItem,
+      ScriptBatchItem,
+      ScriptBatchItem,
+      ScriptBatchItem,
+      ScriptBatchItem,
+    ]
+  | [
+      ScriptBatchItem,
+      ScriptBatchItem,
+      ScriptBatchItem,
+      ScriptBatchItem,
+      ScriptBatchItem,
+      ScriptBatchItem,
+      ScriptBatchItem,
+      ScriptBatchItem,
+      ScriptBatchItem,
+      ScriptBatchItem,
+      ScriptBatchItem,
+      ScriptBatchItem,
+      ScriptBatchItem,
+      ScriptBatchItem,
+      ScriptBatchItem,
+      ScriptBatchItem,
+    ];
 export type SlippageBps = number;
 export type ToMs = number | null;
-export type Version6 = number | null;
+export type Version7 = number | null;
+export type WindowFromMs = number | null;
+export type ExpectedVersion = number | null;
+export type Kind3 = 'indicator' | 'strategy' | 'library' | 'filter' | 'alert';
+export type Name3 = string;
+export type Overlay2 = boolean;
+export type InstrumentId7 = string | null;
+export type Intrabars = boolean;
+export type Limit1 = number;
+export type Tf1 = Timeframe | 'auto';
+export type TfInput = string;
+export type Unless = '' | 'quote_turnover' | 'trade_count' | 'taker_buy_volume';
+export type UnlessInput = string;
+export type ScriptId8 = string;
+export type Source2 = string;
+export type CommissionBps1 = number;
+export type FromMs1 = number | null;
+export type IncludeOpen1 = boolean;
+export type InitialEquity1 = number;
+export type InstrumentId8 = string;
+export type Limit2 = number;
+export type SlippageBps1 = number;
+export type ToMs1 = number | null;
+export type Version8 = number | null;
+export type WindowFromMs1 = number | null;
 export type CreatedAtMs2 = number;
 export type ExpectedVersion1 = number | null;
-export type Kind3 = 'indicator' | 'strategy' | 'library' | 'filter' | 'alert';
+export type Kind4 = 'indicator' | 'strategy' | 'library' | 'filter' | 'alert';
 export type Name4 = string;
-export type Overlay2 = boolean;
-export type ScriptId6 = string;
-export type Source2 = string;
-export type SourceHash2 = string;
-export type Version7 = number;
+export type Overlay3 = boolean;
+export type ScriptId9 = string;
+export type Source3 = string;
+export type SourceHash3 = string;
+export type Version9 = number;
 /**
  * This interface was referenced by `JosephContracts`'s JSON-Schema
  * via the `definition` "QualificationStatus".
@@ -2055,7 +2260,9 @@ export interface Inputs {
  * Attributes:
  *     script_id: Owned alert, indicator or strategy script publishing
  *         conditions.
- *     version: Positive immutable version, pinned rather than following edits.
+ *     version: Positive immutable tenant version, pinned rather than
+ *         following edits; 0 for a built-in or plugin script, whose
+ *         installed source hash is pinned instead.
  *     instrument_id: Canonical instrument whose new closed bars are evaluated.
  *     tf: Source resolution, one second through one calendar month.
  *     inputs: JSON values overriding the pinned version's defaults.
@@ -2080,6 +2287,98 @@ export interface AlertJobInput {
 }
 export interface Inputs1 {
   [k: string]: JsonValue | undefined;
+}
+/**
+ * A declared input of a built-in or plugin script.
+ *
+ * Attributes:
+ *     default: JSON default value.
+ *     title: Settings label.
+ *     minimum: Optional inclusive numeric lower bound.
+ *     maximum: Optional inclusive numeric upper bound.
+ *     options: Optional accepted values.
+ *     step: Optional numeric step.
+ *     group: Optional settings section.
+ *     tooltip: Optional help text.
+ *
+ * This interface was referenced by `JosephContracts`'s JSON-Schema
+ * via the `definition` "CatalogInput".
+ */
+export interface CatalogInput {
+  default: JsonValue;
+  group: Group;
+  maximum: Maximum;
+  minimum: Minimum;
+  options: Options;
+  step: Step;
+  title: Title;
+  tooltip: Tooltip;
+}
+/**
+ * Installed built-in and plugin scripts and skipped plugin packages.
+ *
+ * Attributes:
+ *     scripts: Scripts in catalog order.
+ *     failures: Plugin entry points that failed to load, with reasons.
+ *
+ * This interface was referenced by `JosephContracts`'s JSON-Schema
+ * via the `definition` "CatalogList".
+ */
+export interface CatalogList {
+  failures: Failures;
+  scripts: Scripts;
+}
+/**
+ * A built-in or installed plugin script that the engine runs in process.
+ *
+ * Attributes:
+ *     script_id: ``builtin:<id>`` or ``plugin:<entry point>:<id>``.
+ *     kind: indicator, strategy, library, filter or alert.
+ *     origin: builtin or plugin.
+ *     package: Providing distribution of a plugin.
+ *     package_version: That distribution's version.
+ *     title: Display name.
+ *     short_title: Compact legend name.
+ *     description: Catalog description.
+ *     category: Catalog section.
+ *     overlay: Whether plots share the price pane.
+ *     inputs: Declared inputs in display order.
+ *     requests: Declared additional series by alias.
+ *     source_available: Whether the public source can be read.
+ *     source_hash: Identity of the installed code.
+ *     enabled: False when disabled by configuration.
+ *     source: Public source text on the single-script route, else None.
+ *
+ * This interface was referenced by `JosephContracts`'s JSON-Schema
+ * via the `definition` "CatalogScript".
+ */
+export interface CatalogScript {
+  category: Category;
+  description: Description;
+  enabled: Enabled2;
+  inputs: Inputs2;
+  kind: Kind;
+  origin: Origin;
+  overlay: Overlay;
+  package: Package;
+  package_version: PackageVersion;
+  requests: Requests;
+  script_id: ScriptId2;
+  short_title: ShortTitle;
+  source?: Source;
+  source_available: SourceAvailable;
+  source_hash: SourceHash;
+  title: Title1;
+}
+export interface Inputs2 {
+  [k: string]: CatalogInput | undefined;
+}
+export interface Requests {
+  [k: string]:
+    | {
+        [k: string]: JsonValue | undefined;
+      }
+    | undefined;
 }
 /**
  * Explicit optional metadata for feeds without company fundamentals.
@@ -2184,7 +2483,7 @@ export interface HeatmapTile {
   metadata_as_of_ms: MetadataAsOfMs;
   name: Name;
   sector: Sector1;
-  source: Source;
+  source: Source1;
   symbol: Symbol;
   turnover: Turnover;
   volume: Volume;
@@ -2200,7 +2499,7 @@ export interface HeatmapTile {
  * via the `definition` "LibraryRef".
  */
 export interface LibraryRef {
-  script_id: ScriptId2;
+  script_id: ScriptId3;
   version: Version2;
 }
 /**
@@ -2224,7 +2523,7 @@ export interface PlotPoint {
  *
  * Attributes:
  *     name: Public series name, one to sixty-four characters.
- *     points: At most two thousand chronological closed-bar values.
+ *     points: At most five thousand chronological closed-bar values.
  *
  * This interface was referenced by `JosephContracts`'s JSON-Schema
  * via the `definition` "PlotSeries".
@@ -2251,7 +2550,7 @@ export interface PlotSeries {
  */
 export interface ScanInput {
   history_bars?: HistoryBars2;
-  inputs?: Inputs2;
+  inputs?: Inputs3;
   market_type?: MarketType | null;
   max_symbols?: MaxSymbols;
   query?: Query;
@@ -2259,7 +2558,7 @@ export interface ScanInput {
   venue?: Venue | null;
   version?: Version3;
 }
-export interface Inputs2 {
+export interface Inputs3 {
   [k: string]: JsonValue | undefined;
 }
 /**
@@ -2290,8 +2589,8 @@ export interface ScanJob {
   job_id: JobId1;
   matches?: Matches;
   scanned?: Scanned;
-  script_id: ScriptId3;
-  source_hash: SourceHash;
+  script_id: ScriptId4;
+  source_hash: SourceHash1;
   status: Status;
   total?: Total;
   universe_count?: UniverseCount1;
@@ -2317,58 +2616,20 @@ export interface ScriptAlertEvent {
   time_ms: TimeMs1;
 }
 /**
- * Creates an immutable script version with explicit type and dependencies.
+ * The outcome of one study of a batched run.
  *
  * Attributes:
- *     script_id: Stable tenant-local slug; must match the path on updates.
- *     kind: One of the five script roles; immutable after creation.
- *     name: Display title, one to one hundred twenty characters.
- *     source: UTF-8 Python source, at most sixty-four KiB.
- *     overlay: Whether indicator/strategy plots share the main price pane.
- *     defaults: Default JSON input values overridden by an individual run.
- *     libraries: Python import aliases mapped to pinned library versions.
- *     expected_version: Optimistic lock for edits; required for a new version.
- *     requests: Up to four declared cross-symbol/timeframe source aliases.
+ *     script_id: Requested script id.
+ *     result: Validated result, or None when the study failed.
+ *     error: Why the study failed, otherwise None.
  *
  * This interface was referenced by `JosephContracts`'s JSON-Schema
- * via the `definition` "ScriptInput".
+ * via the `definition` "ScriptBatchEntry".
  */
-export interface ScriptInput {
-  defaults?: Defaults;
-  expected_version?: ExpectedVersion;
-  kind: Kind;
-  libraries?: Libraries;
-  name: Name3;
-  overlay?: Overlay;
-  requests?: Requests;
-  script_id: ScriptId4;
-  source: Source1;
-}
-export interface Defaults {
-  [k: string]: JsonValue | undefined;
-}
-export interface Libraries {
-  [k: string]: LibraryRef | undefined;
-}
-export interface Requests {
-  [k: string]: SeriesRequest | undefined;
-}
-/**
- * Declares another symbol/resolution before isolated indicator execution.
- *
- * Attributes:
- *     instrument_id: Optional canonical symbol; defaults to the chart symbol.
- *     tf: Requested resolution, with confirmed-bar visibility enforced by
- *         host.
- *     limit: Maximum closed source bars, one through five hundred.
- *
- * This interface was referenced by `JosephContracts`'s JSON-Schema
- * via the `definition` "SeriesRequest".
- */
-export interface SeriesRequest {
-  instrument_id?: InstrumentId5;
-  limit?: Limit;
-  tf: Timeframe;
+export interface ScriptBatchEntry {
+  error?: Error2;
+  result?: ScriptResult | null;
+  script_id: ScriptId6;
 }
 /**
  * Reproducible plots and optional simulated strategy performance.
@@ -2414,7 +2675,7 @@ export interface ScriptResult {
   equity_curve: EquityCurve;
   feed_state: FeedState2;
   fills: Fills;
-  instrument_id: InstrumentId6;
+  instrument_id: InstrumentId5;
   kind: Kind2;
   matched?: Matched;
   metrics: Metrics;
@@ -2422,7 +2683,7 @@ export interface ScriptResult {
   plot_styles?: PlotStyles;
   plots: Plots;
   script_id: ScriptId5;
-  source_hash: SourceHash1;
+  source_hash: SourceHash2;
   tf: Tf;
   version: Version5;
   visuals?: Visuals;
@@ -2483,15 +2744,142 @@ export interface PlotStyles {
     | undefined;
 }
 /**
+ * One study of a batched run.
+ *
+ * Attributes:
+ *     script_id: Tenant slug, ``builtin:<id>`` or ``plugin:<entry>:<id>``.
+ *     version: Pinned tenant version, or latest when omitted.
+ *     inputs: Input overrides of this study.
+ *
+ * This interface was referenced by `JosephContracts`'s JSON-Schema
+ * via the `definition` "ScriptBatchItem".
+ */
+export interface ScriptBatchItem {
+  inputs?: Inputs4;
+  script_id: ScriptId7;
+  version?: Version6;
+}
+export interface Inputs4 {
+  [k: string]: JsonValue | undefined;
+}
+/**
+ * Per-study outcomes of a batched run, in request order.
+ *
+ * Attributes:
+ *     results: One entry per requested study.
+ *
+ * This interface was referenced by `JosephContracts`'s JSON-Schema
+ * via the `definition` "ScriptBatchResult".
+ */
+export interface ScriptBatchResult {
+  results: Results;
+}
+/**
+ * Runs several studies over one fetch of the same chart candles.
+ *
+ * The shared fields select the candles and simulation settings; top-level
+ * ``inputs`` are merged under each study's own.
+ *
+ * Attributes:
+ *     runs: One through sixteen studies, run in order.
+ *
+ * This interface was referenced by `JosephContracts`'s JSON-Schema
+ * via the `definition` "ScriptBatchRun".
+ */
+export interface ScriptBatchRun {
+  commission_bps?: CommissionBps;
+  from_ms?: FromMs;
+  include_open?: IncludeOpen;
+  initial_equity?: InitialEquity;
+  inputs?: Inputs5;
+  instrument_id: InstrumentId6;
+  limit?: Limit;
+  runs: Runs;
+  slippage_bps?: SlippageBps;
+  tf: Timeframe;
+  to_ms?: ToMs;
+  version?: Version7;
+  window_from_ms?: WindowFromMs;
+}
+export interface Inputs5 {
+  [k: string]: JsonValue | undefined;
+}
+/**
+ * Creates an immutable script version with explicit type and dependencies.
+ *
+ * Attributes:
+ *     script_id: Stable tenant-local slug; must match the path on updates.
+ *     kind: One of the five script roles; immutable after creation.
+ *     name: Display title, one to one hundred twenty characters.
+ *     source: UTF-8 Python source, at most sixty-four KiB.
+ *     overlay: Whether indicator/strategy plots share the main price pane.
+ *     defaults: Default JSON input values overridden by an individual run.
+ *     libraries: Python import aliases mapped to pinned library versions.
+ *     expected_version: Optimistic lock for edits; required for a new version.
+ *     requests: Up to four declared cross-symbol/timeframe source aliases.
+ *
+ * This interface was referenced by `JosephContracts`'s JSON-Schema
+ * via the `definition` "ScriptInput".
+ */
+export interface ScriptInput {
+  defaults?: Defaults;
+  expected_version?: ExpectedVersion;
+  kind: Kind3;
+  libraries?: Libraries;
+  name: Name3;
+  overlay?: Overlay2;
+  requests?: Requests1;
+  script_id: ScriptId8;
+  source: Source2;
+}
+export interface Defaults {
+  [k: string]: JsonValue | undefined;
+}
+export interface Libraries {
+  [k: string]: LibraryRef | undefined;
+}
+export interface Requests1 {
+  [k: string]: SeriesRequest | undefined;
+}
+/**
+ * Declares another symbol/resolution before isolated indicator execution.
+ *
+ * Attributes:
+ *     instrument_id: Optional canonical symbol; defaults to the chart symbol.
+ *     tf: Requested resolution, with confirmed-bar visibility enforced by
+ *         host; "auto" picks the chart's lower timeframe for intrabars.
+ *     limit: Maximum closed source bars, one through five hundred (five
+ *         thousand for intrabars).
+ *     intrabars: Lower-timeframe bars inside the newest chart bars.
+ *     tf_input: Input whose value, unless "auto", replaces ``tf``.
+ *     unless: Optional bar field; intrabars are fetched only for chart
+ *         bars that lack it.
+ *     unless_input: Boolean input that switches ``unless`` on.
+ *
+ * This interface was referenced by `JosephContracts`'s JSON-Schema
+ * via the `definition` "SeriesRequest".
+ */
+export interface SeriesRequest {
+  instrument_id?: InstrumentId7;
+  intrabars?: Intrabars;
+  limit?: Limit1;
+  tf: Tf1;
+  tf_input?: TfInput;
+  unless?: Unless;
+  unless_input?: UnlessInput;
+}
+/**
  * Requests a reproducible run using closed, real backend candles.
  *
  * Attributes:
  *     version: Pinned script version, or latest when omitted.
  *     instrument_id: Canonical venue:market:symbol identifier.
  *     tf: Supported chart timeframe, one second through one calendar month.
- *     limit: Maximum closed bars, from two through two thousand.
+ *     limit: Maximum closed bars, from two through five thousand.
  *     from_ms: Optional inclusive UTC epoch millisecond lower boundary.
  *     to_ms: Optional exclusive UTC epoch millisecond visibility boundary.
+ *     window_from_ms: Optional start of the displayed window; intrabar
+ *         requests then cover only chart bars from there on.
  *     include_open: Evaluate the provisional last bar for indicators only;
  *         alerts and simulated orders always require closed bars.
  *     inputs: JSON input values overriding the version's defaults.
@@ -2503,19 +2891,20 @@ export interface PlotStyles {
  * via the `definition` "ScriptRun".
  */
 export interface ScriptRun {
-  commission_bps?: CommissionBps;
-  from_ms?: FromMs;
-  include_open?: IncludeOpen;
-  initial_equity?: InitialEquity;
-  inputs?: Inputs3;
-  instrument_id: InstrumentId7;
-  limit?: Limit1;
-  slippage_bps?: SlippageBps;
+  commission_bps?: CommissionBps1;
+  from_ms?: FromMs1;
+  include_open?: IncludeOpen1;
+  initial_equity?: InitialEquity1;
+  inputs?: Inputs6;
+  instrument_id: InstrumentId8;
+  limit?: Limit2;
+  slippage_bps?: SlippageBps1;
   tf: Timeframe;
-  to_ms?: ToMs;
-  version?: Version6;
+  to_ms?: ToMs1;
+  version?: Version8;
+  window_from_ms?: WindowFromMs1;
 }
-export interface Inputs3 {
+export interface Inputs6 {
   [k: string]: JsonValue | undefined;
 }
 /**
@@ -2533,15 +2922,15 @@ export interface ScriptVersion {
   created_at_ms: CreatedAtMs2;
   defaults?: Defaults1;
   expected_version?: ExpectedVersion1;
-  kind: Kind3;
+  kind: Kind4;
   libraries?: Libraries1;
   name: Name4;
-  overlay?: Overlay2;
-  requests?: Requests1;
-  script_id: ScriptId6;
-  source: Source2;
-  source_hash: SourceHash2;
-  version: Version7;
+  overlay?: Overlay3;
+  requests?: Requests2;
+  script_id: ScriptId9;
+  source: Source3;
+  source_hash: SourceHash3;
+  version: Version9;
 }
 export interface Defaults1 {
   [k: string]: JsonValue | undefined;
@@ -2549,7 +2938,7 @@ export interface Defaults1 {
 export interface Libraries1 {
   [k: string]: LibraryRef | undefined;
 }
-export interface Requests1 {
+export interface Requests2 {
   [k: string]: SeriesRequest | undefined;
 }
 /**
@@ -3775,32 +4164,37 @@ export interface DrawingCollection {
   drawings: DrawingDocument[];
 }
 /**
+ * One study on a chart: a built-in, plugin or owned script instance with its inputs. Built-in and plugin scripts use version 0; owned scripts pin an immutable version.
+ *
  * This interface was referenced by `JosephContracts`'s JSON-Schema
- * via the `definition` "IndicatorLayerState".
+ * via the `definition` "StudyState".
  */
-export interface IndicatorLayerState {
-  plugin_id: string;
+export interface StudyState {
+  /**
+   * Unique within the chart; the script id, with a #n suffix for further instances.
+   */
+  study_id: string;
+  /**
+   * Owned script slug, builtin:<id> or plugin:<entry>:<id>.
+   */
+  script_id: string;
+  /**
+   * Pinned owned version; 0 for built-in and plugin scripts.
+   */
+  version: number;
+  kind: 'indicator' | 'strategy' | 'alert';
+  name: string;
   visible: boolean;
   /**
-   * AOI kinds shown; all kinds when omitted.
+   * Input overrides validated by the engine against the script's declared inputs.
    */
-  kinds?: AoiKind[];
+  inputs: {};
   /**
-   * Presentation only: per-kind colors, event markers, sub-pane visibility.
+   * Per-plot color overrides by plot name.
    */
-  style?: {};
-  /**
-   * Indicator inputs validated by the backend against the plugin's input_schema.
-   */
-  settings?: {};
-  /**
-   * True when explicitly removed; hidden layers retain their settings.
-   */
-  removed?: boolean;
-  /**
-   * Retains the legend row when a user hides an added study.
-   */
-  present?: boolean;
+  colors: {
+    [k: string]: string | undefined;
+  };
 }
 /**
  * This interface was referenced by `JosephContracts`'s JSON-Schema
@@ -3813,7 +4207,12 @@ export interface ChartState {
   chart_type: ChartType;
   price_scale: PriceScaleMode;
   show_volume: boolean;
-  indicator_layers: IndicatorLayerState[];
+  /**
+   * Studies in legend order.
+   *
+   * @maxItems 40
+   */
+  studies: StudyState[];
   link_group?: 'A' | 'B' | 'C' | 'D' | null;
   feed_mode: FeedMode;
   /**
@@ -3854,7 +4253,7 @@ export interface SyncOptions {
  * via the `definition` "WorkspaceDocument".
  */
 export interface WorkspaceDocument {
-  schema_version: 1;
+  schema_version: 2;
   workspace_id: string;
   name: string;
   layout: LayoutId;
@@ -3896,7 +4295,7 @@ export interface WorkspaceExportDrawings {
   opaque?: {}[];
 }
 /**
- * Workspace export file, format version 2: the workspace document (schema v1, unchanged) plus the drawings of its instruments. Import also accepts a plain v1 WorkspaceDocument (export format 1, no drawings) and the V4 starter shape (format 0), migrated step by step; drawings of unknown tools are kept.
+ * Workspace export file, format version 2: the workspace document plus the drawings of its instruments. Import also accepts a plain WorkspaceDocument (export format 1, no drawings) and the V4 starter shape (format 0), migrated step by step; schema v1 documents are migrated to v2 (indicator layers and attached scripts become studies); drawings of unknown tools are kept.
  *
  * This interface was referenced by `JosephContracts`'s JSON-Schema
  * via the `definition` "WorkspaceExport".

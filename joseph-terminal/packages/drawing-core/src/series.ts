@@ -9,40 +9,93 @@
  * regression channel).
  *
  * The browser never computes trading values. An engine-backed tool only
- * describes which `/v1/indicators/series` request its anchors imply; the
- * host fetches it (`DrawingSeriesSync`) and the tool renders the returned
- * values. Mapping an anchor time to its bar is pure geometry.
+ * describes which built-in script run its anchors imply (script id, first
+ * bar and inputs); the host runs it (`DrawingSeriesSync`) and the tool
+ * renders the returned values, read per bar from the script's plots and
+ * lines (`seriesPointsFromResult`). Mapping an anchor time to its bar is
+ * pure geometry.
  */
 
 import {
   CONTINUOUS_CALENDAR,
   Decimal,
   type BarCalendar,
-  type IndicatorSeriesPoint,
+  type ScriptResult,
   type Timeframe,
 } from '@joseph/contracts';
 
 /**
- * Bars back the engine computes anchored values from (anchored VWAP,
- * regression channel). Informational only: the terminal never refuses an
- * anchor itself; when the engine refuses one, its message is shown.
+ * Bars a drawing's script run reads at most (the engine's run limit).
+ * Informational only: the terminal never refuses an anchor itself; an
+ * anchor before the loaded bars is reported by the script.
  */
-export const ENGINE_ANCHOR_BAR_CAP = 50_000;
+export const ENGINE_ANCHOR_BAR_CAP = 5_000;
+
+/**
+ * Engine values of one bar: script plot values by plot name (decimal
+ * strings) and script lines ending on the bar (`<line id>.from_price`,
+ * `<line id>.to_price` as decimal strings, `<line id>.from_ms` as an
+ * integer).
+ */
+export interface DrawingSeriesPoint {
+  /** Bar start, epoch ms UTC. */
+  bar_start_ms: number;
+  /** Values by key. */
+  values: Readonly<Record<string, string | number | boolean | null>>;
+}
+
+/**
+ * Converts a script result to per-bar drawing values.
+ * @param result Script run result.
+ * @return Points sorted by bar start; plot values become decimal strings
+ *     with at most 8 decimal places, null values are left out.
+ */
+export function seriesPointsFromResult(
+  result: Pick<ScriptResult, 'plots' | 'visuals'>
+): DrawingSeriesPoint[] {
+  const points = new Map<number, Record<string, string | number | null>>();
+  const at = (time: number) => {
+    let values = points.get(time);
+    if (!values) {
+      values = {};
+      points.set(time, values);
+    }
+    return values;
+  };
+  const decimal = (value: unknown) =>
+    typeof value === 'number' && Number.isFinite(value)
+      ? Decimal.fromNumber(value, 8).toString()
+      : null;
+  for (const plot of result.plots) {
+    for (const point of plot.points) {
+      const value = decimal(point.value);
+      if (value !== null) at(point.time_ms)[plot.name] = value;
+    }
+  }
+  for (const visual of result.visuals ?? []) {
+    const {from_ms: from, to_ms: to, from_price, to_price} = visual.data;
+    if (visual.kind !== 'line' || typeof to !== 'number') continue;
+    const values = at(to);
+    values[`${visual.id}.from_price`] = decimal(from_price);
+    values[`${visual.id}.to_price`] = decimal(to_price);
+    values[`${visual.id}.from_ms`] = typeof from === 'number' ? from : null;
+  }
+  return [...points]
+    .sort(([a], [b]) => a - b)
+    .map(([time, values]) => ({bar_start_ms: time, values}));
+}
 
 /** Shown while the first response for a request is pending. */
 export const SERIES_LOADING_MESSAGE = 'Loading engine values…';
 
-/** Engine series a drawing displays. */
+/** Script run a drawing displays. */
 export interface DrawingSeriesRequest {
-  /** Engine plugin id, e.g. `anchored_vwap`. */
-  pluginId: string;
+  /** Built-in script id, e.g. `builtin:anchored_vwap`. */
+  scriptId: string;
   /** Inclusive first bar start, epoch ms UTC. */
   fromMs: number;
-  /**
-   * Plugin inputs. Decimals are strings and integers are numbers, like the
-   * per-chart indicator settings.
-   */
-  settings: Readonly<Record<string, string | number | boolean>>;
+  /** Script inputs. */
+  inputs: Readonly<Record<string, string | number | boolean>>;
 }
 
 /** Fetch state of one drawing's series. */
@@ -56,7 +109,7 @@ export interface DrawingSeriesState {
   /** Session calendar the request was built with (UTC bars when absent). */
   calendar?: BarCalendar;
   /** Points of the latest response, oldest first. */
-  points: readonly IndicatorSeriesPoint[];
+  points: readonly DrawingSeriesPoint[];
   /** Response `as_of_ms` (epoch ms), or null before the first response. */
   asOfMs: number | null;
   /** Error message when `status` is `error`. */
@@ -102,14 +155,14 @@ export function seriesRequestKey(
   request: DrawingSeriesRequest,
   timeframe: Timeframe
 ): string {
-  const settings = Object.keys(request.settings)
+  const inputs = Object.keys(request.inputs)
     .sort()
-    .map(key => [key, request.settings[key]]);
+    .map(key => [key, request.inputs[key]]);
   return JSON.stringify([
-    request.pluginId,
+    request.scriptId,
     timeframe,
     request.fromMs,
-    settings,
+    inputs,
   ]);
 }
 
@@ -120,9 +173,9 @@ export function seriesRequestKey(
  * @return Point, or undefined when no point starts at that time.
  */
 export function seriesPointAt(
-  points: readonly IndicatorSeriesPoint[],
+  points: readonly DrawingSeriesPoint[],
   barStartMs: number
-): IndicatorSeriesPoint | undefined {
+): DrawingSeriesPoint | undefined {
   let lo = 0;
   let hi = points.length - 1;
   while (lo <= hi) {
@@ -142,7 +195,7 @@ export function seriesPointAt(
  * @return Decimal string, or null when missing, null or malformed.
  */
 export function decimalValue(
-  point: IndicatorSeriesPoint | undefined,
+  point: DrawingSeriesPoint | undefined,
   key: string
 ): string | null {
   const value = point?.values[key];
@@ -156,7 +209,7 @@ export function decimalValue(
  * @return Integer, or null when missing or not an integer.
  */
 export function integerValue(
-  point: IndicatorSeriesPoint | undefined,
+  point: DrawingSeriesPoint | undefined,
   key: string
 ): number | null {
   const value = point?.values[key];

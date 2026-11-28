@@ -90,6 +90,26 @@ def auto_intrabar_tf(
     return timeframes.Timeframe.H1
 
 
+def auto_period_tf(chart: timeframes.Timeframe) -> timeframes.Timeframe | None:
+    """Picks the period of an ordinary ``auto`` request.
+
+    Args:
+        chart: Chart resolution.
+
+    Returns:
+        The day below daily charts, the week below weekly and the month
+        below monthly charts; None on monthly charts.
+    """
+    for period in (
+        timeframes.Timeframe.D1,
+        timeframes.Timeframe.W1,
+        timeframes.Timeframe.MN1,
+    ):
+        if chart.duration_ms < period.duration_ms:
+            return period
+    return None
+
+
 def request_tf(
     declared: models.SeriesRequest,
     chart: timeframes.Timeframe,
@@ -113,10 +133,11 @@ def request_tf(
     chosen: object = declared.tf
     if declared.tf_input:
         value = inputs.get(declared.tf_input, "auto")
-        if value not in ("auto", "", None):
-            chosen = value
+        chosen = "auto" if value in ("", None) else value
     if chosen == "auto":
-        return auto_intrabar_tf(chart) if declared.intrabars else None
+        if declared.intrabars:
+            return auto_intrabar_tf(chart)
+        return auto_period_tf(chart)
     try:
         resolved = timeframes.parse(str(chosen))
     except ValueError:

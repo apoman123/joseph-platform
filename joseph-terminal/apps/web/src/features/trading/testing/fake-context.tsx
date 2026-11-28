@@ -20,6 +20,7 @@ import {
   DEMO_MARKS,
   DemoExecutionClient,
   DemoStrategyClient,
+  DemoStudyClient,
   DemoUserStream,
 } from '@joseph/mock-provider';
 import {
@@ -348,12 +349,14 @@ export function createFakeContext(
   const strategy = new DemoStrategyClient({
     validate: def => toValidationResult(def),
   });
+  const market = fakeMarketClient();
   const clients: BackendClients = {
-    market: fakeMarketClient(),
+    market,
     marketStream: silentStream(),
     strategy,
     execution: broker,
     userStream: new DemoUserStream(broker, strategy),
+    studies: new DemoStudyClient(market),
     demo: true,
     ...options.clients,
   };

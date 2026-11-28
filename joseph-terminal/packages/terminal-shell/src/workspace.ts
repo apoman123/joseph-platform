@@ -38,122 +38,71 @@ export const LAYOUT_PANES: Readonly<Record<LayoutId, number>> = {
 /** Maximum chart panes visible at once; saved tabs have no count limit. */
 export const MAX_VISIBLE_CHARTS = 8;
 
+/** One study entry of a chart (contract `StudyState`). */
+export type StudyState = ChartState['studies'][number];
+
 /**
- * Indicator layers of a new chart, with their initial visibility: the
- * built-in EMA, volume delta and pivot points shown, the other built-in
- * layers listed but hidden. Plugins the engine does not serve are ignored,
- * and installed plugins missing here follow their own display default.
+ * Studies of a new chart: the built-in EMA, volume delta and pivot points.
+ * Built-in and plugin scripts carry version 0; their titles come from the
+ * engine catalog once it loads, `name` is the offline fallback.
  */
-export const DEFAULT_INDICATOR_LAYERS: ChartState['indicator_layers'] = [
-  {plugin_id: 'ema', visible: true},
-  {plugin_id: 'volume_delta', visible: true},
-  {plugin_id: 'pivot_points', visible: true},
-  {plugin_id: 'anchored_vwap', visible: false},
-  {plugin_id: 'sma', visible: false},
-  {plugin_id: 'bollinger_bands', visible: false},
-  {plugin_id: 'rsi', visible: false},
-  {plugin_id: 'atr', visible: false},
+export const DEFAULT_STUDIES: readonly StudyState[] = [
+  {
+    study_id: 'builtin:ema',
+    script_id: 'builtin:ema',
+    version: 0,
+    kind: 'indicator',
+    name: 'EMA',
+    visible: true,
+    inputs: {},
+    colors: {},
+  },
+  {
+    study_id: 'builtin:volume_delta',
+    script_id: 'builtin:volume_delta',
+    version: 0,
+    kind: 'indicator',
+    name: 'Delta %',
+    visible: true,
+    inputs: {},
+    colors: {},
+  },
+  {
+    study_id: 'builtin:pivot_points',
+    script_id: 'builtin:pivot_points',
+    version: 0,
+    kind: 'indicator',
+    name: 'Pivots',
+    visible: true,
+    inputs: {},
+    colors: {},
+  },
 ];
 
 /** Maximum instruments compared on one chart. */
 export const MAX_COMPARE = 3;
 
-/** Presentation settings stored in `IndicatorLayerState.style`. */
-export interface IndicatorLayerStyle {
-  /**
-   * User colors per area-of-interest (AOI) kind, event name or plotted
-   * value key (`#rrggbb`).
-   */
-  colors?: Readonly<Record<string, string>>;
-  /**
-   * Whether event markers are drawn; the plugin's `display.show_events`
-   * when unset.
-   */
-  show_events?: boolean;
-  /** Whether the plugin's sub-panes are shown (default true). */
-  pane?: boolean;
-  /** Visibility per sub-pane id; a pane missing here follows `pane`. */
-  panes?: Readonly<Record<string, boolean>>;
-}
+/** Most studies on one chart (contract limit). */
+export const MAX_STUDIES = 40;
 
-/** Indicator layer configuration patch (visibility is set separately). */
-export interface IndicatorLayerPatch {
-  /** Kinds shown; null shows every kind. */
-  kinds?: ChartState['indicator_layers'][number]['kinds'] | null;
-  /** Presentation settings (replaces the previous style). */
-  style?: IndicatorLayerStyle;
-  /** Indicator inputs; null restores the plugin defaults. */
-  settings?: Readonly<Record<string, unknown>> | null;
-  /**
-   * Visibility of a layer the chart does not list yet (default true); a
-   * listed layer keeps its own.
-   */
-  visible?: boolean;
-}
+/** Fields of a study that `updateStudy` may change. */
+export type StudyPatch = Partial<
+  Pick<StudyState, 'visible' | 'inputs' | 'colors' | 'version' | 'name'>
+>;
 
 /**
- * Returns a layer's presentation settings.
- * @param chart Chart holding the layer.
- * @param pluginId Indicator plugin id.
- * @return Style; empty when the layer or its style is missing.
+ * Returns a study id that is unused on a chart: the script id, else the
+ * script id with the first free `#n` suffix.
+ * @param chart Chart receiving the study.
+ * @param scriptId Script the study runs.
+ * @return Unique study id.
  */
-export function layerStyle(
-  chart: ChartState,
-  pluginId: string
-): IndicatorLayerStyle {
-  const style = chart.indicator_layers.find(
-    l => l.plugin_id === pluginId
-  )?.style;
-  return style ?? {};
-}
-
-/**
- * Returns whether one of a layer's sub-panes is shown (the layer itself
- * may still be hidden; see `layerVisible`).
- * @param style Layer style.
- * @param paneId Pane id from the plugin's `display.panes`.
- * @return The pane's own setting, else the layer-wide `pane` setting,
- *     else true.
- */
-export function paneShown(style: IndicatorLayerStyle, paneId: string): boolean {
-  return style.panes?.[paneId] ?? style.pane !== false;
-}
-
-/**
- * Returns a layer's indicator inputs.
- * @param chart Chart holding the layer.
- * @param pluginId Indicator plugin id.
- * @return Inputs, or null when the layer has none (missing or empty), so the
- *     plugin defaults apply.
- */
-export function layerSettings(
-  chart: ChartState,
-  pluginId: string
-): Readonly<Record<string, unknown>> | null {
-  // The contract types `settings` as an open object (`{}`); its keys are
-  // the plugin's input names.
-  const settings = chart.indicator_layers.find(l => l.plugin_id === pluginId)
-    ?.settings as Record<string, unknown> | undefined;
-  return settings && Object.keys(settings).length > 0 ? settings : null;
-}
-
-/**
- * Returns whether a plugin layer is shown.
- * @param chart Chart holding the layer.
- * @param pluginId Indicator plugin id.
- * @param fallback Visibility of a layer the chart does not list, usually
- *     the plugin's `display.default_visible` (default true).
- * @return The layer's own visibility, else `fallback`.
- */
-export function layerVisible(
-  chart: ChartState,
-  pluginId: string,
-  fallback = true
-): boolean {
-  return (
-    chart.indicator_layers.find(l => l.plugin_id === pluginId)?.visible ??
-    fallback
-  );
+export function nextStudyId(chart: ChartState, scriptId: string): string {
+  const used = new Set(chart.studies.map(study => study.study_id));
+  if (!used.has(scriptId)) return scriptId;
+  let index = 2;
+  while (used.has(`${scriptId}#${index}`)) index += 1;
+  return `${scriptId}#${index}`;
 }
 
 /** Inputs for a fresh workspace. */
@@ -170,8 +119,8 @@ export interface DefaultWorkspaceInput {
 
 /**
  * Creates a chart with the default presentation: candles, linear scale,
- * volume, `DEFAULT_INDICATOR_LAYERS`, no link group, `AUTO` feed and no
- * saved viewport.
+ * volume, `DEFAULT_STUDIES`, no link group, `AUTO` feed and no saved
+ * viewport.
  * @param chartId Chart id, unique within the workspace (`chart-<n>`).
  * @param instrumentId Instrument shown.
  * @param timeframe Bar timeframe.
@@ -189,7 +138,11 @@ export function createChartState(
     chart_type: 'candles',
     price_scale: 'linear',
     show_volume: true,
-    indicator_layers: DEFAULT_INDICATOR_LAYERS.map(layer => ({...layer})),
+    studies: DEFAULT_STUDIES.map(study => ({
+      ...study,
+      inputs: {},
+      colors: {},
+    })),
     link_group: null,
     feed_mode: 'AUTO',
     visible_range: null,
@@ -200,13 +153,13 @@ export function createChartState(
  * Creates the default single-chart workspace: layout `1`, crosshair sync
  * only, and the default favorite timeframes.
  * @param input Workspace id, first chart and clock.
- * @return Workspace document (schema v1).
+ * @return Workspace document (schema v2).
  */
 export function createDefaultWorkspace(
   input: DefaultWorkspaceInput
 ): WorkspaceDocument {
   return {
-    schema_version: 1,
+    schema_version: 2,
     workspace_id: input.workspaceId,
     name: 'My workspace',
     layout: '1',
@@ -254,22 +207,23 @@ export type WorkspaceAction =
   | {type: 'setFeedMode'; chartId: string; feedMode: FeedMode}
   | {type: 'toggleVolume'; chartId: string}
   | {
-      type: 'setIndicatorLayer';
+      /** Appends a study, or replaces the one with the same study id. */
+      type: 'addStudy';
       chartId: string;
-      pluginId: string;
-      visible: boolean;
+      study: StudyState;
     }
   | {
-      /** Removes an indicator and clears its settings, unlike hiding it. */
-      type: 'removeIndicatorLayer';
+      /** Changes a study's visibility, inputs, colors, version or name. */
+      type: 'updateStudy';
       chartId: string;
-      pluginId: string;
+      studyId: string;
+      patch: StudyPatch;
     }
   | {
-      type: 'setIndicatorLayerConfig';
+      /** Removes a study and its settings, unlike hiding it. */
+      type: 'removeStudy';
       chartId: string;
-      pluginId: string;
-      patch: IndicatorLayerPatch;
+      studyId: string;
     }
   | {
       type: 'setCompare';
@@ -298,38 +252,8 @@ export type WorkspaceAction =
 /** Chart presentation captured by templates (never instrument-specific). */
 export type ChartPresentation = Pick<
   ChartState,
-  'chart_type' | 'price_scale' | 'show_volume' | 'indicator_layers'
+  'chart_type' | 'price_scale' | 'show_volume' | 'studies'
 > & {session_separators?: boolean};
-
-/**
- * Applies a configuration patch to one indicator layer. Fields the patch
- * omits are kept; `null` removes `kinds` or `settings`.
- * @param layers Current layers.
- * @param pluginId Indicator plugin id.
- * @param patch Fields to change.
- * @return New layer list; a missing layer is appended first, visible as
- *     `patch.visible` says (default true).
- */
-export function patchIndicatorLayer(
-  layers: ChartState['indicator_layers'],
-  pluginId: string,
-  patch: IndicatorLayerPatch
-): ChartState['indicator_layers'] {
-  const exists = layers.some(l => l.plugin_id === pluginId);
-  const base = exists
-    ? layers
-    : [...layers, {plugin_id: pluginId, visible: patch.visible ?? true}];
-  return base.map(layer => {
-    if (layer.plugin_id !== pluginId) return layer;
-    const next = {...layer};
-    if (patch.kinds === null) delete next.kinds;
-    else if (patch.kinds !== undefined) next.kinds = [...patch.kinds];
-    if (patch.style !== undefined) next.style = {...patch.style};
-    if (patch.settings === null) delete next.settings;
-    else if (patch.settings !== undefined) next.settings = {...patch.settings};
-    return next;
-  });
-}
 
 /**
  * Returns the charts that follow a change made on `chartId`. Only charts
@@ -577,54 +501,44 @@ function reduce(
           show_volume: !chart.show_volume,
         })),
       };
-    case 'setIndicatorLayer':
+    case 'addStudy':
       return {
         ...doc,
         charts: mapCharts(doc, new Set([action.chartId]), chart => {
-          const exists = chart.indicator_layers.some(
-            l => l.plugin_id === action.pluginId
+          const exists = chart.studies.some(
+            study => study.study_id === action.study.study_id
           );
-          const layers = exists
-            ? chart.indicator_layers.map(layer =>
-                layer.plugin_id === action.pluginId
-                  ? layer.removed && action.visible
-                    ? {plugin_id: layer.plugin_id, visible: true, present: true}
-                    : {...layer, visible: action.visible, present: true}
-                  : layer
-              )
-            : [
-                ...chart.indicator_layers,
-                {
-                  plugin_id: action.pluginId,
-                  visible: action.visible,
-                  present: true,
-                },
-              ];
-          return {...chart, indicator_layers: layers};
+          if (!exists && chart.studies.length >= MAX_STUDIES) return chart;
+          const study = structuredClone(action.study);
+          return {
+            ...chart,
+            studies: exists
+              ? chart.studies.map(item =>
+                  item.study_id === study.study_id ? study : item
+                )
+              : [...chart.studies, study],
+          };
         }),
       };
-    case 'removeIndicatorLayer':
+    case 'updateStudy':
       return {
         ...doc,
         charts: mapCharts(doc, new Set([action.chartId]), chart => ({
           ...chart,
-          indicator_layers: [
-            ...chart.indicator_layers.filter(
-              layer => layer.plugin_id !== action.pluginId
-            ),
-            {plugin_id: action.pluginId, visible: false, removed: true},
-          ],
+          studies: chart.studies.map(study =>
+            study.study_id === action.studyId
+              ? {...study, ...structuredClone(action.patch)}
+              : study
+          ),
         })),
       };
-    case 'setIndicatorLayerConfig':
+    case 'removeStudy':
       return {
         ...doc,
         charts: mapCharts(doc, new Set([action.chartId]), chart => ({
           ...chart,
-          indicator_layers: patchIndicatorLayer(
-            chart.indicator_layers,
-            action.pluginId,
-            action.patch
+          studies: chart.studies.filter(
+            study => study.study_id !== action.studyId
           ),
         })),
       };
@@ -659,9 +573,7 @@ function reduce(
           chart_type: action.presentation.chart_type,
           price_scale: action.presentation.price_scale,
           show_volume: action.presentation.show_volume,
-          indicator_layers: structuredClone(
-            action.presentation.indicator_layers
-          ),
+          studies: structuredClone(action.presentation.studies),
           session_separators: action.presentation.session_separators === true,
         })),
       };

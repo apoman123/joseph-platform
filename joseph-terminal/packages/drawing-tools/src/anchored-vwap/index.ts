@@ -7,24 +7,23 @@
 /**
  * @fileoverview Anchored VWAP: the market engine's volume-weighted average
  * price from one anchor bar forward, with optional standard-deviation
- * bands. The browser computes nothing; it requests the series and draws it.
+ * bands. The browser computes nothing; it runs the built-in script and
+ * draws its values.
  *
  * - Anchors: one. Its time picks the anchor bar (the bar nearest to it on
  *   the chart timeframe); its price only places the handle until values
  *   arrive.
- * - Series: `GET /v1/indicators/series?plugin=anchored_vwap&from_ms=<anchor
- *   bar start>` with settings `{anchor: 'time', anchor_ms: <anchor bar
- *   start>, source: 'hlc3', band_1, band_2, band_3}` (decimal strings;
- *   `'0'` turns a band off). Each point carries `vwap`, `stdev`,
- *   `upper_k`/`lower_k` (decimal strings or null), `anchor_ms` (int or
- *   null) and `bars` (int). The host re-requests when the anchor or an
- *   input changes and when a bar closes.
+ * - Values: the built-in `builtin:anchored_vwap` script run from the anchor
+ *   bar with inputs `{anchor: 'time', anchor_ms: <anchor bar start>,
+ *   source: 'hlc3', band_1, band_2, band_3}` (`0` turns a band off). Each
+ *   bar carries its `VWAP` and `Upper k`/`Lower k` plot values. The host
+ *   re-runs it when the anchor or an input changes and when a bar closes.
  * - Geometry: a polyline through `(bar_start_ms, vwap)` of every bar from
  *   the anchor bar on; for each enabled band, polylines through `upper_k`
  *   and `lower_k`; optional fill between the band 1 lines.
  * - Status: while loading or after a failed request a notice replaces the
- *   lines. The engine computes from anchors up to 50 000 bars back; when it
- *   refuses an anchor the notice shows the engine's own message. A dashed
+ *   lines. A run reads up to 5 000 bars from the anchor; when the engine
+ *   refuses a run the notice shows the engine's own message. A dashed
  *   vertical marker shows the anchor bar in every non-drawn state so it can
  *   be dragged.
  * - Hit-testing: the handle first, then the VWAP and band polylines (or
@@ -69,8 +68,8 @@ import {
   type ToolPlugin,
 } from '@joseph/drawing-core';
 
-/** Engine indicator plugin id of the series request. */
-export const ANCHORED_VWAP_PLUGIN = 'anchored_vwap';
+/** Built-in script the tool runs. */
+export const ANCHORED_VWAP_SCRIPT = 'builtin:anchored_vwap';
 
 /** Price source sent to the engine: typical price (high + low + close) / 3. */
 export const ANCHORED_VWAP_SOURCE = 'hlc3';
@@ -114,9 +113,9 @@ export interface VwapBand {
   k: number;
   /** Standard-deviation multiplier (decimal string). */
   multiplier: string;
-  /** Upper band line (engine `upper_<k>` values). */
+  /** Upper band line (script `Upper <k>` values). */
   upper: PlotPoint[];
-  /** Lower band line (engine `lower_<k>` values). */
+  /** Lower band line (script `Lower <k>` values). */
   lower: PlotPoint[];
 }
 
@@ -163,13 +162,13 @@ export function anchoredVwapRequest(
   const bands = Object.fromEntries(
     ANCHORED_VWAP_INPUTS.map(input => [
       input.key,
-      String(readInput(doc, input)),
+      Number(readInput(doc, input)) || 0,
     ])
   );
   return {
-    pluginId: ANCHORED_VWAP_PLUGIN,
+    scriptId: ANCHORED_VWAP_SCRIPT,
     fromMs: anchorMs,
-    settings: {
+    inputs: {
       anchor: 'time',
       anchor_ms: anchorMs,
       source: ANCHORED_VWAP_SOURCE,
@@ -215,11 +214,11 @@ export function vwapView(series: DrawingSeriesState | null): VwapView {
   }
   const anchorBarMs = series.request.fromMs;
   const points = series.points.filter(p => p.bar_start_ms >= anchorBarMs);
-  const line = lineOf(points, 'vwap');
+  const line = lineOf(points, 'VWAP');
   const lastPoint = [...points]
     .reverse()
-    .find(p => decimalValue(p, 'vwap') !== null);
-  const latest = decimalValue(lastPoint, 'vwap');
+    .find(p => decimalValue(p, 'VWAP') !== null);
+  const latest = decimalValue(lastPoint, 'VWAP');
   if (line.length === 0 || latest === null) {
     // With no points and a response no newer than the anchor bar's close,
     // the engine has had no closed bar to compute from yet.
@@ -243,13 +242,13 @@ export function vwapView(series: DrawingSeriesState | null): VwapView {
   // so new multipliers are never paired with values computed for old ones.
   const bands: VwapBand[] = [];
   for (let k = 1; k <= 3; k += 1) {
-    const multiplier = series.request.settings[`band_${k}`];
-    if (typeof multiplier !== 'string' || Number(multiplier) <= 0) continue;
+    const raw = series.request.inputs[`band_${k}`];
+    if (typeof raw !== 'number' || !(raw > 0)) continue;
     bands.push({
       k,
-      multiplier,
-      upper: lineOf(points, `upper_${k}`),
-      lower: lineOf(points, `lower_${k}`),
+      multiplier: String(raw),
+      upper: lineOf(points, `Upper ${k}`),
+      lower: lineOf(points, `Lower ${k}`),
     });
   }
   return {kind: 'ready', anchorBarMs, line, bands, latest};
@@ -446,12 +445,12 @@ export const anchoredVwapTool: ToolPlugin = {
         : [];
     }
     const point = seriesPointAt(series?.points ?? [], barStartMs);
-    const vwap = decimalValue(point, 'vwap');
+    const vwap = decimalValue(point, 'VWAP');
     if (vwap === null) return [];
     const rows = [{label: 'Anchored VWAP', value: formatPrice(vwap, tickSize)}];
     for (const band of view.bands) {
-      const upper = decimalValue(point, `upper_${band.k}`);
-      const lower = decimalValue(point, `lower_${band.k}`);
+      const upper = decimalValue(point, `Upper ${band.k}`);
+      const lower = decimalValue(point, `Lower ${band.k}`);
       if (upper !== null) {
         rows.push({
           label: `VWAP +${band.multiplier}σ`,

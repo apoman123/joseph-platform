@@ -15,13 +15,12 @@ import {
   createBarCalendar,
   dayNumberOf,
   zonedTimeToUtc,
-  type IndicatorSeriesQuery,
 } from '@joseph/contracts';
 import {afterEach, beforeEach, describe, expect, it, vi} from 'vitest';
 import {createDrawing} from './document';
 import {expandPositionAnchors} from './position';
 import {barStartAt, seriesStatusMessage} from './series';
-import {DrawingSeriesSync} from './series-sync';
+import {DrawingSeriesSync, type DrawingSeriesQuery} from './series-sync';
 import {DrawingStore, createCommand} from './store';
 import {ToolRegistry, type ToolPlugin} from './tool';
 
@@ -103,7 +102,7 @@ const TOOL: ToolPlugin = {
     const anchor = doc.anchors[0];
     if (!anchor) return null;
     const bar = barStartAt(anchor.time_ms, timeframe, calendar);
-    return {pluginId: 'engine_line', fromMs: bar, settings: {anchor_ms: bar}};
+    return {scriptId: 'builtin:engine_line', fromMs: bar, inputs: {anchor_ms: bar}};
   },
 };
 
@@ -115,7 +114,7 @@ describe('series sync on session calendars', () => {
     const store = new DrawingStore();
     const tools = new ToolRegistry();
     tools.register(TOOL);
-    const queries: IndicatorSeriesQuery[] = [];
+    const queries: DrawingSeriesQuery[] = [];
     const message = 'Anchor is more than 50,000 bars back.';
     const sync = new DrawingSeriesSync(store, tools, {
       fetch: async query => {
