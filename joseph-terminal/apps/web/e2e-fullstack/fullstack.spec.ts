@@ -38,6 +38,12 @@ import {
 const AUTH = {Authorization: `Bearer ${TOKEN}`};
 
 /**
+ * Pane title of the DEMO venue BTC contract: its id until the instrument
+ * metadata arrives, then the engine's display symbol.
+ */
+const DEMO_BTC = /^(BTCUSD|BTC-USD DEMO)$/;
+
+/**
  * Loads the terminal and switches the active chart to the DEMO venue BTC
  * instrument served by the backend (the test backend enables only `mock`).
  * @param page Playwright page.
@@ -50,7 +56,7 @@ async function loadOnDemoVenue(page: Page): Promise<void> {
   // Search results can re-render while they load, so a click may land on a
   // list that is being replaced: retry the pick until the chart switches.
   await expect(async () => {
-    if ((await symbol.textContent()) === 'BTCUSD') return;
+    if (DEMO_BTC.test((await symbol.textContent()) ?? '')) return;
     if (!(await page.getByLabel('Search instruments').isVisible())) {
       await page.getByTestId('instrument-selector').click();
     }
@@ -59,7 +65,7 @@ async function loadOnDemoVenue(page: Page): Promise<void> {
       .getByRole('option', {name: /BTCUSD/})
       .first()
       .click({timeout: 5_000});
-    await expect(symbol).toHaveText('BTCUSD', {timeout: 5_000});
+    await expect(symbol).toHaveText(DEMO_BTC, {timeout: 5_000});
   }).toPass({timeout: 45_000});
   await expect(page.getByText('Loading candles…')).toHaveCount(0);
 }
