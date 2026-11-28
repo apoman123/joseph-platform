@@ -383,12 +383,15 @@ function paintVisual(
  * @param id Chart-local unique layer identity.
  * @param result Validated backend result for the selected source/version.
  * @param colors Per-series user style overrides.
- * @return Renderer using only finite coordinates, literal colors and plain text.
+ * @param skip Plot drawn natively by the host pane (not painted again).
+ * @return Renderer using only finite coordinates, literal colors and plain
+ *     text; plots listed only in the data window are not painted.
  */
 export function pythonCanvas(
   id: string,
   result: ScriptResult,
-  colors: Readonly<Record<string, string>> = {}
+  colors: Readonly<Record<string, string>> = {},
+  skip: string | null = null
 ): CanvasLayer {
   return {
     id,
@@ -415,6 +418,7 @@ export function pythonCanvas(
       }
       for (const plot of result.plots) {
         const style = result.plot_styles?.[plot.name] ?? {};
+        if (plot.name === skip || style.display === 'data_window') continue;
         const color = pythonColor(colors[plot.name] ?? style.color);
         const offset = numeric(style.offset) ?? 0;
         const points = plot.points.map(point => {

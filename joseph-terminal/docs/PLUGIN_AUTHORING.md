@@ -1,6 +1,6 @@
 # Plugin authoring
 
-How contributors add drawing tools, features and indicator renderings to Joseph Terminal. Plugins are vetted modules composed at build time, never fetched at runtime. CI fails on boundary violations (`pnpm arch:check`) and missing JSDoc (`pnpm lint`).
+How contributors add drawing tools, features and chart studies to Joseph Terminal. Plugins are vetted modules composed at build time, never fetched at runtime. CI fails on boundary violations (`pnpm arch:check`) and missing JSDoc (`pnpm lint`).
 
 ## Add a drawing tool
 
@@ -12,7 +12,7 @@ Shared behaviour lives in `drawing-core`: geometry helpers (`distanceToPolyline`
 
 ### Engine-backed tools
 
-A tool that shows engine values (anchored VWAP, regression channel) never computes them. It declares `seriesRequest(doc, {timeframe, calendar})`, a pure mapping from anchors and props to a `/v1/indicators/series` request (`barStartAt` maps an anchor to its bar). Each chart's `DrawingSeriesSync` fetches it via `MarketDataClient.getIndicatorSeries`, debounces drags, re-requests on bar close and drops superseded responses. The tool gets the result as `RenderState.series` (also the last `hitTest` argument), draws only what the engine returned, and shows a `drawNotice` with the engine's message when values are missing or refused. `dataRows` and `describe` feed the data window and object list. The DEMO stand-in is `mock-provider/src/market/demo-drawing-series.ts`.
+A tool that shows engine values (anchored VWAP, regression channel) never computes them. It declares `seriesRequest(doc, {timeframe, calendar})`, a pure mapping from anchors and props to a built-in script run: script id, first bar and inputs (`barStartAt` maps an anchor to its bar). Each chart's `DrawingSeriesSync` runs it through the study client (`/v1/scripts/run-batch`), debounces drags, re-runs on bar close and drops superseded responses. The script's plot values and lines become per-bar values (`seriesPointsFromResult`: plot names, and `<line id>.from_price` / `.to_price` / `.from_ms` on the bar a line ends). The tool gets them as `RenderState.series` (also the last `hitTest` argument), draws only what the engine returned, and shows a `drawNotice` with the engine's message when values are missing or refused. `dataRows` and `describe` feed the data window and object list. In DEMO the DEMO study evaluator (`mock-provider/src/market/demo-scripts.ts`) answers.
 
 ## Add a feature
 
@@ -23,19 +23,14 @@ A tool that shows engine values (anchored VWAP, regression channel) never comput
 
 Feature flags change visibility only. No feature can grant trading permission or reach a venue: orders go through `ctx.clients.execution` to the execution engine's risk gateway.
 
-## Render an indicator
+## Chart studies
 
-Indicators are computed by the market engine, by its built-ins or by plugin packages installed at run time. The terminal knows no plugin by name: it reads `GET /v1/indicators/plugins` once per runtime (`useIndicatorPlugins()` in `apps/web/src/shell/indicator-plugins.ts`) and draws every plugin from its `IndicatorPluginInfo`:
+Indicators are `joseph_script.Indicator` classes run by the market engine: its built-ins, plugin packages installed through `joseph.scripts` entry points, and the user's own scripts. The terminal knows no indicator by name. It reads the catalog once per runtime (`GET /v1/scripts/catalog?kind=indicator`, `useStudyCatalog()` in `apps/web/src/shell/study-catalog.ts`) and keeps each chart's studies in `ChartState.studies` (script id, pinned version for owned scripts, inputs, plot colors, visibility).
 
-- `output_kinds`, `output_events` and `output_values` declare what the plugin publishes; strategy builders and settings read the same metadata.
-- `display.layer`, `default_visible` and `z_index` place the plugin in the Layers menu (registration order), on new charts and in the paint order. Plugins with `layer: false` (used only by drawing tools or strategies) are not listed.
-- `display.kinds` styles AOIs: `box` zones (fill opacity, midline, line style) or `level` rays at `lower` (dashed and pending until they end when `pending_until_ended` is set). Labels, default colors and tones come from here; `display.end_reasons` labels why an AOI ended.
-- `display.events` styles events: a marker, a segment from the time a `meta` key names (`time_meta`) to the event bar, both, or nothing. `show_events` sets whether markers start shown.
-- `display.plots` draws published values as lines or histograms, on the price pane (`pane: 'price'`, a canvas plot layer) or in a pane declared in `display.panes` with its title, precision and reference levels.
-
-Kinds and events without a style fall back to neutral boxes and circles labelled with their raw names; the reserved `AOI_INVALIDATED` and `AOI_EXPIRED` events are drawn only when styled. Tones (`side`, `sign`, `up`, `down`, `accent`, ...) resolve against the chart theme, and user colors win over metadata colors.
-
-So a new plugin needs no terminal change: declare its metadata in the engine (the contract is `IndicatorPluginInfo` in `packages/contracts/schemas/indicators.schema.json`), and the mapping in `packages/indicator-viz` renders it. Change `indicator-viz` only to add a rendering primitive every plugin can use, with a test against the shared fixtures in `packages/contracts/fixtures/indicator-plugin.fixture.json`. DEMO mode mirrors the engine's built-ins in `mock-provider/src/market/demo-plugins.ts`. Never compute trading signals in the terminal.
+- `useStudyRuns` (`apps/web/src/shell/python-studies.tsx`) runs the visible studies in batches (`POST /v1/scripts/run-batch`) once the chart has its candles, re-runs them when a bar closes and every few seconds while live, and draws each `ScriptResult` with the Python painter: overlay scripts on the price pane, the others in a study pane.
+- The legend, the picker (`indicator-library.tsx`: Built-ins, Plugins, My scripts, My collection) and the settings dialog (`indicator-settings-dialog.tsx`, generated from the declared `INPUTS`) work the same for every origin.
+- Plots declared with `display="data_window"` are only listed in the data window; drawings (`line`, `label`, `box`, `fill`, `hline`, `table`, ...) are rendered from their documented fields only.
+- DEMO mode has no Python: `DemoStudyClient` serves the built-in catalog exported from the engine (`contracts/openapi/builtin-scripts.json`) and evaluates the built-ins with the DEMO study evaluator, checked against outputs exported from the Python built-ins (`contracts/fixtures/builtin-indicator-outputs.json`). Never compute trading signals in the terminal.
 
 ## Change a contract
 

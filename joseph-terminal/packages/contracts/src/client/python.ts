@@ -256,12 +256,7 @@ export class PythonClient implements StudyClient {
    * @return One result or error per study, in request order.
    */
   runBatch(body: ScriptBatchRun): Promise<ScriptBatchResult> {
-    return this.http.request(
-      'POST',
-      '/v1/scripts/run-batch',
-      undefined,
-      body
-    );
+    return this.http.request('POST', '/v1/scripts/run-batch', undefined, body);
   }
 
   /**

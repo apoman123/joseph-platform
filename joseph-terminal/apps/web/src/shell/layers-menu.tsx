@@ -5,111 +5,65 @@
  */
 
 /**
- * @fileoverview Body of the top bar's Layers menu: one row per indicator
- * plugin the engine lists as a layer, in registration order, with a
- * sub-toggle per study pane the plugin declares and a settings button,
- * then the chart's volume, session break and data window options.
+ * @fileoverview Body of the Layers menu: one row per study on the chart,
+ * in legend order, with a visibility toggle and a settings button, then the
+ * chart's volume, session break and data window options.
  */
 
 'use client';
-import type {ChartState, IndicatorPluginInfo} from '@joseph/contracts';
-import {
-  DELTA_LEGEND,
-  DELTA_PLUGIN_ID,
-  layerPlugins,
-} from '@joseph/indicator-viz';
-import {layerStyle, layerVisible, paneShown} from '@joseph/terminal-shell';
+import type {ChartState} from '@joseph/contracts';
+import type {StudyState} from '@joseph/terminal-shell';
 import {Settings2} from 'lucide-react';
 import type {ReactElement} from 'react';
-import {useIndicatorPlugins} from './indicator-plugins';
 import {useStore} from './react-bindings';
 import {useRuntime} from './runtime-context';
+import {studyName, useStudyCatalog} from './study-catalog';
 
 /**
- * Returns the test id of a pane sub-toggle.
- * @param pluginId Plugin id.
- * @param paneId Pane id from `display.panes`.
- * @return `delta-pane-toggle` for the volume delta pane, otherwise
- *     `study-pane-toggle-<plugin>-<pane>`.
+ * Renders one study's visibility toggle and settings button.
+ * @param props Chart and study.
+ * @return Row.
  */
-export function paneToggleTestId(pluginId: string, paneId: string): string {
-  return pluginId === DELTA_PLUGIN_ID
-    ? 'delta-pane-toggle'
-    : `study-pane-toggle-${pluginId}-${paneId}`;
-}
-
-/**
- * Renders one plugin row: visibility, pane sub-toggles and settings.
- * @param props Chart and plugin descriptor.
- * @return Row element.
- */
-export function PluginRow({
+export function StudyRow({
   chart,
-  info,
+  study,
 }: {
   chart: ChartState;
-  info: IndicatorPluginInfo;
+  study: StudyState;
 }): ReactElement {
   const runtime = useRuntime();
+  const catalog = useStudyCatalog();
   const chartId = chart.chart_id;
-  const pluginId = info.plugin_id;
-  const visible = layerVisible(chart, pluginId, info.display.default_visible);
-  const style = layerStyle(chart, pluginId);
+  const name = studyName(catalog, study);
   return (
     <div className="layers-menu__row">
       <label className="j-check layers-menu__item">
         <input
           type="checkbox"
-          checked={visible}
-          data-testid={`layer-toggle-${pluginId}`}
+          checked={study.visible}
+          data-testid={`layer-toggle-${study.study_id}`}
           onChange={() =>
             void runtime.dispatch({
-              type: 'setIndicatorLayer',
+              type: 'updateStudy',
               chartId,
-              pluginId,
-              visible: !visible,
+              studyId: study.study_id,
+              patch: {visible: !study.visible},
             })
           }
         />
-        {info.display_name}
+        {name}
       </label>
-      {visible &&
-        info.display.panes.map(pane => {
-          const shown = paneShown(style, pane.id);
-          return (
-            <label
-              key={pane.id}
-              className="j-check layers-menu__sub"
-              title={pluginId === DELTA_PLUGIN_ID ? DELTA_LEGEND : undefined}
-            >
-              <input
-                type="checkbox"
-                checked={shown}
-                data-testid={paneToggleTestId(pluginId, pane.id)}
-                onChange={() =>
-                  void runtime.dispatch({
-                    type: 'setIndicatorLayerConfig',
-                    chartId,
-                    pluginId,
-                    patch: {
-                      style: {
-                        ...style,
-                        panes: {...style.panes, [pane.id]: !shown},
-                      },
-                    },
-                  })
-                }
-              />
-              {pane.title} pane
-            </label>
-          );
-        })}
       <button
         type="button"
         className="j-btn j-btn--ghost j-btn--icon j-btn--sm"
-        aria-label={`${info.display_name} settings`}
-        data-testid={`indicator-settings-${pluginId}`}
-        onClick={() => void runtime.indicatorSettings.set({chartId, pluginId})}
+        aria-label={`${name} settings`}
+        data-testid={`study-settings-${study.study_id}`}
+        onClick={() =>
+          void runtime.indicatorSettings.set({
+            chartId,
+            studyId: study.study_id,
+          })
+        }
       >
         <Settings2 size={14} aria-hidden="true" />
       </button>
@@ -118,39 +72,32 @@ export function PluginRow({
 }
 
 /**
- * Renders the Layers menu body for a chart.
- * @param props Chart whose layers are edited; showPlugins hides catalogue rows when false.
- * @return Menu element.
+ * Renders the chart's studies and display options.
+ * @param props Chart, and whether to list the studies.
+ * @return Menu body.
  */
 export function LayersMenu({
   chart,
-  showPlugins = true,
+  showStudies = true,
 }: {
   chart: ChartState;
-  showPlugins?: boolean;
+  showStudies?: boolean;
 }): ReactElement {
   const runtime = useRuntime();
-  const plugins = useIndicatorPlugins();
   const dataWindow = useStore(runtime.dataWindow);
   const chartId = chart.chart_id;
   const run = (id: string) =>
     void runtime.commands.execute(id).catch(() => undefined);
   return (
     <div className="layers-menu">
-      {showPlugins && (
+      {showStudies && (
         <p className="layers-menu__note">
-          Indicators are computed by the Joseph engine and drawn as reported.
+          Studies are computed by the Joseph engine and drawn as reported.
         </p>
       )}
-      {showPlugins &&
-        (plugins === null ? (
-          <p className="layers-menu__note" role="status">
-            Loading indicators…
-          </p>
-        ) : (
-          layerPlugins(plugins).map(info => (
-            <PluginRow key={info.plugin_id} chart={chart} info={info} />
-          ))
+      {showStudies &&
+        chart.studies.map(study => (
+          <StudyRow key={study.study_id} chart={chart} study={study} />
         ))}
       <div className="j-menu__sep" />
       <label className="j-check layers-menu__item">
@@ -181,13 +128,6 @@ export function LayersMenu({
         />
         Data window
       </label>
-      <button
-        type="button"
-        className="j-menu__item"
-        onClick={() => void run('indicators.toggle-ended')}
-      >
-        Show or hide ended zones
-      </button>
     </div>
   );
 }

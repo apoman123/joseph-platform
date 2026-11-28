@@ -96,6 +96,7 @@ class StudyContext {
   readonly visuals = new Map<string, ScriptVisual>();
   readonly alerts: ScriptAlertEvent[] = [];
   index = -1;
+  current: StudyBar | null = null;
   private readonly cursors = new Map<string, number>();
   private readonly closed = new Map<string, number>();
 
@@ -105,27 +106,44 @@ class StudyContext {
    */
   constructor(readonly run: StudyRun) {}
 
-  /** @return The current bar. */
+  /**
+   * The current bar.
+   * @return The current bar.
+   * @throws `Error` before the first bar.
+   */
   get bar(): StudyBar {
-    return this.run.bars[this.index]!;
+    if (!this.current) throw new Error('no current bar');
+    return this.current;
   }
 
-  /** @return Chart timeframe. */
+  /**
+   * The chart timeframe.
+   * @return The chart timeframe.
+   */
   get timeframe(): string {
     return this.run.timeframe;
   }
 
-  /** @return Whether this is the first bar. */
+  /**
+   * Whether this is the first bar.
+   * @return Whether this is the first bar.
+   */
   get isFirst(): boolean {
     return this.index === 0;
   }
 
-  /** @return Whether this is the last bar. */
+  /**
+   * Whether this is the last bar.
+   * @return Whether this is the last bar.
+   */
   get isLast(): boolean {
     return this.index === this.run.bars.length - 1;
   }
 
-  /** @return Whether the current bar has closed. */
+  /**
+   * Whether the current bar has closed.
+   * @return Whether the current bar has closed.
+   */
   get isConfirmed(): boolean {
     return this.bar.is_final;
   }
@@ -167,12 +185,15 @@ class StudyContext {
     const start = this.bar.time_ms;
     const end = this.bar.end_ms;
     let index = this.cursors.get(alias) ?? 0;
-    while (index < series.length && series[index]!.time_ms < start) index += 1;
+    while ((series[index]?.time_ms ?? Infinity) < start) {
+      index += 1;
+    }
     this.cursors.set(alias, index);
     const found: StudyBar[] = [];
-    while (index < series.length && series[index]!.end_ms <= end) {
-      found.push(series[index]!);
+    for (let bar = series[index]; bar && bar.end_ms <= end;) {
+      found.push(bar);
       index += 1;
+      bar = series[index];
     }
     return found;
   }
@@ -185,20 +206,18 @@ class StudyContext {
   closedBar(alias: string): StudyBar | null {
     const series = this.run.extra[alias] ?? [];
     let index = this.closed.get(alias) ?? -1;
-    while (
-      index + 1 < series.length &&
-      series[index + 1]!.end_ms <= this.bar.end_ms
-    ) {
+    while ((series[index + 1]?.end_ms ?? Infinity) <= this.bar.end_ms) {
       index += 1;
     }
     this.closed.set(alias, index);
-    return index >= 0 ? series[index]! : null;
+    return series[index] ?? null;
   }
 
   /**
    * Reads the calendar period around the current bar (`ctx.period`).
    * @param tf Period.
    * @return Start and next start, UTC epoch ms.
+   * @throws `Error` for a period the study does not declare.
    */
   period(tf: string): readonly [number, number] {
     const bounds = this.run.periods[tf]?.[this.index];
@@ -227,8 +246,9 @@ class StudyContext {
     const points = this.plots.get(name) ?? [];
     this.plots.set(name, points);
     const point = {time_ms: this.bar.time_ms, value, color};
-    if (points.at(-1)?.time_ms === point.time_ms) points[points.length - 1] = point;
-    else points.push(point);
+    if (points.at(-1)?.time_ms === point.time_ms) {
+      points[points.length - 1] = point;
+    } else points.push(point);
   }
 
   /**
@@ -411,7 +431,9 @@ interface Builtin {
 function sourceValue(bar: StudyBar, source: string): number {
   if (source === 'hl2') return (bar.high + bar.low) / 2;
   if (source === 'hlc3') return (bar.high + bar.low + bar.close) / 3;
-  if (source === 'ohlc4') return (bar.open + bar.high + bar.low + bar.close) / 4;
+  if (source === 'ohlc4') {
+    return (bar.open + bar.high + bar.low + bar.close) / 4;
+  }
   return bar[source as 'open' | 'high' | 'low' | 'close'];
 }
 
@@ -422,7 +444,9 @@ function sourceValue(bar: StudyBar, source: string): number {
  */
 function sum(values: Iterable<number>): number {
   let total = 0;
-  for (const value of values) total += value;
+  for (const value of values) {
+    total += value;
+  }
   return total;
 }
 
@@ -464,7 +488,9 @@ function movingAverage(name: string, exponential: boolean): () => Study {
         out = value;
       } else {
         window.push(price);
-        while (window.length > length) window.shift();
+        while (window.length > length) {
+          window.shift();
+        }
         out = window.length === length ? sum(window) / length : null;
       }
       ctx.plot(name, out, {color: ctx.str('color'), offset: ctx.num('offset')});
@@ -472,14 +498,19 @@ function movingAverage(name: string, exponential: boolean): () => Study {
   };
 }
 
-/** @return A Bollinger Bands instance. */
+/**
+ * Creates a Bollinger Bands instance.
+ * @return A Bollinger Bands instance.
+ */
 function bollinger(): Study {
   const window: number[] = [];
   return ctx => {
     const length = ctx.num('length');
     const price = sourceValue(ctx.bar, ctx.str('source'));
     window.push(price);
-    while (window.length > length) window.shift();
+    while (window.length > length) {
+      window.shift();
+    }
     let basis: number | null = null;
     let upper: number | null = null;
     let lower: number | null = null;
@@ -531,7 +562,10 @@ class Rma {
   }
 }
 
-/** @return An RSI instance. */
+/**
+ * Creates an RSI instance.
+ * @return An RSI instance.
+ */
 function rsi(): Study {
   let previous: number | null = null;
   const up = new Rma();
@@ -544,7 +578,8 @@ function rsi(): Study {
       const gain = up.add(Math.max(price - previous, 0), length);
       const loss = down.add(Math.max(previous - price, 0), length);
       if (gain !== null && loss !== null) {
-        value = loss === 0 ? 100 : gain === 0 ? 0 : 100 - 100 / (1 + gain / loss);
+        value =
+          loss === 0 ? 100 : gain === 0 ? 0 : 100 - 100 / (1 + gain / loss);
       }
     }
     previous = price;
@@ -558,7 +593,10 @@ function rsi(): Study {
   };
 }
 
-/** @return An ATR instance. */
+/**
+ * Creates an ATR instance.
+ * @return An ATR instance.
+ */
 function atr(): Study {
   let previousClose: number | null = null;
   const average = new Rma();
@@ -587,7 +625,10 @@ const METHOD_LABELS: Readonly<Record<string, string>> = {
   candle_direction: 'Intrabar estimate',
 };
 
-/** @return A volume delta instance. */
+/**
+ * Creates a volume delta instance.
+ * @return A volume delta instance.
+ */
 function volumeDelta(): Study {
   let lastClose: number | null = null;
   let lastDirection = 0;
@@ -701,7 +742,10 @@ export function autoPeriod(timeframe: string): string | null {
 /** Pivot level keys in publication order. */
 const LEVELS = ['p', 'r1', 'r2', 'r3', 's1', 's2', 's3'] as const;
 
-/** @return A pivot points instance. */
+/**
+ * Creates a pivot points instance.
+ * @return A pivot points instance.
+ */
 function pivotPoints(): Study {
   let sourceStart: number | null = null;
   let applies: number | null = null;
@@ -716,7 +760,14 @@ function pivotPoints(): Study {
     if (applies === null) return;
     for (const [key, price] of Object.entries(levels)) {
       const name = `pivot:${applies}:${key}`;
-      ctx.line([applies, price], [until, price], name, color(ctx, key), 1, 'dashed');
+      ctx.line(
+        [applies, price],
+        [until, price],
+        name,
+        color(ctx, key),
+        1,
+        'dashed'
+      );
       if (ctx.input('show_labels')) {
         ctx.label(
           `${key.toUpperCase()} (${formatG6(price)})`,
@@ -804,13 +855,16 @@ const VWAP_PERIODS: Readonly<Record<string, string>> = {
   month: '1M',
 };
 
-/** @return An anchored VWAP instance. */
+/**
+ * Creates an anchored VWAP instance.
+ * @return An anchored VWAP instance.
+ */
 function anchoredVwap(): Study {
   let periodStart: number | null = null;
   let started = false;
   let outside = false;
   let bars = 0;
-  let sums = [0, 0, 0];
+  let sums: [number, number, number] = [0, 0, 0];
   const reset = () => {
     started = true;
     bars = 0;
@@ -840,14 +894,14 @@ function anchoredVwap(): Study {
       if (volume > 0) {
         const price = sourceValue(ctx.bar, ctx.str('source'));
         sums = [
-          sums[0]! + price * volume,
-          sums[1]! + volume,
-          sums[2]! + price * price * volume,
+          sums[0] + price * volume,
+          sums[1] + volume,
+          sums[2] + price * price * volume,
         ];
       }
-      if (sums[1]! > 0) {
-        vwap = sums[0]! / sums[1]!;
-        stdev = Math.sqrt(Math.max(0, sums[2]! / sums[1]! - vwap * vwap));
+      if (sums[1] > 0) {
+        vwap = sums[0] / sums[1];
+        stdev = Math.sqrt(Math.max(0, sums[2] / sums[1] - vwap * vwap));
       }
     }
     ctx.plot('VWAP', vwap, {color: ctx.str('color')});
@@ -879,7 +933,10 @@ function anchoredVwap(): Study {
   };
 }
 
-/** @return A regression channel instance. */
+/**
+ * Creates a regression channel instance.
+ * @return A regression channel instance.
+ */
 function regressionChannel(): Study {
   const rows: Array<[number, number, number, number]> = [];
   let started = false;
@@ -902,20 +959,29 @@ function regressionChannel(): Study {
         bar.low,
       ]);
       if (anchorMs <= 0) {
-        while (rows.length > ctx.num('length')) rows.shift();
+        while (rows.length > ctx.num('length')) {
+          rows.shift();
+        }
       }
     }
     if (!(ctx.isLast || (endMs > 0 && bar.end_ms > endMs))) return;
     done = true;
     if (outside) {
-      ctx.table('Regression', [['Anchor is outside the loaded bars']], 'top_left');
+      ctx.table(
+        'Regression',
+        [['Anchor is outside the loaded bars']],
+        'top_left'
+      );
       return;
     }
     if (rows.length < 2 || (anchorMs <= 0 && rows.length < ctx.num('length'))) {
       return;
     }
     const count = rows.length;
-    const origin = rows[0]![1];
+    const [head] = rows;
+    const tail = rows.at(-1);
+    if (!head || !tail) return;
+    const origin = head[1];
     const ys = rows.map(row => row[1] - origin);
     const meanY = sum(ys) / count;
     const centred = ys.map(y => y - meanY);
@@ -928,20 +994,20 @@ function regressionChannel(): Study {
     const intercept = centre - slope * meanX;
     const pearson =
       syy > 0 ? Math.min(1, Math.max(-1, sxy / Math.sqrt(sxx * syy))) : 0;
-    const values: Record<string, number> = {
-      start: centre - slope * meanX,
-      end: centre + slope * meanX,
+    const start = centre - slope * meanX;
+    const end = centre + slope * meanX;
+    const stdev = Math.sqrt(Math.max(0, syy - slope * sxy) / (count - 1));
+    const values = {
       slope,
-      stdev: Math.sqrt(Math.max(0, syy - slope * sxy) / (count - 1)),
+      stdev,
       pearson_r: pearson,
-      max_up:
-        Math.max(...rows.map((row, x) => row[2] - slope * x)) - intercept,
+      max_up: Math.max(...rows.map((row, x) => row[2] - slope * x)) - intercept,
       max_down:
         intercept - Math.min(...rows.map((row, x) => row[3] - slope * x)),
     };
-    const width = ctx.num('deviations') * values.stdev!;
-    const first = rows[0]![0];
-    const last = rows.at(-1)![0];
+    const width = ctx.num('deviations') * stdev;
+    const first = head[0];
+    const last = tail[0];
     const line = ctx.str('color');
     const band = ctx.str('band_color');
     for (const [name, shift, stroke] of [
@@ -950,8 +1016,8 @@ function regressionChannel(): Study {
       ['lower', -width, band],
     ] as const) {
       ctx.line(
-        [first, values.start! + shift],
-        [last, values.end! + shift],
+        [first, start + shift],
+        [last, end + shift],
         name,
         stroke,
         name === 'centre' ? 2 : 1
@@ -962,7 +1028,7 @@ function regressionChannel(): Study {
       ctx.label(
         pearson.toFixed(4),
         first,
-        values.start! - width,
+        start - width,
         'pearson',
         band,
         'below'
@@ -975,7 +1041,7 @@ function regressionChannel(): Study {
       ['Max up', 'max_up'],
       ['Max down', 'max_down'],
     ] as const) {
-      ctx.plot(name, values[key]!, {display: 'data_window'});
+      ctx.plot(name, values[key], {display: 'data_window'});
     }
     ctx.plot('Bars', count, {display: 'data_window'});
   };
@@ -1021,10 +1087,11 @@ export function evaluateBuiltin(scriptId: string, run: StudyRun): StudyOutput {
   }
   const ctx = new StudyContext(run);
   const study = builtin.create();
-  for (let index = 0; index < run.bars.length; index += 1) {
+  run.bars.forEach((bar, index) => {
     ctx.index = index;
+    ctx.current = bar;
     study(ctx);
-  }
+  });
   return {
     plots: [...ctx.plots].map(([name, points]) => ({name, points})),
     plot_styles: ctx.styles,

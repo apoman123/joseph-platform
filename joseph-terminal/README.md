@@ -46,7 +46,6 @@ The `Dockerfile` builds a standalone image on port 3000; pass the same variables
 | `feature-registry` | Feature manifests, lifecycle, dependencies, the `FeatureContext` |
 | `chart-core` | `ChartPort` and the Lightweight Charts adapter (its only importer) |
 | `drawing-core`, `drawing-tools` | Anchored drawings, undo, migrations, engine-series sync; 37 tools |
-| `indicator-viz` | Render-only mapping of engine indicator outputs (zones, levels, events, lines, panes) to overlays, styled by each plugin's display metadata |
 | `terminal-shell` | Workspace, sync, sessions, persistence, hotkeys |
 | `chart-trading`, `strategy-builder` | Order-ticket state machine; rule-AST editing models |
 | `mock-provider` | DEMO market, broker and strategy services |

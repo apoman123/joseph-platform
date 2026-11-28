@@ -101,7 +101,9 @@ export function nextStudyId(chart: ChartState, scriptId: string): string {
   const used = new Set(chart.studies.map(study => study.study_id));
   if (!used.has(scriptId)) return scriptId;
   let index = 2;
-  while (used.has(`${scriptId}#${index}`)) index += 1;
+  while (used.has(`${scriptId}#${index}`)) {
+    index += 1;
+  }
   return `${scriptId}#${index}`;
 }
 

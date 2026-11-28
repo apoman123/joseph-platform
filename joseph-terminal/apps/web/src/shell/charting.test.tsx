@@ -6,8 +6,8 @@
 
 /**
  * @fileoverview Component and unit tests for the charting additions:
- * indicator settings form and dialog, metadata-driven indicator layers,
- * lines and study panes, templates and compare menus, replay
+ * the study settings form and dialog, study runs on the chart, templates
+ * and compare menus, replay
  * and screenshot commands, the data window, the style bar and the object
  * list (jsdom; canvas rendering is covered by Playwright).
  */
@@ -15,12 +15,7 @@
 import {FakeChartPort, type ChartBar} from '@joseph/chart-core';
 import type {DrawingDocument} from '@joseph/contracts';
 import {createDrawing, createCommand, DrawingStore} from '@joseph/drawing-core';
-import {
-  activeChart,
-  layerSettings,
-  layerStyle,
-  layerVisible,
-} from '@joseph/terminal-shell';
+import {activeChart} from '@joseph/terminal-shell';
 import {
   act,
   fireEvent,
@@ -40,18 +35,15 @@ import {
 import {DataWindow} from './data-window';
 import {DrawingStyleBar} from './drawing-style-bar';
 import {groupTools, hotkeyHint} from './drawing-toolbar';
-import {IndicatorSettingsDialog} from './indicator-settings-dialog';
 import {
-  collectOverrides,
-  fieldLabel,
-  fieldsFromSchema,
-  initialValues,
-  parseFieldValue,
-} from './indicator-settings';
+  IndicatorSettingsDialog,
+  collectInputs,
+  studyFields,
+} from './indicator-settings-dialog';
+import {useStudyRuns} from './python-studies';
 import {useStore} from './react-bindings';
 import {RuntimeProvider} from './runtime-context';
 import {savedDockSize} from './slot-host';
-import {useStudyLines, useStudyPanes} from './study-hooks';
 import {TopBar} from './top-bar';
 
 /** DEMO configuration. */
@@ -76,90 +68,70 @@ async function demoRuntime(): Promise<TerminalRuntime> {
   return runtime;
 }
 
-const SCHEMA = {
-  type: 'object',
-  properties: {
-    length: {
-      type: 'integer',
-      default: 20,
-      minimum: 1,
-      maximum: 500,
-      description: 'Number of bars.',
-    },
-    min_coverage: {
-      type: 'string',
-      default: '0.8',
-      minimum: '0.5',
-      maximum: '1',
-      description: 'Share.',
-    },
-    source: {
-      type: 'string',
-      enum: ['close', 'hl2'],
-      default: 'close',
-      description: 'Price.',
-    },
-    enabled: {type: 'boolean', default: true, description: 'On.'},
-    tick_size: {type: 'string', default: '0', description: 'Platform.'},
-    weird: {type: 'array'},
+/** Declared inputs of a study, as the catalog lists them. */
+const INPUTS = {
+  length: {
+    default: 20,
+    title: 'Length',
+    minimum: 1,
+    maximum: 500,
+    options: null,
+    step: 1,
+    group: '',
+    tooltip: '',
+  },
+  source: {
+    default: 'close',
+    title: 'Source',
+    minimum: null,
+    maximum: null,
+    options: ['close', 'hl2'],
+    step: null,
+    group: '',
+    tooltip: '',
+  },
+  color: {
+    default: '#2962ff',
+    title: 'Color',
+    minimum: null,
+    maximum: null,
+    options: null,
+    step: null,
+    group: 'Style',
+    tooltip: '',
   },
 };
 
-describe('indicator settings form helpers', () => {
-  const fields = fieldsFromSchema(SCHEMA);
-
-  it('reads fields from the engine schema and hides platform inputs', () => {
-    expect(fields.map(f => [f.name, f.kind])).toEqual([
-      ['length', 'integer'],
-      ['min_coverage', 'decimal'],
-      ['source', 'enum'],
-      ['enabled', 'boolean'],
+describe('study settings form helpers', () => {
+  it('builds fields from declared inputs or from saved owned inputs', () => {
+    expect(studyFields(INPUTS, {}).map(f => f.name)).toEqual([
+      'length',
+      'source',
+      'color',
     ]);
-    expect(fieldsFromSchema(null)).toEqual([]);
-    expect(fieldLabel('min_coverage')).toBe('Min coverage');
+    const owned = studyFields(null, {fast: 5});
+    expect(owned.map(f => [f.name, f.spec.default])).toEqual([['fast', 5]]);
   });
 
-  it('validates bounds, decimals and choices', () => {
-    const [length, coverage, source] = fields;
-    if (!length || !coverage || !source) throw new Error('fields');
-    expect(parseFieldValue(length, '0')).toEqual({
+  it('validates bounds and colors and keeps only changed values', () => {
+    const fields = studyFields(INPUTS, {});
+    expect(
+      collectInputs(fields, {length: '30', source: 'close', color: '#2962ff'})
+    ).toEqual({ok: true, inputs: {length: 30}});
+    expect(
+      collectInputs(fields, {length: '0', source: 'hl2', color: 'red'})
+    ).toEqual({
       ok: false,
-      error: 'At least 1',
+      errors: {length: 'At least 1', color: 'Use a #rrggbb color'},
     });
-    expect(parseFieldValue(length, '2.5')).toMatchObject({ok: false});
-    expect(parseFieldValue(length, '501')).toEqual({
-      ok: false,
-      error: 'At most 500',
-    });
-    expect(parseFieldValue(coverage, '1.01')).toEqual({
-      ok: false,
-      error: 'At most 1',
-    });
-    expect(parseFieldValue(coverage, '0.4')).toEqual({
-      ok: false,
-      error: 'At least 0.5',
-    });
-    expect(parseFieldValue(coverage, '.5')).toMatchObject({ok: false});
-    expect(parseFieldValue(coverage, '0.9')).toEqual({ok: true, value: '0.9'});
-    expect(parseFieldValue(source, 'ohlc5')).toMatchObject({ok: false});
-  });
-
-  it('keeps only values that differ from the defaults', () => {
-    const values = initialValues(fields, {length: 50});
-    expect(values.length).toBe('50');
-    expect(collectOverrides(fields, {...values, min_coverage: '0.8'})).toEqual({
-      ok: true,
-      overrides: {length: 50},
-    });
-    expect(collectOverrides(fields, {...values, length: 'x'})).toMatchObject({
-      ok: false,
-      errors: {length: 'Enter a whole number'},
-    });
+    expect(
+      collectInputs(fields, {length: 'x', source: 'hl2', color: '#000000'})
+    ).toMatchObject({ok: false, errors: {length: 'Enter a number'}});
   });
 });
 
 describe('IndicatorSettingsDialog', () => {
-  it('saves validated inputs, kinds and colors on the chart layer', async () => {
+  it('saves validated inputs on the chart study and closes with Escape', async () => {
     const runtime = await demoRuntime();
     render(
       <RuntimeProvider runtime={runtime}>
@@ -170,71 +142,32 @@ describe('IndicatorSettingsDialog', () => {
       () =>
         void runtime.indicatorSettings.set({
           chartId: 'chart-1',
-          pluginId: 'volume_delta',
+          studyId: 'builtin:ema',
         })
     );
     const dialog = await screen.findByTestId('indicator-settings');
-    const coverage = await within(dialog).findByLabelText('Min coverage');
-    fireEvent.change(coverage, {target: {value: '1.5'}});
+    const length = await within(dialog).findByLabelText('Length');
+    fireEvent.change(length, {target: {value: '0'}});
     fireEvent.click(within(dialog).getByTestId('indicator-settings-save'));
-    expect(await within(dialog).findByText('At most 1')).toBeInTheDocument();
-    fireEvent.change(coverage, {target: {value: '0.9'}});
-    fireEvent.click(within(dialog).getByTestId('indicator-pane-toggle-delta'));
+    expect(within(dialog).getByText('At least 1')).toBeVisible();
+    fireEvent.change(length, {target: {value: '9'}});
     fireEvent.click(within(dialog).getByTestId('indicator-settings-save'));
-    await waitFor(
-      () => void expect(screen.queryByTestId('indicator-settings')).toBeNull()
-    );
-    const chart = activeChart(runtime.workspace.get());
-    expect(layerSettings(chart, 'volume_delta')).toEqual({
-      min_coverage: '0.9',
-    });
-    expect(layerStyle(chart, 'volume_delta').panes).toEqual({delta: false});
-  });
-
-  it('filters kinds per chart and closes with Escape', async () => {
-    const runtime = await demoRuntime();
-    render(
-      <RuntimeProvider runtime={runtime}>
-        <IndicatorSettingsDialog />
-      </RuntimeProvider>
-    );
+    expect(
+      activeChart(runtime.workspace.get()).studies.find(
+        study => study.study_id === 'builtin:ema'
+      )?.inputs
+    ).toEqual({length: 9});
+    expect(screen.queryByTestId('indicator-settings')).toBeNull();
     act(
       () =>
         void runtime.indicatorSettings.set({
           chartId: 'chart-1',
-          pluginId: 'pivot_points',
-        })
-    );
-    const dialog = await screen.findByTestId('indicator-settings');
-    // Kinds are labelled from the plugin's display metadata.
-    fireEvent.click(await within(dialog).findByRole('checkbox', {name: 'R3'}));
-    fireEvent.click(within(dialog).getByTestId('indicator-settings-save'));
-    await waitFor(
-      () => void expect(screen.queryByTestId('indicator-settings')).toBeNull()
-    );
-    const layer = activeChart(runtime.workspace.get()).indicator_layers.find(
-      l => l.plugin_id === 'pivot_points'
-    );
-    expect(layer?.kinds).toEqual([
-      'PIVOT_P',
-      'PIVOT_R1',
-      'PIVOT_R2',
-      'PIVOT_S1',
-      'PIVOT_S2',
-      'PIVOT_S3',
-    ]);
-    act(
-      () =>
-        void runtime.indicatorSettings.set({
-          chartId: 'chart-1',
-          pluginId: 'pivot_points',
+          studyId: 'builtin:volume_delta',
         })
     );
     await screen.findByTestId('indicator-settings');
     fireEvent.keyDown(window, {key: 'Escape'});
-    await waitFor(
-      () => void expect(screen.queryByTestId('indicator-settings')).toBeNull()
-    );
+    expect(screen.queryByTestId('indicator-settings')).toBeNull();
   });
 });
 
@@ -277,11 +210,11 @@ describe('TopBar chart tools', () => {
 
     fireEvent.click(screen.getByTestId('indicators-menu'));
     fireEvent.click(
-      await screen.findByTestId('indicator-settings-pivot_points')
+      await screen.findByTestId('study-settings-builtin:pivot_points')
     );
     expect(runtime.indicatorSettings.get()).toEqual({
       chartId: 'chart-1',
-      pluginId: 'pivot_points',
+      studyId: 'builtin:pivot_points',
     });
     fireEvent.click(screen.getByTestId('session-separators-toggle'));
     expect(activeChart(runtime.workspace.get()).session_separators).toBe(true);
@@ -363,20 +296,7 @@ describe('DataWindow', () => {
         timeframe="5m"
         previousClose={100}
         tickSize="0.1"
-        delta={
-          new Map([
-            [
-              bar.timeMs,
-              {
-                timeMs: bar.timeMs,
-                value: -22.5,
-                method: 'estimate' as const,
-                buyVolume: null,
-                sellVolume: null,
-              },
-            ],
-          ])
-        }
+        studyRows={[{key: 'delta', label: 'Delta %', value: '−22.50%'}]}
         compare={[
           {
             instrumentId: 'mock:perp:ETHUSD',
@@ -535,9 +455,9 @@ describe('drawing editing UI', () => {
 });
 
 /**
- * Mounts the study hooks of the active chart on a fake chart port.
+ * Runs the active chart's studies on a fake chart port.
  * @param props Runtime and port.
- * @return Nothing; the hooks draw on the port.
+ * @return Nothing; the hook draws on the port.
  */
 function Studies({
   runtime,
@@ -547,85 +467,49 @@ function Studies({
   port: FakeChartPort;
 }): null {
   const chart = activeChart(useStore(runtime.workspace));
-  useStudyPanes(port, chart, runtime, null);
-  useStudyLines(port, chart, runtime, null);
+  useStudyRuns(port, chart, runtime, Date.now());
   return null;
 }
 
-describe('indicator studies from plugin metadata', () => {
-  it('registers record layers and toggle commands from the catalogue', async () => {
-    const runtime = await demoRuntime();
-    await waitFor(
-      () =>
-        void expect(runtime.commands.list().map(c => c.id)).toContain(
-          'indicators.toggle.pivot_points'
-        )
-    );
-    const ids = runtime.commands.list().map(c => c.id);
-    // Plot-only plugins get a toggle; drawing-only plugins get none.
-    expect(ids).toContain('indicators.toggle.ema');
-    expect(ids).not.toContain('indicators.toggle.regression_channel');
-    await runtime.commands.execute('indicators.toggle.rsi');
-    expect(layerVisible(activeChart(runtime.workspace.get()), 'rsi')).toBe(
-      true
-    );
-  });
-
-  it('draws price lines and declared panes for visible plugins', async () => {
+describe('chart studies', () => {
+  it('draws overlay studies on the price pane and others in panes', async () => {
     const runtime = await demoRuntime();
     const port = new FakeChartPort();
     render(<Studies runtime={runtime} port={port} />);
-    // EMA is visible by default and plots on the price pane.
+    // EMA and pivot points overlay the price pane; volume delta has a pane.
     await waitFor(
-      () => void expect(port.canvasLayers.has('study-lines:ema')).toBe(true)
+      () =>
+        void expect(port.canvasLayers.has('study:chart-1:builtin:ema')).toBe(
+          true
+        )
     );
-    await waitFor(() => void expect(port.invalidations).toBeGreaterThan(0));
-    expect(port.studyPanes.has('rsi:rsi')).toBe(false);
+    const delta = 'study:chart-1:builtin:volume_delta';
+    await waitFor(() => void expect(port.studyPanes.has(delta)).toBe(true));
+    expect(port.studyPanes.get(delta)).toMatchObject({style: 'histogram'});
+    expect(port.studyPanes.get(delta)?.points.length).toBeGreaterThan(0);
     act(
       () =>
         void runtime.dispatch({
-          type: 'setIndicatorLayer',
+          type: 'updateStudy',
           chartId: 'chart-1',
-          pluginId: 'rsi',
-          visible: true,
+          studyId: 'builtin:ema',
+          patch: {visible: false},
         })
     );
     await waitFor(
       () =>
-        void expect(
-          port.studyPanes.get('rsi:rsi')?.points.length
-        ).toBeGreaterThan(0)
-    );
-    expect(port.studyPanes.get('rsi:rsi')).toMatchObject({
-      title: 'RSI',
-      style: 'line',
-    });
-    expect(port.studyPanes.get('rsi:rsi')?.levels?.map(l => l.value)).toEqual([
-      70, 50, 30,
-    ]);
-    act(
-      () =>
-        void runtime.dispatch({
-          type: 'setIndicatorLayerConfig',
-          chartId: 'chart-1',
-          pluginId: 'rsi',
-          patch: {style: {panes: {rsi: false}}},
-        })
-    );
-    await waitFor(
-      () => void expect(port.studyPanes.has('rsi:rsi')).toBe(false)
+        void expect(port.canvasLayers.has('study:chart-1:builtin:ema')).toBe(
+          false
+        )
     );
     act(
       () =>
         void runtime.dispatch({
-          type: 'setIndicatorLayer',
+          type: 'removeStudy',
           chartId: 'chart-1',
-          pluginId: 'ema',
-          visible: false,
+          studyId: 'builtin:volume_delta',
         })
     );
-    await waitFor(
-      () => void expect(port.canvasLayers.has('study-lines:ema')).toBe(false)
-    );
+    await waitFor(() => void expect(port.studyPanes.has(delta)).toBe(false));
   });
 });

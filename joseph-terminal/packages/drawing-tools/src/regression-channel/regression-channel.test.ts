@@ -46,12 +46,12 @@ const CHANNEL: DrawingSeriesPoint = {
     'upper.to_price': '170',
     'lower.from_price': '130',
     'lower.to_price': '150',
-    Slope: '2.5',
-    Stdev: '5',
+    'Slope': '2.5',
+    'Stdev': '5',
     "Pearson's R": '0.8734',
     'Max up': '7',
     'Max down': '6',
-    Bars: '9',
+    'Bars': '9',
   },
 };
 

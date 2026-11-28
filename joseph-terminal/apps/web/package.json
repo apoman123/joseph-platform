@@ -19,7 +19,6 @@
     "@joseph/chart-core": "workspace:*",
     "@joseph/drawing-core": "workspace:*",
     "@joseph/drawing-tools": "workspace:*",
-    "@joseph/indicator-viz": "workspace:*",
     "@joseph/terminal-shell": "workspace:*",
     "@joseph/chart-trading": "workspace:*",
     "@joseph/strategy-builder": "workspace:*",

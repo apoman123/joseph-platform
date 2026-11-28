@@ -4,41 +4,34 @@
  * SPDX-License-Identifier: MIT
  */
 
-/** @fileoverview Searchable indicator library with personal and saved categories. */
+/**
+ * @fileoverview Indicator picker: the engine's built-in and plugin
+ * indicator scripts and the user's own scripts, with search, catalog
+ * categories and a starred collection. Adding a script appends a study to
+ * the chart; the chart's studies are listed under Chart options.
+ */
 
 'use client';
 import type {
+  CatalogScript,
   ChartState,
-  IndicatorPluginInfo,
   WorkspaceDocument,
 } from '@joseph/contracts';
-import {layerPlugins} from '@joseph/indicator-viz';
-import {BookOpen, Code2, Layers, Search, Star, X} from 'lucide-react';
+import {BookOpen, Code2, Layers, Puzzle, Search, Star, X} from 'lucide-react';
 import {useEffect, useRef, useState, type ReactElement} from 'react';
 import {createPortal} from 'react-dom';
-import {loadIndicatorPlugins} from './indicator-plugins';
-import {LayersMenu, PluginRow} from './layers-menu';
+import {LayersMenu} from './layers-menu';
+import {attachPython, editPython, pythonState} from './python-state';
 import {useStore} from './react-bindings';
 import {useRuntime} from './runtime-context';
-import {attachPython, editPython, pythonState} from './python-state';
+import {catalogStudy, loadStudyCatalog} from './study-catalog';
 
-/** Built-ins shipped with the engine; additional installed plugins are personal. */
-const BUILT_INS = new Set([
-  'sma',
-  'ema',
-  'anchored_vwap',
-  'regression_channel',
-  'bollinger_bands',
-  'rsi',
-  'atr',
-  'volume_delta',
-  'pivot_points',
-]);
 /** Workspace panel key storing the user's starred indicator identifiers. */
 export const INDICATOR_COLLECTION_KEY = 'shell.indicator-collection';
-/** Library categories in navigation order. */
+/** Library sections in navigation order. */
 const CATEGORIES = [
-  {id: 'default', title: 'Default indicators', icon: BookOpen},
+  {id: 'builtin', title: 'Built-ins', icon: BookOpen},
+  {id: 'plugin', title: 'Plugins', icon: Puzzle},
   {id: 'scripts', title: 'My scripts', icon: Code2},
   {id: 'collection', title: 'My collection', icon: Star},
 ] as const;
@@ -123,11 +116,10 @@ function IndicatorLibrary({
     workspace.charts.find(item => item.chart_id === requestedChart.chart_id) ??
     requestedChart;
   const favorites = indicatorCollection(workspace);
-  const [category, setCategory] = useState<Category>('default');
+  const [category, setCategory] = useState<Category>('builtin');
+  const [section, setSection] = useState('');
   const [query, setQuery] = useState('');
-  const [plugins, setPlugins] = useState<readonly IndicatorPluginInfo[] | null>(
-    null
-  );
+  const [plugins, setPlugins] = useState<readonly CatalogScript[] | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [retry, setRetry] = useState(0);
   const input = useRef<HTMLInputElement>(null);
@@ -141,10 +133,10 @@ function IndicatorLibrary({
   }, []);
   useEffect(() => {
     let alive = true;
-    loadIndicatorPlugins(runtime).then(
+    loadStudyCatalog(runtime).then(
       list => {
         if (alive) {
-          setPlugins(layerPlugins(list));
+          setPlugins(list);
           setError(null);
         }
       },
@@ -162,20 +154,32 @@ function IndicatorLibrary({
       alive = false;
     };
   }, [runtime, retry]);
+  const sections = [
+    ...new Set(
+      (plugins ?? [])
+        .filter(info => info.origin === category)
+        .map(info => info.category)
+        .filter(Boolean)
+    ),
+  ].sort();
   const matches = (plugins ?? []).filter(info => {
-    if (category === 'default' && !BUILT_INS.has(info.plugin_id)) return false;
-    if (category === 'scripts' && BUILT_INS.has(info.plugin_id)) return false;
-    if (category === 'collection' && !favorites.includes(info.plugin_id)) {
+    if (category === 'scripts') return false;
+    if (category === 'collection') {
+      if (!favorites.includes(info.script_id)) return false;
+    } else if (info.origin !== category) return false;
+    if (section && category !== 'collection' && info.category !== section) {
       return false;
     }
-    return `${info.display_name} ${info.plugin_id} ${info.description}`
+    return `${info.title} ${info.short_title} ${info.script_id} ${info.category} ${info.description}`
       .toLowerCase()
       .includes(query.trim().toLowerCase());
   });
+  const onChart = (scriptId: string) =>
+    chart.studies.filter(study => study.script_id === scriptId).length;
   const managed = (owned?.scripts ?? []).filter(
     script =>
       ['indicator', 'strategy', 'alert'].includes(script.kind) &&
-      category !== 'default' &&
+      (category === 'scripts' || category === 'collection') &&
       (category !== 'collection' ||
         favorites.includes(`python:${script.script_id}`)) &&
       `${script.name} ${script.script_id}`
@@ -184,6 +188,7 @@ function IndicatorLibrary({
   );
   const selectCategory = (next: Category) => {
     setCategory(next);
+    setSection('');
     setQuery('');
   };
   return (
@@ -303,6 +308,24 @@ function IndicatorLibrary({
             role="tabpanel"
             aria-labelledby={`indicator-category-${category}`}
           >
+            {sections.length > 1 && (
+              <label className="indicator-library__section">
+                <span className="sr-only">Category</span>
+                <select
+                  className="j-select"
+                  aria-label="Indicator category"
+                  value={section}
+                  onChange={event => void setSection(event.target.value)}
+                >
+                  <option value="">All categories</option>
+                  {sections.map(name => (
+                    <option key={name} value={name}>
+                      {name}
+                    </option>
+                  ))}
+                </select>
+              </label>
+            )}
             {error ? (
               <div className="j-empty" role="alert">
                 <p>{error}</p>
@@ -324,52 +347,85 @@ function IndicatorLibrary({
                   {query
                     ? 'No indicators found'
                     : category === 'scripts'
-                      ? 'No custom scripts yet'
-                      : 'Your collection is empty'}
+                      ? 'No scripts yet'
+                      : category === 'plugin'
+                        ? 'No plugins installed'
+                        : 'Your collection is empty'}
                 </h3>
                 <p>
                   {query
                     ? 'Try a different name or description.'
                     : category === 'scripts'
-                      ? 'Your installed custom indicator plugins appear here.'
-                      : 'Star an indicator to save it to your collection.'}
+                      ? 'Indicators you write in the Python editor appear here.'
+                      : category === 'plugin'
+                        ? 'Indicator packages the operator installs appear here.'
+                        : 'Star an indicator to save it to your collection.'}
                 </p>
               </div>
             ) : (
-              matches.map(info => (
-                <div key={info.plugin_id} className="indicator-library__entry">
-                  <button
-                    type="button"
-                    className={`j-btn j-btn--ghost j-btn--icon indicator-library__star ${favorites.includes(info.plugin_id) ? 'indicator-library__star--saved' : ''}`}
-                    aria-label={`Collect ${info.display_name}`}
-                    aria-pressed={favorites.includes(info.plugin_id)}
-                    title="Save to My collection"
-                    onClick={() =>
-                      void runtime.dispatch({
-                        type: 'setPanel',
-                        featureId: INDICATOR_COLLECTION_KEY,
-                        state: favorites.includes(info.plugin_id)
-                          ? favorites.filter(id => id !== info.plugin_id)
-                          : [...favorites, info.plugin_id],
-                      })
-                    }
+              matches.map(info => {
+                const saved = favorites.includes(info.script_id);
+                const count = onChart(info.script_id);
+                return (
+                  <div
+                    key={info.script_id}
+                    className="indicator-library__entry"
                   >
-                    <Star
-                      size={16}
-                      fill={
-                        favorites.includes(info.plugin_id)
-                          ? 'currentColor'
-                          : 'none'
+                    <button
+                      type="button"
+                      className={`j-btn j-btn--ghost j-btn--icon indicator-library__star ${saved ? 'indicator-library__star--saved' : ''}`}
+                      aria-label={`Collect ${info.title}`}
+                      aria-pressed={saved}
+                      title="Save to My collection"
+                      onClick={() =>
+                        void runtime.dispatch({
+                          type: 'setPanel',
+                          featureId: INDICATOR_COLLECTION_KEY,
+                          state: saved
+                            ? favorites.filter(id => id !== info.script_id)
+                            : [...favorites, info.script_id],
+                        })
                       }
-                      aria-hidden="true"
-                    />
-                  </button>
-                  <div className="indicator-library__study">
-                    <PluginRow chart={chart} info={info} />
-                    <p>{info.description}</p>
+                    >
+                      <Star
+                        size={16}
+                        fill={saved ? 'currentColor' : 'none'}
+                        aria-hidden="true"
+                      />
+                    </button>
+                    <div className="indicator-library__study">
+                      <strong>
+                        {info.title}{' '}
+                        <span className="j-muted">{info.short_title}</span>
+                      </strong>
+                      <p>
+                        {[
+                          info.category,
+                          info.origin === 'plugin' ? info.package : null,
+                          count ? `${count} on chart` : null,
+                        ]
+                          .filter(Boolean)
+                          .join(' · ')}
+                      </p>
+                      <p>{info.description}</p>
+                      <button
+                        type="button"
+                        className="j-btn"
+                        data-testid={`add-study-${info.script_id}`}
+                        onClick={() =>
+                          void runtime.dispatch({
+                            type: 'addStudy',
+                            chartId: chart.chart_id,
+                            study: catalogStudy(chart, info),
+                          })
+                        }
+                      >
+                        Add {info.short_title || info.title}
+                      </button>
+                    </div>
                   </div>
-                </div>
-              ))
+                );
+              })
             )}
             {managed.map(script => (
               <div
@@ -430,7 +486,7 @@ function IndicatorLibrary({
                 </div>
               </div>
             ))}
-            {category !== 'default' && owned?.next_offset != null && (
+            {category === 'scripts' && owned?.next_offset != null && (
               <button
                 className="j-btn"
                 onClick={() =>
@@ -466,7 +522,7 @@ function IndicatorLibrary({
         </div>
         <details className="indicator-library__options" open>
           <summary>Chart options</summary>
-          <LayersMenu chart={chart} showPlugins={false} />
+          <LayersMenu chart={chart} />
         </details>
       </div>
     </div>

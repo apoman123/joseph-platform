@@ -101,24 +101,28 @@ describe('indicator library', () => {
       name: 'Search indicators',
     });
     expect(query).toHaveFocus();
-    const rsi = await within(dialog).findByRole('checkbox', {name: 'RSI'});
-    fireEvent.change(query, {target: {value: 'RSI'}});
-    expect(within(dialog).queryByRole('checkbox', {name: 'EMA'})).toBeNull();
-    fireEvent.click(rsi);
+    const add = await within(dialog).findByTestId('add-study-builtin:rsi');
+    fireEvent.change(query, {target: {value: 'Relative'}});
+    expect(within(dialog).queryByTestId('add-study-builtin:ema')).toBeNull();
+    fireEvent.click(add);
     expect(
-      activeChart(runtime.workspace.get()).indicator_layers.find(
-        layer => layer.plugin_id === 'rsi'
+      activeChart(runtime.workspace.get()).studies.find(
+        study => study.script_id === 'builtin:rsi'
       )?.visible
     ).toBe(true);
-    fireEvent.click(within(dialog).getByRole('button', {name: 'Collect RSI'}));
+    fireEvent.click(
+      within(dialog).getByRole('button', {
+        name: 'Collect Relative Strength Index',
+      })
+    );
     fireEvent.click(within(dialog).getByRole('tab', {name: /My collection/}));
-    expect(within(dialog).getByRole('checkbox', {name: 'RSI'})).toBeChecked();
+    expect(within(dialog).getByTestId('add-study-builtin:rsi')).toBeVisible();
     runtime.flush();
     expect(
       indicatorCollection(createRuntime(() => [], DEMO).workspace.get())
-    ).toEqual(['rsi']);
+    ).toEqual(['builtin:rsi']);
     fireEvent.click(within(dialog).getByRole('tab', {name: 'My scripts'}));
-    expect(within(dialog).getByText('No custom scripts yet')).toBeVisible();
+    expect(within(dialog).getByText('No scripts yet')).toBeVisible();
     fireEvent.keyDown(dialog, {key: 'Escape'});
     expect(screen.queryByRole('dialog')).toBeNull();
     expect(screen.getByRole('button', {name: 'Indicators'})).toHaveFocus();
@@ -126,16 +130,24 @@ describe('indicator library', () => {
     runtime.flush();
   });
 
-  it('lists installed custom indicator plugins under My scripts', async () => {
+  it('lists installed plugin indicators under Plugins', async () => {
     const runtime = createRuntime(() => [], DEMO);
-    const list = await runtime.clients.market.listIndicatorPlugins();
-    const rsi = list.plugins.find(plugin => plugin.plugin_id === 'rsi');
+    const list = await runtime.clients.studies.catalog('indicator');
+    const rsi = list.scripts.find(script => script.script_id === 'builtin:rsi');
     if (!rsi) throw new Error('Missing RSI fixture');
-    vi.spyOn(runtime.clients.market, 'listIndicatorPlugins').mockResolvedValue({
-      plugins: [
-        ...list.plugins,
-        {...rsi, plugin_id: 'my_momentum', display_name: 'My momentum'},
+    vi.spyOn(runtime.clients.studies, 'catalog').mockResolvedValue({
+      scripts: [
+        ...list.scripts,
+        {
+          ...rsi,
+          script_id: 'plugin:acme:momentum',
+          origin: 'plugin',
+          package: 'acme-indicators',
+          title: 'My momentum',
+          short_title: 'MOM',
+        },
       ],
+      failures: [],
     });
     render(
       <RuntimeProvider runtime={runtime}>
@@ -143,10 +155,13 @@ describe('indicator library', () => {
       </RuntimeProvider>
     );
     fireEvent.click(screen.getByRole('button', {name: 'Indicators'}));
-    fireEvent.click(screen.getByRole('tab', {name: 'My scripts'}));
-    expect(
-      await screen.findByRole('checkbox', {name: 'My momentum'})
-    ).toBeVisible();
-    expect(screen.queryByRole('checkbox', {name: 'RSI'})).toBeNull();
+    fireEvent.click(screen.getByRole('tab', {name: 'Plugins'}));
+    const add = await screen.findByTestId('add-study-plugin:acme:momentum');
+    expect(add).toBeVisible();
+    expect(screen.queryByTestId('add-study-builtin:rsi')).toBeNull();
+    fireEvent.click(add);
+    expect(activeChart(runtime.workspace.get()).studies.at(-1)?.script_id).toBe(
+      'plugin:acme:momentum'
+    );
   });
 });

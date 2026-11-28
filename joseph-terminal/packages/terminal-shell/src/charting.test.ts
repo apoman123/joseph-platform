@@ -222,7 +222,9 @@ describe('schema v1 migration', () => {
 
   it('migrates stored v1 workspaces, layers and attachments', () => {
     const current = workspace();
-    const {studies: _studies, ...chart} = current.charts[0]!;
+    const [first] = current.charts;
+    if (!first) throw new Error('no chart');
+    const {studies: _studies, ...chart} = first;
     const v1 = {
       ...current,
       schema_version: 1,
@@ -237,9 +239,16 @@ describe('schema v1 migration', () => {
       ],
       panels: {
         'python.chart-1': [
-          {script_id: 'mine', version: 2, name: 'Mine', visible: true, inputs: {}, colors: {}},
+          {
+            script_id: 'mine',
+            version: 2,
+            name: 'Mine',
+            visible: true,
+            inputs: {},
+            colors: {},
+          },
         ],
-        other: {kept: true},
+        'other': {kept: true},
       },
     };
     const migrated = migrateWorkspaceV1(v1) as typeof current;
@@ -278,9 +287,9 @@ describe('schema v1 migration', () => {
     );
     const [template] = new TemplateRepository(storage).list();
     expect(template?.schema_version).toBe(2);
-    expect(template?.presentation.studies.map(study => study.script_id)).toEqual(
-      ['builtin:rsi']
-    );
+    expect(
+      template?.presentation.studies.map(study => study.script_id)
+    ).toEqual(['builtin:rsi']);
   });
 });
 

@@ -13,8 +13,7 @@
 
 import type {ChartBar} from '@joseph/chart-core';
 import type {VenueStatusList} from '@joseph/contracts';
-import {activeChart, layerSettings} from '@joseph/terminal-shell';
-import {DemoMarketDataClient} from '@joseph/mock-provider';
+import {activeChart} from '@joseph/terminal-shell';
 import {
   act,
   fireEvent,
@@ -34,7 +33,6 @@ import {ChartGrid} from './chart-grid';
 import {DataWindow} from './data-window';
 import {DetachedBanner} from './detached';
 import {IndicatorSettingsDialog} from './indicator-settings-dialog';
-import {fieldsFromSchema} from './indicator-settings';
 import {RuntimeProvider} from './runtime-context';
 import {TopBar} from './top-bar';
 
@@ -181,21 +179,8 @@ describe('timeframe menu', () => {
   });
 });
 
-describe('delta source input', () => {
-  it('comes from the plugin input schema', async () => {
-    const {plugins} = await new DemoMarketDataClient().listIndicatorPlugins();
-    const delta = plugins.find(p => p.plugin_id === 'volume_delta');
-    const field = fieldsFromSchema(delta?.input_schema).find(
-      f => f.name === 'delta_source'
-    );
-    expect(field).toMatchObject({
-      kind: 'enum',
-      defaultValue: 'auto',
-      choices: ['auto', 'estimate'],
-    });
-  });
-
-  it('is offered generically by the settings dialog and saved', async () => {
+describe('volume delta inputs', () => {
+  it('are offered generically by the settings dialog and saved', async () => {
     const runtime = await demoRuntime();
     render(
       <RuntimeProvider runtime={runtime}>
@@ -206,24 +191,27 @@ describe('delta source input', () => {
       () =>
         void runtime.indicatorSettings.set({
           chartId: 'chart-1',
-          pluginId: 'volume_delta',
+          studyId: 'builtin:volume_delta',
         })
     );
     const dialog = await screen.findByTestId('indicator-settings');
-    const source = await within(dialog).findByLabelText('Delta source');
+    const source = await within(dialog).findByLabelText('Intrabar timeframe');
     expect(
       within(source)
         .getAllByRole('option')
         .map(o => o.textContent)
-    ).toEqual(['auto', 'estimate']);
-    fireEvent.change(source, {target: {value: 'estimate'}});
+    ).toEqual(['auto', '1s', '5s', '15s', '1m', '3m', '5m', '15m']);
+    fireEvent.click(within(dialog).getByLabelText('Use venue buy volume'));
+    fireEvent.change(source, {target: {value: '1m'}});
     fireEvent.click(within(dialog).getByTestId('indicator-settings-save'));
     await waitFor(
       () => void expect(screen.queryByTestId('indicator-settings')).toBeNull()
     );
     expect(
-      layerSettings(activeChart(runtime.workspace.get()), 'volume_delta')
-    ).toEqual({delta_source: 'estimate'});
+      activeChart(runtime.workspace.get()).studies.find(
+        study => study.study_id === 'builtin:volume_delta'
+      )?.inputs
+    ).toEqual({use_buy_volume: false, intrabar_tf: '1m'});
   });
 });
 
@@ -238,27 +226,17 @@ describe('data window', () => {
     final: true,
   };
 
-  it('labels true delta with buy and sell volume and the month close', () => {
+  it('lists study values and the month close', () => {
     render(
       <DataWindow
         bar={bar}
         timeframe="1M"
         previousClose={100}
         tickSize="0.1"
-        delta={
-          new Map([
-            [
-              bar.timeMs,
-              {
-                timeMs: bar.timeMs,
-                value: 12.5,
-                method: 'true' as const,
-                buyVolume: '7.03',
-                sellVolume: '5.47',
-              },
-            ],
-          ])
-        }
+        studyRows={[
+          {key: 'buy', label: 'Delta % Buy volume', value: '7.03'},
+          {key: 'sell', label: 'Delta % Sell volume', value: '5.47'},
+        ]}
         compare={[]}
         label={id => id}
       />
@@ -267,12 +245,11 @@ describe('data window', () => {
     expect(panel).toHaveTextContent('Feb 2026');
     // February 2026 closes on March 1st, 28 days later.
     expect(panel).toHaveTextContent('Closes2026-03-01 00:00 UTC');
-    expect(panel).toHaveTextContent('Delta sourceTrue (taker volume)');
-    expect(panel).toHaveTextContent('Buy volume7.03');
-    expect(panel).toHaveTextContent('Sell volume5.47');
+    expect(panel).toHaveTextContent('Delta % Buy volume7.03');
+    expect(panel).toHaveTextContent('Delta % Sell volume5.47');
   });
 
-  it('labels estimates and shows seconds on sub-minute bars', () => {
+  it('shows seconds on sub-minute bars', () => {
     const second = {...bar, timeMs: Date.UTC(2026, 10, 22, 14, 3, 45)};
     render(
       <DataWindow
@@ -280,20 +257,6 @@ describe('data window', () => {
         timeframe="5s"
         previousClose={null}
         tickSize="0.1"
-        delta={
-          new Map([
-            [
-              second.timeMs,
-              {
-                timeMs: second.timeMs,
-                value: -4,
-                method: 'estimate' as const,
-                buyVolume: null,
-                sellVolume: null,
-              },
-            ],
-          ])
-        }
         compare={[]}
         label={id => id}
       />
@@ -301,7 +264,6 @@ describe('data window', () => {
     const panel = screen.getByTestId('data-window');
     expect(panel).toHaveTextContent('2026-11-22 14:03:45 UTC');
     expect(panel).toHaveTextContent('Closes14:03:50 UTC');
-    expect(panel).toHaveTextContent('Delta sourceEstimate');
     expect(panel).not.toHaveTextContent('Buy volume');
   });
 });

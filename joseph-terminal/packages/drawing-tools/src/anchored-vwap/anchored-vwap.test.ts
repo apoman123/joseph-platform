@@ -62,11 +62,11 @@ function point(minute: number, vwap: number | null): DrawingSeriesPoint {
   return {
     bar_start_ms: minute * 60_000,
     values: {
-      VWAP: vwap === null ? null : String(vwap),
-      Stdev: vwap === null ? null : '2',
+      'VWAP': vwap === null ? null : String(vwap),
+      'Stdev': vwap === null ? null : '2',
       'Upper 1': vwap === null ? null : String(vwap + 2),
       'Lower 1': vwap === null ? null : String(vwap - 2),
-      Bars: vwap === null ? null : String(minute - 1),
+      'Bars': vwap === null ? null : String(minute - 1),
     },
   };
 }

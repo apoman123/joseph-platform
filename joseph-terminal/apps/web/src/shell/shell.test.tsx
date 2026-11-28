@@ -106,7 +106,7 @@ describe('TopBar', () => {
     expect(screen.getByTestId('order-mode')).toHaveTextContent('Paper trading');
   });
 
-  it('toggles indicator layers per chart', async () => {
+  it('adds built-in studies and toggles them per chart', async () => {
     const runtime = await demoRuntime();
     render(
       <RuntimeProvider runtime={runtime}>
@@ -114,25 +114,23 @@ describe('TopBar', () => {
       </RuntimeProvider>
     );
     fireEvent.click(screen.getByTestId('indicators-menu'));
-    const checkbox = await screen.findByRole('checkbox', {name: 'RSI'});
-    expect(checkbox).not.toBeChecked();
-    // Plugins without a layer (drawing tools only) are not listed.
-    expect(screen.queryByTestId('layer-toggle-regression_channel')).toBeNull();
-    fireEvent.click(checkbox);
+    fireEvent.click(await screen.findByTestId('add-study-builtin:rsi'));
     const chart = runtime.workspace.get().charts[0];
-    expect(
-      chart?.indicator_layers.find(l => l.plugin_id === 'rsi')?.visible
-    ).toBe(true);
-    // A visible plugin offers a toggle per declared pane.
-    const pane = await screen.findByTestId('study-pane-toggle-rsi-rsi');
-    expect(pane).toBeChecked();
-    fireEvent.click(pane);
+    expect(chart?.studies.map(study => study.study_id)).toEqual([
+      'builtin:ema',
+      'builtin:volume_delta',
+      'builtin:pivot_points',
+      'builtin:rsi',
+    ]);
+    const toggle = await screen.findByTestId('layer-toggle-builtin:rsi');
+    expect(toggle).toBeChecked();
+    fireEvent.click(toggle);
     expect(
       runtime.workspace
         .get()
-        .charts[0]?.indicator_layers.find(l => l.plugin_id === 'rsi')?.style
-    ).toEqual({panes: {rsi: false}});
-    expect(screen.getByTestId('delta-pane-toggle')).toBeChecked();
+        .charts[0]?.studies.find(study => study.study_id === 'builtin:rsi')
+        ?.visible
+    ).toBe(false);
   });
 });
 

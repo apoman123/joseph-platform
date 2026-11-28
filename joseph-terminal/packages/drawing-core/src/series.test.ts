@@ -49,7 +49,11 @@ const TOOL: ToolPlugin = {
     const anchor = doc.anchors[0];
     if (!anchor) return null;
     const bar = barStartAt(anchor.time_ms, timeframe);
-    return {scriptId: 'builtin:engine_line', fromMs: bar, inputs: {anchor_ms: bar}};
+    return {
+      scriptId: 'builtin:engine_line',
+      fromMs: bar,
+      inputs: {anchor_ms: bar},
+    };
   },
 };
 
@@ -110,7 +114,12 @@ function response(query: DrawingSeriesQuery): ScriptResult {
       {
         id: 'centre',
         kind: 'line',
-        data: {from_ms: from, from_price: 1.5, to_ms: from + 60_000, to_price: 2.5},
+        data: {
+          from_ms: from,
+          from_price: 1.5,
+          to_ms: from + 60_000,
+          to_price: 2.5,
+        },
       },
     ],
     bar_closes: {[from]: from + 60_000, [from + 60_000]: from + 120_000},
@@ -219,7 +228,7 @@ describe('DrawingSeriesSync', () => {
     expect(state?.points.map(p => p.bar_start_ms)).toEqual([120_000, 180_000]);
     expect(state?.points[0]?.values).toEqual({v: '1', n: '3'});
     expect(state?.points[1]?.values).toEqual({
-      v: '2',
+      'v': '2',
       'centre.from_price': '1.5',
       'centre.to_price': '2.5',
       'centre.from_ms': 120_000,

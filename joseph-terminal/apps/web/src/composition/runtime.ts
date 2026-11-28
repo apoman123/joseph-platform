@@ -153,12 +153,12 @@ export interface DrawingSelection {
   drawingId: string;
 }
 
-/** Request to open the indicator settings dialog. */
+/** Request to open a chart study's settings dialog. */
 export interface IndicatorSettingsRequest {
-  /** Chart whose layer is configured. */
+  /** Chart whose study is configured. */
   chartId: string;
-  /** Indicator plugin id, e.g. `volume_delta`. */
-  pluginId: string;
+  /** Study id, e.g. `builtin:volume_delta`. */
+  studyId: string;
 }
 
 /** Window actions for detached panes (main window only). */

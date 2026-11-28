@@ -139,13 +139,7 @@ export class DemoStudyClient implements StudyClient {
    * @return One result or error per study.
    */
   async runBatch(body: ScriptBatchRun): Promise<ScriptBatchResult> {
-    const batch = await this.market.getCandles({
-      instrumentId: body.instrument_id,
-      timeframe: body.tf,
-      limit: Math.min(body.limit ?? 500, 2000),
-      ...(body.to_ms ? {toMs: body.to_ms} : {}),
-    });
-    const bars = batch.candles
+    const bars = (await this.candles(body))
       .filter(candle => candle.is_final || body.include_open)
       .map(studyBar);
     const results: ScriptBatchEntry[] = [];
@@ -153,7 +147,12 @@ export class DemoStudyClient implements StudyClient {
       try {
         results.push({
           script_id: run.script_id,
-          result: await this.runOne(body, run.script_id, run.inputs ?? {}, bars),
+          result: await this.runOne(
+            body,
+            run.script_id,
+            run.inputs ?? {},
+            bars
+          ),
           error: null,
         });
       } catch (failure) {
@@ -165,6 +164,44 @@ export class DemoStudyClient implements StudyClient {
       }
     }
     return {results};
+  }
+
+  /**
+   * Fetches the chart candles of a run like the engine: the newest `limit`
+   * bars, from `from_ms` when given (in DEMO pages of 2 000 bars).
+   * @param body Run settings.
+   * @return Candles, oldest first.
+   */
+  private async candles(body: ScriptBatchRun): Promise<Candle[]> {
+    const limit = Math.min(body.limit ?? 500, 5000);
+    if (body.from_ms === null || body.from_ms === undefined) {
+      const batch = await this.market.getCandles({
+        instrumentId: body.instrument_id,
+        timeframe: body.tf,
+        limit: Math.min(limit, 2000),
+        ...(body.to_ms ? {toMs: body.to_ms} : {}),
+      });
+      return batch.candles;
+    }
+    const calendar = demoSpecCalendar(demoSpec(body.instrument_id));
+    const collected: Candle[] = [];
+    let cursor = calendar.floor(body.tf, body.from_ms);
+    for (let page = 0; page < 30; page += 1) {
+      const toMs = calendar.shift(body.tf, cursor, 2000);
+      const batch = await this.market.getCandles({
+        instrumentId: body.instrument_id,
+        timeframe: body.tf,
+        fromMs: cursor,
+        toMs: body.to_ms ? Math.min(toMs, body.to_ms) : toMs,
+      });
+      const fresh = batch.candles.filter(
+        candle => candle.start_ms >= cursor && candle.start_ms < toMs
+      );
+      collected.push(...fresh);
+      if (fresh.length < 2000) break;
+      cursor = toMs;
+    }
+    return collected.slice(-limit);
   }
 
   /**
@@ -280,8 +317,9 @@ export class DemoStudyClient implements StudyClient {
             bar.end_ms > body.window_from_ms) &&
           (!skip || bar.taker_buy_volume === null)
       );
-      if (needed.length === 0) return [];
-      fromMs = needed[0]!.time_ms;
+      const [first] = needed;
+      if (!first) return [];
+      fromMs = first.time_ms;
     }
     const limit = Math.min(Number(request.limit ?? 500), 2000);
     const batch = await this.market.getCandles({
@@ -289,7 +327,7 @@ export class DemoStudyClient implements StudyClient {
       timeframe: tf,
       limit,
       ...(fromMs !== undefined ? {fromMs} : {}),
-      toMs: bars.at(-1)!.end_ms,
+      toMs: bars.at(-1)?.end_ms ?? Date.now(),
     });
     return batch.candles
       .filter(candle => candle.is_final)

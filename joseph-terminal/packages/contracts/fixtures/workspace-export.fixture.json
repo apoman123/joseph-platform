@@ -606,7 +606,7 @@
             "studies": [
               {
                 "study_id": "builtin:ema",
-                "script_id": "builtin:ema",
+                "script_id": "Not a script id!",
                 "version": 0,
                 "kind": "indicator",
                 "name": "ema",

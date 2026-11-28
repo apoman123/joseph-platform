@@ -4,351 +4,417 @@
  * SPDX-License-Identifier: MIT
  */
 
-/** @fileoverview Pinned Python study lifecycle and TradingView-style legends. */
+/**
+ * @fileoverview Chart studies: one system for built-in, plugin and owned
+ * Python scripts. Every visible study of a chart is run by the engine (or
+ * the DEMO evaluator) in batches over the chart's candles once the chart
+ * has loaded them, refreshed every few seconds while live, and drawn
+ * through the Python painter: overlay studies on the price pane, the
+ * others in their own study pane. The TradingView-style legend lists each
+ * study with its inputs and settings, source, visibility and remove
+ * controls.
+ */
 
 'use client';
-import type {ChartPort} from '@joseph/chart-core';
-import type {ChartState, ScriptResult} from '@joseph/contracts';
-import {layerVisible} from '@joseph/terminal-shell';
+import type {ChartPort, StudyPoint} from '@joseph/chart-core';
+import type {
+  CatalogScript,
+  ChartState,
+  ScriptBatchRun,
+  ScriptResult,
+} from '@joseph/contracts';
+import type {StudyState} from '@joseph/terminal-shell';
 import {Braces, Eye, EyeOff, Settings2, X} from 'lucide-react';
 import {useEffect, useRef, useState, type ReactElement} from 'react';
 import type {TerminalRuntime} from '../composition/runtime';
-import {useIndicatorPlugins} from './indicator-plugins';
 import {pythonCanvas} from './python-painter';
-import {
-  editPython,
-  pythonAttachments,
-  pythonState,
-  savePythonAttachments,
-  type PythonAttachment,
-} from './python-state';
+import {editPython, pythonState} from './python-state';
 import {useStore} from './react-bindings';
 import {ScriptDialog} from './script-dialog';
 import {useRuntime} from './runtime-context';
 import styles from './script-ui.module.css';
+import {catalogEntry, studyName, useStudyCatalog} from './study-catalog';
 
-/** Public built-ins; external packages never imply permission to read source. */
-const PUBLIC_SOURCE = new Set([
-  'sma',
-  'ema',
-  'rsi',
-  'atr',
-  'volume_delta',
-  'pivot_points',
-  'anchored_vwap',
-  'bollinger_bands',
-  'regression_channel',
-  'market_structure',
-  'liquidity_sweeps',
-  'imbalance',
-  'order_blocks',
-]);
+/** Refresh interval of live indicator studies (5 s). */
+const LIVE_REFRESH_MS = 5000;
+
+/** Bars every study run reads. */
+export const STUDY_BARS = 2000;
+
+/** Most studies per batched run (the engine's batch limit). */
+const BATCH_SIZE = 16;
+
+/** Fields of drawings that hold prices (study pane ranges). */
+const PRICE_FIELDS = [
+  'price',
+  'from_price',
+  'to_price',
+  'lower',
+  'upper',
+  'open',
+  'high',
+  'low',
+  'close',
+] as const;
 
 /**
- * Executes visible pinned sources when closed bars or input configurations change.
- * @param port Mounted chart renderer, or null before mount.
- * @param chart Current chart identity, symbol and timeframe.
- * @param runtime Authenticated terminal runtime.
- * @param closedBarMs Latest confirmed source bar, or null while loading.
- * @return Per-study execution errors for visible chart diagnostics.
+ * Returns the results-store key of a study.
+ * @param chartId Chart id.
+ * @param studyId Study id.
+ * @return `<chart id>:<study id>`.
  */
-export function usePythonStudies(
+export function studyKey(chartId: string, studyId: string): string {
+  return `${chartId}:${studyId}`;
+}
+
+/**
+ * Cuts a result to the bars before a replay cursor.
+ * @param result Script result.
+ * @param atMs Replay time, or null when live.
+ * @return The result as of the cursor: later plot points and drawings that
+ *     start later are dropped.
+ */
+export function resultAsOf(
+  result: ScriptResult,
+  atMs: number | null
+): ScriptResult {
+  if (atMs === null) return result;
+  const before = (value: unknown) => typeof value !== 'number' || value < atMs;
+  return {
+    ...result,
+    plots: result.plots.map(plot => ({
+      ...plot,
+      points: plot.points.filter(point => point.time_ms < atMs),
+    })),
+    visuals: (result.visuals ?? []).filter(
+      visual => before(visual.data.from_ms) && before(visual.data.time_ms)
+    ),
+    bar_visuals: (result.bar_visuals ?? []).filter(visual =>
+      before(visual.data.time_ms)
+    ),
+    alerts: (result.alerts ?? []).filter(alert => alert.time_ms < atMs),
+    fills: result.fills.filter(fill => fill.time_ms < atMs),
+  };
+}
+
+/**
+ * Finds the plot a study pane draws natively: the first drawn histogram.
+ * @param result Script result.
+ * @return Plot name, or null when every plot is painted on the canvas.
+ */
+function nativePlot(result: ScriptResult): string | null {
+  const plot = result.plots.find(item => {
+    const style = result.plot_styles?.[item.name] ?? {};
+    return style.display !== 'data_window';
+  });
+  if (!plot) return null;
+  const style = result.plot_styles?.[plot.name]?.style;
+  return style === 'histogram' || style === 'columns' ? plot.name : null;
+}
+
+/**
+ * Computes the value range of a study pane from its drawn plots and levels.
+ * @param result Script result.
+ * @return Finite bounds, widened when flat.
+ */
+function paneRange(result: ScriptResult): {min: number; max: number} {
+  let min = Infinity;
+  let max = -Infinity;
+  const add = (value: unknown) => {
+    if (typeof value === 'number' && Number.isFinite(value)) {
+      min = Math.min(min, value);
+      max = Math.max(max, value);
+    }
+  };
+  for (const plot of result.plots) {
+    if (result.plot_styles?.[plot.name]?.display === 'data_window') continue;
+    for (const point of plot.points) {
+      add(point.value);
+    }
+  }
+  for (const visual of [
+    ...(result.visuals ?? []),
+    ...(result.bar_visuals ?? []),
+  ]) {
+    for (const field of PRICE_FIELDS) {
+      add(visual.data[field]);
+    }
+  }
+  if (min === Infinity) return {min: 0, max: 1};
+  return min === max ? {min: min - 1, max: max + 1} : {min, max};
+}
+
+/**
+ * Draws one study result on a chart.
+ * @param port Chart renderer.
+ * @param id Layer or pane id.
+ * @param title Pane title.
+ * @param result Result as of the replay cursor.
+ * @param colors User plot colors.
+ * @return Disposer removing what was added.
+ */
+function renderStudy(
+  port: ChartPort,
+  id: string,
+  title: string,
+  result: ScriptResult,
+  colors: Readonly<Record<string, string>>
+): () => void {
+  if (result.overlay) {
+    return port.addCanvasLayer(pythonCanvas(id, result, colors));
+  }
+  const native = nativePlot(result);
+  const first =
+    result.plots.find(plot => plot.name === native) ??
+    result.plots.find(
+      plot => result.plot_styles?.[plot.name]?.display !== 'data_window'
+    );
+  const points: StudyPoint[] = (first?.points ?? []).flatMap(point =>
+    point.value === null
+      ? []
+      : [
+          {
+            timeMs: point.time_ms,
+            value: point.value,
+            ...(native
+              ? {
+                  tone: point.value >= 0 ? ('bid' as const) : ('ask' as const),
+                  opacity: (point.color ?? '').length === 9 ? 0.4 : 0.75,
+                }
+              : {}),
+          },
+        ]
+  );
+  port.setStudyPane({
+    id,
+    title,
+    style: native ? 'histogram' : 'line',
+    points,
+    caption: result.data_source,
+    range: paneRange(result),
+    canvas: pythonCanvas(id, result, colors, native),
+  });
+  const extra = result.fills.length
+    ? port.addCanvasLayer(
+        pythonCanvas(
+          `${id}:fills`,
+          {...result, overlay: true, plots: [], visuals: [], bar_visuals: []},
+          colors
+        )
+      )
+    : () => undefined;
+  return () => {
+    extra();
+    port.removeStudyPane(id);
+  };
+}
+
+/**
+ * Runs and draws the visible studies of a chart. Runs start once the chart
+ * has its first closed bar, are batched per role and re-run when a bar
+ * closes, the studies change and, for indicators, every few seconds while
+ * live. A study keeps its last drawing until its next result arrives.
+ * @param port Mounted chart renderer, or null before mount.
+ * @param chart Chart state (instrument, timeframe and studies).
+ * @param runtime Terminal runtime.
+ * @param closedBarMs Latest confirmed bar, or null while loading.
+ * @param atMs Replay cursor, or null when live.
+ * @return Errors by study id.
+ */
+export function useStudyRuns(
   port: ChartPort | null,
   chart: ChartState,
   runtime: TerminalRuntime,
-  closedBarMs: number | null
-): string[] {
-  const workspace = useStore(runtime.workspace);
+  closedBarMs: number | null,
+  atMs: number | null = null
+): Readonly<Record<string, string>> {
   const state = pythonState(runtime);
-  const [errors, setErrors] = useState<string[]>([]);
+  const [errors, setErrors] = useState<Readonly<Record<string, string>>>({});
   const [liveTick, setLiveTick] = useState(0);
-  const completed = useRef(new Map<string, string>());
-  const rows = pythonAttachments(runtime, chart.chart_id).filter(
-    row => row.visible
-  );
+  const drawn = useRef(new Map<string, () => void>());
+  const rows = chart.studies.filter(study => study.visible);
   const fingerprint = JSON.stringify(rows);
-  void workspace;
-  const live = rows.some(row => row.kind === 'indicator');
+  const live = atMs === null && rows.some(row => row.kind === 'indicator');
+  const {chart_id: chartId, instrument_id: instrumentId, timeframe} = chart;
   useEffect(() => {
-    if (!live || !port || runtime.config.demo) return;
-    const timer = setInterval(() => void setLiveTick(value => value + 1), 5000);
+    if (!live || !port) return;
+    const timer = setInterval(
+      () => void setLiveTick(value => value + 1),
+      LIVE_REFRESH_MS
+    );
     return () => void clearInterval(timer);
-  }, [live, port, runtime]);
+  }, [live, port]);
+  // Drawings of studies that are gone or hidden are removed at once.
   useEffect(() => {
-    if (!port || runtime.config.demo || closedBarMs === null) return;
+    const wanted = new Set(
+      (JSON.parse(fingerprint) as StudyState[]).map(row => row.study_id)
+    );
+    for (const [id, dispose] of drawn.current) {
+      if (!wanted.has(id)) {
+        dispose();
+        drawn.current.delete(id);
+      }
+    }
+    port?.invalidate();
+  }, [port, fingerprint]);
+  useEffect(
+    () => () => {
+      for (const dispose of drawn.current.values()) {
+        dispose();
+      }
+      drawn.current.clear();
+    },
+    [port, chartId, instrumentId, timeframe]
+  );
+  useEffect(() => {
+    if (!port || closedBarMs === null) return;
+    const studies = JSON.parse(fingerprint) as StudyState[];
+    if (studies.length === 0) {
+      setErrors({});
+      return;
+    }
     let disposed = false;
-    const cleanups: Array<() => void> = [];
-    const failures: string[] = [];
-    setErrors([]);
-    const attachments = JSON.parse(fingerprint) as PythonAttachment[];
-    const execute = async () => {
-      for (const row of attachments) {
+    const windowFrom = port.serialize().visibleRange?.fromMs;
+    const groups: StudyState[][] = [];
+    for (const includeOpen of [true, false]) {
+      const group = studies.filter(
+        row => (row.kind === 'indicator') === includeOpen
+      );
+      for (let start = 0; start < group.length; start += BATCH_SIZE) {
+        groups.push(group.slice(start, start + BATCH_SIZE));
+      }
+    }
+    const failures: Record<string, string> = {};
+    const apply = (row: StudyState, result: ScriptResult) => {
+      state.results.update(all => ({
+        ...all,
+        [studyKey(chartId, row.study_id)]: result,
+      }));
+      drawn.current.get(row.study_id)?.();
+      drawn.current.set(
+        row.study_id,
+        renderStudy(
+          port,
+          `study:${chartId}:${row.study_id}`,
+          row.name,
+          resultAsOf(result, atMs),
+          row.colors as Record<string, string>
+        )
+      );
+    };
+    const run = async (group: StudyState[]) => {
+      const body: ScriptBatchRun = {
+        instrument_id: instrumentId,
+        tf: timeframe,
+        limit: STUDY_BARS,
+        include_open: group[0]?.kind === 'indicator',
+        ...(windowFrom !== undefined ? {window_from_ms: windowFrom} : {}),
+        // Groups hold at most BATCH_SIZE studies, the contract's bound.
+        runs: group.map(row => ({
+          script_id: row.script_id,
+          ...(row.version > 0 ? {version: row.version} : {}),
+          inputs: row.inputs,
+        })) as unknown as ScriptBatchRun['runs'],
+      };
+      try {
+        const answer = await runtime.clients.studies.runBatch(body);
         if (disposed) return;
-        const key = `${chart.chart_id}:${row.script_id}`;
-        try {
-          const stamp = JSON.stringify([
-            row.version,
-            row.inputs,
-            chart.instrument_id,
-            chart.timeframe,
-            closedBarMs,
-            row.kind === 'indicator' ? liveTick : 0,
-          ]);
-          const cached = state.results.get()[key];
-          let result: ScriptResult;
-          if (cached && completed.current.get(key) === stamp) result = cached;
-          else {
-            result = await state.client.run(row.script_id, {
-              version: row.version,
-              instrument_id: chart.instrument_id,
-              tf: chart.timeframe,
-              limit: 2000,
-              inputs: row.inputs,
-              include_open: row.kind === 'indicator',
-            });
-            completed.current.set(key, stamp);
-          }
-          if (disposed) return;
-          state.results.update(all => ({...all, [key]: result}));
-          const canvas = pythonCanvas(`python:${key}`, result, row.colors);
-          if (result.overlay) cleanups.push(port.addCanvasLayer(canvas));
-          else {
-            const id = `python:${key}`;
-            const values = result.plots.flatMap(plot =>
-              plot.points.flatMap(point =>
-                point.value === null ? [] : [point.value]
-              )
-            );
-            for (const visual of [
-              ...(result.visuals ?? []),
-              ...(result.bar_visuals ?? []),
-            ]) {
-              for (const field of [
-                'price',
-                'from_price',
-                'to_price',
-                'lower',
-                'upper',
-                'open',
-                'high',
-                'low',
-                'close',
-              ]) {
-                const value = visual.data[field];
-                if (typeof value === 'number' && Number.isFinite(value)) {
-                  values.push(value);
-                }
-              }
-            }
-            const range = values.length
-              ? {
-                  min: values.reduce(
-                    (minimum, value) => Math.min(minimum, value),
-                    Infinity
-                  ),
-                  max: values.reduce(
-                    (maximum, value) => Math.max(maximum, value),
-                    -Infinity
-                  ),
-                }
-              : {min: 0, max: 1};
-            if (range.min === range.max) {
-              range.min -= 1;
-              range.max += 1;
-            }
-            port.setStudyPane({
-              id,
-              title: row.name,
-              style: 'line',
-              points: (result.plots[0]?.points ?? []).flatMap(point =>
-                point.value === null
-                  ? []
-                  : [{timeMs: point.time_ms, value: point.value}]
-              ),
-              caption: `${result.data_source} · v${row.version}`,
-              range,
-              canvas,
-            });
-            cleanups.push(() => void port.removeStudyPane(id));
-            if (result.fills.length) {
-              cleanups.push(
-                port.addCanvasLayer(
-                  pythonCanvas(
-                    `${id}:fills`,
-                    {
-                      ...result,
-                      overlay: true,
-                      plots: [],
-                      visuals: [],
-                      bar_visuals: [],
-                    },
-                    row.colors
-                  )
-                )
-              );
-            }
-          }
-          port.invalidate();
-        } catch (failure) {
-          if (!disposed) {
-            failures.push(
-              `${row.name}: ${failure instanceof Error ? failure.message : 'Script failed'}`
-            );
-            setErrors([...failures]);
-          }
+        answer.results.forEach((entry, index) => {
+          const row = group[index];
+          if (!row) return;
+          if (entry.result) apply(row, entry.result);
+          else failures[row.study_id] = entry.error ?? 'Study failed';
+        });
+      } catch (failure) {
+        if (disposed) return;
+        for (const row of group) {
+          failures[row.study_id] =
+            failure instanceof Error ? failure.message : 'Study failed';
         }
       }
     };
-    void execute();
+    void Promise.all(groups.map(run)).then(() => {
+      if (disposed) return;
+      setErrors({...failures});
+      port.invalidate();
+    });
     return () => {
       disposed = true;
-      for (const cleanup of cleanups) {
-        cleanup();
-      }
     };
   }, [
     port,
-    chart.chart_id,
-    chart.instrument_id,
-    chart.timeframe,
+    chartId,
+    instrumentId,
+    timeframe,
     runtime,
     state,
     fingerprint,
     closedBarMs,
     liveTick,
+    atMs,
   ]);
   return errors;
 }
 
 /**
- * Renders settings for one pinned managed study with editable JSON and colors.
- * @param props Target chart, current attachment and close callback.
- * @return Settings modal preserving the source version pin.
+ * Summarizes a study's non-style inputs like TradingView's legend.
+ * @param study Chart study.
+ * @param entry Catalog entry, when the study runs a catalog script.
+ * @return Space-separated input values, e.g. `20 close 0`.
  */
-function PythonSettings({
-  chartId,
-  row,
-  onClose,
-}: {
-  chartId: string;
-  row: PythonAttachment;
-  onClose: () => void;
-}): ReactElement {
-  const runtime = useRuntime();
-  const [inputs, setInputs] = useState(JSON.stringify(row.inputs, null, 2));
-  const [colors, setColors] = useState(JSON.stringify(row.colors, null, 2));
-  const [error, setError] = useState<string | null>(null);
-  return (
-    <ScriptDialog title={`${row.name} settings`} onClose={onClose}>
-      <p>Version {row.version} · Inputs and Style apply to this chart only.</p>
-      <label className={styles.field}>
-        Inputs (JSON object)
-        <textarea
-          className="j-input"
-          value={inputs}
-          onChange={event => void setInputs(event.target.value)}
-          rows={8}
-        />
-      </label>
-      <label className={styles.field}>
-        Style colors (plot name → hex color)
-        <textarea
-          className="j-input"
-          value={colors}
-          onChange={event => void setColors(event.target.value)}
-          rows={4}
-        />
-      </label>
-      {error && <p role="alert">{error}</p>}
-      <button
-        type="button"
-        className="j-btn"
-        onClick={() => {
-          try {
-            const parsed: unknown = JSON.parse(inputs);
-            const palette: unknown = JSON.parse(colors);
-            if (
-              !parsed ||
-              Array.isArray(parsed) ||
-              typeof parsed !== 'object' ||
-              !palette ||
-              Array.isArray(palette) ||
-              typeof palette !== 'object' ||
-              Object.values(palette).some(
-                value =>
-                  typeof value !== 'string' || !/^#[0-9a-f]{6}$/i.test(value)
-              )
-            ) {
-              throw new Error(
-                'Inputs must be an object; styles must map plot names to #rrggbb colors.'
-              );
-            }
-            savePythonAttachments(
-              runtime,
-              chartId,
-              pythonAttachments(runtime, chartId).map(item =>
-                item.script_id === row.script_id
-                  ? {
-                      ...item,
-                      inputs: parsed as Record<string, unknown>,
-                      colors: palette as Record<string, string>,
-                    }
-                  : item
-              )
-            );
-            onClose();
-          } catch (failure) {
-            setError(
-              failure instanceof Error ? failure.message : 'Invalid settings'
-            );
-          }
-        }}
-      >
-        Apply settings
-      </button>
-    </ScriptDialog>
-  );
+export function inputsSummary(
+  study: StudyState,
+  entry: CatalogScript | undefined
+): string {
+  const values: Record<string, unknown> = {
+    ...Object.fromEntries(
+      Object.entries(entry?.inputs ?? {}).map(([key, spec]) => [
+        key,
+        spec?.default,
+      ])
+    ),
+    ...(study.inputs as Record<string, unknown>),
+  };
+  return Object.entries(values)
+    .filter(([key, value]) => {
+      const spec = entry?.inputs[key];
+      if (spec?.group === 'Style') return false;
+      if (typeof value === 'number') return !(key.endsWith('_ms') && !value);
+      return typeof value === 'string' && !value.startsWith('#');
+    })
+    .map(([, value]) => String(value))
+    .join(' ');
 }
 
 /**
- * Displays names and settings/source/hide/remove controls at the chart's top left.
- * @param props Current chart and backend script errors.
- * @return Legend rows; protected external source is explicitly unavailable.
+ * Displays the chart's studies at its top left with settings, source,
+ * visibility and remove controls.
+ * @param props Current chart and study errors by study id.
+ * @return Legend rows and the source dialog.
  */
-export function IndicatorLegend({
+export function StudyLegend({
   chart,
   errors,
 }: {
   chart: ChartState;
-  errors: readonly string[];
+  errors: Readonly<Record<string, string>>;
 }): ReactElement {
   const runtime = useRuntime();
-  const plugins = useIndicatorPlugins();
-  const workspace = useStore(runtime.workspace);
+  const catalog = useStudyCatalog();
   const drawingTool = useStore(runtime.drawing.activeTool);
   const [source, setSource] = useState<{name: string; text: string} | null>(
     null
   );
-  const [settings, setSettings] = useState<PythonAttachment | null>(null);
-  const managed = pythonAttachments(runtime, chart.chart_id);
-  void workspace;
-  const builtins = (plugins ?? []).filter(info => {
-    const layer = chart.indicator_layers.find(
-      item => item.plugin_id === info.plugin_id
-    );
-    return (
-      info.display.layer &&
-      !layer?.removed &&
-      (layer?.present ||
-        layerVisible(chart, info.plugin_id, info.display.default_visible))
-    );
-  });
-  const readSource = (id: string, name: string) => {
-    setSource({name, text: 'Loading source…'});
-    void pythonState(runtime)
-      .client.source(id)
-      .then(
-        value => void setSource({name, text: value.source}),
+  const chartId = chart.chart_id;
+  const readSource = (study: StudyState, name: string) => {
+    if (catalogEntry(catalog, study) || study.version === 0) {
+      setSource({name, text: 'Loading source…'});
+      void runtime.clients.studies.catalogScript(study.script_id).then(
+        script =>
+          void setSource({
+            name,
+            text: script.source ?? 'Source unavailable for this plugin',
+          }),
         failure =>
           void setSource({
             name,
@@ -356,6 +422,11 @@ export function IndicatorLegend({
               failure instanceof Error ? failure.message : 'Source unavailable',
           })
       );
+      return;
+    }
+    void editPython(runtime, study.script_id, study.version).catch(
+      failure => void runtime.notifier.notify(String(failure), 'error')
+    );
   };
   return (
     <>
@@ -364,160 +435,100 @@ export function IndicatorLegend({
         aria-label="Active indicators"
         data-drawing-active={drawingTool !== null}
       >
-        {builtins.map(info => {
-          const shown = layerVisible(
-            chart,
-            info.plugin_id,
-            info.display.default_visible
-          );
+        {chart.studies.map(study => {
+          const entry = catalogEntry(catalog, study);
+          const name = studyName(catalog, study);
+          const summary = inputsSummary(study, entry);
+          const owned = study.version > 0;
+          const sourceOff =
+            !owned &&
+            (runtime.clients.demo || entry?.source_available === false);
+          const error = errors[study.study_id];
           return (
-            <div
-              key={info.plugin_id}
-              className={`${styles.legendRow} ${shown ? '' : styles.hidden}`}
-              data-testid={`legend-${info.plugin_id}`}
-            >
-              <span>{info.display_name}</span>
-              <button
-                type="button"
-                className="j-btn j-btn--ghost j-btn--icon j-btn--sm"
-                aria-label={`${info.display_name} settings`}
-                onClick={() =>
-                  void runtime.indicatorSettings.set({
-                    chartId: chart.chart_id,
-                    pluginId: info.plugin_id,
-                  })
-                }
+            <div key={study.study_id}>
+              <div
+                className={`${styles.legendRow} ${study.visible ? '' : styles.hidden}`}
+                data-testid={`legend-${study.study_id}`}
               >
-                <Settings2 size={13} aria-hidden="true" />
-              </button>
-              <button
-                type="button"
-                className="j-btn j-btn--ghost j-btn--icon j-btn--sm"
-                aria-label={`${info.display_name} source`}
-                disabled={
-                  runtime.config.demo || !PUBLIC_SOURCE.has(info.plugin_id)
-                }
-                title={
-                  runtime.config.demo
-                    ? 'Connect a backend to read public Python source'
-                    : PUBLIC_SOURCE.has(info.plugin_id)
-                      ? 'Open public source'
-                      : 'Source unavailable for this plugin'
-                }
-                onClick={() =>
-                  void readSource(info.plugin_id, info.display_name)
-                }
-              >
-                <Braces size={13} aria-hidden="true" />
-              </button>
-              <button
-                type="button"
-                className="j-btn j-btn--ghost j-btn--icon j-btn--sm"
-                aria-label={`${shown ? 'Hide' : 'Show'} ${info.display_name}`}
-                onClick={() =>
-                  void runtime.dispatch({
-                    type: 'setIndicatorLayer',
-                    chartId: chart.chart_id,
-                    pluginId: info.plugin_id,
-                    visible: !shown,
-                  })
-                }
-              >
-                {shown ? (
-                  <Eye size={13} aria-hidden="true" />
-                ) : (
-                  <EyeOff size={13} aria-hidden="true" />
-                )}
-              </button>
-              <button
-                type="button"
-                className="j-btn j-btn--ghost j-btn--icon j-btn--sm"
-                aria-label={`Remove ${info.display_name}`}
-                onClick={() =>
-                  void runtime.dispatch({
-                    type: 'removeIndicatorLayer',
-                    chartId: chart.chart_id,
-                    pluginId: info.plugin_id,
-                  })
-                }
-              >
-                <X size={13} aria-hidden="true" />
-              </button>
+                <span>
+                  {name}
+                  {owned && ` · v${study.version}`}
+                  {summary && <span className="j-muted"> {summary}</span>}
+                </span>
+                <button
+                  type="button"
+                  className="j-btn j-btn--ghost j-btn--icon j-btn--sm"
+                  aria-label={`${name} settings`}
+                  data-testid={`indicator-settings-${study.study_id}`}
+                  onClick={() =>
+                    void runtime.indicatorSettings.set({
+                      chartId,
+                      studyId: study.study_id,
+                    })
+                  }
+                >
+                  <Settings2 size={13} aria-hidden="true" />
+                </button>
+                <button
+                  type="button"
+                  className="j-btn j-btn--ghost j-btn--icon j-btn--sm"
+                  aria-label={`${name} source`}
+                  disabled={sourceOff}
+                  title={
+                    owned
+                      ? 'Edit source'
+                      : runtime.clients.demo
+                        ? 'Connect a backend to read public Python source'
+                        : sourceOff
+                          ? 'Source unavailable for this plugin'
+                          : 'Open public source'
+                  }
+                  onClick={() => void readSource(study, name)}
+                >
+                  <Braces size={13} aria-hidden="true" />
+                </button>
+                <button
+                  type="button"
+                  className="j-btn j-btn--ghost j-btn--icon j-btn--sm"
+                  aria-label={`${study.visible ? 'Hide' : 'Show'} ${name}`}
+                  onClick={() =>
+                    void runtime.dispatch({
+                      type: 'updateStudy',
+                      chartId,
+                      studyId: study.study_id,
+                      patch: {visible: !study.visible},
+                    })
+                  }
+                >
+                  {study.visible ? (
+                    <Eye size={13} aria-hidden="true" />
+                  ) : (
+                    <EyeOff size={13} aria-hidden="true" />
+                  )}
+                </button>
+                <button
+                  type="button"
+                  className="j-btn j-btn--ghost j-btn--icon j-btn--sm"
+                  aria-label={`Remove ${name}`}
+                  onClick={() =>
+                    void runtime.dispatch({
+                      type: 'removeStudy',
+                      chartId,
+                      studyId: study.study_id,
+                    })
+                  }
+                >
+                  <X size={13} aria-hidden="true" />
+                </button>
+              </div>
+              {error && study.visible && (
+                <div className={styles.legendRow} role="alert">
+                  {name}: {error}
+                </div>
+              )}
             </div>
           );
         })}
-        {managed.map(row => (
-          <div
-            key={row.script_id}
-            className={`${styles.legendRow} ${row.visible ? '' : styles.hidden}`}
-          >
-            <span>
-              {row.name} · v{row.version}
-            </span>
-            <button
-              type="button"
-              className="j-btn j-btn--ghost j-btn--icon j-btn--sm"
-              aria-label={`${row.name} settings`}
-              onClick={() => void setSettings(row)}
-            >
-              <Settings2 size={13} aria-hidden="true" />
-            </button>
-            <button
-              type="button"
-              className="j-btn j-btn--ghost j-btn--icon j-btn--sm"
-              aria-label={`${row.name} source`}
-              onClick={() =>
-                void editPython(runtime, row.script_id, row.version).catch(
-                  failure =>
-                    void runtime.notifier.notify(String(failure), 'error')
-                )
-              }
-            >
-              <Braces size={13} aria-hidden="true" />
-            </button>
-            <button
-              type="button"
-              className="j-btn j-btn--ghost j-btn--icon j-btn--sm"
-              aria-label={`${row.visible ? 'Hide' : 'Show'} ${row.name}`}
-              onClick={() =>
-                void savePythonAttachments(
-                  runtime,
-                  chart.chart_id,
-                  managed.map(item =>
-                    item.script_id === row.script_id
-                      ? {...item, visible: !item.visible}
-                      : item
-                  )
-                )
-              }
-            >
-              {row.visible ? (
-                <Eye size={13} aria-hidden="true" />
-              ) : (
-                <EyeOff size={13} aria-hidden="true" />
-              )}
-            </button>
-            <button
-              type="button"
-              className="j-btn j-btn--ghost j-btn--icon j-btn--sm"
-              aria-label={`Remove ${row.name}`}
-              onClick={() =>
-                void savePythonAttachments(
-                  runtime,
-                  chart.chart_id,
-                  managed.filter(item => item.script_id !== row.script_id)
-                )
-              }
-            >
-              <X size={13} aria-hidden="true" />
-            </button>
-          </div>
-        ))}
-        {errors.map(error => (
-          <div key={error} className={styles.legendRow} role="alert">
-            {error}
-          </div>
-        ))}
       </div>
       {source && (
         <ScriptDialog
@@ -531,13 +542,6 @@ export function IndicatorLegend({
             readOnly
           />
         </ScriptDialog>
-      )}
-      {settings && (
-        <PythonSettings
-          chartId={chart.chart_id}
-          row={settings}
-          onClose={() => void setSettings(null)}
-        />
       )}
     </>
   );

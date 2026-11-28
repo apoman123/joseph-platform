@@ -68,14 +68,6 @@ module.exports = {
       },
     },
     {
-      name: 'indicator-viz-is-render-only',
-      severity: 'error',
-      comment:
-        'Indicator visualization never depends on trading or strategy logic.',
-      from: {path: '^packages/indicator-viz/'},
-      to: {path: '^packages/(chart-trading|strategy-builder|mock-provider)/'},
-    },
-    {
       name: 'packages-are-framework-free',
       severity: 'error',
       comment:

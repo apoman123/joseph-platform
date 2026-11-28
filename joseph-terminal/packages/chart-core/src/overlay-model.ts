@@ -111,7 +111,7 @@ export type OverlayModel = PriceLineOverlay | BoxOverlay | MarkerOverlay;
 
 /** A named, ordered group of overlay models owned by one feature. */
 export interface OverlayLayer {
-  /** Unique layer id, e.g. `indicator-viz:pivot_points`. */
+  /** Unique layer id, e.g. `orders:chart-1`. */
   layerId: string;
   /**
    * Paint order of the layer's boxes and rays; higher draws on top. Markers

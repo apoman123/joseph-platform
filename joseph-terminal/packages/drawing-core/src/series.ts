@@ -158,12 +158,7 @@ export function seriesRequestKey(
   const inputs = Object.keys(request.inputs)
     .sort()
     .map(key => [key, request.inputs[key]]);
-  return JSON.stringify([
-    request.scriptId,
-    timeframe,
-    request.fromMs,
-    inputs,
-  ]);
+  return JSON.stringify([request.scriptId, timeframe, request.fromMs, inputs]);
 }
 
 /**

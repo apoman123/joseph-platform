@@ -114,9 +114,6 @@ importers:
       '@joseph/feature-registry':
         specifier: workspace:*
         version: link:../../packages/feature-registry
-      '@joseph/indicator-viz':
-        specifier: workspace:*
-        version: link:../../packages/indicator-viz
       '@joseph/mock-provider':
         specifier: workspace:*
         version: link:../../packages/mock-provider
@@ -182,15 +179,6 @@ importers:
         version: 0.6.2(lightweight-charts@5.3.0)
 
   packages/feature-registry:
-    dependencies:
-      '@joseph/chart-core':
-        specifier: workspace:*
-        version: link:../chart-core
-      '@joseph/contracts':
-        specifier: workspace:*
-        version: link:../contracts
-
-  packages/indicator-viz:
     dependencies:
       '@joseph/chart-core':
         specifier: workspace:*

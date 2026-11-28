@@ -102,7 +102,11 @@ const TOOL: ToolPlugin = {
     const anchor = doc.anchors[0];
     if (!anchor) return null;
     const bar = barStartAt(anchor.time_ms, timeframe, calendar);
-    return {scriptId: 'builtin:engine_line', fromMs: bar, inputs: {anchor_ms: bar}};
+    return {
+      scriptId: 'builtin:engine_line',
+      fromMs: bar,
+      inputs: {anchor_ms: bar},
+    };
   },
 };
 

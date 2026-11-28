@@ -95,7 +95,9 @@ function rounded(value: unknown): unknown {
  * @return DEMO output, rounded like the export.
  */
 function demoRun(parityCase: ParityCase): unknown {
-  const script = CATALOG.scripts.find(s => s.script_id === parityCase.script_id);
+  const script = CATALOG.scripts.find(
+    s => s.script_id === parityCase.script_id
+  );
   const defaults = Object.fromEntries(
     Object.entries(script?.inputs ?? {}).map(([key, spec]) => [
       key,
