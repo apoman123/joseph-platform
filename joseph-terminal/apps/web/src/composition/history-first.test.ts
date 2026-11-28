@@ -5,17 +5,16 @@
  */
 
 /**
- * @fileoverview Tests for the candles-first market client: study requests
- * wait for pending candles, at most for the bounded delay, and everything
- * else passes through.
+ * @fileoverview Tests for the candles-first gate: study runs wait for
+ * pending candles, at most for the bounded delay, and everything else
+ * passes through.
  */
 
 import type {
   CandleBatch,
   CandleQuery,
-  IndicatorSeriesQuery,
-  MarketDataClient,
-  SeriesQuery,
+  ScriptBatchRun,
+  StudyClient,
 } from '@joseph/contracts';
 import {DemoMarketDataClient} from '@joseph/mock-provider';
 import {afterEach, describe, expect, it, vi} from 'vitest';
@@ -25,18 +24,19 @@ const CANDLES: CandleQuery = {
   instrumentId: 'mock:perp:BTCUSD',
   timeframe: '1h',
 };
-const SERIES: IndicatorSeriesQuery = {...CANDLES, pluginId: 'volume_delta'};
-const AOIS: SeriesQuery = {...CANDLES};
+const RUN: ScriptBatchRun = {
+  instrument_id: 'mock:perp:BTCUSD',
+  tf: '1h',
+  runs: [{script_id: 'builtin:ema'}],
+};
 
 /**
- * Builds a DEMO client whose candles resolve on demand, recording calls.
- * @return Client, the calls it saw and the candle resolver.
+ * Builds a DEMO market client whose candles resolve on demand and a study
+ * client, recording calls.
+ * @param maxWaitMs Gate bound.
+ * @return Gated clients, the calls they saw and the candle resolver.
  */
-function fakeClient(): {
-  client: MarketDataClient;
-  calls: string[];
-  finish: () => void;
-} {
+function fake(maxWaitMs?: number) {
   const client = new DemoMarketDataClient();
   const calls: string[] = [];
   let finish: () => void = () => undefined;
@@ -58,17 +58,24 @@ function fakeClient(): {
     calls.push('candles');
     return pending;
   });
-  const series = client.getIndicatorSeries.bind(client);
-  vi.spyOn(client, 'getIndicatorSeries').mockImplementation(query => {
-    calls.push('series');
-    return series(query);
-  });
-  const aois = client.getAois.bind(client);
-  vi.spyOn(client, 'getAois').mockImplementation(query => {
-    calls.push('aois');
-    return aois(query);
-  });
-  return {client, calls, finish};
+  const studies: StudyClient = {
+    catalog: async () => {
+      calls.push('catalog');
+      return {scripts: [], failures: []};
+    },
+    catalogScript: () => Promise.reject(new Error('none')),
+    runBatch: async () => {
+      calls.push('run');
+      return {results: []};
+    },
+  };
+  const gate = historyFirst(maxWaitMs);
+  return {
+    market: gate.market(client),
+    studies: gate.studies(studies),
+    calls,
+    finish,
+  };
 }
 
 afterEach(() => {
@@ -77,38 +84,35 @@ afterEach(() => {
 });
 
 describe('historyFirst', () => {
-  it('holds study requests until pending candles settle', async () => {
-    const {client, calls, finish} = fakeClient();
-    const gated = historyFirst(client);
-    const batch = gated.getCandles(CANDLES);
-    const series = gated.getIndicatorSeries(SERIES);
-    const aois = gated.getAois(AOIS);
-    await Promise.resolve();
-    expect(calls).toEqual(['candles']);
+  it('holds study runs until pending candles settle', async () => {
+    const {market, studies, calls, finish} = fake();
+    const batch = market.getCandles(CANDLES);
+    const run = studies.runBatch(RUN);
+    await studies.catalog('indicator');
+    expect(calls).toEqual(['candles', 'catalog']);
     finish();
     await batch;
-    await Promise.allSettled([series, aois]);
-    expect(calls).toEqual(['candles', 'series', 'aois']);
+    await run;
+    expect(calls).toEqual(['candles', 'catalog', 'run']);
     // Other methods are forwarded with their receiver.
-    await expect(gated.listVenues()).resolves.toBeTruthy();
+    await expect(market.listVenues()).resolves.toBeTruthy();
   });
 
   it('waits no longer than the bound', async () => {
     vi.useFakeTimers();
-    const {client, calls} = fakeClient();
-    const gated = historyFirst(client, 1_000);
-    void gated.getCandles(CANDLES);
-    const series = gated.getIndicatorSeries(SERIES);
+    const {market, studies, calls} = fake(1_000);
+    void market.getCandles(CANDLES);
+    const run = studies.runBatch(RUN);
     await vi.advanceTimersByTimeAsync(999);
     expect(calls).toEqual(['candles']);
     await vi.advanceTimersByTimeAsync(1);
-    await Promise.allSettled([series]);
-    expect(calls).toEqual(['candles', 'series']);
+    await run;
+    expect(calls).toEqual(['candles', 'run']);
   });
 
-  it('sends study requests at once without pending candles', async () => {
-    const {client, calls} = fakeClient();
-    await Promise.allSettled([historyFirst(client).getIndicatorSeries(SERIES)]);
-    expect(calls).toEqual(['series']);
+  it('runs studies at once without pending candles', async () => {
+    const {studies, calls} = fake();
+    await studies.runBatch(RUN);
+    expect(calls).toEqual(['run']);
   });
 });

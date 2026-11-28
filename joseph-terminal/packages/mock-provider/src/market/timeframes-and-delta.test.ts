@@ -172,7 +172,7 @@ async function delta(
     tf,
     limit: 200,
     include_open: true,
-    runs: [{script_id: 'builtin:volume_delta', inputs: inputs as never}],
+    runs: [{script_id: 'builtin:volume_delta', inputs: inputs}],
   });
   const result = results[0]?.result;
   if (!result) throw new Error(results[0]?.error ?? 'no result');

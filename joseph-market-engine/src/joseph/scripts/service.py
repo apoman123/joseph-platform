@@ -23,6 +23,7 @@ from joseph.domain import instruments
 from joseph.domain import market
 from joseph.domain import sessions
 from joseph.domain import timeframes
+from joseph.market_data.adapters import http
 from joseph.market_data.app import service as market_service
 from joseph.scripts import accounting
 from joseph.scripts import catalog as catalog_lib
@@ -451,13 +452,14 @@ class ScriptService:
             if not needed:
                 return []
             from_ms = int(needed[0]["time_ms"])
-        extra = await self.market_data.get_batch(
-            declared.instrument_id or request.instrument_id,
-            tf,
-            from_ms=from_ms,
-            to_ms=int(bars[-1]["end_ms"]),
-            limit=declared.limit,
-        )
+        with http.background():
+            extra = await self.market_data.get_batch(
+                declared.instrument_id or request.instrument_id,
+                tf,
+                from_ms=from_ms,
+                to_ms=int(bars[-1]["end_ms"]),
+                limit=declared.limit,
+            )
         return [bar_record(bar) for bar in extra.candles if bar.is_final]
 
     def bundle(
@@ -583,15 +585,17 @@ class ScriptService:
             request: Instrument, resolution and range.
 
         Returns:
-            The candle batch.
+            The candle batch. Venue requests it causes yield the rate limit
+            to waiting chart batches.
         """
-        return await self.market_data.get_batch(
-            request.instrument_id,
-            request.tf,
-            from_ms=request.from_ms,
-            to_ms=request.to_ms,
-            limit=request.limit,
-        )
+        with http.background():
+            return await self.market_data.get_batch(
+                request.instrument_id,
+                request.tf,
+                from_ms=request.from_ms,
+                to_ms=request.to_ms,
+                limit=request.limit,
+            )
 
     async def run_batch(
         self, principal: identity.Principal, request: models.ScriptBatchRun

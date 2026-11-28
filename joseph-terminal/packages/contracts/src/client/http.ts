@@ -331,10 +331,6 @@ export class HttpMarketDataClient implements MarketDataClient {
     });
   }
 
-
-
-
-
   /**
    * Lists the trading sessions of an exchange calendar
    * (`GET /v1/calendars/{calendar_id}/sessions`).

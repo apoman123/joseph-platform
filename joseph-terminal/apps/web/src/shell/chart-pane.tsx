@@ -1013,7 +1013,8 @@ export function ChartPane({
     chart,
     runtime,
     shownRef.current.filter(bar => bar.final).at(-1)?.timeMs ?? null,
-    atMs
+    atMs,
+    barCount
   );
   useStrategyPreview(port, chart, runtime);
   const studyResults = useStore(pythonState(runtime).results);

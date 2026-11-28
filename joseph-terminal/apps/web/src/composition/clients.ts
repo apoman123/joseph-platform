@@ -107,8 +107,8 @@ export function demoLiveRehearsalRequested(search?: string): boolean {
 }
 
 /**
- * Builds DEMO or HTTP clients from configuration. Study requests of the
- * market client yield to pending candle requests (`historyFirst`). Without an execution
+ * Builds DEMO or HTTP clients from configuration. Study runs yield to
+ * pending candle requests (`historyFirst`). Without an execution
  * engine URL, trading calls reject (`unavailableExecutionClient`); without
  * its WebSocket URL, the user stream stays closed.
  * @param config Terminal configuration.
@@ -116,7 +116,8 @@ export function demoLiveRehearsalRequested(search?: string): boolean {
  */
 export function buildClients(config: TerminalConfig): ClientBundle {
   if (config.demo) {
-    const market = historyFirst(new DemoMarketDataClient());
+    const gate = historyFirst();
+    const market = gate.market(new DemoMarketDataClient());
     const execution = new DemoExecutionClient({
       markPrice: demoMark,
       liveRehearsal: demoLiveRehearsalRequested(),
@@ -129,7 +130,7 @@ export function buildClients(config: TerminalConfig): ClientBundle {
         strategy,
         execution,
         userStream: new DemoUserStream(execution, strategy),
-        studies: new DemoStudyClient(market),
+        studies: gate.studies(new DemoStudyClient(market)),
         demo: true,
       },
       capabilities: [
@@ -161,9 +162,10 @@ export function buildClients(config: TerminalConfig): ClientBundle {
       })
     : NULL_STREAM;
   if (config.executionWsUrl) capabilities.push('user-stream');
+  const gate = historyFirst();
   return {
     clients: {
-      market: historyFirst(
+      market: gate.market(
         new HttpMarketDataClient({baseUrl: marketBase, getToken: token})
       ),
       marketStream: new WebSocketStreamClient({
@@ -172,7 +174,9 @@ export function buildClients(config: TerminalConfig): ClientBundle {
       strategy: new HttpStrategyClient({baseUrl: marketBase, getToken: token}),
       execution,
       userStream,
-      studies: new PythonClient({baseUrl: marketBase, getToken: token}),
+      studies: gate.studies(
+        new PythonClient({baseUrl: marketBase, getToken: token})
+      ),
       demo: false,
     },
     capabilities,

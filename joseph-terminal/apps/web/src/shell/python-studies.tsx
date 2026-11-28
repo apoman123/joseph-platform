@@ -38,8 +38,15 @@ import {catalogEntry, studyName, useStudyCatalog} from './study-catalog';
 /** Refresh interval of live indicator studies (5 s). */
 const LIVE_REFRESH_MS = 5000;
 
-/** Bars every study run reads. */
-export const STUDY_BARS = 2000;
+/**
+ * Bars a study run reads when the chart has loaded fewer (studies get warm
+ * history); runs read the chart's loaded bars, at most the engine's limit,
+ * so they reuse candles the engine already serves the chart.
+ */
+export const STUDY_BARS = 500;
+
+/** Most bars one study run reads (the engine's run limit). */
+export const MAX_STUDY_BARS = 5000;
 
 /** Most studies per batched run (the engine's batch limit). */
 const BATCH_SIZE = 16;
@@ -219,6 +226,7 @@ function renderStudy(
  * @param runtime Terminal runtime.
  * @param closedBarMs Latest confirmed bar, or null while loading.
  * @param atMs Replay cursor, or null when live.
+ * @param loadedBars Bars the chart has loaded; runs read as many.
  * @return Errors by study id.
  */
 export function useStudyRuns(
@@ -226,7 +234,8 @@ export function useStudyRuns(
   chart: ChartState,
   runtime: TerminalRuntime,
   closedBarMs: number | null,
-  atMs: number | null = null
+  atMs: number | null = null,
+  loadedBars = STUDY_BARS
 ): Readonly<Record<string, string>> {
   const state = pythonState(runtime);
   const [errors, setErrors] = useState<Readonly<Record<string, string>>>({});
@@ -236,6 +245,7 @@ export function useStudyRuns(
   const fingerprint = JSON.stringify(rows);
   const live = atMs === null && rows.some(row => row.kind === 'indicator');
   const {chart_id: chartId, instrument_id: instrumentId, timeframe} = chart;
+  const limit = Math.min(MAX_STUDY_BARS, Math.max(STUDY_BARS, loadedBars));
   useEffect(() => {
     if (!live || !port) return;
     const timer = setInterval(
@@ -306,7 +316,7 @@ export function useStudyRuns(
       const body: ScriptBatchRun = {
         instrument_id: instrumentId,
         tf: timeframe,
-        limit: STUDY_BARS,
+        limit,
         include_open: group[0]?.kind === 'indicator',
         ...(windowFrom !== undefined ? {window_from_ms: windowFrom} : {}),
         // Groups hold at most BATCH_SIZE studies, the contract's bound.
@@ -352,6 +362,7 @@ export function useStudyRuns(
     closedBarMs,
     liveTick,
     atMs,
+    limit,
   ]);
   return errors;
 }

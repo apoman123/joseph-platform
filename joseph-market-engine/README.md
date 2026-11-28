@@ -11,10 +11,10 @@ JOSEPH_DEV_TOKENS=dev-local-token:tenant-01:user-01 \
 uv run pytest                                        # all offline tiers
 JOSEPH_NETWORK_TESTS=1 uv run pytest tests/network   # opt-in live venue checks
 uv run python scripts/probe_venues.py                # connectivity evidence
-uv run python -m joseph.indicators.discovery --check # indicator plugins that load
+uv run python -m joseph.scripts.catalog --check      # built-in and plugin scripts that load
 ```
 
-Indicator plugin packages install into this environment with `make plugins` from the repository root; `uv sync` removes them ([plugins](../docs/OPERATIONS.md#indicator-plugins)).
+Script plugin packages (`joseph.scripts` entry points) install into this environment with `make plugins` from the repository root; `uv sync` removes them ([plugins](../docs/OPERATIONS.md#script-plugins)).
 
 ## Modules (`src/joseph/`)
 
@@ -23,9 +23,8 @@ Indicator plugin packages install into this environment with `make plugins` from
 | `domain/` | Standard-library kernel: ids, decimals, timeframes, instruments, session calendars, candles, areas of interest (AOIs), `BarFrame` |
 | `market_data/` | Venue adapters, seconds bars, trade recorder and archives, aggregated timeframes, feed router (AUTO / NATIVE_WS / REST_POLL / REPLAY), candle store, order books |
 | `screening/` | Five strict gates, funding risk, three-state qualification with reasons |
-| `indicators/` | Plugin SDK and metadata, nine built-in indicators, plugin discovery (entry points `joseph.indicator_plugins`), multi-timeframe engine ([README](src/joseph/indicators/README.md)) |
 | `signals/`, `alerts/` | Deduplicated signals; durable outbox to the UI, Telegram, LINE, e-mail, webhooks and the execution engine |
-| `scripts/` | Python script roles: immutable tenant versions, isolated runner, built-in and plugin catalog (`builtin/`, entry points `joseph.scripts`), simulator and backtests (`/v1/scripts/{id}/run`), scans, alert jobs and strategy activations (closed bars → signals, no history replay; [ADR 0010](../docs/adr/0010-python-strategy-scripts.md)) |
+| `scripts/` | Python script roles: immutable tenant versions, isolated runner, built-in and plugin catalog (`builtin/` with the nine built-in indicators and the default strategies, filters and alerts; entry points `joseph.scripts`), batched study runs and backtests (`/v1/scripts/run-batch`, `/v1/scripts/{id}/run`), scans, alert jobs and strategy activations (closed bars → signals, no history replay; [ADR 0010](../docs/adr/0010-python-strategy-scripts.md), [ADR 0011](../docs/adr/0011-indicators-are-joseph-script-classes.md)) |
 | `api/`, `bootstrap.py` | FastAPI routers; composition root |
 
 ## Venues

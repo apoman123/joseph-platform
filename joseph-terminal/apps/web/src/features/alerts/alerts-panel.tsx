@@ -13,12 +13,7 @@
 
 'use client';
 import {formatUtcDateTime} from '@joseph/chart-trading';
-import type {
-  ReasonNode,
-  Severity,
-  Signal,
-  SignalKind,
-} from '@joseph/contracts';
+import type {ReasonNode, Severity, Signal, SignalKind} from '@joseph/contracts';
 import type {WritableStore} from '@joseph/feature-registry';
 import {Fragment, useEffect, useMemo, useState, type ReactNode} from 'react';
 import {
