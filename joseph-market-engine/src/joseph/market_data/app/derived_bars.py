@@ -27,6 +27,7 @@ Everything else is delegated unchanged.
 from __future__ import annotations
 
 import dataclasses
+import decimal
 from collections.abc import AsyncGenerator
 from collections.abc import AsyncIterator
 from collections.abc import Mapping
@@ -161,6 +162,29 @@ class DerivedBarsAdapter:
         if isinstance(self.inner, ports.PriceAdjustmentPort):
             return self.inner.price_adjustment(timeframe)
         return market.PriceAdjustment.RAW
+
+    async def price_basis(
+        self,
+        instrument: instruments.InstrumentId,
+        start_ms: int,
+        end_ms: int,
+    ) -> Mapping[int, decimal.Decimal]:
+        """Delegates the corporate-action factors to the inner source.
+
+        Args:
+            instrument: Exact exchange instrument.
+            start_ms: Inclusive UTC start, epoch milliseconds.
+            end_ms: Exclusive UTC end, epoch milliseconds.
+
+        Returns:
+            The inner source's current factors.
+
+        Raises:
+            errors.UnsupportedError: If the inner source reads none.
+        """
+        if isinstance(self.inner, ports.PriceBasisPort):
+            return await self.inner.price_basis(instrument, start_ms, end_ms)
+        raise errors.UnsupportedError("source reports no price basis")
 
     async def adjust_historical_prices(
         self, bars: Sequence[market.Candle]

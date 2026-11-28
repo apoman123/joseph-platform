@@ -75,22 +75,35 @@ class RateLimiter:
         self._sleep = sleep
         self._tokens = float(burst)
         self._updated = monotonic()
-        self._lock = asyncio.Lock()
 
     async def acquire(self) -> None:
-        """Waits until a token is available and consumes it."""
-        async with self._lock:
-            while True:
-                now = self._monotonic()
-                self._tokens = min(
-                    self.burst,
-                    self._tokens + (now - self._updated) * self.rate_per_s,
-                )
-                self._updated = now
-                if self._tokens >= 1:
-                    self._tokens -= 1
-                    return
-                await self._sleep((1 - self._tokens) / self.rate_per_s)
+        """Waits until a token is available and consumes it.
+
+        The token is reserved at once (the bucket may go negative, which
+        queues later callers behind it in arrival order) and the wait for it
+        happens without holding any lock, so concurrent callers sleep in
+        parallel instead of one after another, and the sustained rate and
+        burst are those of a plain token bucket. A caller cancelled while
+        waiting returns its reservation.
+
+        Raises:
+            asyncio.CancelledError: If cancelled while waiting; the
+                reserved token is returned to the bucket first.
+        """
+        now = self._monotonic()
+        self._tokens = min(
+            self.burst,
+            self._tokens + (now - self._updated) * self.rate_per_s,
+        )
+        self._updated = now
+        self._tokens -= 1
+        if self._tokens >= 0:
+            return
+        try:
+            await self._sleep(-self._tokens / self.rate_per_s)
+        except asyncio.CancelledError:
+            self._tokens += 1
+            raise
 
 
 class VenueHttp:

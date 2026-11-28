@@ -20,7 +20,9 @@ not gaps. Every other venue's bars are dense: a missing bar is a gap.
 
 from __future__ import annotations
 
+import decimal
 from collections.abc import AsyncIterator
+from collections.abc import Mapping
 from collections.abc import Sequence
 from typing import Protocol
 from typing import TypeGuard
@@ -95,6 +97,41 @@ class HistoricalPriceNormalizationPort(Protocol):
 
         Raises:
             errors.VenueUnavailableError: If required evidence cannot be read.
+        """
+        ...
+
+
+@runtime_checkable
+class PriceBasisPort(Protocol):
+    """Reads the provider's current corporate-action factors of a listing.
+
+    The market-data service compares them across its fifteen-minute
+    adjustment epochs: cached adjusted history is dropped only when a
+    factor changed (a new split, dividend or provider correction), instead
+    of on every epoch.
+    """
+
+    async def price_basis(
+        self,
+        instrument: instruments.InstrumentId,
+        start_ms: int,
+        end_ms: int,
+    ) -> Mapping[int, decimal.Decimal]:
+        """Reads confirmed factors of the past sessions in a window.
+
+        Args:
+            instrument: Exact exchange instrument.
+            start_ms: Inclusive UTC start, epoch milliseconds.
+            end_ms: Exclusive UTC end, epoch milliseconds (sessions of the
+                current exchange date are left out).
+
+        Returns:
+            Daily session start (UTC milliseconds) mapped to the factor the
+            provider's historical prices of that session carry now.
+
+        Raises:
+            errors.JosephError: If the evidence cannot be read; the caller
+                then treats the basis as unknown.
         """
         ...
 
