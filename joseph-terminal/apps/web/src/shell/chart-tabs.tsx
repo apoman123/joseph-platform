@@ -29,8 +29,8 @@ export function ChartTabs(): ReactElement {
     return {
       chart,
       label:
-        chart.view_type === 'stock_heatmap'
-          ? 'Stock heatmap'
+        chart.view_type === 'heatmap'
+          ? 'Heatmap'
           : `${instrument.venueMarketId} · ${chart.timeframe}`,
       venue: VENUE_NAMES[instrument.venue],
     };
@@ -131,7 +131,7 @@ export function ChartTabs(): ReactElement {
         type="button"
         className="j-btn j-btn--ghost j-btn--icon chart-tabs__add"
         aria-label="Add chart tab"
-        title="Choose a candlestick chart or stock heatmap"
+        title="Choose a candlestick chart or heatmap"
         aria-haspopup="dialog"
         aria-expanded={adding}
         onClick={() => void setAdding(true)}
@@ -141,7 +141,7 @@ export function ChartTabs(): ReactElement {
       {adding && (
         <ScriptDialog title="New tab" onClose={() => void setAdding(false)}>
           <p>Choose what to explore.</p>
-          {(['candles', 'stock_heatmap'] as const).map(viewType => (
+          {(['candles', 'heatmap'] as const).map(viewType => (
             <button
               key={viewType}
               type="button"
@@ -155,7 +155,7 @@ export function ChartTabs(): ReactElement {
                 setAdding(false);
               }}
             >
-              {viewType === 'candles' ? 'Candlestick chart' : 'Stock heatmap'}
+              {viewType === 'candles' ? 'Candlestick chart' : 'Heatmap'}
             </button>
           ))}
         </ScriptDialog>

@@ -20,12 +20,27 @@ offers it today.
 | US stocks and ETFs | Alpaca IEX | Free Alpaca key required; IEX is one exchange, not consolidated SIP. |
 | Taiwan stocks and ETFs | Fugle free-tier per-symbol REST | Fugle key required for 1m history from 2023-05-23 and current-session REST candles/quotes. Taiwan market data stays disabled without the key. |
 | US Treasury rates | U.S. Treasury daily par and real yields; optional FRED daily rates and spreads | FRED key required for distinct `FRED_*` IDs. Published daily; not a live bond quote or tradable price. |
+| Heatmap metadata and fallback quotes | Nasdaq.com screener and Nasdaq-100 list, Wikipedia S&P 500 constituents, TWSE/TPEx open data, CoinGecko coin markets | Keyless; unofficial (Nasdaq.com) or delayed/end-of-day quotes, cached 60 s to 24 h. Used only by heatmaps, never as a chart or order price. See [Heatmaps](HEATMAPS.md). |
 | Demo only | Mock venue | Synthetic data only when `JOSEPH_DEMO_ONLY=true`; excluded from live market-data venues. |
 
 SinoPac Shioaji is no longer selectable or constructed as a market-data source
 by the market engine. The market engine no longer installs its SDK extra or
 reads its data-feed credentials. Its trading adapter remains in the execution
 engine.
+
+## Heatmap data
+
+Heatmaps combine the configured feeds with keyless public lists. US sector,
+industry and market capitalization come from the Nasdaq.com screener for every
+US data set (one taxonomy); index members come from Wikipedia (S&P 500) and
+Nasdaq.com (Nasdaq-100). With Alpaca keys, US tiles use Alpaca snapshots and
+split-adjusted daily bars of the configured feed (IEX stays labelled IEX);
+without them the screener's delayed values are shown and labelled, and the
+metrics that need history are unavailable. Taiwan tiles use the configured
+Taiwan feed when its venue is enabled and otherwise the official end-of-day
+files; their market capitalization is derived from issued shares and labelled
+as derived. Crypto tiles use CoinGecko. These values are never used as chart,
+screener or order prices, and a missing value stays missing.
 
 ## Closed-market display and chart volume
 

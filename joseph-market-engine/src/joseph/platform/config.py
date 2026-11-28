@@ -402,6 +402,17 @@ class Settings:
         indicator_plugins_required: Indicator plugin ids that must load and
             stay enabled, else startup fails,
             ``JOSEPH_INDICATOR_PLUGINS_REQUIRED``. Default none.
+        script_plugin_packages: Script plugin packages to load,
+            ``JOSEPH_SCRIPT_PLUGIN_PACKAGES``: ``*`` for every installed
+            entry point of the ``joseph.scripts`` group, ``none`` for none,
+            or comma-separated entry-point names. Default ``*``. The
+            built-in scripts always load.
+        script_plugins_disabled: Catalog script ids listed but not
+            runnable, ``JOSEPH_SCRIPT_PLUGINS_DISABLED`` (built-ins
+            included). Default none.
+        script_plugins_required: Catalog script ids that must load and stay
+            enabled, else startup fails, ``JOSEPH_SCRIPT_PLUGINS_REQUIRED``.
+            Default none.
         telegram_bot_token: Telegram bot token (secret),
             ``JOSEPH_TELEGRAM_BOT_TOKEN``. Default none (channel off).
         script_runtime: User Python execution mode, disabled or docker;
@@ -525,6 +536,9 @@ class Settings:
     indicator_plugin_packages: str = "*"
     indicator_plugins_disabled: tuple[str, ...] = ()
     indicator_plugins_required: tuple[str, ...] = ()
+    script_plugin_packages: str = "*"
+    script_plugins_disabled: tuple[str, ...] = ()
+    script_plugins_required: tuple[str, ...] = ()
     telegram_bot_token: str | None = None
     script_runtime: str = "disabled"
     script_runner_image: str = "joseph-python-runner:1"
@@ -709,6 +723,15 @@ class Settings:
             ),
             indicator_plugins_required=_names(
                 source.get("JOSEPH_INDICATOR_PLUGINS_REQUIRED", "")
+            ),
+            script_plugin_packages=(
+                source.get("JOSEPH_SCRIPT_PLUGIN_PACKAGES", "").strip() or "*"
+            ),
+            script_plugins_disabled=_names(
+                source.get("JOSEPH_SCRIPT_PLUGINS_DISABLED", "")
+            ),
+            script_plugins_required=_names(
+                source.get("JOSEPH_SCRIPT_PLUGINS_REQUIRED", "")
             ),
             telegram_bot_token=secret_value(
                 source, "JOSEPH_TELEGRAM_BOT_TOKEN"

@@ -345,7 +345,7 @@
         "view_type": {
           "enum": [
             "candles",
-            "stock_heatmap"
+            "heatmap"
           ],
           "type": "string",
           "description": "Tab content; omitted means candles for existing workspaces."

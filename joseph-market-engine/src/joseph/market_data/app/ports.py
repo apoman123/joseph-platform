@@ -20,6 +20,7 @@ not gaps. Every other venue's bars are dense: a missing bar is a gap.
 
 from __future__ import annotations
 
+import datetime
 import decimal
 from collections.abc import AsyncIterator
 from collections.abc import Mapping
@@ -34,6 +35,7 @@ from joseph.domain import timeframes
 from joseph.market_data.domain import candles as candle_rules
 from joseph.market_data.domain import capabilities
 from joseph.market_data.domain import health
+from joseph.market_data.domain import heatmap_metrics
 
 
 @runtime_checkable
@@ -56,6 +58,40 @@ class SnapshotBatchPort(Protocol):
                 unsupported.
             errors.JosephError: If the provider rejects or cannot serve the
                 query.
+        """
+        ...
+
+
+@runtime_checkable
+class HeatmapQuotesPort(Protocol):
+    """Optional multi-symbol session quotes and daily bars for heatmaps."""
+
+    async def fetch_session_quotes(
+        self, instruments_: Sequence[instruments.InstrumentId]
+    ) -> dict[instruments.InstrumentId, heatmap_metrics.SessionQuote]:
+        """Fetches latest trades with the current and previous daily bars.
+
+        Args:
+            instruments_: Selected listings of one venue.
+
+        Returns:
+            Session quotes of the returned symbols; others are missing.
+        """
+        ...
+
+    async def fetch_daily_bars_batch(
+        self,
+        instruments_: Sequence[instruments.InstrumentId],
+        start: datetime.date,
+    ) -> dict[instruments.InstrumentId, list[heatmap_metrics.DailyBar]]:
+        """Fetches daily bars of many symbols within a request budget.
+
+        Args:
+            instruments_: Selected listings of one venue.
+            start: First exchange-local date.
+
+        Returns:
+            Bars per instrument; symbols beyond the budget are missing.
         """
         ...
 

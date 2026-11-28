@@ -20,7 +20,18 @@ import pydantic
 from joseph.domain import errors
 from joseph.domain import instruments
 from joseph.domain import timeframes
-from joseph.strategy.domain import ast as strategy_ast
+
+InstrumentIdStr: TypeAlias = Annotated[
+    str,
+    pydantic.Field(
+        pattern=(
+            r"^(bybit|okx|coinbase|kraken|deriv|binance|hyperliquid|lighter"
+            r"|bitget|mexc|twse|tpex|nasdaq|nyse|cboe|treasury|mock)"
+            r":(perp|spot|future|stock|etf|rate):[A-Za-z0-9._/-]{1,64}$"
+        )
+    ),
+]
+"""Canonical instrument id text, e.g. ``binance:perp:BTCUSDT``."""
 
 ScriptKind: TypeAlias = Literal[
     "indicator", "strategy", "library", "filter", "alert"
@@ -31,6 +42,17 @@ ScriptId: TypeAlias = Annotated[
     str, pydantic.Field(pattern=r"^[a-z][a-z0-9-]{0,62}$")
 ]
 """Stable tenant-local script slug, one to sixty-three characters."""
+
+ScriptRef: TypeAlias = Annotated[
+    str,
+    pydantic.Field(
+        pattern=(
+            r"^(?:[a-z][a-z0-9-]{0,62}|builtin:[a-z][a-z0-9_-]{0,63}"
+            r"|plugin:[a-z0-9_.-]{1,64}:[a-z][a-z0-9_-]{0,63})$"
+        )
+    ),
+]
+"""A tenant script slug, ``builtin:<id>`` or ``plugin:<entry>:<id>``."""
 
 
 def _bounded_inputs(
@@ -87,7 +109,7 @@ class SeriesRequest(pydantic.BaseModel):
     """
 
     model_config = pydantic.ConfigDict(extra="forbid", strict=True)
-    instrument_id: strategy_ast.InstrumentIdStr | None = None
+    instrument_id: InstrumentIdStr | None = None
     tf: timeframes.Timeframe = pydantic.Field(strict=False)
     limit: Annotated[int, pydantic.Field(ge=1, le=500)] = 500
 
@@ -155,7 +177,7 @@ class ScriptRun(pydantic.BaseModel):
 
     model_config = pydantic.ConfigDict(extra="forbid", strict=True)
     version: Annotated[int, pydantic.Field(ge=1)] | None = None
-    instrument_id: strategy_ast.InstrumentIdStr
+    instrument_id: InstrumentIdStr
     tf: timeframes.Timeframe = pydantic.Field(strict=False)
     limit: Annotated[int, pydantic.Field(ge=2, le=2000)] = 500
     from_ms: Annotated[int, pydantic.Field(ge=0)] | None = None
@@ -415,7 +437,9 @@ class AlertJobInput(pydantic.BaseModel):
     Attributes:
         script_id: Owned alert, indicator or strategy script publishing
             conditions.
-        version: Positive immutable version, pinned rather than following edits.
+        version: Positive immutable tenant version, pinned rather than
+            following edits; 0 for a built-in or plugin script, whose
+            installed source hash is pinned instead.
         instrument_id: Canonical instrument whose new closed bars are evaluated.
         tf: Source resolution, one second through one calendar month.
         inputs: JSON values overriding the pinned version's defaults.
@@ -427,9 +451,9 @@ class AlertJobInput(pydantic.BaseModel):
     """
 
     model_config = pydantic.ConfigDict(extra="forbid", strict=True)
-    script_id: ScriptId
-    version: Annotated[int, pydantic.Field(ge=1)]
-    instrument_id: strategy_ast.InstrumentIdStr
+    script_id: ScriptRef
+    version: Annotated[int, pydantic.Field(ge=0)]
+    instrument_id: InstrumentIdStr
     tf: timeframes.Timeframe = pydantic.Field(strict=False)
     inputs: JsonInputs = pydantic.Field(default_factory=dict)
     subscription_ids: Annotated[list[str], pydantic.Field(max_length=50)] = (

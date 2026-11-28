@@ -33,7 +33,7 @@ import pydantic
 
 from joseph import bootstrap
 from joseph.indicators import catalog
-from joseph.market_data.app import heatmap
+from joseph.market_data.app import heatmap_models
 from joseph.platform import config
 from joseph.scripts import models as scripts
 
@@ -64,8 +64,8 @@ def _script_contracts() -> str:
         scripts.ScanJob,
         scripts.AlertJobInput,
         scripts.AlertJob,
-        heatmap.HeatmapSnapshot,
-        heatmap.CompanyMetadataBatch,
+        heatmap_models.HeatmapSnapshot,
+        heatmap_models.HeatmapCatalog,
     ]
     definitions = {}
     for model in models:

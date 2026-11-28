@@ -104,10 +104,13 @@ convention = "google"
 # Tests may assert and hold fake secrets (S), run long scenarios (PLR), need
 # no package docstrings (D104) and take fixtures they do not use (ARG).
 "tests/**" = ["S", "PLR", "D104", "ARG"]
+# Built-in scripts declare INPUTS/REQUESTS as plain class attributes, like
+# tenant scripts; joseph_script.Script types them as ClassVar.
+"src/joseph/scripts/builtin/**" = ["RUF012"]
 
 [tool.ruff.lint.isort]
 force-single-line = true
-known-first-party = ["joseph"]
+known-first-party = ["joseph", "joseph_script"]
 
 [tool.pydoclint]
 # Google docstrings without types (annotations carry them). Section-less

@@ -62,11 +62,15 @@ from joseph.market_data.adapters import alpaca
 from joseph.market_data.adapters import bar_archive_sql
 from joseph.market_data.adapters import binance_vision
 from joseph.market_data.adapters import bitget_archive
+from joseph.market_data.adapters import coingecko as coingecko_markets
 from joseph.market_data.adapters import factory
+from joseph.market_data.adapters import http as venue_http
 from joseph.market_data.adapters import lighter_archive
 from joseph.market_data.adapters import mexc
 from joseph.market_data.adapters import replay as replay_lib
+from joseph.market_data.adapters import taiwan_open_data
 from joseph.market_data.adapters import trade_archive_sql
+from joseph.market_data.adapters import us_equities
 from joseph.market_data.adapters import ws
 from joseph.market_data.app import candle_store
 from joseph.market_data.app import derived_bars
@@ -95,6 +99,7 @@ from joseph.platform import redaction
 from joseph.platform import streaming
 from joseph.screening.adapters import coingecko
 from joseph.screening.app import service as screening_service
+from joseph.scripts import catalog as script_catalog
 from joseph.scripts import jobs as script_jobs
 from joseph.scripts import repository as script_repository
 from joseph.scripts import runner as script_runner
@@ -173,6 +178,8 @@ class Container:
         starters: Background producer startup hooks, after the delivery worker.
         stoppers: Producer shutdown hooks, before delivery and data sources
             stop.
+        heatmap_sources: Keyless public heatmap sources, None in DEMO-only
+            mode (tests may inject fixture-backed ones).
     """
 
     settings: config.Settings
@@ -200,6 +207,7 @@ class Container:
     stoppers: list[Callable[[], object]] = dataclasses.field(
         default_factory=list
     )
+    heatmap_sources: heatmap_service.HeatmapSources | None = None
 
     async def astart(self) -> None:
         """Starts the background workers.
@@ -445,8 +453,96 @@ def build_container(
         container.closers.append(archive_engine.dispose)
     if trending is not None:
         container.closers.append(trending.close)
+    if not settings.demo_only:
+        container.heatmap_sources = heatmap_sources(
+            clock, http_client, settings.http_timeout_s
+        )
     container.signal_stack = build_signal_stack(container)
     return container
+
+
+def heatmap_sources(
+    clock: clock_lib.Clock,
+    client: httpx.AsyncClient | None,
+    timeout_s: float,
+) -> heatmap_service.HeatmapSources:
+    """Builds the keyless public heatmap sources.
+
+    Args:
+        clock: Time source of the CoinGecko back-off.
+        client: Optional shared HTTP client (tests inject fixture-backed
+            ones); each source otherwise owns a client.
+        timeout_s: Request timeout of owned clients.
+
+    Returns:
+        Nasdaq.com/Wikipedia, TWSE/TPEx open data and CoinGecko sources.
+    """
+
+    def client_for(
+        venue: instruments.Venue, base_url: str, name: str, rate: float
+    ) -> venue_http.VenueHttp:
+        """Creates one rate-limited client.
+
+        Args:
+            venue: Venue tag of the client (messages use ``name``).
+            base_url: Fixed public origin.
+            name: Source name in error messages.
+            rate: Requests per second.
+
+        Returns:
+            Client.
+        """
+        return venue_http.VenueHttp(
+            venue,
+            base_url,
+            client=client,
+            timeout_s=timeout_s,
+            rate_per_s=rate,
+            burst=3,
+            max_concurrency=2,
+            name=name,
+        )
+
+    return heatmap_service.HeatmapSources(
+        us=us_equities.UsEquitySource(
+            client_for(
+                instruments.Venue.NASDAQ,
+                us_equities.NASDAQ_API,
+                "nasdaq.com",
+                1.0,
+            ),
+            client_for(
+                instruments.Venue.NASDAQ,
+                us_equities.WIKIPEDIA_API,
+                "wikipedia",
+                1.0,
+            ),
+        ),
+        taiwan=taiwan_open_data.TaiwanOpenData(
+            client_for(
+                instruments.Venue.TWSE,
+                taiwan_open_data.TWSE_OPENAPI,
+                "twse open data",
+                1.0,
+            ),
+            client_for(
+                instruments.Venue.TPEX,
+                taiwan_open_data.TPEX_OPENAPI,
+                "tpex open data",
+                1.0,
+            ),
+        ),
+        coins=coingecko_markets.CoinGeckoSource(
+            # The venue only tags the client; messages say ``coingecko``.
+            client_for(
+                instruments.Venue.BINANCE,
+                coingecko_markets.API_URL,
+                "coingecko",
+                0.2,
+            ),
+            clock,
+        ),
+    )
 
 
 def _trade_recorder(
@@ -810,15 +906,21 @@ def create_application(
             timeout_s=built.settings.script_timeout_s,
         ),
         built.market_data,
+        script_catalog.build(
+            script_catalog.CatalogConfig(
+                packages=built.settings.script_plugin_packages,
+                disabled=built.settings.script_plugins_disabled,
+                required=built.settings.script_plugins_required,
+            )
+        ),
     )
     routers.append(scripts_router.build_router(scripts, deps.get_principal))
     universe = market_universe.UniverseService(built.market_data)
-    routers.append(
-        heatmap_router.build_router(
-            heatmap_service.HeatmapService(universe, built.engine),
-            deps.get_principal,
-        )
+    heatmaps = heatmap_service.HeatmapService(
+        universe, built.heatmap_sources, clock=built.clock
     )
+    built.closers.append(heatmaps.close)
+    routers.append(heatmap_router.build_router(heatmaps, deps.get_principal))
     if built.signal_stack is not None:
         jobs = script_jobs.ScriptJobs(
             scripts,

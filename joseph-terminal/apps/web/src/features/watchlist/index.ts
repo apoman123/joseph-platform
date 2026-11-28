@@ -59,6 +59,9 @@ export function prefsFromSettings(stored: WatchlistSettings): WatchlistPrefs {
   };
 }
 
+/** Command that appends `{instrumentId}` (default: the active chart) to the list. */
+export const WATCHLIST_ADD_COMMAND = 'watchlist.add';
+
 /** Default rows in DEMO mode. */
 export const DEMO_WATCHLIST: readonly string[] = [
   'mock:perp:BTCUSD',
@@ -127,6 +130,27 @@ export const WATCHLIST_FEATURE: WebFeature = {
       return createElement(WatchlistPanel, {ctx: props.ctx, items, prefs});
     }
     const view: WebView = WatchlistSlot;
+    const removeCommand = ctx.commands.register({
+      id: WATCHLIST_ADD_COMMAND,
+      title: 'Add active chart to watchlist',
+      run: args => {
+        const wanted = (args as {instrumentId?: unknown} | undefined)
+          ?.instrumentId;
+        const instrumentId =
+          typeof wanted === 'string' && wanted
+            ? wanted
+            : ctx.selection.get().instrumentId;
+        if (items.get().includes(instrumentId)) {
+          ctx.notifier.notify(`${instrumentId} is already in the watchlist.`);
+          return;
+        }
+        items.set([...items.get(), instrumentId]);
+        ctx.notifier.notify(
+          `${instrumentId} added to the watchlist.`,
+          'success'
+        );
+      },
+    });
     const remove = ctx.slots.contribute('side-panel', {
       id: 'watchlist',
       title: 'Watchlist',
@@ -136,6 +160,7 @@ export const WATCHLIST_FEATURE: WebFeature = {
     });
     return () => {
       remove();
+      removeCommand();
       off();
     };
   },

@@ -3,21 +3,133 @@
 
 """Public abstract interfaces.
 
-Public abstract interfaces for the five kinds of isolated Joseph scripts.
+Public abstract interfaces for the five kinds of Joseph scripts. Every
+script, including the platform's built-in indicators, strategies, filters and
+alerts and installed plugin packages, is one concrete subclass of exactly one
+of ``Indicator``, ``Strategy``, ``Library``, ``Filter`` or ``Alert``.
+
+Subclasses may declare presentation metadata and typed inputs as class
+attributes; the host reads them without running ``on_bar``::
+
+    class Average(Indicator):
+        ID = "average"
+        TITLE = "Average"
+        INPUTS = {"length": Input(20, title="Length", minimum=1, maximum=500)}
+
+        def on_bar(self, ctx):
+            ctx.plot("Average", ctx.sma(length=int(ctx.input("length"))))
 """
 
 from __future__ import annotations
 
 import abc
+import dataclasses
 from collections.abc import Mapping
 from typing import TYPE_CHECKING
 from typing import Any
+from typing import ClassVar
 
 if TYPE_CHECKING:
     from joseph.scripts import worker
 
 
-class Indicator(abc.ABC):
+@dataclasses.dataclass(frozen=True, slots=True)
+class Input:
+    """A declared, user-configurable script input.
+
+    Attributes:
+        default: JSON default value (number, string, boolean or list).
+        title: Settings-dialog label; the input name when empty.
+        minimum: Optional inclusive numeric lower bound.
+        maximum: Optional inclusive numeric upper bound.
+        options: Optional accepted values, shown as a choice list.
+        step: Optional numeric spinner step.
+        group: Optional settings-dialog section, such as "Style".
+        tooltip: Optional help text shown next to the input.
+    """
+
+    default: Any
+    title: str = ""
+    minimum: float | None = None
+    maximum: float | None = None
+    options: tuple[Any, ...] | None = None
+    step: float | None = None
+    group: str = ""
+    tooltip: str = ""
+
+    def to_json(self) -> dict[str, Any]:
+        """Describes the input as a JSON object for catalogs and dialogs.
+
+        Returns:
+            The declaration with ``options`` as a list and unset fields as
+            None or empty strings.
+        """
+        return {
+            "default": self.default,
+            "title": self.title,
+            "minimum": self.minimum,
+            "maximum": self.maximum,
+            "options": None if self.options is None else list(self.options),
+            "step": self.step,
+            "group": self.group,
+            "tooltip": self.tooltip,
+        }
+
+
+@dataclasses.dataclass(frozen=True, slots=True)
+class Request:
+    """A declared additional symbol or resolution read through ctx.request.
+
+    Attributes:
+        tf: Resolution such as "1d"; source bars become visible only after
+            they have closed.
+        instrument_id: Optional canonical symbol; the chart symbol when None.
+        limit: Maximum closed source bars, one through five hundred.
+    """
+
+    tf: str
+    instrument_id: str | None = None
+    limit: int = 500
+
+    def to_json(self) -> dict[str, Any]:
+        """Describes the request in the script-version JSON shape.
+
+        Returns:
+            Mapping with tf, instrument_id and limit.
+        """
+        return {
+            "tf": self.tf,
+            "instrument_id": self.instrument_id,
+            "limit": self.limit,
+        }
+
+
+class Script:
+    """Optional declarations shared by every script role.
+
+    Attributes:
+        ID: Stable catalog slug for built-in and plugin scripts (lowercase
+            letters, digits, "-" and "_"); tenant scripts use their saved id.
+        TITLE: Display name; the class name when empty.
+        SHORT_TITLE: Compact legend name; TITLE when empty.
+        DESCRIPTION: One or two plain-text sentences for catalogs.
+        OVERLAY: Whether plots share the price pane (True) or get their own.
+        INPUTS: Declared inputs in display order, keyed by input name.
+        REQUESTS: Additional series aliases read with ctx.request.
+        CATEGORY: Optional catalog section such as "Trend" or "Volume".
+    """
+
+    ID: ClassVar[str] = ""
+    TITLE: ClassVar[str] = ""
+    SHORT_TITLE: ClassVar[str] = ""
+    DESCRIPTION: ClassVar[str] = ""
+    OVERLAY: ClassVar[bool] = True
+    INPUTS: ClassVar[Mapping[str, Input]] = {}
+    REQUESTS: ClassVar[Mapping[str, Request]] = {}
+    CATEGORY: ClassVar[str] = ""
+
+
+class Indicator(Script, abc.ABC):
     """Base class for closed-bar visual calculations without trading authority.
 
     Subclasses implement on_bar and publish plots/drawings through the context.
@@ -37,7 +149,7 @@ class Indicator(abc.ABC):
         ...
 
 
-class Strategy(abc.ABC):
+class Strategy(Script, abc.ABC):
     """Base class for visual studies.
 
     Base class for visual studies with an isolated simulated trading account.
@@ -59,7 +171,7 @@ class Strategy(abc.ABC):
         ...
 
 
-class Library(abc.ABC):
+class Library(Script, abc.ABC):
     """Base class exporting reusable code without a standalone chart instance.
 
     Consumers import an alias pinned to an immutable, tenant-owned version.
@@ -76,7 +188,7 @@ class Library(abc.ABC):
         ...
 
 
-class Filter(abc.ABC):
+class Filter(Script, abc.ABC):
     """Base class for Python market-universe filtering."""
 
     @abc.abstractmethod
@@ -93,7 +205,7 @@ class Filter(abc.ABC):
         ...
 
 
-class Alert(abc.ABC):
+class Alert(Script, abc.ABC):
     """Base class for Python alert conditions evaluated on closed market bars.
 
     Subclasses publish messages through ctx.alert; the host routes accepted
@@ -111,3 +223,25 @@ class Alert(abc.ABC):
             None; matching events are recorded with bar-time idempotency keys.
         """
         ...
+
+
+ROLES: tuple[type[Script], ...] = (Indicator, Strategy, Library, Filter, Alert)
+"""The five abstract script roles, in catalog order."""
+
+
+def role_of(cls: type) -> str | None:
+    """Names the single script role a class implements.
+
+    Args:
+        cls: Any class.
+
+    Returns:
+        "indicator", "strategy", "library", "filter" or "alert" when the class
+        inherits exactly one role base, otherwise None.
+    """
+    found = [
+        base.__name__.lower()
+        for base in ROLES
+        if isinstance(cls, type) and issubclass(cls, base)
+    ]
+    return found[0] if len(found) == 1 else None

@@ -469,36 +469,57 @@ export type ScriptId1 = string;
  */
 export type SubscriptionIds1 = string[];
 export type Version1 = number;
-export type AsOfMs = number;
-export type InstrumentId3 = string;
-export type MarketCap = string | null;
-export type Sector = string | null;
-/**
- * @maxItems 5000
- */
-export type Records = CompanyMetadata[];
-export type AvailableMetrics = string[];
+export type Available = boolean;
 export type Currency = string;
+export type DefaultLimit = number;
+export type Id = string;
+export type Label = string;
+export type Reason = string | null;
+export type Section = string;
+export type Type = 'stocks' | 'etfs' | 'crypto';
+export type Datasets = HeatmapDataset[];
+export type Available1 = boolean;
+export type Id1 = 'sector' | 'asset_class' | 'none';
+export type Label1 = string;
+export type Reason1 = string | null;
+export type Available2 = boolean;
+export type Format = 'currency' | 'percent' | 'number' | 'ratio';
+export type Id2 = string;
+export type Label2 = string;
+export type Reason2 = string | null;
+export type Scale = ('diverging' | 'sequential') | null;
+export type AsOfMs = number | null;
+export type Field = string;
+export type Note = string | null;
+export type Source = string;
+export type ColorMetrics = HeatmapMetric[];
+export type Currency1 = string;
+export type Dataset = string;
+export type DatasetLabel = string;
+export type DefaultColor = string;
+export type DefaultGrouping = 'sector' | 'asset_class' | 'none';
+export type DefaultSize = string;
+export type Demo = boolean;
 export type GeneratedAtMs = number;
-export type MissingMetadata = boolean;
-export type QuoteCount = number;
-export type Region = 'us' | 'taiwan';
+export type Groupings = HeatmapGrouping[];
+export type Limit = number;
+export type Pending = boolean;
+export type PricedCount = number;
+export type Provenance = HeatmapProvenance[];
+export type SizeMetrics = HeatmapMetric[];
 export type AsOfMs1 = number | null;
-export type ChangePct = string | null;
+export type ChartUnavailableReason = string | null;
 export type Error = string | null;
-export type Exchange = string;
-export type FeedState1 = string;
-export type InstrumentId4 = string;
-export type Last = string | null;
-export type MarketCap1 = string | null;
-export type MetadataAsOfMs = number | null;
+export type Exchange = string | null;
+export type Group = string | null;
+export type Industry = string | null;
+export type InstrumentId3 = string | null;
+export type Key = string;
 export type Name = string | null;
-export type Sector1 = string | null;
-export type Source = string | null;
+export type Price = string | null;
 export type Symbol = string;
-export type Turnover = string | null;
-export type Volume = string | null;
 export type Tiles = HeatmapTile[];
+export type Type1 = 'stocks' | 'etfs' | 'crypto';
 export type UniverseCount = number;
 export type ScriptId2 = string;
 export type Version2 = number;
@@ -539,15 +560,15 @@ export type ExpectedVersion = number | null;
 export type Kind = 'indicator' | 'strategy' | 'library' | 'filter' | 'alert';
 export type Name3 = string;
 export type Overlay = boolean;
-export type InstrumentId5 = string | null;
-export type Limit = number;
+export type InstrumentId4 = string | null;
+export type Limit1 = number;
 export type ScriptId4 = string;
 export type Source1 = string;
 /**
  * @maxItems 2000
  */
 export type Alerts = ScriptAlertEvent[];
-export type Id = string;
+export type Id3 = string;
 export type Kind1 =
   | 'line'
   | 'polyline'
@@ -573,10 +594,10 @@ export type DataSource = string;
  * @maxItems 2000
  */
 export type EquityCurve = PlotPoint[];
-export type FeedState2 = string;
+export type FeedState1 = string;
 export type Effect = 'entry' | 'exit' | 'reversal';
 export type Fee = number;
-export type Price = number;
+export type Price1 = number;
 export type Quantity = number;
 export type Side = 'buy' | 'sell';
 export type TimeMs2 = number;
@@ -584,7 +605,7 @@ export type TimeMs2 = number;
  * @maxItems 4000
  */
 export type Fills = SimulatedFill[];
-export type InstrumentId6 = string;
+export type InstrumentId5 = string;
 export type Kind2 = 'indicator' | 'strategy' | 'filter' | 'alert';
 export type Matched = boolean | null;
 export type Overlay1 = boolean;
@@ -604,8 +625,8 @@ export type CommissionBps = number;
 export type FromMs = number | null;
 export type IncludeOpen = boolean;
 export type InitialEquity = number;
-export type InstrumentId7 = string;
-export type Limit1 = number;
+export type InstrumentId6 = string;
+export type Limit2 = number;
 export type SlippageBps = number;
 export type ToMs = number | null;
 export type Version6 = number | null;
@@ -2055,7 +2076,9 @@ export interface Inputs {
  * Attributes:
  *     script_id: Owned alert, indicator or strategy script publishing
  *         conditions.
- *     version: Positive immutable version, pinned rather than following edits.
+ *     version: Positive immutable tenant version, pinned rather than
+ *         following edits; 0 for a built-in or plugin script, whose
+ *         installed source hash is pinned instead.
  *     instrument_id: Canonical instrument whose new closed bars are evaluated.
  *     tf: Source resolution, one second through one calendar month.
  *     inputs: JSON values overriding the pinned version's defaults.
@@ -2082,112 +2105,200 @@ export interface Inputs1 {
   [k: string]: JsonValue | undefined;
 }
 /**
- * Explicit optional metadata for feeds without company fundamentals.
+ * Every data set and the default per heatmap family.
  *
  * Attributes:
- *     instrument_id: Canonical stock or ETF identifier.
- *     sector: Optional user-provided industry/sector label, maximum 120 chars.
- *     market_cap: Optional positive market capitalization in its quote
- *         currency,
- *         encoded as a decimal string, never inferred from price or volume.
- *     as_of_ms: User-declared observation time in UTC epoch milliseconds.
+ *     datasets: Data sets in menu order.
+ *     defaults: Default data set id per heatmap family.
  *
  * This interface was referenced by `JosephContracts`'s JSON-Schema
- * via the `definition` "CompanyMetadata".
+ * via the `definition` "HeatmapCatalog".
  */
-export interface CompanyMetadata {
-  as_of_ms: AsOfMs;
-  instrument_id: InstrumentId3;
-  market_cap?: MarketCap;
-  sector?: Sector;
+export interface HeatmapCatalog {
+  datasets: Datasets;
+  defaults: Defaults;
 }
 /**
- * An explicit batch of user-owned heatmap fundamentals.
+ * A selectable data set (an index, a market or a coin universe).
  *
  * Attributes:
- *     records: At most five thousand canonical, dated company records.
+ *     id: Stable id, e.g. ``us_sp500`` or ``crypto_all``.
+ *     type: Heatmap family.
+ *     label: Human label, e.g. ``S&P 500``.
+ *     section: Menu section, e.g. ``United States``, ``Taiwan``, ``Crypto``.
+ *     currency: Quote currency of prices and sizes (``USD`` or ``TWD``).
+ *     default_limit: Tiles shown by default (the largest first).
+ *     available: Whether the configured sources can serve it.
+ *     reason: Why it is unavailable, or None.
  *
  * This interface was referenced by `JosephContracts`'s JSON-Schema
- * via the `definition` "CompanyMetadataBatch".
+ * via the `definition` "HeatmapDataset".
  */
-export interface CompanyMetadataBatch {
-  records: Records;
+export interface HeatmapDataset {
+  available: Available;
+  currency: Currency;
+  default_limit: DefaultLimit;
+  id: Id;
+  label: Label;
+  reason?: Reason;
+  section: Section;
+  type: Type;
+}
+export interface Defaults {
+  [k: string]: string | undefined;
 }
 /**
- * Real stock heatmap data and explicit market/coverage limits.
+ * A grouping option of the selected data set.
  *
  * Attributes:
- *     tiles: Selected stocks, including unavailable/neutral tiles.
- *     universe_count: Actual eligible stocks before the requested result
- *         limit.
- *     quote_count: Number with a returned source quote.
- *     generated_at_ms: Response generation time, UTC epoch milliseconds.
- *     region: US or Taiwan universe; quote currencies are never mixed by size.
- *     currency: USD or TWD quote currency of the selected stock region.
- *     available_metrics: Metrics actually present in at least one selected
- *         tile.
- *     missing_metadata: Whether sector or market-cap information is
- *         incomplete.
- *     source_errors: Provider metadata failures limiting the selected
- *         universe.
+ *     id: ``sector``, ``asset_class`` or ``none``.
+ *     label: Human label, e.g. ``Sector``.
+ *     available: Whether tiles carry this grouping.
+ *     reason: Why the grouping is unavailable, or None.
+ *
+ * This interface was referenced by `JosephContracts`'s JSON-Schema
+ * via the `definition` "HeatmapGrouping".
+ */
+export interface HeatmapGrouping {
+  available: Available1;
+  id: Id1;
+  label: Label1;
+  reason?: Reason1;
+}
+/**
+ * One size or colour metric and whether the source supplies it.
+ *
+ * Attributes:
+ *     id: Stable metric id, e.g. ``market_cap`` or ``change_1d``.
+ *     label: Human label, e.g. ``Change 1D, %``.
+ *     format: Value format: currency amount, percent, plain number or
+ *         ratio (relative volume).
+ *     scale: Colour scale of a colour metric: ``diverging`` (red/grey/green)
+ *         or ``sequential`` (single-hue intensity); None for size metrics.
+ *     available: Whether at least the source can supply the metric.
+ *     reason: Why the metric is unavailable, or None when available.
+ *
+ * This interface was referenced by `JosephContracts`'s JSON-Schema
+ * via the `definition` "HeatmapMetric".
+ */
+export interface HeatmapMetric {
+  available: Available2;
+  format: Format;
+  id: Id2;
+  label: Label2;
+  reason?: Reason2;
+  scale?: Scale;
+}
+/**
+ * Where one part of the heatmap comes from.
+ *
+ * Attributes:
+ *     field: What the source supplies, e.g. ``Sector & market cap``.
+ *     source: Source label, e.g. ``Nasdaq.com screener (unofficial,
+ *         delayed)``.
+ *     as_of_ms: When the source data was fetched or observed, UTC epoch
+ *         milliseconds, or None when it is not loaded yet.
+ *     note: Optional caveat such as ``derived: shares x last price``.
+ *
+ * This interface was referenced by `JosephContracts`'s JSON-Schema
+ * via the `definition` "HeatmapProvenance".
+ */
+export interface HeatmapProvenance {
+  as_of_ms?: AsOfMs;
+  field: Field;
+  note?: Note;
+  source: Source;
+}
+/**
+ * A heatmap of one data set with metric availability and provenance.
+ *
+ * Attributes:
+ *     type: Heatmap family.
+ *     dataset: Data set id.
+ *     dataset_label: Data set label.
+ *     currency: Currency of prices and currency-valued metrics.
+ *     tiles: Tiles, largest default size first.
+ *     universe_count: Members of the data set before the limit.
+ *     limit: Requested maximum tiles.
+ *     priced_count: Tiles with a price.
+ *     size_metrics: Size-by options with availability.
+ *     color_metrics: Colour-by options with availability.
+ *     groupings: Group-by options with availability.
+ *     default_size: Default size metric id.
+ *     default_color: Default colour metric id.
+ *     default_grouping: Default grouping id.
+ *     provenance: Source of each part of the data.
+ *     source_errors: Per-source failures limiting the result.
+ *     pending: True while a slow source is still loading; the client
+ *         should poll again soon for fuller coverage.
+ *     generated_at_ms: Response time, UTC epoch milliseconds.
+ *     demo: True for synthetic DEMO data.
  *
  * This interface was referenced by `JosephContracts`'s JSON-Schema
  * via the `definition` "HeatmapSnapshot".
  */
 export interface HeatmapSnapshot {
-  available_metrics: AvailableMetrics;
-  currency: Currency;
+  color_metrics: ColorMetrics;
+  currency: Currency1;
+  dataset: Dataset;
+  dataset_label: DatasetLabel;
+  default_color: DefaultColor;
+  default_grouping: DefaultGrouping;
+  default_size: DefaultSize;
+  demo?: Demo;
   generated_at_ms: GeneratedAtMs;
-  missing_metadata: MissingMetadata;
-  quote_count: QuoteCount;
-  region: Region;
+  groupings: Groupings;
+  limit: Limit;
+  pending?: Pending;
+  priced_count: PricedCount;
+  provenance: Provenance;
+  size_metrics: SizeMetrics;
   source_errors?: SourceErrors;
   tiles: Tiles;
+  type: Type1;
   universe_count: UniverseCount;
 }
 export interface SourceErrors {
   [k: string]: string | undefined;
 }
 /**
- * One stock tile whose missing metrics remain unavailable.
+ * One symbol of the map.
  *
  * Attributes:
- *     instrument_id: Exact venue-scoped stock or ETF identifier.
- *     symbol: Provider display symbol.
- *     name: Provider company/security name when available.
- *     exchange: Actual listing exchange or canonical venue.
- *     last: Latest source price as a decimal string, or None.
- *     change_pct: Source daily price change in percent, or None.
- *     volume: Source daily base volume as a decimal string, or None.
- *     turnover: Source daily quote turnover, or None.
- *     market_cap: Explicit optional company metadata, never a volume proxy.
- *     sector: Explicit optional company sector, otherwise unclassified.
- *     metadata_as_of_ms: Date of user-supplied fundamentals, or None.
- *     feed_state: Actual quote provenance state; unavailable without a quote.
- *     source: Actual provider label; never promoted to a broader market feed.
- *     as_of_ms: Actual quote observation time, or None without a quote.
- *     error: Provider/missing-data explanation, or None for an available
- *         quote.
+ *     key: Unique key within the data set (ticker or coin id).
+ *     symbol: Display ticker.
+ *     name: Company, fund or coin name, or None.
+ *     group: Sector (stocks), asset class (ETFs) or None (crypto).
+ *     industry: Industry within the sector, or None.
+ *     exchange: Listing exchange, or None.
+ *     instrument_id: Canonical instrument to chart, or None when no
+ *         configured venue lists it.
+ *     chart_unavailable_reason: Why no chart can open, or None.
+ *     price: Last price as a decimal string, or None.
+ *     metrics: Available metric values by metric id (decimal strings);
+ *         a missing key means the value is unavailable for this symbol.
+ *     as_of_ms: Quote observation or fetch time, or None.
+ *     error: Per-symbol source problem, or None.
  *
  * This interface was referenced by `JosephContracts`'s JSON-Schema
  * via the `definition` "HeatmapTile".
  */
 export interface HeatmapTile {
-  as_of_ms: AsOfMs1;
-  change_pct: ChangePct;
-  error: Error;
-  exchange: Exchange;
-  feed_state: FeedState1;
-  instrument_id: InstrumentId4;
-  last: Last;
-  market_cap: MarketCap1;
-  metadata_as_of_ms: MetadataAsOfMs;
-  name: Name;
-  sector: Sector1;
-  source: Source;
+  as_of_ms?: AsOfMs1;
+  chart_unavailable_reason?: ChartUnavailableReason;
+  error?: Error;
+  exchange?: Exchange;
+  group?: Group;
+  industry?: Industry;
+  instrument_id?: InstrumentId3;
+  key: Key;
+  metrics?: Metrics;
+  name?: Name;
+  price?: Price;
   symbol: Symbol;
-  turnover: Turnover;
-  volume: Volume;
+}
+export interface Metrics {
+  [k: string]: string | undefined;
 }
 /**
  * Pins one reusable library to an immutable tenant-owned version.
@@ -2334,7 +2445,7 @@ export interface ScriptAlertEvent {
  * via the `definition` "ScriptInput".
  */
 export interface ScriptInput {
-  defaults?: Defaults;
+  defaults?: Defaults1;
   expected_version?: ExpectedVersion;
   kind: Kind;
   libraries?: Libraries;
@@ -2344,7 +2455,7 @@ export interface ScriptInput {
   script_id: ScriptId4;
   source: Source1;
 }
-export interface Defaults {
+export interface Defaults1 {
   [k: string]: JsonValue | undefined;
 }
 export interface Libraries {
@@ -2366,8 +2477,8 @@ export interface Requests {
  * via the `definition` "SeriesRequest".
  */
 export interface SeriesRequest {
-  instrument_id?: InstrumentId5;
-  limit?: Limit;
+  instrument_id?: InstrumentId4;
+  limit?: Limit1;
   tf: Timeframe;
 }
 /**
@@ -2412,12 +2523,12 @@ export interface ScriptResult {
   complete: Complete;
   data_source: DataSource;
   equity_curve: EquityCurve;
-  feed_state: FeedState2;
+  feed_state: FeedState1;
   fills: Fills;
-  instrument_id: InstrumentId6;
+  instrument_id: InstrumentId5;
   kind: Kind2;
   matched?: Matched;
-  metrics: Metrics;
+  metrics: Metrics1;
   overlay: Overlay1;
   plot_styles?: PlotStyles;
   plots: Plots;
@@ -2444,7 +2555,7 @@ export interface BarCloses {
  */
 export interface ScriptVisual {
   data: Data;
-  id: Id;
+  id: Id3;
   kind: Kind1;
 }
 export interface Data {
@@ -2467,12 +2578,12 @@ export interface Data {
 export interface SimulatedFill {
   effect?: Effect;
   fee: Fee;
-  price: Price;
+  price: Price1;
   quantity: Quantity;
   side: Side;
   time_ms: TimeMs2;
 }
-export interface Metrics {
+export interface Metrics1 {
   [k: string]: number | undefined;
 }
 export interface PlotStyles {
@@ -2508,8 +2619,8 @@ export interface ScriptRun {
   include_open?: IncludeOpen;
   initial_equity?: InitialEquity;
   inputs?: Inputs3;
-  instrument_id: InstrumentId7;
-  limit?: Limit1;
+  instrument_id: InstrumentId6;
+  limit?: Limit2;
   slippage_bps?: SlippageBps;
   tf: Timeframe;
   to_ms?: ToMs;
@@ -2531,7 +2642,7 @@ export interface Inputs3 {
  */
 export interface ScriptVersion {
   created_at_ms: CreatedAtMs2;
-  defaults?: Defaults1;
+  defaults?: Defaults2;
   expected_version?: ExpectedVersion1;
   kind: Kind3;
   libraries?: Libraries1;
@@ -2543,7 +2654,7 @@ export interface ScriptVersion {
   source_hash: SourceHash2;
   version: Version7;
 }
-export interface Defaults1 {
+export interface Defaults2 {
   [k: string]: JsonValue | undefined;
 }
 export interface Libraries1 {
@@ -3837,7 +3948,7 @@ export interface ChartState {
   /**
    * Tab content; omitted means candles for existing workspaces.
    */
-  view_type?: 'candles' | 'stock_heatmap';
+  view_type?: 'candles' | 'heatmap';
 }
 /**
  * This interface was referenced by `JosephContracts`'s JSON-Schema
