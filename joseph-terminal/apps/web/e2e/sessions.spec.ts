@@ -192,7 +192,7 @@ test('charts a stock by session without overnight or weekend gaps', async ({
   await status.screenshot({path: `${SHOTS}/32-market-status.png`});
 });
 
-test('shows stock delta as classified (Lee–Ready)', async ({page}) => {
+test('shows stock delta from classified buy volume', async ({page}) => {
   await openTerminal(page);
   await pickInstrument(page, 'ACME', /ACME/);
   await showDataWindow(page);
@@ -200,7 +200,7 @@ test('shows stock delta as classified (Lee–Ready)', async ({page}) => {
   if (!box) throw new Error('no chart');
   await page.mouse.move(box.x + box.width * 0.6, box.y + box.height * 0.3);
   const data = page.getByTestId('data-window');
-  await expect(data).toContainText('Classified (Lee–Ready)');
+  await expect(data).toContainText('Delta % Coverage %100%');
   await expect(data).toContainText(/Buy volume\s*[\d,]+ sh/);
   // Let the crosshair and panes repaint before the screenshot.
   await page.waitForTimeout(300);

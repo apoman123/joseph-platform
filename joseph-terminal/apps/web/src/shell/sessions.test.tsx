@@ -412,7 +412,7 @@ describe('data window on session markets', () => {
     expect(panel).toHaveTextContent('Close588');
     expect(panel).toHaveTextContent('Volume2,500 張');
     expect(panel).toHaveTextContent('Closes10:00:00 TPE');
-    expect(panel).toHaveTextContent('Delta %8.0000%');
+    expect(panel).toHaveTextContent('Delta %8%');
     expect(panel).toHaveTextContent('Delta % Buy volume1,350 張');
   });
 });

@@ -86,7 +86,7 @@ export function studyDataRows(
           ? '—'
           : volume && /volume/i.test(plot.name)
             ? volume(value)
-            : `${formatNumber(value, Math.abs(value) >= 1000 ? 2 : 4)}${percent ? '%' : ''}`;
+            : `${formatNumber(value, Number.isInteger(value) ? 0 : percent || Math.abs(value) >= 1000 ? 2 : 4)}${percent ? '%' : ''}`;
       rows.push({
         key: `study:${study.study_id}:${plot.name}`,
         label: plot.name === name ? name : `${name} ${plot.name}`,

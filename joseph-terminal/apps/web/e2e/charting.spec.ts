@@ -49,7 +49,7 @@ test('shows volume, Delta % and study panes and the data window', async ({
 }) => {
   await openTerminal(page);
   // Price, volume and Delta % panes each own canvases. The Delta % pane
-  // appears only after the plugin list loads, which is slow under load.
+  // appears only after its study run answers, which is slow under load.
   await expect
     .poll(() => canvasCount(page), {timeout: 30_000})
     .toBeGreaterThanOrEqual(9);
@@ -66,14 +66,15 @@ test('shows volume, Delta % and study panes and the data window', async ({
   await expect.poll(() => canvasCount(page)).toBeLessThan(withPanes);
   await volume.check();
   await expect.poll(() => canvasCount(page)).toBe(withPanes);
-  await page.getByTestId('delta-pane-toggle').click();
+  const delta = page.getByTestId('layer-toggle-builtin:volume_delta');
+  await delta.uncheck();
   await expect.poll(() => canvasCount(page)).toBeLessThan(withPanes);
-  await page.getByTestId('delta-pane-toggle').click();
+  await delta.check();
   await expect.poll(() => canvasCount(page)).toBe(withPanes);
-  // The layers come from the engine's plugin catalogue; RSI declares
-  // its own pane.
-  await page.getByTestId('layer-toggle-rsi').check();
-  await expect(page.getByTestId('study-pane-toggle-rsi-rsi')).toBeChecked();
+  // The studies come from the engine's script catalog; RSI draws in its
+  // own pane.
+  await page.getByTestId('add-study-builtin:rsi').click();
+  await expect(page.getByTestId('layer-toggle-builtin:rsi')).toBeChecked();
   await expect.poll(() => canvasCount(page)).toBeGreaterThan(withPanes);
   await page.getByTestId('data-window-toggle').check();
   await page.getByTestId('session-separators-toggle').check();
@@ -133,18 +134,16 @@ test('zooms prices when scrolling over the right price scale', async ({
     .toBe(false);
 });
 
-test('edits indicator inputs, kinds and the pane from the settings dialog', async ({
-  page,
-}) => {
+test('edits study inputs from the settings dialog', async ({page}) => {
   await openTerminal(page);
   await openLayers(page);
-  await page.getByTestId('indicator-settings-volume_delta').click();
+  await page.getByTestId('study-settings-builtin:volume_delta').click();
   const dialog = page.getByTestId('indicator-settings');
-  await expect(dialog.getByLabel('Min coverage')).toHaveValue('0.8');
-  await dialog.getByLabel('Min coverage').fill('1.5');
+  await expect(dialog.getByLabel('Minimum coverage')).toHaveValue('0.8');
+  await dialog.getByLabel('Minimum coverage').fill('1.5');
   await dialog.getByTestId('indicator-settings-save').click();
   await expect(dialog.getByText('At most 1')).toBeVisible();
-  await dialog.getByLabel('Min coverage').fill('0.9');
+  await dialog.getByLabel('Minimum coverage').fill('0.9');
   await page.screenshot({path: `${SHOTS}/13-indicator-settings.png`});
   await dialog.getByTestId('indicator-settings-save').click();
   await expect(dialog).toHaveCount(0);
@@ -155,7 +154,7 @@ test('edits indicator inputs, kinds and the pane from the settings dialog', asyn
         () => localStorage.getItem('joseph.workspace.v1.default') ?? ''
       )
     )
-    .toContain('"min_coverage":"0.9"');
+    .toContain('"min_coverage":0.9');
 });
 
 test('compares another symbol on its own percentage axis', async ({page}) => {

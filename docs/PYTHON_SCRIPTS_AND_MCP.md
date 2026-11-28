@@ -96,6 +96,9 @@ are available through the following context operations:
   `bgcolor`, and fixed-position `table`. Per-bar visuals have a separate bound.
 - `request(alias, field="close", intrabars=False)` for declared additional
   symbols/timeframes. Only source bars closed by the visible bar are exposed.
+- `intrabars(alias)`, `closed_bar(alias)`, `period(tf)`, `optional_series(field)`
+  and `plot(..., display="data_window")`; see
+  [context extensions](#context-extensions-for-indicators).
 - `alert` and `alertcondition` for preview events or explicitly enabled jobs.
 
 **Other timeframes / symbols** declares up to four aliases before execution:
@@ -104,10 +107,14 @@ are available through the following context operations:
 {"daily": {"tf": "1d", "limit": 500}, "other": {"instrument_id": "nasdaq:stock:MSFT", "tf": "1h", "limit": 500}}
 ```
 
-Inputs/styles and visibility are saved per chart with the immutable version pin.
-**My scripts** in the indicator picker lists owned indicator, strategy, and alert
-sources; libraries and filters remain in the editor. Managed studies can also be
-saved in **My collection**. Attached studies evaluate up to 2,000 source bars.
+Built-in, plugin and owned indicators are one study system: every chart keeps
+its studies (`ChartState.studies`: script id, pinned version for owned scripts,
+inputs, plot colors, visibility) in the workspace. The indicator picker lists
+**Built-ins**, **Plugins** and **My scripts** (owned indicator, strategy, and
+alert sources; libraries and filters remain in the editor), and studies can be
+saved in **My collection**. A chart's visible studies run in batches
+(`POST /v1/scripts/run-batch`) over the bars the chart has loaded (500 through
+5,000), after the chart's own candles have arrived.
 Indicators refresh provisional values every five seconds with fresh replayed
 state; strategies and alerts use closed bars. A provisional bar cannot emit an
 alert. Data availability and missing-history errors remain visible.
@@ -117,7 +124,7 @@ Each active indicator has a top-left legend:
 | Control | Action |
 | --- | --- |
 | Name | Identifies the study; managed studies show the pinned version. |
-| Gear | Opens per-chart inputs and presentation settings. |
+| Gear | Opens per-chart settings generated from the declared `INPUTS` (groups, bounds, options, `Style` colors) plus plot colors. |
 | `{}` | Opens owned source in the Python editor, or read-only public built-in source. Protected external source is unavailable. |
 | Eye | Hides or shows the study while retaining its settings and legend row. |
 | Cross | Removes the study and clears its chart settings. Re-adding starts from defaults. |
@@ -126,6 +133,46 @@ These behaviors follow TradingView's [indicator customization](https://www.tradi
 [indicator settings](https://www.tradingview.com/support/solutions/43000480333-how-to-adjust-the-indicator-settings/),
 and [source availability](https://uk.tradingview.com/pine-script-docs/primer/first-steps/).
 The API's categories follow its [visuals overview](https://www.tradingview.com/pine-script-docs/visuals/overview/).
+
+### Context extensions for indicators
+
+The built-in indicators use these additions; tenant and plugin scripts can use
+them too.
+
+- **Intrabar requests.** `Request(tf, intrabars=True, limit=...)` (up to 5,000
+  bars) reads the lower-timeframe bars inside the chart bars with
+  `ctx.intrabars(alias)` (closed intrabars that start in the current bar and
+  end by its close; a cursor makes a whole run read each intrabar once).
+  `tf="auto"` picks 1s on seconds charts, 1m intraday, 5m on daily and 1h on
+  weekly and monthly charts (none on 1s and 1m charts); `tf_input` names an
+  input whose value, unless `"auto"`, replaces `tf`. The host fetches
+  intrabars only for the newest chart bars that need them: from the run's
+  `window_from_ms` (the chart's visible window) when given, skipping bars
+  that already carry the optional field named by `unless` (for example
+  `taker_buy_volume`) while the boolean input `unless_input` is true.
+- **Latest closed bar.** `ctx.closed_bar(alias)` returns the newest bar of a
+  declared series that has closed by the current bar's close, or `None`.
+  For an ordinary request `tf="auto"` (through `tf_input`) is the next
+  calendar period above the chart: the day below daily charts, the week
+  below weekly and the month below monthly charts.
+- **Calendar periods.** `PERIODS = ("1d", "1w", "1M")` on the class makes the
+  host compute each bar's period on the instrument's session calendar;
+  `ctx.period("1d")` returns `(start_ms, next_start_ms)` (UTC days, ISO weeks
+  and months on 24x7 markets; sessions, their weeks and months on exchanges).
+- **Data-window values.** `ctx.plot(name, value, display="data_window")` lists
+  a value in the legend's data window without drawing it.
+- **Runs** read up to 5,000 bars (`limit`), with `from_ms`/`to_ms` bounds and
+  `include_open` for a provisional last bar (indicators only).
+  `POST /v1/scripts/run-batch` (`ScriptBatchRun`: the run fields plus `runs`,
+  one through sixteen `{script_id, version?, inputs}` entries) runs several
+  studies over one fetch of the chart candles and answers `ScriptBatchResult`,
+  one `{script_id, result, error}` entry per study; one study's failure does
+  not fail the others. Built-in and plugin classes run in process with a
+  result cache keyed by exact input.
+
+`GET /v1/scripts/catalog?kind=indicator` lists the built-in and plugin
+indicators with their declared inputs and requests;
+`GET /v1/scripts/catalog/{id}` adds the public source of a built-in.
 
 ## Strategy simulations
 
@@ -252,7 +299,7 @@ The official Python SDK is locked to **2.3.0**, targeting MCP **2026-07-28** wit
 SDK-supported legacy negotiation. Tools have stable names, strict argument
 schemas, output schemas, permission checks, and side-effect annotations. The
 catalog derives every user `/v1/` HTTP operation from both engines' OpenAPI:
-market/history/feed health, indicators/AOIs, screening, Python sources/versions,
+market/history/feed health, the script catalog and study runs, screening, Python sources/versions,
 filters/alerts, strategy activations/signals, notification subscriptions,
 accounts/orders/positions/fills/risk/deployments/consents. Internal service-token
 routes and MCP credential bootstrap are deliberately excluded.

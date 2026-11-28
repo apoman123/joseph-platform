@@ -29,13 +29,13 @@ A newer `ci-cd` run cancels an older one on the same branch or pull request, exc
 
 ## Images
 
-`ghcr.io/<owner>/joseph-{market-engine,execution-engine,terminal}`, tagged `sha-<commit>`, `latest` (main) and `vX.Y.Z` / `X.Y.Z` / `X.Y` (tags); non-root with health checks, SBOM and provenance (plus artifact attestations on a public repository). The terminal image bakes `NEXT_PUBLIC_*` from the repository variables `PUBLIC_MARKET_API_URL`, `PUBLIC_MARKET_WS_URL`, `PUBLIC_EXECUTION_API_URL`, `PUBLIC_EXECUTION_WS_URL`; unset means DEMO only. The market image has the built-in indicators plus any [plugin packages](#indicator-plugins-in-the-market-image) in `MARKET_PLUGIN_REQUIREMENTS`. Locally: `make images`.
+`ghcr.io/<owner>/joseph-{market-engine,execution-engine,terminal}`, tagged `sha-<commit>`, `latest` (main) and `vX.Y.Z` / `X.Y.Z` / `X.Y` (tags); non-root with health checks, SBOM and provenance (plus artifact attestations on a public repository). The terminal image bakes `NEXT_PUBLIC_*` from the repository variables `PUBLIC_MARKET_API_URL`, `PUBLIC_MARKET_WS_URL`, `PUBLIC_EXECUTION_API_URL`, `PUBLIC_EXECUTION_WS_URL`; unset means DEMO only. The market image has the built-in indicators plus any [plugin packages](#script-plugins-in-the-market-image) in `MARKET_PLUGIN_REQUIREMENTS`. Locally: `make images`.
 
-**Privacy guard:** engine packages must stay private: the market-engine image may contain indicator plugin packages under their own licences, and engines built with the `sinopac` extra contain SinoPac's SDK, which may not be redistributed. `.github/actions/private-image` fails when GHCR serves an engine image anonymously, with or without plugins; `images` runs it before publishing and after the push (a first push creates the package). Fix: package settings → *Change visibility* → private. The terminal package may be public.
+**Privacy guard:** engine packages must stay private: the market-engine image may contain script plugin packages under their own licences, and engines built with the `sinopac` extra contain SinoPac's SDK, which may not be redistributed. `.github/actions/private-image` fails when GHCR serves an engine image anonymously, with or without plugins; `images` runs it before publishing and after the push (a first push creates the package). Fix: package settings → *Change visibility* → private. The terminal package may be public.
 
 ## Forks
 
-- Workflows from fork pull requests need a maintainer's approval and get no secrets. The test jobs need none, since they use only the built-in indicators, so every test job and `security.yml` run.
+- Workflows from fork pull requests need a maintainer's approval and get no secrets. The test jobs need none, since they use only the built-in scripts, so every test job and `security.yml` run.
 - Forks never publish or deploy: `images` skips forked repositories, and the deploy jobs need it.
 
 ## Environments
@@ -54,11 +54,11 @@ A newer `ci-cd` run cancels an older one on the same branch or pull request, exc
 2. Settings → Actions → General: require approval for fork pull request workflows from all outside contributors.
 3. Optionally protect `main` with pull requests and the test and CodeQL jobs as required checks.
 4. Variables `STAGING_SSH_HOST`, `_SSH_USER`, `_DEPLOY_DIR`, `_WEB_URL`, `_HEALTH_URLS` (space-separated) and secrets `STAGING_SSH_KEY`, `STAGING_SSH_KNOWN_HOSTS` (`ssh-keyscan -H <host>`); the same with `PRODUCTION_`. Application secrets stay on the servers.
-5. Optionally, [indicator plugins](#indicator-plugins-in-the-market-image) for the market image.
+5. Optionally, [script plugins](#script-plugins-in-the-market-image) for the market image.
 6. After the first publish, confirm both engine packages are private.
 7. Private repositories only: code scanning, dependency review and attestations need GitHub Advanced Security and the variable `CODE_SCANNING_ENABLED=true`.
 
-### Indicator plugins in the market image
+### Script plugins in the market image
 
 Only the `images` job installs plugin packages; every test job uses the built-ins. Leave them unset to publish a market image with the built-ins only.
 
@@ -69,7 +69,7 @@ Only the `images` job installs plugin packages; every test job uses the built-in
 | `MARKET_IMAGE_LICENSES` | Actions variable | Optional additional SPDX expression when plugins add licences; combined with the integrated market application's `AGPL-3.0-only` baseline. Defaults to `MIT` for original components. |
 
 - **Store** them from your checkout: `gh variable set MARKET_PLUGIN_REQUIREMENTS`, `gh secret set PLUGIN_GIT_TOKEN` (each prompts for the value). Not as environment settings: the `images` job has no `environment:`.
-- **Use:** the job passes the variable as the build arg `PLUGIN_REQUIREMENTS` and the token, when set, as the BuildKit secret `plugin_git_token`. Inside one `RUN` the token rewrites `https://github.com/` URLs; it never reaches a layer, the build cache or a git config file. The build fails if `python -m joseph.indicators.discovery --check` reports a plugin that does not load.
+- **Use:** the job passes the variable as the build arg `PLUGIN_REQUIREMENTS` and the token, when set, as the BuildKit secret `plugin_git_token`. Inside one `RUN` the token rewrites `https://github.com/` URLs; it never reaches a layer, the build cache or a git config file. The build fails if `python -m joseph.scripts.catalog --check` reports an entry point or class that does not load.
 - **Rotate** the token before it expires (GitHub emails a reminder): regenerate it with the same settings and set the secret again.
 
 ## Servers

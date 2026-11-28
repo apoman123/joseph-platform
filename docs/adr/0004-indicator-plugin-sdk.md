@@ -1,6 +1,6 @@
 # ADR-0004: Indicator plugin SDK and versioned outputs
 
-- **Status:** Accepted (2026-11-22)
+- **Status:** Superseded by [ADR 0011](0011-indicators-are-joseph-script-classes.md) (2026-11-28); accepted 2026-11-22.
 - **Context:** Indicators must be portable from Pine, testable bar by bar, and removable without touching each other or the OMS.
 - **Decision:** Each indicator is an `IndicatorPlugin` package with `plugin_id`, `indicator_version`, input schema, warm-up, required streams and a pure `on_bar_closed(state, bar) -> (state, output)`. Plugins publish only `Aoi`, `StructureEvent` and documented scalar `values` inside an `IndicatorSnapshot`; consumers never read private state. Plugins never import each other (enforced). Outputs carry `method` (`pine_parity` vs `trade`) so enhanced models are never mistaken for parity.
 - **Alternatives:** One monolithic indicator module (rejected: changes ripple); JavaScript indicators in the terminal (rejected: Python is authoritative).

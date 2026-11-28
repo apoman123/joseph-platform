@@ -11,7 +11,7 @@ corepack enable && pnpm install
 pnpm dev          # http://localhost:3000
 ```
 
-With no backend configured, the terminal runs in **DEMO mode**: synthetic perpetuals, stocks, bond ETFs and a yield on the `mock` venue, generated in the browser, and a simulated paper broker. Every chart is labelled *Demo data*, and every panel works: drawing, indicator layers, screener, strategies, alerts, backtests, paper trading. `?demo-live-rehearsal=1` adds a simulated account to rehearse LIVE arming (code `123456`).
+With no backend configured, the terminal runs in **DEMO mode**: synthetic perpetuals, stocks, bond ETFs and a yield on the `mock` venue, generated in the browser, and a simulated paper broker. Every chart is labelled *Demo data*, and every panel works: drawing, built-in indicator studies, screener, strategies, alerts, backtests, paper trading. `?demo-live-rehearsal=1` adds a simulated account to rehearse LIVE arming (code `123456`).
 
 ## Connect to the engines
 

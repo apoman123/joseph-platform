@@ -176,16 +176,16 @@ test('draws anchors far back and shows the engine message only on refusal', asyn
   page,
 }) => {
   await openTerminal(page);
-  // 2,400 bars is far more than the chart has loaded; the engine computes
-  // anchored values from up to 50,000 bars back.
+  // 2,400 bars is far more than the chart has loaded; a drawing's script
+  // run reads up to 5,000 bars from its anchor.
   await seedVwap(page, 2400);
   await openPanel(page, 'Objects');
   await expect(objectDetail(page, 'anchored-vwap')).toHaveText(/^VWAP \d/);
-  // Beyond 50,000 bars the engine refuses; its own message is shown.
-  await seedVwap(page, 50_001);
+  // Beyond 5,000 bars the anchor is outside the loaded bars; that is shown.
+  await seedVwap(page, 6000);
   await openPanel(page, 'Objects');
   await expect(objectDetail(page, 'anchored-vwap')).toHaveText(
-    /^The anchor is 50001 closed 5m bars back; anchored studies are computed for at most 50000 bars/
+    /^The anchor is before the bars the engine reads \(at most 5,000 bars back\)/
   );
   await showDataWindow(page);
   await hoverChart(page, 0.6, 0.4);

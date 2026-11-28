@@ -99,11 +99,9 @@ test('Python editor saves, executes and attaches a real isolated indicator', asy
   await legend
     .getByRole('button', {name: 'Browser Python average settings'})
     .click();
-  const settings = page.getByRole('dialog', {
-    name: 'Browser Python average settings',
-  });
-  await settings.getByLabel('Inputs (JSON object)').fill('{"length":12}');
-  await settings.getByRole('button', {name: 'Apply settings'}).click();
+  const settings = page.getByTestId('indicator-settings');
+  await settings.getByLabel('length').fill('12');
+  await settings.getByTestId('indicator-settings-save').click();
   await legend
     .getByRole('button', {name: 'Browser Python average source'})
     .click();

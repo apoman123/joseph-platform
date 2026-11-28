@@ -20,31 +20,21 @@ Never change indicators, strategies or the risk gateway for a venue.
 
 ## Add or change an indicator (Python)
 
-An indicator is an `IndicatorPlugin` ([ADR 0004](adr/0004-indicator-plugin-sdk.md)). Generic indicators can become built-ins in `joseph/indicators/builtin/`; anything else, strategy-specific indicators included, goes into a separate plugin package that the engine discovers at startup ([ADR 0009](adr/0009-external-indicator-library.md)). The platform never names a plugin package or its vocabulary.
+An indicator is a concrete `joseph_script.Indicator` subclass ([ADR 0011](adr/0011-indicators-are-joseph-script-classes.md)); there is no other indicator format. Generic indicators can become built-ins; anything else, strategy-specific indicators included, goes into a separate plugin package that the engine loads at startup. The platform never names a plugin package or its ids.
 
-1. **Implement** a `BasePlugin` (`joseph.indicators.sdk`): settings with bounds, required streams, warm-up, a frozen state and `on_bar_closed`. Publish only `Aoi`, `StructureEvent` (`joseph.domain.structures`) and declared values.
-2. **Declare** what it publishes and how it is drawn, in `joseph.indicators.sdk.metadata` types:
-
-   | Class variable | Holds |
-   |---|---|
-   | `OUTPUT_KINDS`, `OUTPUT_EVENTS` | AOI kinds and event names, `^[A-Z][A-Z0-9_]{0,47}$`. Kinds are unique across installed plugins; `AOI_INVALIDATED` and `AOI_EXPIRED` are reserved |
-   | `OUTPUT_VALUES` | `ValueSpec`s: key, type, unit, description, choices (strings only). Consumers read only these |
-   | `DISPLAY` | `Display`: layer, default visibility, z-order, event markers, and `KindStyle`, `EventStyle`, `PlotStyle` (price-pane lines or histograms), `PaneStyle` (sub-panes with levels) and `EndReasonStyle` entries |
-
-   Registration validates the metadata. The terminal renders exactly what is declared; no terminal code is needed.
+1. **Implement** `on_bar(ctx)`: read the current bar (`ctx.bar`, including optional fields such as `taker_buy_volume`), declared inputs and series, and keep state incrementally on the instance (one pass per run, O(n)). Publish through the context only: `ctx.plot(name, value, color=, style=, width=, offset=, display=)` (`display="data_window"` lists a value without drawing it), drawings (`line`, `label`, `box`, `fill`, `hline`, `linefill`, `table`, ...) and `ctx.alert` conditions on confirmed bars.
+2. **Declare** `ID`, `TITLE`, `SHORT_TITLE`, `DESCRIPTION`, `CATEGORY`, `OVERLAY` (price pane or its own pane), every setting as a `joseph_script.Input` (bounds, options, step, group `Style` for colors, tooltip; the terminal's settings dialog is generated from them), additional series as `REQUESTS` (`joseph_script.Request`, including lower-timeframe `intrabars=True` requests with `tf="auto"`, `tf_input`, `unless` and `unless_input`) and calendar periods as `PERIODS` (read with `ctx.period(tf)`). See [Python scripts](PYTHON_SCRIPTS_AND_MCP.md#context-extensions-for-indicators).
 3. **Ship** it:
-   - **Built-in:** add it to `builtin_plugins()` in `joseph/indicators/builtin/__init__.py` (the order is the registration and Layers order) and keep it pure (import-linter contract `builtin-indicators-pure`). Run `make openapi` to refresh `contracts/openapi/builtin-indicator-plugins.json`, which the terminal's DEMO mirror (`mock-provider`) is tested against.
-   - **Plugin package:** a distribution that depends on `joseph-market-engine` (a compatible minor version, e.g. `>=0.6,<0.7`) and declares an entry point whose zero-argument callable returns its plugins in display order:
+   - **Built-in:** one module in `joseph/scripts/builtin/indicators/` registered in `MODULES["indicators"]` (`joseph/scripts/builtin/__init__.py`; the order is the picker order). It imports only `joseph_script` and the standard library (helpers such as price sources are duplicated per module), so its public source is valid tenant source (`tests/unit/scripts/test_catalog.py`, import-linter contract `builtin-scripts-pure`). DEMO mode has no Python: add the study to the DEMO study evaluator (`joseph-terminal/packages/mock-provider/src/market/demo-scripts.ts`), then run `make openapi`, which refreshes the built-in catalog (`contracts/openapi/builtin-scripts.json`) and the outputs of every built-in on fixed bars (`contracts/fixtures/builtin-indicator-outputs.json`); `demo-scripts.test.ts` requires the DEMO evaluator to reproduce them.
+   - **Plugin package:** a distribution that depends on `joseph-market-engine` (a compatible minor version) and declares an entry point in the `joseph.scripts` group naming the class or a zero-argument factory returning classes:
 
      ```toml
-     [project.entry-points."joseph.indicator_plugins"]
-     my_indicators = "my_indicators.plugins:default_plugins"
+     [project.entry-points."joseph.scripts"]
+     my_scripts = "my_scripts.indicators:classes"
      ```
 
-     Install it with `make plugins` ([operations](OPERATIONS.md#indicator-plugins)); `uv run python -m joseph.indicators.discovery --check` in `joseph-market-engine/` lists what loads.
-4. **Test:** hand-derived golden scenarios in `fixtures/indicators/<plugin_id>/` with `joseph.indicators.golden`; batch, streaming and checkpoint-restore runs must agree. `joseph.indicators.testing` provides candle builders and the test plugins `EchoPlugin` and `ZoneEchoPlugin`; plugin packages use them from the installed engine.
-
-A changed algorithm needs a new `indicator_version`; `method: trade` outputs never replace `pine_parity` ones.
+     Its catalog id is `plugin:<entry point>:<ID>`. Install it with `make plugins` ([operations](OPERATIONS.md#script-plugins)); `uv run python -m joseph.scripts.catalog --check` in `joseph-market-engine/` lists what loads.
+4. **Test:** hand-derived golden scenarios in `fixtures/indicators/<id>/<scenario>.json` (bars, optional intrabars and period bars, expected final values), reproduced by `tests/replay/scripts/test_builtin_indicator_golden.py`; add a reader there that maps the script's plots and drawings to the scenario's value names. Plugin packages test their classes with `joseph.scripts.worker.run_class` on deterministic bars.
 
 ## Add a strategy (Python)
 
