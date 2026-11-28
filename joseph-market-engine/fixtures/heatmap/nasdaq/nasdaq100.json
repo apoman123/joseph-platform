@@ -1,0 +1,109 @@
+{
+ "data": {
+  "totalrecords": 8,
+  "limit": 101,
+  "offset": 0,
+  "date": "Nov 27, 2026",
+  "data": {
+   "asOf": null,
+   "headers": {
+    "symbol": "Symbol",
+    "companyName": "Name",
+    "marketCap": "Market Cap",
+    "lastSalePrice": "Last Sale",
+    "netChange": "Net Change",
+    "percentageChange": "Percentage Change"
+   },
+   "rows": [
+    {
+     "symbol": "AAPL",
+     "sector": "",
+     "companyName": "Apple Inc. Common Stock",
+     "marketCap": "5,210,368,534,280",
+     "lastSalePrice": "$358.54",
+     "netChange": "$2.96",
+     "percentageChange": "+0.83%",
+     "deltaIndicator": "up"
+    },
+    {
+     "symbol": "AMAT",
+     "sector": "",
+     "companyName": "Applied Materials, Inc. Common Stock",
+     "marketCap": "255,570,120,544",
+     "lastSalePrice": "$322.04",
+     "netChange": "$10.86",
+     "percentageChange": "+3.49%",
+     "deltaIndicator": "up"
+    },
+    {
+     "symbol": "INTC",
+     "sector": "",
+     "companyName": "Intel Corporation Common Stock",
+     "marketCap": "305,081,000,000",
+     "lastSalePrice": "$57.40",
+     "netChange": "$2.93",
+     "percentageChange": "+5.38%",
+     "deltaIndicator": "up"
+    },
+    {
+     "symbol": "MSFT",
+     "sector": "",
+     "companyName": "Microsoft Corporation Common Stock",
+     "marketCap": "3,659,999,984,953",
+     "lastSalePrice": "$492.85",
+     "netChange": "$2.92",
+     "percentageChange": "+0.60%",
+     "deltaIndicator": "up"
+    },
+    {
+     "symbol": "ADBE",
+     "sector": "",
+     "companyName": "Adobe Inc. Common Stock",
+     "marketCap": "91,380,268,000",
+     "lastSalePrice": "$234.79",
+     "netChange": "$1.96",
+     "percentageChange": "+0.84%",
+     "deltaIndicator": "up"
+    },
+    {
+     "symbol": "AMZN",
+     "sector": "",
+     "companyName": "Amazon.com, Inc. Common Stock",
+     "marketCap": "2,747,834,706,321",
+     "lastSalePrice": "$254.12",
+     "netChange": "$9.69",
+     "percentageChange": "+3.96%",
+     "deltaIndicator": "up"
+    },
+    {
+     "symbol": "NVDA",
+     "sector": "",
+     "companyName": "NVIDIA Corporation Common Stock",
+     "marketCap": "3,626,809,000,000",
+     "lastSalePrice": "$150.49",
+     "netChange": "$1.19",
+     "percentageChange": "+0.80%",
+     "deltaIndicator": "up"
+    },
+    {
+     "symbol": "AMD",
+     "sector": "",
+     "companyName": "Advanced Micro Devices, Inc. Common Stock",
+     "marketCap": "703,173,035,271",
+     "lastSalePrice": "$424.54",
+     "netChange": "$18.51",
+     "percentageChange": "+4.56%",
+     "deltaIndicator": "up"
+    }
+   ]
+  },
+  "filters": null,
+  "title": null
+ },
+ "message": null,
+ "status": {
+  "rCode": 200,
+  "bCodeMessage": null,
+  "developerMessage": null
+ }
+}

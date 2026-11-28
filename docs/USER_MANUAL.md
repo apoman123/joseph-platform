@@ -39,6 +39,18 @@ reload, subject to browser storage and memory capacity. Single-chart mode mounts
 only the selected tab. Split layouts show a page of up to eight saved charts
 containing the active tab, so inactive pages do not keep chart subscriptions open.
 
+### Heatmaps
+
+Choose **+** → **Heatmap** for a market map instead of a chart. Pick the data
+set in the toolbar (stocks of an index or market, ETFs, or crypto coins), then
+*Size by*, *Color by* and *Group by*. Click a sector header to zoom in and the
+breadcrumb to go back; click a legend segment to hide those tiles; click a
+tile to open its chart, or right-click it to add it to the watchlist. The
+cogwheel sets the tile title, logo badge, shown value and colour scheme; the
+camera saves or copies a PNG or a link to the view. Options the data sources
+cannot supply are disabled with the reason. Details:
+[Heatmaps](HEATMAPS.md).
+
 ### Indicator library
 
 Click **Indicators** to open the searchable library:

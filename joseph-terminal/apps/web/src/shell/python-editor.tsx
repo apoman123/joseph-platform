@@ -462,7 +462,7 @@ export function PythonEditor({
                 busy ||
                 !saved ||
                 !runtimeEnabled ||
-                chart.view_type === 'stock_heatmap'
+                chart.view_type === 'heatmap'
               }
               onClick={() =>
                 void run(async () => {

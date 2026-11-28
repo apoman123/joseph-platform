@@ -103,7 +103,7 @@ export function DrawingFavorites(): ReactElement | null {
   if (
     !tools.length ||
     workspace.charts.find(chart => chart.chart_id === workspace.active_chart_id)
-      ?.view_type === 'stock_heatmap'
+      ?.view_type === 'heatmap'
   ) {
     return null;
   }
