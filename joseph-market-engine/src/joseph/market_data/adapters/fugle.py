@@ -164,6 +164,27 @@ class FugleSource:  # noqa: DOC302 - Document constructor mutation.
             return market.PriceAdjustment.ALL
         return market.PriceAdjustment.RAW
 
+    async def price_basis(
+        self,
+        instrument: instruments.InstrumentId,
+        start_ms: int,
+        end_ms: int,
+    ) -> Mapping[int, decimal.Decimal]:
+        """Read the current daily adjusted/raw close factors of a window.
+
+        Args:
+            instrument: Exact TWSE or TPEx stock/ETF identity.
+            start_ms: Inclusive UTC start, epoch milliseconds.
+            end_ms: Exclusive UTC end, epoch milliseconds.
+
+        Returns:
+            Daily session start mapped to the factor Fugle's adjusted
+            history carries now; empty in raw mode.
+        """
+        if not self.adjusted_daily or end_ms <= start_ms:
+            return {}
+        return await self._daily_factors(instrument, start_ms, end_ms)
+
     @property
     def _headers(self) -> dict[str, str]:
         """Build authentication headers without retaining copies.

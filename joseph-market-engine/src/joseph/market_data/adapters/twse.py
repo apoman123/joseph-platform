@@ -152,6 +152,17 @@ _TRADING_DAY_MARKERS = ("開始交易", "最後交易")
 _HISTORY_FLOOR = datetime.date(1999, 1, 1)
 MAX_MONTHS_PER_CALL = 24
 """STOCK_DAY months read per call (one request each, newest kept)."""
+COLD_MONTHS_PER_DAILY_CALL = 4
+"""Uncached STOCK_DAY months one daily-bar call reads (about 6 s paced).
+
+The www pace allows one request per 2 s, so a cold 500-bar daily chart
+(24 months) took about 48 s, longer than the terminal's 30 s deadline.
+A call now returns the newest months it read within this budget (the
+months already cached cost nothing); the chart's "load older" requests
+read the next months, so history fills in progressively.
+"""
+COLD_MONTHS_PER_PERIODIC_CALL = 10
+"""Uncached months one weekly or monthly call reads (about 18 s paced)."""
 _MONTH_TTL_MS = 30 * 60_000
 """An open month's cached report is re-read after this long."""
 _DUE_MONTH_TTL_MS = 10 * 60_000
@@ -1307,6 +1318,9 @@ class TaiwanExchangeAdapter(base.BaseVenueAdapter):
         self._sleep = sleep
         self._poll_interval_s = poll_interval_s
         self._months: dict[tuple[str, int, int], _Month] = {}
+        self._month_reads: dict[
+            tuple[str, int, int], asyncio.Future[list[market.Candle]]
+        ] = {}
         self._builders: dict[str, snapshot_bars.SnapshotBarBuilder] = {}
         self._watch: dict[str, int] = {}
         self._poller: asyncio.Task[None] | None = None
@@ -1390,21 +1404,56 @@ class TaiwanExchangeAdapter(base.BaseVenueAdapter):
             month: Month.
 
         Returns:
-            Daily candles of the month.
+            Daily candles of the month. Concurrent reads of one month share
+            a single request.
         """
-        code = instrument.venue_market_id
-        key = (code, year, month)
+        key = (instrument.venue_market_id, year, month)
+        if self._month_cached(instrument, year, month):
+            return self._months[key].bars
+        running = self._month_reads.get(key)
+        if running is None:
+            running = asyncio.ensure_future(
+                self._fetch_month(instrument, year, month)
+            )
+            self._month_reads[key] = running
+
+            def done(finished: asyncio.Future[list[market.Candle]]) -> None:
+                """Caches a finished read and forgets it.
+
+                Args:
+                    finished: The month's read.
+                """
+                if self._month_reads.get(key) is finished:
+                    del self._month_reads[key]
+                if not finished.cancelled() and finished.exception() is None:
+                    self._months[key] = _Month(
+                        finished.result(), self._clock.now_ms()
+                    )
+
+            running.add_done_callback(done)
+        return await asyncio.shield(running)
+
+    def _month_cached(
+        self, instrument: instruments.InstrumentId, year: int, month: int
+    ) -> bool:
+        """Tells whether ``_month`` would answer without a request.
+
+        Args:
+            instrument: Instrument.
+            year: Year.
+            month: Month.
+
+        Returns:
+            True when the cached report is still valid.
+        """
+        cached = self._months.get((instrument.venue_market_id, year, month))
+        if cached is None:
+            return False
+        if month_complete(year, month, cached.fetched_ms):
+            return True
         now = self._clock.now_ms()
-        cached = self._months.get(key)
-        if cached is not None:
-            if month_complete(year, month, cached.fetched_ms):
-                return cached.bars
-            ttl = _DUE_MONTH_TTL_MS if _day_due(cached, now) else _MONTH_TTL_MS
-            if now - cached.fetched_ms < ttl:
-                return cached.bars
-        bars = await self._fetch_month(instrument, year, month)
-        self._months[key] = _Month(bars, self._clock.now_ms())
-        return bars
+        ttl = _DUE_MONTH_TTL_MS if _day_due(cached, now) else _MONTH_TTL_MS
+        return now - cached.fetched_ms < ttl
 
     async def _daily(
         self,
@@ -1412,6 +1461,7 @@ class TaiwanExchangeAdapter(base.BaseVenueAdapter):
         start_ms: int,
         end_ms: int,
         wanted: int | None,
+        cold_budget: int = MAX_MONTHS_PER_CALL,
     ) -> tuple[list[market.Candle], list[candle_rules.Span], bool]:
         """Collects daily bars of a range, newest months first.
 
@@ -1420,6 +1470,8 @@ class TaiwanExchangeAdapter(base.BaseVenueAdapter):
             start_ms: Inclusive start.
             end_ms: Exclusive end.
             wanted: Stop once this many bars in range are collected.
+            cold_budget: Most uncached months read (one paced request each);
+                the call stops before the next one beyond it.
 
         Returns:
             Ascending final daily bars plus, during or after today's
@@ -1435,10 +1487,15 @@ class TaiwanExchangeAdapter(base.BaseVenueAdapter):
         covered: list[candle_rules.Span] = []
         year, month = last.year, last.month
         months = 0
+        cold = 0
         while (year, month) >= (
             first.year,
             first.month,
         ) and months < MAX_MONTHS_PER_CALL:
+            if not self._month_cached(instrument, year, month):
+                if cold >= cold_budget:
+                    break
+                cold += 1
             for bar in await self._month(instrument, year, month):
                 rows[bar.start_ms] = bar
             months += 1
@@ -1891,7 +1948,13 @@ class TaiwanExchangeAdapter(base.BaseVenueAdapter):
         }
         wanted = None if limit is None else limit * per_bar[timeframe]
         daily, covered, complete = await self._daily(
-            instrument, min(grid, start_ms), end_ms, wanted
+            instrument,
+            min(grid, start_ms),
+            end_ms,
+            wanted,
+            COLD_MONTHS_PER_DAILY_CALL
+            if timeframe is _D1
+            else COLD_MONTHS_PER_PERIODIC_CALL,
         )
         if timeframe is not _D1:
             finals = [bar.end_ms for bar in daily if bar.is_final]
@@ -1973,6 +2036,29 @@ class TaiwanExchangeAdapter(base.BaseVenueAdapter):
         if self._fugle is not None:
             return self._fugle.price_adjustment(timeframe)
         return market.PriceAdjustment.RAW
+
+    async def price_basis(
+        self,
+        instrument: instruments.InstrumentId,
+        start_ms: int,
+        end_ms: int,
+    ) -> Mapping[int, decimal.Decimal]:
+        """Reads Fugle's current daily corporate-action factors.
+
+        Args:
+            instrument: TWSE or TPEx stock/ETF identity.
+            start_ms: Inclusive UTC start, epoch milliseconds.
+            end_ms: Exclusive UTC end, epoch milliseconds.
+
+        Returns:
+            Daily session start mapped to the adjusted/raw close factor.
+
+        Raises:
+            errors.UnsupportedError: Without Fugle (prices are raw).
+        """
+        if self._fugle is None:
+            raise errors.UnsupportedError("raw official prices have no basis")
+        return await self._fugle.price_basis(instrument, start_ms, end_ms)
 
     def _with_fugle(
         self, caps: capabilities.VenueCapabilities

@@ -71,6 +71,29 @@ function tiles(): HTMLElement[] {
 }
 
 describe('DEMO heatmap', () => {
+  it('settles on a fractional container width without an update loop', async () => {
+    vi.spyOn(HTMLElement.prototype, 'getBoundingClientRect').mockReturnValue({
+      x: 0,
+      y: 0,
+      left: 0,
+      top: 0,
+      right: 1031.7,
+      bottom: 600.4,
+      width: 1031.7,
+      height: 600.4,
+      toJSON: () => ({}),
+    });
+    const errors = vi.spyOn(console, 'error').mockImplementation(() => {});
+    setup();
+    await screen.findByRole('button', {name: /^ACME\b.*Acme/});
+    expect(tiles().length).toBeGreaterThan(50);
+    expect(
+      errors.mock.calls.some(call =>
+        /Maximum update depth/.test(String(call[0]))
+      )
+    ).toBe(false);
+  });
+
   it('renders sector-grouped DEMO stocks and opens a chartable tile', async () => {
     const {runtime} = setup();
     const acme = await screen.findByRole('button', {name: /^ACME\b.*Acme/});

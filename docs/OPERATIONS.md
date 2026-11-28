@@ -137,6 +137,7 @@ Crypto, TWSE/TPEx official data and Treasury yields need no keys.
 
 - **Notification channel:** set its variables and restart the market engine; failed deliveries retry and dead-letter after 6 attempts.
 - **Probe venues:** `cd joseph-market-engine && uv run python scripts/probe_venues.py`. **API docs:** `make openapi`.
+- **Chart load benchmark:** `cd joseph-market-engine && uv run python scripts/bench_chart_history.py [--latency-ms 150] [--skip-twse]` times cold, warm, concurrent, study-loaded and adjustment-epoch chart batches over simulated slow venues with production rate limits (no network). The terminal's DEMO timing is `E2E_PORT=3301 pnpm --filter @joseph/web exec playwright test e2e/chart-load-perf.spec.ts`.
 - **Backup:** SQLite: stop and copy `var/*.db`; PostgreSQL: `pg_dump`. After a restore, `GET /v1/audit/events` must show `chain_valid: true`.
 - **Upgrade:** `make ci` on the new version; saved documents migrate on read. A plugin package declares the engine versions it supports: bump its pinned requirement with the engine, and the discovery check fails the build if it no longer loads. **Rollback:** redeploy the previous build ([CI/CD](CI_CD.md#release-and-rollback)).
 
@@ -155,6 +156,7 @@ Crypto, TWSE/TPEx official data and Treasury yields need no keys.
 | Symptom | Action |
 |---|---|
 | Feed STALE or gaps | Check *Data health* and `probe_venues.py`; new exposure is already blocked |
+| Charts slow to load | TWSE/TPEx daily history is paced at one month per 2 s and fills in progressively (scroll back for more); Alpaca shares 200 requests/min across US venues. Compare `scripts/bench_chart_history.py` with the numbers in [Market data scope](MARKET_DATA_SCOPE.md#loading-and-live-price-latency) |
 | `ORDER_UNKNOWN` / `UNKNOWN_RECONCILING` | Do **not** resubmit. The reconciler queries by client order id; if it cannot, the order is flagged for manual intervention: check the venue, then cancel or confirm |
 | Position mismatch blocks an account | A holding Joseph did not open, or a missed fill. Resolve it at the venue, or use a dedicated account |
 | Runaway strategy or unexpected exposure | Kill switch (*Risk controls* or `POST /v1/risk/kill-switch`, GLOBAL) blocks new opening orders; tick *Cancel open orders* / *Close positions* only if intended. Then disable the deployment and pause the strategy activation |

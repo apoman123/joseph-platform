@@ -37,6 +37,7 @@ import asyncio
 import collections
 import dataclasses
 import decimal
+import functools
 import hashlib
 import math
 from collections.abc import AsyncIterator
@@ -192,8 +193,12 @@ def _mix(value: int) -> int:
     return value ^ (value >> 31)
 
 
+@functools.lru_cache(maxsize=1 << 16)
 def _unit(seed: int, salt: int, index: int) -> float:
     """Returns a deterministic pseudo-random value in [-1, 1).
+
+    Pure, so it is memoized: the slow noise layers and daily jumps read the
+    same knots for thousands of consecutive minutes.
 
     Args:
         seed: Instrument seed.
@@ -341,9 +346,11 @@ def _sample_span(
     """
     volume, taker, high, low, close = totals
     position, stop = span
+    p1 = _price(spec, seed, position) if position < stop else close
     while position < stop:
         nxt = min(position + step, stop)
-        p0 = _price(spec, seed, position)
+        # Each sub-step starts where the previous one ended.
+        p0 = p1
         p1 = _price(spec, seed, nxt)
         index = int(position)
         up = abs(_unit(seed, 8, index)) * wick

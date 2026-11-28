@@ -98,6 +98,51 @@ describe('ChartPane drawings', () => {
     expect(getCandles).toHaveBeenCalledTimes(2);
   });
 
+  it('redraws a recently viewed series at once while revalidating it', async () => {
+    const runtime = createRuntime(composeFeatures, DEMO);
+    await runtime.registry.activateAll();
+    const chart = activeChart(runtime.workspace.get());
+    vi.spyOn(runtime.clients.marketStream, 'subscribe').mockReturnValue(
+      () => undefined
+    );
+    /**
+     * Renders the pane for a timeframe.
+     * @param timeframe Chart timeframe.
+     * @return Element.
+     */
+    const pane = (timeframe: typeof chart.timeframe) => (
+      <RuntimeProvider runtime={runtime}>
+        <ChartPane
+          chart={{...chart, timeframe}}
+          active
+          runtime={runtime}
+          onMenu={() => undefined}
+        />
+      </RuntimeProvider>
+    );
+    const view = render(pane(chart.timeframe));
+    await waitFor(
+      () => void expect(view.queryByText('Loading candles…')).toBeNull()
+    );
+    const port = runtime.charts.get(chart.chart_id);
+    if (!(port instanceof FakeChartPort)) throw new Error('no fake chart');
+    const first = port.bars.length;
+    expect(first).toBeGreaterThan(0);
+    view.rerender(pane('4h'));
+    await waitFor(
+      () => void expect(view.queryByText('Loading candles…')).toBeNull()
+    );
+    // The revalidation never answers: the cached bars are what is drawn.
+    const getCandles = vi
+      .spyOn(runtime.clients.market, 'getCandles')
+      .mockReturnValue(new Promise(() => undefined));
+    view.rerender(pane(chart.timeframe));
+    await waitFor(() => void expect(getCandles).toHaveBeenCalled());
+    expect(port.bars.length).toBe(first);
+    expect(view.queryByText('Loading candles…')).toBeNull();
+    view.unmount();
+  });
+
   it('cancels old history and resubscribes when the feed mode changes', async () => {
     const runtime = createRuntime(composeFeatures, DEMO);
     await runtime.registry.activateAll();

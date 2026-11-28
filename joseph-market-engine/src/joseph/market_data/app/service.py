@@ -25,8 +25,10 @@ fetch or live session covered (an outage) still is both.
 
 from __future__ import annotations
 
+import asyncio
 import contextlib
 import dataclasses
+import decimal
 from collections.abc import Awaitable
 from collections.abc import Iterator
 from collections.abc import Mapping
@@ -39,6 +41,7 @@ from joseph.domain import market
 from joseph.domain import quality
 from joseph.domain import sessions
 from joseph.domain import timeframes
+from joseph.market_data.adapters import http
 from joseph.market_data.adapters import replay as replay_lib
 from joseph.market_data.app import candle_store
 from joseph.market_data.app import feed_router
@@ -63,6 +66,157 @@ MAX_SESSION_WINDOW_MS = 400 * 86_400_000
 """Longest window of ``calendar_sessions`` (400 days)."""
 _SNAPSHOT_TTL_MS = 1_000
 """How long a fetched snapshot is served from the cache."""
+_EDGE_TTL_MIN_MS = 1_000
+_EDGE_TTL_MAX_MS = 10_000
+"""Bounds of how long a fetched live edge is served from the store.
+
+A batch reads the venue for the bar still forming unless the edge was read
+less than a twelfth of a bar ago (within these bounds) and no bar closed
+since, or a live session keeps the store's edge current.
+"""
+_BASIS_WINDOW_MS = 30 * 86_400_000
+"""Recent sessions whose corporate-action factors are compared per epoch."""
+_BASIS_MAX_AGE_MS = 366 * 86_400_000
+"""A price basis older than this is not compared; its history is reloaded."""
+
+
+def edge_ttl_ms(timeframe: timeframes.Timeframe) -> int:
+    """Returns how long a fetched live edge of a series stays fresh.
+
+    Args:
+        timeframe: Resolution of the series.
+
+    Returns:
+        A twelfth of the bar, between one and ten seconds.
+    """
+    return min(
+        _EDGE_TTL_MAX_MS, max(_EDGE_TTL_MIN_MS, timeframe.duration_ms // 12)
+    )
+
+
+def basis_changed(
+    previous: Mapping[int, decimal.Decimal],
+    previous_today_ms: int,
+    current: Mapping[int, decimal.Decimal],
+) -> bool:
+    """Tells whether a provider's corporate-action factors changed.
+
+    A session that was still current when ``previous`` was read carried
+    native prices (factor one) then; any other session absent from
+    ``previous`` was not compared and is skipped. A new split or dividend
+    changes the factor of every session before its ex-date, so it shows in
+    the most recent sessions of the window.
+
+    Args:
+        previous: Factors read before, by daily session start.
+        previous_today_ms: Exchange-local midnight of the date on which
+            ``previous`` was read.
+        current: Factors read now, by daily session start.
+
+    Returns:
+        True when any compared session's factor differs.
+    """
+    for start, factor in current.items():
+        old = previous.get(start)
+        if old is None:
+            if start < previous_today_ms:
+                continue
+            old = decimal.Decimal(1)
+        if factor != old:
+            return True
+    return False
+
+
+@dataclasses.dataclass(slots=True)
+class _Basis:
+    """Corporate-action price basis of one instrument's cached history.
+
+    Attributes:
+        epoch: Adjustment epoch (``now // ADJUSTMENT_REFRESH_MS``) of the
+            last check.
+        since_ms: Start of the epoch in which the cached history's basis
+            was established; batches report it as their price-basis epoch.
+        today_ms: Exchange-local midnight of the date of the last check.
+        factors: Factors read at the last check, or None when unknown.
+        pending: Background read of ``factors`` still running, if any.
+    """
+
+    epoch: int
+    since_ms: int
+    today_ms: int
+    factors: Mapping[int, decimal.Decimal] | None
+    pending: asyncio.Future[Mapping[int, decimal.Decimal] | None] | None = None
+
+
+class _Flight:
+    """One running history refresh that identical requests share.
+
+    The refresh runs as its own task: a waiter that is cancelled (a client
+    that went away) stops waiting without cancelling the refresh for the
+    others, and a refresh nobody waits for any more still completes into
+    the store, ready for the retry.
+
+    Attributes:
+        start_ms: Inclusive start of the refreshed range.
+        end_ms: Exclusive end of the refreshed range.
+        max_bars: Bar budget of the refresh.
+        task: The refresh.
+    """
+
+    def __init__(
+        self,
+        start_ms: int,
+        end_ms: int,
+        max_bars: int,
+        task: asyncio.Future[None],
+    ) -> None:
+        """Initializes the flight.
+
+        Args:
+            start_ms: Inclusive start of the refreshed range.
+            end_ms: Exclusive end of the refreshed range.
+            max_bars: Bar budget of the refresh.
+            task: The refresh.
+        """
+        self.start_ms = start_ms
+        self.end_ms = end_ms
+        self.max_bars = max_bars
+        self.task = task
+
+    def covers(self, start_ms: int, end_ms: int, max_bars: int) -> bool:
+        """Tells whether this refresh also serves another request.
+
+        Args:
+            start_ms: Inclusive start of the other request.
+            end_ms: Exclusive end of the other request.
+            max_bars: Bar budget of the other request.
+
+        Returns:
+            True when the range and budget include the other request's.
+        """
+        return (
+            self.start_ms <= start_ms
+            and end_ms <= self.end_ms
+            and max_bars <= self.max_bars
+        )
+
+    async def join(self) -> None:
+        """Waits for the refresh without letting a cancellation reach it.
+
+        Raises:
+            errors.JosephError: Whatever the refresh raised.
+        """
+        await asyncio.shield(self.task)
+
+
+def _retrieve[T](task: asyncio.Future[T]) -> None:
+    """Marks a background task's exception as retrieved.
+
+    Args:
+        task: Finished task (its waiters, if any, saw the exception).
+    """
+    if not task.cancelled():
+        task.exception()
 
 
 @dataclasses.dataclass(frozen=True, slots=True)
@@ -80,6 +234,9 @@ class CandleBatchResult:
             None when a legacy replay has no reliable price-basis metadata.
         gaps: Missing closed-bar ranges as half-open ``(from_ms, to_ms)``
             pairs.
+        basis_epoch_ms: Start of the adjustment epoch in which the batch's
+            price basis was established; None reports the epoch of
+            ``as_of_ms``.
     """
 
     instrument_id: instruments.InstrumentId
@@ -90,6 +247,7 @@ class CandleBatchResult:
     as_of_ms: int
     gaps: tuple[tuple[int, int], ...]
     price_adjustment: market.PriceAdjustment | None = None
+    basis_epoch_ms: int | None = None
 
     @property
     def complete(self) -> bool:
@@ -116,11 +274,14 @@ class CandleBatchResult:
         if self.price_adjustment is not None:
             result["price_adjustment"] = self.price_adjustment.value
             if self.price_adjustment is not market.PriceAdjustment.RAW:
-                result["price_adjustment_epoch_ms"] = (
-                    self.as_of_ms
-                    // ADJUSTMENT_REFRESH_MS
-                    * ADJUSTMENT_REFRESH_MS
-                )
+                epoch = self.basis_epoch_ms
+                if epoch is None:
+                    epoch = (
+                        self.as_of_ms
+                        // ADJUSTMENT_REFRESH_MS
+                        * ADJUSTMENT_REFRESH_MS
+                    )
+                result["price_adjustment_epoch_ms"] = epoch
                 result["price_adjustment_refresh_after_ms"] = (
                     self.as_of_ms // ADJUSTMENT_REFRESH_MS + 1
                 ) * ADJUSTMENT_REFRESH_MS
@@ -281,6 +442,16 @@ class MarketDataService:
         self._adjustment_epochs: dict[
             tuple[instruments.InstrumentId, timeframes.Timeframe], int
         ] = {}
+        self._bases: dict[instruments.InstrumentId, _Basis] = {}
+        self._basis_locks: dict[instruments.InstrumentId, asyncio.Lock] = {}
+        self._flights: dict[
+            tuple[instruments.InstrumentId, timeframes.Timeframe],
+            list[_Flight],
+        ] = {}
+        self._edges: dict[
+            tuple[instruments.InstrumentId, timeframes.Timeframe],
+            tuple[int, int],
+        ] = {}
         self._snapshots: dict[
             instruments.InstrumentId, tuple[int, market.MarketSnapshot]
         ] = {}
@@ -440,6 +611,56 @@ class MarketDataService:
         end_ms: int,
         max_bars: int,
     ) -> None:
+        """Refreshes a range, sharing a running refresh that covers it.
+
+        Concurrent identical requests (a chart opened twice, a study and
+        its chart, a reconnect storm) wait for one venue fetch instead of
+        each sending their own; see ``_Flight`` for cancellation.
+
+        Args:
+            instrument: Instrument of the series.
+            timeframe: Resolution of the series.
+            start_ms: Inclusive start, epoch milliseconds.
+            end_ms: Exclusive end, epoch milliseconds.
+            max_bars: Bars after which no further round is started.
+
+        Returns:
+            None; see ``_refresh_now``.
+        """
+        key = (instrument, timeframe)
+        flights = self._flights.setdefault(key, [])
+        for flight in flights:
+            if flight.covers(start_ms, end_ms, max_bars):
+                await flight.join()
+                return
+        task = asyncio.ensure_future(
+            self._refresh_now(instrument, timeframe, start_ms, end_ms, max_bars)
+        )
+        flight = _Flight(start_ms, end_ms, max_bars, task)
+        flights.append(flight)
+
+        def done(finished: asyncio.Future[None]) -> None:
+            """Forgets the finished flight.
+
+            Args:
+                finished: The flight's task.
+            """
+            flights.remove(flight)
+            if not flights and self._flights.get(key) is flights:
+                del self._flights[key]
+            _retrieve(finished)
+
+        task.add_done_callback(done)
+        await flight.join()
+
+    async def _refresh_now(
+        self,
+        instrument: instruments.InstrumentId,
+        timeframe: timeframes.Timeframe,
+        start_ms: int,
+        end_ms: int,
+        max_bars: int,
+    ) -> None:
         """Fetches missing or recent bars from the venue into the store.
 
         Adapters may cap one history call (e.g. 10,000 bars), so long
@@ -469,16 +690,13 @@ class MarketDataService:
         """
         now = self._clock.now_ms()
         adapter = self.adapter(instrument.venue)
-        if (
+        adjusted = (
             isinstance(adapter, ports.PriceAdjustmentPort)
             and adapter.price_adjustment(timeframe)
             is not market.PriceAdjustment.RAW
-        ):
-            key = (instrument, timeframe)
-            epoch = now // ADJUSTMENT_REFRESH_MS
-            if self._adjustment_epochs.get(key) != epoch:
-                self._store.invalidate(instrument, timeframe)
-                self._adjustment_epochs[key] = epoch
+        )
+        if adjusted:
+            await self._keep_basis(instrument, timeframe, adapter, now)
         calendar = sessions.for_instrument(instrument)
         current, last_closed = closed_through(calendar, timeframe, now)
         closed_end = min(end_ms, current)
@@ -487,11 +705,7 @@ class MarketDataService:
             archived = await self._recorded.seconds_bars(
                 instrument, timeframe, start_ms, closed_end
             )
-            if (
-                isinstance(adapter, ports.PriceAdjustmentPort)
-                and adapter.price_adjustment(timeframe)
-                is not market.PriceAdjustment.RAW
-            ):
+            if adjusted:
                 if isinstance(adapter, ports.HistoricalPriceNormalizationPort):
                     archived = await adapter.adjust_historical_prices(archived)
                 else:
@@ -515,6 +729,7 @@ class MarketDataService:
                 and end_ms > current
                 and calendar.ceil(timeframe, current) < end_ms
                 and (last_closed is not None or calendar.continuous)
+                and not self._edge_fresh(instrument, timeframe, now, current)
             ):
                 # A live bar may exist in range; between sessions none does.
                 fetch_from = max(
@@ -530,6 +745,13 @@ class MarketDataService:
             )
             fetched += len(result.candles)
             reached = max((c.end_ms for c in result.candles), default=cursor)
+            if end_ms > current and (
+                reached >= current
+                or any(end >= current for _, end in result.covered)
+            ):
+                # The fetch delivered through the newest closed bar, so it
+                # also brought the bar still forming, if any.
+                self._edges[instrument, timeframe] = (now, current)
             if (
                 not gaps
                 or result.complete
@@ -538,6 +760,193 @@ class MarketDataService:
             ):
                 return
             cursor = reached
+
+    async def _keep_basis(
+        self,
+        instrument: instruments.InstrumentId,
+        timeframe: timeframes.Timeframe,
+        adapter: ports.MarketDataPort,
+        now_ms: int,
+    ) -> None:
+        """Drops cached adjusted history whose price basis may be outdated.
+
+        Sources that report their factors (``ports.PriceBasisPort``) keep
+        their cached history until a factor changes; others drop a series
+        once per adjustment epoch.
+
+        Args:
+            instrument: Instrument of the adjusted series.
+            timeframe: Resolution of the adjusted series.
+            adapter: Source of the instrument.
+            now_ms: Current time, epoch milliseconds.
+        """
+        if isinstance(adapter, ports.PriceBasisPort):
+            await self._check_basis(instrument, adapter, now_ms)
+            return
+        key = (instrument, timeframe)
+        epoch = now_ms // ADJUSTMENT_REFRESH_MS
+        if self._adjustment_epochs.get(key) != epoch:
+            self._store.invalidate(instrument, timeframe)
+            self._edges.pop(key, None)
+            self._adjustment_epochs[key] = epoch
+
+    def _edge_fresh(
+        self,
+        instrument: instruments.InstrumentId,
+        timeframe: timeframes.Timeframe,
+        now_ms: int,
+        closed_end: int,
+    ) -> bool:
+        """Tells whether the store's live edge of a series is current.
+
+        Args:
+            instrument: Instrument of the series.
+            timeframe: Resolution of the series.
+            now_ms: Current time, epoch milliseconds.
+            closed_end: Exclusive end of the newest closed bar now.
+
+        Returns:
+            True when a live session feeds the series, or its edge was
+            fetched within ``edge_ttl_ms`` and no bar has closed since.
+        """
+        session = self._router.session(instrument, timeframe)
+        if session is not None and (
+            session.state is feed_router.SessionState.LIVE
+        ):
+            return True
+        edge = self._edges.get((instrument, timeframe))
+        return (
+            edge is not None
+            and edge[1] == closed_end
+            and 0 <= now_ms - edge[0] < edge_ttl_ms(timeframe)
+        )
+
+    def _invalidate_adjusted(
+        self,
+        instrument: instruments.InstrumentId,
+        adapter: ports.PriceAdjustmentPort,
+    ) -> None:
+        """Drops every adjusted cached series of an instrument.
+
+        Args:
+            instrument: Instrument whose price basis changed or is unknown.
+            adapter: The instrument's source, which names adjusted series.
+        """
+        for timeframe in self._store.series_timeframes(instrument):
+            if (
+                adapter.price_adjustment(timeframe)
+                is not market.PriceAdjustment.RAW
+            ):
+                self._store.invalidate(instrument, timeframe)
+                self._edges.pop((instrument, timeframe), None)
+
+    async def _read_basis(
+        self,
+        adapter: ports.PriceBasisPort,
+        instrument: instruments.InstrumentId,
+        start_ms: int,
+        end_ms: int,
+    ) -> Mapping[int, decimal.Decimal] | None:
+        """Reads an instrument's current factors, None when unavailable.
+
+        Args:
+            adapter: Source of the instrument.
+            instrument: Instrument.
+            start_ms: Inclusive UTC start, epoch milliseconds.
+            end_ms: Exclusive UTC end, epoch milliseconds.
+
+        Returns:
+            Factors by daily session start, or None when the evidence could
+            not be read (the basis is then treated as changed).
+        """
+        try:
+            return dict(
+                await self._call(
+                    instrument.venue,
+                    adapter.price_basis(instrument, start_ms, end_ms),
+                )
+            )
+        except errors.JosephError:
+            return None
+
+    async def _check_basis(
+        self,
+        instrument: instruments.InstrumentId,
+        adapter: ports.PriceBasisPort,
+        now_ms: int,
+    ) -> None:
+        """Keeps an instrument's cached adjusted history on a valid basis.
+
+        Once per adjustment epoch the source's recent corporate-action
+        factors are read again and compared with the previous reading;
+        the cached adjusted history is dropped only when they differ (or
+        cannot be compared). The first use of an instrument drops whatever
+        the store held and reads the baseline in the background, so a cold
+        chart does not wait for it.
+
+        Args:
+            instrument: Instrument about to be refreshed.
+            adapter: Its source.
+            now_ms: Current time, epoch milliseconds.
+
+        Raises:
+            AssertionError: If the source declares no price policy.
+        """
+        if not isinstance(adapter, ports.PriceAdjustmentPort):
+            raise AssertionError("price-basis source without a price policy")
+        epoch = now_ms // ADJUSTMENT_REFRESH_MS
+        basis = self._bases.get(instrument)
+        if basis is not None and basis.epoch == epoch:
+            return
+        lock = self._basis_locks.setdefault(instrument, asyncio.Lock())
+        async with lock:
+            basis = self._bases.get(instrument)
+            if basis is not None and basis.epoch == epoch:
+                return
+            calendar = sessions.for_instrument(instrument)
+            today = price_adjustments.today_start(calendar, now_ms)
+            if basis is None:
+                self._invalidate_adjusted(instrument, adapter)
+                with http.background():
+                    pending = asyncio.ensure_future(
+                        self._read_basis(
+                            adapter,
+                            instrument,
+                            today - _BASIS_WINDOW_MS,
+                            today,
+                        )
+                    )
+                pending.add_done_callback(_retrieve)
+                self._bases[instrument] = _Basis(
+                    epoch,
+                    epoch * ADJUSTMENT_REFRESH_MS,
+                    today,
+                    None,
+                    pending,
+                )
+                return
+            previous = basis.factors
+            if basis.pending is not None:
+                previous = await asyncio.shield(basis.pending)
+            current = None
+            if previous is not None and now_ms - basis.today_ms < (
+                _BASIS_MAX_AGE_MS
+            ):
+                current = await self._read_basis(
+                    adapter,
+                    instrument,
+                    min(today - _BASIS_WINDOW_MS, basis.today_ms - 86_400_000),
+                    today,
+                )
+            since = basis.since_ms
+            if (
+                previous is None
+                or current is None
+                or basis_changed(previous, basis.today_ms, current)
+            ):
+                self._invalidate_adjusted(instrument, adapter)
+                since = epoch * ADJUSTMENT_REFRESH_MS
+            self._bases[instrument] = _Basis(epoch, since, today, current)
 
     async def get_candles(
         self,
@@ -565,9 +974,12 @@ class MarketDataService:
         """
         instrument = as_instrument_id(instrument_id)
         tf = as_timeframe(timeframe)
-        await self._refresh(
-            instrument, tf, start_ms, end_ms, self._max_refresh_bars
-        )
+        # Studies, scans and strategies read through here; their venue
+        # requests yield the rate limit to waiting chart batches.
+        with http.background():
+            await self._refresh(
+                instrument, tf, start_ms, end_ms, self._max_refresh_bars
+            )
         return candle_rules.finals_only(
             self._enrich(self._store.range(instrument, tf, start_ms, end_ms))
         )
@@ -659,11 +1071,13 @@ class MarketDataService:
             calendar=calendar,
             covered=covered,
         )
+        basis = self._bases.get(instrument)
         return CandleBatchResult(
             instrument_id=instrument,
             timeframe=tf,
             candles=tuple(rows),
             price_adjustment=price_adjustment,
+            basis_epoch_ms=basis.since_ms if basis is not None else None,
             feed_state=state,
             source=source,
             as_of_ms=now,
