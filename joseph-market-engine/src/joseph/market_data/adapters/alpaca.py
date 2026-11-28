@@ -100,6 +100,7 @@ from joseph.market_data.domain import candles as candle_rules
 from joseph.market_data.domain import capabilities
 from joseph.market_data.domain import classification
 from joseph.market_data.domain import health
+from joseph.market_data.domain import heatmap_metrics
 from joseph.market_data.domain import price_adjustments
 from joseph.market_data.domain import session_bars
 from joseph.market_data.domain import us_trade_bars
@@ -135,6 +136,10 @@ CLOSING_REQUESTS_PER_FETCH = 20
 """Closing-window requests one history fetch may send (newest first)."""
 CLOSING_REQUESTS_PER_MINUTE = 60
 """Closing-window requests per rolling minute, all symbols (of 200/min)."""
+HEATMAP_REQUESTS_PER_MINUTE = 40
+"""Multi-symbol heatmap bar requests per rolling minute (of 200/min)."""
+HEATMAP_SYMBOLS_PER_REQUEST = 100
+"""Symbols per multi-symbol bars request."""
 _CLOSING_CACHE_SESSIONS = 100_000
 """Symbol sessions whose closing prints are kept (oldest dropped)."""
 _CLOSING_RETRY_MS = 15_000
@@ -600,6 +605,34 @@ def daily_bar(
         now_ms,
         is_final=final,
         source=source,
+    )
+
+
+def heatmap_bar(row: Mapping[str, Any]) -> heatmap_metrics.DailyBar | None:
+    """Converts an Alpaca daily bar for heatmap metrics.
+
+    Args:
+        row: Alpaca bar (``t`` at New York midnight, ``o``/``h``/``l``/``c``,
+            ``v`` and optional ``vw``).
+
+    Returns:
+        Bar on its New York date, or None when a field is missing.
+    """
+    try:
+        day = ny_date(rfc3339_ms(str(row["t"])) + 3_600_000)
+        values = [
+            decimals.to_decimal(row[key]) for key in ("o", "h", "l", "c", "v")
+        ]
+    except (KeyError, ValueError, TypeError, decimal.InvalidOperation):
+        return None
+    return heatmap_metrics.DailyBar(
+        day,
+        open=values[0],
+        high=values[1],
+        low=values[2],
+        close=values[3],
+        volume=values[4],
+        vwap=base.opt_dec(row.get("vw")),
     )
 
 
@@ -1248,6 +1281,7 @@ class AlpacaSource:  # noqa: DOC302 - Document constructor mutation.
         clock: Time source.
         stream: The shared stream connection.
         closing_budget: Budget of closing-window requests.
+        heatmap_budget: Budget of multi-symbol heatmap bar requests.
         _normalizer: Source-local daily price-factor cache for historical tape.
     """
 
@@ -1277,6 +1311,7 @@ class AlpacaSource:  # noqa: DOC302 - Document constructor mutation.
         self.clock = clock
         self.stream = AlpacaStream(config, clock, connect)
         self.closing_budget = RequestBudget(clock, CLOSING_REQUESTS_PER_MINUTE)
+        self.heatmap_budget = RequestBudget(clock, HEATMAP_REQUESTS_PER_MINUTE)
         self._closing: dict[
             tuple[str, int], tuple[us_trade_bars.TapeTrade, ...]
         ] = {}
@@ -1868,6 +1903,27 @@ def _window(
         # Outside the XNYS session table there is no grid to align to.
         return start_ms
     return first
+
+
+def _session_quote(row: Mapping[str, Any]) -> heatmap_metrics.SessionQuote:
+    """Converts an Alpaca snapshot into a heatmap session quote.
+
+    Args:
+        row: ``{latestTrade, dailyBar, prevDailyBar, ...}``.
+
+    Returns:
+        Latest trade with the current and previous daily bars.
+    """
+    trade = row.get("latestTrade") or {}
+    stamp = trade.get("t")
+    today = row.get("dailyBar")
+    previous = row.get("prevDailyBar")
+    return heatmap_metrics.SessionQuote(
+        last=base.opt_dec(trade.get("p")),
+        last_ms=rfc3339_ms(str(stamp)) if stamp else None,
+        today=heatmap_bar(today) if today else None,
+        previous=heatmap_bar(previous) if previous else None,
+    )
 
 
 class AlpacaAdapter(base.BaseVenueAdapter):
@@ -2679,6 +2735,115 @@ class AlpacaAdapter(base.BaseVenueAdapter):
                 for symbol, row in rows.items()
                 if symbol in by_symbol and row
             )
+        return out
+
+    async def fetch_daily_bars_batch(
+        self,
+        instruments_: Sequence[instruments.InstrumentId],
+        start: datetime.date,
+    ) -> dict[instruments.InstrumentId, list[heatmap_metrics.DailyBar]]:
+        """Reads split-adjusted daily bars of many symbols at once.
+
+        Uses ``/v2/stocks/bars?symbols=...`` in groups of
+        ``HEATMAP_SYMBOLS_PER_REQUEST`` symbols, following
+        ``next_page_token``. Each page spends one request of the shared
+        heatmap budget; when the budget is spent the remaining symbols are
+        left out (the caller reports them missing), never waited for.
+
+        Args:
+            instruments_: Listings of this venue.
+            start: First New York date to read.
+
+        Returns:
+            Bars per instrument, oldest first; instruments without bars, cut
+            short by ``MAX_PAGES`` or beyond the budget are absent.
+
+        Raises:
+            errors.JosephError: Without keys or when Alpaca rejects the query.
+        """
+        self._source.require_keys(self.VENUE)
+        by_symbol = {
+            instrument.venue_market_id: instrument
+            for instrument in instruments_
+        }
+        symbols = list(by_symbol)
+        out: dict[instruments.InstrumentId, list[heatmap_metrics.DailyBar]] = {}
+        for index in range(0, len(symbols), HEATMAP_SYMBOLS_PER_REQUEST):
+            group = symbols[index : index + HEATMAP_SYMBOLS_PER_REQUEST]
+            loaded, complete = await self._bars_group(group, start)
+            if not complete:
+                return out
+            for symbol, bars in loaded.items():
+                if symbol in by_symbol and bars:
+                    out[by_symbol[symbol]] = bars
+        return out
+
+    async def _bars_group(
+        self, symbols: Sequence[str], start: datetime.date
+    ) -> tuple[dict[str, list[heatmap_metrics.DailyBar]], bool]:
+        """Reads every page of one multi-symbol daily-bars request.
+
+        Args:
+            symbols: At most ``HEATMAP_SYMBOLS_PER_REQUEST`` Alpaca symbols.
+            start: First New York date to read.
+
+        Returns:
+            Bars per symbol, and whether every page was read (False when the
+            budget or ``MAX_PAGES`` stopped the reading).
+        """
+        token: str | None = None
+        loaded: dict[str, list[heatmap_metrics.DailyBar]] = {}
+        for _ in range(MAX_PAGES):
+            if not self._source.heatmap_budget.take():
+                return loaded, False
+            params: dict[str, Any] = {
+                "symbols": ",".join(symbols),
+                "timeframe": "1Day",
+                "start": start.isoformat(),
+                "adjustment": "split",
+                "feed": self.config.rest_feed,
+                "limit": _PAGE_LIMIT,
+                "sort": "asc",
+            }
+            if token:
+                params["page_token"] = token
+            payload = await self._source.get("/v2/stocks/bars", params)
+            for symbol, rows in (payload.get("bars") or {}).items():
+                parsed = [heatmap_bar(row) for row in rows or ()]
+                loaded.setdefault(symbol, []).extend(
+                    bar for bar in parsed if bar is not None
+                )
+            token = payload.get("next_page_token")
+            if not token:
+                return loaded, True
+        return loaded, False
+
+    async def fetch_session_quotes(
+        self, instruments_: Sequence[instruments.InstrumentId]
+    ) -> dict[instruments.InstrumentId, heatmap_metrics.SessionQuote]:
+        """Reads latest trades with current and previous daily bars.
+
+        Args:
+            instruments_: Listings of this venue.
+
+        Returns:
+            Session quotes of the symbols Alpaca returned.
+
+        Raises:
+            errors.JosephError: Without keys or when Alpaca rejects the query.
+        """
+        self._source.require_keys(self.VENUE)
+        by_symbol = {
+            instrument.venue_market_id: instrument
+            for instrument in instruments_
+        }
+        symbols = list(by_symbol)
+        out: dict[instruments.InstrumentId, heatmap_metrics.SessionQuote] = {}
+        for index in range(0, len(symbols), 200):
+            rows = await self._snapshots(symbols[index : index + 200])
+            for symbol, row in rows.items():
+                if symbol in by_symbol and row:
+                    out[by_symbol[symbol]] = _session_quote(row)
         return out
 
     async def fetch_order_book(  # noqa: DOC201 - always raises UnsupportedError; never returns

@@ -395,6 +395,13 @@ def _alpaca(request: httpx.Request) -> httpx.Response:
         wanted = set(params.get("symbols", "").split(","))
         rows = _fixture("alpaca", "snapshots")
         return _ok({k: v for k, v in rows.items() if k in wanted})
+    if path == "/v2/stocks/bars":
+        page = (
+            "bars_multi_page2"
+            if params.get("page_token")
+            else "bars_multi_page1"
+        )
+        return _ok(_fixture("alpaca", page))
     if not path.startswith("/v2/stocks/AAPL/"):
         empty = {"next_page_token": None, "symbol": path.split("/")[3]}
         kind = path.rsplit("/", 1)[-1]
@@ -679,3 +686,98 @@ def binance_handler() -> Callable[[httpx.Request], httpx.Response]:
         The handler, for tests that wrap it to inject failures.
     """
     return _binance
+
+
+# Keyless heatmap sources ---------------------------------------------------
+# Recorded public responses, trimmed to a few rows (fixtures/heatmap).
+
+_HEATMAP_FIXTURES = (
+    pathlib.Path(__file__).resolve().parents[1] / "fixtures" / "heatmap"
+)
+
+
+def heatmap_fixture(path: str) -> Any:
+    """Loads a recorded heatmap source response.
+
+    Args:
+        path: File under ``fixtures/heatmap`` without ``.json``.
+
+    Returns:
+        Parsed JSON.
+    """
+    return json.loads(
+        (_HEATMAP_FIXTURES / f"{path}.json").read_text(encoding="utf-8")
+    )
+
+
+def _heatmap_public(request: httpx.Request) -> httpx.Response:
+    """Serves the recorded Nasdaq.com, Wikipedia, TWSE, TPEx and CoinGecko data.
+
+    Args:
+        request: Mocked request.
+
+    Returns:
+        The recorded body; Nasdaq.com answers 403 without a browser agent
+        like the live API, unknown paths 404.
+    """
+    host, path, params = request.url.host, request.url.path, request.url.params
+    if host == "api.nasdaq.com":
+        if "Mozilla" not in request.headers.get("User-Agent", ""):
+            return httpx.Response(403)
+        if path == "/api/screener/stocks":
+            exchange = params.get("exchange", "nasdaq")
+            return _ok(heatmap_fixture(f"nasdaq/screener_{exchange}"))
+        if path == "/api/quote/list-type/nasdaq100":
+            return _ok(heatmap_fixture("nasdaq/nasdaq100"))
+    if host == "en.wikipedia.org" and path == "/w/api.php":
+        return _ok(heatmap_fixture("wikipedia/sp500"))
+    files = {
+        "/v1/opendata/t187ap03_L": "twse/company_info",
+        "/v1/exchangeReport/STOCK_DAY_ALL": "twse/stock_day_all",
+        "/openapi/v1/mopsfin_t187ap03_O": "tpex/company_info",
+        "/openapi/v1/tpex_mainboard_daily_close_quotes": (
+            "tpex/daily_close_quotes"
+        ),
+    }
+    if path in files:
+        return _ok(heatmap_fixture(files[path]))
+    if host == "api.coingecko.com" and path == "/api/v3/coins/markets":
+        category = params.get("category")
+        if category == "stablecoins":
+            return _ok(heatmap_fixture("coingecko/markets_stablecoins"))
+        if category == "decentralized-finance-defi":
+            return _ok(heatmap_fixture("coingecko/markets_defi"))
+        if params.get("page") == "1":
+            return _ok(heatmap_fixture("coingecko/markets_page1"))
+        return _ok([])
+    return httpx.Response(404)
+
+
+def _install_heatmap_routes(router: respx.Router) -> None:
+    """Registers the keyless heatmap source routes.
+
+    TWSE and TPEx routes match their open-data paths only, so the exchange
+    venue routes of the same hosts keep working when installed after them.
+
+    Args:
+        router: respx router to add the routes to.
+    """
+    for host in ("api.nasdaq.com", "en.wikipedia.org", "api.coingecko.com"):
+        router.route(host=host).mock(side_effect=_heatmap_public)
+    for host, path in (
+        ("openapi.twse.com.tw", "/v1/opendata/t187ap03_L"),
+        ("openapi.twse.com.tw", "/v1/exchangeReport/STOCK_DAY_ALL"),
+        ("www.tpex.org.tw", "/openapi/v1/mopsfin_t187ap03_O"),
+        ("www.tpex.org.tw", "/openapi/v1/tpex_mainboard_daily_close_quotes"),
+    ):
+        router.route(host=host, path=path).mock(side_effect=_heatmap_public)
+
+
+@pytest.fixture(scope="session")
+def heatmap_routes() -> Callable[[respx.Router], None]:
+    """Provides the installer of the keyless heatmap source routes.
+
+    Returns:
+        ``install(router)``, which adds the routes to a respx router.
+    """
+    return _install_heatmap_routes

@@ -239,7 +239,7 @@ export type WorkspaceAction =
       /** Optional canonical instrument; defaults to the active chart's symbol. */
       instrumentId?: InstrumentId;
       /** Tab content; existing callers create candlestick charts. */
-      viewType?: 'candles' | 'stock_heatmap';
+      viewType?: 'candles' | 'heatmap';
     }
   | {
       /** Removes a chart tab while preserving at least one chart. */

@@ -310,7 +310,7 @@ export function DrawingToolbar(): ReactElement {
   };
   if (
     workspace.charts.find(chart => chart.chart_id === selection.chartId)
-      ?.view_type === 'stock_heatmap'
+      ?.view_type === 'heatmap'
   ) {
     return (
       <nav className="drawbar" aria-label="Heatmap controls">
